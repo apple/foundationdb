@@ -164,6 +164,12 @@ uint64_t DeterministicRandom::peek() const {
 	return next;
 }
 
+void DeterministicRandom::resetSeed(uint32_t seed) {
+	rng.seed((unsigned long)seed);
+	next = (uint64_t(rng()) << 32);
+	next ^= rng();
+}
+
 void DeterministicRandom::addref() {
 	ReferenceCounted<DeterministicRandom>::addref();
 }

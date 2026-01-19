@@ -133,7 +133,7 @@ using namespace std::literals;
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_RESEED_TIME, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
@@ -182,6 +182,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_RESTARTING,            "--restarting",                SO_NONE },
 	{ OPT_RANDOMSEED,            "-s",                          SO_REQ_SEP },
 	{ OPT_RANDOMSEED,            "--seed",                      SO_REQ_SEP },
+	{ OPT_RESEED_TIME,           "--reseed-time",               SO_REQ_SEP },
 	{ OPT_KEY,                   "-k",                          SO_REQ_SEP },
 	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
@@ -1121,6 +1122,7 @@ struct CLIOptions {
 
 	ServerRole role = ServerRole::FDBD;
 	uint32_t randomSeed = platform::getRandomSeed();
+	double reseedTime = -1.0; // Time in seconds when to reset random seed in simulation (-1 = disabled)
 
 	const char* testFile = "tests/default.txt";
 	std::string kvFile;
@@ -1599,6 +1601,16 @@ private:
 				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
 				if (*end) {
 					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
+			case OPT_RESEED_TIME: {
+				char* end;
+				reseedTime = strtod(args.OptionArg(), &end);
+				if (*end || reseedTime < 0) {
+					fprintf(stderr, "ERROR: Could not parse reseed time `%s' (must be >= 0)\n", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -2443,7 +2455,7 @@ int main(int argc, char* argv[]) {
 				    KnobValue::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
 			simulationSetupAndRun(
-			    dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
+			    dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths, opts.reseedTime);
 			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
