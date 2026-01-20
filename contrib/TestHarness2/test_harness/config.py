@@ -279,6 +279,12 @@ class Config:
             "help": "If set, archive FDB logs and test harness outputs to a .tar.gz file in the joshua_output_dir on test failure.",
             "env_name": "TH_ARCHIVE_LOGS_ON_FAILURE",
         }
+        self.test_args_file: Path | None = None
+        self.test_args_file_args = {
+            "type": Path,
+            "required": False,
+            "help": "File containing test arguments (e.g., '-f tests/fast/CycleTest.toml -s 315315 -b off --reseed-time 100')",
+        }
 
         self._env_names: Dict[str, str] = {}
         self._config_map = self._build_map()
