@@ -973,8 +973,10 @@ class TestRunner:
         for count, file in enumerate(test_files):
             will_restart = count + 1 < len(test_files)
             binary = self.binary_chooser.choose_binary(file)
+            # Skip determinism check when running from test_args_file (track_stats=False)
             unseed_check = (
-                not is_no_sim(file)
+                track_stats
+                and not is_no_sim(file)
                 and config.random.random() < config.unseed_check_ratio
             )
             buggify_enabled: bool = False
