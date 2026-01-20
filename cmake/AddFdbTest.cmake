@@ -287,6 +287,15 @@ function(create_correctness_package)
   set(out_dir "${CMAKE_BINARY_DIR}/correctness")
   stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files TEST_LIST "${TEST_NAMES}")
   set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${FDB_VERSION}.tar.gz)
+
+  # Check if test_args.txt exists and prepare optional file list
+  set(optional_test_args_files "")
+  set(optional_copy_commands "")
+  if(EXISTS "${CMAKE_SOURCE_DIR}/test_args.txt")
+    list(APPEND optional_test_args_files "${out_dir}/test_args.txt")
+    set(optional_copy_commands COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/test_args.txt ${out_dir}/test_args.txt)
+  endif()
+
   add_custom_command(
     OUTPUT ${tar_file}
     DEPENDS ${package_files}
@@ -296,9 +305,11 @@ function(create_correctness_package)
                                      ${out_dir}/joshua_test
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/correctnessTimeout.sh
                                      ${out_dir}/joshua_timeout
+    ${optional_copy_commands}
     COMMAND ${CMAKE_COMMAND} -E tar cfz ${tar_file} ${package_files}
                                                     ${out_dir}/joshua_test
                                                     ${out_dir}/joshua_timeout
+                                                    ${optional_test_args_files}
     WORKING_DIRECTORY ${out_dir}
     COMMENT "Package correctness archive"
     )
