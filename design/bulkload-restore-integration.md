@@ -282,8 +282,8 @@ s3://bucket/backup-2025-01-20-23-17-10.123456/
 │   ├── log_end_version
 │   └── mutation_log_type
 └── bulkdump_data/                   # V3 NEW: BulkDump SST format
-    ├── job-manifest.txt             # Top-level job manifest
     └── <job-uuid>/                  # Job-specific directory
+        ├── job-manifest.txt         # Top-level job manifest
         ├── 0/                       # Shard/range directory (shard 0)
         │   ├── <version>-manifest.txt   # Shard manifest
         │   └── <version>-data.sst       # Shard SST data file
