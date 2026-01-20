@@ -187,8 +187,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
-		state bool adjusted = false;
-
 		if (BUGGIFY) {
 			for (auto r : getSystemBackupRanges()) {
 				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);

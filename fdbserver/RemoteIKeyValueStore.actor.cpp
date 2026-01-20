@@ -140,6 +140,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					forwardPromise(onClosedReq.reply, kvStore->onClosed());
 				}
 				when(IKVSDisposeRequest disposeReq = waitNext(ikvsInterface.dispose.getFuture())) {
+					(void)disposeReq; // suppress unused variable warning
 					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", kvsId);
 					kvStore->dispose();
 					guard.invalidate();
@@ -147,6 +148,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					return Void();
 				}
 				when(IKVSCloseRequest closeReq = waitNext(ikvsInterface.close.getFuture())) {
+					(void)closeReq; // suppress unused variable warning
 					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", kvsId);
 					kvStore->close();
 					guard.invalidate();

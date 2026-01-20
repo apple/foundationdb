@@ -643,7 +643,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
 					// Pass lockDB=False since we already locked, unlockDB=True to release when done,
 					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
-					Version _ = wait(backupAgent.restore(cx,
+					Version v = wait(backupAgent.restore(cx,
 					                                     cx,
 					                                     restoreTag,
 					                                     KeyRef(lastBackupContainer->getURL()),
@@ -662,7 +662,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                     lastBackupContainer->getEncryptionKeyFileName(),
 					                                     lockUID));
 
-					TraceEvent("BS3BCW_RestoreComplete").detail("BackupTag", printable(self->backupTag));
+					TraceEvent("BS3BCW_RestoreComplete")
+					    .detail("BackupTag", printable(self->backupTag))
+					    .detail("RestoreVersion", v);
 				}
 			}
 
