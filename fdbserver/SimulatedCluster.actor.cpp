@@ -2879,7 +2879,7 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 
 		// If reseedTime is set, schedule a random seed reset at a random time between [0, reseedTime]
 		if (reseedTime >= 0.0) {
-			double actualReseedTime = deterministicRandom()->random01() * reseedTime;
+			double actualReseedTime = nondeterministicRandom()->random01() * reseedTime;
 			uint32_t newSeed = platform::getRandomSeed();
 			TraceEvent("SchedulingRandomSeedReset")
 			    .detail("ReseedTimeMax", reseedTime)
