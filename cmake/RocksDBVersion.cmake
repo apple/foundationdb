@@ -13,16 +13,15 @@
 #   (where <ref> is either a version tag like "v9.7.3" or a commit hash)
 
 ###############################################################################
-# OPTION 1: Official Release (DEFAULT - currently active)
-# Use this for stable, released versions of RocksDB.
+# OPTION 1: RocksDB Release Number
+# If you use this option, make sure Option 2 below is commented out.
 ###############################################################################
 # set(ROCKSDB_VERSION "9.7.3")
 # set(ROCKSDB_VERSION_SHA256 "acfabb989cbfb5b5c4d23214819b059638193ec33dad2d88373c46448d16d38b")
 
 ###############################################################################
-# OPTION 2: Git Commit
-# Use this for unreleased features/fixes. Uncomment and fill in, then comment
-# out Option 1 above.
+# OPTION 2: RocksDB Git Commit Hash
+# If you use this option, make sure Option 1 above is commented out.
 #
 # Note: CMake will auto-fetch the version from GitHub at configure time.
 # This requires network access during cmake configure.
