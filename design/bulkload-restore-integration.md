@@ -1,4 +1,4 @@
-# Design for Integrating BulkDump/BulkLoad into Backup/Restore
+#Design for Integrating BulkDump / BulkLoad into Backup / Restore
 
 ## Table of Contents
 
@@ -60,7 +60,7 @@ Given these problems, we establish the following 4 requirements:
 1. **Single-Command Integration**: When running backup or restore operations, users can choose to enable the new snapshot system (BulkDump/BulkLoad) with existing commands.
    - *Rationale*: Without this, users would need to invoke BulkDump, BulkLoad, and traditional backup/restore separately, which is error-prone and complex to manage.
 
-2. **Backward Compatibility**: Backup data generated with BulkDump can be restored using traditional range file restore methods, and traditional backup data can be restored normally.
+2. **Backward Compatibility**: Backup data generated with BulkDump can be restored using traditional range file restore methods, and traditional backup data can be restored using the existing range file + mutation log process through the transaction system.
    - *Rationale*: Since BulkDump uses a completely different manifest and data file format (SSTs) compared to traditional range files, this requirement enables fallback scenarios and addresses failure conditions.
 
 3. **Performance Requirement**: Backup and restore times must be no longer than current implementations when using BulkDump/BulkLoad.
@@ -167,9 +167,9 @@ graph TB
         SS2 -->|Read snapshots V2| BA
         SSN -->|Read snapshots V2| BA
         
-        SS1 -->|Generate SSTs V3| DD
-        SS2 -->|Generate SSTs V3| DD
-        SSN -->|Generate SSTs V3| DD
+        SS1 -->|Generate & Upload SSTs V3| DD
+        SS2 -->|Generate & Upload SSTs V3| DD
+        SSN -->|Generate & Upload SSTs V3| DD
         
         DD -->|Coordinate| BDTF
         
@@ -185,7 +185,9 @@ graph TB
     
     BA -->|Save V2 snapshots| RF
     BW -->|Save partitioned logs| ML
-    BDTF -->|Save SST snapshots| BD
+    SS1 -->|Upload SSTs directly| BD
+    SS2 -->|Upload SSTs directly| BD
+    SSN -->|Upload SSTs directly| BD
     
     style BDTF fill:#FFF3CD
     style DD fill:#FFF3CD
@@ -201,8 +203,9 @@ graph TB
 
 ### Terminology and Component Definitions
 
-- **`backup_agent`** = Long-running executable process that executes backup and restore TaskBucket tasks
-- **`Backup Agents`** = Instances of `backup_agent` processes executing TaskBucket tasks (both backup and restore)
+- **`backup_agent`** = Executable binary that runs as a long-running process to execute TaskBucket tasks
+- **`Backup Agents`** = Running instances of the `backup_agent` executable that perform backup operations
+- **`Restore Agents`** = Running instances of the `backup_agent` executable that perform restore operations (same processes, different tasks)
 - **`fdbbackup`** = Command-line tool that submits backup jobs to TaskBucket (does not execute the backup itself)
 - **`fdbrestore`** = Command-line tool that submits restore jobs to TaskBucket (does not execute the restore itself)
 
@@ -216,21 +219,21 @@ graph TB
 
 ### Command-Line Interface
 
-#### Backup Command with Snapshot Mode
+#### Backup Command with Mode
 ```bash
-fdbbackup start --snapshot-mode <mode> \
+fdbbackup start --mode <mode> \
   -d <backup_url> \
   -t <target_version> \
   [--timeout <seconds>]
 ```
 
 **New Parameter:**
-- `--snapshot-mode <mode>`: Controls which snapshot mechanism(s) to use
+- `--mode <mode>`: Controls which snapshot mechanism(s) to use
   - `rangefile` (default): Generate only traditional range files (V1/V2 method)
   - `bulkdump`: Generate only BulkDump SST files
   - `both`: Generate both formats for validation/comparison
 
-#### Restore Command with BulkLoad
+#### Restore Command with Mode
 ```bash
 fdbrestore start \
   -r <backup_url> \
@@ -241,18 +244,18 @@ fdbrestore start \
 
 **New Parameter:**
 - `--mode <mode>`: Controls which restore mechanism to use for range data
-  - `rangefile` (default): Use traditional range file restore from kvranges/
+  - `rangefile` (default): Use traditional range file restore from the `kvranges/` directory in S3
   - `bulkload`: Use BulkLoad for range data restoration if BulkDump dataset is available
 
 **Default behavior (traditional range files):**
-1. Use traditional range file restore from kvranges/
+1. Use traditional range file restore from the `kvranges/` directory in S3
 2. Apply mutation logs using traditional method
-3. Does not use BulkLoad even if bulkdump_data/ is present
+3. Does not use BulkLoad even if the `bulkdump_data/` directory is present in S3
 
 **BulkLoad behavior (with --mode bulkload):**
 1. Verify BulkDump dataset completeness
 2. If complete: use BulkLoad for range data restoration
-3. If incomplete: error (backup does not have bulkdump_data/)
+3. If incomplete: error (backup does not have the `bulkdump_data/` directory in S3)
 4. After BulkLoad: apply mutation logs using traditional method
 
 ### Data Format and Folder Structure
@@ -295,6 +298,7 @@ s3://bucket/backup-2025-01-20-23-17-10.123456/
 - `kvranges/` enables fallback to V2 restore method and side-by-side validation
 - `bulkdump_data/` provides faster restore via direct SST ingestion using BulkDump's native layout - no conversion or adaptation needed
 - `logs/` format unchanged from V2 (partitioned logs)
+- **Snapshot Relationship**: The `bulkdump_data/` directory contains SST-formatted snapshot data at the same version as the traditional snapshots in `snapshots/` and `kvranges/` directories. Each represents the same point-in-time snapshot but in different formats (SST vs range files).
 - After validation: Only `bulkdump_data/` will be generated; `kvranges/` will be deprecated
 
 ### Integration Strategy
@@ -304,7 +308,7 @@ To achieve the requirements, we propose the following designs:
 #### 1. Snapshot Generation in Backup (BulkDump Integration)
 
 **Details:**
-- **Command Interface**: `fdbbackup start --snapshot-mode bulkdump` enables BulkDump-based snapshot generation
+- **Command Interface**: `fdbbackup start --mode both` enables BulkDump-based snapshot generation alongside traditional range files
 - **Implementation**: A new task, `BulkDumpTaskFunc`, coordinates with the Data Distributor to have Storage Servers generate SST files directly
 - **Parallel Execution**: BulkDumpTaskFunc runs in parallel with existing backup processes (mutation log capture continues unchanged)
 - **Output**: Creates `bulkdump_data/` folder containing SST files alongside traditional `kvranges/` folder for fallback
@@ -397,7 +401,7 @@ graph TB
 
 **V3 Restore Flow:**
 1. **fdbrestore** submits restore job to TaskBucket (then exits or waits for completion)
-2. **TaskBucket** orchestrates task execution via Backup Agents based on `--mode` flag:
+2. **TaskBucket** orchestrates task execution via Backup Agents based on the `--mode` flag:
    - If `--mode bulkload`: executes BulkLoadTaskFunc to verify manifest and run BulkLoad
    - If default: uses traditional range file restore from kvranges/
 3. **BulkLoad system** (when used) directly injects SST files into Storage Servers via DD
@@ -441,7 +445,7 @@ For BulkLoad Operations:
 
 For BulkDump Operations:
 ```bash
-# No additional knobs required - works with default configuration
+#No additional knobs required - works with default configuration
 ```
 
 **Configuration Steps:**
@@ -454,9 +458,9 @@ For BulkDump Operations:
 The `knob_shard_encode_location_metadata=1` setting changes how shard location metadata is encoded. Existing shards have metadata written in the old format, so a database wiggle is required to force all shards to rewrite their metadata with the new encoding that includes shard IDs required for BulkLoad operations.
 
 ```bash
-# Trigger database wiggle after cluster restart
+#Trigger database wiggle after cluster restart
 fdbcli --exec "configure perpetual_storage_wiggle=1"
-# Monitor wiggle completion before using BulkLoad
+#Monitor wiggle completion before using BulkLoad
 fdbcli --exec "status details"
 ```
 
@@ -471,17 +475,13 @@ fdbserver --knob_shard_encode_location_metadata=1 \
 ```cpp
 // Validation performed during BulkLoad submission
 if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-    throw bulkload_invalid_configuration(
-        "BulkLoad requires --knob_shard_encode_location_metadata=1. "
-        "Restart cluster with this knob enabled."
-    );
+	throw bulkload_invalid_configuration("BulkLoad requires --knob_shard_encode_location_metadata=1. "
+	                                     "Restart cluster with this knob enabled.");
 }
 
 if (!SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE) {
-    throw bulkload_invalid_configuration(
-        "BulkLoad requires --knob_enable_read_lock_on_range=1. "
-        "Restart cluster with this knob enabled."
-    );
+	throw bulkload_invalid_configuration("BulkLoad requires --knob_enable_read_lock_on_range=1. "
+	                                     "Restart cluster with this knob enabled.");
 }
 ```
 
@@ -599,19 +599,19 @@ TraceEvent("RestoreSnapshotMethodSelected")
 ```bash
 fdbbackup status -d <backup_url>
 
-# New fields in output:
-#   Snapshot Mode: bulkdump|rangefile|both
-#   BulkLoad Compatible: yes|no
+#New fields in output:
+#Snapshot Mode : bulkdump | rangefile | both
+#BulkLoad Compatible : yes | no
 ```
 
 **Restore Status Enhancements:**
 ```bash
 fdbrestore status
 
-# New fields in output:
-#   Snapshot Method: bulkload|rangefile
-#   Snapshot Phase: complete|in_progress|not_started
-#   Mutation Log Phase: complete|in_progress|not_started
+#New fields in output:
+#Snapshot Method : bulkload | rangefile
+#Snapshot Phase : complete | in_progress | not_started
+#Mutation Log Phase : complete | in_progress | not_started
 ```
 
 ### Key Metrics to Monitor
@@ -627,7 +627,7 @@ fdbrestore status
 ### Rollout Strategy
 
 #### Phase 1: Opt-in Integration (8.0 Release)
-- BulkDump/BulkLoad integration available via `--snapshot-mode both` flag for backup and `--mode bulkload` flag for restore
+- BulkDump/BulkLoad integration available via `--mode both` flag for backup and `--mode bulkload` flag for restore
 - Traditional range file backup/restore remains default and as fall back if bulkdump fails.
 - **Duration**: 6 months minimum for production validation
 
@@ -661,9 +661,9 @@ BulkDump/BulkLoad integration uses the same error handling as current backup/res
 **Failure Scenarios & Handling:**
 
 1. **BulkDump Fails During Backup (BulkDump Mode)**
-   - When user explicitly uses `--snapshot-mode bulkdump`, backup fails completely (no fallback in bulkdump-only mode)
+   - When user explicitly uses `--mode bulkdump`, backup fails completely (no fallback in bulkdump-only mode)
    - Error logged: `backup_bulkdump_failed`
-   - User must retry with `--snapshot-mode rangefile` (default) or `--snapshot-mode both`
+   - User must retry with `--mode rangefile` (default) or `--mode both`
 
 2. **Incomplete BulkDump Dataset at Restore**
    - Restore pre-flight check verifies manifest completeness
@@ -674,7 +674,7 @@ BulkDump/BulkLoad integration uses the same error handling as current backup/res
    - When user specifies `--mode bulkload`, BulkLoad task fails and logs error
    - Restore fails with error: `restore_bulkload_failed`
    - Recovery options (in order of preference):
-     - **Format fallback**: If backup has `kvranges/` (created with `--snapshot-mode both`), retry with `--mode rangefile` using same snapshot
+     - **Format fallback**: If backup has `kvranges/` (created with `--mode both`), retry with `--mode rangefile` using same snapshot
      - **Older snapshot fallback**: Use an older snapshot from the backup dataset (if available) and replay more mutation logs to reach target version
      - **No recovery**: If only current BulkDump snapshot exists and BulkLoad consistently fails, restore cannot proceed
 
@@ -692,7 +692,7 @@ error_code_actor bulkload_invalid_configuration()  // NEW: Configuration validat
 
 #### Emergency Rollback
 If critical issues are discovered post-deployment:
-1. **Disable BulkDump** in new backups (revert to default `--snapshot-mode rangefile`)
+1. **Disable BulkDump** in new backups (revert to default `--mode rangefile`)
 2. **Use traditional restore** for all operations (use `--mode rangefile`)
 3. **Existing data** remains accessible through range files (for backups created with dual datasets)
 4. **No data loss** due to dual dataset approach during transition period
@@ -717,5 +717,4 @@ If critical issues are discovered post-deployment:
 
 ### Security Considerations
 
-**Encryption integration is not yet designed.** For production use requiring encryption, use traditional backup/restore without `--snapshot-mode bulkdump` or BulkLoad.
-
+**Encryption integration is not yet designed.** For production use requiring encryption, use traditional backup/restore without `--mode bulkdump` or BulkLoad.

@@ -139,6 +139,12 @@ enum class SnapshotMode {
 	BOTH // Generate both formats for validation
 };
 
+// Restore mechanism mode for restore operations
+enum class RestoreMode {
+	RANGEFILE = 0, // Default - traditional range file restore
+	BULKLOAD // Use BulkLoad for efficient SST ingestion
+};
+
 class FileBackupAgent : public BackupAgentBase {
 public:
 	FileBackupAgent();

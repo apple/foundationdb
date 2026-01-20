@@ -111,11 +111,6 @@ enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME }
 // New fast restore reuses the type from legacy slow restore
 enum class RestoreType { UNKNOWN, START, STATUS, ABORT, WAIT };
 
-enum class RestoreMode {
-	RANGEFILE = 0, // Default - traditional range file restore
-	BULKLOAD // Use BulkLoad for efficient SST ingestion
-};
-
 //
 enum {
 	// Backup constants
@@ -2028,7 +2023,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 UsePartitionedLog usePartitionedLog,
                                 IncrementalBackupOnly incrementalBackupOnly,
                                 Optional<std::string> encryptionKeyFile,
-                                int snapshotMode = 0) {
+                                SnapshotMode snapshotMode = SnapshotMode::RANGEFILE) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2083,7 +2078,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly,
 			                              encryptionKeyFile,
-			                              snapshotMode));
+			                              static_cast<int>(snapshotMode)));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2408,7 +2403,7 @@ ACTOR Future<Void> runRestore(Database db,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
                               Optional<std::string> encryptionKeyFile,
-                              bool useRangeFileRestore = true) {
+                              RestoreMode restoreMode = RestoreMode::RANGEFILE) {
 	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
@@ -2487,7 +2482,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   beginVersion,
 			                                                   encryptionKeyFile,
 			                                                   {},
-			                                                   useRangeFileRestore));
+			                                                   restoreMode == RestoreMode::RANGEFILE));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -4490,7 +4485,7 @@ int main(int argc, char* argv[]) {
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
 				                           encryptionKeyFile,
-				                           static_cast<int>(snapshotMode)));
+				                           snapshotMode));
 				break;
 			}
 
@@ -4659,26 +4654,24 @@ int main(int argc, char* argv[]) {
 
 			switch (restoreType) {
 			case RestoreType::START:
-				f = stopAfter(runRestore(
-				    db,
-				    restoreClusterFileOrig,
-				    tagName,
-				    restoreContainer,
-				    proxy,
-				    backupKeys,
-				    beginVersion,
-				    restoreVersion,
-				    restoreTimestamp,
-				    !dryRun,
-				    Verbose{ !quietDisplay },
-				    waitForDone,
-				    addPrefix,
-				    removePrefix,
-				    onlyApplyMutationLogs,
-				    inconsistentSnapshotOnly,
-				    encryptionKeyFile,
-				    restoreMode ==
-				        RestoreMode::RANGEFILE)); // useRangeFileRestore=true means traditional, false means BulkLoad
+				f = stopAfter(runRestore(db,
+				                         restoreClusterFileOrig,
+				                         tagName,
+				                         restoreContainer,
+				                         proxy,
+				                         backupKeys,
+				                         beginVersion,
+				                         restoreVersion,
+				                         restoreTimestamp,
+				                         !dryRun,
+				                         Verbose{ !quietDisplay },
+				                         waitForDone,
+				                         addPrefix,
+				                         removePrefix,
+				                         onlyApplyMutationLogs,
+				                         inconsistentSnapshotOnly,
+				                         encryptionKeyFile,
+				                         restoreMode)); // Pass RestoreMode directly
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::True)));

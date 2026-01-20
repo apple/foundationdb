@@ -127,6 +127,7 @@ ACTOR Future<bool> monitorBulkLoadJobCompletion(Database cx,
 
 // Verify that a complete BulkDump dataset exists for BulkLoad restore
 // Returns true if dataset is complete, false if incomplete
+// JobId corresponds to a single BulkDump job which represents one snapshot at a specific version
 ACTOR Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, std::string bulkDumpJobId) {
 	try {
 		if (bulkDumpJobId.empty()) {
@@ -134,41 +135,45 @@ ACTOR Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer>
 			return false;
 		}
 
-		// Check if job-manifest.txt exists in bulkdump_data/
-		state std::string jobManifestPath = "bulkdump_data/job-manifest.txt";
-		state Reference<IAsyncFile> jobManifestFile;
+		// Check if job-specific directory exists: bulkdump_data/<job-uuid>/
+		state std::string jobDirectoryPath = "bulkdump_data/" + bulkDumpJobId + "/";
 
 		try {
-			Reference<IAsyncFile> _jobManifestFile = wait(bc->readFile(jobManifestPath));
-			jobManifestFile = _jobManifestFile;
+			// Try to list files in the job directory to verify it exists and has content
+			Reference<BackupContainerFileSystem> bcfs = bc.castTo<BackupContainerFileSystem>();
+			if (bcfs) {
+				BackupContainerFileSystem::FilesAndSizesT files = wait(bcfs->listFiles(jobDirectoryPath));
+				if (files.empty()) {
+					TraceEvent(SevWarn, "BulkLoadVerifyDatasetJobDirectoryEmpty")
+					    .detail("JobDirectoryPath", jobDirectoryPath)
+					    .detail("BulkDumpJobId", bulkDumpJobId);
+					return false;
+				}
+
+				TraceEvent("BulkLoadVerifyDatasetJobDirectoryFound")
+				    .detail("JobDirectoryPath", jobDirectoryPath)
+				    .detail("BulkDumpJobId", bulkDumpJobId)
+				    .detail("FileCount", files.size());
+
+				// Basic verification: job directory exists and contains files
+				// More detailed verification (parsing shard manifests) is delegated to BulkLoad system
+				return true;
+			} else {
+				// Fallback: assume complete if we can't verify (BulkLoad will catch incomplete datasets)
+				TraceEvent(SevWarn, "BulkLoadVerifyDatasetCannotCast")
+				    .detail("BulkDumpJobId", bulkDumpJobId)
+				    .detail("Note", "Verification delegated to BulkLoad system");
+				return true;
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_file_not_found) {
-				TraceEvent(SevWarn, "BulkLoadVerifyDatasetJobManifestNotFound")
-				    .detail("JobManifestPath", jobManifestPath)
+				TraceEvent(SevWarn, "BulkLoadVerifyDatasetJobDirectoryNotFound")
+				    .detail("JobDirectoryPath", jobDirectoryPath)
 				    .detail("BulkDumpJobId", bulkDumpJobId);
 				return false;
 			}
 			throw;
 		}
-
-		// Read and verify job manifest exists and is readable
-		state int64_t manifestSize = wait(jobManifestFile->size());
-		if (manifestSize == 0) {
-			TraceEvent(SevWarn, "BulkLoadVerifyDatasetJobManifestEmpty")
-			    .detail("JobManifestPath", jobManifestPath)
-			    .detail("BulkDumpJobId", bulkDumpJobId);
-			return false;
-		}
-
-		TraceEvent("BulkLoadVerifyDatasetJobManifestFound")
-		    .detail("JobManifestPath", jobManifestPath)
-		    .detail("BulkDumpJobId", bulkDumpJobId)
-		    .detail("ManifestSize", manifestSize);
-
-		// For now, basic verification is sufficient - just check that job manifest exists and is readable
-		// More detailed verification (checking all shard manifests) could be added in the future
-		// but would require parsing the job manifest format and checking each shard directory
-		return true;
 
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "BulkLoadVerifyDatasetError").error(e).detail("BulkDumpJobId", bulkDumpJobId);

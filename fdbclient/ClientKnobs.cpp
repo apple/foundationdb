@@ -157,15 +157,15 @@ void ClientKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( TASKBUCKET_MAX_TASK_KEYS,               1000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	//Backup
-	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,     1024*1024 );
-	init( BACKUP_CONCURRENT_DELETES,               100 );
-	init( BACKUP_SIMULATED_LIMIT_BYTES,		       1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
-	init( BACKUP_GET_RANGE_LIMIT_BYTES,		       1e6 );
-	init( BACKUP_LOCK_BYTES,                       1e8 );
-	init( BACKUP_RANGE_TIMEOUT,   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
-	init( BACKUP_RANGE_MINWAIT,   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
-	init( BULKDUMP_JOB_TIMEOUT,                    3600 * 24 ); // 24 hours - large DBs may take days
-	init( BULKLOAD_JOB_TIMEOUT,                    3600 * 24 ); // 24 hours - large DBs may take days
+	init( BACKUP_LOCAL_FILE_WRITE_BLOCK,          1024*1024 );
+	init( BACKUP_CONCURRENT_DELETES,              100 );
+	init( BACKUP_SIMULATED_LIMIT_BYTES,           1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
+	init( BACKUP_GET_RANGE_LIMIT_BYTES,           1e6 );
+	init( BACKUP_LOCK_BYTES,                      1e8 );
+	init( BACKUP_RANGE_TIMEOUT,                   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
+	init( BACKUP_RANGE_MINWAIT,                   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
+	init( BULKDUMP_JOB_TIMEOUT,                   3600 * 24 ); // 24 hours - large DBs may take days
+	init( BULKLOAD_JOB_TIMEOUT,                   3600 * 24 ); // 24 hours - large DBs may take days
 	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  10 * 60 );  // 10 minutes
 	init( BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC,   3600 * 24 * 10); // 10 days
 	init( BACKUP_SHARD_TASK_LIMIT,                1000 ); if( randomize && BUGGIFY ) BACKUP_SHARD_TASK_LIMIT = 4;

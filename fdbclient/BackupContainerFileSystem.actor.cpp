@@ -182,7 +182,6 @@ public:
 			maxVer = metadata.get().snapshotVersion;
 			// fileNames is empty for BulkDump (files are referenced by job ID)
 		} else {
-			// Traditional range file snapshots
 			ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 			// Validate each filename, update version range
@@ -233,9 +232,22 @@ public:
 
 		wait(yield());
 		state std::string docString = json_spirit::write_string(json);
+		state std::string fileName = format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes);
 
-		state Reference<IBackupFile> f =
-		    wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
+		// Check if file already exists to prevent name clashes
+		try {
+			Reference<IAsyncFile> existingFile = wait(bc->readFile(fileName));
+			// If we reach here, the file exists - throw detailed exception
+			throw backup_duplicate(); // File already exists, cannot write with same name
+		} catch (Error& e) {
+			// If file_not_found, that's expected - we can proceed to write
+			if (e.code() != error_code_file_not_found) {
+				// Some other error occurred while checking file existence
+				throw;
+			}
+		}
+
+		state Reference<IBackupFile> f = wait(bc->writeFile(fileName));
 		wait(f->append(docString.data(), docString.size()));
 		wait(f->finish());
 
@@ -1282,6 +1294,7 @@ public:
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
+
 		if (sscanf(name.c_str(),
 		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n",
 		           &f.beginVersion,
