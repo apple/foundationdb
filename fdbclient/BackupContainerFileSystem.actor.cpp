@@ -232,25 +232,55 @@ public:
 
 		wait(yield());
 		state std::string docString = json_spirit::write_string(json);
-		state std::string fileName = format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes);
 
-		// Check if file already exists to prevent name clashes
-		try {
-			Reference<IAsyncFile> existingFile = wait(bc->readFile(fileName));
-			// If we reach here, the file exists - throw detailed exception
-			throw backup_duplicate(); // File already exists, cannot write with same name
-		} catch (Error& e) {
-			// If file_not_found, that's expected - we can proceed to write
-			if (e.code() != error_code_file_not_found) {
-				// Some other error occurred while checking file existence
-				throw;
+		// Generate filename - add suffixes only when 'both' mode is active to prevent collision
+		// Single modes use original format for backward compatibility
+		state std::string fileName;
+		state std::string baseFileName = format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes);
+
+		if (isBulkDump) {
+			// For BulkDump: check if we're in 'both' mode by looking for potential rangefile collision
+			std::vector<KeyspaceSnapshotFile> existingSnapshots = wait(bc->listKeyspaceSnapshots());
+			bool hasRangefileSnapshot = false;
+
+			for (const auto& snapshot : existingSnapshots) {
+				if (snapshot.fileName == baseFileName || snapshot.fileName == baseFileName + ",range") {
+					hasRangefileSnapshot = true;
+					break;
+				}
+			}
+
+			if (hasRangefileSnapshot) {
+				// Both mode detected - use suffix to distinguish
+				fileName = baseFileName + ",bulk";
+			} else {
+				// Single bulkdump mode - use original format
+				fileName = baseFileName;
+			}
+		} else {
+			// For Rangefile: check if we're in 'both' mode by looking for BulkDump collision
+			std::vector<KeyspaceSnapshotFile> existingSnapshots = wait(bc->listKeyspaceSnapshots());
+			bool hasBulkDumpSnapshot = false;
+
+			for (const auto& snapshot : existingSnapshots) {
+				if (snapshot.fileName == baseFileName + ",bulk") {
+					hasBulkDumpSnapshot = true;
+					break;
+				}
+			}
+
+			if (hasBulkDumpSnapshot) {
+				// Both mode detected - BulkDump already exists, use suffix to distinguish
+				fileName = baseFileName + ",range";
+			} else {
+				// Single rangefile mode - use original format for backward compatibility
+				fileName = baseFileName;
 			}
 		}
 
 		state Reference<IBackupFile> f = wait(bc->writeFile(fileName));
 		wait(f->append(docString.data(), docString.size()));
 		wait(f->finish());
-
 		return Void();
 	}
 
@@ -1295,6 +1325,19 @@ public:
 		f.fileName = path;
 		int len;
 
+		// Try new format with type suffix: snapshot,beginVersion,endVersion,totalSize,type
+		if (sscanf(name.c_str(),
+		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 ",%*[^,]%n",
+		           &f.beginVersion,
+		           &f.endVersion,
+		           &f.totalSize,
+		           &len) == 3 &&
+		    len == name.size()) {
+			out = f;
+			return true;
+		}
+
+		// Try original format: snapshot,beginVersion,endVersion,totalSize
 		if (sscanf(name.c_str(),
 		           "snapshot,%" SCNd64 ",%" SCNd64 ",%" SCNd64 "%n",
 		           &f.beginVersion,

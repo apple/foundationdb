@@ -231,7 +231,7 @@ fdbbackup start --mode <mode> \
 - `--mode <mode>`: Controls which snapshot mechanism(s) to use
   - `rangefile` (default): Generate only traditional range files (V1/V2 method)
   - `bulkdump`: Generate only BulkDump SST files
-  - `both`: Generate both formats for validation/comparison
+  - `both`: Generate both formats (with unique filenames to prevent collision)
 
 #### Restore Command with Mode
 ```bash
@@ -564,8 +564,9 @@ The implementation is divided into four phases with specific testing criteria:
 
 ### Representative Test Cases
 1. **Happy Path**: Backup with `--snapshot-mode bulkdump`, restore with `--mode bulkload`
-2. **Mixed Scenarios**: Backup with `--snapshot-mode both`, restore testing both `--mode bulkload` and default methods
-3. **Timeout Scenario**: BulkDump times out, traditional backup completes
+2. **Both Mode**: Backup with `--snapshot-mode both`, restore testing both `--mode bulkload` and default methods
+3. **Fallback Scenario**: BulkDump backup, traditional restore with range files (backward compatibility)
+4. **Timeout Scenario**: BulkDump times out, traditional backup completes
 4. **Incomplete Dataset**: Restore with `--mode bulkload` fails gracefully when BulkDump data incomplete
 5. **Performance Comparison**: BulkDump backup ≤ traditional backup time, BulkLoad restore ≤ traditional restore time
 
@@ -628,7 +629,7 @@ fdbrestore status
 
 #### Phase 1: Opt-in Integration (8.0 Release)
 - BulkDump/BulkLoad integration available via `--mode both` flag for backup and `--mode bulkload` flag for restore
-- Traditional range file backup/restore remains default and as fall back if bulkdump fails.
+- Traditional range file backup/restore remains default and as fallback if bulkdump fails.
 - **Duration**: 6 months minimum for production validation
 
 #### Phase 2: Default Transition (8.1+ Release)
