@@ -403,8 +403,9 @@ function wait_for_files_in_listing {
   
   while [[ $attempt -lt $max_attempts ]]; do
     local output
+    # Capture only stdout (listing output), discard stderr (HTTP debug messages)
     output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-      --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>&1)
+      --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>/dev/null)
     
     local found_count
     found_count=$(echo "${output}" | grep -c "${pattern}" || true)
