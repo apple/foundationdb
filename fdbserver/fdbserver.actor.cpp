@@ -2454,8 +2454,12 @@ int main(int argc, char* argv[]) {
 				    "shard_encode_location_metadata",
 				    KnobValue::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
-			simulationSetupAndRun(
-			    dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths, opts.reseedTime);
+			simulationSetupAndRun(dataFolder,
+			                      opts.testFile,
+			                      opts.restarting,
+			                      (isRestoring >= 1),
+			                      opts.whitelistBinPaths,
+			                      opts.reseedTime);
 			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
