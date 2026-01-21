@@ -177,6 +177,7 @@ set(WITH_ROCKSDB ON CACHE BOOL "Build with experimental RocksDB support")
 set(PORTABLE_ROCKSDB 1 CACHE STRING "Minimum CPU arch to support (i.e. skylake, haswell, etc., or 0 = current CPU, 1 = baseline CPU)")
 set(ROCKSDB_TOOLS OFF CACHE BOOL "Compile RocksDB tools")
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
+# RocksDB version/commit configuration is in cmake/RocksDBVersion.cmake
 
 ################################################################################
 # TOML11
