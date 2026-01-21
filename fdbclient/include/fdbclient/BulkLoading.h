@@ -74,6 +74,13 @@ const int bulkLoadManifestFormatVersion = 1;
 // TODO(BulkDump): use this everywhere
 std::string appendToPath(const std::string& path, const std::string& append);
 
+// Constructs a URL with the path modified to include "data/" prefix.
+// This is used for BulkDump/BulkLoad to write under the backup container's data directory,
+// consistent with where BackupContainerS3BlobStore stores other backup files.
+// Input:  blobstore://creds@host/backup_container?bucket=... , "bulkdump_data"
+// Output: blobstore://creds@host/data/backup_container/bulkdump_data?bucket=...
+std::string getBackupDataPath(const std::string& url, const std::string& suffix);
+
 // Here are important metadata: (1) BulkLoadTaskState; (2) BulkDumpState; (3) BulkLoadManifest. BulkLoadTaskState is
 // only used for bulkload core engine which persists the metadata for each unit bulkload range (aka. task).
 // BulkDumpState is used for bulk dumping. BulkLoadManifest is the metadata for persisting core information of the
