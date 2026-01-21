@@ -563,8 +563,8 @@ The implementation is divided into four phases with specific testing criteria:
 **Implementation**: Production environment validation (timeline to be determined).
 
 ### Representative Test Cases
-1. **Happy Path**: Backup with `--snapshot-mode bulkdump`, restore with `--mode bulkload`
-2. **Both Mode**: Backup with `--snapshot-mode both`, restore testing both `--mode bulkload` and default methods
+1. **Happy Path**: Backup with `--mode bulkdump`, restore with `--mode bulkload`
+2. **Both Mode**: Backup with `--mode both`, restore testing both `--mode bulkload` and default methods
 3. **Fallback Scenario**: BulkDump backup, traditional restore with range files (backward compatibility)
 4. **Timeout Scenario**: BulkDump times out, traditional backup completes
 4. **Incomplete Dataset**: Restore with `--mode bulkload` fails gracefully when BulkDump data incomplete

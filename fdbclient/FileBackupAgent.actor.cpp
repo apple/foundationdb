@@ -159,11 +159,11 @@ ACTOR Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer>
 				// More detailed verification (parsing shard manifests) is delegated to BulkLoad system
 				return true;
 			} else {
-				// Fallback: assume complete if we can't verify (BulkLoad will catch incomplete datasets)
-				TraceEvent(SevWarn, "BulkLoadVerifyDatasetCannotCast")
+				// Cannot verify - backup container doesn't support file listing
+				TraceEvent(SevError, "BulkLoadVerifyDatasetCannotCast")
 				    .detail("BulkDumpJobId", bulkDumpJobId)
-				    .detail("Note", "Verification delegated to BulkLoad system");
-				return true;
+				    .detail("Note", "BackupContainer does not support file listing required for verification");
+				return false;
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_file_not_found) {
@@ -4556,16 +4556,6 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			// Open backup container for metadata access
 			state Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {});
 
-			// Note: BulkDump dataset verification is skipped for now.
-			// The BulkDump system stores data in job-specific manifests under the jobId directory,
-			// not in a top-level job-manifest.txt. Full verification would require reading the
-			// BulkLoad manifests which is done by the BulkLoad system itself when it processes the job.
-			// If the dataset is incomplete, BulkLoad will fail with an appropriate error.
-			TraceEvent("BulkLoadRestoreDatasetAssumedComplete")
-			    .detail("RestoreUID", restore.getUid())
-			    .detail("BulkDumpJobId", bulkDumpJobId)
-			    .detail("Note", "Verification delegated to BulkLoad system");
-
 			// Get restore ranges using a transaction
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -4626,6 +4616,19 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("BackupUrl", backupUrl);
 				throw restore_missing_data();
 			}
+
+			// Verify BulkDump dataset completeness before proceeding
+			bool datasetComplete = wait(verifyBulkDumpDatasetCompleteness(bcRef, bulkDumpJobId));
+			if (!datasetComplete) {
+				TraceEvent(SevError, "BulkLoadRestoreDatasetIncomplete")
+				    .detail("RestoreUID", restore.getUid())
+				    .detail("BulkDumpJobId", bulkDumpJobId)
+				    .detail("BackupUrl", backupUrl);
+				throw restore_missing_data();
+			}
+			TraceEvent("BulkLoadRestoreDatasetVerified")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BulkDumpJobId", bulkDumpJobId);
 
 			// Determine transport method from backup URL
 			state BulkLoadTransportMethod loadTransportMethod =

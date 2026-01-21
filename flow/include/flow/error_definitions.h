@@ -167,7 +167,6 @@ ERROR( range_lock_reject, 1247, "Range lock is rejected" )
 ERROR( range_unlock_reject, 1248, "Range unlock is rejected" )
 ERROR( bulkload_dataset_not_cover_required_range, 1249, "Bulkload dataset does not cover the required range" )
 ERROR( bulkload_invalid_configuration, 1250, "BulkLoad requires cluster configuration with both shard_encode_location_metadata=1 and enable_read_lock_on_range=1" )
-ERROR( bulkload_configuration_warning, 1251, "BulkLoad configuration warning" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
