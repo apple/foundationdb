@@ -13,6 +13,7 @@ testClass = "Backup"
 buggify = false
 generateFearless = false
 minimumRegions = 1
+encryptModes = ['disabled']  # Backup/restore does not support encryption
 config = "single usable_regions=1 storage_engine=ssd-2 tenant_mode=disabled"
 
 [[test]]
