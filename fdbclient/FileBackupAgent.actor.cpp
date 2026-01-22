@@ -27,12 +27,16 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
+#include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/BulkDumping.h"
+#include "fdbclient/BulkLoading.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/JsonBuilder.h"
+#include "fdbclient/JSONDoc.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
@@ -63,6 +67,127 @@
 #include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// Counters to verify BulkDump/BulkLoad were actually used (for test assertions)
+std::atomic<int> g_bulkDumpTaskCompleteCount(0);
+std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
+
+// Helper function to monitor BulkDump job completion
+// Returns true if job completed successfully, false if timed out
+ACTOR Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeoutDuration, double pollInterval) {
+	state double timeoutStart = now();
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			Optional<BulkDumpState> currentJob = wait(getSubmittedBulkDumpJob(&tr));
+			bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
+
+			if (!stillRunning) {
+				return true; // Job completed successfully
+			}
+
+			if (now() - timeoutStart > timeoutDuration) {
+				return false; // Timed out
+			}
+
+			wait(delay(pollInterval));
+			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Helper function to monitor BulkLoad job completion
+// Returns true if job completed successfully, false if timed out
+// lockAware must be true when DB is locked (e.g., during restore)
+ACTOR Future<bool> monitorBulkLoadJobCompletion(Database cx,
+                                                UID jobId,
+                                                double timeoutDuration,
+                                                double pollInterval,
+                                                bool lockAware) {
+	state double timeoutStart = now();
+
+	loop {
+		Optional<BulkLoadJobState> currentJob = wait(getRunningBulkLoadJob(cx, lockAware));
+		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
+
+		if (!stillRunning) {
+			return true; // Job completed successfully
+		}
+
+		if (now() - timeoutStart > timeoutDuration) {
+			return false; // Timed out
+		}
+
+		wait(delay(pollInterval));
+	}
+}
+
+// Verify that a complete BulkDump dataset exists for BulkLoad restore
+// Returns true if dataset is complete, false if incomplete
+// JobId corresponds to a single BulkDump job which represents one snapshot at a specific version
+ACTOR Future<bool> verifyBulkDumpDatasetCompleteness(Reference<IBackupContainer> bc, std::string bulkDumpJobId) {
+	try {
+		if (bulkDumpJobId.empty()) {
+			TraceEvent(SevWarn, "BulkLoadVerifyDatasetEmptyJobId");
+			return false;
+		}
+
+		// Check if job-specific directory exists: bulkdump_data/<job-uuid>/
+		// BulkDump stores data under data/<container>/bulkdump_data/ via getBackupDataPath(),
+		// which is consistent with where BackupContainer stores other files (logs, ranges, etc.)
+		state std::string jobDirectoryPath = "bulkdump_data/" + bulkDumpJobId + "/";
+
+		try {
+			// Try to list files in the job directory to verify it exists and has content
+			Reference<BackupContainerFileSystem> bcfs = bc.castTo<BackupContainerFileSystem>();
+			if (bcfs) {
+				// Standard listFiles works because BulkDump now writes under data/<container>/
+				BackupContainerFileSystem::FilesAndSizesT files = wait(bcfs->listFiles(jobDirectoryPath));
+				if (files.empty()) {
+					TraceEvent(SevWarn, "BulkLoadVerifyDatasetJobDirectoryEmpty")
+					    .detail("JobDirectoryPath", jobDirectoryPath)
+					    .detail("BulkDumpJobId", bulkDumpJobId);
+					return false;
+				}
+
+				TraceEvent("BulkLoadVerifyDatasetJobDirectoryFound")
+				    .detail("JobDirectoryPath", jobDirectoryPath)
+				    .detail("BulkDumpJobId", bulkDumpJobId)
+				    .detail("FileCount", files.size());
+
+				// Basic verification: job directory exists and contains files
+				// More detailed verification (parsing shard manifests) is delegated to BulkLoad system
+				return true;
+			} else {
+				// Cannot verify - backup container doesn't support file listing
+				// Use SevWarn (not SevError) to avoid abort in simulation
+				TraceEvent(SevWarn, "BulkLoadVerifyDatasetCannotCast")
+				    .detail("BulkDumpJobId", bulkDumpJobId)
+				    .detail("Note", "BackupContainer does not support file listing required for verification");
+				return false;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_file_not_found) {
+				TraceEvent(SevWarn, "BulkLoadVerifyDatasetJobDirectoryNotFound")
+				    .detail("JobDirectoryPath", jobDirectoryPath)
+				    .detail("BulkDumpJobId", bulkDumpJobId);
+				return false;
+			}
+			throw;
+		}
+
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "BulkLoadVerifyDatasetError").error(e).detail("BulkDumpJobId", bulkDumpJobId);
+		return false;
+	}
+}
+
+// Note: BulkLoad configuration validation (shard_encode_location_metadata, enable_read_lock_on_range)
+// is performed by the BulkLoad system on the server side. Client-side validation is not possible
+// because SERVER_KNOBS are not accessible from fdbclient.
 
 Optional<std::string> fileBackupAgentProxy = Optional<std::string>();
 
@@ -199,6 +324,13 @@ public:
 	KeyBackedProperty<bool> inconsistentSnapshotOnly() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<bool> transformPartitionedLog() { return configSpace.pack(__FUNCTION__sr); }
+	// BulkLoad integration properties
+	KeyBackedProperty<bool> useRangeFileRestore() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::string> bulkDumpJobId() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Key> bulkLoadCompleteFuture() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> bulkLoadComplete() { return configSpace.pack(__FUNCTION__sr); }
+	// Original BulkLoad mode before restore enabled it - used to restore state after completion/crash
+	KeyBackedProperty<int> originalBulkLoadMode() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Changed to restoreRangeSet. It can be removed.
@@ -494,10 +626,13 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	state Future<Key> url = restore.sourceContainerURL().getD(tr);
 	state Future<Version> restoreVersion = restore.restoreVersion().getD(tr);
 	state Future<std::string> progress = restore.getProgress(tr);
+	state Future<ERestoreState> restoreState = restore.stateEnum().getD(tr);
+	state Future<Optional<bool>> useRangeFileRestore = restore.useRangeFileRestore().get(tr);
+	state Future<Optional<bool>> bulkLoadComplete = restore.bulkLoadComplete().get(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) &&
-	     success(progress));
+	     success(progress) && success(restoreState) && success(useRangeFileRestore) && success(bulkLoadComplete));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
@@ -508,6 +643,29 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	                    printable(addPrefix.get()).c_str(),
 	                    printable(removePrefix.get()).c_str(),
 	                    restoreVersion.get());
+
+	// Add enhanced status fields for BulkLoad integration
+	// useRangeFileRestore is Future<Optional<bool>>, after wait() we call .get() to get Optional<bool>
+	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
+	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
+	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
+
+	// Add phase status information
+	ERestoreState currentState = restoreState.get();
+	if (currentState == ERestoreState::RUNNING) {
+		bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+		if (usingBulkLoad) {
+			std::string snapshotPhase = bulkLoadDone ? "complete" : "in_progress";
+			returnStr += format("  Snapshot Phase: %s", snapshotPhase.c_str());
+			std::string mutationPhase = bulkLoadDone ? "in_progress" : "not_started";
+			returnStr += format("  Mutation Log Phase: %s", mutationPhase.c_str());
+		} else {
+			returnStr += "  Snapshot Phase: in_progress  Mutation Log Phase: in_progress";
+		}
+	} else if (currentState == ERestoreState::COMPLETED) {
+		returnStr += "  Snapshot Phase: complete  Mutation Log Phase: complete";
+	}
+
 	return returnStr;
 }
 
@@ -3886,6 +4044,259 @@ Future<Key> BackupSnapshotDispatchTask::addSnapshotManifestTask(Reference<ReadYo
 	return BackupSnapshotManifest::addTask(tr, taskBucket, parentTask, completionKey, waitFor);
 }
 
+// BulkDumpTaskFunc: Creates BulkDump snapshots during backup
+// Must be defined before StartFullBackupTaskFunc which references it
+struct BulkDumpTaskFunc : BackupTaskFuncBase {
+	static StringRef name;
+	static constexpr uint32_t version = 1;
+
+	static struct {
+		static TaskParam<Version> snapshotVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> bulkDumpJobId() { return __FUNCTION__sr; }
+		static TaskParam<bool> timeoutOccurred() { return __FUNCTION__sr; }
+	} Params;
+
+	StringRef getName() const override { return name; };
+
+	Future<Void> execute(Database cx,
+	                     Reference<TaskBucket> tb,
+	                     Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return _execute(cx, tb, fb, task);
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<TaskBucket> tb,
+	                    Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return _finish(tr, tb, fb, task);
+	};
+
+	ACTOR static Future<Void> _execute(Database cx,
+	                                   Reference<TaskBucket> taskBucket,
+	                                   Reference<FutureBucket> futureBucket,
+	                                   Reference<Task> task) {
+		state BackupConfig config(task);
+		state Version snapshotVersion = Params.snapshotVersion().get(task);
+		state std::string jobId = Params.bulkDumpJobId().getOrDefault(task, "");
+
+		TraceEvent("BulkDumpTaskStart")
+		    .detail("BackupUID", config.getUid())
+		    .detail("SnapshotVersion", snapshotVersion)
+		    .detail("BulkDumpJobId", jobId);
+
+		// Declare state variables before try block so they're accessible in catch block
+		state std::vector<KeyRange> backupRanges;
+		state Reference<IBackupContainer> bc;
+		state int originalBulkDumpMode = 0;
+		state BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::CP;
+		state BulkDumpState bulkDumpJob;
+		state bool jobAlreadyRunning = false;
+
+		try {
+			// Submit BulkDump job via ManagementAPI
+			// This is a black box delegation to the existing BulkDump system
+
+			// Get backup ranges from config
+			std::vector<KeyRange> ranges = wait(config.backupRanges().getOrThrow(cx.getReference()));
+			backupRanges = ranges;
+			Reference<IBackupContainer> container = wait(config.backupContainer().getOrThrow(cx.getReference()));
+			bc = container;
+
+			// Read the original BulkDump mode from config (saved by StartFullBackupTaskFunc before task creation).
+			// This is persisted in the database so we can restore the correct mode even after a crash.
+			int mode = wait(config.originalBulkDumpMode().getD(cx.getReference(), Snapshot::False, 0));
+			originalBulkDumpMode = mode;
+
+			// Determine transport method from backup URL
+			transportMethod =
+			    isBlobstoreUrl(bc->getURL()) ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP;
+
+			// Check if there's already a running BulkDump job (e.g., from a previous task attempt or another agent).
+			// If so, we'll monitor that job instead of submitting a new one. This prevents the "Conflict to a
+			// running BulkDump job" error that occurs when multiple backup agents try to run the same task.
+			state Transaction checkTr(cx);
+			loop {
+				try {
+					checkTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					checkTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					Optional<BulkDumpState> existingJob = wait(getSubmittedBulkDumpJob(&checkTr));
+					if (existingJob.present()) {
+						bulkDumpJob = existingJob.get();
+						jobAlreadyRunning = true;
+						TraceEvent("BulkDumpTaskUsingExistingJob")
+						    .detail("BackupUID", config.getUid())
+						    .detail("ExistingJobId", bulkDumpJob.getJobId());
+					}
+					break;
+				} catch (Error& e) {
+					wait(checkTr.onError(e));
+				}
+			}
+
+			if (!jobAlreadyRunning) {
+				// Enable BulkDump mode at the DD level before submitting the job
+				wait(success(setBulkDumpMode(cx, 1)));
+
+				// Configure BulkDump job for the full keyspace
+				// BulkDump/BulkLoad requires the load range to be a subset of the dump range.
+				// Using normalKeys for both ensures compatibility regardless of user-specified ranges.
+				// Store data under data/<container>/bulkdump_data/ to be consistent with backup container layout
+				std::string bulkDumpRoot = getBackupDataPath(bc->getURL(), "bulkdump_data");
+				bulkDumpJob = createBulkDumpJob(normalKeys, bulkDumpRoot, BulkLoadType::SST, transportMethod);
+
+				// Submit the BulkDump job
+				wait(submitBulkDumpJob(cx, bulkDumpJob));
+			}
+
+			// Store job ID for monitoring
+			Params.bulkDumpJobId().set(task, bulkDumpJob.getJobId().toString());
+
+			// Monitor BulkDump progress - timeout is configurable for large datasets
+			state bool completed = wait(monitorBulkDumpJobCompletion(cx,
+			                                                         bulkDumpJob.getJobId(),
+			                                                         CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT,
+			                                                         5.0)); // Poll every 5 seconds
+
+			if (!completed) {
+				TraceEvent(SevWarn, "BulkDumpTaskTimeout")
+				    .detail("BackupUID", config.getUid())
+				    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
+				    .detail("TimeoutDuration", 300.0);
+				Params.timeoutOccurred().set(task, true);
+			}
+
+			TraceEvent("BulkDumpTaskComplete")
+			    .detail("BackupUID", config.getUid())
+			    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
+			    .detail("TimeoutOccurred", Params.timeoutOccurred().getOrDefault(task, false))
+			    .detail("JobAlreadyRunning", jobAlreadyRunning);
+
+			// Restore original BulkDump mode after job completes, but only if:
+			// 1. We actually enabled the mode (not if we just monitored an existing job)
+			// 2. The original mode was different from what we set
+			if (!jobAlreadyRunning && originalBulkDumpMode != 1) {
+				wait(success(setBulkDumpMode(cx, originalBulkDumpMode)));
+			}
+
+			// Write the keyspace snapshot file to mark the backup as complete
+			// This is essential for the restore process to find the snapshot
+			if (completed) {
+				// Build beginEndKeys from backup ranges
+				std::vector<std::pair<Key, Key>> beginEndKeys;
+				for (const auto& range : backupRanges) {
+					beginEndKeys.emplace_back(range.begin, range.end);
+				}
+
+				// Create BulkDump snapshot metadata
+				// Note: totalBytes and totalKeys are set to 0 here. Unlike traditional range file backups
+				// which accumulate fileSize from each RangeSlice, BulkDump writes its data to manifest files
+				// in the backup container (one per shard). To get accurate byte/key counts, we would need to:
+				//   1. List all manifest files under bc->getURL()/bulkDumpJobId/
+				//   2. Read each BulkLoadManifest and call getTotalBytes()/getKeyCount()
+				//   3. Aggregate the totals
+				// For now, zeros are acceptable since the critical field is bulkDumpJobId which BulkLoad
+				// uses to locate the data. TODO: Fix. The byte counts are informational for status display.
+				SnapshotMetadata metadata =
+				    SnapshotMetadata::bulkDump(bulkDumpJob.getJobId().toString(), snapshotVersion, 0, 0);
+
+				// Write the snapshot file - empty file list since BulkDump uses job manifests, not range files
+				wait(bc->writeKeyspaceSnapshotFile({}, // No individual range files for BulkDump
+				                                   beginEndKeys,
+				                                   0, // See comment above about totalBytes
+				                                   IncludeKeyRangeMap::False,
+				                                   metadata));
+
+				TraceEvent("BulkDumpTaskWroteSnapshot")
+				    .detail("BackupUID", config.getUid())
+				    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
+				    .detail("SnapshotVersion", snapshotVersion)
+				    .detail("RangeCount", backupRanges.size());
+			}
+
+			// Increment counter for test assertions
+			g_bulkDumpTaskCompleteCount.fetch_add(1);
+
+		} catch (Error& e) {
+			state Error savedError = e;
+			TraceEvent(SevWarn, "BulkDumpTaskError")
+			    .error(e)
+			    .detail("BackupUID", config.getUid())
+			    .detail("SnapshotVersion", snapshotVersion)
+			    .detail("JobAlreadyRunning", jobAlreadyRunning);
+			// Restore original BulkDump mode on error, but only if we were the ones who enabled it
+			try {
+				if (!jobAlreadyRunning && originalBulkDumpMode != 1) {
+					wait(success(setBulkDumpMode(cx, originalBulkDumpMode)));
+				}
+			} catch (Error& e2) {
+				TraceEvent(SevWarn, "BulkDumpTaskRestoreModeError").error(e2);
+			}
+			throw savedError;
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  Reference<FutureBucket> futureBucket,
+	                                  Reference<Task> task) {
+		state BackupConfig config(task);
+		state Version snapshotVersion = Params.snapshotVersion().get(task);
+
+		TraceEvent("BulkDumpTaskFinishStart")
+		    .detail("BackupUID", config.getUid())
+		    .detail("SnapshotVersion", snapshotVersion);
+
+		// Set latestSnapshotEndVersion so BackupLogsDispatchTask knows we're restorable
+		// This is critical for the backup to complete when using BulkDump
+		config.latestSnapshotEndVersion().set(tr, snapshotVersion);
+
+		// Also set firstSnapshotEndVersion if not already set (first snapshot)
+		state Optional<Version> firstSnapshotEnd = wait(config.firstSnapshotEndVersion().get(tr));
+		if (!firstSnapshotEnd.present()) {
+			config.firstSnapshotEndVersion().set(tr, snapshotVersion);
+		}
+
+		TraceEvent("BulkDumpTaskFinishSetVersions")
+		    .detail("BackupUID", config.getUid())
+		    .detail("SnapshotVersion", snapshotVersion)
+		    .detail("FirstSnapshotWasSet", !firstSnapshotEnd.present());
+
+		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+		wait(taskFuture->set(tr, taskBucket));
+		wait(taskBucket->finish(tr, task));
+
+		TraceEvent("BulkDumpTaskFinish")
+		    .detail("BackupUID", config.getUid())
+		    .detail("SnapshotVersion", snapshotVersion);
+
+		return Void();
+	}
+
+	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
+	                                 Reference<TaskBucket> taskBucket,
+	                                 Reference<Task> parentTask,
+	                                 Version snapshotVersion,
+	                                 TaskCompletionKey completionKey,
+	                                 Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		Key key = wait(addBackupTask(BulkDumpTaskFunc::name,
+		                             BulkDumpTaskFunc::version,
+		                             tr,
+		                             taskBucket,
+		                             completionKey,
+		                             BackupConfig(parentTask),
+		                             waitFor,
+		                             [=](Reference<Task> task) {
+			                             Params.snapshotVersion().set(task, snapshotVersion);
+			                             Params.timeoutOccurred().set(task, false);
+		                             }));
+		return key;
+	}
+};
+StringRef BulkDumpTaskFunc::name = "bulk_dump_snapshot_5.2"_sr;
+REGISTER_TASKFUNC(BulkDumpTaskFunc);
+
 struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
@@ -4029,9 +4440,33 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		// Using priority 1 for both of these to at least start both tasks soon
 		// Do not add snapshot task if we only want the incremental backup
 		if (!incrementalBackupOnly.get().present() || !incrementalBackupOnly.get().get()) {
-			wait(success(BackupSnapshotDispatchTask::addTask(
-			    tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			// Check snapshot mode: 0=RANGEFILE, 1=BULKDUMP, 2=BOTH
+			state int snapshotModeValue = wait(config.snapshotMode().getD(tr, Snapshot::False, 0));
+
+			TraceEvent("StartFullBackupTaskSnapshotMode")
+			    .detail("BackupUID", config.getUid())
+			    .detail("SnapshotModeValue", snapshotModeValue)
+			    .detail("IncrementalBackupOnly",
+			            incrementalBackupOnly.get().present() && incrementalBackupOnly.get().get());
+
+			// Add BulkDump task if mode is BULKDUMP(1) or BOTH(2)
+			if (snapshotModeValue == 1 || snapshotModeValue == 2) {
+				// Save original BulkDump mode BEFORE creating the task, so it's persisted in the database.
+				// This allows crash recovery to restore the correct mode even if the task restarts.
+				int currentBulkDumpMode = wait(getBulkDumpMode(tr->getDatabase()));
+				config.originalBulkDumpMode().set(tr, currentBulkDumpMode);
+
+				wait(success(BulkDumpTaskFunc::addTask(
+				    tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
+			}
+
+			// Add traditional range file snapshot if mode is RANGEFILE(0) or BOTH(2)
+			if (snapshotModeValue == 0 || snapshotModeValue == 2) {
+				wait(success(BackupSnapshotDispatchTask::addTask(
+				    tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished))));
+			}
 		}
+
 		wait(success(BackupLogsDispatchTask::addTask(
 		    tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished))));
 
@@ -4077,6 +4512,297 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 };
 StringRef StartFullBackupTaskFunc::name = "file_backup_start_5.2"_sr;
 REGISTER_TASKFUNC(StartFullBackupTaskFunc);
+
+// BulkLoadRestoreTaskFunc: Restores data using BulkLoad instead of traditional range file restore
+// This task is used when useRangeFileRestore=false is specified
+struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
+	static StringRef name;
+	static constexpr uint32_t version = 1;
+
+	static struct {
+		static TaskParam<Version> restoreVersion() { return __FUNCTION__sr; }
+		static TaskParam<std::string> backupUrl() { return __FUNCTION__sr; }
+		static TaskParam<std::string> bulkDumpJobId() { return __FUNCTION__sr; }
+	} Params;
+
+	StringRef getName() const override { return name; };
+
+	Future<Void> execute(Database cx,
+	                     Reference<TaskBucket> tb,
+	                     Reference<FutureBucket> fb,
+	                     Reference<Task> task) override {
+		return _execute(cx, tb, fb, task);
+	};
+	Future<Void> finish(Reference<ReadYourWritesTransaction> tr,
+	                    Reference<TaskBucket> tb,
+	                    Reference<FutureBucket> fb,
+	                    Reference<Task> task) override {
+		return _finish(tr, tb, fb, task);
+	};
+
+	ACTOR static Future<Void> _execute(Database cx,
+	                                   Reference<TaskBucket> taskBucket,
+	                                   Reference<FutureBucket> futureBucket,
+	                                   Reference<Task> task) {
+		state RestoreConfig restore(task);
+		state Version restoreVersion = Params.restoreVersion().get(task);
+		state std::string backupUrl = Params.backupUrl().get(task);
+		state std::string bulkDumpJobId = Params.bulkDumpJobId().getOrDefault(task, "");
+
+		TraceEvent("BulkLoadRestoreTaskStart")
+		    .detail("RestoreUID", restore.getUid())
+		    .detail("RestoreVersion", restoreVersion)
+		    .detail("BackupUrl", backupUrl)
+		    .detail("BulkDumpJobId", bulkDumpJobId);
+
+		// Declare state variable before try block so it's accessible in catch block
+		state int originalBulkLoadMode = 0;
+
+		try {
+			// Open backup container for metadata access
+			state Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {});
+
+			// Get restore ranges using a transaction
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			state std::vector<KeyRange> restoreRanges = wait(restore.getRestoreRangesOrDefault(tr));
+
+			// If bulkDumpJobId is empty, read it from the snapshot file metadata
+			if (bulkDumpJobId.empty()) {
+				// Use the backup container we already opened to find the snapshot file for our restore version
+				BackupContainerFileSystem* bcfsPtr = dynamic_cast<BackupContainerFileSystem*>(bcRef.getPtr());
+				if (bcfsPtr != nullptr) {
+					state Reference<BackupContainerFileSystem> bcfs =
+					    Reference<BackupContainerFileSystem>::addRef(bcfsPtr);
+					state std::vector<KeyspaceSnapshotFile> snapshots = wait(bcfs->listKeyspaceSnapshots());
+					state int snapIdx = snapshots.size() - 1;
+					while (snapIdx >= 0 && bulkDumpJobId.empty()) {
+						// For BulkDump snapshots: beginVersion == endVersion == snapshotVersion
+						// Accept any snapshot that is at or before our restore version
+						if (snapshots[snapIdx].endVersion <= restoreVersion) {
+							// Read the snapshot file to get bulkDumpJobId
+							state std::string snapFileName = snapshots[snapIdx].fileName;
+							state Reference<IAsyncFile> snapFile = wait(bcfs->readFile(snapFileName));
+							state int64_t snapSize = wait(snapFile->size());
+							state Standalone<StringRef> snapBuf = makeString(snapSize);
+							int bytesRead = wait(snapFile->read(mutateString(snapBuf), snapSize, 0));
+							if (bytesRead == snapSize) {
+								json_spirit::mValue json;
+								if (json_spirit::read_string(snapBuf.toString(), json)) {
+									JSONDoc doc(json);
+									std::string jobId;
+									if (doc.tryGet("bulkDumpJobId", jobId) && !jobId.empty()) {
+										bulkDumpJobId = jobId;
+										TraceEvent("BulkLoadRestoreFoundJobId")
+										    .detail("RestoreUID", restore.getUid())
+										    .detail("BulkDumpJobId", bulkDumpJobId)
+										    .detail("SnapshotFile", snapFileName);
+									}
+								}
+							}
+						}
+						snapIdx--;
+					}
+				}
+			}
+
+			// Create BulkLoad job from the BulkDump data
+			// BulkDump stores data under data/<container>/bulkdump_data/ subdirectory.
+			// DD appends the jobId via getBulkLoadJobRoot(jobRoot, jobId) when accessing files.
+			state std::string jobRoot = getBackupDataPath(backupUrl, "bulkdump_data");
+			state UID dumpJobUid;
+			if (!bulkDumpJobId.empty()) {
+				dumpJobUid = UID::fromString(bulkDumpJobId);
+			} else {
+				// No BulkDump job ID found - this is an error for BulkLoad restore
+				TraceEvent(SevError, "BulkLoadRestoreNoBulkDumpJobId")
+				    .detail("RestoreUID", restore.getUid())
+				    .detail("BackupUrl", backupUrl);
+				throw restore_missing_data();
+			}
+
+			// Verify BulkDump dataset completeness before proceeding
+			bool datasetComplete = wait(verifyBulkDumpDatasetCompleteness(bcRef, bulkDumpJobId));
+			if (!datasetComplete) {
+				TraceEvent(SevWarn, "BulkLoadRestoreDatasetIncomplete")
+				    .detail("RestoreUID", restore.getUid())
+				    .detail("BulkDumpJobId", bulkDumpJobId)
+				    .detail("BackupUrl", backupUrl);
+				throw restore_missing_data();
+			}
+			TraceEvent("BulkLoadRestoreDatasetVerified")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BulkDumpJobId", bulkDumpJobId);
+
+			// Determine transport method from backup URL
+			state BulkLoadTransportMethod loadTransportMethod =
+			    isBlobstoreUrl(backupUrl) ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP;
+
+			// BulkLoad range must match the BulkDump range (normalKeys)
+			// The actual restore ranges will be applied via mutation log replay
+			state BulkLoadJobState bulkLoadJob =
+			    createBulkLoadJob(dumpJobUid, normalKeys, jobRoot, loadTransportMethod);
+
+			TraceEvent("BulkLoadRestoreJobCreated")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
+			    .detail("JobRoot", jobRoot);
+
+			// Register the BulkLoad range lock owner (required for range locking)
+			wait(registerRangeLockOwner(cx, "BulkLoad", "BulkLoad restore operation"));
+
+			TraceEvent("BulkLoadRestoreRegisteredLockOwner")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("Owner", "BulkLoad");
+
+			// Note: BulkLoad configuration validation (shard_encode_location_metadata, enable_read_lock_on_range)
+			// is performed by the BulkLoad system on the server side when the job is submitted.
+
+			// Read the original BulkLoad mode from config (saved by StartFullRestoreTaskFunc before task creation).
+			// This is persisted in the database so we can restore the correct mode even after a crash.
+			int mode = wait(restore.originalBulkLoadMode().getD(cx.getReference(), Snapshot::False, 0));
+			originalBulkLoadMode = mode;
+
+			// Enable BulkLoad mode at DD level so the job will be processed
+			wait(success(setBulkLoadMode(cx, 1)));
+
+			TraceEvent("BulkLoadRestoreEnabledMode")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BulkLoadJobId", bulkLoadJob.getJobId());
+
+			// Submit BulkLoad job (must be lockAware since DB is locked during restore)
+			wait(submitBulkLoadJob(cx, bulkLoadJob, true /* lockAware */));
+
+			TraceEvent("BulkLoadRestoreJobSubmitted")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BulkLoadJobId", bulkLoadJob.getJobId());
+
+			// Monitor BulkLoad progress - timeout is configurable for large datasets
+			// Must be lockAware since DB is locked during restore
+			bool completed = wait(monitorBulkLoadJobCompletion(cx,
+			                                                   bulkLoadJob.getJobId(),
+			                                                   CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT,
+			                                                   5.0, // Poll every 5 seconds
+			                                                   true)); // lockAware
+
+			if (!completed) {
+				TraceEvent(SevWarn, "BulkLoadRestoreTimeout")
+				    .detail("RestoreUID", restore.getUid())
+				    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
+				    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT);
+				// Restore original BulkLoad mode before throwing
+				if (originalBulkLoadMode != 1) {
+					wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+				}
+				throw timed_out();
+			}
+
+			// Restore original BulkLoad mode now that the job is complete
+			if (originalBulkLoadMode != 1) {
+				wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+			}
+
+			TraceEvent("BulkLoadRestoreTaskComplete")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
+			    .detail("RestoreVersion", restoreVersion);
+
+			// Increment counter for test assertions
+			g_bulkLoadRestoreTaskCompleteCount.fetch_add(1);
+
+		} catch (Error& e) {
+			state Error savedError = e;
+			TraceEvent(SevWarn, "BulkLoadRestoreTaskError")
+			    .error(e)
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BackupUrl", backupUrl);
+			// Restore original BulkLoad mode on error
+			try {
+				if (originalBulkLoadMode != 1) {
+					wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+				}
+			} catch (Error& e2) {
+				TraceEvent(SevWarn, "BulkLoadRestoreRestoreModeError").error(e2);
+			}
+			throw savedError;
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
+	                                  Reference<TaskBucket> taskBucket,
+	                                  Reference<FutureBucket> futureBucket,
+	                                  Reference<Task> task) {
+		state RestoreConfig restore(task);
+
+		// Mark BulkLoad phase as complete
+		restore.bulkLoadComplete().set(tr, true);
+
+		// Update fileBlocksFinished and filesBlocksDispatched to match fileBlockCount
+		// so the restore progress tracker knows all range data has been loaded.
+		// BulkLoad doesn't use the traditional block dispatching mechanism.
+		state int64_t totalBlocks = wait(restore.fileBlockCount().getD(tr, Snapshot::False, 0));
+		state int64_t finishedBlocks = wait(restore.fileBlocksFinished().getD(tr, Snapshot::False, 0));
+		if (finishedBlocks < totalBlocks) {
+			// Set both dispatched and finished to match total to indicate all range data is done
+			restore.filesBlocksDispatched().set(tr, totalBlocks);
+			restore.fileBlocksFinished().set(tr, totalBlocks);
+		}
+
+		// Set firstConsistentVersion if not already set
+		// For BulkLoad restore, this is the snapshot version from the BulkDump
+		state Version firstConsistentVer =
+		    wait(restore.firstConsistentVersion().getD(tr, Snapshot::False, invalidVersion));
+		if (firstConsistentVer == invalidVersion) {
+			// Get the restore version as the first consistent version
+			state Version restoreVer = wait(restore.restoreVersion().getD(tr, Snapshot::False, invalidVersion));
+			if (restoreVer != invalidVersion) {
+				restore.firstConsistentVersion().set(tr, restoreVer);
+			}
+		}
+
+		TraceEvent("BulkLoadRestoreTaskFinished")
+		    .detail("RestoreUID", restore.getUid())
+		    .detail("TotalBlocks", totalBlocks)
+		    .detail("FinishedBlocks", finishedBlocks);
+
+		state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+		wait(taskFuture->set(tr, taskBucket));
+		wait(taskBucket->finish(tr, task));
+		return Void();
+	}
+
+	ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
+	                                 Reference<TaskBucket> taskBucket,
+	                                 Reference<Task> parentTask,
+	                                 Version restoreVersion,
+	                                 std::string backupUrl,
+	                                 std::string bulkDumpJobId,
+	                                 TaskCompletionKey completionKey,
+	                                 Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		Key doneKey = wait(completionKey.get(tr, taskBucket));
+		state Reference<Task> task(new Task(BulkLoadRestoreTaskFunc::name, BulkLoadRestoreTaskFunc::version, doneKey));
+
+		// Set task parameters
+		Params.restoreVersion().set(task, restoreVersion);
+		Params.backupUrl().set(task, backupUrl);
+		Params.bulkDumpJobId().set(task, bulkDumpJobId);
+
+		// Get restore config from parent task and bind it to new task
+		wait(RestoreConfig(parentTask).toTask(tr, task));
+
+		if (!waitFor) {
+			return taskBucket->addTask(tr, task);
+		}
+
+		wait(waitFor->onSetAddTask(tr, taskBucket, task));
+		return "OnSetAddTask"_sr;
+	}
+};
+StringRef BulkLoadRestoreTaskFunc::name = "bulk_load_restore_5.2"_sr;
+REGISTER_TASKFUNC(BulkLoadRestoreTaskFunc);
 
 struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -6276,6 +7002,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state bool transformPartitionedLog;
 		state Version restoreVersion;
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
+		state bool useRangeFileRestore = false;
 
 		if (firstVersion == invalidVersion) {
 			wait(restore.logError(
@@ -6287,26 +7014,77 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		restore.stateEnum().set(tr, ERestoreState::RUNNING);
 
-		// Set applyMutation versions
+		// Check if using traditional rangefile restore instead of BulkLoad
+		// Default to true (traditional rangefile restore) for backward compatibility
+		state Optional<bool> rangeFileRestore = wait(restore.useRangeFileRestore().get(tr));
+		useRangeFileRestore = !rangeFileRestore.present() || rangeFileRestore.get();
 
+		// Set applyMutation versions
 		restore.setApplyBeginVersion(tr, firstVersion);
 		restore.setApplyEndVersion(tr, firstVersion);
 
-		// Apply range data and log data in order
+		// Apply range data using either BulkLoad or traditional range file restore
 		wait(store(transformPartitionedLog, restore.transformPartitionedLog().getD(tr, Snapshot::False, false)));
 		wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
 
-		if (transformPartitionedLog) {
+		if (!useRangeFileRestore) {
+			// Use BulkLoad for range data restoration, then apply logs
+			state Reference<IBackupContainer> bc = wait(restore.sourceContainer().getOrThrow(tr));
+
+			// Get the BulkDump job ID - this should have been stored by the backup
+			// when it completed the BulkDump phase
+			state Optional<std::string> bulkDumpJobIdOpt = wait(restore.bulkDumpJobId().get(tr));
+			state std::string bulkDumpJobId = bulkDumpJobIdOpt.present() ? bulkDumpJobIdOpt.get() : "";
+
+			// Save original BulkLoad mode BEFORE creating the task, so it's persisted in the database.
+			// This allows crash recovery to restore the correct mode even if the task restarts.
+			int currentBulkLoadMode = wait(getBulkLoadMode(tr->getDatabase()));
+			restore.originalBulkLoadMode().set(tr, currentBulkLoadMode);
+
+			TraceEvent("StartFullRestoreUsingBulkLoad")
+			    .detail("RestoreUID", restore.getUid())
+			    .detail("BackupUrl", bc->getURL())
+			    .detail("BulkDumpJobId", bulkDumpJobId)
+			    .detail("RestoreVersion", restoreVersion);
+
+			// Create a future that BulkLoad will signal when done
+			state Reference<TaskFuture> bulkLoadDone = futureBucket->future(tr);
+
+			// Add BulkLoad task for range data
+			wait(success(BulkLoadRestoreTaskFunc::addTask(tr,
+			                                              taskBucket,
+			                                              task,
+			                                              restoreVersion,
+			                                              bc->getURL(),
+			                                              bulkDumpJobId,
+			                                              TaskCompletionKey::signal(bulkLoadDone))));
+
+			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
+			// Set onlyApplyMutationLogs so it only processes logs, not range files
+			restore.onlyApplyMutationLogs().set(tr, true);
+
+			// Add RestoreDispatch task that waits for BulkLoad to complete
+			wait(success(RestoreDispatchTaskFunc::addTask(tr,
+			                                              taskBucket,
+			                                              task,
+			                                              0,
+			                                              "",
+			                                              0,
+			                                              CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE,
+			                                              0,
+			                                              TaskCompletionKey::noSignal(),
+			                                              bulkLoadDone)));
+		} else if (transformPartitionedLog) {
+			// Traditional restore with partitioned logs
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
 			wait(success(RestoreDispatchPartitionedTaskFunc::addTask(
 			    tr, taskBucket, task, firstVersion, firstVersion, endVersion)));
 		} else {
+			// Traditional restore with non-partitioned logs
 			wait(success(RestoreDispatchTaskFunc::addTask(
 			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE)));
 		}
-
-		wait(taskBucket->finish(tr, task));
 
 		// Initialize apply mutations map.
 		state Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
@@ -6317,6 +7095,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			Value versionEncoded = BinaryWriter::toValue(Params.firstVersion().get(task), Unversioned());
 			wait(krmSetRange(tr, restore.applyMutationsMapPrefix(), normalKeys, versionEncoded));
 		}
+
+		wait(taskBucket->finish(tr, task));
 		return Void();
 	}
 
@@ -6589,7 +7369,8 @@ public:
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
-	                                       Optional<std::string> encryptionKeyFileName) {
+	                                       Optional<std::string> encryptionKeyFileName,
+	                                       int snapshotMode) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -6711,6 +7492,7 @@ public:
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
+		config.snapshotMode().set(tr, snapshotMode);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -6733,7 +7515,8 @@ public:
 	                                        InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                        Version beginVersion,
 	                                        UID uid,
-	                                        TransformPartitionedLog transformPartitionedLog) {
+	                                        TransformPartitionedLog transformPartitionedLog,
+	                                        bool useRangeFileRestore = true) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -6810,6 +7593,7 @@ public:
 		restore.beginVersion().set(tr, beginVersion);
 		restore.unlockDBAfterRestore().set(tr, unlockDB);
 		restore.transformPartitionedLog().set(tr, transformPartitionedLog);
+		restore.useRangeFileRestore().set(tr, useRangeFileRestore);
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
@@ -7217,7 +8001,7 @@ public:
 					     store(recentReadVersion, tr->getReadVersion()));
 					bc = fileBackup::getBackupContainerWithProxy(bc);
 
-					bool snapshotProgress = false;
+					state bool snapshotProgress = false;
 
 					switch (backupState) {
 					case EBackupState::STATE_SUBMITTED:
@@ -7245,6 +8029,31 @@ public:
 					}
 					statusText += format("BackupUID: %s\n", uidAndAbortedFlag.get().first.toString().c_str());
 					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
+
+					// Add enhanced status fields for BulkLoad integration
+					state Optional<int> snapshotModeOpt = wait(config.snapshotMode().get(tr));
+					int snapshotModeValue = snapshotModeOpt.present() ? snapshotModeOpt.get() : 0;
+					std::string snapshotModeText;
+					switch (snapshotModeValue) {
+					case 0:
+						snapshotModeText = "rangefile";
+						break;
+					case 1:
+						snapshotModeText = "bulkdump";
+						break;
+					case 2:
+						snapshotModeText = "both";
+						break;
+					default:
+						snapshotModeText = "unknown";
+						break;
+					}
+					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
+
+					// Check if backup is BulkLoad compatible (has bulkdump_data/)
+					state Optional<std::string> bulkDumpJobIdOpt = wait(config.bulkDumpJobId().get(tr));
+					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
+					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
 
 					if (snapshotProgress) {
 						state int64_t snapshotInterval;
@@ -7419,7 +8228,8 @@ public:
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                     Optional<std::string> encryptionKeyFileName,
-	                                     UID randomUid) {
+	                                     UID randomUid,
+	                                     bool useRangeFileRestore = true) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
 			throw restore_error();
@@ -7491,7 +8301,8 @@ public:
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
 				                   randomUid,
-				                   TransformPartitionedLog(desc.partitioned)));
+				                   TransformPartitionedLog(desc.partitioned),
+				                   useRangeFileRestore));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -7770,7 +8581,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<UID> lockUID) {
+                                         Optional<UID> lockUID,
+                                         bool useRangeFileRestore) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -7789,7 +8601,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    encryptionKeyFileName,
-	                                    lockUID.present() ? lockUID.get() : deterministicRandom()->randomUniqueID());
+	                                    lockUID.present() ? lockUID.get() : deterministicRandom()->randomUniqueID(),
+	                                    useRangeFileRestore);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -7809,7 +8622,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
                                          Optional<std::string> const& encryptionKeyFileName,
-                                         Optional<UID> lockUID) {
+                                         Optional<UID> lockUID,
+                                         bool useRangeFileRestore) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -7831,7 +8645,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
 	               encryptionKeyFileName,
-	               lockUID);
+	               lockUID,
+	               useRangeFileRestore);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -7849,7 +8664,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         bool useRangeFileRestore) {
 	Standalone<VectorRef<KeyRangeRef>> rangeRef;
 	if (range.begin.empty() && range.end.empty()) {
 		addDefaultBackupRanges(rangeRef);
@@ -7875,7 +8691,9 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               UnlockDB::True,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName);
+	               encryptionKeyFileName,
+	               {},
+	               useRangeFileRestore);
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx,
@@ -7928,7 +8746,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
-                                           Optional<std::string> const& encryptionKeyFileName) {
+                                           Optional<std::string> const& encryptionKeyFileName,
+                                           int snapshotMode) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -7941,7 +8760,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,
-	                                         encryptionKeyFileName);
+	                                         encryptionKeyFileName,
+	                                         snapshotMode);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {

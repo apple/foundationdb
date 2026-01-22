@@ -78,6 +78,7 @@
  * For file-based backups, continue using the original BackupAndRestoreCorrectness workload.
  */
 
+#include <atomic>
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -92,6 +93,12 @@
 #include "fdbserver/MockS3ServerChaos.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// Counters to verify BulkDump/BulkLoad were actually used
+// These are incremented by trace event handlers in the backup/restore code paths
+// and checked by the test to ensure the expected paths were taken
+extern std::atomic<int> g_bulkDumpTaskCompleteCount;
+extern std::atomic<int> g_bulkLoadRestoreTaskCompleteCount;
 
 // S3-specific backup correctness workload - see file header for differences from BackupAndRestoreCorrectness
 struct BackupS3BlobCorrectnessWorkload : TestWorkload {
@@ -118,6 +125,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	bool skipDirtyRestore;
 	int initSnapshotInterval;
 	int snapshotInterval;
+
+	// BulkDump/BulkLoad integration options
+	// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
+	int snapshotMode;
+	// useRangeFileRestore: false=use BulkLoad (default when backup uses BULKDUMP), true=use traditional rangefile
+	bool useRangeFileRestore;
 
 	// Chaos testing options
 	bool enableChaos;
@@ -166,6 +179,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		skipDirtyRestore = getOption(options, "skipDirtyRestore"_sr, true);
 		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 30);
+
+		// BulkDump/BulkLoad integration options
+		// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
+		snapshotMode = getOption(options, "snapshotMode"_sr, 0);
+		// useRangeFileRestore: When false and backup used BULKDUMP, restore uses BulkLoad
+		// Default to true (traditional restore) for backward compatibility
+		useRangeFileRestore = getOption(options, "useRangeFileRestore"_sr, true);
 
 		// Chaos testing options
 		enableChaos = getOption(options, "enableChaos"_sr, false);
@@ -463,7 +483,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
-			                               self->encryptionKeyFileName));
+			                               self->encryptionKeyFileName,
+			                               self->snapshotMode));
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -660,12 +681,33 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                     InconsistentSnapshotOnly::False,
 					                                     ::invalidVersion,
 					                                     lastBackupContainer->getEncryptionKeyFileName(),
-					                                     lockUID));
+					                                     lockUID,
+					                                     self->useRangeFileRestore));
 
 					TraceEvent("BS3BCW_RestoreComplete")
 					    .detail("BackupTag", printable(self->backupTag))
 					    .detail("RestoreVersion", v);
+
+					// ASSERT: When useRangeFileRestore=false, BulkLoad MUST have been used
+					if (!self->useRangeFileRestore) {
+						int bulkLoadCount = g_bulkLoadRestoreTaskCompleteCount.load();
+						TraceEvent("BS3BCW_AssertBulkLoadUsed")
+						    .detail("UseRangeFileRestore", self->useRangeFileRestore)
+						    .detail("BulkLoadRestoreTaskCompleteCount", bulkLoadCount);
+						// FAIL if BulkLoad didn't run
+						ASSERT(bulkLoadCount > 0);
+					}
 				}
+			}
+
+			// ASSERT: Verify BulkDump was used when snapshotMode=1 (BULKDUMP) or 2 (BOTH)
+			if (self->snapshotMode == 1 || self->snapshotMode == 2) {
+				int bulkDumpCount = g_bulkDumpTaskCompleteCount.load();
+				TraceEvent("BS3BCW_AssertBulkDumpUsed")
+				    .detail("SnapshotMode", self->snapshotMode)
+				    .detail("BulkDumpTaskCompleteCount", bulkDumpCount);
+				// FAIL if BulkDump didn't run
+				ASSERT(bulkDumpCount > 0);
 			}
 
 			wait(b);

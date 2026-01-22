@@ -152,6 +152,27 @@ struct KeyspaceSnapshotFile {
 	}
 };
 
+// Extended metadata for snapshot files, supporting both traditional range files and BulkDump
+struct SnapshotMetadata {
+	std::string snapshotType = "rangefile"; // "rangefile" or "bulkdump"
+	std::string bulkDumpJobId; // Only used for bulkdump snapshots
+	int64_t totalKeys = 0; // Key count (primarily for bulkdump)
+	Version snapshotVersion = invalidVersion; // For bulkdump: the snapshot version (beginVersion == endVersion)
+	                                          // For rangefile: ignored (derived from files)
+
+	bool isBulkDump() const { return snapshotType == "bulkdump"; }
+
+	// Factory for creating BulkDump metadata
+	static SnapshotMetadata bulkDump(const std::string& jobId, Version version, int64_t totalBytes, int64_t keys) {
+		SnapshotMetadata m;
+		m.snapshotType = "bulkdump";
+		m.bulkDumpJobId = jobId;
+		m.snapshotVersion = version;
+		m.totalKeys = keys;
+		return m;
+	}
+};
+
 struct BackupFileList {
 	std::vector<RangeFile> ranges;
 	std::vector<LogFile> logs;
@@ -250,10 +271,14 @@ public:
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
-	virtual Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
-	                                               const std::vector<std::pair<Key, Key>>& beginEndKeys,
-	                                               int64_t totalBytes,
-	                                               IncludeKeyRangeMap includeKeyRangeMap) = 0;
+	// For BulkDump snapshots, pass SnapshotMetadata with snapshotType="bulkdump" and the job ID.
+	// For traditional range file snapshots, metadata can be omitted.
+	virtual Future<Void> writeKeyspaceSnapshotFile(
+	    const std::vector<std::string>& fileNames,
+	    const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	    int64_t totalBytes,
+	    IncludeKeyRangeMap includeKeyRangeMap,
+	    Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) = 0;
 
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;

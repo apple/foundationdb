@@ -50,6 +50,8 @@
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/BulkLoading.h"
+#include "fdbclient/ManagementAPI.actor.h"
 
 #include "flow/Platform.h"
 
@@ -134,6 +136,7 @@ enum {
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_USE_PARTITIONED_LOG,
 	OPT_ENCRYPT_FILES,
+	OPT_MODE,
 
 	// Backup and Restore constants
 	OPT_PROXY,
@@ -282,6 +285,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
+	{ OPT_MODE, "--mode", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -715,6 +719,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
 	{ OPT_RESTORE_USER_DATA, "--user-data", SO_NONE },
 	{ OPT_RESTORE_SYSTEM_DATA, "--system-metadata", SO_NONE },
+	{ OPT_MODE, "--mode", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -1095,6 +1100,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 For start or modify operations, specifies the backup's default target snapshot interval "
 	       "as DURATION seconds.  Defaults to %d for start operations.\n",
 	       CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	printf("  --mode MODE    Snapshot mechanism to use: bulkdump, rangefile (default, legacy), or both.\n"
+	       "                 bulkdump: Uses BulkDump SST files for faster restore performance\n"
+	       "                 rangefile: Traditional range files for backward compatibility\n"
+	       "                 both: Generate both formats for validation (increases backup size)\n");
 	printf("  --active-snapshot-interval DURATION\n"
 	       "                 For modify operations, sets the desired interval for the backup's currently active "
 	       "snapshot, relative to the start of the snapshot.\n");
@@ -1212,6 +1221,12 @@ static void printRestoreUsage(bool devhelp) {
 	       "                 To be used in conjunction with incremental restore.\n"
 	       "                 Indicates to the backup agent to only begin replaying log files from a certain version, "
 	       "instead of the entire set.\n");
+	printf(
+	    "  --mode MODE    Restore mechanism to use: rangefile (default), bulkload.\n"
+	    "                 rangefile: Traditional range file restore from kvranges/\n"
+	    "                 bulkload: Use BulkLoad for faster range data restoration if BulkDump dataset is available\n"
+	    "                 If incomplete dataset: restore returns error with clear message directing user to retry with "
+	    "--mode rangefile.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-256-GCM key in the provided file is used for decrypting backup files.\n");
 	printf(TLS_HELP);
@@ -1381,7 +1396,6 @@ extern bool g_crashOnError;
 ProgramExe getProgramType(std::string programExe) {
 	ProgramExe enProgramExe = ProgramExe::UNDEFINED;
 
-	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
 
 	// Remove the extension, if Windows
@@ -1451,7 +1465,6 @@ ProgramExe getProgramType(std::string programExe) {
 BackupType getBackupType(std::string backupType) {
 	BackupType enBackupType = BackupType::UNDEFINED;
 
-	// lowercase the string
 	std::transform(backupType.begin(), backupType.end(), backupType.begin(), ::tolower);
 
 	static std::map<std::string, BackupType> values;
@@ -1481,6 +1494,28 @@ BackupType getBackupType(std::string backupType) {
 	return enBackupType;
 }
 
+Optional<SnapshotMode> getSnapshotMode(std::string mode) {
+	std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+
+	if (mode == "rangefile")
+		return SnapshotMode::RANGEFILE;
+	if (mode == "bulkdump")
+		return SnapshotMode::BULKDUMP;
+	if (mode == "both")
+		return SnapshotMode::BOTH;
+	return Optional<SnapshotMode>();
+}
+
+Optional<RestoreMode> getRestoreMode(std::string mode) {
+	std::transform(mode.begin(), mode.end(), mode.begin(), ::tolower);
+
+	if (mode == "rangefile")
+		return RestoreMode::RANGEFILE;
+	if (mode == "bulkload")
+		return RestoreMode::BULKLOAD;
+	return Optional<RestoreMode>();
+}
+
 RestoreType getRestoreType(std::string name) {
 	if (name == "start")
 		return RestoreType::START;
@@ -1496,7 +1531,6 @@ RestoreType getRestoreType(std::string name) {
 DBType getDBType(std::string dbType) {
 	DBType enBackupType = DBType::UNDEFINED;
 
-	// lowercase the string
 	std::transform(dbType.begin(), dbType.end(), dbType.begin(), ::tolower);
 
 	static std::map<std::string, DBType> values;
@@ -1988,7 +2022,8 @@ ACTOR Future<Void> submitBackup(Database db,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
                                 IncrementalBackupOnly incrementalBackupOnly,
-                                Optional<std::string> encryptionKeyFile) {
+                                Optional<std::string> encryptionKeyFile,
+                                SnapshotMode snapshotMode = SnapshotMode::RANGEFILE) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2042,7 +2077,8 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly,
-			                              encryptionKeyFile));
+			                              encryptionKeyFile,
+			                              static_cast<int>(snapshotMode)));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2366,7 +2402,8 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string removePrefix,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                              Optional<std::string> encryptionKeyFile) {
+                              Optional<std::string> encryptionKeyFile,
+                              RestoreMode restoreMode = RestoreMode::RANGEFILE) {
 	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
@@ -2443,7 +2480,9 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
-			                                                   encryptionKeyFile));
+			                                                   encryptionKeyFile,
+			                                                   {},
+			                                                   restoreMode == RestoreMode::RANGEFILE));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3705,6 +3744,7 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		bool restoreSystemKeys = false;
 		bool restoreUserKeys = false;
+		RestoreMode restoreMode = RestoreMode::RANGEFILE; // Default to traditional range file restore
 		bool encryptionEnabled = true;
 		bool encryptSnapshotFilesPresent = false;
 		std::string traceDir = "";
@@ -3728,6 +3768,7 @@ int main(int argc, char* argv[]) {
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
 		Optional<std::string> blobManifestUrl;
+		SnapshotMode snapshotMode = SnapshotMode::RANGEFILE; // Default to legacy rangefile mode
 
 		BackupModifyOptions modifyOptions;
 
@@ -4163,6 +4204,30 @@ int main(int argc, char* argv[]) {
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
+			case OPT_MODE:
+				// Handle mode parameter for both backup and restore
+				if (programExe == ProgramExe::BACKUP) {
+					// Validate and store mode parameter for snapshot generation
+					auto parsedMode = getSnapshotMode(args->OptionArg());
+					if (!parsedMode.present()) {
+						fprintf(stderr,
+						        "ERROR: Unknown snapshot mode '%s'. Valid modes are: rangefile, bulkdump, both\n",
+						        args->OptionArg());
+						return FDB_EXIT_ERROR;
+					}
+					snapshotMode = parsedMode.get();
+				} else if (programExe == ProgramExe::RESTORE || programExe == ProgramExe::FASTRESTORE_TOOL) {
+					// Validate and store mode parameter for restore mechanism
+					auto parsedMode = getRestoreMode(args->OptionArg());
+					if (!parsedMode.present()) {
+						fprintf(stderr,
+						        "ERROR: Unknown restore mode '%s'. Valid modes are: rangefile, bulkload\n",
+						        args->OptionArg());
+						return FDB_EXIT_ERROR;
+					}
+					restoreMode = parsedMode.get();
+				}
+				break;
 			}
 		}
 
@@ -4419,7 +4484,8 @@ int main(int argc, char* argv[]) {
 				                           stopWhenDone,
 				                           usePartitionedLog,
 				                           incrementalBackupOnly,
-				                           encryptionKeyFile));
+				                           encryptionKeyFile,
+				                           snapshotMode));
 				break;
 			}
 
@@ -4604,8 +4670,8 @@ int main(int argc, char* argv[]) {
 				                         removePrefix,
 				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly,
-				                         encryptionKeyFile));
-
+				                         encryptionKeyFile,
+				                         restoreMode)); // Pass RestoreMode directly
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::True)));

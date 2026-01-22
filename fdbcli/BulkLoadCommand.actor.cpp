@@ -146,26 +146,6 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 	return Void();
 }
 
-ACTOR Future<int> getBulkLoadMode(Database cx) {
-	state Transaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state int oldMode = 0;
-			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
-			if (oldModeValue.present()) {
-				BinaryReader rd(oldModeValue.get(), Unversioned());
-				rd >> oldMode;
-			}
-			return oldMode;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() == 2) {
