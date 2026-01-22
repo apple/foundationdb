@@ -304,7 +304,8 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			          err.error.code() == error_code_actor_cancelled ||
 			          err.error.code() == error_code_remote_kvs_cancelled ||
 			          err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
-			          err.error.code() == error_code_shutdown_in_progress;
+			          err.error.code() == error_code_shutdown_in_progress ||
+			          err.error.code() == error_code_audit_storage_task_outdated; // Expected during DD failover
 
 			if (!ok) {
 				err.error = checkIOTimeout(err.error); // Possibly convert error to io_timeout
@@ -1863,21 +1864,9 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	}
 
 	if (!ok) {
-		// Some errors are expected operational events, not actual failures
-		// These should not be logged as SevError
-		bool isExpectedError = (e.code() == error_code_audit_storage_task_outdated);
-
-		if (isExpectedError) {
-			TraceEvent(SevInfo, "ExpectedRoleFailureSuppressed", id)
-			    .detail("Role", role.roleName)
-			    .detail("ErrorCode", e.code())
-			    .detail("ErrorName", e.name())
-			    .detail("Reason", reason);
-		}
-
 		std::string type = role.roleName + "Failed";
 
-		TraceEvent err(isExpectedError ? SevInfo : SevError, type.c_str(), id);
+		TraceEvent err(SevError, type.c_str(), id);
 		if (e.code() != invalid_error_code) {
 			err.errorUnsuppressed(e);
 		}
