@@ -416,66 +416,35 @@ if [ ${#PARAMS[@]} -ne 0 ]; then
   set -- "${PARAMS[@]}"
 fi
 
-# Globals
-# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
-# It gets cleaned up on the way out of the test.
-TEST_SCRATCH_DIR=
-readonly HTTP_VERBOSE_LEVEL=10
-readonly TAG="test_backup"
-# Should we use S3? If USE_S3 is not defined, then check if
-# OKTETO_NAMESPACE is defined (It is defined on the okteto
-# internal apple dev environments where S3 is available).
-readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
-
-# Set KNOBS based on whether we're using real S3 or MockS3Server
-if [[ "${USE_S3}" == "true" ]]; then
-  # Use AWS KMS encryption for real S3
-  KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-else
-  # No encryption for MockS3Server
-  KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-fi
-readonly KNOBS
-
-# Set TLS_CA_FILE only when using real S3, not for MockS3Server
-if [[ "${USE_S3}" == "true" ]]; then
-  # Try to find a valid TLS CA file if not explicitly set
-  if [[ -z "${TLS_CA_FILE:-}" ]]; then
-    # Common locations for TLS CA files on different systems
-    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/"; do
-      if [[ -f "${ca_file}" ]]; then
-        TLS_CA_FILE="${ca_file}"
-        break
-      fi
-    done
-  fi
-  TLS_CA_FILE="${TLS_CA_FILE:-}"
-else
-  # For MockS3Server, don't use TLS
-  TLS_CA_FILE=""
-fi
-readonly TLS_CA_FILE
-# Clear these environment variables. fdbbackup goes looking for them
-# and if EITHER is set, it will go via a proxy instead of to where we.
-# want it to go.
-unset HTTP_PROXY
-unset HTTPS_PROXY
-
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
-  err "Failed resolve_to_absolute_path"
+  echo "Failed resolve_to_absolute_path" >&2
   exit 1
 fi
 if ! cwd=$( cd -P "$( dirname "${path}" )" >/dev/null 2>&1 && pwd ); then
-  err "Failed dirname on ${path}"
+  echo "Failed dirname on ${path}" >&2
   exit 1
 fi
 readonly cwd
+
+# Source common test functions first (needed for setup_backup_test_environment)
 # shellcheck source=/dev/null
 if ! source "${cwd}/../../fdbclient/tests/tests_common.sh"; then
-  err "Failed to source tests_common.sh"
+  echo "Failed to source tests_common.sh" >&2
   exit 1
 fi
+# shellcheck source=/dev/null
+if ! source "${cwd}/backup_tests_common.sh"; then
+  echo "Failed to source backup_tests_common.sh" >&2
+  exit 1
+fi
+
+# Globals
+TEST_SCRATCH_DIR=
+readonly TAG="test_backup"
+
+# Setup common environment (USE_S3, KNOBS, TLS_CA_FILE, clears HTTP_PROXY/HTTPS_PROXY)
+setup_backup_test_environment 10
 # Process command-line options.
 if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"
@@ -577,23 +546,8 @@ else
   export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
 fi
 
-# Source in the fdb cluster.
-# shellcheck source=/dev/null
-if ! source "${cwd}/../../fdbclient/tests/fdb_cluster_fixture.sh"; then
-  err "Failed to source fdb_cluster_fixture.sh"
-  exit 1
-fi
-# Startup fdb cluster and backup agent.
-if ! start_fdb_cluster "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}" 1; then
-  err "Failed start FDB cluster"
-  exit 1
-fi
-log "FDB cluster is up"
-if ! start_backup_agent "${build_dir}" "${TEST_SCRATCH_DIR}" "${KNOBS[@]}"; then
-  err "Failed start backup_agent"
-  exit 1
-fi
-log "Backup_agent is up"
+# Startup fdb cluster and backup agent
+setup_fdb_cluster_with_backup "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR}" 1
 
 # Run tests.
 test="test_s3_backup_and_restore"

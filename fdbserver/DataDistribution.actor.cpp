@@ -32,6 +32,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BulkDumpUtil.actor.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/DataDistribution.actor.h"
@@ -1144,6 +1145,165 @@ ACTOR Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 }
 
 // A bulk load task is guaranteed to be either complete or overwritten by another task
+// Execute a BulkLoad task with prefix transform directly without data move.
+// Reads SST files, transforms keys with prefix, writes via transaction.
+// This preserves source data in normalKeys (for audit comparison when using system key prefix).
+ACTOR Future<Void> executePrefixTransformTask(Reference<DataDistributor> self, BulkLoadTaskState task) {
+	state Database cx = self->txnProcessor->context();
+	state Key addPrefix = task.getAddPrefix();
+	state Key removePrefix = task.getRemovePrefix();
+	state KeyRange taskRange = task.getRange();
+	state UID taskId = task.getTaskId();
+	state int64_t totalKeysWritten = 0;
+
+	TraceEvent("DDBulkLoadPrefixTransformTaskStart", self->ddId)
+	    .detail("TaskID", taskId)
+	    .detail("Range", taskRange)
+	    .detail("AddPrefix", addPrefix)
+	    .detail("RemovePrefix", removePrefix);
+
+	// Get manifest info from task
+	state std::vector<BulkLoadManifest> manifests = task.getManifests();
+
+	// Process each manifest's SST file
+	state int m = 0;
+	for (; m < manifests.size(); m++) {
+		state BulkLoadManifest manifest = manifests[m];
+		state BulkLoadFileSet fileSet = manifest.getFileSet();
+		state KeyRange manifestRange = KeyRangeRef(manifest.getBeginKey(), manifest.getEndKey());
+
+		TraceEvent("DDBulkLoadPrefixTransformTaskProcessManifest", self->ddId)
+		    .detail("TaskID", taskId)
+		    .detail("ManifestIndex", m)
+		    .detail("ManifestRange", manifestRange);
+
+		// Download file to local temp directory
+		state BulkLoadFileSet localFileSet =
+		    wait(bulkLoadDownloadTaskFileSet(task.getTransportMethod(), fileSet, self->bulkLoadFolder, self->ddId));
+
+		// Read SST file using the same reader BulkLoad uses
+		state std::string sstFilePath = localFileSet.getDataFileFullPath();
+		state std::unique_ptr<IRocksDBSstFileReader> reader = newRocksDBSstFileReader();
+
+		try {
+			reader->open(abspath(sstFilePath));
+		} catch (Error& e) {
+			TraceEvent(SevError, "DDBulkLoadPrefixTransformTaskOpenSSTFailed", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("TaskID", taskId)
+			    .detail("SSTFile", sstFilePath);
+			throw;
+		}
+
+		TraceEvent("DDBulkLoadPrefixTransformTaskReadingSST", self->ddId)
+		    .detail("TaskID", taskId)
+		    .detail("SSTFile", sstFilePath);
+
+		// Read all key-values, transform, and write via transaction
+		// Batch writes for efficiency
+		state std::vector<KeyValue> batch;
+		state int batchSize = 0;
+		state int maxBatchSize = 1000; // Keys per transaction
+		state int maxBatchBytes = 1000000; // ~1MB per transaction
+
+		while (reader->hasNext()) {
+			KeyValue kv = reader->next();
+
+			// Check if key is in task range
+			if (!taskRange.contains(kv.key)) {
+				continue;
+			}
+
+			// Transform key with prefix
+			Key transformedKey = kv.key;
+			if (removePrefix.size() > 0 && kv.key.startsWith(removePrefix)) {
+				transformedKey = kv.key.removePrefix(removePrefix);
+			}
+			if (addPrefix.size() > 0) {
+				transformedKey = transformedKey.withPrefix(addPrefix);
+			}
+
+			batch.emplace_back(KeyValueRef(transformedKey, kv.value));
+			batchSize += transformedKey.size() + kv.value.size();
+
+			// Write batch when it gets large enough
+			if (batch.size() >= maxBatchSize || batchSize >= maxBatchBytes) {
+				state Transaction writeTr(cx);
+				loop {
+					try {
+						writeTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						// Use ACCESS_SYSTEM_KEYS if writing to system key space
+						if (addPrefix.startsWith("\xff"_sr)) {
+							writeTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						}
+						for (const auto& item : batch) {
+							writeTr.set(item.key, item.value);
+						}
+						wait(writeTr.commit());
+						totalKeysWritten += batch.size();
+						break;
+					} catch (Error& e) {
+						wait(writeTr.onError(e));
+					}
+				}
+				batch.clear();
+				batchSize = 0;
+				wait(delay(0)); // Yield to avoid blocking
+			}
+		}
+
+		// Write remaining batch
+		if (!batch.empty()) {
+			state Transaction finalTr(cx);
+			loop {
+				try {
+					finalTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					if (addPrefix.startsWith("\xff"_sr)) {
+						finalTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					}
+					for (const auto& item : batch) {
+						finalTr.set(item.key, item.value);
+					}
+					wait(finalTr.commit());
+					totalKeysWritten += batch.size();
+					break;
+				} catch (Error& e) {
+					wait(finalTr.onError(e));
+				}
+			}
+		}
+
+		TraceEvent("DDBulkLoadPrefixTransformTaskManifestComplete", self->ddId)
+		    .detail("TaskID", taskId)
+		    .detail("ManifestIndex", m)
+		    .detail("KeysWritten", totalKeysWritten);
+	}
+
+	// Mark task as complete
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			BulkLoadTaskState updatedTask = task;
+			updatedTask.phase = BulkLoadPhase::Complete;
+			updatedTask.completeTime = now();
+			wait(krmSetRange(&tr, bulkLoadTaskPrefix, taskRange, bulkLoadTaskStateValue(updatedTask)));
+			wait(tr.commit());
+			TraceEvent("DDBulkLoadPrefixTransformTaskComplete", self->ddId)
+			    .detail("TaskID", taskId)
+			    .detail("Range", taskRange)
+			    .detail("TotalKeysWritten", totalKeysWritten)
+			    .detail("CommitVersion", tr.getCommittedVersion());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID taskId) {
 	state Promise<BulkLoadAck> completeAck;
 	state BulkLoadTaskState triggeredBulkLoadTask;
@@ -1162,8 +1322,24 @@ ACTOR Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange rang
 		    .detail("TaskRange", triggeredBulkLoadTask.getRange())
 		    .detail("JobID", triggeredBulkLoadTask.getJobId())
 		    .detail("CommitVersion", commitVersion)
+		    .detail("HasPrefixTransform", triggeredBulkLoadTask.hasPrefixTransform())
 		    .detail("Duration", now() - beginTime);
 		ASSERT(triggeredBulkLoadTask.getRange() == range);
+
+		// For prefix transform tasks: execute directly without data move.
+		// BulkLoad + prefix means no SST ingestion - just read SST files, transform keys, and write.
+		// This preserves source data in normalKeys (important for audit comparison with system key prefix).
+		if (triggeredBulkLoadTask.hasPrefixTransform()) {
+			TraceEvent("DDBulkLoadTaskDoTask", self->ddId)
+			    .detail("Phase", "PrefixTransformDirectExecution")
+			    .detail("TaskID", taskId)
+			    .detail("Range", range)
+			    .detail("AddPrefix", triggeredBulkLoadTask.getAddPrefix())
+			    .detail("RemovePrefix", triggeredBulkLoadTask.getRemovePrefix());
+			wait(executePrefixTransformTask(self, triggeredBulkLoadTask));
+			self->bulkLoadEngineParallelismLimitor.decrementTaskCounter();
+			return Void();
+		}
 
 		// Step 2: submit the task to in-memory task map, which (1) turns off shard boundary change;
 		// (2) when starting a data move on the task range, the task will be attached to the data move;
@@ -1483,11 +1659,13 @@ ACTOR Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDist
 ACTOR Future<BulkLoadTaskState> bulkLoadJobSubmitTask(Reference<DataDistributor> self,
                                                       UID jobId,
                                                       BulkLoadManifestSet manifests,
-                                                      KeyRange taskRange) {
+                                                      KeyRange taskRange,
+                                                      Key addPrefix,
+                                                      Key removePrefix) {
 	state Database cx = self->txnProcessor->context();
 	state Transaction tr(cx);
 	// We define the task range is the range of the min begin key and the max end key among all input manifests
-	state BulkLoadTaskState bulkLoadTask(jobId, manifests, taskRange);
+	state BulkLoadTaskState bulkLoadTask(jobId, manifests, taskRange, addPrefix, removePrefix);
 	loop {
 		try {
 			// At any time, there must be at most one bulkload job
@@ -1569,6 +1747,8 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
                                       BulkLoadTransportMethod jobTransportMethod,
                                       std::string manifestLocalTempFolder,
                                       std::vector<BulkLoadJobFileManifestEntry> manifestEntries,
+                                      Key addPrefix,
+                                      Key removePrefix,
                                       Promise<Void> errorOut) {
 	state Database cx = self->txnProcessor->context();
 	state BulkLoadTaskState bulkLoadTask;
@@ -1596,6 +1776,8 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		// Discussion about what if another newer job has persist some task on the range with a different
 		// job Id. This case should never happen because before the newer job starts, the old job has
 		// completed or cancelled.
+		// Note: Just use jobRoot here, not getBulkLoadJobRoot(jobRoot, sourceJobId), because the
+		// manifest's relativePath already includes the sourceJobId in its path hierarchy.
 		manifests.setRootPath(jobRoot);
 		// A manifest's range is exactly the data range that the manifest covers.
 		// The task range is the union of all manifest ranges overlapping with the job range.
@@ -1603,7 +1785,7 @@ ACTOR Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		// the manifests can contain more data outside the task range.
 		// The task range is the source of truth for the data that the task will cover.
 		// The task range is used to filter out data outside the task range when the SS loading the data.
-		wait(store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests, taskRange)));
+		wait(store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests, taskRange, addPrefix, removePrefix)));
 
 		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
 		    .detail("Phase", "Task submitted")
@@ -1935,6 +2117,8 @@ ACTOR Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<
 					                                    jobState.getTransportMethod(),
 					                                    self->bulkLoadJobManager.get().manifestLocalTempFolder,
 					                                    manifestEntries,
+					                                    jobState.getAddPrefix(),
+					                                    jobState.getRemovePrefix(),
 					                                    errorOut));
 					wait(delay(SERVER_KNOBS->DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC)); // Avoid busy loop
 				}
@@ -2122,6 +2306,7 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		return Void();
 	}
 	state UID jobId = job.get().getJobId();
+	state UID sourceJobId = job.get().getSourceJobId(); // BulkDump job ID for file location
 	state KeyRange jobRange = job.get().getJobRange();
 	state std::string jobRoot = job.get().getJobRoot();
 	state BulkLoadTransportMethod jobTransportMethod = job.get().getTransportMethod();
@@ -2134,14 +2319,16 @@ ACTOR Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		            self->bulkLoadJobManager.present() ? self->bulkLoadJobManager.get().jobState.getJobId().toString()
 		                                               : "No old job")
 		    .detail("NewJobId", jobId)
+		    .detail("SourceJobId", sourceJobId)
 		    .detail("NewJobRange", jobRange)
 		    .detail("NewJobRoot", jobRoot)
 		    .detail("NewJobTransportMethod", jobTransportMethod);
 		// Set up all metadata and information required to run the job.
-		std::string localFolder = getBulkLoadJobRoot(self->bulkLoadFolder, jobId);
+		// Use sourceJobId for file location (the BulkDump job ID)
+		std::string localFolder = getBulkLoadJobRoot(self->bulkLoadFolder, sourceJobId);
 		std::string manifestLocalTempFolder = abspath(joinPath(localFolder, "manifest-temp"));
 		resetFileFolder(manifestLocalTempFolder);
-		std::string remoteFolder = getBulkLoadJobRoot(jobRoot, jobId);
+		std::string remoteFolder = getBulkLoadJobRoot(jobRoot, sourceJobId);
 		std::string jobManifestFileName = getBulkLoadJobManifestFileName();
 		std::string localJobManifestFilePath = joinPath(localFolder, jobManifestFileName);
 		std::string remoteJobManifestFilePath = appendToPath(remoteFolder, jobManifestFileName);
@@ -2566,9 +2753,10 @@ ACTOR Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> re
 		// Dynamically check if BulkDump mode is enabled
 		state int currentMode = wait(getBulkDumpMode(cx));
 		if (!bulkDumpIsEnabled(currentMode)) {
-			// Mode is disabled - use a longer polling interval to avoid keeping DD "active"
-			// during QuietDatabase checks. BulkDumpTaskFunc will eventually enable the mode.
-			wait(delay(60.0));
+			// Mode is disabled - poll at the same interval as when enabled so that
+			// BulkDumpTaskFunc's setBulkDumpMode(1) is detected quickly.
+			// The QuietDatabase concern is mitigated by this being a simple metadata read.
+			wait(delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC));
 			continue;
 		}
 		try {

@@ -710,8 +710,13 @@ public:
 	BulkLoadTaskState() = default;
 
 	// For submitting a task by a job
-	BulkLoadTaskState(const UID& jobId, const BulkLoadManifestSet& manifests, const KeyRange& taskRange)
-	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), manifests(manifests), taskRange(taskRange) {
+	BulkLoadTaskState(const UID& jobId,
+	                  const BulkLoadManifestSet& manifests,
+	                  const KeyRange& taskRange,
+	                  Key addPrefix = Key(),
+	                  Key removePrefix = Key())
+	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), manifests(manifests), taskRange(taskRange),
+	    addPrefix(addPrefix), removePrefix(removePrefix) {
 		ASSERT(!manifests.empty());
 		if (manifests.hasEmptyData()) {
 			phase = BulkLoadPhase::Complete; // If no data to load, the task is complete.
@@ -757,6 +762,16 @@ public:
 	BulkLoadByteSampleSetting getByteSampleSetting() const { return manifests.getByteSampleSetting(); }
 
 	BulkLoadType getLoadType() const { return manifests.getLoadType(); }
+
+	Key getAddPrefix() const { return addPrefix; }
+
+	Key getRemovePrefix() const { return removePrefix; }
+
+	// Returns true if prefix transformation is needed (SST ingestion must be disabled)
+	bool hasPrefixTransform() const { return addPrefix.size() > 0 || removePrefix.size() > 0; }
+
+	// Returns true if prefix transforms to system key space (data move should be skipped)
+	bool hasSystemKeyPrefix() const { return addPrefix.size() > 0 && addPrefix.startsWith("\xff"_sr); }
 
 	void setCancelledDataMovePriority(int priority) { cancelledDataMovePriority = priority; }
 
@@ -813,7 +828,9 @@ public:
 		           completeTime,
 		           restartCount,
 		           taskRange,
-		           cancelledDataMovePriority);
+		           cancelledDataMovePriority,
+		           addPrefix,
+		           removePrefix);
 	}
 
 	// Updated by DD
@@ -835,6 +852,10 @@ private:
 	KeyRange taskRange;
 	Optional<int> cancelledDataMovePriority; // Set when the task is failed for unretryable error.
 	// In this case, we want to re-issue data move on the task range if the data move is team unhealthy related.
+	// For restore with prefix transformation - when set, SST ingestion is disabled
+	// and keys are read from SST files and written with prefix transformation
+	Key addPrefix;
+	Key removePrefix;
 };
 
 enum class BulkLoadJobPhase : uint8_t {
@@ -854,12 +875,17 @@ public:
 	BulkLoadJobState() = default;
 
 	// Used when submit a global job
-	BulkLoadJobState(const UID& jobId,
+	// sourceJobId: The BulkDump job ID used to locate data files (via getBulkLoadJobRoot)
+	// jobId: A unique ID for this particular BulkLoad operation (for tracking purposes)
+	BulkLoadJobState(const UID& sourceJobId,
 	                 const std::string& jobRoot,
 	                 const KeyRange& jobRange,
-	                 const BulkLoadTransportMethod& transportMethod)
-	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), phase(BulkLoadJobPhase::Submitted),
-	    transportMethod(transportMethod), submitTime(now()) {}
+	                 const BulkLoadTransportMethod& transportMethod,
+	                 Key addPrefix = Key(),
+	                 Key removePrefix = Key())
+	  : jobId(deterministicRandom()->randomUniqueID()), sourceJobId(sourceJobId), jobRoot(jobRoot), jobRange(jobRange),
+	    phase(BulkLoadJobPhase::Submitted), transportMethod(transportMethod), submitTime(now()), addPrefix(addPrefix),
+	    removePrefix(removePrefix) {}
 
 	std::string toString() const {
 		std::string res = "[BulkLoadJobState]: [JobId]: " + jobId.toString() + ", [JobRoot]: " + jobRoot +
@@ -882,6 +908,9 @@ public:
 	BulkLoadTransportMethod getTransportMethod() const { return transportMethod; }
 
 	UID getJobId() const { return jobId; }
+
+	// Returns the BulkDump job ID used to locate data files
+	UID getSourceJobId() const { return sourceJobId; }
 
 	KeyRange getJobRange() const { return jobRange; }
 
@@ -909,6 +938,18 @@ public:
 
 	Optional<uint64_t> getTaskCount() const { return taskCount; }
 
+	Key getAddPrefix() const { return addPrefix; }
+
+	Key getRemovePrefix() const { return removePrefix; }
+
+	// Returns true if prefix transformation is needed (SST ingestion must be disabled)
+	bool hasPrefixTransform() const { return addPrefix.size() > 0 || removePrefix.size() > 0; }
+
+	// Returns true if prefix transforms to system key space (data move should be skipped)
+	// When true, BulkLoad should just read SST files and write to system keys via transaction,
+	// without creating a data move that would reassign normalKeys ownership
+	bool hasSystemKeyPrefix() const { return addPrefix.size() > 0 && addPrefix.startsWith("\xff"_sr); }
+
 	bool isMetadataValid() const {
 		if (!jobId.isValid()) {
 			return false;
@@ -929,22 +970,39 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, transportMethod, jobRoot, phase, submitTime, endTime, taskCount, errorMessage);
+		serializer(ar,
+		           jobId,
+		           sourceJobId,
+		           jobRange,
+		           transportMethod,
+		           jobRoot,
+		           phase,
+		           submitTime,
+		           endTime,
+		           taskCount,
+		           errorMessage,
+		           addPrefix,
+		           removePrefix);
 	}
 
 private:
-	UID jobId; // The jobId used by BulkDump when dumping the data.
+	UID jobId; // Unique ID for this BulkLoad operation (for tracking purposes)
+	UID sourceJobId; // The BulkDump job ID used to locate data files
 	KeyRange jobRange;
 	BulkLoadTransportMethod transportMethod = BulkLoadTransportMethod::Invalid;
 	std::string jobRoot;
 	// jobRoot is the root path of data store used by bulkload/dump funcationality.
 	// Given the job manifest file is stored in the jobFolder, the
-	// jobFolder = getBulkLoadJobRoot(jobRoot, jobId).
+	// jobFolder = getBulkLoadJobRoot(jobRoot, sourceJobId).
 	BulkLoadJobPhase phase = BulkLoadJobPhase::Invalid;
 	double submitTime = 0;
 	double endTime = 0;
 	Optional<uint64_t> taskCount;
 	Optional<std::string> errorMessage;
+	// For restore with prefix transformation - when set, SST ingestion is disabled
+	// and keys are read from SST files and written with prefix transformation
+	Key addPrefix;
+	Key removePrefix;
 };
 
 // Define the bulkload job manifest file header
@@ -1158,5 +1216,7 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
 BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
                                    const std::string& jobRoot,
-                                   const BulkLoadTransportMethod& transportMethod);
+                                   const BulkLoadTransportMethod& transportMethod,
+                                   Key addPrefix = Key(),
+                                   Key removePrefix = Key());
 #endif

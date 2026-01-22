@@ -119,7 +119,13 @@ std::string getPath(const std::string& path) {
 	// We want boost::url to parse out the path but it cannot digest credentials. Strip them out
 	// before passing to boost::url.
 	try {
-		return boost::urls::parse_uri(matches[1].str() + matches[3].str()).value().path();
+		std::string result = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value().path();
+		// boost::urls::path() returns the path with a leading slash for absolute URIs.
+		// S3 object names should not have a leading slash, so strip it if present.
+		if (!result.empty() && result[0] == '/') {
+			result = result.substr(1);
+		}
+		return result;
 	} catch (std::system_error& e) {
 		TraceEvent(SevError, "BulkLoadGetPathError")
 		    .detail("Path", path)
@@ -217,6 +223,8 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
 BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
                                    const KeyRange& range,
                                    const std::string& jobRoot,
-                                   const BulkLoadTransportMethod& transportMethod) {
-	return BulkLoadJobState(dumpJobIdToLoad, jobRoot, range, transportMethod);
+                                   const BulkLoadTransportMethod& transportMethod,
+                                   Key addPrefix,
+                                   Key removePrefix) {
+	return BulkLoadJobState(dumpJobIdToLoad, jobRoot, range, transportMethod, addPrefix, removePrefix);
 }
