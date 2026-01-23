@@ -713,11 +713,6 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 	}
 
 	// Step 3: merge with new data move
-	// For prefix tasks: skip the data move entirely.
-	// BulkLoad + prefix means no SST ingestion - just read SST files, transform keys, and write.
-	// This doesn't require ownership reassignment. The task will be executed differently.
-	bool skipDataMoveForPrefixTransform = bulkLoadTaskState.hasPrefixTransform();
-
 	StorageMetrics oldStats;
 	int shardCount = 0;
 	for (auto it : self->shards->intersectingRanges(keys)) {
@@ -727,14 +722,7 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 			shardCount = shardCount + it->value().stats->get().get().shardCount;
 		}
 	}
-	if (skipDataMoveForPrefixTransform) {
-		TraceEvent("DDBulkLoadEngineSkipDataMoveForPrefixTransform", self->distributorId)
-		    .detail("TaskID", bulkLoadTaskState.getTaskId())
-		    .detail("Range", keys)
-		    .detail("AddPrefix", bulkLoadTaskState.getAddPrefix())
-		    .detail("RemovePrefix", bulkLoadTaskState.getRemovePrefix());
-		// Don't create a data move. The task will be executed via direct SST read + key transform + write.
-	} else if (!cancelledDataMovePriority.present()) {
+	if (!cancelledDataMovePriority.present()) {
 		// If this is for a new bulkload task
 		restartShardTrackers(self, keys, ShardMetrics(oldStats, now(), shardCount));
 		self->shardsAffectedByTeamFailure->defineShard(keys);

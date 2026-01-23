@@ -4562,23 +4562,11 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			// Open backup container for metadata access
 			state Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {});
 
-			// Note: BulkDump dataset verification is skipped for now.
-			// The BulkDump system stores data in job-specific manifests under the jobId directory,
-			// not in a top-level job-manifest.txt. Full verification would require reading the
-			// BulkLoad manifests which is done by the BulkLoad system itself when it processes the job.
-			// If the dataset is incomplete, BulkLoad will fail with an appropriate error.
-			TraceEvent("BulkLoadRestoreDatasetAssumedComplete")
-			    .detail("RestoreUID", restore.getUid())
-			    .detail("BulkDumpJobId", bulkDumpJobId)
-			    .detail("Note", "Verification delegated to BulkLoad system");
-
-			// Get restore ranges and prefix info using a transaction
+			// Get restore ranges using a transaction
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			state std::vector<KeyRange> restoreRanges = wait(restore.getRestoreRangesOrDefault(tr));
-			state Key restoreAddPrefix = wait(restore.addPrefix().getD(tr));
-			state Key restoreRemovePrefix = wait(restore.removePrefix().getD(tr));
 
 			// If bulkDumpJobId is empty, read it from the snapshot file metadata
 			if (bulkDumpJobId.empty()) {
@@ -4653,15 +4641,13 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 
 			// BulkLoad range must match the BulkDump range (normalKeys)
 			// The actual restore ranges will be applied via mutation log replay
-			state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
-			    dumpJobUid, normalKeys, jobRoot, loadTransportMethod, restoreAddPrefix, restoreRemovePrefix);
+			state BulkLoadJobState bulkLoadJob =
+			    createBulkLoadJob(dumpJobUid, normalKeys, jobRoot, loadTransportMethod);
 
 			TraceEvent("BulkLoadRestoreJobCreated")
 			    .detail("RestoreUID", restore.getUid())
 			    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
-			    .detail("JobRoot", jobRoot)
-			    .detail("AddPrefix", restoreAddPrefix)
-			    .detail("RemovePrefix", restoreRemovePrefix);
+			    .detail("JobRoot", jobRoot);
 
 			// Register the BulkLoad range lock owner (required for range locking)
 			wait(registerRangeLockOwner(cx, "BulkLoad", "BulkLoad restore operation"));

@@ -4400,11 +4400,6 @@ static Future<ErrorOr<GetKeyValuesReply>> issueGetKeyValuesRequest(StorageServer
 // NOTE: We read the ENTIRE restored keyspace (not just rangeToRead with prefix),
 // because restored keys are stored with their original names under the prefix.
 // E.g., source key "mykey" is restored as "\xff\x02/rlog/mykey"
-//
-// IMPORTANT: We use database transactions to read BOTH source and restored data.
-// This is because the validation restore's BulkLoad process may create data moves
-// that relocate the source data between storage servers. Using transactions ensures
-// we read from the correct location regardless of data move state.
 ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSourceAndRestoredData(StorageServer* data,
                                                                                                 KeyRange rangeToRead,
                                                                                                 Version version,
@@ -4423,37 +4418,22 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
 	    .detail("Limit", limit)
 	    .detail("LimitBytes", limitBytes);
 
-	// Read BOTH source and restored data using database transactions
-	// This ensures correct reads even when data moves have relocated shards
-	state ErrorOr<GetKeyValuesReply> sourceResult;
+	// Read source data from user key range (this SS must own it since DD sent request here)
+	state Future<ErrorOr<GetKeyValuesReply>> sourceFuture =
+	    issueGetKeyValuesRequest(data, rangeToRead, version, limit, limitBytes);
+
+	// Read restored data from system key space
+	// NOTE: Use database transaction to read system keys since this SS might not own them
+	// IMPORTANT: Use same byte limits as source query to ensure comparable results, since restored keys
+	// are larger (include prefix), which could cause fewer keys to be returned when byte limit is reached
 	state ErrorOr<GetKeyValuesReply> restoredResult;
-
 	try {
-		state Transaction sourceTr(data->cx);
-		sourceTr.setVersion(version);
-		sourceTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		GetRangeLimits sourceLimits(limit, limitBytes);
-		state RangeResult sourceData =
-		    wait(sourceTr.getRange(rangeToRead, sourceLimits, Snapshot::False, Reverse::False));
-
-		// Convert RangeResult to GetKeyValuesReply format
-		GetKeyValuesReply sourceReply;
-		sourceReply.data.append_deep(sourceReply.arena, sourceData.begin(), sourceData.size());
-		sourceReply.more = sourceData.more;
-		sourceReply.version = version;
-		sourceResult = sourceReply;
-	} catch (Error& e) {
-		sourceResult = e;
-	}
-
-	try {
-		state Transaction restoredTr(data->cx);
-		restoredTr.setVersion(version);
-		restoredTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		restoredTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		GetRangeLimits restoredLimits(limit, limitBytes);
-		state RangeResult restoredData =
-		    wait(restoredTr.getRange(restoredRange, restoredLimits, Snapshot::False, Reverse::False));
+		state Transaction tr(data->cx);
+		tr.setVersion(version);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		GetRangeLimits limits(limit, limitBytes);
+		state RangeResult restoredData = wait(tr.getRange(restoredRange, limits, Snapshot::False, Reverse::False));
 
 		// Convert RangeResult to GetKeyValuesReply format
 		GetKeyValuesReply restoredReply;
@@ -4465,30 +4445,34 @@ ACTOR static Future<std::pair<GetKeyValuesReply, GetKeyValuesReply>> fetchSource
 		restoredResult = e;
 	}
 
+	state Future<ErrorOr<GetKeyValuesReply>> restoredFuture = Future<ErrorOr<GetKeyValuesReply>>(restoredResult);
+
+	wait(success(sourceFuture) && success(restoredFuture));
+
 	// Check for errors
-	if (sourceResult.isError()) {
-		throw sourceResult.getError();
+	if (sourceFuture.get().isError()) {
+		throw sourceFuture.get().getError();
 	}
-	if (restoredResult.isError()) {
-		throw restoredResult.getError();
+	if (restoredFuture.get().isError()) {
+		throw restoredFuture.get().getError();
 	}
-	if (sourceResult.get().error.present()) {
-		throw sourceResult.get().error.get();
+	if (sourceFuture.get().get().error.present()) {
+		throw sourceFuture.get().get().error.get();
 	}
-	if (restoredResult.get().error.present()) {
-		throw restoredResult.get().error.get();
+	if (restoredFuture.get().get().error.present()) {
+		throw restoredFuture.get().get().error.get();
 	}
 
 	// Log what we fetched
 	TraceEvent("SSAuditRestoreFetchResult", data->thisServerID)
-	    .detail("SourceKeys", sourceResult.get().data.size())
-	    .detail("RestoredKeys", restoredResult.get().data.size())
-	    .detail("SourceBytes", sourceResult.get().data.expectedSize())
-	    .detail("RestoredBytes", restoredResult.get().data.expectedSize())
-	    .detail("SourceMore", sourceResult.get().more)
-	    .detail("RestoredMore", restoredResult.get().more);
+	    .detail("SourceKeys", sourceFuture.get().get().data.size())
+	    .detail("RestoredKeys", restoredFuture.get().get().data.size())
+	    .detail("SourceBytes", sourceFuture.get().get().data.expectedSize())
+	    .detail("RestoredBytes", restoredFuture.get().get().data.expectedSize())
+	    .detail("SourceMore", sourceFuture.get().get().more)
+	    .detail("RestoredMore", restoredFuture.get().get().more);
 
-	return std::make_pair(sourceResult.get(), restoredResult.get());
+	return std::make_pair(sourceFuture.get().get(), restoredFuture.get().get());
 }
 
 // Helper: Compare source and restored data, returning validation errors
@@ -7195,11 +7179,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			state KeyRef rangeEnd;
-			// Prefix transformation state for BulkLoad restore with --add-prefix
-			state bool hasPrefixTransform = false;
-			state Key bulkLoadAddPrefix;
-			state Key bulkLoadRemovePrefix;
-
 			if (conductBulkLoad) {
 				ASSERT(dataMoveIdIsValidForBulkLoad(dataMoveId)); // TODO(BulkLoad): remove dangerous assert
 				// Get the bulkload task metadata from the data move metadata. Note that a SS can receive a data move
@@ -7211,7 +7190,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// Note that it is possible that this SS can never get the bulkload metadata because the bulkload data
 				// move is cancelled or replaced by another data move. In this case, while
 				// getBulkLoadTaskStateFromDataMove get stuck, this fetchKeys is guaranteed to be cancelled.
-				state BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
+				BulkLoadTaskState bulkLoadTaskState = wait(getBulkLoadTaskStateFromDataMove(
 				    data->cx, dataMoveId, /*atLeastVersion=*/data->version.get(), data->thisServerID));
 				TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 				    .detail("DataMoveId", dataMoveId.toString())
@@ -7249,14 +7228,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						break;
 					}
 				}
-				// Skip SST ingestion if prefix transformation is needed - must read SST and write keys with prefix
-				hasPrefixTransform = bulkLoadTaskState.hasPrefixTransform();
-				bulkLoadAddPrefix = bulkLoadTaskState.getAddPrefix();
-				bulkLoadRemovePrefix = bulkLoadTaskState.getRemovePrefix();
-
 				if (SERVER_KNOBS->BULK_LOAD_USE_SST_INGEST &&
 				    data->storage.getKeyValueStore()->supportsSstIngestion() && bulkloadCanIngestSSTFile &&
-				    allFilesContained && !hasPrefixTransform) {
+				    allFilesContained) {
 					TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 					    .detail("DataMoveId", dataMoveId.toString())
 					    .detail("Range", keys)
@@ -7294,16 +7268,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						// Falling back to KV-based writes because either:
 						// - Task range is not aligned with manifests (bulkloadCanIngestSSTFile=false)
 						// - File ranges don't fit within shard (allFilesContained=false)
-						// - Prefix transformation is needed (hasPrefixTransform=true)
 						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
 						    .detail("DataMoveId", dataMoveId.toString())
 						    .detail("Range", keys)
 						    .detail("Phase", "SST ingestion fallback to KV writes")
 						    .detail("TaskRangeAligned", bulkloadCanIngestSSTFile)
 						    .detail("AllFilesContained", allFilesContained)
-						    .detail("HasPrefixTransform", hasPrefixTransform)
-						    .detail("AddPrefix", bulkLoadAddPrefix)
-						    .detail("RemovePrefix", bulkLoadRemovePrefix)
 						    .detail("FKID", fetchKeysID);
 					}
 					hold = tryGetRangeForBulkLoad(results, keys, localBulkLoadFileSets);
@@ -7372,91 +7342,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					}
 
 					// Write this_block to storage
-					// Apply prefix transformation if needed for BulkLoad restore with --add-prefix
 					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
 					state Key blockEnd =
 					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
 					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
-
-					// Track if we need to use client transaction for system keys
-					state bool useClientForSystemKeys = false;
-
-					if (conductBulkLoad && hasPrefixTransform) {
-						// Transform keys with prefix for restore validation
-						state Standalone<VectorRef<KeyValueRef>> transformedData;
-						transformedData.arena().dependsOn(blockData.arena());
-						for (const auto& kv : blockData) {
-							Key transformedKey = kv.key;
-							if (bulkLoadRemovePrefix.size() > 0 && kv.key.startsWith(bulkLoadRemovePrefix)) {
-								transformedKey = kv.key.removePrefix(bulkLoadRemovePrefix);
-							}
-							if (bulkLoadAddPrefix.size() > 0) {
-								transformedKey = transformedKey.withPrefix(bulkLoadAddPrefix);
-							}
-							transformedData.push_back(transformedData.arena(), KeyValueRef(transformedKey, kv.value));
-						}
-						// Transform block range
-						Key transformedBegin = blockRange.begin;
-						Key transformedEnd = blockRange.end;
-						if (bulkLoadRemovePrefix.size() > 0) {
-							if (transformedBegin.startsWith(bulkLoadRemovePrefix)) {
-								transformedBegin = transformedBegin.removePrefix(bulkLoadRemovePrefix);
-							}
-							if (transformedEnd.startsWith(bulkLoadRemovePrefix)) {
-								transformedEnd = transformedEnd.removePrefix(bulkLoadRemovePrefix);
-							}
-						}
-						if (bulkLoadAddPrefix.size() > 0) {
-							transformedBegin = transformedBegin.withPrefix(bulkLoadAddPrefix);
-							transformedEnd = transformedEnd.withPrefix(bulkLoadAddPrefix);
-						}
-						blockRange = KeyRangeRef(transformedBegin, transformedEnd);
-						blockData = transformedData;
-
-						// Check if destination is system key space - if so, use client transaction
-						// because this storage server doesn't own system keys
-						useClientForSystemKeys = blockRange.begin >= systemKeys.begin;
-
-						TraceEvent(
-						    bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKeyPrefixTransform", data->thisServerID)
-						    .detail("FKID", interval.pairID)
-						    .detail("OriginalKeys", this_block.size())
-						    .detail("TransformedRange", blockRange)
-						    .detail("AddPrefix", bulkLoadAddPrefix)
-						    .detail("RemovePrefix", bulkLoadRemovePrefix)
-						    .detail("UseClientForSystemKeys", useClientForSystemKeys);
-					}
-
-					if (useClientForSystemKeys) {
-						// Use FDB client to write TRANSFORMED data to system key space
-						// This routes the writes to the correct storage servers
-						state Transaction sysKeyTr(data->cx);
-						loop {
-							try {
-								sysKeyTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-								sysKeyTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-								for (const auto& kv : blockData) {
-									sysKeyTr.set(kv.key, kv.value);
-								}
-								wait(sysKeyTr.commit());
-								TraceEvent(bulkLoadVerboseEventSev(),
-								           "SSBulkLoadTaskFetchKeySystemKeyWrite",
-								           data->thisServerID)
-								    .detail("FKID", interval.pairID)
-								    .detail("BlockRange", blockRange)
-								    .detail("KeyCount", blockData.size())
-								    .detail("CommitVersion", sysKeyTr.getCommittedVersion());
-								break;
-							} catch (Error& e) {
-								wait(sysKeyTr.onError(e));
-							}
-						}
-						// NOTE: For system key prefix tasks, we intentionally do NOT write to local storage.
-						// The data move will complete but the source SS keeps ownership of normalKeys.
-						// This preserves the original data for audit comparison.
-					} else {
-						wait(data->storage.replaceRange(blockRange, blockData));
-					}
+					wait(data->storage.replaceRange(blockRange, blockData));
 
 					if (conductBulkLoad) {
 						TraceEvent(bulkLoadVerboseEventSev(), "SSBulkLoadTaskFetchKey", data->thisServerID)
