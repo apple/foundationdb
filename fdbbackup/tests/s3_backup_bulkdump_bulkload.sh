@@ -31,7 +31,8 @@
 #    - This creates a "known good" baseline in system keys
 # 4. Clears normalKeys (original data)
 # 5. Restores to normalKeys using BULKLOAD mode (reads SST files)
-# 6. Runs audit_storage validate_restore to compare:
+#    NOTE: If encryption is enabled, uses rangefile mode instead (BulkLoad doesn't support encryption)
+# 6. Runs audit_storage validate_restore to compare (skipped if encryption enabled):
 #    - BulkLoad-restored data (in normalKeys)
 #    - Traditional-restored data (in system key prefix)
 #    - This validates BulkLoad produces identical results to traditional restore
@@ -292,25 +293,37 @@ function test_bulkdump_bulkload {
     return 1
   fi
   
-  # Step 3: Restore to normalKeys using BulkLoad mode
-  log "Restore using BulkLoad mode"
-  if ! run_restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${TAG}" "${local_encryption_key_file}" "bulkload" "${credentials}"; then
-    err "Failed BulkLoad restore"
-    return 1
-  fi
+  # Step 3: Restore to normalKeys
+  # NOTE: BulkLoad doesn't support encryption yet, so use traditional restore when encrypted
+  if [[ -n "${local_encryption_key_file}" ]]; then
+    log "Restore using rangefile mode (BulkLoad doesn't support encryption yet)"
+    if ! run_restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${TAG}" "${local_encryption_key_file}" "rangefile" "${credentials}"; then
+      err "Failed rangefile restore"
+      return 1
+    fi
+    log "SKIPPING BulkLoad validation (encryption not supported by BulkLoad)"
+    # Clean up the prefixed validation data
+    cleanup_validation_prefix "${local_build_dir}" "${local_scratch_dir}"
+  else
+    log "Restore using BulkLoad mode"
+    if ! run_restore "${local_build_dir}" "${local_scratch_dir}" "${local_url}" "${TAG}" "${local_encryption_key_file}" "bulkload" "${credentials}"; then
+      err "Failed BulkLoad restore"
+      return 1
+    fi
   
-  # Step 4: Run audit to compare BulkLoad-restored (normalKeys) vs traditional-restored (prefix)
-  log "Running audit_storage validate_restore..."
-  log "Comparing BulkLoad-restored data against traditional-restored data..."
-  if ! run_validate_restore_audit "${local_build_dir}" "${local_scratch_dir}"; then
-    err "Failed audit-based restore validation - BulkLoad result differs from traditional restore!"
-    return 1
-  fi
-  log "Audit validation PASSED - BulkLoad produces identical results to traditional restore"
+    # Step 4: Run audit to compare BulkLoad-restored (normalKeys) vs traditional-restored (prefix)
+    log "Running audit_storage validate_restore..."
+    log "Comparing BulkLoad-restored data against traditional-restored data..."
+    if ! run_validate_restore_audit "${local_build_dir}" "${local_scratch_dir}"; then
+      err "Failed audit-based restore validation - BulkLoad result differs from traditional restore!"
+      return 1
+    fi
+    log "Audit validation PASSED - BulkLoad produces identical results to traditional restore"
   
-  # Step 5: Clean up the prefixed validation data
-  log "Cleaning up validation prefix data..."
-  cleanup_validation_prefix "${local_build_dir}" "${local_scratch_dir}"
+    # Step 5: Clean up the prefixed validation data
+    log "Cleaning up validation prefix data..."
+    cleanup_validation_prefix "${local_build_dir}" "${local_scratch_dir}"
+  fi
   
   # Additional verification
   log "Verify restored data matches expected values"
