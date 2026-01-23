@@ -303,21 +303,23 @@ function test_encryption_mismatches {
   local mismatch_logdir="${local_scratch_dir}/encryption_mismatch_logs"
   mkdir -p "${mismatch_logdir}"
 
+  # Build base restore args once - reused for all tests
+  local base_args=(
+    "-t" "${local_tag}" "-w"
+    "-r" "${local_url}"
+  )
+  add_base_args base_args "${cluster_file}" "${mismatch_logdir}"
+  add_common_optional_args base_args "${blob_credentials}" "" ""
+
   if [[ -n "${backup_encryption_key_file}" ]]; then
     # Backup was encrypted - test mismatches
     log "Testing encryption mismatches for encrypted backup"
 
     # Test 1: Encrypted backup → restore without encryption (should fail)
     log "Test 1: Attempting restore without encryption on encrypted backup (should fail)"
-    local cmd_args1=(
-      "-t" "${local_tag}" "-w"
-      "-r" "${local_url}"
-    )
-    add_base_args cmd_args1 "${cluster_file}" "${mismatch_logdir}"
-    add_common_optional_args cmd_args1 "${blob_credentials}" "" ""
 
     set +e
-    "${local_build_dir}"/bin/fdbrestore start "${cmd_args1[@]}" 2>"${mismatch_logdir}/test1_stderr.log"
+    "${local_build_dir}"/bin/fdbrestore start "${base_args[@]}" 2>"${mismatch_logdir}/test1_stderr.log"
     local exit_code1=$?
     set -e
 
@@ -333,12 +335,8 @@ function test_encryption_mismatches {
     create_encryption_key_file "${wrong_key_file}"
 
     log "Test 2: Attempting restore with wrong encryption key (should fail)"
-    local cmd_args2=(
-      "-t" "${local_tag}" "-w"
-      "-r" "${local_url}"
-    )
-    add_base_args cmd_args2 "${cluster_file}" "${mismatch_logdir}"
-    add_common_optional_args cmd_args2 "${blob_credentials}" "" "${wrong_key_file}"
+    # Copy base_args and add encryption key
+    local cmd_args2=("${base_args[@]}" "--encryption-key-file" "${wrong_key_file}")
 
     set +e
     "${local_build_dir}"/bin/fdbrestore start "${cmd_args2[@]}" 2>"${mismatch_logdir}/test2_stderr.log"
@@ -363,12 +361,8 @@ function test_encryption_mismatches {
     create_encryption_key_file "${any_key_file}"
 
     log "Test: Attempting restore with encryption on unencrypted backup (should fail)"
-    local cmd_args=(
-      "-t" "${local_tag}" "-w"
-      "-r" "${local_url}"
-    )
-    add_base_args cmd_args "${cluster_file}" "${mismatch_logdir}"
-    add_common_optional_args cmd_args "${blob_credentials}" "" "${any_key_file}"
+    # Copy base_args and add encryption key
+    local cmd_args=("${base_args[@]}" "--encryption-key-file" "${any_key_file}")
 
     set +e
     "${local_build_dir}"/bin/fdbrestore start "${cmd_args[@]}" 2>"${mismatch_logdir}/test_stderr.log"
