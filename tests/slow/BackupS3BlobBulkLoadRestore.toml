@@ -5,7 +5,7 @@
 # - Backup creates BOTH range files AND SST files (snapshotMode=2)
 #   - Range files are used by traditional restore
 #   - SST files are used by BulkLoad restore
-# - Validation flow (see design/validating_restored_data_using_one_cluster.md):
+# - Validation: compare BulkLoad restore vs traditional restore
 #   1. Restore with --add-prefix to system keyspace using TRADITIONAL (rangefile) mode
 #      This creates a "known good" baseline
 #   2. Clear normalKeys (original data)
@@ -101,5 +101,5 @@ timeout = 3600
     snapshotMode = 2           # 2 = BOTH (creates range files AND SST files for comparison)
     useRangeFileRestore = false # false = use BulkLoad for restore
     # Validation: Compare BulkLoad-restored vs traditional-restored using audit_storage validate_restore
-    # See design/validating_restored_data_using_one_cluster.md
+    # Compares BulkLoad-restored (normalKeys) vs traditional-restored (prefix)
     performValidation = true

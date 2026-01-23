@@ -21,7 +21,7 @@
 # Test BulkLoad restore validation against traditional restore.
 #
 # This test validates BulkLoad produces identical results to traditional restore
-# (see design/validating_restored_data_using_one_cluster.md):
+# by comparing two restore methods using audit_storage validate_restore:
 #
 # 1. Loads test data into the database
 # 2. Creates backup using "both" mode (writes BOTH range files AND SST files)
@@ -270,7 +270,7 @@ function test_bulkdump_bulkload {
     return 1
   fi
   
-  # BulkLoad validation strategy (see design/validating_restored_data_using_one_cluster.md):
+  # BulkLoad validation: compare BulkLoad restore vs traditional restore
   # 1. Restore with prefix using TRADITIONAL (rangefile) mode - this is our "known good" baseline
   # 2. Clear normalKeys (original data)
   # 3. Restore to normalKeys using BULKLOAD mode

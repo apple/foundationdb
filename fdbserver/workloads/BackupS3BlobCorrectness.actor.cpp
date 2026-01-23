@@ -651,12 +651,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					    .detail("LockUID", lockUID)
 					    .detail("BackupTag", printable(self->backupTag));
 
-					// BulkLoad validation strategy (see design/validating_restored_data_using_one_cluster.md):
-					// 1. Restore with prefix using TRADITIONAL (rangefile) mode - "known good" baseline
+					// BulkLoad validation: compare BulkLoad restore vs traditional restore
+					// 1. Traditional restore with addPrefix to system keyspace (\xff\x02/rlog/)
 					// 2. Clear normalKeys
-					// 3. Restore to normalKeys using BULKLOAD
-					// 4. Run audit to compare BulkLoad result vs traditional result
-					// This validates BulkLoad produces identical results to traditional restore.
+					// 3. BulkLoad restore to normalKeys
+					// 4. audit_storage validate_restore compares normalKeys vs prefixed data
 
 					// Prefix for validation - restored data goes to system keyspace
 					state Key validationPrefix = "\xff\x02/rlog/"_sr;
