@@ -289,3 +289,14 @@ function grep_for_severity40 {
     return 1
   fi
 }
+
+# Test getLayerStatus functionality by checking cluster layers status
+# $1 The build directory
+# $2 The scratch directory
+function test_fdbcli_status_json_for_bkup {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  # Give backup agent time to write status
+  sleep 5
+  "${local_build_dir}"/bin/fdbcli -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" --exec 'status json' | jq '.cluster.layers'
+}

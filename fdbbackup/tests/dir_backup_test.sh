@@ -136,17 +136,6 @@ function restore {
   fi
 }
 
-# Test getLayerStatus functionality by checking cluster layers status
-# $1 The build directory
-# $2 The scratch directory
-function test_fdbcli_status_json {
-  local local_build_dir="${1}"
-  local scratch_dir="${2}"
-  # Give backup agent time to write status
-  sleep 5
-  "${local_build_dir}"/bin/fdbcli -C "${scratch_dir}/loopback_cluster/fdb.cluster" --exec 'status json' | jq '.cluster.layers'
-}
-
 # Run a backup to the fs and then a restore.
 # $1 build directory
 # $2 the scratch directory
@@ -169,7 +158,7 @@ function test_dir_backup_and_restore {
   fi
 
   log "Test fdbcli status json"
-  test_fdbcli_status_json "${local_build_dir}" "${scratch_dir}"
+  test_fdbcli_status_json_for_bkup "${local_build_dir}" "${scratch_dir}"
 
   log "Clear fdb data"
   if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
