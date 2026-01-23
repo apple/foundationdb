@@ -1649,7 +1649,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		}
 		wait(waitForAllReady(encryptionSetupResults));
 		json_spirit::mArray keysArr;
-		std::set<std::string> seenKeyPaths;
+		std::unordered_set<std::string> seenKeyPaths;
 		for (int j = 0; j < encryptionContainerIndices.size() && j < 1e6; j++) {
 			int i = encryptionContainerIndices[j];
 			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
