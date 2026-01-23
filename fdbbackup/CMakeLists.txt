@@ -61,5 +61,6 @@ if (NOT WIN32 AND NOT OPEN_FOR_IDE)
   enable_testing()
   add_test(NAME dir_backup_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/dir_backup_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
   add_test(NAME s3_backup_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_test.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR} --encrypt-at-random)
-  add_test(NAME s3_backup_bulkdump_bulkload_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_bulkdump_bulkload.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR} --encrypt-at-random)
+  # Note: No --encrypt flag - BulkLoad doesn't support encryption yet
+  add_test(NAME s3_backup_bulkdump_bulkload_tests COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/s3_backup_bulkdump_bulkload.sh ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
 endif()
