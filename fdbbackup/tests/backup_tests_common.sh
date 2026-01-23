@@ -46,7 +46,7 @@ function add_base_args {
 # Uses bash nameref (requires bash 4.3+) to modify the array in place
 # $1 name of the array variable to modify (passed by name, not value)
 # $2 blob credentials file (optional)
-# $3 mode (backup/restore mode, optional)
+# $3 mode (optional): for backup: bulkdump|rangefile|both; for restore: rangefile|bulkload
 # $4 encryption key file (optional)
 function add_common_optional_args {
   local -n _args_ref="$1"
@@ -73,7 +73,9 @@ function add_common_optional_args {
 
 # Shared backup function with optional parameters
 # $1 build directory, $2 scratch directory, $3 backup url, $4 tag
-# $5 encryption key file (optional), $6 backup mode (optional), $7 blob credentials file (optional)
+# $5 encryption key file (optional)
+# $6 backup mode (optional): bulkdump|rangefile|both - controls snapshot mechanism
+# $7 blob credentials file (optional)
 function run_backup {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
@@ -194,7 +196,9 @@ function run_backup {
 
 # Shared restore function with optional parameters
 # $1 build directory, $2 scratch directory, $3 backup url, $4 tag
-# $5 encryption key file (optional), $6 restore mode (optional), $7 blob credentials file (optional)
+# $5 encryption key file (optional)
+# $6 restore mode (optional): rangefile|bulkload - controls restore mechanism
+# $7 blob credentials file (optional)
 function run_restore {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
