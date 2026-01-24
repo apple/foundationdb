@@ -50,6 +50,7 @@
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "fdbclient/BackupContainer.h"
 
 #include "flow/Platform.h"
 
@@ -1612,6 +1613,32 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		wait(waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) &&
 		     waitForAll(tagRangeBytes) && waitForAll(tagLogBytes) && success(fBackupPaused));
 
+		state std::vector<Future<Void>> encryptionSetupResults;
+		state std::vector<int> encryptionContainerIndices;
+
+		for (int i = 0; i < tagContainers.size(); i++) {
+			if (tagContainers[i].get()->getEncryptionKeyFileName().present()) {
+				encryptionSetupResults.push_back(tagContainers[i].get()->encryptionSetupComplete());
+				encryptionContainerIndices.push_back(i);
+			}
+		}
+		wait(waitForAllReady(encryptionSetupResults));
+		json_spirit::mArray keysArr;
+		std::unordered_set<std::string> seenKeyPaths;
+		for (int j = 0; j < encryptionContainerIndices.size() && j < 1e6; j++) {
+			int i = encryptionContainerIndices[j];
+			std::string keyPath = tagContainers[i].get()->getEncryptionKeyFileName().get();
+
+			if (seenKeyPaths.find(keyPath) == seenKeyPaths.end()) {
+				seenKeyPaths.insert(keyPath);
+				json_spirit::mObject keyObj;
+				keyObj["path"] = tagContainers[i].get()->getEncryptionKeyFileName().get();
+				keyObj["success"] = !encryptionSetupResults[j].isError();
+				keysArr.push_back(keyObj);
+			}
+		}
+		o.create("encryption_keys") = keysArr;
+
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
 		layerRoot.create("total_workers.$sum") =
@@ -1640,7 +1667,11 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
 			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
-
+			tagRoot.create("file_level_encryption") =
+			    tagContainers[j].get()->getEncryptionKeyFileName().present() ? true : false;
+			if (tagContainers[j].get()->getEncryptionKeyFileName().present()) {
+				tagRoot.create("encryption_key_file") = tagContainers[j].get()->getEncryptionKeyFileName().get();
+			}
 			j++;
 		}
 	} else if (exe == ProgramExe::DR_AGENT) {
