@@ -290,9 +290,6 @@ function grep_for_severity40 {
   fi
 }
 
-# Test getLayerStatus functionality by checking cluster layers status
-# $1 The build directory
-# $2 The scratch directory
 function test_fdbcli_status_json_for_bkup {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"

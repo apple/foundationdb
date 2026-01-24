@@ -157,7 +157,6 @@ function test_dir_backup_and_restore {
     return 1
   fi
 
-  log "Test fdbcli status json"
   test_fdbcli_status_json_for_bkup "${local_build_dir}" "${scratch_dir}"
 
   log "Clear fdb data"

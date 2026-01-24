@@ -204,7 +204,7 @@ function test_s3_backup_and_restore {
     err "Failed backup"
     return 1
   fi
-  log "Test fdbcli status json"
+
   test_fdbcli_status_json_for_bkup "${local_build_dir}" "${local_scratch_dir}"
 
   log "Clear fdb data"
