@@ -156,6 +156,9 @@ function test_dir_backup_and_restore {
     err "Failed backup"
     return 1
   fi
+
+  test_fdbcli_status_json_for_bkup "${local_build_dir}" "${scratch_dir}"
+
   log "Clear fdb data"
   if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed clear data in fdb"
