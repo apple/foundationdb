@@ -1311,7 +1311,8 @@ public:
 		if (bytesRead != cipherKey->size()) {
 			TraceEvent(SevError, "InvalidEncryptionKeyFileSize")
 			    .detail("ExpectedSize", cipherKey->size())
-			    .detail("ActualSize", bytesRead);
+			    .detail("ActualSize", bytesRead)
+			    .detail("FileName", encryptionKeyFileName);
 			throw invalid_encryption_key_file();
 		}
 		ASSERT_EQ(bytesRead, cipherKey->size());
