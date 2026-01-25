@@ -71,6 +71,61 @@ function add_common_optional_args {
   done
 }
 
+# Pre-clear S3 URL before test (only for real S3, not MockS3Server)
+# $1 build directory, $2 scratch directory, $3 url, $4 blob credentials file
+# Returns 0 if cleared or skipped (MockS3Server), 1 on error
+function s3_preclear_url {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local local_url="${3}"
+  local credentials="${4}"
+  
+  if [[ "${USE_S3}" != "true" ]]; then
+    # MockS3Server - buckets are lazily created, skip preclear
+    return 0
+  fi
+  
+  local cmd=("${local_build_dir}/bin/s3client")
+  cmd+=("${KNOBS[@]}")
+  cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
+  cmd+=("--blob-credentials" "${credentials}")
+  cmd+=("--log" "--logdir" "${local_scratch_dir}")
+  cmd+=("rm" "${local_url}")
+  
+  if ! "${cmd[@]}"; then
+    err "Failed pre-cleanup rm of ${local_url}"
+    return 1
+  fi
+  return 0
+}
+
+# Cleanup S3 URL after test (works for both S3 and MockS3Server)
+# $1 build directory, $2 scratch directory, $3 url, $4 blob credentials file
+function s3_cleanup_url {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local local_url="${3}"
+  local credentials="${4}"
+  
+  local cmd=("${local_build_dir}/bin/s3client")
+  cmd+=("${KNOBS[@]}")
+  
+  # Only add TLS CA file for real S3, not MockS3Server
+  if [[ "${USE_S3}" == "true" ]]; then
+    cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
+  fi
+  
+  cmd+=("--blob-credentials" "${credentials}")
+  cmd+=("--log" "--logdir" "${local_scratch_dir}")
+  cmd+=("rm" "${local_url}")
+  
+  if ! "${cmd[@]}"; then
+    err "Failed rm of ${local_url}"
+    return 1
+  fi
+  return 0
+}
+
 # Shared backup function with optional parameters
 # $1 build directory, $2 scratch directory, $3 backup url, $4 tag
 # $5 encryption key file (optional)

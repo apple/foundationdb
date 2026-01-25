@@ -100,24 +100,11 @@ function test_s3_backup_and_restore {
   local local_build_dir="${4}"
   local local_encryption_key_file="${5:-}"
   
-  # Edit the url. Backup adds 'data' to the path. Need this url for
-  # cleanup of test data.
+  # Edit the url. Backup adds 'data' to the path. Need this url for cleanup.
   local edited_url=$(echo "${local_url}" | sed -e "s/ctest/data\/ctest/" )
   readonly edited_url
-  if [[ "${USE_S3}" == "true" ]]; then
-    # Run this rm only if s3. In MockS3Server, it would fail because
-    # bucket doesn't exist yet (they are lazily created).
-    local preclear_cmd=("${local_build_dir}/bin/s3client")
-    preclear_cmd+=("${KNOBS[@]}")
-    preclear_cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
-    preclear_cmd+=("--blob-credentials" "${credentials}")
-    preclear_cmd+=("--log" "--logdir" "${local_scratch_dir}")
-    preclear_cmd+=("rm" "${edited_url}")
-    
-    if ! "${preclear_cmd[@]}"; then
-      err "Failed pre-cleanup rm of ${edited_url}"
-      return 1
-    fi
+  if ! s3_preclear_url "${local_build_dir}" "${local_scratch_dir}" "${edited_url}" "${credentials}"; then
+    return 1
   fi
   log "Load data"
   if ! load_data "${local_build_dir}" "${local_scratch_dir}"; then
@@ -153,20 +140,7 @@ function test_s3_backup_and_restore {
   fi
   
   # Cleanup test data.
-  local cleanup_cmd=("${local_build_dir}/bin/s3client")
-  cleanup_cmd+=("${KNOBS[@]}")
-  
-  # Only add TLS CA file for real S3, not MockS3Server
-  if [[ "${USE_S3}" == "true" ]]; then
-    cleanup_cmd+=("--tls-ca-file" "${TLS_CA_FILE}")
-  fi
-  
-  cleanup_cmd+=("--blob-credentials" "${credentials}")
-  cleanup_cmd+=("--log" "--logdir" "${local_scratch_dir}")
-  cleanup_cmd+=("rm" "${edited_url}")
-  
-  if ! "${cleanup_cmd[@]}"; then
-    err "Failed rm of ${edited_url}"
+  if ! s3_cleanup_url "${local_build_dir}" "${local_scratch_dir}" "${edited_url}" "${credentials}"; then
     return 1
   fi
   log "Check for Severity=40 errors"
