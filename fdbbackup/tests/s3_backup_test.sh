@@ -80,13 +80,6 @@ function resolve_to_absolute_path {
   realpath "${p}"
 }
 
-function create_encryption_key_file {
-  local key_file="${1}"
-  log "Creating encryption key file at ${key_file}"
-  dd if=/dev/urandom bs=32 count=1 of="${key_file}" 2>/dev/null
-  chmod 600 "${key_file}"
-}
-
 # Run a backup to s3 and then a restore.
 # $1 The url to use
 # $2 the scratch directory
