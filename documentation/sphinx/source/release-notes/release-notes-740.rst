@@ -2,6 +2,47 @@
 Release Notes
 #############
 
+7.4.7
+=====
+* Same as 7.4.6 release with AVX enabled.
+
+7.4.6
+=====
+
+* Fixed a restore stuck bug where readLogData() errors were not propagated correctly. `(PR #12433) <https://github.com/apple/foundationdb/pull/12433>`_
+* Fixed FdbDecode memory issues. `(PR #12495) <https://github.com/apple/foundationdb/pull/12495>`_
+* Fixed decode range file keys and values interpretation bug. `(PR #12420) <https://github.com/apple/foundationdb/pull/12420>`_
+* Fixed mutation conversion to skip Tx mutations, LogProtocolMessage, and SpanContextMessage. `(PR #12604) <https://github.com/apple/foundationdb/pull/12604>`_
+* Fixed the flags used for opening the encryption key file. `(PR #12424) <https://github.com/apple/foundationdb/pull/12424>`_
+* Fixed backup encryption on S3. `(PR #12289) <https://github.com/apple/foundationdb/pull/12289>`_
+* Added support for backup encryption via fdbbackup modify command. `(PR #12591) <https://github.com/apple/foundationdb/pull/12591>`_
+* Added support for backup worker to use proxy from command line to upload to S3. `(PR #12566) <https://github.com/apple/foundationdb/pull/12566>`_
+* Added metadata for encrypted backups. `(PR #12354) <https://github.com/apple/foundationdb/pull/12354>`_
+* Added FileLevelEncryption field to BackupDescription JSON output. `(PR #12626) <https://github.com/apple/foundationdb/pull/12626>`_
+* Added encryption key info to status JSON. `(PR #12657) <https://github.com/apple/foundationdb/pull/12657>`_
+* Added SNI in TLS handshake. `(PR #12385) <https://github.com/apple/foundationdb/pull/12385>`_
+* Added ARM support for Docker images. `(PR #12425) <https://github.com/apple/foundationdb/pull/12425>`_
+* Added restore validation feature allowing backup/restore validation in a single cluster. `(PR #12648) <https://github.com/apple/foundationdb/pull/12648>`_
+* Upgraded RocksDB to 8.11.5. `(PR #12651) <https://github.com/apple/foundationdb/pull/12651>`_
+
+7.4.5
+=====
+* Same as 7.4.4 release with AVX enabled.
+
+7.4.4
+=====
+
+* Fixed a race that could cause recovery to be stuck when purging old generations. `(PR #12214) <https://github.com/apple/foundationdb/pull/12214>`_
+* Fixed TSS mismatch handling crashes. `(PR #12330) <https://github.com/apple/foundationdb/pull/12330>`_
+* Fixed potential DatabaseContext leaks in multi-version client.
+* Fixed double-encoding of URIs in requests to S3BlobStore. `(PR #12302) <https://github.com/apple/foundationdb/pull/12302>`_
+* Fixed "Unknown error" when configuring regions. `(PR #12314) <https://github.com/apple/foundationdb/pull/12314>`_
+* Improved TLS handshake process to avoid blocking main thread. `(PR #12346) <https://github.com/apple/foundationdb/pull/12346>`_
+* Fixed TLS to accept same key with different values. `(PR #12321) <https://github.com/apple/foundationdb/pull/12321>`_
+* Added network and connection counters for improved observability. `(PR #12295) <https://github.com/apple/foundationdb/pull/12295>`_, `(PR #12355) <https://github.com/apple/foundationdb/pull/12355>`_
+* Added TLS stats. `(PR #12277) <https://github.com/apple/foundationdb/pull/12277>`_
+* Reverted a spill by reference change that caused issues. `(PR #12298) <https://github.com/apple/foundationdb/pull/12298>`_
+
 7.4.3
 =====
 * Same as 7.4.2 release with AVX enabled.
