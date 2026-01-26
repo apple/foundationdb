@@ -311,10 +311,25 @@ function create_encryption_key_file {
   chmod 600 "${key_file}"
 }
 
+# Determine if we should use real S3 based on environment
+# Returns "true" if S3 should be used, "false" otherwise
+# Checks USE_S3 env var first, then falls back to OKTETO_NAMESPACE detection
+function get_use_s3_default {
+  if [[ -n "${USE_S3:-}" ]]; then
+    echo "${USE_S3}"
+  elif [[ -n "${OKTETO_NAMESPACE+x}" ]]; then
+    echo "true"
+  else
+    echo "false"
+  fi
+}
+
 # Common S3/MockS3 environment setup - shared across all S3 tests
-# $1 build directory, $2 scratch directory, $3 path prefix
-# Sets global variables: TEST_SCRATCH_DIR, host, blob_credentials_file, query_str
-# Exports: FDB_BLOB_CREDENTIALS, FDB_TLS_CA_FILE (if needed)
+# Prerequisites: USE_S3 and TLS_CA_FILE must be set before calling this function
+#   (use get_use_s3_default and setup_tls_ca_file)
+# $1 build directory, $2 scratch directory, $3 path prefix (used for temp dir naming)
+# Sets global variables: TEST_SCRATCH_DIR, host, bucket, region, blob_credentials_file, query_str
+# Exports: FDB_BLOB_CREDENTIALS, FDB_TLS_CA_FILE (if using real S3)
 function setup_s3_environment {
   local local_build_dir="${1}"
   local local_scratch_dir="${2}"
@@ -331,18 +346,19 @@ function setup_s3_environment {
       err "Failed creating local aws_dir"
       exit 1
     fi
-    readonly TEST_SCRATCH_DIR
     if ! readarray -t configs < <(aws_setup "${local_build_dir}" "${TEST_SCRATCH_DIR}"); then
       err "Failed aws_setup"
       return 1
     fi
-    readonly host="${configs[0]}"
-    readonly bucket="${configs[1]}"
-    readonly blob_credentials_file="${configs[2]}"
-    readonly region="${configs[3]}"
+    host="${configs[0]}"
+    bucket="${configs[1]}"
+    blob_credentials_file="${configs[2]}"
+    region="${configs[3]}"
     query_str="bucket=${bucket}&region=${region}&secure_connection=1"
     export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
-    export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+    if [[ -n "${TLS_CA_FILE:-}" ]]; then
+      export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+    fi
   else
     log "Testing against MockS3Server"
     # Source MockS3 fixture (use TESTS_COMMON_DIR for reliable path resolution)
@@ -354,15 +370,14 @@ function setup_s3_environment {
       err "Failed create of test dir." >&2
       exit 1
     fi
-    readonly TEST_SCRATCH_DIR
     if ! start_mocks3 "${local_build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
       err "Failed to start MockS3Server"
       exit 1
     fi
-    readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
-    readonly bucket="test-bucket"
-    readonly region="us-east-1"
-    readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
+    host="${MOCKS3_HOST}:${MOCKS3_PORT}"
+    bucket="test-bucket"
+    region="us-east-1"
+    blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
     echo '{}' > "${blob_credentials_file}"
     query_str="bucket=${bucket}&region=${region}&secure_connection=0"
     export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
@@ -370,6 +385,8 @@ function setup_s3_environment {
 
   readonly TEST_SCRATCH_DIR
   readonly host
+  readonly bucket
+  readonly region
   readonly blob_credentials_file
   readonly query_str
 }

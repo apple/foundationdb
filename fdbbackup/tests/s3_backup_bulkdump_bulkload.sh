@@ -455,65 +455,10 @@ fi
 readonly ENCRYPTION_KEY_FILE
 readonly USE_PARTITIONED_LOG
 
-# Set host, bucket, and blob_credentials_file whether MockS3Server or s3.
-readonly path_prefix="ctests/$$"
-host=
-query_str=
-blob_credentials_file=
-if [[ "${USE_S3}" == "true" ]]; then
-  log "Testing against s3"
-  # Now source in the aws fixture so we can use its methods in the below.
-  # shellcheck source=/dev/null
-  if ! source "${cwd}/../../fdbclient/tests/aws_fixture.sh"; then
-    err "Failed to source aws_fixture.sh"
-    exit 1
-  fi
-  if ! TEST_SCRATCH_DIR=$( create_aws_dir "${scratch_dir}" ); then
-    err "Failed creating local aws_dir"
-    exit 1
-  fi
-  readonly TEST_SCRATCH_DIR
-  if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed aws_setup"
-    return 1
-  fi
-  readonly host="${configs[0]}"
-  readonly bucket="${configs[1]}"
-  readonly blob_credentials_file="${configs[2]}"
-  readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}&secure_connection=1"
-  # Make these environment variables available for the fdb cluster and backup_agent when s3.
-  export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
-  export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
-else
-  log "Testing against MockS3Server"
-  # Now source in the mocks3 fixture so we can use its methods in the below.
-  # shellcheck source=/dev/null
-  if ! source "${cwd}/../../fdbclient/tests/mocks3_fixture.sh"; then
-    err "Failed to source mocks3_fixture.sh"
-    exit 1
-  fi
-  if ! TEST_SCRATCH_DIR=$(mktemp -d "${scratch_dir}/mocks3_backup_test.XXXXXX"); then
-    err "Failed create of the mocks3 test dir." >&2
-    exit 1
-  fi
-  readonly TEST_SCRATCH_DIR
-  # Pass test scratch dir as persistence directory so files are cleaned up with test
-  if ! start_mocks3 "${build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
-    err "Failed to start MockS3Server"
-    exit 1
-  fi
-  readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
-  readonly bucket="test-bucket"
-  readonly region="us-east-1"
-  # Create an empty blob credentials file (MockS3Server uses simple auth)
-  readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-  echo '{}' > "${blob_credentials_file}"
-  # Let the connection to MockS3Server be insecure -- not-TLS
-  query_str="bucket=${bucket}&region=${region}&secure_connection=0"
-  # Set environment variables for MockS3Server
-  export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
-fi
+# Setup S3/MockS3 environment using common function
+readonly temp_dir_prefix="mocks3_backup_test"
+readonly url_path_prefix="ctests/$$"
+setup_s3_environment "${build_dir}" "${scratch_dir}" "${temp_dir_prefix}"
 
 # Startup fdb cluster and backup agent with BulkLoad knobs
 # Use 2 storage servers so BulkLoad can find a different server than the BulkDump source
@@ -522,6 +467,6 @@ setup_fdb_cluster_with_backup "${source_dir}" "${build_dir}" "${TEST_SCRATCH_DIR
 
 # Run tests.
 test="test_bulkdump_bulkload"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+url="blobstore://${host}/${url_path_prefix}/${test}?${query_str}"
 test_bulkdump_bulkload "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}" "${ENCRYPTION_KEY_FILE}"
 log_test_result $? "test_bulkdump_bulkload"
