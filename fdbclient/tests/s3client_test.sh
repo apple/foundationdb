@@ -655,36 +655,6 @@ set -o nounset  # a.k.a. set -u
 set -o pipefail
 set -o noclobber
 
-# Globals
-
-# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
-# It gets cleaned up on the way out of the test.
-TEST_SCRATCH_DIR=
-readonly HTTP_VERBOSE_LEVEL=2
-# Should we use S3? If USE_S3 is not defined, then check if
-# OKTETO_NAMESPACE is defined (It is defined on the okteto
-# internal apple dev environments where S3 is available).
-readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
-
-# Set TLS_CA_FILE only when using real S3, not for SeaweedFS
-if [[ "${USE_S3}" == "true" ]]; then
-  # Try to find a valid TLS CA file if not explicitly set
-  if [[ -z "${TLS_CA_FILE:-}" ]]; then
-    # Common locations for TLS CA files on different systems
-    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/" "/etc/ssl/certs/"; do
-      if [[ -f "${ca_file}" ]]; then
-        TLS_CA_FILE="${ca_file}"
-        break
-      fi
-    done
-  fi
-  TLS_CA_FILE="${TLS_CA_FILE:-}"
-else
-  # For SeaweedFS, don't use TLS
-  TLS_CA_FILE=""
-fi
-readonly TLS_CA_FILE
-
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
   echo "ERROR: Failed resolve_to_absolute_path"
@@ -700,6 +670,16 @@ if ! source "${cwd}/tests_common.sh"; then
   echo "ERROR: Failed to source tests_common.sh"
   exit 1
 fi
+
+# Globals
+# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
+# It gets cleaned up on the way out of the test.
+TEST_SCRATCH_DIR=
+readonly HTTP_VERBOSE_LEVEL=2
+
+# Setup USE_S3 and TLS_CA_FILE using common functions
+readonly USE_S3="$(get_use_s3_default)"
+setup_tls_ca_file
 
 blob_credentials_file=""
 bucket=""
