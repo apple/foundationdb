@@ -1,9 +1,20 @@
-# BulkDump/BulkLoad Integration Test
-# Tests backup with BulkDump snapshots and restore with BulkLoad
+# BulkLoad Validation Test
+# Tests that BulkLoad restore produces identical results to traditional restore
 #
-# This test validates the new BulkDump/BulkLoad integration:
-# - Backup creates BulkDump SST files (snapshotMode=1)
-# - Restore uses BulkLoad instead of traditional rangefile restore (useRangeFileRestore=false)
+# This test validates BulkLoad produces the same data as traditional restore:
+# - Backup creates BOTH range files AND SST files (snapshotMode=2)
+#   - Range files are used by traditional restore
+#   - SST files are used by BulkLoad restore
+# - Validation: compare BulkLoad restore vs traditional restore
+#   1. Restore with --add-prefix to system keyspace using TRADITIONAL (rangefile) mode
+#      This creates a "known good" baseline
+#   2. Clear normalKeys (original data)
+#   3. Restore to normalKeys using BULKLOAD mode (reads SST files)
+#   4. Run audit_storage validate_restore to compare:
+#      - BulkLoad-restored data (in normalKeys)
+#      - Traditional-restored data (in system key prefix)
+#   5. Clean up validation prefix data
+# - This validates BulkLoad produces identical results to traditional restore
 #
 # Configuration aligned with working tests/slow/BulkDumpingS3.toml
 
@@ -87,5 +98,8 @@ timeout = 3600
     skipDirtyRestore = false
     backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
     # BulkDump/BulkLoad integration options
-    snapshotMode = 1           # 1 = BULKDUMP (creates SST files instead of range files)
+    snapshotMode = 2           # 2 = BOTH (creates range files AND SST files for comparison)
     useRangeFileRestore = false # false = use BulkLoad for restore
+    # Validation: Compare BulkLoad-restored vs traditional-restored using audit_storage validate_restore
+    # Compares BulkLoad-restored (normalKeys) vs traditional-restored (prefix)
+    performValidation = true

@@ -4,6 +4,10 @@
 # Functions shared by ctests.
 #
 
+# Directory where this script is located (for sourcing related files)
+TESTS_COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TESTS_COMMON_DIR
+
 # Globals.
 # Values loaded up into the database.
 FDB_DATA=()
@@ -296,4 +300,97 @@ function test_fdbcli_status_json_for_bkup {
   # Give backup agent time to write status
   sleep 5
   "${local_build_dir}"/bin/fdbcli -C "${local_scratch_dir}/loopback_cluster/fdb.cluster" --exec 'status json' | jq '.cluster.layers'
+}
+
+# Create encryption key file for testing
+# $1 key file path
+function create_encryption_key_file {
+  local key_file="${1}"
+  log "Creating encryption key file at ${key_file}"
+  dd if=/dev/urandom bs=32 count=1 of="${key_file}" 2>/dev/null
+  chmod 600 "${key_file}"
+}
+
+# Common S3/MockS3 environment setup - shared across all S3 tests
+# $1 build directory, $2 scratch directory, $3 path prefix
+# Sets global variables: TEST_SCRATCH_DIR, host, blob_credentials_file, query_str
+# Exports: FDB_BLOB_CREDENTIALS, FDB_TLS_CA_FILE (if needed)
+function setup_s3_environment {
+  local local_build_dir="${1}"
+  local local_scratch_dir="${2}"
+  local local_path_prefix="${3}"
+
+  if [[ "${USE_S3}" == "true" ]]; then
+    log "Testing against s3"
+    # Source AWS fixture (use TESTS_COMMON_DIR for reliable path resolution)
+    if ! source "${TESTS_COMMON_DIR}/aws_fixture.sh"; then
+      err "Failed to source aws_fixture.sh"
+      exit 1
+    fi
+    if ! TEST_SCRATCH_DIR=$( create_aws_dir "${local_scratch_dir}" ); then
+      err "Failed creating local aws_dir"
+      exit 1
+    fi
+    readonly TEST_SCRATCH_DIR
+    if ! readarray -t configs < <(aws_setup "${local_build_dir}" "${TEST_SCRATCH_DIR}"); then
+      err "Failed aws_setup"
+      return 1
+    fi
+    readonly host="${configs[0]}"
+    readonly bucket="${configs[1]}"
+    readonly blob_credentials_file="${configs[2]}"
+    readonly region="${configs[3]}"
+    query_str="bucket=${bucket}&region=${region}&secure_connection=1"
+    export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
+    export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
+  else
+    log "Testing against MockS3Server"
+    # Source MockS3 fixture (use TESTS_COMMON_DIR for reliable path resolution)
+    if ! source "${TESTS_COMMON_DIR}/mocks3_fixture.sh"; then
+      err "Failed to source mocks3_fixture.sh"
+      exit 1
+    fi
+    if ! TEST_SCRATCH_DIR=$(mktemp -d "${local_scratch_dir}/${local_path_prefix}.XXXXXX"); then
+      err "Failed create of test dir." >&2
+      exit 1
+    fi
+    readonly TEST_SCRATCH_DIR
+    if ! start_mocks3 "${local_build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
+      err "Failed to start MockS3Server"
+      exit 1
+    fi
+    readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
+    readonly bucket="test-bucket"
+    readonly region="us-east-1"
+    readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
+    echo '{}' > "${blob_credentials_file}"
+    query_str="bucket=${bucket}&region=${region}&secure_connection=0"
+    export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
+  fi
+
+  readonly TEST_SCRATCH_DIR
+  readonly host
+  readonly blob_credentials_file
+  readonly query_str
+}
+
+# Setup TLS CA file for S3 connections
+function setup_tls_ca_file {
+  if [[ "${USE_S3}" == "true" ]]; then
+    # Try to find a valid TLS CA file if not explicitly set
+    if [[ -z "${TLS_CA_FILE:-}" ]]; then
+      # Common locations for TLS CA files on different systems
+      for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/"; do
+        if [[ -f "${ca_file}" ]]; then
+          TLS_CA_FILE="${ca_file}"
+          break
+        fi
+      done
+    fi
+    TLS_CA_FILE="${TLS_CA_FILE:-}"
+  else
+    # For MockS3Server, don't use TLS
+    TLS_CA_FILE=""
+  fi
+  readonly TLS_CA_FILE
 }
