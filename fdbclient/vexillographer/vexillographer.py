@@ -97,7 +97,7 @@ HEADER_NOTICE_CPP = """\
 LICENSE_PY = textwrap.dedent(
     """
     # FoundationDB Python API
-    # Copyright (c) 2013-2016 Apple Inc.
+    # Copyright (c) 2013-2026 Apple Inc.
 
     # Permission is hereby granted, free of charge, to any person obtaining a copy
     # of this software and associated documentation files (the "Software"), to deal
