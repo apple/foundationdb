@@ -288,6 +288,7 @@ add_subdirectory(fdbctl)
 add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
+add_subdirectory(contrib/replay)
 if(NOT WIN32)
   if(NOT FOUNDATIONDB_CROSS_COMPILING) # FIXME(swift): make this work when
                                        # x-compiling.
