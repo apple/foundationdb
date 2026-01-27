@@ -975,6 +975,7 @@ const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 
+// TODO(gglass): see if this can be removed:
 const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
 // TOOD(gglass): see if this can be removed:
 const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);

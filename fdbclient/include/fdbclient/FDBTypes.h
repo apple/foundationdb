@@ -1424,10 +1424,15 @@ struct StorageMigrationType {
 };
 
 // TODO(gglass): come back and see if more of this can be removed.  We only use DISABLED.
-struct EncryptionAtRestMode {
+struct EncryptionAtRestModeDeprecated {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { DISABLED = 0, DOMAIN_AWARE = 1, CLUSTER_AWARE = 2, END = 3 };
+	enum Mode {
+		DISABLED = 0,
+		DOMAIN_AWARE_DEPRECATED = 1
+		CLUSTER_AWARE_DEPRECATED = 2,
+		END = 3,
+	};
 
 	EncryptionAtRestMode() : mode(DISABLED) {}
 	EncryptionAtRestMode(Mode mode) : mode(mode) {

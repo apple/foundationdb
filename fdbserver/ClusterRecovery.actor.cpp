@@ -35,13 +35,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-namespace {
-EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
-	TraceEvent(SevDebug, "CREncryptionAtRestMode").detail("Mode", config.encryptionAtRestMode.toString());
-	return config.encryptionAtRestMode;
-}
-} // namespace
-
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -203,12 +196,10 @@ ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, Recruit
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
-		req.encryptMode = getEncryptionAtRest(self->configuration);
 		req.commitProxyIndex = i;
 		TraceEvent("CommitProxyReplies", self->dbgid)
 		    .detail("WorkerID", recr.commitProxies[i].id())
 		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
-		    .detail("EncryptMode", req.encryptMode.toString())
 		    .detail("FirstProxy", req.firstProxy ? "True" : "False")
 		    .detail("CommitProxyIndex", req.commitProxyIndex);
 		initializationReplies.push_back(
@@ -253,7 +244,6 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
-		req.encryptMode = getEncryptionAtRest(self->configuration);
 		TraceEvent("ResolverReplies", self->dbgid).detail("WorkerID", recr.resolvers[i].id());
 		initializationReplies.push_back(
 		    transformErrors(throwErrorOr(recr.resolvers[i].resolver.getReplyUnlessFailedFor(
@@ -370,7 +360,6 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
-		isr.encryptMode = self->configuration.encryptionAtRestMode;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -460,7 +449,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
-	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest(self->configuration);
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
@@ -471,9 +459,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		// which may cause immediate recovery to stuck in locking old tlogs.
 		self->logSystem->purgeOldRecoveredGenerationsCoreState(newState);
 		newState.recoveryCount = recoverCount;
-
-		// Update Coordinators EncryptionAtRest status during the very first recovery of the cluster (empty database)
-		newState.encryptionAtRestMode = encryptionAtRestMode;
 
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
 
@@ -488,7 +473,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 		    .detail("FinalUpdate", finalUpdate)
 		    .detail("NewState.tlogs", newState.tLogs.size())
 		    .detail("NewState.OldTLogs", newState.oldTLogData.size())
-		    .detail("NewState.EncryptionAtRestMode", newState.encryptionAtRestMode.toString())
 		    .detail("Expected.tlogs",
 		            configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>()))
 		    .detail("RecoveryCount", newState.recoveryCount);
@@ -1059,10 +1043,6 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 		    .detail("RequiredGrvProxies", 1)
 		    .detail("RequiredResolvers", 1)
 		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-		// The cluster's EncryptionAtRest status is now readable.
-		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
-			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
-		}
 	}
 
 	// FIXME: we only need log routers for the same locality as the master
@@ -1181,25 +1161,17 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Sets self->configuration to the configuration (FF/conf/ keys) at self->lastEpochEnd
 
 	// Recover transaction state store
-	// If it's the first recovery the encrypt mode is not yet available so create the txn state store with encryption
-	// disabled. This is fine since we will not write any data to disk using this txn store.
-	state bool enableEncryptionForTxnStateStore = false;
-	if (self->controllerData->encryptionAtRestMode.getFuture().isReady()) {
-		EncryptionAtRestMode encryptMode = wait(self->controllerData->encryptionAtRestMode.getFuture());
-		enableEncryptionForTxnStateStore = encryptMode.isEncryptionEnabled();
-	}
-	CODE_PROBE(enableEncryptionForTxnStateStore, "Enable encryption for txnStateStore", probe::decoration::rare);
-	if (self->txnStateStore)
+	if (self->txnStateStore) {
 		self->txnStateStore->close();
+	}
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
 	self->txnStateStore = keyValueStoreLogSystem(self->txnStateLogAdapter,
 	                                             self->dbInfo,
 	                                             self->dbgid,
 	                                             self->memoryLimit,
-	                                             false,
-	                                             false,
-	                                             true,
-	                                             enableEncryptionForTxnStateStore);
+	                                             /*disableSnapshot=*/ false,
+	                                             /*replaceContent=*/ false,
+	                                             /*exactRecovery=*/ true);
 
 	// Version 0 occurs at the version epoch. The version epoch is the number
 	// of microseconds since the Unix epoch. It can be set through fdbcli.
@@ -1543,12 +1515,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
 	wait(self->cstate.read());
-
-	// Unless the cluster database is 'empty', the cluster's EncryptionAtRest status is readable once cstate is
-	// recovered
-	if (!self->cstate.myDBState.tLogs.empty() && self->controllerData->encryptionAtRestMode.canBeSet()) {
-		self->controllerData->encryptionAtRestMode.send(self->cstate.myDBState.encryptionAtRestMode);
-	}
 
 	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion()) {
 		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();

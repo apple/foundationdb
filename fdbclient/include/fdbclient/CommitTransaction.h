@@ -22,7 +22,8 @@
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #pragma once
 
-#include "fdbclient/BlobCipher.h"
+// TODO(gglass): remove this for real
+// #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/Knobs.h"
@@ -60,7 +61,6 @@ static const char* typeString[] = { "SetValue",
 	                                "CompareAndClear",
 	                                "Reserved_For_SpanContextMessage",
 	                                "Reserved_For_OTELSpanContextMessage",
-	                                "Encrypted",
 	                                "AccumulativeChecksum",
 	                                "MAX_ATOMIC_OP" };
 
@@ -93,7 +93,6 @@ struct MutationRef {
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
 		Reserved_For_OTELSpanContextMessage,
-		Encrypted, /* Represents an encrypted mutation and cannot be used directly before decrypting */
 		MAX_ATOMIC_OP
 	};
 
@@ -337,7 +336,7 @@ struct MutationRef {
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			if (!isEncrypted() && ar.protocolVersion().hasMutationChecksum() &&
+			if (ar.protocolVersion().hasMutationChecksum() &&
 			    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 				// Attach checksum at first, then attach acs index
 				populateChecksum();
@@ -353,7 +352,7 @@ struct MutationRef {
 			} else {
 				serializer(ar, type, param2, empty);
 			}
-		} else if (!isEncrypted() && ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
+		} else if (ar.isSerializing && ar.protocolVersion().hasMutationChecksum() &&
 		           CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 			// Attach checksum at first, then attach acs index
 			populateChecksum();
@@ -401,163 +400,6 @@ struct MutationRef {
 				this->corrupted = true;
 			}
 		}
-	}
-
-	// An encrypted mutation has type Encrypted, encryption header (which contains encryption metadata) as param1,
-	// and the payload as param2. It can be serialize/deserialize as normal mutation, but can only be used after
-	// decryption via decrypt().
-	bool isEncrypted() const { return type == Encrypted; }
-
-	const BlobCipherEncryptHeader* encryptionHeader() const {
-		ASSERT(isEncrypted());
-		return reinterpret_cast<const BlobCipherEncryptHeader*>(param1.begin());
-	}
-
-	const BlobCipherEncryptHeaderRef configurableEncryptionHeader() const {
-		ASSERT(isEncrypted());
-		return BlobCipherEncryptHeaderRef::fromStringRef(param1);
-	}
-
-	EncryptCipherDomainId encryptDomainId() const {
-		ASSERT(isEncrypted());
-		return configurableEncryptionHeader().getDomainId();
-	}
-
-	void updateEncryptCipherDetails(std::unordered_set<BlobCipherDetails>& cipherDetails) {
-		ASSERT(isEncrypted());
-
-		BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
-		EncryptHeaderCipherDetails details = header.getCipherDetails();
-		ASSERT(details.textCipherDetails.isValid());
-		cipherDetails.insert(details.textCipherDetails);
-		if (details.headerCipherDetails.present()) {
-			ASSERT(details.headerCipherDetails.get().isValid());
-			cipherDetails.insert(details.headerCipherDetails.get());
-		}
-	}
-
-	MutationRef encrypt(TextAndHeaderCipherKeys cipherKeys,
-	                    Arena& arena,
-	                    BlobCipherMetrics::UsageType usageType,
-	                    double* encryptTime = nullptr) const {
-		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
-		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
-		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		bw << *this;
-
-		EncryptBlobCipherAes265Ctr cipher(
-		    cipherKeys.cipherTextKey,
-		    cipherKeys.cipherHeaderKey,
-		    iv,
-		    AES_256_IV_LENGTH,
-		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
-		    usageType);
-
-		StringRef serializedHeader;
-		StringRef payload;
-		BlobCipherEncryptHeaderRef header;
-		payload =
-		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptTime);
-		Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
-		arena.dependsOn(headerStr.arena());
-		serializedHeader = headerStr;
-		return MutationRef(Encrypted, serializedHeader, payload);
-	}
-
-	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
-	                    const EncryptCipherDomainId& domainId,
-	                    Arena& arena,
-	                    BlobCipherMetrics::UsageType usageType,
-	                    double* encryptionTime = nullptr) const {
-		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
-		auto getCipherKey = [&](const EncryptCipherDomainId& domainId) {
-			auto iter = cipherKeys.find(domainId);
-			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
-			return iter->second;
-		};
-		Reference<BlobCipherKey> textCipherKey = getCipherKey(domainId);
-		Reference<BlobCipherKey> headerCipherKey;
-		if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
-			headerCipherKey = getCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
-		}
-		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
-		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
-		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		bw << *this;
-
-		EncryptBlobCipherAes265Ctr cipher(
-		    textCipherKey,
-		    headerCipherKey,
-		    iv,
-		    AES_256_IV_LENGTH,
-		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
-		    usageType);
-
-		BlobCipherEncryptHeaderRef header;
-		auto payload =
-		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptionTime);
-		Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(header);
-		arena.dependsOn(serializedHeader.arena());
-		return MutationRef(Encrypted, serializedHeader, payload);
-	}
-
-	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
-	                            Arena& arena,
-	                            BlobCipherMetrics::UsageType usageType,
-	                            double* encryptionTime = nullptr) const {
-		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType, encryptionTime);
-	}
-
-	MutationRef decrypt(TextAndHeaderCipherKeys cipherKeys,
-	                    Arena& arena,
-	                    BlobCipherMetrics::UsageType usageType,
-	                    StringRef* buf = nullptr,
-	                    double* decryptTime = nullptr) const {
-		StringRef plaintext;
-		const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
-		DecryptBlobCipherAes256Ctr cipher(
-		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.getIV(), usageType);
-		plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena, decryptTime);
-		if (buf != nullptr) {
-			*buf = plaintext;
-		}
-		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
-		MutationRef mutation;
-		reader >> mutation;
-		return mutation;
-	}
-
-	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
-	                    Arena& arena,
-	                    BlobCipherMetrics::UsageType usageType,
-	                    StringRef* buf = nullptr,
-	                    double* decryptTime = nullptr) const {
-		TextAndHeaderCipherKeys textAndHeaderKeys = getCipherKeys(cipherKeys);
-		return decrypt(textAndHeaderKeys, arena, usageType, buf, decryptTime);
-	}
-
-	TextAndHeaderCipherKeys getCipherKeys(
-	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) const {
-		auto getCipherKey = [&](const BlobCipherDetails& details) -> Reference<BlobCipherKey> {
-			if (!details.isValid()) {
-				return {};
-			}
-			auto iter = cipherKeys.find(details);
-			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
-			return iter->second;
-		};
-		TextAndHeaderCipherKeys textAndHeaderKeys;
-		const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
-		EncryptHeaderCipherDetails cipherDetails = header.getCipherDetails();
-		ASSERT(cipherDetails.textCipherDetails.isValid());
-		textAndHeaderKeys.cipherTextKey = getCipherKey(cipherDetails.textCipherDetails);
-		if (cipherDetails.headerCipherDetails.present()) {
-			ASSERT(cipherDetails.headerCipherDetails.get().isValid());
-			textAndHeaderKeys.cipherHeaderKey = getCipherKey(cipherDetails.headerCipherDetails.get());
-		} else {
-			ASSERT(!FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
-		}
-		return textAndHeaderKeys;
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement
@@ -622,11 +464,15 @@ struct CommitTransactionRef {
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
 	VectorRef<MutationRef> mutations; // metadata mutations
+	// TODO(gglass): remove this
+#if 0	
 	// encryptedMutations should be a 1-1 correspondence with mutations field above. That is either
 	// encryptedMutations.size() == 0 or encryptedMutations.size() == mutations.size() and encryptedMutations[i] =
 	// mutations[i].encrypt(). Currently this field is not serialized so clients should NOT set this field during a
 	// usual commit path. It is currently only used during backup mutation log restores.
 	VectorRef<Optional<MutationRef>> encryptedMutations;
+#endif
+	
 	Version read_snapshot = 0;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present
@@ -719,6 +565,8 @@ struct MutationRefAndCipherKeys {
 	TextAndHeaderCipherKeys cipherKeys;
 };
 
+// TODO(gglass): remove this
+#if 0
 struct EncryptedMutationsAndVersionRef {
 	VectorRef<MutationRef> mutations;
 	Optional<VectorRef<MutationRef>> encrypted;
@@ -763,5 +611,6 @@ struct EncryptedMutationsAndVersionRef {
 		}
 	};
 };
+#endif 
 
 #endif

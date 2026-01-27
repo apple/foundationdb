@@ -69,7 +69,6 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_IS_REGISTERED,
-	ENCRYPTION_AT_REST_MODE_ALREADY_SET,
 	INVALID_STORAGE_TYPE
 };
 
@@ -130,11 +129,6 @@ ConfigurationResult buildConfiguration(
 bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
-
-// TODO(gglass): consider removing
-bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
-                                       std::map<std::string, std::string> newConfig,
-                                       bool creating);
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {

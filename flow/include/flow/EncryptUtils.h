@@ -32,6 +32,9 @@
 #include <string_view>
 #include <unordered_set>
 
+// TODO(gglass): figure out how much of this stuff is needed with encryption at rest having
+// been deleted.
+
 #define DEBUG_ENCRYPT_KEY_CIPHER false
 
 constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;

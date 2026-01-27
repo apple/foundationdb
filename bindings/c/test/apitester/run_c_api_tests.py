@@ -156,9 +156,6 @@ class TestConfig:
     def __init__(self, test_file):
         config = toml.load(test_file)
         server_config = config.get("server", [{}])[0]
-        self.enable_encryption_at_rest = server_config.get(
-            "enable_encryption_at_rest", False
-        )
         self.tls_enabled = server_config.get("tls_enabled", False)
         self.client_chain_len = server_config.get("tls_client_chain_len", 2)
         self.server_chain_len = server_config.get("tls_server_chain_len", 3)
@@ -182,7 +179,6 @@ def run_test(args, test_file):
     with TempCluster(
         args.build_dir,
         config.num_processes,
-        enable_encryption_at_rest=config.enable_encryption_at_rest,
         tls_config=tls_config,
     ) as cluster:
         ret_code = run_tester(args, cluster, test_file)

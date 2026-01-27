@@ -23,7 +23,6 @@ class TempCluster(LocalCluster):
         authorization_keypair_id: str = "",
         remove_at_exit: bool = True,
         custom_config: dict = {},
-        enable_encryption_at_rest: bool = False,
     ):
         self.build_dir = Path(build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
@@ -32,7 +31,6 @@ class TempCluster(LocalCluster):
         tmp_dir.mkdir(parents=True)
         self.tmp_dir = tmp_dir
         self.remove_at_exit = remove_at_exit
-        self.enable_encryption_at_rest = enable_encryption_at_rest
         super().__init__(
             tmp_dir,
             self.build_dir.joinpath("bin", "fdbserver"),
@@ -40,7 +38,6 @@ class TempCluster(LocalCluster):
             self.build_dir.joinpath("bin", "fdbcli"),
             process_number,
             port=port,
-            enable_encryption_at_rest=enable_encryption_at_rest,
             tls_config=tls_config,
             mkcert_binary=self.build_dir.joinpath("bin", "mkcert"),
             authorization_kty=authorization_kty,

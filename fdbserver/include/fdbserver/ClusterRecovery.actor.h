@@ -136,10 +136,18 @@ private:
 			// Use RECORD_RECOVER_AT_IN_CSTATE to make sure that when turning on recording recover at in CSTATE, we will
 			// never go back to a version < 7.3. We can remove the branch writing withEncryptionAtRest in 7.4 once
 			// RECORD_RECOVER_AT_IN_CSTATE is turned on everywhere.
+			// TODO(gglass): figure out what the above means post-encryption-at-rest deletion.
+			// Also: if "withEncryptionAtRest" is being used as a synonym for "indicates a release version that we think
+			// has that feature", BAD IDEA.  If you want a predicate or function that we can call here to indicate
+			// a given release version, then get a predicate or function with that purpose. Like put the release number
+			// in the predicate name and just call it.  Do not use a proxy that you think "well, of course the FooBar feature
+			// means release X.Y".  If you want "ReleaseXY", ask for it.
 			if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
 				wait(self->cstate.setExclusive(
 				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withGcTxnGenerations()))));
 			} else {
+				// TODO: as above, find another way to ask for the version that this code is asking for.
+				// Or just delete this wait() if it's not actually needed.
 				wait(self->cstate.setExclusive(
 				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
 			}

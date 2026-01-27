@@ -887,6 +887,7 @@ public:
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
 	double SINGLETON_RECRUIT_BME_DELAY;
+	// TODO: document what this means.  Actually, document a lot of these settings.
 	bool RECORD_RECOVER_AT_IN_CSTATE;
 	bool TRACK_TLOG_RECOVERY;
 	double CC_RERECRUIT_LOG_ROUTER_TIMEOUT;

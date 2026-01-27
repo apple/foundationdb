@@ -22,11 +22,9 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -278,11 +276,12 @@ void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena,
  This actor is responsible for taking an original transaction which was added to the backup mutation log (represented
  by "value" parameter), breaking it up into the individual MutationRefs (that constitute the transaction), decrypting
  each mutation (if needed) and adding/removing prefixes from the mutations. The final mutations are then added to the
- "result" vector alongside their encrypted counterparts (which is added to the "encryptedResult" vector)
+ "result" vector.
  Each `value` is a param2
 */
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
+											   // TODO(gglass): XXX: is this needed?
                                                VectorRef<Optional<MutationRef>>* encryptedResult,
                                                int* mutationSize,
                                                Standalone<StringRef> value,
@@ -344,38 +343,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
-			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
-			ASSERT(!dbConfig->encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
-
-			// TODO(gglass): see if the following block is needed.
-			// Decrypt mutation ref if encrypted
-			if (logValue.isEncrypted()) {
-				encryptedLogValue = logValue;
-				state EncryptCipherDomainId domainId = logValue.encryptDomainId();
-				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-				try {
-					TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-					    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
-					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
-				} catch (Error& e) {
-					// It's possible a tenant was deleted and the encrypt key fetch failed
-					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
-					    .detail("Version", version)
-					    .detail("TenantId", domainId);
-					if (e.code() == error_code_encrypt_keys_fetch_failed ||
-					    e.code() == error_code_encrypt_key_not_found) {
-						CODE_PROBE(true, "mutation log restore encrypt keys not found", probe::decoration::rare);
-						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
-						continue;
-					} else {
-						throw;
-					}
-				}
-			}
-			ASSERT(!logValue.isEncrypted());
 
 			MutationRef originalLogValue = logValue;
-
 			if (logValue.type == MutationRef::ClearRange) {
 				KeyRangeRef range(logValue.param1, logValue.param2);
 				auto ranges = key_version->intersectingRanges(range);
@@ -405,6 +374,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 							}
 							_addResult(result, mutationSize, arena, logValue);
 						}
+						// XXX TODO(gglass): is this needed
 						if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
 							encryptedResult->push_back_deep(*arena, encryptedLogValue);
 						} else {
@@ -428,6 +398,7 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					_addResult(result, mutationSize, arena, logValue);
 					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
 					// do not have to re-encrypt unnecessarily
+					// XXX TODO(gglass): is this needed
 					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
 						encryptedResult->push_back_deep(*arena, encryptedLogValue);
 					} else {

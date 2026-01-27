@@ -55,7 +55,6 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
-	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 }
 
 int toInt(ValueRef const& v) {
@@ -239,9 +238,7 @@ bool DatabaseConfiguration::isValid() const {
 	      // We cannot specify regions with three_datacenter replication
 	      LOG_TEST((perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1)) &&
 	      LOG_TEST(isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality)) &&
-	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET) &&
-	      LOG_TEST(encryptionAtRestMode >= EncryptionAtRestMode::DISABLED) &&
-	      LOG_TEST(encryptionAtRestMode < EncryptionAtRestMode::END))) {
+	      LOG_TEST(storageMigrationType != StorageMigrationType::UNSET))) {
 		return false;
 	}
 #undef LOG_TEST
@@ -403,7 +400,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["perpetual_storage_wiggle_engine"] = perpetualStoreType.toString();
 	}
 	result["storage_migration_type"] = storageMigrationType.toString();
-	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
 	return result;
 }
 
@@ -427,7 +423,6 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			// For string values, some properties can set with a "<name>=<value>" syntax in "configure"
 			// Such properties are listed here:
 			static std::set<std::string> directSet = { "storage_migration_type",
-				                                       "encryption_at_rest_mode",
 				                                       "storage_engine",
 				                                       "log_engine",
 				                                       "perpetual_storage_wiggle_engine" };
@@ -691,8 +686,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
 	} else if (ck == "proxies"_sr) {
 		overwriteProxiesCount();
-	} else if (ck == "encryption_at_rest_mode"_sr) {
-		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
 	} else if (ck.startsWith("excluded/"_sr)) {
 		// excluded servers: don't keep the state internally
 	} else {

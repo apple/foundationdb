@@ -659,7 +659,9 @@ public:
 	}
 
 	const Arena& getArena() const { return arena; }
-
+	
+// TODO(gglass): remove callers if possible
+#if 0
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
 
@@ -673,6 +675,7 @@ public:
 		ASSERT(cipherKey.isValid());
 		return cipherKey->getDomainId();
 	}
+#endif
 
 	// Return pointer to encoding header.
 	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
@@ -747,15 +750,10 @@ public:
 	ArbitraryObject extra;
 };
 
-class IPageEncryptionKeyProvider;
-
 // This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.
 class IPager2 : public IClosable {
 public:
 	virtual std::string getName() const = 0;
-
-	// Set an encryption key provider.
-	virtual void setEncryptionKeyProvider(Reference<IPageEncryptionKeyProvider> keyProvider) = 0;
 
 	// Returns an ArenaPage that can be passed to writePage. The data in the returned ArenaPage might not be zeroed.
 	virtual Reference<ArenaPage> newPageBuffer(size_t blocks = 1) = 0;

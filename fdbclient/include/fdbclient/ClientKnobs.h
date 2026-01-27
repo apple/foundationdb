@@ -336,6 +336,8 @@ public:
 	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
 
+	// TODO(gglass): delete this for real
+#if 0
 	// Encryption-at-rest
 	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
 	int ENCRYPT_HEADER_FLAGS_VERSION;
@@ -347,6 +349,7 @@ public:
 	// REST KMS configurations
 	bool REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
 	int SIM_KMS_VAULT_MAX_KEYS;
+#endif	
 
 	bool ENABLE_MUTATION_CHECKSUM;
 	// Enable to start accumulative checksum population and validation

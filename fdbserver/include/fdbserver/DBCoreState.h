@@ -139,13 +139,20 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
-	EncryptionAtRestMode encryptionAtRestMode; // cluster encryption data at-rest mode
+	// encryptionAtRestModeDeprecated: Leaving this member in here but marked as Deprecated.
+	// It may not be safe to remove this flat out if DBCoreState is persisted
+	// in some way that survives upgrades.  We want to avoid future disasters where
+	// somebody adds a new member but that gets interpreted according to garbage old
+	// bytes in storage associated with the prior encryptionAtRestMode member.
+	// If we are positive that the above cannot happen then I suppose it would be OK
+	// to remove the following member.
+	EncryptionAtRestModeDeprecated encryptionAtRestModeDeprecated;
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
 	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
 	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    encryptionAtRestMode(EncryptionAtRestMode()) {}
+	    encryptionAtRestModeDeprecatred(0)) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
@@ -167,7 +174,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities && encryptionAtRestMode == r.encryptionAtRestMode;
+		       pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
@@ -186,9 +193,6 @@ struct DBCoreState {
 
 		if (ar.protocolVersion().hasSWVersionTracking()) {
 			serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion); // 7.2
-		}
-		if (ar.protocolVersion().hasEncryptionAtRest()) {
-			serializer(ar, encryptionAtRestMode); // 7.2
 		}
 	}
 };

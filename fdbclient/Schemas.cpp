@@ -135,7 +135,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "ratekeeper",
                         "blob_manager",
                         "blob_worker",
-                        "encrypt_key_proxy",
                         "consistency_scan",
                         "router",
                         "coordinator"
@@ -588,7 +587,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
-                  "unreachable_encryptKeyProxy_worker",
                   "unreachable_consistencyScan_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
@@ -897,12 +895,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "aggressive",
              "gradual"
          ]},
-         "encryption_at_rest_mode": {
-             "$enum":[
-             "disabled",
-             "domain_aware",
-             "cluster_aware"
-         ]}
       },
       "consistency_scan" : {
          "configuration" : {
@@ -1048,25 +1040,6 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                "logical_core_utilization":0.4
             }
          }
-      },
-      "metacluster" : {
-         "cluster_type" : "management",
-         "metacluster_name":"metacluster1",
-         "metacluster_id":12345,
-         "data_cluster_name" : "data_cluster1",
-         "data_cluster_id" : 12346,
-         "num_data_clusters":10
-      },
-      "encryption_at_rest": {
-         "ekp_is_healthy": true
-      },
-      "kms" : {
-         "kms_connector_type": "RESTKmsConnector",
-         "kms_is_healthy": true,
-         "kms_stable": true,
-         "kms_urls":[
-            "https://127.0.0.1:1234"
-         ]
       },
       "idempotency_ids":{
          "size_bytes": 0,
@@ -1393,7 +1366,6 @@ const KeyRef JSONSchemas::faultToleranceStatusSchema = R"statusSchema(
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
-                  "unreachable_encryptKeyProxy_worker",
                   "unreachable_consistencyScan_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",

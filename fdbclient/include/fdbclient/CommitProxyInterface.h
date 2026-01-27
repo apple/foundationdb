@@ -26,8 +26,8 @@
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
+// TODO(gglass): remove this header if possible
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
@@ -127,7 +127,6 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	ClusterType clusterType = ClusterType::STANDALONE;
 
@@ -141,7 +140,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, encryptKeyProxy, clusterId, clusterType);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
 	}
 };
 
@@ -449,11 +448,10 @@ struct SWIFT_CXX_IMPORT_OWNED GetStorageServerRejoinInfoReply {
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
-	EncryptionAtRestMode encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history, encryptMode);
+		serializer(ar, version, tag, newTag, newLocality, history);
 	}
 };
 
@@ -660,8 +658,5 @@ struct SetThrottledShardRequest {
 
 Standalone<StringRef> getBackupKey(BinaryWriter& wr, uint32_t** partBuffer, int part);
 StringRef getBackupValue(Key& content, int part);
-
-// Instantiated in CommitProxyInterface.cpp
-extern template class GetEncryptCipherKeys<ClientDBInfo>;
 
 #endif

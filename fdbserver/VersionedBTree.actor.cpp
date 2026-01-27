@@ -20,7 +20,6 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/RandomKeyValueUtils.h"
 #include "fdbclient/Tuple.h"
 #include "fdbrpc/DDSketch.h"
@@ -28,7 +27,6 @@
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
-#include "fdbserver/IPageEncryptionKeyProvider.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/VersionedBTreeDebug.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1007,7 +1005,6 @@ public:
 
 				try {
 					page->postReadHeader(c.pageID);
-					// These pages are not encrypted
 					page->postReadPayload(c.pageID);
 				} catch (Error& e) {
 					bool isInjected = false;
@@ -1461,7 +1458,6 @@ struct RedwoodMetrics {
 		unsigned int pagerEvictFail;
 		unsigned int btreeLeafPreload;
 		unsigned int btreeLeafPreloadExt;
-		unsigned int readRequestDecryptTimeNS;
 	};
 
 	RedwoodMetrics() {
@@ -2040,11 +2036,6 @@ public:
 
 	std::string getName() const override { return filename; }
 
-	void setEncryptionKeyProvider(Reference<IPageEncryptionKeyProvider> kp) override {
-		keyProvider = kp;
-		keyProviderInitialized.send(Void());
-	}
-
 	void setPageSize(int size) {
 		// Conservative maximum for number of records that can fit in this page size
 		g_redwoodMetrics.updateMaxRecordCount(315.0 * size / 4096);
@@ -2571,16 +2562,9 @@ public:
 		             page->getEncodingType(),
 		             page->rawData());
 
-		// Set metadata before prewrite so it's in the pre-encrypted page in cache if the page is encrypted
 		// The actual next commit version is unknown, so the write version of a page is always the
 		// last committed version + 1
 		page->setWriteInfo(pageIDs.front(), this->getLastCommittedVersion() + 1);
-
-		// Copy the page if preWrite will encrypt/modify the payload
-		bool copy = page->isEncrypted();
-		if (copy) {
-			page = page->clone();
-		}
 
 		page->preWrite(pageIDs.front());
 
@@ -2823,26 +2807,7 @@ public:
 
 		try {
 			page->postReadHeader(pageID);
-			if (page->isEncrypted()) {
-				if (!self->keyProvider.isValid()) {
-					wait(self->keyProviderInitialized.getFuture());
-					ASSERT(self->keyProvider.isValid());
-				}
-				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
-					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-					    .detail("PhysicalPageID", page->getPhysicalPageID())
-					    .detail("EncodingTypeFound", page->getEncodingType())
-					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
-					throw unexpected_encoding_type();
-				}
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
-				page->encryptionKey = k;
-			}
-			double decryptTime = 0;
-			page->postReadPayload(pageID, &decryptTime);
-			if (isReadRequest(reason)) {
-				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
-			}
+			page->postReadPayload(pageID);
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
@@ -2907,27 +2872,7 @@ public:
 
 		try {
 			page->postReadHeader(pageIDs.front());
-			if (page->isEncrypted()) {
-				if (!self->keyProvider.isValid()) {
-					wait(self->keyProviderInitialized.getFuture());
-					ASSERT(self->keyProvider.isValid());
-				}
-				if (self->keyProvider->expectedEncodingType() != page->getEncodingType()) {
-					TraceEvent(SevWarnAlways, "RedwoodBTreeUnexpectedNodeEncoding")
-					    .detail("PhysicalPageID", page->getPhysicalPageID())
-					    .detail("EncodingTypeFound", page->getEncodingType())
-					    .detail("EncodingTypeExpected", self->keyProvider->expectedEncodingType());
-					throw unexpected_encoding_type();
-				}
-				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
-				page->encryptionKey = k;
-			}
-			double decryptTime = 0;
-			page->postReadPayload(pageIDs.front(), &decryptTime);
-			if (reason.present() && isReadRequest(reason.get())) {
-				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
-			}
-
+			page->postReadPayload(pageIDs.front());
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
 			             self->filename.c_str(),
 			             toString(pageIDs).c_str(),
@@ -3879,9 +3824,6 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-	Reference<IPageEncryptionKeyProvider> keyProvider;
-	Promise<Void> keyProviderInitialized;
-
 	Reference<PriorityMultiLock> ioLock;
 
 	int64_t pageCacheBytes;
@@ -4699,7 +4641,6 @@ class DecodeBoundaryVerifier {
 		Key lower;
 		Key upper;
 		unsigned int height;
-		Optional<int64_t> domainId;
 		bool empty() const { return lower.empty() && upper.empty(); }
 	};
 
@@ -4707,7 +4648,6 @@ class DecodeBoundaryVerifier {
 	std::unordered_map<LogicalPageID, BoundariesByVersion> boundariesByPageID;
 	int boundarySampleSize = 1000;
 	int boundaryPopulation = 0;
-	Reference<IPageEncryptionKeyProvider> keyProvider;
 
 public:
 	std::vector<Key> boundarySamples;
@@ -4724,8 +4664,6 @@ public:
 		}
 		return nullptr;
 	}
-
-	void setKeyProvider(Reference<IPageEncryptionKeyProvider> kp) { keyProvider = kp; }
 
 	void sampleBoundary(Key b) {
 		if (boundaryPopulation <= boundarySampleSize) {
@@ -4747,34 +4685,19 @@ public:
 	            Version v,
 	            Key lowerBound,
 	            Key upperBound,
-	            unsigned int height,
-	            Optional<int64_t> domainId) {
+	            unsigned int height) {
 		sampleBoundary(lowerBound);
 		sampleBoundary(upperBound);
-		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s', %u, %s\n",
+		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s', %u\n",
 		             ::toString(id).c_str(),
 		             ::toString(v).c_str(),
 		             lowerBound.printable().c_str(),
 		             upperBound.printable().c_str(),
-		             height,
-		             Traceable<decltype(domainId)>::toString(domainId).c_str());
-
-		if (domainId.present()) {
-			ASSERT(keyProvider && keyProvider->enableEncryptionDomain());
-			if (!keyProvider->keyFitsInDomain(domainId.get(), lowerBound, true)) {
-				fprintf(stderr,
-				        "Page lower bound not in domain: %s %s, domain id %s, lower bound '%s'\n",
-				        ::toString(id).c_str(),
-				        ::toString(v).c_str(),
-				        ::toString(domainId).c_str(),
-				        lowerBound.printable().c_str());
-				return false;
-			}
-		}
+		             height);
 
 		auto& b = boundariesByPageID[id.front()][v];
 		ASSERT(b.empty());
-		b = { lowerBound, upperBound, height, domainId };
+		b = { lowerBound, upperBound, height };
 		return true;
 	}
 
@@ -4782,7 +4705,6 @@ public:
 	            Version v,
 	            Key lowerBound,
 	            Key upperBound,
-	            Optional<int64_t> domainId,
 	            BTreePage::BinaryTree::Cursor& cursor) {
 		auto i = boundariesByPageID.find(id);
 		ASSERT(i != boundariesByPageID.end());
@@ -4801,43 +4723,6 @@ public:
 			        b->second.lower.printable().c_str(),
 			        b->second.upper.printable().c_str());
 			return false;
-		}
-
-		if (!b->second.domainId.present()) {
-			ASSERT(!keyProvider || !keyProvider->enableEncryptionDomain());
-			ASSERT(!domainId.present());
-		} else {
-			ASSERT(keyProvider->enableEncryptionDomain());
-			if (b->second.domainId != domainId) {
-				fprintf(stderr,
-				        "Page encrypted with incorrect domain: %s %s, using %s, written %s\n",
-				        ::toString(id).c_str(),
-				        ::toString(v).c_str(),
-				        ::toString(domainId).c_str(),
-				        ::toString(b->second.domainId).c_str());
-				return false;
-			}
-			ASSERT(domainId.present());
-			auto checkKeyFitsInDomain = [&]() -> bool {
-				if (!keyProvider->keyFitsInDomain(domainId.get(), cursor.get().key, b->second.height > 1)) {
-					fprintf(stderr,
-					        "Encryption domain mismatch on %s, %s, domain: %s, key %s\n",
-					        ::toString(id).c_str(),
-					        ::toString(v).c_str(),
-					        ::toString(domainId).c_str(),
-					        cursor.get().key.printable().c_str());
-					return false;
-				}
-				return true;
-			};
-			cursor.moveFirst();
-			if (cursor.valid() && !checkKeyFitsInDomain()) {
-				return false;
-			}
-			cursor.moveLast();
-			if (cursor.valid() && !checkKeyFitsInDomain()) {
-				return false;
-			}
 		}
 
 		return true;
@@ -4964,20 +4849,21 @@ public:
 		uint8_t height;
 		LazyClearQueueT::QueueState lazyDeleteQueue;
 		BTreeNodeLink root;
-		EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED; // since 7.3
+		// gglass: assuming we have to write this out or downgrades to older versions will result in
+		// old code not being able to read this field.
+		EncryptionAtRestModeDeprecated encryptionModeDeprecated = EncryptionAtRestModeDeprecated::DISABLED;
 
 		std::string toString() {
-			return format("{formatVersion=%d  height=%d  root=%s  lazyDeleteQueue=%s encryptionMode=%s}",
+			return format("{formatVersion=%d  height=%d  root=%s  lazyDeleteQueue=%s}",
 			              (int)formatVersion,
 			              (int)height,
 			              ::toString(root).c_str(),
-			              lazyDeleteQueue.toString().c_str(),
-			              encryptionMode.toString().c_str());
+			              lazyDeleteQueue.toString().c_str());
 		}
 
 		template <class Ar>
 		void serialize(Ar& ar) {
-			serializer(ar, formatVersion, encodingType, height, lazyDeleteQueue, root, encryptionMode);
+			serializer(ar, formatVersion, encodingType, height, lazyDeleteQueue, root, encryptionModeDeprecated);
 		}
 	};
 
@@ -5042,12 +4928,9 @@ public:
 	               std::string name,
 	               UID logID,
 	               Reference<AsyncVar<ServerDBInfo> const> db,
-	               Optional<EncryptionAtRestMode> expectedEncryptionMode,
-	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	               Reference<IPageEncryptionKeyProvider> keyProvider = {},
-	               Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = {})
-	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
-	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_encryptionMonitor(encryptionMonitor),
+	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE)
+	  : m_pager(pager), m_db(db), m_encodingType(encodingType),
+	    m_enforceEncodingType(false), m_keyProvider(keyProvider),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_logID(logID),
 	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
@@ -5056,15 +4939,9 @@ public:
 		m_latestCommit = m_init;
 	}
 
-	Future<EncryptionAtRestMode> encryptionMode() { return m_encryptionMode.getFuture(); }
-
 	ACTOR static Future<Reference<ArenaPage>> makeEmptyRoot(VersionedBTree* self) {
 		state Reference<ArenaPage> page = self->m_pager->newPageBuffer();
 		page->init(self->m_encodingType, PageType::BTreeNode, 1);
-		if (page->isEncrypted()) {
-			ArenaPage::EncryptionKey k = wait(self->m_keyProvider->getLatestDefaultEncryptionKey());
-			page->encryptionKey = k;
-		}
 
 		BTreePage* btpage = (BTreePage*)page->mutateData();
 		btpage->init(1, 0);
@@ -5180,71 +5057,6 @@ public:
 		return freedPages;
 	}
 
-	void checkOrUpdateEncodingType(const std::string& event,
-	                               const EncryptionAtRestMode& encryptionMode,
-	                               EncodingType& encodingType) {
-		EncodingType expectedEncodingType = EncodingType::MAX_ENCODING_TYPE;
-		if (encryptionMode == EncryptionAtRestMode::DISABLED) {
-			expectedEncodingType = EncodingType::XXHash64;
-		} else {
-			expectedEncodingType = FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ? EncodingType::AESEncryptionWithAuth
-			                                                                     : EncodingType::AESEncryption;
-		}
-		// Randomly enable XOR encryption in simulation. Also ignore encoding type mismatch if XOR encryption is set but
-		// default encoding is expected.
-		if (encodingType == EncodingType::MAX_ENCODING_TYPE) {
-			encodingType = expectedEncodingType;
-			if (encodingType == EncodingType::XXHash64 && g_network->isSimulated() && m_logID.hash() % 2 == 0) {
-				encodingType = EncodingType::XOREncryption_TestOnly;
-			}
-		} else if (encodingType != expectedEncodingType) {
-			// In simulation we could enable xor encryption for testing. Ignore encoding type mismatch in such a case.
-			if (!(g_network->isSimulated() && encodingType == EncodingType::XOREncryption_TestOnly &&
-			      expectedEncodingType == EncodingType::XXHash64)) {
-				TraceEvent(SevWarnAlways, "RedwoodBTreeMismatchEncryptionModeAndEncodingType")
-				    .detail("InstanceName", m_pager->getName())
-				    .detail("Event", event)
-				    .detail("EncryptionMode", encryptionMode)
-				    .detail("ExpectedEncodingType", expectedEncodingType)
-				    .detail("ActualEncodingType", encodingType);
-				throw encrypt_mode_mismatch();
-			}
-		}
-	}
-
-	void initEncryptionKeyProvider() {
-		if (!m_keyProvider.isValid()) {
-			switch (m_encodingType) {
-			case EncodingType::XXHash64:
-				m_keyProvider = makeReference<NullEncryptionKeyProvider>();
-				break;
-			case EncodingType::XOREncryption_TestOnly:
-				m_keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(m_name);
-				break;
-			case EncodingType::AESEncryption:
-				ASSERT(m_expectedEncryptionMode.present());
-				ASSERT(m_db.isValid());
-				m_keyProvider = makeReference<AESEncryptionKeyProvider<AESEncryption>>(
-				    m_db, m_expectedEncryptionMode.get(), m_encryptionMonitor);
-				break;
-			case EncodingType::AESEncryptionWithAuth:
-				ASSERT(m_expectedEncryptionMode.present());
-				ASSERT(m_db.isValid());
-				m_keyProvider = makeReference<AESEncryptionKeyProvider<AESEncryptionWithAuth>>(
-				    m_db, m_expectedEncryptionMode.get(), m_encryptionMonitor);
-				break;
-			default:
-				ASSERT(false);
-			}
-		} else {
-			ASSERT_EQ(m_encodingType, m_keyProvider->expectedEncodingType());
-		}
-		m_pager->setEncryptionKeyProvider(m_keyProvider);
-		if (m_pBoundaryVerifier != nullptr) {
-			m_pBoundaryVerifier->setKeyProvider(m_keyProvider);
-		}
-	}
-
 	ACTOR static Future<Void> init_impl(VersionedBTree* self) {
 		wait(self->m_pager->init());
 		self->m_pBuffer.reset(new MutationBuffer());
@@ -5264,33 +5076,9 @@ public:
 		state Value btreeHeader = self->m_pager->getCommitRecord();
 		if (btreeHeader.size() == 0) {
 			// Create new BTree
-
-			if (!self->m_expectedEncryptionMode.present()) {
-				// We can only create a new BTree if the encryption mode is known.
-				// If it is not known, then this init() was on a Redwood instance that already exited on disk but
-				// which had not completed its first BTree commit so it recovered to a state before the BTree
-				// existed in the Pager.  We must treat this case as error as the file is not usable via this open
-				// path.
-				Error err = storage_engine_not_initialized();
-
-				// The current version of FDB should not produce this scenario on disk so it should not be observed
-				// during recovery.  However, previous versions can produce it so in a restarted simulation test
-				// we will assume that is what happened and throw the error as an injected fault.
-				if (g_network->isSimulated() && g_simulator->restarted) {
-					err = err.asInjectedFault();
-				}
-				throw err;
-			}
-
-			self->m_encryptionMode.send(self->m_expectedEncryptionMode.get());
-			self->checkOrUpdateEncodingType("NewBTree", self->m_expectedEncryptionMode.get(), self->m_encodingType);
-			self->initEncryptionKeyProvider();
-			self->m_enforceEncodingType = isEncodingTypeEncrypted(self->m_encodingType);
-
 			self->m_header.formatVersion = BTreeCommitHeader::FORMAT_VERSION;
 			self->m_header.encodingType = self->m_encodingType;
 			self->m_header.height = 1;
-			self->m_header.encryptionMode = self->m_expectedEncryptionMode.get();
 
 			LogicalPageID id = wait(self->m_pager->newPageID());
 			self->m_header.root = BTreeNodeLinkRef((LogicalPageID*)&id, 1);
@@ -5320,21 +5108,6 @@ public:
 				throw e;
 			}
 
-			if (self->m_expectedEncryptionMode.present()) {
-				if (self->m_header.encryptionMode != self->m_expectedEncryptionMode.get()) {
-					TraceEvent(SevWarnAlways, "RedwoodBTreeEncryptionModeMismatched")
-					    .detail("InstanceName", self->m_pager->getName())
-					    .detail("ExpectedEncryptionMode", self->m_expectedEncryptionMode)
-					    .detail("StoredEncryptionMode", self->m_header.encryptionMode);
-					throw encrypt_mode_mismatch();
-				} else {
-					self->m_expectedEncryptionMode = self->m_header.encryptionMode;
-				}
-			} else {
-				self->m_expectedEncryptionMode = self->m_header.encryptionMode;
-			}
-			self->m_encryptionMode.send(self->m_header.encryptionMode);
-
 			ASSERT_NE(EncodingType::MAX_ENCODING_TYPE, self->m_header.encodingType);
 			if (self->m_encodingType == EncodingType::MAX_ENCODING_TYPE) {
 				self->m_encodingType = self->m_header.encodingType;
@@ -5345,11 +5118,6 @@ public:
 				    .detail("ExistingEncodingType", self->m_header.encodingType);
 				throw unexpected_encoding_type();
 			}
-			// Verify if encryption mode and encoding type in the header are consistent.
-			// This check can also fail in case of authentication mode mismatch.
-			self->checkOrUpdateEncodingType("ExistingBTree", self->m_header.encryptionMode, self->m_encodingType);
-			self->initEncryptionKeyProvider();
-			self->m_enforceEncodingType = isEncodingTypeEncrypted(self->m_encodingType);
 
 			self->m_lazyClearQueue.recover(self->m_pager, self->m_header.lazyDeleteQueue, "LazyClearQueueRecovered");
 			debug_printf("BTree recovered.\n");
@@ -5374,10 +5142,18 @@ public:
 
 	virtual ~VersionedBTree() {
 		// DecodeBoundaryVerifier objects outlive simulated processes.
+		//
+		// [meta-commentary] Well, why?  Can we get rid of that?  Why does *this* code
+		// [meta-commentary] need to care about *some other code's* random low level dirty laundry like
+		// [meta-commentary] the following:
+		//
 		// Thus, if we did not clear the key providers here, each DecodeBoundaryVerifier object might
 		// maintain references to untracked peers through its key provider. This would result in
 		// errors when FlowTransport::removePeerReference is called to remove a peer that is no
 		// longer tracked by FlowTransport::transport().
+		//
+		// [meta-commentary] And yet we write the above comments like we're PROUD that we know everybody's dirty laundry.
+		//
 		if (m_pBoundaryVerifier != nullptr) {
 			m_pBoundaryVerifier->setKeyProvider(Reference<IPageEncryptionKeyProvider>());
 		}
@@ -5385,6 +5161,10 @@ public:
 		// This probably shouldn't be called directly (meaning deleting an instance directly) but it should be safe,
 		// it will cancel init and commit and leave the pager alive but with potentially an incomplete set of
 		// uncommitted writes so it should not be committed.
+		//
+		// [meta-commentary] Why do we even need to define ~VersionedBTree at all?  Why not just run until we get killed?
+		// [meta-commenatry] If we want an interface to quiesce things, then define that.
+		//
 		m_latestCommit.cancel();
 		m_lazyClearActor.cancel();
 		m_init.cancel();
@@ -5655,13 +5435,9 @@ private:
 
 	IPager2* m_pager;
 	Reference<AsyncVar<ServerDBInfo> const> m_db;
-	Optional<EncryptionAtRestMode> m_expectedEncryptionMode;
 
-	Promise<EncryptionAtRestMode> m_encryptionMode;
 	EncodingType m_encodingType;
 	bool m_enforceEncodingType;
-	Reference<IPageEncryptionKeyProvider> m_keyProvider;
-	Reference<GetEncryptCipherKeysMonitor> m_encryptionMonitor;
 
 	// Counter to update with DecodeCache memory usage
 	int64_t* m_pDecodeCacheMemory = nullptr;
@@ -5700,12 +5476,11 @@ private:
 		            int blockSize,
 		            EncodingType encodingType,
 		            unsigned int height,
-		            bool enableEncryptionDomain,
 		            bool splitByDomain,
 		            IPageEncryptionKeyProvider* keyProvider)
 		  : startIndex(index), count(0), pageSize(blockSize),
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
-		    kvBytes(0), encodingType(encodingType), height(height), enableEncryptionDomain(enableEncryptionDomain),
+		    kvBytes(0), encodingType(encodingType), height(height),
 		    splitByDomain(splitByDomain), keyProvider(keyProvider) {
 
 			// Subtrace Page header overhead, BTreePage overhead, and DeltaTree (BTreePage::BinaryTree) overhead.
@@ -5715,7 +5490,7 @@ private:
 
 		PageToBuild next() {
 			return PageToBuild(
-			    endIndex(), blockSize, encodingType, height, enableEncryptionDomain, splitByDomain, keyProvider);
+			    endIndex(), blockSize, encodingType, height, splitByDomain, keyProvider);
 		}
 
 		int startIndex; // Index of the first record
@@ -5730,11 +5505,9 @@ private:
 
 		EncodingType encodingType;
 		unsigned int height;
-		bool enableEncryptionDomain;
 		bool splitByDomain;
 		IPageEncryptionKeyProvider* keyProvider;
 
-		Optional<int64_t> domainId = Optional<int64_t>();
 		size_t domainPrefixLength = 0;
 		bool canUseDefaultDomain = false;
 
@@ -5758,7 +5531,7 @@ private:
 
 		std::string toString() const {
 			return format("{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d "
-			              "large=%d, domain=%s}",
+			              "large=%d}",
 			              startIndex,
 			              count,
 			              usedBytes(),
@@ -5767,8 +5540,7 @@ private:
 			              kvBytes,
 			              blockCount,
 			              blockSize,
-			              largeDeltaTree,
-			              ::toString(domainId).c_str());
+			              largeDeltaTree);
 		}
 
 		// Move an item from a to b if a has 2 or more items and the item fits in b
@@ -5809,56 +5581,6 @@ private:
 				return false;
 			}
 
-			if (enableEncryptionDomain) {
-				int64_t defaultDomainId = keyProvider->getDefaultEncryptionDomainId();
-				int64_t currentDomainId;
-				size_t prefixLength;
-				if (count == 0 || splitByDomain) {
-					std::tie(currentDomainId, prefixLength) = keyProvider->getEncryptionDomain(rec.key);
-				}
-				if (count == 0) {
-					domainId = currentDomainId;
-					domainPrefixLength = prefixLength;
-					canUseDefaultDomain =
-					    (height > 1 && (currentDomainId == defaultDomainId ||
-					                    (prefixLength == rec.key.size() &&
-					                     (nextRecord.key == dbEnd.key ||
-					                      !nextRecord.key.startsWith(rec.key.substr(0, prefixLength))))));
-				} else if (splitByDomain) {
-					ASSERT(domainId.present());
-					if (domainId == currentDomainId) {
-						// The new record falls in the same domain as the rest of the page.
-						// Since this is not the first record, the key must contain a non-prefix portion,
-						// so we cannot use the default domain the encrypt the page (unless domainId is the default
-						// domain).
-						if (domainId != defaultDomainId) {
-							ASSERT(prefixLength < rec.key.size());
-							canUseDefaultDomain = false;
-						}
-					} else if (canUseDefaultDomain &&
-					           (currentDomainId == defaultDomainId ||
-					            (prefixLength == rec.key.size() &&
-					             (nextRecord.key == dbEnd.key ||
-					              !nextRecord.key.startsWith(rec.key.substr(0, prefixLength)))))) {
-						// The new record meets one of the following conditions:
-						//   1. it falls in the default domain, or
-						//   2. its key contain only the domain prefix, and
-						//     2a. the following record doesn't fall in the same domain.
-						// In this case switch to use the default domain to encrypt the page.
-						// Condition 2a is needed, because if there are multiple records from the same domain,
-						// they need to form their own page(s).
-						domainId = defaultDomainId;
-						domainPrefixLength = 0;
-					} else {
-						// The new record doesn't fit in the same domain as the existing page.
-						return false;
-					}
-				} else {
-					ASSERT(domainPrefixLength < rec.key.size());
-					canUseDefaultDomain = false;
-				}
-			}
-
 			++count;
 			bytesLeft -= nodeSize;
 			kvBytes += rec.kvBytes();
@@ -5883,9 +5605,7 @@ private:
 		}
 
 		void finish() {
-			if (enableEncryptionDomain && canUseDefaultDomain) {
-				domainId = keyProvider->getDefaultEncryptionDomainId();
-			}
+			/* empty, used to do encryption stuff. */
 		}
 	};
 
@@ -5909,21 +5629,9 @@ private:
 		double maxNewSlack = SERVER_KNOBS->REDWOOD_PAGE_REBUILD_SLACK_DISTRIBUTION;
 		std::vector<PageToBuild> pages;
 
-		// Whether encryption is used and we need to set encryption domain for a page.
-		bool enableEncryptionDomain =
-		    isEncodingTypeEncrypted(m_encodingType) && m_keyProvider->enableEncryptionDomain();
 		// Whether we may need to split by encryption domain. It is mean to be an optimization to avoid
 		// unnecessary domain check and may not be exhaust all cases.
 		bool splitByDomain = false;
-		if (enableEncryptionDomain && records.size() > 1) {
-			int64_t firstDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[0].key));
-			int64_t lastDomain = std::get<0>(m_keyProvider->getEncryptionDomain(records[records.size() - 1].key));
-			// If the two record falls in the same non-default domain, we know all the records fall in the
-			// same domain. Otherwise we may need to split pages by domain.
-			if (firstDomain != lastDomain || firstDomain == m_keyProvider->getDefaultEncryptionDomainId()) {
-				splitByDomain = true;
-			}
-		}
 
 		// deltaSizes contains pair-wise delta sizes for [lowerBound, records..., upperBound]
 		std::vector<int> deltaSizes(records.size() + 1);
@@ -5934,7 +5642,7 @@ private:
 		}
 
 		PageToBuild p(
-		    0, m_blockSize, m_encodingType, height, enableEncryptionDomain, splitByDomain, m_keyProvider.getPtr());
+		    0, m_blockSize, m_encodingType, height, splitByDomain, m_keyProvider.getPtr());
 
 		for (int i = 0; i < records.size();) {
 			bool force = p.count < minRecords || p.slackFraction() > maxSlack;
@@ -5973,20 +5681,15 @@ private:
 			PageToBuild& a = pages[pages.size() - 2];
 			PageToBuild& b = pages.back();
 
-			// We can rebalance the two pages only if they are in the same encryption domain.
-			ASSERT(!enableEncryptionDomain || (a.domainId.present() && b.domainId.present()));
-			if (!enableEncryptionDomain || a.domainId.get() == b.domainId.get()) {
-
-				// While the last page page has too much slack and the second to last page
-				// has more than the minimum record count, shift a record from the second
-				// to last page to the last page.
-				while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
-					int i = a.lastIndex();
-					if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
-						break;
-					}
-					debug_printf("  After shifting i=%d: a=%s b=%s\n", i, a.toString().c_str(), b.toString().c_str());
+			// While the last page page has too much slack and the second to last page
+			// has more than the minimum record count, shift a record from the second
+			// to last page to the last page.
+			while (b.slackFraction() > maxNewSlack && a.count > minRecords) {
+				int i = a.lastIndex();
+				if (!PageToBuild::shiftItem(a, b, deltaSizes[i], records[i].kvBytes())) {
+					break;
 				}
+				debug_printf("  After shifting i=%d: a=%s b=%s\n", i, a.toString().c_str(), b.toString().c_str());
 			}
 		}
 
@@ -6009,10 +5712,6 @@ private:
 		// All records share the prefix shared by the lower and upper boundaries
 		state int prefixLen = lowerBound->getCommonPrefixLen(*upperBound);
 
-		// Whether encryption is used and we need to set encryption domain for a page.
-		state bool enableEncryptionDomain =
-		    isEncodingTypeEncrypted(self->m_encodingType) && self->m_keyProvider->enableEncryptionDomain();
-
 		state std::vector<PageToBuild> pagesToBuild =
 		    self->splitPages(lowerBound, upperBound, prefixLen, entries, height);
 		ASSERT(pagesToBuild.size() > 0);
@@ -6024,24 +5723,6 @@ private:
 		state int sinceYield = 0;
 
 		state int pageIndex;
-
-		if (enableEncryptionDomain) {
-			ASSERT(pagesToBuild[0].domainId.present());
-			int64_t domainId = pagesToBuild[0].domainId.get();
-			// We make sure the page lower bound fits in the domain of the page.
-			// If the page domain is the default domain, we make sure the page doesn't fall within a domain
-			// specific subtree.
-			// If the page domain is non-default, in addition, we make the first page of the domain on a level
-			// use the domain prefix as the lower bound. Such a lower bound will ensure that pages for a domain
-			// form a full subtree (i.e. have a single root) in the B-tree.
-			if (!self->m_keyProvider->keyFitsInDomain(domainId, pageLowerBound.key, true)) {
-				if (domainId == self->m_keyProvider->getDefaultEncryptionDomainId()) {
-					pageLowerBound = RedwoodRecordRef(entries[0].key);
-				} else {
-					pageLowerBound = RedwoodRecordRef(entries[0].key.substr(0, pagesToBuild[0].domainPrefixLength));
-				}
-			}
-		}
 
 		state PageToBuild* p = nullptr;
 		for (pageIndex = 0; pageIndex < pagesToBuild.size(); ++pageIndex) {
@@ -6060,25 +5741,6 @@ private:
 				pageUpperBound.truncate(commonPrefix + 1);
 			}
 
-			if (enableEncryptionDomain && pageUpperBound.key != dbEnd.key) {
-				int64_t ubDomainId;
-				KeyRef ubDomainPrefix;
-				if (lastPage) {
-					size_t ubPrefixLength;
-					std::tie(ubDomainId, ubPrefixLength) = self->m_keyProvider->getEncryptionDomain(pageUpperBound.key);
-					ubDomainPrefix = pageUpperBound.key.substr(0, ubPrefixLength);
-				} else {
-					PageToBuild& nextPage = pagesToBuild[pageIndex + 1];
-					ASSERT(nextPage.domainId.present());
-					ubDomainId = nextPage.domainId.get();
-					ubDomainPrefix = entries[nextPage.startIndex].key.substr(0, nextPage.domainPrefixLength);
-				}
-				if (ubDomainId != self->m_keyProvider->getDefaultEncryptionDomainId() &&
-				    p->domainId.get() != ubDomainId) {
-					pageUpperBound = RedwoodRecordRef(ubDomainPrefix);
-				}
-			}
-
 			// For internal pages, skip first entry if child link is null.  Such links only exist
 			// to maintain a borrow-able prefix for the previous subtree after a subtree deletion.
 			// If the null link falls on a new page post-split, then the pageLowerBound of the page
@@ -6091,18 +5753,17 @@ private:
 				--p->count;
 				debug_printf("Skipping first null record, new count=%d\n", p->count);
 
-				// In case encryption or encryption domain is not enabled, if the page is now empty then it must be
+				// If the page is now empty then it must be
 				// the last page in pagesToBuild, otherwise there would be more than 1 item since internal pages
-				// need to have multiple children. In case encryption and encryption domain is enabled, however,
-				// because of the page split by encryption domain, it may not be the last page.
+				// need to have multiple children.
 				//
-				// Either way, a record must be added to the output set because the upper boundary of the last
+				// A record must be added to the output set because the upper boundary of the last
 				// page built does not match the upper boundary of the original page that this call to writePages() is
 				// replacing.  Put another way, the upper boundary of the rightmost page of the page set that was just
 				// built does not match the upper boundary of the original page that the page set is replacing, so
 				// adding the extra null link fixes this.
 				if (p->count == 0) {
-					ASSERT(enableEncryptionDomain || lastPage);
+					ASSERT(lastPage);
 					records.push_back_deep(records.arena(), pageLowerBound);
 					pageLowerBound = pageUpperBound;
 					continue;
@@ -6113,12 +5774,6 @@ private:
 			state Reference<ArenaPage> page = self->m_pager->newPageBuffer(p->blockCount);
 			page->init(
 			    self->m_encodingType, (p->blockCount == 1) ? PageType::BTreeNode : PageType::BTreeSuperNode, height);
-			if (page->isEncrypted()) {
-				ArenaPage::EncryptionKey k =
-				    wait(enableEncryptionDomain ? self->m_keyProvider->getLatestEncryptionKey(p->domainId.get())
-				                                : self->m_keyProvider->getLatestDefaultEncryptionKey());
-				page->encryptionKey = k;
-			}
 
 			BTreePage* btPage = (BTreePage*)page->mutateData();
 			btPage->init(height, p->kvBytes);
@@ -6209,7 +5864,7 @@ private:
 
 			if (self->m_pBoundaryVerifier != nullptr) {
 				ASSERT(self->m_pBoundaryVerifier->update(
-				    childPageID, v, pageLowerBound.key, pageUpperBound.key, height, p->domainId));
+							 childPageID, v, pageLowerBound.key, pageUpperBound.key, height);
 			}
 
 			if (++sinceYield > 100) {
@@ -6257,27 +5912,10 @@ private:
 		// commit record, build a new root page and update records to be a link to that new page.
 		// Root pointer size is limited because the pager commit header is limited to smallestPhysicalBlock in
 		// size.
-		//
-		// There's another case. When encryption domain is enabled, we want to make sure the root node is encrypted
-		// using the default encryption domain. An indication that's not true is when the first record is not using
-		// dbBegin as key.
 		while (records.size() > 1 ||
 		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
 		       records[0].key != dbBegin.key) {
 			CODE_PROBE(records.size() == 1, "Writing a new root because the current root pointer would be too large");
-			if (records[0].key != dbBegin.key) {
-				ASSERT(self->m_expectedEncryptionMode.present() &&
-				       self->m_expectedEncryptionMode.get().isEncryptionEnabled());
-				ASSERT(self->m_keyProvider.isValid() && self->m_keyProvider->enableEncryptionDomain());
-				int64_t domainId;
-				size_t prefixLength;
-				std::tie(domainId, prefixLength) = self->m_keyProvider->getEncryptionDomain(records[0].key);
-				ASSERT(domainId != self->m_keyProvider->getDefaultEncryptionDomainId());
-				ASSERT(records[0].key.size() == prefixLength);
-				CODE_PROBE(true,
-				           "Writing a new root because the current root is encrypted with non-default encryption "
-				           "domain cipher key");
-			}
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
@@ -6610,11 +6248,10 @@ private:
 		                     bool alreadyCloned,
 		                     bool updating,
 		                     ParentInfo* parentInfo,
-		                     Reference<IPageEncryptionKeyProvider> keyProvider,
 		                     Optional<int64_t> pageDomainId,
 		                     int maxHeightAllowed)
 		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
-		    keyProvider(keyProvider), pageDomainId(pageDomainId), maxHeightAllowed(maxHeightAllowed) {}
+		    pageDomainId(pageDomainId), maxHeightAllowed(maxHeightAllowed) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -6629,7 +6266,6 @@ private:
 		bool changesMade;
 		ParentInfo* parentInfo;
 
-		Reference<IPageEncryptionKeyProvider> keyProvider;
 		Optional<int64_t> pageDomainId;
 
 		int maxHeightAllowed;
@@ -6665,16 +6301,7 @@ private:
 					const RedwoodRecordRef& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
-					// Fail if the inserted record does not belong to the same encryption domain as the existing page
-					// data.
-					bool canInsert = true;
-					if (page->isEncrypted() && keyProvider->enableEncryptionDomain()) {
-						ASSERT(keyProvider && pageDomainId.present());
-						canInsert = keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, true);
-					}
-					if (canInsert) {
-						canInsert = end.insert(rec, 0, maxHeightAllowed);
-					}
+					bool canInsert = end.insert(rec, 0, maxHeightAllowed);
 
 					if (!canInsert) {
 						debug_printf("internal page: failed to insert %s, switching to rebuild\n",
@@ -6845,12 +6472,6 @@ private:
 		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
 		state bool tryToUpdate = btPage->tree()->numItems > 0 && update->boundariesNormal();
 
-		state bool enableEncryptionDomain = page->isEncrypted() && self->m_keyProvider->enableEncryptionDomain();
-		state Optional<int64_t> pageDomainId;
-		if (enableEncryptionDomain) {
-			pageDomainId = page->getEncryptionDomainId();
-		}
-
 		debug_printf("%s tryToUpdate=%d\n", context.c_str(), tryToUpdate);
 		debug_print(addPrefix(context,
 		                      btPage->toString("commitSubtreeStart",
@@ -6970,15 +6591,8 @@ private:
 
 						// If updating, first try to add the record to the page
 						if (updatingDeltaTree) {
-							bool canInsert = true;
-							if (enableEncryptionDomain) {
-								ASSERT(pageDomainId.present());
-								canInsert = self->m_keyProvider->keyFitsInDomain(pageDomainId.get(), rec.key, false);
-							}
-							if (canInsert) {
-								copyForUpdate();
-								canInsert = cursor.insert(rec, update->skipLen, maxHeightAllowed);
-							}
+							copyForUpdate();
+							bool canInsert = cursor.insert(rec, update->skipLen, maxHeightAllowed);
 							if (canInsert) {
 								btPage->kvBytes += rec.kvBytes();
 								debug_printf("%s Inserted %s [mutation, boundary start]\n",
@@ -7754,15 +7368,10 @@ public:
 #endif
 
 				           if (btree->m_pBoundaryVerifier != nullptr) {
-					           Optional<int64_t> domainId;
-					           if (p->isEncrypted() && btree->m_keyProvider->enableEncryptionDomain()) {
-						           domainId = p->getEncryptionDomainId();
-					           }
 					           ASSERT(btree->m_pBoundaryVerifier->verify(link.get().getChildPage().front(),
 					                                                     pager->getVersion(),
 					                                                     link.get().key,
 					                                                     link.next().getOrUpperBound().key,
-					                                                     domainId,
 					                                                     cursor));
 				           }
 				           return Void();
@@ -8019,16 +7628,9 @@ public:
 	KeyValueStoreRedwood(std::string filename,
 	                     UID logID,
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
-	                     Optional<EncryptionAtRestMode> encryptionMode,
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	                     Reference<IPageEncryptionKeyProvider> keyProvider = {},
-	                     int64_t pageCacheBytes = 0,
-	                     Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = {})
+	                     int64_t pageCacheBytes = 0)
 	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
-		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
-			ASSERT(keyProvider.isValid() || db.isValid());
-		}
-
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
@@ -8055,8 +7657,7 @@ public:
 		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false);
-		m_tree = new VersionedBTree(
-		    pager, filename, logID, db, encryptionMode, encodingType, keyProvider, encryptionMonitor);
+		m_tree = new VersionedBTree(pager, filename, logID, db, encodingType);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -8071,8 +7672,6 @@ public:
 		self->m_nextCommitVersion = self->m_tree->getLastCommittedVersion() + 1;
 		return Void();
 	}
-
-	Future<EncryptionAtRestMode> encryptionMode() override { return m_tree->encryptionMode(); }
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
@@ -8338,7 +7937,6 @@ private:
 	Promise<Void> m_errorPromise;
 	bool prefetch;
 	Version m_nextCommitVersion;
-	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
@@ -8350,17 +7948,12 @@ private:
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
-                                       Optional<EncryptionAtRestMode> encryptionMode,
-                                       int64_t pageCacheBytes,
-                                       Reference<GetEncryptCipherKeysMonitor> encryptionMonitor) {
+                                       int64_t pageCacheBytes) {
 	return new KeyValueStoreRedwood(filename,
 	                                logID,
 	                                db,
-	                                encryptionMode,
 	                                EncodingType::MAX_ENCODING_TYPE,
-	                                Reference<IPageEncryptionKeyProvider>(),
-	                                pageCacheBytes,
-	                                encryptionMonitor);
+	                                pageCacheBytes);
 }
 
 int randomSize(int max) {
@@ -10158,10 +9751,6 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state int encoding =
 	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
-	state unsigned int encryptionDomainMode =
-	    params.getInt("domainMode")
-	        .orDefault(deterministicRandom()->randomInt(
-	            0, RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::MAX));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -10232,25 +9821,13 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                                   (keyGen.getMaxKeyLen() + valGen.getMaxValLen()) * int64_t(20000), 10e6)));
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
-	state EncryptionAtRestMode encryptionMode =
-	    !isEncodingTypeAESEncrypted(encodingType)
-	        ? EncryptionAtRestMode::DISABLED
-	        : (encryptionDomainMode == RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode::DISABLED
-	               ? EncryptionAtRestMode::CLUSTER_AWARE
-	               : EncryptionAtRestMode::DOMAIN_AWARE);
-	state Reference<IPageEncryptionKeyProvider> keyProvider;
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	if (encodingType == EncodingType::AESEncryption) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryption>>(
-		    RandomEncryptionKeyProvider<AESEncryption>::EncryptionDomainMode(encryptionDomainMode));
-		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ false }));
-	} else if (encodingType == EncodingType::AESEncryptionWithAuth) {
-		keyProvider = makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>(
-		    RandomEncryptionKeyProvider<AESEncryptionWithAuth>::EncryptionDomainMode(encryptionDomainMode));
-		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ true }));
-		g_knobs.setKnob("encrypt_header_auth_token_algo", KnobValueRef::create(int{ 1 }));
-	} else if (encodingType == EncodingType::XOREncryption_TestOnly) {
+	if (encodingType == EncodingType::XOREncryption_TestOnly) {
 		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
+	} else {
+		// Fix this shit
+		printf("encodingType = [%d]\n", (int) encodingType);
+		ASSERT(false);
 	}
 
 	printf("\n");
@@ -10262,7 +9839,6 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
 	printf("encodingType: %d\n", encodingType);
-	printf("domainMode: %d\n", encryptionDomainMode);
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
 	printf("keyGenerator: %s\n", keyGen.toString().c_str());
@@ -10288,7 +9864,14 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("Initializing...\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
+
+	//		VersionedBTree(IPager2* pager,
+	//               std::string name,
+	//             UID logID,
+	//             Reference<AsyncVar<ServerDBInfo> const> db,
+	//             EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE)
+
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {}, encodingType);
 	wait(btree->init());
 
 	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10537,7 +10120,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-				btree = new VersionedBTree(pager, file, UID(), {}, encryptionMode, encodingType, keyProvider);
+
+				btree = new VersionedBTree(pager, file, UID(), {}, encodingType);
 
 				wait(btree->init());
 
@@ -10588,9 +10172,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                           file,
 		                           UID(),
 		                           {},
-		                           {},
-		                           encodingType,
-		                           keyProvider);
+		                           encodingType);
 		wait(btree->init());
 	}
 
@@ -10729,7 +10311,6 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	if (reload) {
 		pager = new DWALPager(
 		    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-		pager->setEncryptionKeyProvider(makeReference<NullEncryptionKeyProvider>());
 		wait(success(pager->init()));
 
 		LogicalPageID extID = pager->newLastExtentID();
@@ -10781,7 +10362,6 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	printf("Reopening pager file from disk.\n");
 	pager = new DWALPager(
 	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
-	pager->setEncryptionKeyProvider(makeReference<NullEncryptionKeyProvider>());
 	wait(success(pager->init()));
 
 	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
@@ -10923,8 +10503,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(
-	    pager, file, UID(), {}, {}, EncodingType::XXHash64, makeReference<NullEncryptionKeyProvider>());
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {}, EncodingType::XXHash64);
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 
@@ -11561,70 +11140,5 @@ TEST_CASE(":/redwood/performance/histograms") {
 	double elapsed_time_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 	std::cout << "Time needed to log 33 histograms (millisecond): " << elapsed_time_ms << std::endl;
 
-	return Void();
-}
-
-namespace {
-void setAuthMode(EncodingType encodingType) {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	if (encodingType == AESEncryption) {
-		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ false }));
-	} else {
-		g_knobs.setKnob("encrypt_header_auth_token_enabled", KnobValueRef::create(bool{ true }));
-		g_knobs.setKnob("encrypt_header_auth_token_algo", KnobValueRef::create(int{ 1 }));
-	}
-}
-} // anonymous namespace
-
-TEST_CASE("/redwood/correctness/EnforceEncodingType") {
-	state const std::vector<std::pair<EncodingType, EncodingType>> testCases = {
-		{ XXHash64, XOREncryption_TestOnly }, { AESEncryption, AESEncryptionWithAuth }
-	};
-	state const std::map<EncodingType, Reference<IPageEncryptionKeyProvider>> encryptionKeyProviders = {
-		{ XXHash64, makeReference<NullEncryptionKeyProvider>() },
-		{ XOREncryption_TestOnly, makeReference<XOREncryptionKeyProvider_TestOnly>("test.redwood-v1") },
-		{ AESEncryption, makeReference<RandomEncryptionKeyProvider<AESEncryption>>() },
-		{ AESEncryptionWithAuth, makeReference<RandomEncryptionKeyProvider<AESEncryptionWithAuth>>() }
-	};
-	state IKeyValueStore* kvs = nullptr;
-	g_allowXOREncryptionInSimulation = false;
-	for (const auto& testCase : testCases) {
-		state EncodingType initialEncodingType = testCase.first;
-		state EncodingType reopenEncodingType = testCase.second;
-		ASSERT_NE(initialEncodingType, reopenEncodingType);
-		ASSERT(isEncodingTypeEncrypted(reopenEncodingType));
-		deleteFile("test.redwood-v1");
-		printf("Create KV store with encoding type %d\n", initialEncodingType);
-		setAuthMode(initialEncodingType);
-		kvs = new KeyValueStoreRedwood("test.redwood-v1",
-		                               UID(),
-		                               {}, // db
-		                               isEncodingTypeAESEncrypted(initialEncodingType)
-		                                   ? EncryptionAtRestMode::CLUSTER_AWARE
-		                                   : EncryptionAtRestMode::DISABLED,
-		                               initialEncodingType,
-		                               encryptionKeyProviders.at(initialEncodingType));
-		wait(kvs->init());
-		kvs->set(KeyValueRef("foo"_sr, "bar"_sr));
-		wait(kvs->commit());
-		wait(closeKVS(kvs));
-		// Reopen
-		printf("Reopen KV store with encoding type %d\n", reopenEncodingType);
-		setAuthMode(reopenEncodingType);
-		kvs = new KeyValueStoreRedwood("test.redwood-v1",
-		                               UID(),
-		                               {}, // db
-		                               {}, // encryptionMode
-		                               reopenEncodingType,
-		                               encryptionKeyProviders.at(reopenEncodingType));
-		try {
-			wait(kvs->init());
-			Optional<Value> v = wait(kvs->readValue("foo"_sr));
-			UNREACHABLE();
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_unexpected_encoding_type);
-		}
-		wait(closeKVS(kvs, true /*dispose*/));
-	}
 	return Void();
 }

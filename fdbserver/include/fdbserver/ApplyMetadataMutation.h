@@ -25,7 +25,6 @@
 #include <cstddef>
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -87,6 +86,8 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
                                       IKeyValueStore* txnStateStore);
 
+// TODO(gglass): delete for real
+#if 0
 void applyMetadataMutations(SpanContext const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
@@ -100,19 +101,43 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Version popVersion,
                             bool initialCommit,
                             bool provisionalCommitProxy);
+#endif
+
+void applyMetadataMutations(SpanContext const& spanContext,
+                            ProxyCommitData& proxyCommitData,
+                            Arena& arena,
+                            Reference<ILogSystem> logSystem,
+                            const VectorRef<MutationRef>& mutations,
+                            LogPushData* pToCommit,
+							bool& confChange,
+                            Version version,
+                            Version popVersion,
+                            bool initialCommit,
+                            bool provisionalCommitProxy);
+
 void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
 
+
 bool containsMetadataMutation(const VectorRef<MutationRef>& mutations);
 
 // Resolver's version
+
+// TODO(gglass): delete for real
+
+#if 0
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
                             const VectorRef<MutationRef>& mutations,
                             const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* pCipherKeys,
                             EncryptionAtRestMode encryptMode);
+#endif
+
+void applyMetadataMutations(SpanContext const& spanContext,
+                            ResolverData& resolverData,
+                            const VectorRef<MutationRef>& mutations);
 
 #endif
