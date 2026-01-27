@@ -316,6 +316,8 @@ public:
 
 	static std::string lastOpenError;
 
+	virtual Future<Void> encryptionSetupComplete() const = 0;
+
 	// TODO: change the following back to `private` once blob obj access is refactored
 protected:
 	std::string URL;
