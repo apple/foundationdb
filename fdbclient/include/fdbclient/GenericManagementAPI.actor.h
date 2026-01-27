@@ -202,9 +202,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
-	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
-		// Encryption data at-rest mode can be set only at the time of database creation
-		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
 	}
 
 	state Future<Void> tooLong = delay(60);

@@ -23,9 +23,7 @@
 #ifndef FDBSERVER_IPAGER_H
 #define FDBSERVER_IPAGER_H
 
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/IClosable.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Error.h"
@@ -96,23 +94,18 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 	{ PagerEvents::PageWrite, PagerEventReasons::MetaData },
 };
 
+// These values are the sort of thing that are likely to appear in serialized persisted
+// data, so to avoid any possible confusion with old code and new code relating to
+// reusing enum values for unrelated purposes, the enum contains the deprecated
+// encrypted values (2 and 3).  They are renamed to help find and eliminate source
+// code which uses them.
 enum EncodingType : uint8_t {
 	XXHash64 = 0,
 	XOREncryption_TestOnly = 1,
-	AESEncryption = 2,
-	AESEncryptionWithAuth = 3,
+	AESEncryption_DEPRECATED = 2,
+	AESEncryptionWithAuth_DEPRECATED = 3,
 	MAX_ENCODING_TYPE = 4
 };
-
-static constexpr std::array EncryptedEncodingTypes = { AESEncryption, AESEncryptionWithAuth, XOREncryption_TestOnly };
-inline bool isEncodingTypeEncrypted(EncodingType encoding) {
-	return std::find(EncryptedEncodingTypes.begin(), EncryptedEncodingTypes.end(), encoding) !=
-	       EncryptedEncodingTypes.end();
-}
-
-inline bool isEncodingTypeAESEncrypted(EncodingType encoding) {
-	return encoding == AESEncryption || encoding == AESEncryptionWithAuth;
-}
 
 enum PageType : uint8_t {
 	HeaderPage = 0,
@@ -660,23 +653,6 @@ public:
 
 	const Arena& getArena() const { return arena; }
 	
-// TODO(gglass): remove callers if possible
-#if 0
-	// Returns true if the page's encoding type employs encryption
-	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
-
-	// Return encryption domain id used. This method only use information from the encryptionKey.
-	// Caller should make sure encryption domain is in use.
-	int64_t getEncryptionDomainId() const {
-		// encryption domain is only supported by AESEncryption and AESEncryptionWithAuth.
-		ASSERT(getEncodingType() == EncodingType::AESEncryption ||
-		       getEncodingType() == EncodingType::AESEncryptionWithAuth);
-		const Reference<BlobCipherKey>& cipherKey = encryptionKey.aesKey.cipherTextKey;
-		ASSERT(cipherKey.isValid());
-		return cipherKey->getDomainId();
-	}
-#endif
-
 	// Return pointer to encoding header.
 	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
 

@@ -44,9 +44,6 @@
 template class ReplyPromise<MasterInterface>;
 template struct NetSAV<MasterInterface>;
 
-// Instantiate ServerDBInfo related templates
-template class GetEncryptCipherKeys<struct ServerDBInfo>;
-
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req);
 
 Version figureVersionCxx(Version current,

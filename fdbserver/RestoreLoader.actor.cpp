@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
+// TODO(gglass): is this stuff needed?
+
 // This file implements the functions and actors used by the RestoreLoader role.
 // The RestoreLoader role starts with the restoreLoaderCore actor
 
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
