@@ -239,11 +239,6 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		std::string protocol = p.toString();
 		boost::algorithm::to_lower(protocol);
 		this->connType = RESTConnectionType::getConnectionType(protocol);
-		if (!this->connType.secure && !CLIENT_KNOBS->REST_KMS_ALLOW_NOT_SECURE_CONNECTION) {
-			TraceEvent(SevWarnAlways, "RESTUtilsUnSupportedNotSecureConn").detail("Protocol", protocol);
-			CODE_PROBE(true, "REST URI not-secure connection not supported");
-			throw rest_unsupported_protocol();
-		}
 
 		// extract 'resource' and optional 'parameter list' if supplied in the URL
 		uint8_t foundSeparator = 0;

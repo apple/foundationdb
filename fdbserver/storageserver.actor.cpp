@@ -10554,6 +10554,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		try {
 			loop {
 				choose {
+					when(wait(ioTimeoutError(durable,
+											 SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME,
+											 "StorageCommit"))) {
+						break;
+					}
 					when(wait(delay(60.0))) {
 						TraceEvent(SevWarn, "CommitTooLong", data->thisServerID)
 						    .detail("FetchBytes", data->fetchKeysTotalCommitBytes)

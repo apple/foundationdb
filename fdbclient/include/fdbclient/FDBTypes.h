@@ -1423,19 +1423,21 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
-// TODO(gglass): come back and see if more of this can be removed.  We only use DISABLED.
+// TODO(gglass): come back and see if more of this can be removed.  We only use DISABLED, and that
+// too it should only really be used in places where we write out persistent metadata, so that
+// we can write "disabled" into metadata seen by older code versions in downgrade scenarios.
 struct EncryptionAtRestModeDeprecated {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
 	enum Mode {
 		DISABLED = 0,
-		DOMAIN_AWARE_DEPRECATED = 1
-		CLUSTER_AWARE_DEPRECATED = 2,
+		DOMAIN_AWARE = 1,
+		CLUSTER_AWARE = 2,
 		END = 3,
 	};
 
-	EncryptionAtRestMode() : mode(DISABLED) {}
-	EncryptionAtRestMode(Mode mode) : mode(mode) {
+	EncryptionAtRestModeDeprecated() : mode(DISABLED) {}
+	EncryptionAtRestModeDeprecated(Mode mode) : mode(mode) {
 		if ((uint32_t)mode >= END) {
 			this->mode = DISABLED;
 		}
@@ -1461,13 +1463,13 @@ struct EncryptionAtRestModeDeprecated {
 		return "";
 	}
 
-	static EncryptionAtRestMode fromString(std::string mode) {
+	static EncryptionAtRestModeDeprecated fromString(std::string mode) {
 		if (mode == "disabled") {
-			return EncryptionAtRestMode::DISABLED;
+			return EncryptionAtRestModeDeprecated::DISABLED;
 		} else if (mode == "cluster_aware") {
-			return EncryptionAtRestMode::CLUSTER_AWARE;
+			return EncryptionAtRestModeDeprecated::CLUSTER_AWARE;
 		} else if (mode == "domain_aware") {
-			return EncryptionAtRestMode::DOMAIN_AWARE;
+			return EncryptionAtRestModeDeprecated::DOMAIN_AWARE;
 		} else {
 			TraceEvent(SevError, "UnknownEncryptMode").detail("EncryptMode", mode);
 			ASSERT(false);
@@ -1477,16 +1479,16 @@ struct EncryptionAtRestModeDeprecated {
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
 
-	bool isEquals(const EncryptionAtRestMode& e) const { return this->mode == e.mode; }
+	bool isEquals(const EncryptionAtRestModeDeprecated& e) const { return this->mode == e.mode; }
 
-	bool operator==(const EncryptionAtRestMode& e) const { return isEquals(e); }
-	bool operator!=(const EncryptionAtRestMode& e) const { return !isEquals(e); }
+	bool operator==(const EncryptionAtRestModeDeprecated& e) const { return isEquals(e); }
+	bool operator!=(const EncryptionAtRestModeDeprecated& e) const { return !isEquals(e); }
 	bool operator==(Mode m) const { return mode == m; }
 	bool operator!=(Mode m) const { return mode != m; }
 
-	bool isEncryptionEnabled() const { return mode != EncryptionAtRestMode::DISABLED; }
+	bool isEncryptionEnabled() const { return mode != EncryptionAtRestModeDeprecated::DISABLED; }
 
-	static EncryptionAtRestMode fromValueRef(Optional<ValueRef> val) {
+	static EncryptionAtRestModeDeprecated fromValueRef(Optional<ValueRef> val) {
 		if (!val.present()) {
 			return DISABLED;
 		}
@@ -1500,20 +1502,20 @@ struct EncryptionAtRestModeDeprecated {
 		return static_cast<Mode>(num);
 	}
 
-	static EncryptionAtRestMode fromValue(Optional<Value> val) {
+	static EncryptionAtRestModeDeprecated fromValue(Optional<Value> val) {
 		if (!val.present()) {
-			return EncryptionAtRestMode();
+			return EncryptionAtRestModeDeprecated();
 		}
 
-		return EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(val.get().contents()));
+		return EncryptionAtRestModeDeprecated::fromValueRef(Optional<ValueRef>(val.get().contents()));
 	}
 
 	uint32_t mode;
 };
 
 template <>
-struct Traceable<EncryptionAtRestMode> : std::true_type {
-	static std::string toString(const EncryptionAtRestMode& mode) { return mode.toString(); }
+struct Traceable<EncryptionAtRestModeDeprecated> : std::true_type {
+	static std::string toString(const EncryptionAtRestModeDeprecated& mode) { return mode.toString(); }
 };
 
 typedef StringRef ClusterNameRef;

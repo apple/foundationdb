@@ -5864,7 +5864,7 @@ private:
 
 			if (self->m_pBoundaryVerifier != nullptr) {
 				ASSERT(self->m_pBoundaryVerifier->update(
-							 childPageID, v, pageLowerBound.key, pageUpperBound.key, height);
+									 childPageID, v, pageLowerBound.key, pageUpperBound.key, height));
 			}
 
 			if (++sinceYield > 100) {

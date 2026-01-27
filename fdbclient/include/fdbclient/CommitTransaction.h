@@ -22,10 +22,7 @@
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #pragma once
 
-// TODO(gglass): remove this for real
-// #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
 #include "flow/EncryptUtils.h"
@@ -559,58 +556,5 @@ struct MutationsAndVersionRef {
 		serializer(ar, mutations, version, knownCommittedVersion);
 	}
 };
-
-struct MutationRefAndCipherKeys {
-	MutationRef mutation;
-	TextAndHeaderCipherKeys cipherKeys;
-};
-
-// TODO(gglass): remove this
-#if 0
-struct EncryptedMutationsAndVersionRef {
-	VectorRef<MutationRef> mutations;
-	Optional<VectorRef<MutationRef>> encrypted;
-	std::vector<TextAndHeaderCipherKeys> cipherKeys;
-	Version version = invalidVersion;
-	Version knownCommittedVersion = invalidVersion;
-
-	EncryptedMutationsAndVersionRef() {}
-	explicit EncryptedMutationsAndVersionRef(Version version, Version knownCommittedVersion)
-	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
-	EncryptedMutationsAndVersionRef(VectorRef<MutationRef> mutations,
-	                                VectorRef<MutationRef> encrypted,
-	                                const std::vector<TextAndHeaderCipherKeys>& cipherKeys,
-	                                Version version,
-	                                Version knownCommittedVersion)
-	  : mutations(mutations), encrypted(encrypted), cipherKeys(cipherKeys), version(version),
-	    knownCommittedVersion(knownCommittedVersion) {}
-	EncryptedMutationsAndVersionRef(Arena& to,
-	                                VectorRef<MutationRef> mutations,
-	                                Optional<VectorRef<MutationRef>> encrypt,
-	                                const std::vector<TextAndHeaderCipherKeys>& cipherKeys,
-	                                Version version,
-	                                Version knownCommittedVersion)
-	  : mutations(to, mutations), cipherKeys(cipherKeys), version(version),
-	    knownCommittedVersion(knownCommittedVersion) {
-		if (encrypt.present()) {
-			encrypted = VectorRef<MutationRef>(to, encrypt.get());
-		}
-	}
-	EncryptedMutationsAndVersionRef(Arena& to, const EncryptedMutationsAndVersionRef& from)
-	  : mutations(to, from.mutations), cipherKeys(from.cipherKeys), version(from.version),
-	    knownCommittedVersion(from.knownCommittedVersion) {
-		if (from.encrypted.present()) {
-			encrypted = VectorRef<MutationRef>(to, from.encrypted.get());
-		}
-	}
-	int expectedSize() const { return mutations.expectedSize(); }
-
-	struct OrderByVersion {
-		bool operator()(EncryptedMutationsAndVersionRef const& a, EncryptedMutationsAndVersionRef const& b) const {
-			return a.version < b.version;
-		}
-	};
-};
-#endif 
 
 #endif
