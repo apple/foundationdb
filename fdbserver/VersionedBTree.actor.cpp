@@ -2009,7 +2009,6 @@ public:
 	// If the file already exists, pageSize might be different than desiredPageSize
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
 	// If memoryOnly is true, the pager will exist only in memory and once the cache is full writes will fail.
-	// Note that ownership is not taken for keyProvider and it must outlive the pager
 	DWALPager(int desiredPageSize,
 	          int desiredExtentSize,
 	          std::string filename,
@@ -4930,7 +4929,7 @@ public:
 	               Reference<AsyncVar<ServerDBInfo> const> db,
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE)
 	  : m_pager(pager), m_db(db), m_encodingType(encodingType),
-	    m_enforceEncodingType(false), m_keyProvider(keyProvider),
+	    m_enforceEncodingType(false),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_logID(logID),
 	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
@@ -5141,30 +5140,6 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
-		// DecodeBoundaryVerifier objects outlive simulated processes.
-		//
-		// [meta-commentary] Well, why?  Can we get rid of that?  Why does *this* code
-		// [meta-commentary] need to care about *some other code's* random low level dirty laundry like
-		// [meta-commentary] the following:
-		//
-		// Thus, if we did not clear the key providers here, each DecodeBoundaryVerifier object might
-		// maintain references to untracked peers through its key provider. This would result in
-		// errors when FlowTransport::removePeerReference is called to remove a peer that is no
-		// longer tracked by FlowTransport::transport().
-		//
-		// [meta-commentary] And yet we write the above comments like we're PROUD that we know everybody's dirty laundry.
-		//
-		if (m_pBoundaryVerifier != nullptr) {
-			m_pBoundaryVerifier->setKeyProvider(Reference<IPageEncryptionKeyProvider>());
-		}
-
-		// This probably shouldn't be called directly (meaning deleting an instance directly) but it should be safe,
-		// it will cancel init and commit and leave the pager alive but with potentially an incomplete set of
-		// uncommitted writes so it should not be committed.
-		//
-		// [meta-commentary] Why do we even need to define ~VersionedBTree at all?  Why not just run until we get killed?
-		// [meta-commenatry] If we want an interface to quiesce things, then define that.
-		//
 		m_latestCommit.cancel();
 		m_lazyClearActor.cancel();
 		m_init.cancel();
@@ -5476,12 +5451,11 @@ private:
 		            int blockSize,
 		            EncodingType encodingType,
 		            unsigned int height,
-		            bool splitByDomain,
-		            IPageEncryptionKeyProvider* keyProvider)
+		            bool splitByDomain)
 		  : startIndex(index), count(0), pageSize(blockSize),
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
 		    kvBytes(0), encodingType(encodingType), height(height),
-		    splitByDomain(splitByDomain), keyProvider(keyProvider) {
+		    splitByDomain(splitByDomain) {
 
 			// Subtrace Page header overhead, BTreePage overhead, and DeltaTree (BTreePage::BinaryTree) overhead.
 			bytesLeft =
@@ -5490,7 +5464,7 @@ private:
 
 		PageToBuild next() {
 			return PageToBuild(
-			    endIndex(), blockSize, encodingType, height, splitByDomain, keyProvider);
+			    endIndex(), blockSize, encodingType, height, splitByDomain);
 		}
 
 		int startIndex; // Index of the first record
@@ -5506,7 +5480,6 @@ private:
 		EncodingType encodingType;
 		unsigned int height;
 		bool splitByDomain;
-		IPageEncryptionKeyProvider* keyProvider;
 
 		size_t domainPrefixLength = 0;
 		bool canUseDefaultDomain = false;
@@ -5641,8 +5614,7 @@ private:
 			deltaSizes[i] = records[i].deltaSize(records[i - 1], prefixLen, true);
 		}
 
-		PageToBuild p(
-		    0, m_blockSize, m_encodingType, height, splitByDomain, m_keyProvider.getPtr());
+		PageToBuild p(0, m_blockSize, m_encodingType, height, splitByDomain);
 
 		for (int i = 0; i < records.size();) {
 			bool force = p.count < minRecords || p.slackFraction() > maxSlack;
@@ -6248,10 +6220,9 @@ private:
 		                     bool alreadyCloned,
 		                     bool updating,
 		                     ParentInfo* parentInfo,
-		                     Optional<int64_t> pageDomainId,
 		                     int maxHeightAllowed)
 		  : updating(updating), page(p), clonedPage(alreadyCloned), changesMade(false), parentInfo(parentInfo),
-		    pageDomainId(pageDomainId), maxHeightAllowed(maxHeightAllowed) {}
+		    maxHeightAllowed(maxHeightAllowed) {}
 
 		// Whether updating the existing page is allowed
 		bool updating;
@@ -6265,8 +6236,6 @@ private:
 		// Whether there are any changes to the page, either made in place or staged in rebuild
 		bool changesMade;
 		ParentInfo* parentInfo;
-
-		Optional<int64_t> pageDomainId;
 
 		int maxHeightAllowed;
 
@@ -6490,7 +6459,6 @@ private:
 				                                         batch->snapshot->getVersion(),
 				                                         update->cBegin.get().key,
 				                                         update->cBegin.next().getOrUpperBound().key,
-				                                         pageDomainId,
 				                                         cursor));
 			}
 		}
@@ -6995,7 +6963,7 @@ private:
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
 			state InternalPageModifier modifier(
-			    page, pageCopy.isValid(), tryToUpdate, parentInfo, self->m_keyProvider, pageDomainId, maxHeightAllowed);
+			    page, pageCopy.isValid(), tryToUpdate, parentInfo, maxHeightAllowed);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -8474,8 +8442,6 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 		                                               { "PagerRemapFree", metric.pagerRemapFree },
 		                                               { "PagerRemapCopy", metric.pagerRemapCopy },
 		                                               { "PagerRemapSkip", metric.pagerRemapSkip },
-		                                               { "", 0 },
-		                                               { "ReadRequestDecryptTimeNS", metric.readRequestDecryptTimeNS },
 		                                               { "", 0 } };
 
 	double elapsed = now() - startTime;
@@ -9821,14 +9787,6 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                                   (keyGen.getMaxKeyLen() + valGen.getMaxValLen()) * int64_t(20000), 10e6)));
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	if (encodingType == EncodingType::XOREncryption_TestOnly) {
-		keyProvider = makeReference<XOREncryptionKeyProvider_TestOnly>(file);
-	} else {
-		// Fix this shit
-		printf("encodingType = [%d]\n", (int) encodingType);
-		ASSERT(false);
-	}
 
 	printf("\n");
 	printf("file: %s\n", file.c_str());

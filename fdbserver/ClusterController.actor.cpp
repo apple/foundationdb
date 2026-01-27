@@ -919,9 +919,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto currColocMap = getColocCounts(currPids);
 	auto newColocMap = getColocCounts(newPids);
 
-	ASSERT(currColocMap[currEKPProcessId] == 0);
-	ASSERT(newColocMap[newEKPProcessId] == 0);
-
 	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
 	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&

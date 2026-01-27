@@ -1306,7 +1306,6 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 			continue; // rangeLock is transparent to lock-aware transactions
 		}
 		VectorRef<MutationRef>* pMutations = &trs[i].transaction.mutations;
-		bool transactionRejected = false;
 		for (int j = 0; j < pMutations->size(); j++) {
 			MutationRef m = (*pMutations)[j];
 			KeyRange rangeToCheck;
@@ -1319,8 +1318,7 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 			if (shouldReject) {
 				self->committed[i] = ConflictBatch::TransactionLockReject;
 				trs[i].reply.sendError(transaction_rejected_range_locked());
-				transactionRejected = true;
-				beak;
+				break;
 			}
 		}
 	}
@@ -2094,11 +2092,10 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* pCommitData,
                                int currentBatchMemBytesCount) {
 
 	state CommitBatch::CommitBatchContext context(pCommitData, trs, currentBatchMemBytesCount);
-
-	Future<Void> commit = CommitBatch::commitBatchImpl(&context);
+	state Future<Void> commit = CommitBatch::commitBatchImpl(&context);
 
 	try {
-		wait(timeout(commit, SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT));
+		wait(timeoutError(commit, SERVER_KNOBS->COMMIT_PROXY_LIVENESS_TIMEOUT));
 	} catch (Error& err) {
 		TraceEvent(SevInfo, "CommitBatchFailed", pCommitData->dbgid)
 		    .detail("Stage", context.stage)

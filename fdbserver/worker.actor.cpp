@@ -644,7 +644,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
-		                              ekpInterf->get(),
 		                              csInterf->get(),
 		                              degraded->get(),
 		                              localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
@@ -724,9 +723,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 				break;
 			}
 			when(wait(csInterf->onChange())) {
-				break;
-			}
-			when(wait(ekpInterf->onChange())) {
 				break;
 			}
 			when(wait(degraded->onChange())) {
@@ -2504,7 +2500,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       initialClass,
 		                                       ddInterf,
 		                                       rkInterf,
-		                                       ekpInterf,
 		                                       csInterf,
 		                                       degraded,
 		                                       connRecord,
