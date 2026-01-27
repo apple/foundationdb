@@ -320,6 +320,13 @@ func (o NetworkOptions) SetClientBuggifySectionFiredProbability(param int64) err
 	return o.setOpt(83, int64ToBytes(param))
 }
 
+// Sets the IP address to use for tracing. If not provided, the IP address will be automatically determined when connecting to a cluster. This option allows you to specify the IP address explicitly and avoid the automatic determination process.
+//
+// Parameter: IP address in IPv4 or IPv6 format
+func (o NetworkOptions) SetTraceIp(param string) error {
+	return o.setOpt(84, []byte(param))
+}
+
 // Set a tracer to run on the client. Should be set to the same value as the tracer set on the server.
 //
 // Parameter: Distributed tracer type. Choose from none, log_file, or network_lossy

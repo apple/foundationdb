@@ -1,0 +1,7 @@
+- have history tab e.g. past recovery history, db config history, epoch history, etc. genearlly my principle has been "as of now" state, and no memory... but I guess I can extend this to "history as of now" and deem it as acceptable given its potential productivity gains
+- have epoch associated with txn interfaces. useful to understand what generation they belong to, especially useful during recovery.
+      --- log routers, tlog, backup workers DONE. left: master, cp, grv proxy, resolver, anything else in txn system which is associated with an epoch?
+- topology view nesting: role interface id child of a certain worker interface id, tlog id can be a child of a shared tlog id. visually show these.
+- control plane metadata (srcs: system key space, commit proxy txn state store, role specific code, etc.)
+      --- range maps (key to shard, shard to key range, shard to ss, ss to shards)
+      --- buddies in txn (ss <-> tlog on primary and remote, remote tlog <-> LR, LR <-> primary/satellite tlog)

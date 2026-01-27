@@ -64,7 +64,12 @@ void validateOptionValueNotPresent(Optional<StringRef> value);
 void enableClientInfoLogging();
 
 struct NetworkOptions {
+	// The localAddress is not used and is a left over of the deprecated network option localAddress.
 	std::string localAddress;
+	// traceIP can be set with the same NetworkOption to statically define the address used in trace events.
+	// If the traceIP is not set, it will be automcatically detected when the first connection attempt to a
+	// cluster is made.
+	Optional<IPAddress> traceIP;
 	std::string clusterFile;
 	Optional<std::string> traceDirectory;
 	uint64_t traceRollSize;
