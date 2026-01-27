@@ -280,18 +280,16 @@ void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena,
  Each `value` is a param2
 */
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
-                                               VectorRef<MutationRef>* result,
-											   // TODO(gglass): XXX: is this needed?
-                                               VectorRef<Optional<MutationRef>>* encryptedResult,
-                                               int* mutationSize,
-                                               Standalone<StringRef> value,
-                                               Key addPrefix,
-                                               Key removePrefix,
-                                               Version version,
-                                               Reference<KeyRangeMap<Version>> key_version,
-                                               Database cx,
-                                               bool provisionalProxy,
-                                               std::shared_ptr<DatabaseConfiguration> dbConfig) {
+											   VectorRef<MutationRef>* result,
+											   int* mutationSize,
+											   Standalone<StringRef> value,
+											   Key addPrefix,
+											   Key removePrefix,
+											   Version version,
+											   Reference<KeyRangeMap<Version>> key_version,
+											   Database cx,
+											   bool provisionalProxy,
+											   std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	try {
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
@@ -344,7 +342,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
 
-			MutationRef originalLogValue = logValue;
 			if (logValue.type == MutationRef::ClearRange) {
 				KeyRangeRef range(logValue.param1, logValue.param2);
 				auto ranges = key_version->intersectingRanges(range);
@@ -374,12 +371,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 							}
 							_addResult(result, mutationSize, arena, logValue);
 						}
-						// XXX TODO(gglass): is this needed
-						if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
-							encryptedResult->push_back_deep(*arena, encryptedLogValue);
-						} else {
-							encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
-						}
 					}
 				}
 			} else {
@@ -396,14 +387,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 					}
 					_addResult(result, mutationSize, arena, logValue);
-					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
-					// do not have to re-encrypt unnecessarily
-					// XXX TODO(gglass): is this needed
-					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
-						encryptedResult->push_back_deep(*arena, encryptedLogValue);
-					} else {
-						encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
-					}
 				}
 			}
 
@@ -681,13 +664,10 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
 
-	// mutations and encrypted mutations (and their relationship) is described in greater detail in the definition of
-	// CommitTransactionRef in CommitTransaction.h
+	// more info on this stuff: CommitTransactionRef in CommitTransaction.h
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
-	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
-	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
 
 	// The commit request contains no read conflict ranges, so regardless of what read version we
@@ -754,7 +734,6 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				Standalone<StringRef> value = bw.toValue();
 				wait(decodeBackupLogValue(&curReq.arena,
 				                          &curReq.transaction.mutations,
-				                          &curReq.transaction.encryptedMutations,
 				                          &curBatchMutationSize,
 				                          value,
 				                          addPrefix,
@@ -767,8 +746,6 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 
 				for (int i = 0; i < curReq.transaction.mutations.size(); i++) {
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
-					req.transaction.encryptedMutations.push_back_deep(req.arena,
-					                                                  curReq.transaction.encryptedMutations[i]);
 				}
 				mutationSize += curBatchMutationSize;
 				newBeginVersion = group.groupKey + 1;

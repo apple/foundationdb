@@ -707,7 +707,7 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(self, pContext, d));
+		wait(processCompleteTransactionStateRequest(self, pContext, db));
 		pContext->processed = true;
 	}
 

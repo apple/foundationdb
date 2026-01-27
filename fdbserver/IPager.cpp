@@ -25,8 +25,7 @@
 #include <limits>
 
 TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	for (uint8_t et = 0; et < EncodingType::MAX_ENCODING_TYPE; et++) {
+	for (uint8_t et = 0; et < EncodingType::MAX_USABLE_ENCODING_TYPE_PLUS_ONE; et++) {
 		constexpr int _PAGE_SIZE = 8 * 1024;
 		EncodingType encodingType = (EncodingType)et;
 		Reference<ArenaPage> page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
@@ -48,11 +47,7 @@ TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
 			page->postReadPayload(pageID);
 			UNREACHABLE();
 		} catch (Error& e) {
-			if (encodingType == AESEncryptionWithAuth) {
-				ASSERT_EQ(e.code(), error_code_encrypt_header_authtoken_mismatch);
-			} else {
-				ASSERT_EQ(e.code(), error_code_page_decoding_failed);
-			}
+			ASSERT_EQ(e.code(), error_code_page_decoding_failed);
 		}
 	}
 	return Void();

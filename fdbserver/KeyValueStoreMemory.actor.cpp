@@ -937,10 +937,12 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V2);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		return new KeyValueStoreMemory<radix_tree>(
-		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType, false, false, false, false);
+												   log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType,
+												   /*doc*/false, /*ument*/false, /*thisstuff FFS*/ false);
 	} else {
 		return new KeyValueStoreMemory<IKeyValueContainer>(
-		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType, false, false, false, false);
+		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType,
+			/* name */ false, /*the */ false, /* effing parameter*/ false);
 	}
 }
 

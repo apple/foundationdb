@@ -43,7 +43,7 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode, pageCacheBytes, encryptionMonitor);
+		return keyValueStoreRedwoodV1(filename, logID, db, pageCacheBytes);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

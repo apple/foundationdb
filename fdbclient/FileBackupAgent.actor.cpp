@@ -4921,14 +4921,6 @@ bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const
 	// decode param2, so that each actual mutations are in mutations variable
 	std::vector<MutationRef> mutations = decodeMutationLogValue(serializedMutations);
 	for (auto& m : mutations) {
-		if (m.type == MutationRef::Encrypted) {
-			// TODO:  In order to filter out encrypted mutations that are not relevant to the
-			// target range, they would have to be decrypted here in order to check relevance
-			// below, however the staged mutations would still need to remain encrypted for
-			// staging into the destination database.  Without decrypting, we must assume that
-			// some data could match the range and return true here.
-			return true;
-		}
 		if (filters.match(m)) {
 			return true;
 		}
@@ -7007,11 +6999,12 @@ public:
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
-										   // TODO(gglass): is this flag needed?
+										   // TODO(gglass): this is OK to delete
 	                                       bool encryptionEnabled,
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
+										   // NOTE(gglass): this field is used by us for file level backup encryption
 	                                       Optional<std::string> encryptionKeyFileName,
 	                                       int snapshotMode) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

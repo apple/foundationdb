@@ -151,8 +151,7 @@ struct DBCoreState {
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
 	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    encryptionAtRestModeDeprecatred(0)) {}
+	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
