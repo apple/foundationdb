@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2573,6 +2573,26 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 	}
 }
 
+ACTOR Future<int> getBulkLoadMode(Database cx) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			state int oldMode = 0;
+			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			if (oldModeValue.present()) {
+				BinaryReader rd(oldModeValue.get(), Unversioned());
+				rd >> oldMode;
+			}
+			return oldMode;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
 	ASSERT(normalKeys.contains(bulkLoadTask.getRange()) &&
 	       (bulkLoadTask.phase == BulkLoadPhase::Submitted ||
@@ -2848,11 +2868,15 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 }
 
 // TODO(Zhe): clear bulkload task metadata within the input range
-ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
+ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
+
 	state Transaction tr(cx);
 	loop {
 		try {
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			}
 			// There is at most one bulkLoad job or bulkDump job at a time globally
 			Optional<BulkDumpState> aliveBulkDumpJob = wait(getSubmittedBulkDumpJob(&tr));
 			if (aliveBulkDumpJob.present()) {
@@ -2917,13 +2941,16 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState) {
 	return Void();
 }
 
-ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx) {
+ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
 	state RangeResult rangeResult;
 	state Transaction tr(cx);
 	state Key beginKey = normalKeys.begin;
 	state Key endKey = normalKeys.end;
 	while (beginKey < endKey) {
 		try {
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			}
 			rangeResult.clear();
 			wait(store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey))));
 			for (int i = 0; i < rangeResult.size() - 1; i++) {

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,6 +78,9 @@
  * For file-based backups, continue using the original BackupAndRestoreCorrectness workload.
  */
 
+#include <atomic>
+#include "fdbclient/Audit.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -92,6 +95,12 @@
 #include "fdbserver/MockS3ServerChaos.h"
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// Counters to verify BulkDump/BulkLoad were actually used
+// These are incremented by trace event handlers in the backup/restore code paths
+// and checked by the test to ensure the expected paths were taken
+extern std::atomic<int> g_bulkDumpTaskCompleteCount;
+extern std::atomic<int> g_bulkLoadRestoreTaskCompleteCount;
 
 // S3-specific backup correctness workload - see file header for differences from BackupAndRestoreCorrectness
 struct BackupS3BlobCorrectnessWorkload : TestWorkload {
@@ -118,6 +127,15 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 	bool skipDirtyRestore;
 	int initSnapshotInterval;
 	int snapshotInterval;
+
+	// BulkDump/BulkLoad integration options
+	// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
+	int snapshotMode;
+	// useRangeFileRestore: false=use BulkLoad (default when backup uses BULKDUMP), true=use traditional rangefile
+	bool useRangeFileRestore;
+	// performValidation: if true, validates backup by restoring with prefix and running audit_storage validate_restore
+	// This must happen BEFORE clearing the database so we can compare original vs restored data
+	bool performValidation;
 
 	// Chaos testing options
 	bool enableChaos;
@@ -166,6 +184,16 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		skipDirtyRestore = getOption(options, "skipDirtyRestore"_sr, true);
 		initSnapshotInterval = getOption(options, "initSnapshotInterval"_sr, 0);
 		snapshotInterval = getOption(options, "snapshotInterval"_sr, 30);
+
+		// BulkDump/BulkLoad integration options
+		// snapshotMode: 0=RANGEFILE (default), 1=BULKDUMP, 2=BOTH
+		snapshotMode = getOption(options, "snapshotMode"_sr, 0);
+		// useRangeFileRestore: When false and backup used BULKDUMP, restore uses BulkLoad
+		// Default to true (traditional restore) for backward compatibility
+		useRangeFileRestore = getOption(options, "useRangeFileRestore"_sr, true);
+		// performValidation: Validates backup by comparing original data vs restored data
+		// Uses audit_storage validate_restore - must happen BEFORE clearing database
+		performValidation = getOption(options, "performValidation"_sr, false);
 
 		// Chaos testing options
 		enableChaos = getOption(options, "enableChaos"_sr, false);
@@ -463,7 +491,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,
-			                               self->encryptionKeyFileName));
+			                               self->encryptionKeyFileName,
+			                               self->snapshotMode));
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -622,8 +651,57 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					    .detail("LockUID", lockUID)
 					    .detail("BackupTag", printable(self->backupTag));
 
-					// Clear the backup ranges before restoring (unless skipDirtyRestore is true)
+					// BulkLoad validation: compare BulkLoad restore vs traditional restore
+					// 1. Traditional restore with addPrefix to system keyspace (\xff\x02/rlog/)
+					// 2. Clear normalKeys
+					// 3. BulkLoad restore to normalKeys
+					// 4. audit_storage validate_restore compares normalKeys vs prefixed data
+
+					// Prefix for validation - restored data goes to system keyspace
+					state Key validationPrefix = "\xff\x02/rlog/"_sr;
+					state Key validationPrefixEnd = "\xff\x02/rlog0"_sr;
+
+					if (self->performValidation) {
+						// Step 1: Restore with prefix using TRADITIONAL (rangefile) mode
+						TraceEvent("BS3BCW_ValidationStep1_TraditionalRestore")
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("ValidationPrefix", printable(validationPrefix));
+
+						Standalone<StringRef> validationRestoreTag(self->backupTag.toString() + "_validate");
+						try {
+							Version validationVersion =
+							    wait(backupAgent.restore(cx,
+							                             cx,
+							                             validationRestoreTag,
+							                             KeyRef(lastBackupContainer->getURL()),
+							                             lastBackupContainer->getProxy(),
+							                             self->restoreRanges,
+							                             WaitForComplete::True,
+							                             ::invalidVersion,
+							                             Verbose::True,
+							                             validationPrefix, // addPrefix
+							                             Key(), // removePrefix
+							                             LockDB::False, // already locked
+							                             UnlockDB::False, // don't unlock yet
+							                             OnlyApplyMutationLogs::False,
+							                             InconsistentSnapshotOnly::False,
+							                             ::invalidVersion,
+							                             lastBackupContainer->getEncryptionKeyFileName(),
+							                             lockUID,
+							                             true)); // useRangeFileRestore = true (traditional mode)
+
+							TraceEvent("BS3BCW_ValidationStep1_Complete")
+							    .detail("ValidationVersion", validationVersion)
+							    .detail("ValidationPrefix", printable(validationPrefix));
+						} catch (Error& e) {
+							TraceEvent(SevError, "BS3BCW_ValidationStep1_Failed").error(e);
+							throw;
+						}
+					}
+
+					// Step 2: Clear the backup ranges before restoring (unless skipDirtyRestore is true)
 					if (!self->skipDirtyRestore) {
+						TraceEvent("BS3BCW_ClearingNormalKeys");
 						wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -633,7 +711,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						}));
 					}
 
-					// Perform the restore
+					// Step 3: Perform the restore (with BulkLoad if configured)
 					TraceEvent("BS3BCW_Restore")
 					    .detail("LastBackupContainer", lastBackupContainer->getURL())
 					    .detail("BackupTag", printable(self->backupTag))
@@ -660,12 +738,132 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                     InconsistentSnapshotOnly::False,
 					                                     ::invalidVersion,
 					                                     lastBackupContainer->getEncryptionKeyFileName(),
-					                                     lockUID));
+					                                     lockUID,
+					                                     self->useRangeFileRestore));
 
 					TraceEvent("BS3BCW_RestoreComplete")
 					    .detail("BackupTag", printable(self->backupTag))
 					    .detail("RestoreVersion", v);
+
+					// ASSERT: When useRangeFileRestore=false, BulkLoad MUST have been used
+					if (!self->useRangeFileRestore) {
+						int bulkLoadCount = g_bulkLoadRestoreTaskCompleteCount.load();
+						TraceEvent("BS3BCW_AssertBulkLoadUsed")
+						    .detail("UseRangeFileRestore", self->useRangeFileRestore)
+						    .detail("BulkLoadRestoreTaskCompleteCount", bulkLoadCount);
+						// FAIL if BulkLoad didn't run
+						ASSERT(bulkLoadCount > 0);
+					}
+
+					// Step 4: Run audit to compare BulkLoad-restored vs traditional-restored
+					if (self->performValidation) {
+						TraceEvent("BS3BCW_ValidationStep4_AuditStarting")
+						    .detail("Comparing", "BulkLoad-restored (normalKeys) vs traditional-restored (prefix)");
+
+						state Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
+						state UID auditId;
+						state int auditRetryCount = 0;
+						state int maxAuditRetries = 5;
+
+						state Error auditError;
+						loop {
+							try {
+								UID scheduleResult = wait(timeoutError(auditStorage(clusterFile,
+								                                                    normalKeys,
+								                                                    AuditType::ValidateRestore,
+								                                                    KeyValueStoreType::END,
+								                                                    300.0),
+								                                       60.0));
+								auditId = scheduleResult;
+								break;
+							} catch (Error& e) {
+								auditError = e;
+								if (auditError.code() == error_code_timed_out ||
+								    auditError.code() == error_code_audit_storage_failed) {
+									auditRetryCount++;
+									if (auditRetryCount < maxAuditRetries) {
+										TraceEvent(SevWarn, "BS3BCW_ValidationAuditRetry")
+										    .error(auditError)
+										    .detail("RetryCount", auditRetryCount);
+										wait(delay(2.0 * auditRetryCount));
+										continue;
+									}
+								}
+								throw auditError;
+							}
+						}
+
+						TraceEvent("BS3BCW_ValidationAuditScheduled").detail("AuditID", auditId);
+
+						// Monitor audit progress
+						state double auditStartTime = now();
+						state double maxAuditWaitTime = 300.0;
+						state AuditPhase finalPhase = AuditPhase::Invalid;
+
+						loop {
+							wait(delay(5.0));
+
+							std::vector<AuditStorageState> auditStates =
+							    wait(getAuditStates(cx, AuditType::ValidateRestore, true));
+
+							for (const auto& auditState : auditStates) {
+								if (auditState.id == auditId) {
+									if (auditState.getPhase() == AuditPhase::Complete) {
+										finalPhase = AuditPhase::Complete;
+										break;
+									} else if (auditState.getPhase() == AuditPhase::Error ||
+									           auditState.getPhase() == AuditPhase::Failed) {
+										TraceEvent(SevError, "BS3BCW_ValidationAuditFailed")
+										    .detail("AuditID", auditId)
+										    .detail("Phase", (int)auditState.getPhase())
+										    .detail("Error", auditState.error)
+										    .detail(
+										        "Meaning",
+										        "BulkLoad restore produced different data than traditional restore!");
+										throw audit_storage_failed();
+									}
+								}
+							}
+
+							if (finalPhase == AuditPhase::Complete) {
+								break;
+							}
+
+							if (now() - auditStartTime > maxAuditWaitTime) {
+								TraceEvent(SevError, "BS3BCW_ValidationAuditTimeout")
+								    .detail("AuditID", auditId)
+								    .detail("ElapsedTime", now() - auditStartTime);
+								throw timed_out();
+							}
+						}
+
+						TraceEvent("BS3BCW_ValidationAuditComplete")
+						    .detail("AuditID", auditId)
+						    .detail("Result", "BulkLoad produces identical results to traditional restore");
+
+						// Step 5: Clean up validation data from system keyspace
+						wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							tr->clear(KeyRangeRef(validationPrefix, validationPrefixEnd));
+							return Void();
+						}));
+
+						TraceEvent("BS3BCW_ValidationComplete")
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("AuditID", auditId);
+					}
 				}
+			}
+
+			// ASSERT: Verify BulkDump was used when snapshotMode=1 (BULKDUMP) or 2 (BOTH)
+			if (self->snapshotMode == 1 || self->snapshotMode == 2) {
+				int bulkDumpCount = g_bulkDumpTaskCompleteCount.load();
+				TraceEvent("BS3BCW_AssertBulkDumpUsed")
+				    .detail("SnapshotMode", self->snapshotMode)
+				    .detail("BulkDumpTaskCompleteCount", bulkDumpCount);
+				// FAIL if BulkDump didn't run
+				ASSERT(bulkDumpCount > 0);
 			}
 
 			wait(b);
