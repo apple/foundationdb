@@ -1331,22 +1331,15 @@ void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorag
 	return;
 }
 
-// Akanksha TODO: Exprerimental actor
-ACTOR Future<Void> calculateUserKeyPartitions(DataDistributionTracker* self) {
-	state const int NUM_PARTITIONS = 100; // Hardcoded for now.
+// TODO akanksha: Exprerimental actor
+ACTOR Future<std::vector<KeyRange>> calculateBackupPartitions(DataDistributionTracker* self) {
+	// TODO akanksha: Hardcoded for now.
+	state const int NUM_PARTITIONS = 100;
 
 	state std::vector<std::pair<KeyRange, int64_t>> userShards;
 	state int64_t totalBytes = 0;
 
-	printf("User Key Space Shards (normalKeys)\n");
-
-	// NOTES:
-	// self->shards contains all shards:
-	// 		KeyRange -> ShardTrackedData
-	//			ShardTrackedData contains Data which includes Reference<AsyncVar<Optional<ShardMetrics>>> stats;
-	// Also it iterates in sorted key order because it's a RangeMap and RangeMap is ordered by key.
-	// So the iteration below goes through all shards in normalKeys range in sorted order.
-
+	// Step 1: Collect shard sizes
 	loop {
 		state bool needWait = false;
 		state Future<Void> onChange;
@@ -1355,34 +1348,25 @@ ACTOR Future<Void> calculateUserKeyPartitions(DataDistributionTracker* self) {
 
 		for (auto it : self->shards->intersectingRanges(normalKeys)) {
 
-			// Get the key range for this shard.
 			KeyRange shardRange = it.range();
-
-			// NOTES:
-			// Wait for metrics to be available
-			// It reads from the cache rather than querying storage servers directly.
-			// trackShardMetrics actor continually updates the cache.
+			// Await trackShardMetrics to populate stats in cache (waits for notification from background actor, no
+			// RPC).
 			if (!it->value().stats->get().present()) {
-				// Wait until stats are available in background by trackShardMetrics actor.
-				// Doesn't trigger a new RPC call. It's already being in Process/has to be done in the background by
-				// trackShardMetrics actor anyway.
 				onChange = it->value().stats->onChange();
 				needWait = true;
-				break; // EXIT iteration before waiting
+				break;
 			}
 
-			// Stored in memory.
 			StorageMetrics metrics = it->value().stats->get().get().metrics;
 
 			int64_t shardBytes = metrics.bytes;
 			totalBytes += shardBytes;
 
-			// Store in map: (KeyRange, size in bytes)
 			userShards.push_back(std::make_pair(shardRange, shardBytes));
 		}
 
 		if (!needWait) {
-			break; // EXIT loop
+			break;
 		}
 
 		wait(onChange);
@@ -1390,7 +1374,6 @@ ACTOR Future<Void> calculateUserKeyPartitions(DataDistributionTracker* self) {
 
 	// Step 2: Partition the shards
 	int64_t targetBytesPerPartition = totalBytes / NUM_PARTITIONS;
-	printf("Target bytes per partition: %" PRId64 "\n", targetBytesPerPartition);
 
 	state std::vector<KeyRange> partitions;
 	state int64_t currentPartitionBytes = 0;
@@ -1411,14 +1394,7 @@ ACTOR Future<Void> calculateUserKeyPartitions(DataDistributionTracker* self) {
 		}
 	}
 
-	// TODO Save in a more permanent place rather than printing.
-	for (int i = 0; i < partitions.size(); i++) {
-		printf("Partition %d: Begin=%s, End=%s\n",
-		       i,
-		       partitions[i].begin.printable().c_str(),
-		       partitions[i].end.printable().c_str());
-	}
-	return Void();
+	return partitions;
 }
 
 DataDistributionTracker::DataDistributionTracker(DataDistributionTrackerInitParams const& params)
@@ -2208,6 +2184,287 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	ASSERT(reply.shardMetrics.empty());
 	ASSERT(reply.maxReadLoad == -1);
 	ASSERT(reply.minReadLoad == -1);
+
+	return Void();
+}
+
+// Helper to create minimal DataDistributionTracker for testing
+DataDistributionTracker* createTestTracker(KeyRangeMap<ShardTrackedData>* testShards) {
+	// Keep these alive long enough
+	static UID distId = deterministicRandom()->randomUniqueID();
+	static Promise<Void> readyPromise;
+	static PromiseStream<RelocateShard> output;
+
+	static Reference<ShardsAffectedByTeamFailure> sabTF = makeReference<ShardsAffectedByTeamFailure>();
+	static Reference<PhysicalShardCollection> psc = makeReference<PhysicalShardCollection>();
+	static Reference<BulkLoadTaskCollection> bltc = makeReference<BulkLoadTaskCollection>(distId);
+	static Reference<AsyncVar<bool>> anyZero = makeReference<AsyncVar<bool>>(false);
+	static bool cancelled = false;
+
+	DataDistributionTrackerInitParams params{ .db = Reference<IDDTxnProcessor>(),
+		                                      .distributorId = distId,
+		                                      .readyToStart = readyPromise,
+		                                      .output = output,
+		                                      .shardsAffectedByTeamFailure = sabTF,
+		                                      .physicalShardCollection = psc,
+		                                      .bulkLoadTaskCollection = bltc,
+		                                      .anyZeroHealthyTeams = anyZero,
+		                                      .shards = testShards,
+		                                      .trackerCancelled = &cancelled,
+		                                      .usableRegions = 1 };
+
+	auto* tracker = new DataDistributionTracker(params);
+
+	// Avoid waits on readyToStart breaking
+	if (!tracker->readyToStart.isSet()) {
+		tracker->readyToStart.send(Void());
+	}
+
+	return tracker;
+}
+
+TEST_CASE("/DataDistribution/calculateBackupPartitions/NoUserShards") {
+	ShardTrackedData defaultData;
+	// Make default stats present and explicitly zero, so even if normalKeys is covered,
+	// calculateBackupPartitions will not wait on onChange().
+	StorageMetrics zeroMetrics;
+	zeroMetrics.bytes = 0;
+	zeroMetrics.bytesWrittenPerKSecond = 0;
+	zeroMetrics.bytesReadPerKSecond = 0;
+	zeroMetrics.iosPerKSecond = 0;
+	zeroMetrics.opsReadPerKSecond = 0;
+	ShardMetrics zeroShard(zeroMetrics, 0.0, 1);
+	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(zeroShard);
+
+	KeyRangeMap<ShardTrackedData> shards(defaultData);
+
+	ShardTrackedData systemData;
+	systemData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(zeroShard);
+	shards.insert(systemKeys, systemData);
+
+	DataDistributionTracker* tracker = createTestTracker(&shards);
+
+	// With zero‑metrics everywhere, this behaves like "no user data".
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+
+	// Should return 1 partition covering entire normalKeys range
+	ASSERT(partitions.size() == 1);
+	ASSERT(partitions[0].begin == normalKeys.begin);
+	ASSERT(partitions[0].end == normalKeys.end);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/calculateBackupPartitions/SingleShard") {
+	ShardTrackedData defaultData;
+	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	KeyRangeMap<ShardTrackedData> shards(defaultData);
+
+	// Add single shard with metrics
+	ShardTrackedData data;
+	StorageMetrics metrics;
+	metrics.bytes = 1000000; // 1MB
+	ShardMetrics shardMetrics(metrics, 0.0, 1);
+	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
+	shards.insert(normalKeys, data);
+
+	DataDistributionTracker* tracker = createTestTracker(&shards);
+
+	// Call actual function - should complete without error and return 1 partition
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+
+	// With only 1MB of data, should create 1 partition
+	ASSERT(partitions.size() == 1);
+	ASSERT(partitions[0].begin == normalKeys.begin);
+	ASSERT(partitions[0].end == normalKeys.end);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/calculateBackupPartitions/VaryingSizes") {
+	ShardTrackedData defaultData;
+	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	KeyRangeMap<ShardTrackedData> shards(defaultData);
+
+	state Key key1 = normalKeys.begin.withSuffix(StringRef((uint8_t*)"a", 1));
+	state Key key2 = normalKeys.begin.withSuffix(StringRef((uint8_t*)"b", 1));
+	state Key key3 = normalKeys.begin.withSuffix(StringRef((uint8_t*)"c", 1));
+	state Key key4 = normalKeys.end;
+
+	// Add shards with different sizes
+	std::vector<std::pair<KeyRange, int64_t>> testShards = {
+		{ KeyRangeRef(normalKeys.begin, key1), 50000 }, // 50KB
+		{ KeyRangeRef(key1, key2), 200000 }, // 200KB
+		{ KeyRangeRef(key2, key3), 10000 }, // 10KB
+		{ KeyRangeRef(key3, key4), 90000 } // 90KB
+	};
+
+	for (const auto& shard : testShards) {
+		ShardTrackedData data;
+		StorageMetrics metrics;
+		metrics.bytes = shard.second;
+		ShardMetrics shardMetrics(metrics, 0.0, 1);
+		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
+		shards.insert(shard.first, data);
+	}
+
+	DataDistributionTracker* tracker = createTestTracker(&shards);
+
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+
+	// With varying sizes, should create 4 partitions (one per shard)
+	ASSERT(partitions.size() == 4);
+	ASSERT(partitions[0].begin == normalKeys.begin);
+	ASSERT(partitions[0].end == key1);
+	ASSERT(partitions[1].begin == key1);
+	ASSERT(partitions[1].end == key2);
+	ASSERT(partitions[2].begin == key2);
+	ASSERT(partitions[2].end == key3);
+	ASSERT(partitions[3].begin == key3);
+	ASSERT(partitions[3].end == key4);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/calculateBackupPartitions/ZeroSizeShards") {
+	ShardTrackedData defaultData;
+	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	KeyRangeMap<ShardTrackedData> shards(defaultData);
+
+	int shardCount = 0;
+	for (auto it : shards.ranges()) {
+		printf("Shard %d: [%s, %s)\n",
+		       shardCount,
+		       it.range().begin.printable().c_str(),
+		       it.range().end.printable().c_str());
+		shardCount++;
+	}
+	state Key key1 = normalKeys.begin.withSuffix(StringRef((uint8_t*)"a", 1));
+	state Key key2 = normalKeys.begin.withSuffix(StringRef((uint8_t*)"b", 1));
+	state Key key3 = normalKeys.end;
+
+	// Mix zero and non-zero size shards
+	std::vector<std::pair<KeyRange, int64_t>> testShards = {
+		{ KeyRangeRef(normalKeys.begin, key1), 0 }, // 0 bytes
+		{ KeyRangeRef(key1, key2), 1000000 }, // 1MB
+		{ KeyRangeRef(key2, key3), 0 } // 0 bytes
+	};
+
+	for (const auto& shard : testShards) {
+		ShardTrackedData data;
+		StorageMetrics metrics;
+		metrics.bytes = shard.second;
+		ShardMetrics shardMetrics(metrics, 0.0, 1);
+		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
+		shards.insert(shard.first, data);
+	}
+
+	DataDistributionTracker* tracker = createTestTracker(&shards);
+
+	// Call actual function - should handle zero-size shards correctly
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+
+	// With 0 + 1MB + 0 = 1MB total, target = 10KB per partition
+	// Should create 2 partitions (first includes zero-byte + 1MB shards, second is last zero-byte shard)
+	ASSERT(partitions.size() == 2);
+	ASSERT(partitions[0].begin == normalKeys.begin);
+	ASSERT(partitions[0].end == key2);
+	ASSERT(partitions[1].begin == key2);
+	ASSERT(partitions[1].end == normalKeys.end);
+
+	return Void();
+}
+
+ACTOR Future<Void> testAsyncMetricsUpdate() {
+	state ShardTrackedData defaultData;
+	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	state KeyRangeMap<ShardTrackedData> shards(defaultData);
+
+	state Key splitKey = normalKeys.begin.withSuffix(StringRef((uint8_t*)"split", 5));
+
+	// Add shard without metrics initially
+	ShardTrackedData emptyData;
+	emptyData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	shards.insert(KeyRangeRef(normalKeys.begin, splitKey), emptyData);
+
+	// Add shard with metrics
+	ShardTrackedData dataWithMetrics;
+	StorageMetrics metrics;
+	metrics.bytes = 100000;
+	ShardMetrics shardMetrics(metrics, 0.0, 1);
+	dataWithMetrics.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
+	shards.insert(KeyRangeRef(splitKey, normalKeys.end), dataWithMetrics);
+
+	state DataDistributionTracker* tracker = createTestTracker(&shards);
+
+	// Start calculation - should wait for missing metrics
+	state Future<std::vector<KeyRange>> resultFuture = calculateBackupPartitions(tracker);
+
+	wait(delay(0.1)); // Let it start waiting
+
+	// Provide the missing metrics
+	StorageMetrics newMetrics;
+	newMetrics.bytes = 50000;
+	ShardMetrics newShardMetrics(newMetrics, 0.0, 1);
+	shards.rangeContaining(normalKeys.begin)->value().stats->set(newShardMetrics);
+
+	std::vector<KeyRange> partitions = wait(resultFuture);
+
+	// With 50KB + 100KB = 150KB total, target = 1.5KB per partition
+	// Should create 2 partitions (one per shard since each > target)
+	ASSERT(partitions.size() == 2);
+	ASSERT(partitions[0].begin == normalKeys.begin);
+	ASSERT(partitions[0].end == splitKey);
+	ASSERT(partitions[1].begin == splitKey);
+	ASSERT(partitions[1].end == normalKeys.end);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/calculateBackupPartitions/AsyncMetrics") {
+	// Test that calculateBackupPartitions waits for missing shard metrics.
+	wait(testAsyncMetricsUpdate());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/calculateBackupPartitions/MultipleShards") {
+	ShardTrackedData defaultData;
+	StorageMetrics defaultMetrics;
+	defaultMetrics.bytes = 0;
+	ShardMetrics defaultShardMetrics(defaultMetrics, 0.0, 0);
+	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(defaultShardMetrics);
+	KeyRangeMap<ShardTrackedData> shards(defaultData);
+
+	// Create 1000 small shards
+	for (int i = 0; i < 1000; i++) {
+		std::string startStr = format("shard%04d", i);
+		std::string endStr = format("shard%04d", i + 1);
+		Key start = normalKeys.begin.withSuffix(StringRef(startStr));
+		Key end = (i == 999) ? normalKeys.end : normalKeys.begin.withSuffix(StringRef(endStr));
+
+		ShardTrackedData data;
+		StorageMetrics metrics;
+		metrics.bytes = 1000; // 1KB each = 1MB total
+		ShardMetrics shardMetrics(metrics, 0.0, 1);
+		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
+		shards.insert(KeyRangeRef(start, end), data);
+	}
+
+	DataDistributionTracker* tracker = createTestTracker(&shards);
+
+	// Call actual function - should create balanced partitions
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+
+	// With 1000 shards of 1KB each = 1MB total, target = 10KB per partition
+	// Should create ~100 partitions
+	ASSERT(partitions.size() == 100);
+	ASSERT(partitions[0].begin == normalKeys.begin);
+	ASSERT(partitions[partitions.size() - 1].end == normalKeys.end);
+
+	// Verify partitions are contiguous
+	for (int i = 1; i < partitions.size(); i++) {
+		ASSERT(partitions[i - 1].end == partitions[i].begin);
+	}
 
 	return Void();
 }
