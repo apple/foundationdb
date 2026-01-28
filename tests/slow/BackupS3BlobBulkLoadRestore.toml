@@ -22,7 +22,6 @@ testClass = "Backup"
 
 [configuration]
 storageEngineExcludeTypes = [5] # FIXME: remove after allowing bulkloading with fetchKey and shardedrocksdb
-encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS
 
 # Instruct simulation to generate a simple, single-region config (same as BulkDumpingS3.toml)

@@ -9,7 +9,6 @@ processesPerMachine = 2
 coordinators = 3
 machineCount = 45
 asanMachineCount = 20
-encryptModes=['disabled']
 
 [[test]]
 testTitle = 'PerpetualWiggleStorageMigration'

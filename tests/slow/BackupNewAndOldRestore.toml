@@ -1,7 +1,6 @@
 testClass = "Backup"
 
 [configuration]
-encryptModes = ['disabled'] # Do not support encryption
 
 [[test]]
 testTitle = 'NewBackup'
