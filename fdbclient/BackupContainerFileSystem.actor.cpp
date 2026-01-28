@@ -1405,14 +1405,53 @@ public:
 	}
 
 	ACTOR static Future<Void> writeEncryptionMetadataIfNotExists(Reference<BackupContainerFileSystem> bc) {
-		Optional<Version> existingEncryptionMetadata = wait(bc->fileLevelEncryption().get());
+		// Determine what value we would write (1 = encryption enabled, 0 = disabled)
+		state Version expectedValue = bc->encryptionKeyFileName.present() ? 1 : 0;
+
+		state Optional<Version> existingEncryptionMetadata = wait(bc->fileLevelEncryption().get());
 
 		if (!existingEncryptionMetadata.present()) {
 			bool exists = wait(bc->exists());
 			if (!exists) {
 				wait(bc->create());
 			}
-			wait(bc->fileLevelEncryption().set(bc->encryptionKeyFileName.present() ? 1 : 0));
+			// Try to write our value. Another writer may race with us, which is OK
+			// as long as they write the same value.
+			try {
+				wait(bc->fileLevelEncryption().set(expectedValue));
+			} catch (Error& e) {
+				// If write fails (e.g., due to race condition in simulation),
+				// we'll verify below that the correct value was written
+				TraceEvent(SevWarn, "BackupContainerEncryptionMetadataWriteError")
+				    .error(e)
+				    .detail("URL", bc->getURL())
+				    .detail("ExpectedValue", expectedValue);
+			}
+
+			// Read back to verify the value matches what we expected.
+			// This handles both the race condition (another writer won) and
+			// detects configuration mismatches (different encryption settings).
+			Optional<Version> finalValue = wait(bc->fileLevelEncryption().get());
+			if (!finalValue.present()) {
+				TraceEvent(SevError, "BackupContainerEncryptionMetadataMissing")
+				    .detail("URL", bc->getURL())
+				    .detail("ExpectedValue", expectedValue);
+				throw backup_error();
+			}
+			if (finalValue.get() != expectedValue) {
+				TraceEvent(SevError, "BackupContainerEncryptionMetadataMismatch")
+				    .detail("URL", bc->getURL())
+				    .detail("ExpectedValue", expectedValue)
+				    .detail("ActualValue", finalValue.get());
+				throw backup_error();
+			}
+		} else if (existingEncryptionMetadata.get() != expectedValue) {
+			// Metadata already exists but with different value - configuration mismatch
+			TraceEvent(SevError, "BackupContainerEncryptionMetadataMismatch")
+			    .detail("URL", bc->getURL())
+			    .detail("ExpectedValue", expectedValue)
+			    .detail("ActualValue", existingEncryptionMetadata.get());
+			throw backup_error();
 		}
 		return Void();
 	}

@@ -25,10 +25,11 @@ storageEngineExcludeTypes = [5] # FIXME: remove after allowing bulkloading with 
 encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS
 
-# Instruct simulation to generate a simple, single-region config (same as BulkDumpingS3.toml)
+# HA (multi-region) configuration - randomly enabled for test coverage
 generateFearless = false
 simpleConfig = false
 minimumRegions = 1
+# singleRegion not set - allows random HA configuration
 
 # Explicit simple config - single replication, single region, explicit process counts
 config = "single usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
