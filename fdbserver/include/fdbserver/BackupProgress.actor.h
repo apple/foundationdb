@@ -43,6 +43,10 @@ public:
 	// savedVersion is used.
 	void addBackupStatus(const WorkerBackupStatus& status);
 
+	// Adds a range backup status. If the range already has an entry, then the max of
+	// savedVersion is used.
+	void addRangeBackupStatus(const RangeBackupStatus& status);
+
 	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : std::map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
 	//
@@ -52,6 +56,11 @@ public:
 	//    else if savedVersion < endVersion - 1 = knownCommittedVersion
 	//        backup [savedVersion + 1, endVersion)
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> getUnfinishedBackup();
+
+	// Returns a map of tuple<Epoch, endVersion, totalRanges> : std::map<KeyRange, Version>, so that
+	// the backup range should be [savedVersion + 1, endVersion) for the "KeyRange" of the "Epoch".
+	// This is the range-partitioned version of getUnfinishedBackup().
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<KeyRange, Version>> getUnfinishedRangeBackup();
 
 	// Set the value for "backupStartedKey"
 	void setBackupStartedValue(Optional<Value> value) { backupStartedValue = value; }
@@ -86,6 +95,15 @@ private:
 	                       Version adjustedBeginVersion,
 	                       LogEpoch epoch);
 
+	// For each range in progress, the saved version is smaller than endVersion - 1,
+	// add {range, savedVersion+1} to rangeVersions and remove the range from "ranges".
+	void updateRangeVersions(std::map<KeyRange, Version>* rangeVersions,
+	                         std::set<KeyRange>* ranges,
+	                         const std::map<KeyRange, Version>& progress,
+	                         Version endVersion,
+	                         Version adjustedBeginVersion,
+	                         LogEpoch epoch);
+
 	const UID dbgid;
 
 	// Note this MUST be iterated in ascending order.
@@ -96,9 +114,16 @@ private:
 	// the gap. "progress" MUST be iterated in ascending order.
 	std::map<LogEpoch, std::map<Tag, Version>> progress;
 
+	// Range backup progress saved in the system keyspace for range-partitioned backups.
+	// Maps epoch to (KeyRange -> Version) for tracking progress per range.
+	std::map<LogEpoch, std::map<KeyRange, Version>> rangeProgress;
+
 	// LogRouterTags for each epoch obtained by decoding backup progress from
 	// the system keyspace.
 	std::map<LogEpoch, int32_t> epochTags;
+
+	// Total ranges for each epoch in range-partitioned backup mode.
+	std::map<LogEpoch, int32_t> epochRanges;
 
 	// Value of the "backupStartedKey".
 	Optional<Value> backupStartedValue;

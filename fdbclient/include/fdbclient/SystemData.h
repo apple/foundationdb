@@ -440,6 +440,37 @@ extern const KeyRef backupPausedKey;
 // The key to store the maximum version that backup workers popped in NOOP mode.
 extern const KeyRef backupWorkerMaxNoopVersionKey;
 
+// Range partitioned backup mutation logs
+//	"\xff\x02/backupRangeProgress/[[workerID]]/[[beginKey]]" := "[[RangeBackupStatus]]"
+//	Provides the progress for the given backup worker on a specific key range.
+//	The beginKey is the start of the key range being backed up by this worker.
+extern const KeyRangeRef backupRangeProgressKeys;
+extern const KeyRef backupRangeProgressPrefix;
+const Key backupRangeProgressKeyFor(UID workerID, const KeyRef& beginKey);
+const Value backupRangeProgressValue(const RangeBackupStatus& status);
+std::pair<UID, Key> decodeBackupRangeProgressKey(const KeyRef& key);
+RangeBackupStatus decodeBackupRangeProgressValue(const ValueRef& value);
+
+// Range partition configuration for backup
+//	"\xff\x02/backupRangeConfig/[[backupID]]" := "[[RangePartitionConfig]]"
+//	Configuration for range-based backup partitioning
+extern const KeyRangeRef backupRangeConfigKeys;
+extern const KeyRef backupRangeConfigPrefix;
+const Key backupRangeConfigKeyFor(UID backupID);
+const Value backupRangeConfigValue(const RangePartitionConfig& config);
+UID decodeBackupRangeConfigKey(const KeyRef& key);
+RangePartitionConfig decodeBackupRangeConfigValue(const ValueRef& value);
+
+// Range partition assignments for backup workers
+//	"\xff\x02/backupRangeAssignment/[[workerID]]" := "[[vector<KeyRange>]]"
+//	Key ranges assigned to each backup worker for range-partitioned backup
+extern const KeyRangeRef backupRangeAssignmentKeys;
+extern const KeyRef backupRangeAssignmentPrefix;
+const Key backupRangeAssignmentKeyFor(UID workerID);
+const Value backupRangeAssignmentValue(const std::vector<KeyRange>& ranges);
+UID decodeBackupRangeAssignmentKey(const KeyRef& key);
+std::vector<KeyRange> decodeBackupRangeAssignmentValue(const ValueRef& value);
+
 //	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's previous set of coordinators.
 //	Changed when performing quorumChange.
