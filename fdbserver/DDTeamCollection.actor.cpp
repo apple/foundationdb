@@ -231,7 +231,12 @@ public:
 			self->updateTeamPivotValues();
 
 			// Step 1: find all valid teams from team collection
+			// First pass: try to find teams with zero overlap with source servers
+			// Second pass (fallback): if no zero-overlap teams exist, allow overlapping teams
+			// This fallback is necessary for small clusters where the number of healthy servers
+			// is less than 2x the team size (e.g., 4 servers with triple replication).
 			std::vector<Reference<TCTeamInfo>> validTeams;
+			std::vector<Reference<TCTeamInfo>> healthyTeamsWithOverlap; // Fallback candidates
 			int unhealthyTeamCount = 0;
 			int notEligibileTeamCount = 0;
 			int duplicatedCount = 0;
@@ -245,32 +250,55 @@ public:
 				// stuck at failing to get an eligible team.
 				// We still want to have this low disk space check in the simulation, but we
 				// do not want this check blocking the simulation. So, we randomly do the check.
+				bool passedDiskCheck = true;
 				if (!g_network->isSimulated() || deterministicRandom()->random01() < 0.5) {
 					bool anyDestServerHaveLowDiskUtil =
 					    dest->getEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL) > 0;
 					if (!anyDestServerHaveLowDiskUtil) {
 						notEligibileTeamCount++;
-						continue;
+						passedDiskCheck = false;
 					}
 				}
-				bool ok = true;
+				if (!passedDiskCheck) {
+					continue;
+				}
+				bool hasOverlap = false;
 				for (const auto& srcId : req.src) {
 					std::vector<UID> serverIds = dest->getServerIDs();
 					for (const auto& serverId : serverIds) {
 						if (serverId == srcId) {
-							ok = false; // Do not select a team that has a server owning the bulk loading range.
+							hasOverlap = true; // Team has a server owning the bulk loading range.
 							break;
 						}
 					}
-					if (!ok) {
+					if (hasOverlap) {
 						break;
 					}
 				}
-				if (!ok) {
+				if (hasOverlap) {
 					duplicatedCount++;
+					// Still track this team as a fallback candidate in case no zero-overlap teams exist
+					healthyTeamsWithOverlap.push_back(dest);
 					continue;
 				}
 				validTeams.push_back(dest);
+			}
+
+			// Fallback: if no teams with zero overlap, use healthy teams with overlap
+			// This can happen in small clusters (e.g., 4 servers with triple replication where
+			// source has 3 servers, making it impossible to find a team with zero overlap).
+			// BulkLoad to an overlapping team is safe - it just means some servers in the
+			// destination team already have the data from being in the source team.
+			bool usedOverlapFallback = false;
+			if (validTeams.empty() && !healthyTeamsWithOverlap.empty()) {
+				validTeams = std::move(healthyTeamsWithOverlap);
+				usedOverlapFallback = true;
+				TraceEvent(SevWarn, "DDBulkLoadEngineTaskGetTeamUsingOverlapFallback", self->distributorId)
+				    .detail("SrcIds", describe(req.src))
+				    .detail("Primary", self->isPrimary())
+				    .detail("TeamSize", self->teams.size())
+				    .detail("FallbackTeamCount", validTeams.size())
+				    .detail("Reason", "No teams with zero overlap available, using overlapping teams");
 			}
 
 			// Step 2: Conduct Power-of-D-Choice to select a team
@@ -308,6 +336,7 @@ public:
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
+				    .detail("UsedOverlapFallback", usedOverlapFallback)
 				    .detail("DestIds", describe(res.get()->getServerIDs()))
 				    .detail("DestTeam", res.get()->getTeamID());
 			} else {
@@ -319,7 +348,8 @@ public:
 				    .detail("ValidTeamSize", validTeams.size())
 				    .detail("UnhealthyTeamCount", unhealthyTeamCount)
 				    .detail("DuplicatedCount", duplicatedCount)
-				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
+				    .detail("NotEligibileTeamCount", notEligibileTeamCount)
+				    .detail("UsedOverlapFallback", usedOverlapFallback);
 			}
 			req.reply.send(std::make_pair(res, false));
 			return Void();

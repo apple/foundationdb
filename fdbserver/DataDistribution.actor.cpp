@@ -2807,14 +2807,24 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			// Always spawn bulkDumpCore - it will dynamically check the mode
+			// NOTE: Unlike BulkLoad and other DD operations, BulkDump does NOT require remoteRecovered()
+			// in HA configurations. BulkDump is a read-only operation that reads data from primary DC
+			// storage servers and writes SST files to external storage (S3). It does not modify cluster
+			// data or require coordination with the remote DC.
+			//
+			// Previously, BulkDump waited for remoteRecovered() in HA mode, which caused failures when:
+			// - The remote DC couldn't form teams ("Do not have enough unique machines")
+			// - The remote DC was slow to reach ALL_LOGS_RECRUITED state
+			// - Recovery state never progressed, blocking BulkDump indefinitely
+			// In these cases, BulkDump would never start, producing 0-byte snapshots and empty restores.
+			//
+			// Traditional backup (FileBackupAgent) has no such requirement - it reads data directly via
+			// transactions without waiting for remote DC recovery. BulkDump should behave similarly since
+			// it's also just reading committed data from the primary DC's storage servers.
 			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
 			    .detail("UsableRegions", self->configuration.usableRegions)
 			    .detail("InitialMode", self->initData->bulkDumpMode);
-			if (self->configuration.usableRegions > 1) {
-				actors.push_back(bulkDumpCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-			} else {
-				actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
-			}
+			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
 
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);

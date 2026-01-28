@@ -1464,20 +1464,36 @@ void validateBulkLoadRelocateData(const RelocateData& rd, const std::vector<UID>
 		throw movekeys_conflict();
 		// Very important invariant. If this error appears, check the logic
 	}
+
+	// Check for source/destination overlap
+	// This can happen in two cases:
+	// 1. Remote team collection is not ready (not expected during normal operation)
+	// 2. Small cluster with fewer healthy servers than 2x team size (e.g., 4 servers with triple replication)
+	//    In this case, there's no team with zero overlap, so DDTeamCollection falls back to overlapping teams.
+	//
+	// For BulkLoad, overlapping src/dest is safe because:
+	// - Data is loaded from external SST files (e.g., S3), not from current source servers
+	// - The "source" servers are just the current shard owners, not the data source
+	// - BulkLoading to the same servers effectively replaces their data with the SST file contents
+	int overlapCount = 0;
 	for (const auto& destId : destIds) {
 		if (std::find(rd.src.begin(), rd.src.end(), destId) != rd.src.end()) {
-			// In this case, getTeam has to select src as dest when remote team collection is not ready
-			// This is not expected
-			TraceEvent(SevError, "DDBulkLoadEngineTaskLaunchFailed", logId)
-			    .detail("Reason", "Conflict src and destd due to remote recovery")
-			    .detail("DataMovePriority", rd.priority)
-			    .detail("DataMoveId", rd.dataMoveId)
-			    .detail("RelocatorRange", rd.keys)
-			    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId())
-			    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
-			    .detail("TaskRange", rd.bulkLoadTask.get().coreState.getRange());
-			throw movekeys_conflict();
+			overlapCount++;
 		}
+	}
+	if (overlapCount > 0) {
+		TraceEvent(SevWarn, "DDBulkLoadEngineTaskUsingOverlappingSrcDest", logId)
+		    .detail("Reason", "Source and destination servers overlap (small cluster or remote recovery)")
+		    .detail("OverlapCount", overlapCount)
+		    .detail("SrcCount", rd.src.size())
+		    .detail("DestCount", destIds.size())
+		    .detail("DataMovePriority", rd.priority)
+		    .detail("DataMoveId", rd.dataMoveId)
+		    .detail("RelocatorRange", rd.keys)
+		    .detail("TaskID", rd.bulkLoadTask.get().coreState.getTaskId())
+		    .detail("JobID", rd.bulkLoadTask.get().coreState.getJobId())
+		    .detail("TaskRange", rd.bulkLoadTask.get().coreState.getRange());
+		// Continue with BulkLoad - overlap is allowed for small clusters
 	}
 	return;
 }
