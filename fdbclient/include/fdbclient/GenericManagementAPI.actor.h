@@ -532,6 +532,14 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						resetPPWStats = false; // the latter setting will override the former setting
 					}
 				}
+
+				// Clear backup progress when backup workers are disabled
+				if (i->first == backupWorkerEnabledKey && i->second == "0") {
+					tr->clear(backupProgressKeys);
+					TraceEvent("BackupWorkerProgressCleared")
+					    .detail("ConfigKey", i->first)
+					    .detail("ConfigValue", i->second);
+				}
 			}
 
 			if (!creating && resetPPWStats) {
