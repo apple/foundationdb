@@ -4927,7 +4927,7 @@ public:
 	               std::string name,
 	               UID logID,
 	               Reference<AsyncVar<ServerDBInfo> const> db,
-	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE)
+	               EncodingType encodingType = EncodingType::INVALID_ENCODING_TYPE)
 	  : m_pager(pager), m_db(db), m_encodingType(encodingType),
 	    m_enforceEncodingType(false),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_logID(logID),
@@ -5107,8 +5107,8 @@ public:
 				throw e;
 			}
 
-			ASSERT_NE(EncodingType::MAX_ENCODING_TYPE, self->m_header.encodingType);
-			if (self->m_encodingType == EncodingType::MAX_ENCODING_TYPE) {
+			ASSERT_NE(EncodingType::INVALID_ENCODING_TYPE, self->m_header.encodingType);
+			if (self->m_encodingType == EncodingType::INVALID_ENCODING_TYPE) {
 				self->m_encodingType = self->m_header.encodingType;
 			} else if (self->m_encodingType != self->m_header.encodingType) {
 				TraceEvent(SevWarn, "RedwoodBTreeUnexpectedEncodingType")
@@ -7596,7 +7596,7 @@ public:
 	KeyValueStoreRedwood(std::string filename,
 	                     UID logID,
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
-	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
+	                     EncodingType encodingType = EncodingType::INVALID_ENCODING_TYPE,
 	                     int64_t pageCacheBytes = 0)
 	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 		int pageSize =
@@ -7920,7 +7920,7 @@ IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
 	return new KeyValueStoreRedwood(filename,
 	                                logID,
 	                                db,
-	                                EncodingType::MAX_ENCODING_TYPE,
+	                                EncodingType::INVALID_ENCODING_TYPE,
 	                                pageCacheBytes);
 }
 
@@ -9716,7 +9716,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
 	state int encoding =
-	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE));
+	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE_FOR_RANDOM_SELECTION));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =

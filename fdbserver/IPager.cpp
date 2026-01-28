@@ -25,7 +25,11 @@
 #include <limits>
 
 TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
-	for (uint8_t et = 0; et < EncodingType::MAX_USABLE_ENCODING_TYPE_PLUS_ONE; et++) {
+	// Do not assume values 0 through "MAX-1" are valid. Values can get deprecated.
+	// Instead just explicitly specify the values that we are going to test with.
+	std::vector<EncodingType> typesToTest{EncodingType::XXHash64, EncodingType::XOREncryption_TestOnly};
+
+	for (auto et : typesToTest) {
 		constexpr int _PAGE_SIZE = 8 * 1024;
 		EncodingType encodingType = (EncodingType)et;
 		Reference<ArenaPage> page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);

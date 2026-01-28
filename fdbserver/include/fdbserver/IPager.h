@@ -100,12 +100,13 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 // encrypted values (2 and 3).  They are renamed to help find and eliminate source
 // code which uses them.
 enum EncodingType : uint8_t {
+	INVALID_ENCODING_TYPE = 0xff,
 	XXHash64 = 0,
 	XOREncryption_TestOnly = 1,
-	MAX_USABLE_ENCODING_TYPE_PLUS_ONE = 2,
+	MAX_ENCODING_TYPE_FOR_RANDOM_SELECTION = 2,
 	AESEncryption_DEPRECATED = 2,
 	AESEncryptionWithAuth_DEPRECATED = 3,
-	MAX_ENCODING_TYPE = 4
+	MAX_ENCODING_TYPE_EVER_DEFINED_DONT_USE_THIS_DIRECTLY_BECAUSE_YOU_CANT_ASSUME_NO_VALUES_EVER_GET_DEPRECATED = 4,
 };
 
 enum PageType : uint8_t {
