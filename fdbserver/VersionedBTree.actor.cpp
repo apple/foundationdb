@@ -4928,9 +4928,8 @@ public:
 	VersionedBTree(IPager2* pager,
 	               std::string name,
 	               UID logID,
-	               Reference<AsyncVar<ServerDBInfo> const> db,
-	               EncodingType encodingType = EncodingType::INVALID_ENCODING_TYPE)
-	  : m_pager(pager), m_db(db), m_encodingType(encodingType),
+	               Reference<AsyncVar<ServerDBInfo> const> db) 
+	  : m_pager(pager), m_db(db),
 	    m_enforceEncodingType(false),
 	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_logID(logID),
 	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
@@ -5109,10 +5108,7 @@ public:
 				throw e;
 			}
 
-			ASSERT_NE(EncodingType::INVALID_ENCODING_TYPE, self->m_header.encodingType);
-			if (self->m_encodingType == EncodingType::INVALID_ENCODING_TYPE) {
-				self->m_encodingType = self->m_header.encodingType;
-			} else if (self->m_encodingType != self->m_header.encodingType) {
+			if (self->m_encodingType != self->m_header.encodingType) {
 				TraceEvent(SevWarn, "RedwoodBTreeUnexpectedEncodingType")
 				    .detail("InstanceName", self->m_pager->getName())
 				    .detail("UsingEncodingType", self->m_encodingType)
@@ -5413,7 +5409,7 @@ private:
 	IPager2* m_pager;
 	Reference<AsyncVar<ServerDBInfo> const> m_db;
 
-	EncodingType m_encodingType;
+	EncodingType m_encodingType = EncodingType::XXHash64;
 	bool m_enforceEncodingType;
 
 	// Counter to update with DecodeCache memory usage
@@ -7633,7 +7629,7 @@ public:
 		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false);
-		m_tree = new VersionedBTree(pager, filename, logID, db, encodingType);
+		m_tree = new VersionedBTree(pager, filename, logID, db);
 		m_init = catchError(init_impl(this));
 	}
 
@@ -9829,13 +9825,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 
-	//		VersionedBTree(IPager2* pager,
-	//               std::string name,
-	//             UID logID,
-	//             Reference<AsyncVar<ServerDBInfo> const> db,
-	//             EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE)
-
-	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {}, encodingType);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), /*ServerDBInfo blah */ {});
 	wait(btree->init());
 
 	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
@@ -10085,7 +10075,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
 
-				btree = new VersionedBTree(pager, file, UID(), {}, encodingType);
+				btree = new VersionedBTree(pager, file, UID(), /* something blah = */ {});
 
 				wait(btree->init());
 
@@ -10135,8 +10125,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 		                                         pagerMemoryOnly),
 		                           file,
 		                           UID(),
-		                           {},
-		                           encodingType);
+		                           /* blah = */ {});
+
 		wait(btree->init());
 	}
 
@@ -10467,7 +10457,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	DWALPager* pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
-	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {}, EncodingType::XXHash64);
+	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {});
 	wait(btree->init());
 	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 

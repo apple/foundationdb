@@ -341,6 +341,7 @@ public:
 		if (t == EncodingType::XXHash64) {
 			return sizeof(XXHashEncoder::Header);
 		} else {
+			TraceEvent(SevWarnAlways, "InvalidPageEncoding").detail("EncodingType", t);
 			throw page_encoding_not_supported();
 		}
 	}
@@ -443,12 +444,14 @@ public:
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else {
+			TraceEvent(SevWarnAlways, "InvalidPageEncoding").detail("EncodingType", page->encodingType);
 			throw page_encoding_not_supported();
 		}
 
 		if (page->headerVersion == 1) {
 			page->getMainHeader<RedwoodHeaderV1>()->updateChecksum(buffer, pPayload - buffer);
 		} else {
+			TraceEvent(SevWarnAlways, "InvalidPageHeaderVersion").detail("HeaderVersion", page->headerVersion);
 			throw page_header_version_not_supported();
 		}
 		encodingHeaderAvailable = true;
@@ -475,6 +478,7 @@ public:
 				}
 			}
 		} else {
+			TraceEvent(SevWarnAlways, "InvalidPageHeaderVersion").detail("HeaderVersion", page->headerVersion);
 			throw page_header_version_not_supported();
 		}
 	}
@@ -485,6 +489,7 @@ public:
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::decode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
 		} else {
+			TraceEvent(SevWarnAlways, "InvalidPageEncoding").detail("EncodingType", page->encodingType);
 			throw page_encoding_not_supported();
 		}
 	}
@@ -525,6 +530,7 @@ public:
 		if (page->headerVersion == 1) {
 			return page->getMainHeader<RedwoodHeaderV1>()->firstPhysicalPageID;
 		} else {
+			TraceEvent(SevWarnAlways, "InvalidPageHeaderVersion").detail("HeaderVersion", page->headerVersion);
 			throw page_header_version_not_supported();
 		}
 	}
