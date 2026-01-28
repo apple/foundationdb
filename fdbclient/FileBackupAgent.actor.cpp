@@ -4800,9 +4800,33 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("BulkLoadJobId", bulkLoadJob.getJobId())
 				    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT);
-				// Restore original BulkLoad mode before throwing
+				// Check if job is still running before restoring mode.
+				// If job exists, keep mode=1 so DD continues processing on retry.
+				// This avoids unnecessary DD restarts from mode toggling.
 				if (originalBulkLoadMode != 1) {
-					wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+					state Transaction timeoutCheckTr(cx);
+					state bool jobStillRunning = false;
+					loop {
+						try {
+							timeoutCheckTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+							timeoutCheckTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							Optional<BulkLoadJobState> existingJob = wait(getSubmittedBulkLoadJob(&timeoutCheckTr));
+							jobStillRunning = existingJob.present();
+							break;
+						} catch (Error& e) {
+							wait(timeoutCheckTr.onError(e));
+						}
+					}
+					if (!jobStillRunning) {
+						wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+						TraceEvent("BulkLoadRestoreTimeoutModeRestored")
+						    .detail("RestoreUID", restore.getUid())
+						    .detail("OriginalMode", originalBulkLoadMode);
+					} else {
+						TraceEvent("BulkLoadRestoreTimeoutModeKept")
+						    .detail("RestoreUID", restore.getUid())
+						    .detail("Reason", "JobStillRunning - avoiding DD restart");
+					}
 				}
 				throw timed_out();
 			}
