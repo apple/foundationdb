@@ -72,10 +72,30 @@
 std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
 
-// Helper function to monitor BulkDump job completion
-// Returns true if job completed successfully, false if timed out
+// Monitor BulkDump job completion by polling the database for job status.
+//
+// Parameters:
+//   - timeoutDuration: Warning threshold - after this time, periodic warnings are emitted
+//   - pollInterval: How often to check job status
+//
+// Returns:
+//   - true: Job completed successfully (system key cleared indicates job finished)
+//   - false: Absolute timeout reached (safety valve for stuck/buggy jobs)
+//
+// Design rationale:
+//   BulkDump jobs can legitimately run for hours or days for large datasets. The timeoutDuration
+//   parameter is NOT a hard limit but a threshold for emitting warnings. The absolute maximum
+//   wait time (3x timeout or 7 days, whichever is smaller) provides a safety valve for jobs
+//   that become stuck due to bugs or coordinator failures. While the job is registered in the
+//   database, we continue waiting because that indicates the job system believes it's still
+//   running and making progress.
 ACTOR Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeoutDuration, double pollInterval) {
 	state double timeoutStart = now();
+	state double lastWarnTime = now();
+	state double warnInterval = 300.0; // Warn every 5 minutes after timeout threshold
+	// Absolute maximum wait: 3x the timeout or 7 days, whichever is smaller
+	// This is a safety valve for stuck jobs - normal jobs should complete well before this
+	state double absoluteMaxWait = std::min(timeoutDuration * 3.0, 7.0 * 24.0 * 3600.0);
 	state Transaction tr(cx);
 
 	loop {
@@ -84,11 +104,31 @@ ACTOR Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double t
 			bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
 
 			if (!stillRunning) {
-				return true; // Job completed successfully
+				return true; // Job completed successfully (system key cleared)
 			}
 
-			if (now() - timeoutStart > timeoutDuration) {
-				return false; // Timed out
+			double elapsed = now() - timeoutStart;
+
+			// Safety valve: if we've exceeded the absolute maximum, something is likely stuck
+			if (elapsed > absoluteMaxWait) {
+				TraceEvent(SevWarn, "BulkDumpMonitorAbsoluteTimeout")
+				    .detail("JobId", jobId)
+				    .detail("ElapsedSeconds", elapsed)
+				    .detail("AbsoluteMaxWait", absoluteMaxWait)
+				    .detail("OriginalTimeout", timeoutDuration)
+				    .detail("Note", "Job still registered but exceeded safety valve timeout");
+				return false;
+			}
+
+			// Emit periodic warnings after passing the expected timeout threshold
+			if (elapsed > timeoutDuration && now() - lastWarnTime > warnInterval) {
+				TraceEvent(SevWarn, "BulkDumpMonitorStillWaiting")
+				    .detail("JobId", jobId)
+				    .detail("ElapsedSeconds", elapsed)
+				    .detail("TimeoutThreshold", timeoutDuration)
+				    .detail("AbsoluteMaxWait", absoluteMaxWait)
+				    .detail("RemainingUntilAbsoluteTimeout", absoluteMaxWait - elapsed);
+				lastWarnTime = now();
 			}
 
 			wait(delay(pollInterval));
@@ -4158,18 +4198,60 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 			                                                         5.0)); // Poll every 5 seconds
 
 			if (!completed) {
-				TraceEvent(SevWarn, "BulkDumpTaskTimeout")
-				    .detail("BackupUID", config.getUid())
-				    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
-				    .detail("TimeoutDuration", 300.0);
-				Params.timeoutOccurred().set(task, true);
+				// Monitoring timed out, but check if the job actually completed
+				// The job may have finished between the last poll and the timeout check,
+				// or the job may have completed but monitoring was slow due to S3 chaos
+				state Transaction finalCheckTr(cx);
+				loop {
+					try {
+						Optional<BulkDumpState> currentJob = wait(getSubmittedBulkDumpJob(&finalCheckTr));
+						bool stillRunning =
+						    currentJob.present() && currentJob.get().getJobId() == bulkDumpJob.getJobId();
+						if (!stillRunning) {
+							// Job actually completed after monitoring timeout
+							completed = true;
+							TraceEvent("BulkDumpTaskCompletedAfterTimeout")
+							    .detail("BackupUID", config.getUid())
+							    .detail("BulkDumpJobId", bulkDumpJob.getJobId());
+						}
+						break;
+					} catch (Error& e) {
+						TraceEvent(SevDebug, "BulkDumpFinalCheckRetry")
+						    .suppressFor(5.0)
+						    .detail("BackupUID", config.getUid())
+						    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
+						    .errorUnsuppressed(e);
+						wait(finalCheckTr.onError(e));
+					}
+				}
+
+				// If still not completed, also check if data files exist in the backup container
+				// This handles the case where the job completed but system key cleanup happened
+				if (!completed) {
+					bool datasetExists = wait(verifyBulkDumpDatasetCompleteness(bc, bulkDumpJob.getJobId().toString()));
+					if (datasetExists) {
+						completed = true;
+						TraceEvent("BulkDumpTaskCompletedDatasetExists")
+						    .detail("BackupUID", config.getUid())
+						    .detail("BulkDumpJobId", bulkDumpJob.getJobId());
+					}
+				}
+
+				if (!completed) {
+					TraceEvent(SevWarn, "BulkDumpTaskTimeout")
+					    .detail("BackupUID", config.getUid())
+					    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
+					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKDUMP_JOB_TIMEOUT);
+					Params.timeoutOccurred().set(task, true);
+				}
 			}
 
 			TraceEvent("BulkDumpTaskComplete")
 			    .detail("BackupUID", config.getUid())
 			    .detail("BulkDumpJobId", bulkDumpJob.getJobId())
 			    .detail("TimeoutOccurred", Params.timeoutOccurred().getOrDefault(task, false))
-			    .detail("JobAlreadyRunning", jobAlreadyRunning);
+			    .detail("JobAlreadyRunning", jobAlreadyRunning)
+			    .detail("ActuallyCompleted", completed);
 
 			// Restore original BulkDump mode after job completes, but only if:
 			// 1. We actually enabled the mode (not if we just monitored an existing job)
@@ -4223,10 +4305,37 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 			    .detail("BackupUID", config.getUid())
 			    .detail("SnapshotVersion", snapshotVersion)
 			    .detail("JobAlreadyRunning", jobAlreadyRunning);
-			// Restore original BulkDump mode on error, but only if we were the ones who enabled it
+			// Restore original BulkDump mode on error, but only if:
+			// 1. We were the ones who enabled it (not monitoring an existing job)
+			// 2. The original mode wasn't already 1
+			// 3. The error wasn't due to a conflict with an existing job (bulkdump_task_failed)
+			//    In that case, another task's job is running and needs mode=1
+			// 4. There's no other BulkDump job currently running
 			try {
-				if (!jobAlreadyRunning && originalBulkDumpMode != 1) {
-					wait(success(setBulkDumpMode(cx, originalBulkDumpMode)));
+				if (!jobAlreadyRunning && originalBulkDumpMode != 1 &&
+				    savedError.code() != error_code_bulkdump_task_failed) {
+					// Double-check that no job is running before restoring mode
+					// Another task may have successfully submitted a job
+					state Transaction modeCheckTr(cx);
+					state bool anotherJobRunning = false;
+					loop {
+						try {
+							modeCheckTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+							modeCheckTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							Optional<BulkDumpState> existingJob = wait(getSubmittedBulkDumpJob(&modeCheckTr));
+							anotherJobRunning = existingJob.present();
+							break;
+						} catch (Error& e3) {
+							wait(modeCheckTr.onError(e3));
+						}
+					}
+					if (!anotherJobRunning) {
+						wait(success(setBulkDumpMode(cx, originalBulkDumpMode)));
+					} else {
+						TraceEvent("BulkDumpTaskSkipModeRestore")
+						    .detail("BackupUID", config.getUid())
+						    .detail("Reason", "AnotherJobRunning");
+					}
 				}
 			} catch (Error& e2) {
 				TraceEvent(SevWarn, "BulkDumpTaskRestoreModeError").error(e2);
@@ -4717,10 +4826,35 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			    .error(e)
 			    .detail("RestoreUID", restore.getUid())
 			    .detail("BackupUrl", backupUrl);
-			// Restore original BulkLoad mode on error
+			// Restore original BulkLoad mode on error, but only if:
+			// 1. The original mode wasn't already 1
+			// 2. The error wasn't due to a conflict with an existing job (bulkload_task_failed)
+			//    In that case, another task's job is running and needs mode=1
+			// 3. There's no other BulkLoad job currently running
 			try {
-				if (originalBulkLoadMode != 1) {
-					wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+				if (originalBulkLoadMode != 1 && savedError.code() != error_code_bulkload_task_failed) {
+					// Double-check that no job is running before restoring mode
+					// Another task may have successfully submitted a job
+					state Transaction modeCheckTr(cx);
+					state bool anotherJobRunning = false;
+					loop {
+						try {
+							modeCheckTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+							modeCheckTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							Optional<BulkLoadJobState> existingJob = wait(getSubmittedBulkLoadJob(&modeCheckTr));
+							anotherJobRunning = existingJob.present();
+							break;
+						} catch (Error& e3) {
+							wait(modeCheckTr.onError(e3));
+						}
+					}
+					if (!anotherJobRunning) {
+						wait(success(setBulkLoadMode(cx, originalBulkLoadMode)));
+					} else {
+						TraceEvent("BulkLoadRestoreTaskSkipModeRestore")
+						    .detail("RestoreUID", restore.getUid())
+						    .detail("Reason", "AnotherJobRunning");
+					}
 				}
 			} catch (Error& e2) {
 				TraceEvent(SevWarn, "BulkLoadRestoreRestoreModeError").error(e2);

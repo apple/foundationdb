@@ -526,6 +526,7 @@ public:
 		    .add("disableRemoteKVS", &disableRemoteKVS)
 		    .add("encryptModes", &encryptModes)
 		    .add("simpleConfig", &simpleConfig)
+		    .add("singleRegion", &singleRegion)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
 		    .add("desiredTLogCount", &desiredTLogCount)

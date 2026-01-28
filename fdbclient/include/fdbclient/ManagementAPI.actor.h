@@ -210,6 +210,9 @@ ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyR
 // Set lockAware=true when submitting during database restore (when database is locked).
 ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
 
+// Return the existing BulkLoad job metadata (if any)
+ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
+
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.
 ACTOR Future<int> setBulkDumpMode(Database cx, int mode);
