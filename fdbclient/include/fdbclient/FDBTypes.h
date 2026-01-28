@@ -1364,6 +1364,41 @@ struct WorkerBackupStatus {
 	}
 };
 
+// Range-based backup status for tracking backup progress on specific key ranges
+struct RangeBackupStatus {
+	LogEpoch epoch;
+	Version version;
+	KeyRange range;
+	UID workerID;
+	int32_t totalRanges;
+
+	RangeBackupStatus() : epoch(0), version(invalidVersion), totalRanges(0) {}
+	RangeBackupStatus(LogEpoch e, Version v, KeyRange r, UID w, int32_t total)
+	  : epoch(e), version(v), range(r), workerID(w), totalRanges(total) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, epoch, version, range, workerID, totalRanges);
+	}
+};
+
+// Configuration for range-partitioned backup
+struct RangePartitionConfig {
+	UID backupID;
+	std::vector<KeyRange> ranges;
+	int32_t maxRangesPerWorker;
+	bool enableRangePartitioning;
+
+	RangePartitionConfig() : maxRangesPerWorker(10), enableRangePartitioning(false) {}
+	RangePartitionConfig(UID id, std::vector<KeyRange> r, int32_t maxRanges, bool enabled)
+	  : backupID(id), ranges(r), maxRangesPerWorker(maxRanges), enableRangePartitioning(enabled) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, backupID, ranges, maxRangesPerWorker, enableRangePartitioning);
+	}
+};
+
 enum class TransactionPriority : uint8_t { BATCH, DEFAULT, IMMEDIATE, MIN = BATCH, MAX = IMMEDIATE };
 
 const std::array<TransactionPriority, (int)TransactionPriority::MAX + 1> allTransactionPriorities = {

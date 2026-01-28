@@ -727,6 +727,30 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 	}
 }
 
+// Save range partition backup progress
+ACTOR Future<Void> saveRangeProgress(BackupData* self, Version backupVersion, KeyRange range, int totalRanges) {
+	state Transaction tr(self->cx);
+	state Key key = backupRangeProgressKeyFor(self->myId, range.begin);
+
+	loop {
+		try {
+			// It's critical to save progress immediately so that after a master
+			// recovery, the new master can know the progress so far.
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			RangeBackupStatus status(self->backupEpoch, backupVersion, range, self->myId, totalRanges);
+			tr.set(key, backupRangeProgressValue(status));
+			tr.addReadConflictRange(singleKeyRange(key));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 // Write a mutation to a log file. Note the mutation can be different from
 // message.message for clear mutations.
 ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,

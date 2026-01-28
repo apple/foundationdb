@@ -1123,6 +1123,107 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
+// Range partitioned backup mutation logs implementation
+const KeyRangeRef backupRangeProgressKeys("\xff\x02/backupRangeProgress/"_sr, "\xff\x02/backupRangeProgress0"_sr);
+const KeyRef backupRangeProgressPrefix = backupRangeProgressKeys.begin;
+
+const KeyRangeRef backupRangeConfigKeys("\xff\x02/backupRangeConfig/"_sr, "\xff\x02/backupRangeConfig0"_sr);
+const KeyRef backupRangeConfigPrefix = backupRangeConfigKeys.begin;
+
+const KeyRangeRef backupRangeAssignmentKeys("\xff\x02/backupRangeAssignment/"_sr, "\xff\x02/backupRangeAssignment0"_sr);
+const KeyRef backupRangeAssignmentPrefix = backupRangeAssignmentKeys.begin;
+
+const Key backupRangeProgressKeyFor(UID workerID, const KeyRef& beginKey) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupRangeProgressPrefix);
+	wr << workerID;
+	wr.serializeBytes("/"_sr);
+	wr.serializeBytes(beginKey);
+	return wr.toValue();
+}
+
+const Value backupRangeProgressValue(const RangeBackupStatus& status) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
+	wr << status;
+	return wr.toValue();
+}
+
+std::pair<UID, Key> decodeBackupRangeProgressKey(const KeyRef& key) {
+	BinaryReader rd(key.removePrefix(backupRangeProgressPrefix), Unversioned());
+	UID workerID;
+	rd >> workerID;
+	
+	// Skip the separator "/"
+	StringRef separator;
+	rd >> separator;
+	
+	// The rest is the begin key
+	Key beginKey = rd.remainder().toString();
+	return std::make_pair(workerID, beginKey);
+}
+
+RangeBackupStatus decodeBackupRangeProgressValue(const ValueRef& value) {
+	RangeBackupStatus status;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> status;
+	return status;
+}
+
+const Key backupRangeConfigKeyFor(UID backupID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupRangeConfigPrefix);
+	wr << backupID;
+	return wr.toValue();
+}
+
+const Value backupRangeConfigValue(const RangePartitionConfig& config) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
+	wr << config;
+	return wr.toValue();
+}
+
+UID decodeBackupRangeConfigKey(const KeyRef& key) {
+	UID backupID;
+	BinaryReader rd(key.removePrefix(backupRangeConfigPrefix), Unversioned());
+	rd >> backupID;
+	return backupID;
+}
+
+RangePartitionConfig decodeBackupRangeConfigValue(const ValueRef& value) {
+	RangePartitionConfig config;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> config;
+	return config;
+}
+
+const Key backupRangeAssignmentKeyFor(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupRangeAssignmentPrefix);
+	wr << workerID;
+	return wr.toValue();
+}
+
+const Value backupRangeAssignmentValue(const std::vector<KeyRange>& ranges) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBackupProgressValue()));
+	wr << ranges;
+	return wr.toValue();
+}
+
+UID decodeBackupRangeAssignmentKey(const KeyRef& key) {
+	UID workerID;
+	BinaryReader rd(key.removePrefix(backupRangeAssignmentPrefix), Unversioned());
+	rd >> workerID;
+	return workerID;
+}
+
+std::vector<KeyRange> decodeBackupRangeAssignmentValue(const ValueRef& value) {
+	std::vector<KeyRange> ranges;
+	BinaryReader reader(value, IncludeVersion());
+	if (value.size() > 0)
+		reader >> ranges;
+	return ranges;
+}
+
 bool mutationForKey(const MutationRef& m, const KeyRef& key) {
 	return isSingleKeyMutation((MutationRef::Type)m.type) && m.param1 == key;
 }

@@ -44,6 +44,25 @@ void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 	}
 }
 
+void BackupProgress::addRangeBackupStatus(const RangeBackupStatus& status) {
+	auto& it = rangeProgress[status.epoch];
+	auto lb = it.lower_bound(status.range);
+	if (lb != it.end() && status.range == lb->first) {
+		if (lb->second < status.version) {
+			lb->second = status.version;
+		}
+	} else {
+		it.insert(lb, { status.range, status.version });
+	}
+
+	auto rangeIt = epochRanges.find(status.epoch);
+	if (rangeIt == epochRanges.end()) {
+		epochRanges.insert({ status.epoch, status.totalRanges });
+	} else {
+		ASSERT(status.totalRanges == rangeIt->second);
+	}
+}
+
 void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions,
                                        std::set<Tag>* tags,
                                        const std::map<Tag, Version>& progress,
@@ -61,6 +80,30 @@ void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions,
 			TraceEvent("BackupVersionRange", dbgid)
 			    .detail("OldEpoch", epoch)
 			    .detail("Tag", tag.toString())
+			    .detail("BeginVersion", savedVersion + 1)
+			    .detail("AdjustedBeginVersion", beginVersion)
+			    .detail("EndVersion", endVersion);
+		}
+	}
+}
+
+void BackupProgress::updateRangeVersions(std::map<KeyRange, Version>* rangeVersions,
+                                         std::set<KeyRange>* ranges,
+                                         const std::map<KeyRange, Version>& progress,
+                                         Version endVersion,
+                                         Version adjustedBeginVersion,
+                                         LogEpoch epoch) {
+	for (const auto& [range, savedVersion] : progress) {
+		// If range is not in "ranges", it means the old epoch has more ranges than
+		// new epoch's ranges. Just ignore the range here.
+		auto n = ranges->erase(range);
+		if (n > 0 && savedVersion < endVersion - 1) {
+			const Version beginVersion =
+			    (savedVersion + 1 > adjustedBeginVersion) ? (savedVersion + 1) : adjustedBeginVersion;
+			rangeVersions->insert({ range, beginVersion });
+			TraceEvent("BackupRangeVersionRange", dbgid)
+			    .detail("OldEpoch", epoch)
+			    .detail("Range", range.toString())
 			    .detail("BeginVersion", savedVersion + 1)
 			    .detail("AdjustedBeginVersion", beginVersion)
 			    .detail("EndVersion", endVersion);
@@ -92,7 +135,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 				auto prev = std::prev(current);
 				// Previous epoch is gone, consolidate the progress.
 				for (auto [tag, version] : prev->second) {
-					if (toCheck.contains(tag)) {
+					if (toCheck.find(tag) != toCheck.end()) {
 						progressIt->second[tag] = std::max(version, progressIt->second[tag]);
 						toCheck.erase(tag);
 					}
@@ -138,6 +181,80 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 		}
 		if (!tagVersions.empty()) {
 			toRecruit[{ epoch, info.epochEnd, info.logRouterTags }] = tagVersions;
+		}
+	}
+	return toRecruit;
+}
+
+std::map<std::tuple<LogEpoch, Version, int>, std::map<KeyRange, Version>> BackupProgress::getUnfinishedRangeBackup() {
+	std::map<std::tuple<LogEpoch, Version, int>, std::map<KeyRange, Version>> toRecruit;
+
+	if (!backupStartedValue.present())
+		return toRecruit; // No active backups
+
+	Version lastEnd = invalidVersion;
+	for (const auto& [epoch, info] : epochInfos) {
+		std::set<KeyRange> ranges; // This would be populated from range partition configuration
+		std::map<KeyRange, Version> rangeVersions;
+
+		// Sometimes, an epoch's begin version is lower than the previous epoch's
+		// end version. In this case, adjust the epoch's begin version to be the
+		// same as previous end version.
+		Version adjustedBeginVersion = lastEnd > info.epochBegin ? lastEnd : info.epochBegin;
+		lastEnd = info.epochEnd;
+
+		auto progressIt = rangeProgress.lower_bound(epoch);
+		if (progressIt != rangeProgress.end() && progressIt->first == epoch) {
+			std::set<KeyRange> toCheck = ranges;
+			for (auto current = progressIt; current != rangeProgress.begin() && !toCheck.empty();) {
+				auto prev = std::prev(current);
+				// Previous epoch is gone, consolidate the progress.
+				for (auto [range, version] : prev->second) {
+					if (toCheck.find(range) != toCheck.end()) {
+						progressIt->second[range] = std::max(version, progressIt->second[range]);
+						toCheck.erase(range);
+					}
+				}
+				current = prev;
+			}
+			updateRangeVersions(&rangeVersions, &ranges, progressIt->second, info.epochEnd, adjustedBeginVersion, epoch);
+		} else {
+			auto rit = std::find_if(
+			    rangeProgress.rbegin(),
+			    rangeProgress.rend(),
+			    [epoch = epoch](const std::pair<LogEpoch, std::map<KeyRange, Version>>& p) { return p.first < epoch; });
+			while (!(rit == rangeProgress.rend())) {
+				// A partial recovery can result in empty epoch that copies previous
+				// epoch's version range. In this case, we should check previous
+				// epoch's savedVersion.
+				int savedMore = 0;
+				for (auto [range, version] : rit->second) {
+					if (version >= info.epochBegin) {
+						savedMore++;
+					}
+				}
+				if (savedMore > 0) {
+					updateRangeVersions(&rangeVersions, &ranges, rit->second, info.epochEnd, adjustedBeginVersion, epoch);
+					if (ranges.empty())
+						break;
+				}
+				rit++;
+			}
+		}
+
+		for (const KeyRange& range : ranges) { // ranges without progress data
+			rangeVersions.insert({ range, adjustedBeginVersion });
+			TraceEvent("BackupRangeVersionRange", dbgid)
+			    .detail("OldEpoch", epoch)
+			    .detail("Range", range.toString())
+			    .detail("BeginVersion", info.epochBegin)
+			    .detail("AdjustedBeginVersion", adjustedBeginVersion)
+			    .detail("EndVersion", info.epochEnd);
+		}
+		if (!rangeVersions.empty()) {
+			auto rangeIt = epochRanges.find(epoch);
+			int totalRanges = rangeIt != epochRanges.end() ? rangeIt->second : 0;
+			toRecruit[{ epoch, info.epochEnd, totalRanges }] = rangeVersions;
 		}
 	}
 	return toRecruit;
