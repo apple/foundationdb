@@ -147,7 +147,6 @@ struct ClientDBInfo {
 extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
-// TODO(gglass): see if this can be removed now that tenant is removed.
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;

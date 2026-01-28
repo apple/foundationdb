@@ -235,20 +235,6 @@ public:
 	uint8_t* rawData() { return buffer; }
 	int rawSize() const { return bufferSize; }
 
-	// Encryption key used to encrypt a page. Different encoding types may use different structs to represent
-	// an encryption key, and EncryptionKey is a union of these structs.
-	struct EncryptionKey {
-		// TODO(gglass): make the following deletion permanent.  The original definition is this
-		//   struct TextAndHeaderCipherKeys {
-		//       Reference<BlobCipherKey> cipherTextKey;
-		//       Reference<BlobCipherKey> cipherHeaderKey;
-		//   };
-		// ...which suggests it is *not* embedded in persistent metadata (including unencrypted) on disk.
-		// TextAndHeaderCipherKeys aesKey; // For AESEncryption and AESEncryptionWithAuth
-		uint8_t xorKey; // For XOREncryption_TestOnly
-		uint8_t xorWith; // For XOREncryption_TestOnly
-	};
-
 #pragma pack(push, 1)
 
 	// The next few structs describe the byte-packed physical structure.  The fields of Page
@@ -346,45 +332,6 @@ public:
 		}
 	};
 
-	// A dummy "encrypting" encoding which uses XOR with a 1 byte secret key on
-	// the payload to obfuscate it and protects the payload with an XXHash checksum.
-	struct XOREncryptionEncoder {
-		struct Header {
-			// Checksum is on unencrypted payload
-			XXH64_hash_t checksum;
-			uint8_t xorKey;
-		};
-
-		static void encode(void* header,
-		                   const EncryptionKey& encryptionKey,
-		                   uint8_t* payload,
-		                   int len,
-		                   PhysicalPageID seed) {
-			Header* h = reinterpret_cast<Header*>(header);
-			h->checksum = XXH3_64bits_withSeed(payload, len, seed);
-			h->xorKey = encryptionKey.xorKey;
-			uint8_t xorMask = ~encryptionKey.xorKey ^ encryptionKey.xorWith;
-			for (int i = 0; i < len; ++i) {
-				payload[i] ^= xorMask;
-			}
-		}
-
-		static void decode(void* header,
-		                   const EncryptionKey& encryptionKey,
-		                   uint8_t* payload,
-		                   int len,
-		                   PhysicalPageID seed) {
-			Header* h = reinterpret_cast<Header*>(header);
-			uint8_t xorMask = ~encryptionKey.xorKey ^ encryptionKey.xorWith;
-			for (int i = 0; i < len; ++i) {
-				payload[i] ^= xorMask;
-			}
-			if (h->checksum != XXH3_64bits_withSeed(payload, len, seed)) {
-				throw page_decoding_failed();
-			}
-		}
-	};
-
 #pragma pack(pop)
 
 	// Get the size of the encoding header based on type
@@ -442,7 +389,6 @@ public:
 
 		// Non-verifying header parse just to initialize members
 		p->postReadHeader(invalidPhysicalPageID, false);
-		p->encryptionKey = encryptionKey;
 
 		return Reference<ArenaPage>(p);
 	}
@@ -456,7 +402,6 @@ public:
 
 		// Non-verifying header parse just to initialize component pointers
 		p->postReadHeader(invalidPhysicalPageID, false);
-		p->encryptionKey = encryptionKey;
 
 		return Reference<ArenaPage>(p);
 	}
@@ -583,9 +528,6 @@ public:
 			throw page_header_version_not_supported();
 		}
 	}
-
-	// Used by encodings that do encryption
-	EncryptionKey encryptionKey;
 
 	// Whether encoding header is set
 	bool encodingHeaderAvailable = false;

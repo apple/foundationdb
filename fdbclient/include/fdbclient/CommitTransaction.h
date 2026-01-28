@@ -461,15 +461,7 @@ struct CommitTransactionRef {
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
 	VectorRef<MutationRef> mutations; // metadata mutations
-	// TODO(gglass): remove this
-#if 0	
-	// encryptedMutations should be a 1-1 correspondence with mutations field above. That is either
-	// encryptedMutations.size() == 0 or encryptedMutations.size() == mutations.size() and encryptedMutations[i] =
-	// mutations[i].encrypt(). Currently this field is not serialized so clients should NOT set this field during a
-	// usual commit path. It is currently only used during backup mutation log restores.
-	VectorRef<Optional<MutationRef>> encryptedMutations;
-#endif
-	
+
 	Version read_snapshot = 0;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present

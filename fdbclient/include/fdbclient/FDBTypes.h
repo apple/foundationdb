@@ -1423,9 +1423,8 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
-// TODO(gglass): come back and see if more of this can be removed.  We only use DISABLED, and that
-// too it should only really be used in places where we write out persistent metadata, so that
-// we can write "disabled" into metadata seen by older code versions in downgrade scenarios.
+// We assume this type is persistend in database metadata. Rename it to indicate
+// deprecation status, but leave the values as-is so that they can be interpreted.
 struct EncryptionAtRestModeDeprecated {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.

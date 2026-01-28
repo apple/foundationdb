@@ -6999,12 +6999,10 @@ public:
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
-										   // TODO(gglass): this is OK to delete
 	                                       bool encryptionEnabled,
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
-										   // NOTE(gglass): this field is used by us for file level backup encryption
 	                                       Optional<std::string> encryptionKeyFileName,
 	                                       int snapshotMode) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
