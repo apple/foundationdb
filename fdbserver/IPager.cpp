@@ -25,34 +25,25 @@
 #include <limits>
 
 TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
-	// Do not assume values 0 through "MAX-1" are valid. Values can get deprecated.
-	// Instead just explicitly specify the values that we are going to test with.
-	std::vector<EncodingType> typesToTest{EncodingType::XXHash64, EncodingType::XOREncryption_TestOnly};
+	EncodingType encodingType = EncodingType::XXHash64;
+	// TODO: it should not be necessary to define this constant here.  ArenaPage or something
+	// should export one.
+	constexpr int _PAGE_SIZE = 8 * 1024;
+	Reference<ArenaPage> page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
+	page->init(encodingType, PageType::BTreeNode, 1);
+	deterministicRandom()->randomBytes(page->mutateData(), page->dataSize());
+	PhysicalPageID pageID = deterministicRandom()->randomUInt32();
+	page->setWriteInfo(pageID, 1 /*version*/);
+	page->preWrite(pageID);
 
-	for (auto et : typesToTest) {
-		constexpr int _PAGE_SIZE = 8 * 1024;
-		EncodingType encodingType = (EncodingType)et;
-		Reference<ArenaPage> page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
-		page->init(encodingType, PageType::BTreeNode, 1);
-		deterministicRandom()->randomBytes(page->mutateData(), page->dataSize());
-		PhysicalPageID pageID = deterministicRandom()->randomUInt32();
-		if (encodingType == XOREncryption_TestOnly) {
-			page->encryptionKey.xorKey = deterministicRandom()->randomInt(0, std::numeric_limits<uint8_t>::max());
-			page->encryptionKey.xorWith = deterministicRandom()->randomInt(0, std::numeric_limits<uint8_t>::max());
-		}
-		page->setWriteInfo(pageID, 1 /*version*/);
-		page->preWrite(pageID);
-		// Randomly corrupt the data.
-		uint8_t* byte = page->mutateData() + deterministicRandom()->randomInt(0, page->dataSize());
-		*byte = ~(*byte);
-		page->postReadHeader(pageID);
-		try {
-			// Assert checksum failure is thrown.
-			page->postReadPayload(pageID);
-			UNREACHABLE();
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_page_decoding_failed);
-		}
+	uint8_t* byte = page->mutateData() + deterministicRandom()->randomInt(0, page->dataSize());
+	*byte = ~(*byte);
+	page->postReadHeader(pageID);
+	try {
+		page->postReadPayload(pageID);
+		UNREACHABLE();
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_page_decoding_failed);
 	}
 	return Void();
 }

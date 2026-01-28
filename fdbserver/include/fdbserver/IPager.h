@@ -97,13 +97,12 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 // These values are the sort of thing that are likely to appear in serialized persisted
 // data, so to avoid any possible confusion with old code and new code relating to
 // reusing enum values for unrelated purposes, the enum contains the deprecated
-// encrypted values (2 and 3).  They are renamed to help find and eliminate source
+// encrypted values (1-3).  They are renamed to help find and eliminate source
 // code which uses them.
 enum EncodingType : uint8_t {
-	INVALID_ENCODING_TYPE = 0xff,
+	INVALID_ENCODING_TYPE = 4, // 4 = Old value of MAX that was being used in Redwood code for initialization of member variables/etc.
 	XXHash64 = 0,
-	XOREncryption_TestOnly = 1,
-	MAX_ENCODING_TYPE_FOR_RANDOM_SELECTION = 2,
+	XOREncryption_TestOnly_DEPRECATED = 1,
 	AESEncryption_DEPRECATED = 2,
 	AESEncryptionWithAuth_DEPRECATED = 3,
 	MAX_ENCODING_TYPE_EVER_DEFINED_DONT_USE_THIS_DIRECTLY_BECAUSE_YOU_CANT_ASSUME_NO_VALUES_EVER_GET_DEPRECATED = 4,
@@ -394,8 +393,6 @@ public:
 	static int encodingHeaderSize(EncodingType t) {
 		if (t == EncodingType::XXHash64) {
 			return sizeof(XXHashEncoder::Header);
-		} else if (t == EncodingType::XOREncryption_TestOnly) {
-			return sizeof(XOREncryptionEncoder::Header);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -500,8 +497,6 @@ public:
 
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::encode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
-			XOREncryptionEncoder::encode(page->getEncodingHeader(), encryptionKey, pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
@@ -544,15 +539,13 @@ public:
 	void postReadPayload(PhysicalPageID pageID, double* decryptTime = nullptr) {
 		if (page->encodingType == EncodingType::XXHash64) {
 			XXHashEncoder::decode(page->getEncodingHeader(), pPayload, payloadSize, pageID);
-		} else if (page->encodingType == EncodingType::XOREncryption_TestOnly) {
-			XOREncryptionEncoder::decode(page->getEncodingHeader(), encryptionKey, pPayload, payloadSize, pageID);
 		} else {
 			throw page_encoding_not_supported();
 		}
 	}
 
 	const Arena& getArena() const { return arena; }
-	
+
 	// Return pointer to encoding header.
 	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
 

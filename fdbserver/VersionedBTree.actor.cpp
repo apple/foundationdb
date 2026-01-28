@@ -4548,6 +4548,7 @@ struct BTreePage {
 #pragma pack(pop)
 
 	void init(unsigned int height, unsigned int kvBytes) {
+		ASSERT(height < 0xf0);
 		treeOffset = sizeof(BTreePage);
 		this->height = height;
 		this->kvBytes = kvBytes;
@@ -4780,6 +4781,7 @@ public:
 
 		int readFromBytes(const uint8_t* src) {
 			height = *(uint8_t*)src;
+			ASSERT(height < 0xf0);
 			src += sizeof(uint8_t);
 			version = *(Version*)src;
 			src += sizeof(Version);
@@ -5888,6 +5890,7 @@ private:
 		       records.front().getChildPage().size() > (BUGGIFY ? 1 : BTreeCommitHeader::maxRootPointerSize) ||
 		       records[0].key != dbBegin.key) {
 			CODE_PROBE(records.size() == 1, "Writing a new root because the current root pointer would be too large");
+			ASSERT(height < 0xf0);
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
 			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
@@ -6031,6 +6034,7 @@ private:
 		}
 
 		state unsigned int height = (unsigned int)((const BTreePage*)page->data())->height;
+		ASSERT(height < 0xf0);
 		if (oldID.size() == 1) {
 			page->setLogicalPageInfo(oldID.front(), parentID);
 			LogicalPageID id = wait(
@@ -6432,6 +6436,10 @@ private:
 		state Reference<const ArenaPage> pageCopy;
 
 		state BTreePage* btPage = (BTreePage*)page->mutateData();
+		if (height != btPage->height) {
+			fprintf(stderr, "height [%d] != btPage->height [%d]\n", height, btPage->height);
+			ASSERT(false);
+		}
 		ASSERT(height == btPage->height);
 		++g_redwoodMetrics.level(height).metrics.pageCommitStart;
 
@@ -9715,8 +9723,6 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state bool serialTest = params.getInt("serialTest").orDefault(deterministicRandom()->random01() < 0.25);
 	state bool shortTest = params.getInt("shortTest").orDefault(deterministicRandom()->random01() < 0.25);
 
-	state int encoding =
-	    params.getInt("encodingType").orDefault(deterministicRandom()->randomInt(0, EncodingType::MAX_ENCODING_TYPE_FOR_RANDOM_SELECTION));
 	state int pageSize =
 	    shortTest ? 250 : (deterministicRandom()->coinflip() ? 4096 : deterministicRandom()->randomInt(250, 400));
 	state int extentSize =
@@ -9786,7 +9792,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                             : randomSize((int)std::min<int64_t>(
 	                                   (keyGen.getMaxKeyLen() + valGen.getMaxValLen()) * int64_t(20000), 10e6)));
 
-	state EncodingType encodingType = static_cast<EncodingType>(encoding);
+	state EncodingType encodingType = EncodingType::XXHash64;
 
 	printf("\n");
 	printf("file: %s\n", file.c_str());
