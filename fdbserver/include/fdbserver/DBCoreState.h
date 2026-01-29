@@ -139,6 +139,7 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
+
 	// encryptionAtRestModeDeprecated: Leaving this member in here but marked as Deprecated.
 	// It may not be safe to remove this flat out if DBCoreState is persisted
 	// in some way that survives upgrades.  We want to avoid future disasters where
@@ -146,6 +147,15 @@ struct DBCoreState {
 	// bytes in storage associated with the prior encryptionAtRestMode member.
 	// If we are positive that the above cannot happen then I suppose it would be OK
 	// to remove the following member.
+	//
+	// Another solution would be to do an explicit migration where we run code to
+	// zero out this field in persistent metadata and then rewrite that metadata.
+	// Once all production footprint had zero values for these bytes then
+	// we would delete the member from this struct.  In some contexts
+	// this might be considered the "right way" to do things but it is
+	// way too much work for the value it yields.  It is vastly
+	// simpler to just ignore the ~4 bytes historically used for this
+	// purpose, and add new members after this legacy member.
 	EncryptionAtRestModeDeprecated encryptionAtRestModeDeprecated;
 
 	DBCoreState()
