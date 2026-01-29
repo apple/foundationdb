@@ -32,8 +32,8 @@
 #include <string_view>
 #include <unordered_set>
 
-// TODO(gglass): figure out how much of this stuff is needed with encryption at rest having
-// been deleted.
+// TODO(gglass): figure out how much of this stuff is needed now that encryption
+// at rest is deleted.  For now leave it is as it's not that much code.
 
 #define DEBUG_ENCRYPT_KEY_CIPHER false
 
