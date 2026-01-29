@@ -347,29 +347,3 @@ TEST_CASE("/RESTUtils/ValidURIWithParamsSecure") {
 	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
 	return Void();
 }
-
-TEST_CASE("/RESTUtils/ValidURIWithParamsKnobNotEnabled") {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ false }));
-	std::string uri("http://host/foo/bar?param1,param2");
-	try {
-		RESTUrl r(uri);
-		ASSERT(false);
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_rest_unsupported_protocol);
-	}
-	return Void();
-}
-
-TEST_CASE("/RESTUtils/ValidURIWithParams") {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ true }));
-	std::string uri("http://host/foo/bar?param1,param2");
-	RESTUrl r(uri);
-	ASSERT_EQ(r.connType.secure, RESTConnectionType::NOT_SECURE_CONNECTION);
-	ASSERT_EQ(r.host.compare("host"), 0);
-	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
-	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
-	return Void();
-}

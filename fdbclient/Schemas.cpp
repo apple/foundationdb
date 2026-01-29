@@ -894,7 +894,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
-         ]},
+         ]}
       },
       "consistency_scan" : {
          "configuration" : {

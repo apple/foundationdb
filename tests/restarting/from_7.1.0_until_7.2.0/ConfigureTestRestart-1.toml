@@ -1,4 +1,7 @@
 [[test]]
+# Redwood unavoidably tries encryption modes in old binaries
+storageEngineExcludeTypes = [3]
+
 testTitle='CloggedConfigureDatabaseTest'
 clearAfterTest=false
 
