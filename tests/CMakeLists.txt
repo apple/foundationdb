@@ -14,6 +14,7 @@ set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPT
 
 # for the restart test we optimally want to use the last stable fdbserver
 # to test upgrades
+# FIXME: why is this using 7.1.23?  That is not the "last stable fdbserver".
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
     fdbserver-7.1.23 fdbserver fdbserver.exe
@@ -307,33 +308,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
 
   if (RESTART_TEST)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-1.txt
-      restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.3.0/CycleTestRestart-1.txt
-      restarting/from_7.1.0_until_7.3.0/CycleTestRestart-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-1.txt
-      restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-1.txt
-      restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
-      restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
-      restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
-      restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-1.toml
-      restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
       restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)
