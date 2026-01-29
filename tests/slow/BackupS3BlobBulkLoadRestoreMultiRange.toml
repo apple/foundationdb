@@ -24,12 +24,12 @@ storageEngineExcludeTypes = [5] # TODO(BulkLoad): remove after allowing bulkload
 encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS
 
-# Force single-region for stability - BulkLoad in 2-DC mode has cluster instability issues
-# TODO(BulkLoad): Re-enable HA testing once BulkLoad is more stable with multi-region
+# HA (multi-region) configuration - randomly enabled for test coverage
+# Note: generateFearless controls "fearless DR" configs, simpleConfig=false allows complex configs
 generateFearless = false
 simpleConfig = false
 minimumRegions = 1
-singleRegion = true
+# singleRegion not set - allows random HA configuration
 
 config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 
