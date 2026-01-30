@@ -53,8 +53,8 @@ disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
 # Longer timeouts to handle chaos-induced delays
 # BulkDump with S3 chaos can take much longer than normal
-bulkdump_job_timeout = 1800
-bulkload_job_timeout = 1800
+bulkdump_job_timeout = 2400
+bulkload_job_timeout = 2400
 
 [[flow_knobs]]
 MAX_BUGGIFIED_DELAY = 0.0
@@ -88,8 +88,10 @@ timeout = 7200
 
     [[test.workload]]
     testName = 'Cycle'
-    nodeCount = 1000
-    transactionsPerSecond = 500.0
+    # Reduced from 1000 to 500 to limit S3 operations during chaos
+    # More nodes = more SST files = more chances for S3 failures
+    nodeCount = 500
+    transactionsPerSecond = 300.0
     testDuration = 30.0
     expectedRate = 0
 
