@@ -771,9 +771,7 @@ ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
-ACTOR Future<Void> saveMutationsToFile(BackupData* self,
-                                       Version popVersion,
-                                       int numMsg) {
+ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	state std::vector<Reference<IBackupFile>> logFiles;

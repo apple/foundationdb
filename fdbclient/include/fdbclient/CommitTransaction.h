@@ -333,8 +333,7 @@ struct MutationRef {
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
 			StringRef empty;
-			if (ar.protocolVersion().hasMutationChecksum() &&
-			    CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
+			if (ar.protocolVersion().hasMutationChecksum() && CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM) {
 				// Attach checksum at first, then attach acs index
 				populateChecksum();
 				uint8_t cType = createTypeWithChecksum(this->type);

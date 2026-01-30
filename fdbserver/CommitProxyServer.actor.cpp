@@ -1599,34 +1599,34 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	// if the operation was detected at pre resolution time. This ensures that the
 	// operation is broadcast to all logs, and does not lead to logs being included
 	// that are not part of the expected tag set (tpcv).
-	buildIdempotencyIdMutations(
-	    self->trs,
-	    self->idempotencyKVBuilder,
-	    self->commitVersion,
-	    self->committed,
-	    ConflictBatch::TransactionCommitted,
-	    self->locked,
-	    [&](const KeyValue& kv) {
-		    MutationRef idempotencyIdSet;
-		    idempotencyIdSet.type = MutationRef::Type::SetValue;
-		    idempotencyIdSet.param1 = kv.key;
-		    idempotencyIdSet.param2 = kv.value;
-		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
-		    ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ||
-		           pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size());
-		    self->toCommit.addTags(tags);
-			if (pProxyCommitData->acsBuilder != nullptr) {
-				updateMutationWithAcsAndAddMutationToAcsBuilder(
-																pProxyCommitData->acsBuilder,
-																idempotencyIdSet,
-																tags,
-																getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
-																pProxyCommitData->epoch,
-																self->commitVersion,
-																pProxyCommitData->dbgid);
-			}
-			self->toCommit.writeTypedMessage(idempotencyIdSet);
-	    });
+	buildIdempotencyIdMutations(self->trs,
+	                            self->idempotencyKVBuilder,
+	                            self->commitVersion,
+	                            self->committed,
+	                            ConflictBatch::TransactionCommitted,
+	                            self->locked,
+	                            [&](const KeyValue& kv) {
+		                            MutationRef idempotencyIdSet;
+		                            idempotencyIdSet.type = MutationRef::Type::SetValue;
+		                            idempotencyIdSet.param1 = kv.key;
+		                            idempotencyIdSet.param2 = kv.value;
+		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		                            ASSERT(!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ||
+		                                   pProxyCommitData->db->get().logSystemConfig.numLogs() ==
+		                                       self->tpcvMap.size());
+		                            self->toCommit.addTags(tags);
+		                            if (pProxyCommitData->acsBuilder != nullptr) {
+			                            updateMutationWithAcsAndAddMutationToAcsBuilder(
+			                                pProxyCommitData->acsBuilder,
+			                                idempotencyIdSet,
+			                                tags,
+			                                getCommitProxyAccumulativeChecksumIndex(pProxyCommitData->commitProxyIndex),
+			                                pProxyCommitData->epoch,
+			                                self->commitVersion,
+			                                pProxyCommitData->dbgid);
+		                            }
+		                            self->toCommit.writeTypedMessage(idempotencyIdSet);
+	                            });
 
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST ||
 	    pProxyCommitData->db->get().logSystemConfig.numLogs() == self->tpcvMap.size()) {
@@ -2866,9 +2866,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	//TraceEvent("CommitProxyInit1", proxy.id());
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
-	while (
-	    !(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
-	      commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
+	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
+	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
 	}
@@ -2893,7 +2892,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(
-													  commitData.logAdapter, commitData.db, proxy.id(), 2e9,  /*doc=*/true, /*ument=*/true, /*constants=*/true);
+	    commitData.logAdapter, commitData.db, proxy.id(), 2e9, /*doc=*/true, /*ument=*/true, /*constants=*/true);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);

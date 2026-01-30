@@ -1785,12 +1785,8 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
-		prevStorageServer = storageServer(store,
-		                                  recruited,
-		                                  db,
-		                                  folder,
-		                                  Promise<Void>(),
-		                                  Reference<IClusterConnectionRecord>(nullptr));
+		prevStorageServer =
+		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
 		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
 	}
 }
@@ -2330,7 +2326,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                deterministicRandom()->coinflip())
 				             : true),
 				    dbInfo,
-				    /* document constants =*/ 0);
+				    /* document constants =*/0);
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -2411,14 +2407,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				IKeyValueStore* kv = openKVStore(s.storeType,
-				                                 s.filename,
-				                                 s.storeID,
-				                                 memoryLimit,
-				                                 validateDataFiles,
-				                                 false,
-				                                 false,
-				                                 dbInfo);
+				IKeyValueStore* kv = openKVStore(
+				    s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, false, dbInfo);
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
@@ -2779,14 +2769,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					IKeyValueStore* data = openKVStore(req.storeType,
-					                                   filename,
-					                                   logId,
-					                                   memoryLimit,
-					                                   false,
-					                                   false,
-					                                   false,
-					                                   dbInfo);
+					IKeyValueStore* data =
+					    openKVStore(req.storeType, filename, logId, memoryLimit, false, false, false, dbInfo);
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,

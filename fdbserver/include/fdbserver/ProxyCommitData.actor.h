@@ -303,7 +303,7 @@ struct ProxyCommitData {
 	// So, if PROXY_USE_RESOLVER_PRIVATE_MUTATIONS is on, the RangeLock is automatically disabled.
 	bool rangeLockEnabled() {
 		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-			!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
+		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	}
 
 	ProxyCommitData(UID dbgid,
@@ -328,8 +328,7 @@ struct ProxyCommitData {
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
 	    lastResolverReset(now()), commitProxyIndex(commitProxyIndex),
 	    acsBuilder(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM &&
-				   !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
-	                       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
+	                       !SERVER_KNOBS->ENABLE_VERSION_VECTOR && !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST
 	                   ? std::make_shared<AccumulativeChecksumBuilder>(
 	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
 	                   : nullptr),

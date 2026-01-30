@@ -175,7 +175,7 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
 		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-			changeCoordinators.getFuture().isReady();
+		       changeCoordinators.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -419,10 +419,9 @@ struct RegisterWorkerRequest {
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-	    consistencyScanInterf(csInterf), degraded(degraded),
-	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
-	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface),
-	    clusterId(clusterId) {}
+	    consistencyScanInterf(csInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
+	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
+	    configBroadcastInterface(configBroadcastInterface), clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -681,14 +680,8 @@ struct InitializeCommitProxyRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           master,
-		           masterLifetime,
-		           recoveryCount,
-		           recoveryTransactionVersion,
-		           firstProxy,
-		           reply,
-		           commitProxyIndex);
+		serializer(
+		    ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply, commitProxyIndex);
 	}
 };
 
@@ -791,8 +784,7 @@ struct InitializeStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-				   ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
+		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
 	}
 };
 
@@ -1064,13 +1056,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder);
-ACTOR Future<Void> storageServer(
-    IKeyValueStore* persistentData,
-    StorageServerInterface ssi,
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::string folder,
-    Promise<Void> recovered,
-    Reference<IClusterConnectionRecord> connRecord);
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                 std::string folder,
+                                 Promise<Void> recovered,
+                                 Reference<IClusterConnectionRecord> connRecord);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

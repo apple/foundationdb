@@ -100,7 +100,8 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEv
 // encrypted values (1-3).  They are renamed to help find and eliminate source
 // code which uses them.
 enum EncodingType : uint8_t {
-	INVALID_ENCODING_TYPE = 4, // 4 = Old value of MAX that was being used in Redwood code for initialization of member variables/etc.
+	INVALID_ENCODING_TYPE =
+	    4, // 4 = Old value of MAX that was being used in Redwood code for initialization of member variables/etc.
 	XXHash64 = 0,
 	XOREncryption_TestOnly_DEPRECATED = 1,
 	AESEncryption_DEPRECATED = 2,

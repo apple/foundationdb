@@ -1483,8 +1483,7 @@ private:
 	Key lastValue;
 };
 
-void decodeKVPairs(StringRefReader* reader,
-                   Standalone<VectorRef<KeyValueRef>>* results) {
+void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
 	// Read begin key, if this fails then block was invalid.
 	uint32_t kLen = reader->consumeNetworkUInt32();
 	const uint8_t* k = reader->consume(kLen);
@@ -3578,10 +3577,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		Params.endVersion().set(task, maxVer);
 
 		// Avoid keyRange filtering optimization for 'manifest' files
-		wait(bc->writeKeyspaceSnapshotFile(files,
-		                                   beginEndKeys,
-		                                   totalBytes,
-										   IncludeKeyRangeMap::True));
+		wait(bc->writeKeyspaceSnapshotFile(files, beginEndKeys, totalBytes, IncludeKeyRangeMap::True));
 
 		TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 		    .detail("BackupUID", config.getUid())

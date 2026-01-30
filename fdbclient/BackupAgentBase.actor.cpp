@@ -280,16 +280,16 @@ void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena,
  Each `value` is a param2
 */
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
-											   VectorRef<MutationRef>* result,
-											   int* mutationSize,
-											   Standalone<StringRef> value,
-											   Key addPrefix,
-											   Key removePrefix,
-											   Version version,
-											   Reference<KeyRangeMap<Version>> key_version,
-											   Database cx,
-											   bool provisionalProxy,
-											   std::shared_ptr<DatabaseConfiguration> dbConfig) {
+                                               VectorRef<MutationRef>* result,
+                                               int* mutationSize,
+                                               Standalone<StringRef> value,
+                                               Key addPrefix,
+                                               Key removePrefix,
+                                               Version version,
+                                               Reference<KeyRangeMap<Version>> key_version,
+                                               Database cx,
+                                               bool provisionalProxy,
+                                               std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	try {
 		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;

@@ -75,9 +75,9 @@ public:
 	                           bool initialCommit_,
 	                           bool provisionalCommitProxy_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
-	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_),
-	    confChange(confChange_), logSystem(logSystem_), version(version),
-	    popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
+	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
+	    logSystem(logSystem_), version(version), popVersion(popVersion_),
+	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
 	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
@@ -94,12 +94,11 @@ public:
 	                           ResolverData& resolverData_,
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore),
-	    toCommit(resolverData_.toCommit), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
-	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
+	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
+	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
+	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    initialCommit(resolverData_.initialCommit), forResolver(true),
-	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {
-	}
+	    accumulativeChecksumIndex(resolverAccumulativeChecksumIndex), epoch(Optional<LogEpoch>()) {}
 
 private:
 	// The following variables are incoming parameters
@@ -169,9 +168,7 @@ private:
 	bool dummyConfChange = false;
 
 private:
-	void writeMutation(const MutationRef& m) {
-		toCommit->writeTypedMessage(m);
-	}
+	void writeMutation(const MutationRef& m) { toCommit->writeTypedMessage(m); }
 
 	void checkSetRangeLockPrefix(const MutationRef& m) {
 		if (!m.param1.startsWith(rangeLockPrefix)) {

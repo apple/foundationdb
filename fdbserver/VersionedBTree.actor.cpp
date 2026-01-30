@@ -4681,11 +4681,7 @@ public:
 		return deterministicRandom()->randomChoice(boundarySamples);
 	}
 
-	bool update(BTreeNodeLinkRef id,
-	            Version v,
-	            Key lowerBound,
-	            Key upperBound,
-	            unsigned int height) {
+	bool update(BTreeNodeLinkRef id, Version v, Key lowerBound, Key upperBound, unsigned int height) {
 		sampleBoundary(lowerBound);
 		sampleBoundary(upperBound);
 		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s', %u\n",
@@ -4701,11 +4697,7 @@ public:
 		return true;
 	}
 
-	bool verify(LogicalPageID id,
-	            Version v,
-	            Key lowerBound,
-	            Key upperBound,
-	            BTreePage::BinaryTree::Cursor& cursor) {
+	bool verify(LogicalPageID id, Version v, Key lowerBound, Key upperBound, BTreePage::BinaryTree::Cursor& cursor) {
 		auto i = boundariesByPageID.find(id);
 		ASSERT(i != boundariesByPageID.end());
 		ASSERT(!i->second.empty());
@@ -4925,14 +4917,9 @@ public:
 	Version getLastCommittedVersion() const { return m_pager->getLastCommittedVersion(); }
 
 	// VersionedBTree takes ownership of pager
-	VersionedBTree(IPager2* pager,
-	               std::string name,
-	               UID logID,
-	               Reference<AsyncVar<ServerDBInfo> const> db) 
-	  : m_pager(pager), m_db(db),
-	    m_enforceEncodingType(false),
-	    m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_logID(logID),
-	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	VersionedBTree(IPager2* pager, std::string name, UID logID, Reference<AsyncVar<ServerDBInfo> const> db)
+	  : m_pager(pager), m_db(db), m_enforceEncodingType(false), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
+	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5445,25 +5432,17 @@ private:
 
 	// Describes a range of a vector of records that should be built into a single BTreePage
 	struct PageToBuild {
-		PageToBuild(int index,
-		            int blockSize,
-		            EncodingType encodingType,
-		            unsigned int height,
-		            bool splitByDomain)
+		PageToBuild(int index, int blockSize, EncodingType encodingType, unsigned int height, bool splitByDomain)
 		  : startIndex(index), count(0), pageSize(blockSize),
 		    largeDeltaTree(pageSize > BTreePage::BinaryTree::SmallSizeLimit), blockSize(blockSize), blockCount(1),
-		    kvBytes(0), encodingType(encodingType), height(height),
-		    splitByDomain(splitByDomain) {
+		    kvBytes(0), encodingType(encodingType), height(height), splitByDomain(splitByDomain) {
 
 			// Subtrace Page header overhead, BTreePage overhead, and DeltaTree (BTreePage::BinaryTree) overhead.
 			bytesLeft =
 			    ArenaPage::getUsableSize(blockSize, encodingType) - sizeof(BTreePage) - sizeof(BTreePage::BinaryTree);
 		}
 
-		PageToBuild next() {
-			return PageToBuild(
-			    endIndex(), blockSize, encodingType, height, splitByDomain);
-		}
+		PageToBuild next() { return PageToBuild(endIndex(), blockSize, encodingType, height, splitByDomain); }
 
 		int startIndex; // Index of the first record
 		int count; // Number of records added to the page
@@ -5575,9 +5554,7 @@ private:
 			return true;
 		}
 
-		void finish() {
-			/* empty, used to do encryption stuff. */
-		}
+		void finish() { /* empty, used to do encryption stuff. */ }
 	};
 
 	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
@@ -5833,8 +5810,8 @@ private:
 			}
 
 			if (self->m_pBoundaryVerifier != nullptr) {
-				ASSERT(self->m_pBoundaryVerifier->update(
-									 childPageID, v, pageLowerBound.key, pageUpperBound.key, height));
+				ASSERT(
+				    self->m_pBoundaryVerifier->update(childPageID, v, pageLowerBound.key, pageUpperBound.key, height));
 			}
 
 			if (++sinceYield > 100) {
@@ -6966,8 +6943,7 @@ private:
 			// which to build new page(s) if modification is not possible or not allowed.
 			// If pageCopy is already set it was initialized to page above so the modifier doesn't need
 			// to copy it
-			state InternalPageModifier modifier(
-			    page, pageCopy.isValid(), tryToUpdate, parentInfo, maxHeightAllowed);
+			state InternalPageModifier modifier(page, pageCopy.isValid(), tryToUpdate, parentInfo, maxHeightAllowed);
 
 			// Apply the possible changes for each subtree range recursed to, except the last one.
 			// For each range, the expected next record, if any, is checked against the first boundary
@@ -7921,11 +7897,7 @@ IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
                                        int64_t pageCacheBytes) {
-	return new KeyValueStoreRedwood(filename,
-	                                logID,
-	                                db,
-	                                EncodingType::INVALID_ENCODING_TYPE,
-	                                pageCacheBytes);
+	return new KeyValueStoreRedwood(filename, logID, db, EncodingType::INVALID_ENCODING_TYPE, pageCacheBytes);
 }
 
 int randomSize(int max) {

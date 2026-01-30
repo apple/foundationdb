@@ -251,10 +251,7 @@ struct MoveInUpdates {
 	              IKeyValueStore* store,
 	              MoveInUpdatesSpilled spilled);
 
-	void addMutation(Version version,
-	                 bool fromFetch,
-	                 MutationRef const& mutation,
-	                 bool allowSpill);
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation, bool allowSpill);
 
 	bool hasNext() const;
 
@@ -381,9 +378,7 @@ struct MoveInShard {
 	void setHighWatermark(const Version version) { this->meta->highWatermark = version; }
 	Version getHighWatermark() const { return this->meta->highWatermark; }
 
-	void addMutation(Version version,
-	                 bool fromFetch,
-	                 MutationRef const& mutation);
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
 	KeyRangeRef getAffectedRange(const MutationRef& mutation) const;
 
@@ -444,9 +439,7 @@ struct AddingShard : NonCopyable {
 			readWrite.send(Void());
 	}
 
-	void addMutation(Version version,
-	                 bool fromFetch,
-	                 MutationRef const& mutation);
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
 	bool isDataTransferred() const { return phase >= FetchingCF; }
 	bool isDataAndCFTransferred() const { return phase >= Waiting; }
@@ -577,9 +570,7 @@ public:
 		return isCFInVersionedData() || (moveInShard && (moveInShard->getPhase() == MoveInPhase::ReadWritePending ||
 		                                                 moveInShard->getPhase() == MoveInPhase::Complete));
 	}
-	void addMutation(Version version,
-	                 bool fromFetch,
-	                 MutationRef const& mutation);
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 	bool isFetched() const {
 		return readWrite || (adding && adding->fetchComplete.isSet()) ||
 		       (moveInShard && moveInShard->fetchComplete.isSet());
@@ -6438,18 +6429,12 @@ void coalesceShards(StorageServer* data, KeyRangeRef keys) {
 }
 
 template <class T>
-void addMutation(T& target,
-                 Version version,
-                 bool fromFetch,
-                 MutationRef const& mutation) {
+void addMutation(T& target, Version version, bool fromFetch, MutationRef const& mutation) {
 	target.addMutation(version, fromFetch, mutation);
 }
 
 template <class T>
-void addMutation(Reference<T>& target,
-                 Version version,
-                 bool fromFetch,
-                 MutationRef const& mutation) {
+void addMutation(Reference<T>& target, Version version, bool fromFetch, MutationRef const& mutation) {
 	addMutation(*target, version, fromFetch, mutation);
 }
 
@@ -6461,11 +6446,7 @@ void splitMutations(StorageServer* data, KeyRangeMap<T>& map, VerUpdateRef const
 }
 
 template <class T>
-void splitMutation(StorageServer* data,
-                   KeyRangeMap<T>& map,
-                   MutationRef const& m,
-                   Version ver,
-                   bool fromFetch) {
+void splitMutation(StorageServer* data, KeyRangeMap<T>& map, MutationRef const& m, Version ver, bool fromFetch) {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		if (!SHORT_CIRCUT_ACTUAL_STORAGE || !normalKeys.contains(m.param1))
 			addMutation(map.rangeContaining(m.param1)->value(), ver, fromFetch, m);
@@ -6475,10 +6456,7 @@ void splitMutation(StorageServer* data,
 			auto r = map.intersectingRanges(mKeys);
 			for (auto i = r.begin(); i != r.end(); ++i) {
 				KeyRangeRef k = mKeys & i->range();
-				addMutation(i->value(),
-				            ver,
-				            fromFetch,
-				            MutationRef((MutationRef::Type)m.type, k.begin, k.end));
+				addMutation(i->value(), ver, fromFetch, MutationRef((MutationRef::Type)m.type, k.begin, k.end));
 			}
 		}
 	} else
@@ -7572,9 +7550,7 @@ AddingShard::AddingShard(StorageServer* server,
 	fetchClient = fetchKeys(server, this);
 }
 
-void AddingShard::addMutation(Version version,
-                              bool fromFetch,
-                              MutationRef const& mutation) {
+void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	if (version <= fetchVersion) {
 		return;
 	}
@@ -8287,10 +8263,7 @@ Key MoveInUpdates::getPersistKey(const Version version, const int idx) const {
 	return wr.toValue();
 }
 
-void MoveInUpdates::addMutation(Version version,
-                                bool fromFetch,
-                                MutationRef const& mutation,
-                                bool allowSpill) {
+void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef const& mutation, bool allowSpill) {
 	if (version <= lastRepliedVersion || this->fail) {
 		return;
 	}
@@ -8422,9 +8395,7 @@ void MoveInShard::cancel(const MoveInFailed failed) {
 	    mLV, MutationRef(MutationRef::SetValue, persistMoveInShardKey(this->id()), moveInShardValue(*this->meta)));
 }
 
-void MoveInShard::addMutation(Version version,
-                              bool fromFetch,
-                              MutationRef const& mutation) {
+void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	DEBUG_MUTATION("MoveInShardAddMutation", version, mutation, this->id());
 	server->counters.logicalBytesMoveInOverhead += mutation.expectedSize();
 	const KeyRangeRef range = this->getAffectedRange(mutation);
@@ -8503,9 +8474,7 @@ ShardInfo* ShardInfo::newShard(StorageServer* data, const StorageServerShard& sh
 	return res;
 }
 
-void ShardInfo::addMutation(Version version,
-                            bool fromFetch,
-                            MutationRef const& mutation) {
+void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	ASSERT((void*)this);
 	ASSERT(keys.contains(mutation.param1));
 	if (adding) {
@@ -8513,8 +8482,7 @@ void ShardInfo::addMutation(Version version,
 	} else if (moveInShard) {
 		moveInShard->addMutation(version, fromFetch, mutation);
 	} else if (readWrite) {
-		readWrite->addMutation(
-		    version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
+		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
 	} else if (mutation.type != MutationRef::ClearRange) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned shard!
@@ -8811,11 +8779,7 @@ void changeServerKeys(StorageServer* data,
 	// Clear the moving-in empty range, and set it available at the latestVersion.
 	for (const auto& range : newEmptyRanges) {
 		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
-		data->addMutation(data->data().getLatestVersion(),
-		                  true,
-		                  clearRange,
-		                  range,
-		                  data->updateEagerReads);
+		data->addMutation(data->data().getLatestVersion(), true, clearRange, range, data->updateEagerReads);
 		data->newestAvailableVersion.insert(range, latestVersion);
 		setAvailableStatus(data, range, true);
 		++data->counters.kvSystemClearRanges;
@@ -9188,11 +9152,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	// Clear the moving-in empty range, and set it available at the latestVersion.
 	for (const auto& range : newEmptyRanges) {
 		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
-		data->addMutation(data->data().getLatestVersion(),
-		                  true,
-		                  clearRange,
-		                  range,
-		                  data->updateEagerReads);
+		data->addMutation(data->data().getLatestVersion(), true, clearRange, range, data->updateEagerReads);
 		data->newestAvailableVersion.insert(range, latestVersion);
 		setAvailableStatus(data, range, true);
 		++data->counters.kvSystemClearRanges;
@@ -9272,10 +9232,7 @@ public:
 	  : currentVersion(fromVersion), fromVersion(fromVersion), restoredVersion(restoredVersion),
 	    processedStartKey(false), processedCacheStartKey(false) {}
 
-	void applyMutation(StorageServer* data,
-	                   MutationRef const& m,
-	                   Version ver,
-	                   bool fromFetch) {
+	void applyMutation(StorageServer* data, MutationRef const& m, Version ver, bool fromFetch) {
 		//TraceEvent("SSNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
 
 		if (currentVersion != ver) {
@@ -9753,9 +9710,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					cloneReader >> msg;
 					if (!msg.validateChecksum()) {
 						TraceEvent(SevError, "ValidateChecksumError", data->thisServerID)
-							.setMaxFieldLength(-1)
-							.setMaxEventLength(-1)
-							.detail("Mutation", msg);
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
+						    .detail("Mutation", msg);
 						ASSERT(false);
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -9798,9 +9755,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				break;
 			}
 
-			CODE_PROBE(
-					   true,
-					   "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
+			CODE_PROBE(true,
+			           "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
 			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the
 			// reads only selectively
 			eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
@@ -9831,8 +9787,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				updater.applyMutation(
-				    data, pUpdate->mutations[mutationNum], pUpdate->version, true);
+				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				// data->counters.mutationBytes or data->counters.mutations should not be updated because they
 				// should have counted when the mutations arrive from cursor initially.
@@ -9893,7 +9848,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				MutationRef msg;
 				rd >> msg;
 				if (data->acsValidator != nullptr && msg.checksum.present() &&
-					msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
+				    msg.accumulativeChecksumIndex.present() && !isAccumulativeChecksumMutation(msg)) {
 					// We have to check accumulative checksum when iterating through cloneCursor2,
 					// where ss removal by tag assignment takes effect immediately
 					data->acsValidator->addMutation(
@@ -10568,9 +10523,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		try {
 			loop {
 				choose {
-					when(wait(ioTimeoutError(durable,
-											 SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME,
-											 "StorageCommit"))) {
+					when(wait(ioTimeoutError(durable, SERVER_KNOBS->MAX_STORAGE_COMMIT_TIME, "StorageCommit"))) {
 						break;
 					}
 					when(wait(delay(60.0))) {

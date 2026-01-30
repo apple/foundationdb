@@ -191,11 +191,11 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Version lastShardMove;
 
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount)
-	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount),
-	    version(-1), conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE),
-	    cc("Resolver", dbgid.toString()), resolveBatchIn("ResolveBatchIn", cc),
-	    resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc),
-	    resolvedBytes("ResolvedBytes", cc), resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),
+	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), version(-1),
+	    conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE), cc("Resolver", dbgid.toString()),
+	    resolveBatchIn("ResolveBatchIn", cc), resolveBatchStart("ResolveBatchStart", cc),
+	    resolvedTransactions("ResolvedTransactions", cc), resolvedBytes("ResolvedBytes", cc),
+	    resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),
 	    resolvedWriteConflictRanges("ResolvedWriteConflictRanges", cc),
 	    transactionsAccepted("TransactionsAccepted", cc), transactionsTooOld("TransactionsTooOld", cc),
 	    transactionsConflicted("TransactionsConflicted", cc),
@@ -416,9 +416,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();
 
-				applyMetadataMutations(spanContext,
-				                       *resolverData,
-				                       req.transactions[t].mutations);
+				applyMetadataMutations(spanContext, *resolverData, req.transactions[t].mutations);
 			}
 			CODE_PROBE(self->forceRecovery, "Resolver detects forced recovery");
 		}
@@ -595,10 +593,9 @@ struct TransactionStateResolveContext {
 	}
 };
 
-ACTOR Future<Void> processCompleteTransactionStateRequest(
-    Reference<Resolver> self,
-    TransactionStateResolveContext* pContext,
-    Reference<AsyncVar<ServerDBInfo> const> db) {
+ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> self,
+                                                          TransactionStateResolveContext* pContext,
+                                                          Reference<AsyncVar<ServerDBInfo> const> db) {
 	state KeyRange txnKeys = allKeys;
 	state std::map<Tag, UID> tag_uid;
 
@@ -721,16 +718,14 @@ ACTOR Future<Void> processTransactionStateRequestPart(Reference<Resolver> self,
 ACTOR Future<Void> resolverCore(ResolverInterface resolver,
                                 InitializeResolverRequest initReq,
                                 Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Reference<Resolver> self(
-				   new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
+	state Reference<Resolver> self(new Resolver(resolver.id(), initReq.commitProxyCount, initReq.resolverCount));
 	state ActorCollection actors(false);
 	state Future<Void> doPollMetrics = self->resolverCount > 1 ? Void() : Future<Void>(Never());
 	state PromiseStream<Future<Void>> addActor;
 	actors.add(waitFailureServer(resolver.waitFailure.getFuture()));
 	actors.add(traceRole(Role::RESOLVER, resolver.id()));
 
-	TraceEvent("ResolverInit", resolver.id())
-	    .detail("RecoveryCount", initReq.recoveryCount);
+	TraceEvent("ResolverInit", resolver.id()).detail("RecoveryCount", initReq.recoveryCount);
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(initReq.masterLifetime.isEqual(db->get().masterLifetime) &&
@@ -748,7 +743,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 		self->logAdapter = new LogSystemDiskQueueAdapter(self->logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 		self->txnStateStore = keyValueStoreLogSystem(
-													 self->logAdapter, db, resolver.id(), /*doc=*/2e9, /*u=*/true, /*ment=*/true, /*constants=*/true);
+		    self->logAdapter, db, resolver.id(), /*doc=*/2e9, /*u=*/true, /*ment=*/true, /*constants=*/true);
 
 		// wait for txnStateStore recovery
 		wait(success(self->txnStateStore->readValue(StringRef())));

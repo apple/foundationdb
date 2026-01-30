@@ -92,7 +92,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Reference<ILogSystem> logSystem,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
-							bool& confChange,
+                            bool& confChange,
                             Version version,
                             Version popVersion,
                             bool initialCommit,
@@ -103,7 +103,6 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
                             IKeyValueStore* txnStateStore);
-
 
 bool containsMetadataMutation(const VectorRef<MutationRef>& mutations);
 

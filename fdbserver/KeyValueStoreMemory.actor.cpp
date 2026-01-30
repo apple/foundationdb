@@ -530,8 +530,7 @@ private:
 						h = *(OpHeader*)data.begin();
 						ASSERT(h.op != OpEncrypted_Deprecated);
 					}
-					state Standalone<StringRef> data =
-					    wait(readOpData(self, h, &isZeroFilled, &zeroFillSize));
+					state Standalone<StringRef> data = wait(readOpData(self, h, &isZeroFilled, &zeroFillSize));
 					if (zeroFillSize > 0) {
 						TraceEvent("KVSMemRecoveryComplete", self->id)
 						    .detail("Reason", "data specified by header does not exist")
@@ -896,7 +895,6 @@ private:
 		self->log->pop(location);
 		return Void();
 	}
-
 };
 
 template <typename Container>
@@ -936,13 +934,23 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	// Use DiskQueueVersion::V2 with xxhash3 checksum
 	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V2);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
-		return new KeyValueStoreMemory<radix_tree>(
-												   log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType,
-												   /*doc*/false, /*ument*/false, /*thisstuff FFS*/ false);
+		return new KeyValueStoreMemory<radix_tree>(log,
+		                                           Reference<AsyncVar<ServerDBInfo> const>(),
+		                                           logID,
+		                                           memoryLimit,
+		                                           storeType,
+		                                           /*doc*/ false,
+		                                           /*ument*/ false,
+		                                           /*thisstuff FFS*/ false);
 	} else {
-		return new KeyValueStoreMemory<IKeyValueContainer>(
-		    log, Reference<AsyncVar<ServerDBInfo> const>(), logID, memoryLimit, storeType,
-			/* name */ false, /*the */ false, /* effing parameter*/ false);
+		return new KeyValueStoreMemory<IKeyValueContainer>(log,
+		                                                   Reference<AsyncVar<ServerDBInfo> const>(),
+		                                                   logID,
+		                                                   memoryLimit,
+		                                                   storeType,
+		                                                   /* name */ false,
+		                                                   /*the */ false,
+		                                                   /* effing parameter*/ false);
 	}
 }
 
@@ -953,12 +961,6 @@ IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                        bool disableSnapshot,
                                        bool replaceContent,
                                        bool exactRecovery) {
-	return new KeyValueStoreMemory<IKeyValueContainer>(queue,
-	                                                   db,
-	                                                   logID,
-	                                                   memoryLimit,
-	                                                   KeyValueStoreType::MEMORY,
-	                                                   disableSnapshot,
-	                                                   replaceContent,
-	                                                   exactRecovery);
+	return new KeyValueStoreMemory<IKeyValueContainer>(
+	    queue, db, logID, memoryLimit, KeyValueStoreType::MEMORY, disableSnapshot, replaceContent, exactRecovery);
 }
