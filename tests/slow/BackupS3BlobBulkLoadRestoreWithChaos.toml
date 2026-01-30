@@ -29,10 +29,15 @@ simpleConfig = false
 minimumRegions = 1
 # singleRegion not set - allows random HA configuration
 
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+# Triple replication needs 6+ servers (3 src + 3 different dest) to avoid overlapping
+extraMachineCountDC = 3
+
 config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 
-# Disable buggify to isolate S3 chaos effects
+# Disable buggify and fault injection to isolate S3 chaos effects
 buggify = false
+faultInjection = false
 
 # Required knobs for BulkLoad functionality
 [[knobs]]

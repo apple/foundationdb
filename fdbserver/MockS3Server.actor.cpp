@@ -195,9 +195,13 @@ ACTOR static Future<Void> atomicWriteFile(std::string path, std::string content)
 	// Generate unique temp filename to avoid collision with other MockS3 servers
 	// writing to the same path. Each server gets its own temp file, and the
 	// last rename wins (correct S3 semantics).
+	// IMPORTANT: Use nondeterministicRandom() here, NOT deterministicRandom()!
+	// atomicWriteFile can be called in non-deterministic order across platforms
+	// (due to concurrent file operations), and using deterministicRandom() would
+	// cause the simulation's random state to diverge between platforms.
 	// We use OPEN_ATOMIC_WRITE_AND_CREATE which creates a .part file internally,
 	// so the full chain is: path.{uuid}.tmp.part -> path.{uuid}.tmp -> path
-	state std::string tempPath = path + "." + deterministicRandom()->randomUniqueID().toString() + ".tmp";
+	state std::string tempPath = path + "." + nondeterministicRandom()->randomUniqueID().toString() + ".tmp";
 
 	try {
 		// Create all parent directories

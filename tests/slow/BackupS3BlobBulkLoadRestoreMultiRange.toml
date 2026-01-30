@@ -31,10 +31,15 @@ simpleConfig = false
 minimumRegions = 1
 # singleRegion not set - allows random HA configuration
 
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+# Triple replication needs 6+ servers (3 src + 3 different dest) to avoid overlapping
+extraMachineCountDC = 3
+
 config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 
-# Disable buggify to avoid interference with MockS3 interactions
+# Disable buggify and fault injection to avoid interference with MockS3/BulkLoad
 buggify = false
+faultInjection = false
 
 # Required knobs for BulkLoad functionality
 [[knobs]]
@@ -74,6 +79,8 @@ useDB = true
 clearAfterTest = false
 simBackupAgents = 'BackupToFile'
 waitForQuiescence = false
+waitForQuiescenceEnd = false
+runConsistencyCheck = false
 connectionFailuresDisableDuration = 1000000
 runFailureWorkloads = false
 timeout = 3600
