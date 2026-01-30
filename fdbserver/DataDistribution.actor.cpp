@@ -2807,14 +2807,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			// Always spawn bulkDumpCore - it will dynamically check the mode
+			// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
+			// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
+			// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
 			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
 			    .detail("UsableRegions", self->configuration.usableRegions)
 			    .detail("InitialMode", self->initData->bulkDumpMode);
-			if (self->configuration.usableRegions > 1) {
-				actors.push_back(bulkDumpCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-			} else {
-				actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
-			}
+			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
 
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);
