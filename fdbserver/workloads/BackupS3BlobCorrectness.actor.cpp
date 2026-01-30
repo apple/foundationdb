@@ -877,7 +877,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 							Key keyToCorrupt = corruptedKey;
 							Value valueToWrite = corruptedValue;
 							wait(runRYWTransaction(
-							    cx, [keyToCorrupt, valueToWrite](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+							    cx,
+							    [keyToCorrupt, valueToWrite](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 								    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 								    tr->set(keyToCorrupt, valueToWrite);
 								    return Void();
@@ -931,8 +932,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 												TraceEvent(SevError, "BS3BCW_ValidationNegativeTestFailed")
 												    .detail("AuditID", negativeAuditId)
 												    .detail("CorruptedKey", corruptedKey)
-												    .detail("Problem",
-												            "Audit passed despite data corruption - validation is broken!");
+												    .detail(
+												        "Problem",
+												        "Audit passed despite data corruption - validation is broken!");
 												ASSERT(false); // Fail the test
 											}
 										}
@@ -955,12 +957,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 							// Copy state vars to locals for lambda capture
 							Key keyToRestore = corruptedKey;
 							Value valueToRestore = originalValue;
-							wait(runRYWTransaction(
-							    cx, [keyToRestore, valueToRestore](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-								    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-								    tr->set(keyToRestore, valueToRestore);
-								    return Void();
-							    }));
+							wait(runRYWTransaction(cx,
+							                       [keyToRestore, valueToRestore](
+							                           Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+								                       tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+								                       tr->set(keyToRestore, valueToRestore);
+								                       return Void();
+							                       }));
 
 							TraceEvent("BS3BCW_ValidationNegativeTestComplete")
 							    .detail("KeyRestored", corruptedKey)
