@@ -1755,24 +1755,19 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("ReadVersion", tr.getReadVersion().get());
 
 						if (bulkLoadTaskState.present()) {
-							// Only check for conflicts when there's an ongoing data move (dest is non-empty).
-							// For BulkLoad with overlapping src/dest (small clusters where src == dest),
-							// we want to allow the operation when there's no active data move.
-							if (!dest.empty()) {
-								state std::vector<UID> owners(src.size() + dest.size());
-								std::merge(src.begin(), src.end(), dest.begin(), dest.end(), owners.begin());
-								for (const auto& ssid : servers) {
-									if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
-										TraceEvent(SevWarn, "DDBulkLoadTaskStartMoveShardsMoveInConflict")
-										    .detail("TaskID", bulkLoadTaskState.get().getTaskId())
-										    .detail("JobID", bulkLoadTaskState.get().getJobId())
-										    .detail("TaskRange", bulkLoadTaskState.get().getRange())
-										    .detail("DestServerId", ssid)
-										    .detail("OwnerIds", describe(owners))
-										    .detail("DataMove", dataMove.toString());
-										cancelDataMove = true;
-										throw retry();
-									}
+							state std::vector<UID> owners(src.size() + dest.size());
+							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), owners.begin());
+							for (const auto& ssid : servers) {
+								if (std::find(owners.begin(), owners.end(), ssid) != owners.end()) {
+									TraceEvent(SevWarn, "DDBulkLoadTaskStartMoveShardsMoveInConflict")
+									    .detail("TaskID", bulkLoadTaskState.get().getTaskId())
+									    .detail("JobID", bulkLoadTaskState.get().getJobId())
+									    .detail("TaskRange", bulkLoadTaskState.get().getRange())
+									    .detail("DestServerId", ssid)
+									    .detail("OwnerIds", describe(owners))
+									    .detail("DataMove", dataMove.toString());
+									cancelDataMove = true;
+									throw retry();
 								}
 							}
 						}
