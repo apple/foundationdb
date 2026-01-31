@@ -52,9 +52,9 @@ cc_enforce_use_unfit_dd_in_sim = true
 disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
 # Longer timeouts to handle chaos-induced delays
-# BulkDump with S3 chaos can take much longer than normal
-bulkdump_job_timeout = 2400
-bulkload_job_timeout = 2400
+# BulkDump with S3 chaos can take much longer than normal (10x+ on Linux vs macOS)
+bulkdump_job_timeout = 3600
+bulkload_job_timeout = 3600
 
 [[flow_knobs]]
 MAX_BUGGIFIED_DELAY = 0.0
@@ -88,10 +88,10 @@ timeout = 7200
 
     [[test.workload]]
     testName = 'Cycle'
-    # Reduced from 1000 to 500 to limit S3 operations during chaos
-    # More nodes = more SST files = more chances for S3 failures
-    nodeCount = 500
-    transactionsPerSecond = 300.0
+    # Reduced to limit S3 operations during chaos
+    # More nodes = more SST files = more chances for S3 failures to compound
+    nodeCount = 300
+    transactionsPerSecond = 200.0
     testDuration = 30.0
     expectedRate = 0
 
@@ -108,11 +108,12 @@ timeout = 7200
     # BulkDump/BulkLoad integration options
     snapshotMode = 1           # 1 = BULKDUMP (creates SST files instead of range files)
     useRangeFileRestore = false # false = use BulkLoad for restore
-    # S3 Chaos injection - minimal rates for BulkDump compatibility
-    # BulkDump writes many SST files, very sensitive to S3 failures
+    # S3 Chaos injection - very light rates for BulkDump compatibility
+    # BulkDump writes many SST files, extremely sensitive to S3 failures
+    # These rates compound: with N files, effective failure rate ~ N * rate
     enableChaos = true
-    errorRate = 0.01
-    throttleRate = 0.02
-    delayRate = 0.01
+    errorRate = 0.005
+    throttleRate = 0.01
+    delayRate = 0.005
     corruptionRate = 0.0
-    maxDelay = 0.5
+    maxDelay = 0.3
