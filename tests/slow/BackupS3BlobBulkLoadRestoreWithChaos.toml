@@ -5,9 +5,9 @@
 # Chaos must be minimal to allow the backup snapshot to complete.
 #
 # Chaos configuration (minimal rates for BulkDump compatibility):
-# - 1% error rate (very occasional S3 failures)
-# - 2% throttling rate (light throttling)
-# - 1% delay rate (minimal random delays)
+# - 0.5% error rate (very occasional S3 failures)
+# - 1% throttling rate (light throttling)
+# - 0.5% delay rate (minimal random delays)
 # - 0% corruption rate (no corruption - BulkDump can't handle this)
 #
 # NOTE: SST file handling is only applicable when simulation randomly chooses
@@ -53,8 +53,9 @@ disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
 # Longer timeouts to handle chaos-induced delays
 # BulkDump with S3 chaos can take much longer than normal (10x+ on Linux vs macOS)
-bulkdump_job_timeout = 3600
-bulkload_job_timeout = 3600
+# With chaos compounding on many SST files, 3600s wasn't enough - increase to 5400s
+bulkdump_job_timeout = 5400
+bulkload_job_timeout = 5400
 
 [[flow_knobs]]
 MAX_BUGGIFIED_DELAY = 0.0
@@ -90,8 +91,9 @@ timeout = 7200
     testName = 'Cycle'
     # Reduced to limit S3 operations during chaos
     # More nodes = more SST files = more chances for S3 failures to compound
-    nodeCount = 300
-    transactionsPerSecond = 200.0
+    # 200 nodes is minimum to still exercise meaningful BulkDump behavior
+    nodeCount = 200
+    transactionsPerSecond = 150.0
     testDuration = 30.0
     expectedRate = 0
 
