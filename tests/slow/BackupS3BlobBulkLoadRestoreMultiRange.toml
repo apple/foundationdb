@@ -53,8 +53,9 @@ min_byte_sampling_probability = 0.5
 cc_enforce_use_unfit_dd_in_sim = true
 disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
-bulkdump_job_timeout = 600
-bulkload_job_timeout = 600
+# Linux/Joshua runs 4x slower than macOS, so need larger timeout
+bulkdump_job_timeout = 1200
+bulkload_job_timeout = 1200
 
 [[flow_knobs]]
 MAX_BUGGIFIED_DELAY = 0.0
