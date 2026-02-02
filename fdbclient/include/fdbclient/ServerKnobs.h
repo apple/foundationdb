@@ -900,9 +900,9 @@ public:
 	// state, log router failures will trigger a new recovery.
 	bool CC_RERECRUIT_LOG_ROUTER_ENABLED;
 	double CC_RERECRUIT_BACKUP_WORKER_TIMEOUT;
-	// If enabled, Cluster Controller will rerecruit backup workers if it detects some backup workers have failed to avoid
-	// recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before that
-	// state, backup worker failures will trigger a new recovery.
+	// If enabled, Cluster Controller will rerecruit backup workers if it detects some backup workers have failed to
+	// avoid recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before
+	// that state, backup worker failures will trigger a new recovery.
 	bool CC_RERECRUIT_BACKUP_WORKER_ENABLED;
 
 	// Move Keys
