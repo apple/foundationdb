@@ -189,26 +189,47 @@ static void createParentDirectories(const std::string& filePath) {
 // ACTOR: Atomic file write using simulation filesystem without chaos injection
 // Chaos-free because AsyncFileChaos only affects files with "storage-" in the name
 // (see AsyncFileChaos.h:40). OPEN_NO_AIO controls AsyncFileNonDurable behavior.
+// Uses unique temp filename per caller to avoid race conditions when multiple
+// MockS3 servers write to the same path simultaneously (last writer wins).
 ACTOR static Future<Void> atomicWriteFile(std::string path, std::string content) {
+	// Generate unique temp filename to avoid collision with other MockS3 servers
+	// writing to the same path. Each server gets its own temp file, and the
+	// last rename wins (correct S3 semantics).
+	// IMPORTANT: Use nondeterministicRandom() here, NOT deterministicRandom()!
+	// atomicWriteFile can be called in non-deterministic order across platforms
+	// (due to concurrent file operations), and using deterministicRandom() would
+	// cause the simulation's random state to diverge between platforms.
+	// We use OPEN_ATOMIC_WRITE_AND_CREATE which creates a .part file internally,
+	// so the full chain is: path.{uuid}.tmp.part -> path.{uuid}.tmp -> path
+	state std::string tempPath = path + "." + nondeterministicRandom()->randomUniqueID().toString() + ".tmp";
+
 	try {
 		// Create all parent directories
 		createParentDirectories(path);
 
-		// Use simulation filesystem with atomic write
-		// No chaos injection: simfdb/mocks3/* files don't match "storage-*" pattern
+		// Write to unique temp file using atomic write (simulation requires this flag with OPEN_CREATE)
 		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-		    path,
+		    tempPath,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO,
 		    0644));
 
 		wait(file->write(content.data(), content.size(), 0));
-		wait(file->sync()); // Atomic rename happens here
+		wait(file->sync()); // Renames .part -> tempPath
 		file = Reference<IAsyncFile>();
+
+		// Rename unique temp file to final path (last writer wins)
+		renameFile(tempPath, path);
 
 		TraceEvent("MockS3PersistenceWriteSuccess").detail("Path", path).detail("Size", content.size());
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistenceWriteException").error(e).detail("Path", path);
+		// Clean up temp file on failure
+		try {
+			deleteFile(tempPath);
+		} catch (Error&) {
+			// Ignore cleanup errors
+		}
 	}
 	return Void();
 }

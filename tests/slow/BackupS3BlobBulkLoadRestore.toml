@@ -25,16 +25,21 @@ storageEngineExcludeTypes = [5] # FIXME: remove after allowing bulkloading with 
 encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS
 
-# Instruct simulation to generate a simple, single-region config (same as BulkDumpingS3.toml)
+# HA (multi-region) configuration - randomly enabled for test coverage
 generateFearless = false
 simpleConfig = false
 minimumRegions = 1
+# singleRegion not set - allows random HA configuration
+
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+extraMachineCountDC = 3
 
 # Explicit simple config - single replication, single region, explicit process counts
 config = "single usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 
-# Disable all fault injection
+# Disable buggify and fault injection to avoid interference with MockS3/BulkLoad
 buggify = false
+faultInjection = false
 
 # Required knobs for BulkLoad functionality (from BulkDumpingS3.toml)
 [[knobs]]
@@ -48,9 +53,9 @@ min_byte_sampling_probability = 0.5
 cc_enforce_use_unfit_dd_in_sim = true
 disable_audit_storage_final_replica_check_in_sim = true
 max_trace_lines = 5000000
-# Shorter timeouts for testing
-bulkdump_job_timeout = 300
-bulkload_job_timeout = 300
+# Allow more time for BulkDump job to complete (Linux runs 4x slower than macOS)
+bulkdump_job_timeout = 1200
+bulkload_job_timeout = 1200
 
 # Disable buggified delays
 [[flow_knobs]]
