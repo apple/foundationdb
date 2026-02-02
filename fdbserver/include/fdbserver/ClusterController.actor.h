@@ -3329,6 +3329,15 @@ public:
 	    excludedDegradedServers;
 	std::queue<double> recentHealthTriggeredRecoveryTime;
 
+	// Legacy comment:
+	//   Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	//   The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	//   stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
+	//   encryption status.
+	//
+	// Currently this should always be "encryption not enabled". It is left here for protocol compatibility.
+	Promise<EncryptionAtRestModeDeprecated> encryptionAtRestModeDeprecated;
+
 	CounterCollection clusterControllerMetrics;
 
 	Counter openDatabaseRequests;

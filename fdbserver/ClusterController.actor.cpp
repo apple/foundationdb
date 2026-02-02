@@ -2588,6 +2588,17 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
+	state EncryptionAtRestModeDeprecated encryptMode = wait(self->encryptionAtRestModeDeprecated.getFuture());
+	if (!encryptMode.isEncryptionEnabled()) {
+		TraceEvent("EKPNotConfigured");
+		return Void();
+	} else {
+		TraceEvent(SevError, "WeBoguslyThinkEKPIsConfigured");
+		return Void();
+	}
+}
+
 ACTOR Future<Void> stopConsistencyScan(Database db) {
 	state ConsistencyScanState cs = ConsistencyScanState();
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
@@ -2825,6 +2836,18 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, ClusterControllerFullInterface ccInterf) {
+	loop {
+		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
+		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
+		EncryptionAtRestModeDeprecated mode = wait(self->encryptionAtRestModeDeprecated.getFuture());
+		GetEncryptionAtRestModeResponse resp;
+		resp.mode = mode;
+		req.reply.send(resp);
+		TraceEvent("HandleGetEncryptionAtRestModeEnd").detail("TlogId", req.tlogId).detail("Mode", resp.mode);
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
@@ -2840,6 +2863,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		configBroadcaster = ConfigBroadcaster(coordinators, configDBType, getPreviousCoordinators(&self));
 	}
 
+	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
+	self.addActor.send(monitorEncryptKeyProxy(&self));
 	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
@@ -2862,6 +2887,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorConsistencyScan(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
+	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));	
 	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
 	                                                               self.id,
 	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,

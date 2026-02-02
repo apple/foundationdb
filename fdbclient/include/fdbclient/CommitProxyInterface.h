@@ -27,6 +27,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.actor.h"
@@ -125,6 +126,7 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 
 	ClusterType clusterType = ClusterType::STANDALONE;
 
@@ -138,7 +140,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clusterId, clusterType);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, encryptKeyProxy, clusterId, clusterType);
 	}
 };
 
@@ -445,10 +447,11 @@ struct SWIFT_CXX_IMPORT_OWNED GetStorageServerRejoinInfoReply {
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history);
+		serializer(ar, version, tag, newTag, newLocality, history, encryptMode);
 	}
 };
 

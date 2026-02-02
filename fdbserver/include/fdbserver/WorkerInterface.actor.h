@@ -27,6 +27,7 @@
 
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -58,6 +59,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeEncryptKeyProxyRequest> encryptKeyProxy;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -122,6 +124,7 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
+		           encryptKeyProxy,
 		           updateServerDBInfo);
 	}
 };
@@ -162,6 +165,7 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
+	RequestStream<struct GetEncryptionAtRestModeRequest> getEncryptionAtRestMode;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -175,7 +179,7 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
 		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady();
+		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -190,6 +194,7 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
 		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
 		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
+		getEncryptionAtRestMode.getEndpoint(TaskPriority::ClusterController);
 	}
 
 	template <class Ar>
@@ -208,7 +213,8 @@ struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 		           updateWorkerHealth,
 		           tlogRejoin,
 		           notifyBackupWorkerDone,
-		           changeCoordinators);
+		           changeCoordinators,
+		           getEncryptionAtRestMode);
 	}
 };
 
@@ -389,6 +395,7 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
 	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
@@ -410,6 +417,7 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
+	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
 	                      Optional<Version> lastSeenKnobVersion,
@@ -419,9 +427,10 @@ struct RegisterWorkerRequest {
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-	    consistencyScanInterf(csInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false), recoveredDiskFiles(recoveredDiskFiles),
-	    configBroadcastInterface(configBroadcastInterface), clusterId(clusterId) {}
+	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
+	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface),
+	    clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -433,6 +442,7 @@ struct RegisterWorkerRequest {
 		           generation,
 		           distributorInterf,
 		           ratekeeperInterf,
+		           encryptKeyProxyInterf,
 		           consistencyScanInterf,
 		           issues,
 		           incompatiblePeers,
@@ -519,6 +529,33 @@ struct BackupWorkerDoneRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, workerUID, backupEpoch, reply);
+	}
+};
+
+struct GetEncryptionAtRestModeResponse {
+	constexpr static FileIdentifier file_identifier = 2932156;
+	uint32_t mode;
+
+	GetEncryptionAtRestModeResponse() : mode(EncryptionAtRestModeDeprecated::Mode::DISABLED) {}
+	GetEncryptionAtRestModeResponse(uint32_t m) : mode(m) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+};
+
+struct GetEncryptionAtRestModeRequest {
+	constexpr static FileIdentifier file_identifier = 2670826;
+	UID tlogId;
+	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
+
+	GetEncryptionAtRestModeRequest() {}
+	GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tlogId, reply);
 	}
 };
 
@@ -676,12 +713,20 @@ struct InitializeCommitProxyRequest {
 	Version recoveryTransactionVersion;
 	bool firstProxy;
 	ReplyPromise<CommitProxyInterface> reply;
+	EncryptionAtRestModeDeprecated encryptMode;
 	uint16_t commitProxyIndex;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply, commitProxyIndex);
+		serializer(ar,
+		           master,
+		           masterLifetime,
+		           recoveryCount,
+		           recoveryTransactionVersion,
+		           firstProxy,
+		           reply,
+		           encryptMode,
+		           commitProxyIndex);
 	}
 };
 
@@ -753,10 +798,11 @@ struct InitializeResolverRequest {
 	int resolverCount;
 	UID masterId; // master's UID
 	ReplyPromise<ResolverInterface> reply;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, masterLifetime, recoveryCount, commitProxyCount, resolverCount, masterId, reply);
+		serializer(ar, masterLifetime, recoveryCount, commitProxyCount, resolverCount, masterId, reply, encryptMode);
 	}
 };
 
@@ -781,10 +827,28 @@ struct InitializeStorageRequest {
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion);
+		serializer(
+		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion, encryptMode);
+	}
+};
+
+struct InitializeEncryptKeyProxyRequest {
+	constexpr static FileIdentifier file_identifier = 4180191;
+	UID reqId;
+	UID interfaceId;
+	ReplyPromise<EncryptKeyProxyInterface> reply;
+	EncryptionAtRestModeDeprecated encryptMode;
+
+	InitializeEncryptKeyProxyRequest() {}
+	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, interfaceId, reply, encryptMode);
 	}
 };
 
@@ -951,6 +1015,7 @@ struct Role {
 	static const Role RATEKEEPER;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role ENCRYPT_KEY_PROXY;
 	static const Role CONSISTENCYSCAN;
 
 	std::string roleName;
@@ -981,6 +1046,8 @@ struct Role {
 			return RATEKEEPER;
 		case ProcessClass::Backup:
 			return BACKUP;
+		case ProcessClass::EncryptKeyProxy:
+			return ENCRYPT_KEY_PROXY;
 		case ProcessClass::ConsistencyScan:
 			return CONSISTENCYSCAN;
 		case ProcessClass::Worker:
@@ -1048,6 +1115,10 @@ class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
 
+ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
+                                         Reference<AsyncVar<ServerDBInfo>> db,
+                                         EncryptionAtRestModeDeprecated encryptMode);
+
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
@@ -1056,12 +1127,15 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder);
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord);
+
+ACTOR Future<Void> storageServer(
+    IKeyValueStore* persistentData,
+    StorageServerInterface ssi,
+    Reference<AsyncVar<ServerDBInfo> const> db,
+    std::string folder,
+    Promise<Void> recovered,
+    Reference<IClusterConnectionRecord> connRecord);
+
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

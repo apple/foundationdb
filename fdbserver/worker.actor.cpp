@@ -637,6 +637,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			incorrectTime = Optional<double>();
 		}
 
+		Optional<EncryptKeyProxyInterface> fakeEpkInterf;
 		RegisterWorkerRequest request(interf,
 		                              initialClass,
 		                              processClass,
@@ -644,6 +645,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
+									  fakeEpkInterf,
 		                              csInterf->get(),
 		                              degraded->get(),
 		                              localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
@@ -4082,4 +4084,5 @@ const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
 const Role Role::RATEKEEPER("Ratekeeper", "RK");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
 const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

@@ -203,6 +203,9 @@ struct DBCoreState {
 		if (ar.protocolVersion().hasSWVersionTracking()) {
 			serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion); // 7.2
 		}
+		if (ar.protocolVersion().hasEncryptionAtRest()) {
+			serializer(ar, encryptionAtRestModeDeprecated); // 7.2
+		}
 	}
 };
 
