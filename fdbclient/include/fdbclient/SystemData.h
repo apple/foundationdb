@@ -440,6 +440,13 @@ extern const KeyRef backupPausedKey;
 // The key to store the maximum version that backup workers popped in NOOP mode.
 extern const KeyRef backupWorkerMaxNoopVersionKey;
 
+// Backup Partitioning (Backup v3) system keys
+// "\xff\x02/backupPartitionRequired" - Set by BackupAgent to request partitioning
+extern const KeyRef backupPartitionRequiredKey;
+// "\xff\x02/backupPartitionMap/[[version]]" := "[[BackupPartitionMap]]"
+extern const KeyRangeRef backupPartitionMapKeys;
+extern const KeyRef backupPartitionMapPrefix;
+
 //	"\xff/previousCoordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's previous set of coordinators.
 //	Changed when performing quorumChange.

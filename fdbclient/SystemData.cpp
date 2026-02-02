@@ -1082,6 +1082,11 @@ const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
 extern const KeyRef backupWorkerMaxNoopVersionKey = "\xff\x02/backupWorkerMaxNoopVersion"_sr;
 
+// Backup Partitioning (Backup v3) system keys
+const KeyRef backupPartitionRequiredKey = "\xff\x02/backupPartitionRequired"_sr;
+const KeyRangeRef backupPartitionMapKeys("\xff\x02/backupPartitionMap/"_sr, "\xff\x02/backupPartitionMap0"_sr);
+const KeyRef backupPartitionMapPrefix = backupPartitionMapKeys.begin;
+
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(backupProgressPrefix);

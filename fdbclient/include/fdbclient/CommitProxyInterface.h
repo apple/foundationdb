@@ -38,6 +38,22 @@
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
 
+// Include BackupPartitionMap for the request struct
+#include "fdbserver/BackupPartitionMap.h"
+
+// Request to update backup partition map on CommitProxy
+struct BackupPartitionMapRequest {
+	constexpr static FileIdentifier file_identifier = 2847362;
+	BackupPartitionMap partitionMap;
+	Version version;
+	ReplyPromise<Void> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, partitionMap, version, reply);
+	}
+};
+
 struct CommitProxyInterface {
 	constexpr static FileIdentifier file_identifier = 8954922;
 	enum { LocationAwareLoadBalance = 1 };
@@ -63,6 +79,7 @@ struct CommitProxyInterface {
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 	RequestStream<struct SetThrottledShardRequest> setThrottledShard;
+	RequestStream<struct BackupPartitionMapRequest> updateBackupPartitionMap;
 
 	UID id() const { return commit.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -93,6 +110,8 @@ struct CommitProxyInterface {
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
 			setThrottledShard =
 			    RequestStream<struct SetThrottledShardRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
+			updateBackupPartitionMap =
+			    RequestStream<struct BackupPartitionMapRequest>(commit.getEndpoint().getAdjustedEndpoint(14));
 		}
 	}
 

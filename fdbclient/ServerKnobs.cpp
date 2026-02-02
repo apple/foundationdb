@@ -783,6 +783,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
 	init( BACKUP_WORKER_LOCK_BYTES,                              3e9 ); if(randomize && BUGGIFY) BACKUP_WORKER_LOCK_BYTES = deterministicRandom()->randomInt(2048, 4096) * 4096;
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && BUGGIFY) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
+	
+	// Backup Partitioning (Backup v3)
+	init( BACKUP_NUM_OF_PARTITIONS,                              100 ); if(randomize && BUGGIFY) BACKUP_NUM_OF_PARTITIONS = deterministicRandom()->randomInt(10, 50);
+	init( BACKUP_PARTITION_MAP_CACHE_TIMEOUT,                  300.0 ); if(randomize && BUGGIFY) BACKUP_PARTITION_MAP_CACHE_TIMEOUT = 60.0;
+	init( BACKUP_PARTITION_REQUIRED_TIMEOUT,                    30.0 ); if(randomize && BUGGIFY) BACKUP_PARTITION_REQUIRED_TIMEOUT = 10.0;
 
 	//Cluster Controller
 	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
