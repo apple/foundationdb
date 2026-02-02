@@ -645,7 +645,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
-									  fakeEpkInterf,
+		                              fakeEpkInterf,
 		                              csInterf->get(),
 		                              degraded->get(),
 		                              localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),

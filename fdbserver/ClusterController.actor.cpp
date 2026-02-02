@@ -2887,7 +2887,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorConsistencyScan(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(updateClusterId(&self));
-	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));	
+	self.addActor.send(handleGetEncryptionAtRestMode(&self, interf));
 	self.addActor.send(self.clusterControllerMetrics.traceCounters("ClusterControllerMetrics",
 	                                                               self.id,
 	                                                               SERVER_KNOBS->STORAGE_LOGGING_DELAY,

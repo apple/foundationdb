@@ -1128,13 +1128,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder);
 
-ACTOR Future<Void> storageServer(
-    IKeyValueStore* persistentData,
-    StorageServerInterface ssi,
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::string folder,
-    Promise<Void> recovered,
-    Reference<IClusterConnectionRecord> connRecord);
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                 std::string folder,
+                                 Promise<Void> recovered,
+                                 Reference<IClusterConnectionRecord> connRecord);
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
