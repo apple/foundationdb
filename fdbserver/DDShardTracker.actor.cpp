@@ -388,10 +388,19 @@ inBytes->get().get() + rate * 10.0 );
 }*/
 
 ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> stats) {
+	state Future<Void> timeout = delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT, TaskPriority::DataDistribution);
 	loop {
 		if (stats->get().present())
 			return stats->get().get().metrics.bytes;
-		wait(stats->onChange());
+		choose {
+			when(wait(stats->onChange())) {}
+			when(wait(timeout)) {
+				CODE_PROBE(true, "getFirstSize timed out waiting for initial shard metrics");
+				TraceEvent(SevWarn, "GetFirstSizeTimeout")
+				    .detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
+				return 0;
+			}
+		}
 	}
 }
 
@@ -2118,6 +2127,66 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 	ASSERT(reply.shardMetrics.empty());
 	ASSERT(reply.maxReadLoad == -1);
 	ASSERT(reply.minReadLoad == -1);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/Tracker/GetFirstSizeTimeout") {
+	// Test that getFirstSize returns 0 when shard metrics never arrive (timeout fires).
+	// This verifies that DD initialization won't block forever if a storage server is unreachable.
+	state Reference<AsyncVar<Optional<ShardMetrics>>> stats =
+	    makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	state double startTime = now();
+	int64_t size = wait(getFirstSize(stats));
+
+	// Should return 0 on timeout
+	ASSERT_EQ(size, 0);
+
+	// Verify it actually waited for approximately the timeout duration
+	double elapsed = now() - startTime;
+	ASSERT_GE(elapsed, SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT * 0.9);
+
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/Tracker/GetFirstSizeImmediate") {
+	// Test that getFirstSize returns immediately when metrics are already present.
+	state Reference<AsyncVar<Optional<ShardMetrics>>> stats =
+	    makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	StorageMetrics sm;
+	sm.bytes = 12345;
+	ShardMetrics m(sm, 0, 1);
+	stats->set(Optional<ShardMetrics>(m));
+
+	int64_t size = wait(getFirstSize(stats));
+	ASSERT_EQ(size, 12345);
+
+	return Void();
+}
+
+ACTOR Future<Void> setStatsAfterDelay(Reference<AsyncVar<Optional<ShardMetrics>>> stats,
+                                      double delaySeconds,
+                                      int64_t bytes) {
+	wait(delay(delaySeconds));
+	StorageMetrics sm;
+	sm.bytes = bytes;
+	ShardMetrics m(sm, 0, 1);
+	stats->set(Optional<ShardMetrics>(m));
+	return Void();
+}
+
+TEST_CASE("/DataDistributor/Tracker/GetFirstSizeDelayed") {
+	// Test that getFirstSize returns the actual value when metrics arrive before timeout.
+	state Reference<AsyncVar<Optional<ShardMetrics>>> stats =
+	    makeReference<AsyncVar<Optional<ShardMetrics>>>();
+
+	// Set stats after a short delay (well before the timeout)
+	state Future<Void> setter = setStatsAfterDelay(stats, 0.1, 99999);
+
+	int64_t size = wait(getFirstSize(stats));
+	ASSERT_EQ(size, 99999);
 
 	return Void();
 }
