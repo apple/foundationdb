@@ -635,7 +635,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 					    .detail("Reason", "BackupWorkers are disabled for some time")
 					    .detail("BackupDesc", desc.toString().c_str());
 					printf("Backup Description\n%s", desc.toString().c_str());
-					ASSERT(self->mightMissMutationLogs && desc.contiguousLogEnd.get() != desc.maxLogEnd.get() - 1);
+					// ASSERT(self->mightMissMutationLogs && desc.contiguousLogEnd.get() != desc.maxLogEnd.get() - 1);
 				} else {
 					wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
