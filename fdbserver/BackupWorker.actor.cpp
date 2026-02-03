@@ -125,7 +125,7 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
-	const Version startVersion; // This worker's start version
+	Version startVersion; // This worker's start version
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
@@ -1258,7 +1258,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 			state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 			Version savedVersion = wait(BackupProgress::takeover(cx, interf.id(), req.backupEpoch, req.routerTag));
 			// Resume from saved version + 1
-			req.startVersion = savedVersion + 1;
+			self.startVersion = req.startVersion = savedVersion + 1;
 			TraceEvent("BackupWorkerResumeFromSavedVersion", interf.id())
 			    .detail("Tag", req.routerTag)
 			    .detail("Epoch", req.backupEpoch)
