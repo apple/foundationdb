@@ -21,9 +21,24 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbclient/DatabaseContext.h"
-
+#include "fdbserver/Knobs.h"
 #include "fdbclient/Tracing.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+#define SevDebugMemory SevVerbose
+
+struct RangePartitionedVersionedMessage {
+	LogMessageVersion version;
+	StringRef message;
+	VectorRef<Tag> tags;
+	Arena arena; // Keep a reference to the memory containing the message
+
+	RangePartitionedVersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
+	  : version(v), message(m), tags(t), arena(a) {}
+
+	Version getVersion() const { return version.version; }
+	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
+};
 
 struct BackupRangePartitionedData {
 	const UID myId;
@@ -33,12 +48,49 @@ struct BackupRangePartitionedData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	Version minKnownCommittedVersion;
+	Version savedVersion; // Largest version saved to blob storage
+	NotifiedVersion pulledVersion;
+	AsyncVar<Reference<ILogSystem>> logSystem;
+	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
+	Reference<FlowLock> lock;
+	AsyncTrigger doneTrigger;
+	// Partition ID to messages map.
+	std::map<uint64_t, std::vector<RangePartitionedVersionedMessage>> partitionMessages;
+	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
+	KeyRangeMap<uint64_t> keyRangeToPartition;
 
 	explicit BackupRangePartitionedData(UID id,
 	                                    Reference<AsyncVar<ServerDBInfo> const> db,
 	                                    const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
-	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch) {}
+	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0), paused(false),
+	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)) {
+
+		// TODO akanksha: Initialize keyRangeToPartition map. Each backworker will receive a partition map
+		// which is BackupTag ->  list<Partition> mapping and Partition contains partition Id and key range. We can
+		// construct the keyRangeToPartition map from that.
+	}
+
+	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }
+
+	void eraseMessagesAfterEndVersion() {
+		ASSERT(endVersion.present());
+		const Version ver = endVersion.get();
+		for (auto& [partitionId, messages] : partitionMessages) {
+			while (!messages.empty()) {
+				if (messages.back().getVersion() > ver) {
+					size_t bytes = messages.back().getEstimatedSize();
+					TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", myId).detail("Release", bytes);
+					lock->release(bytes);
+					messages.pop_back();
+				} else {
+					break;
+				}
+			}
+		}
+	}
 };
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
@@ -108,4 +160,102 @@ ACTOR Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		}
 	}
 	return Void();
+}
+
+// Pulls data from TLog servers.
+ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
+	state Future<Void> logSystemChange = Void();
+	state Reference<ILogSystem::IPeekCursor> cursor;
+
+	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
+
+	TraceEvent("BWRangePartitionedPull", self->myId)
+	    .detail("Tag", self->tag)
+	    .detail("Version", tagAt)
+	    .detail("StartVersion", self->startVersion)
+	    .detail("SavedVersion", self->savedVersion);
+
+	loop {
+		while (self->paused.get()) {
+			wait(self->paused.onChange());
+		}
+
+		loop choose {
+			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) {
+				DisabledTraceEvent("BWRangePartitionedGotMore", self->myId)
+				    .detail("Tag", self->tag)
+				    .detail("CursorVersion", cursor->version().version);
+				break;
+			}
+			when(wait(logSystemChange)) {
+				if (self->logSystem.get()) {
+					// TODO akanksha: Use peekSingle as of now instead of peekLogRouter and later confirm if it works as
+					// expected.
+					cursor = self->logSystem.get()->peekSingle(self->myId, tagAt, self->tag);
+				} else {
+					cursor = Reference<ILogSystem::IPeekCursor>();
+				}
+				logSystemChange = self->logSystem.onChange();
+			}
+		}
+
+		if (cursor->popped() > 0) {
+			TraceEvent(SevError, "BWRangePartitionedDataPopped", self->myId)
+			    .detail("Popped", cursor->popped())
+			    .detail("Expected", tagAt);
+			throw worker_removed();
+		}
+
+		self->minKnownCommittedVersion =
+		    std::max(self->minKnownCommittedVersion, cursor->getMinKnownCommittedVersion());
+
+		// Note we aggressively peek (uncommitted) messages, but only committed
+		// messages/mutations will be flushed to disk/blob in uploadData().
+		state int64_t peekedBytes = 0;
+
+		// Hold messages until we know how many we can take, self->messages always
+		// contains messages that we have reserved memory for. Therefore, lock->release()
+		// will always encounter message with reserved memory.
+		state std::map<uint64_t, std::vector<RangePartitionedVersionedMessage>> tmpPartitionMessages;
+		while (cursor->hasMessage()) {
+			auto msg = RangePartitionedVersionedMessage(
+			    cursor->version(), cursor->getMessage(), cursor->getTags(), cursor->arena());
+			// TODO akanksha: Parse mutation to get the key and determine the partitionId in next PR.
+			KeyRef key;
+			if (key.size() > 0) {
+				uint64_t pid = self->keyRangeToPartition[key];
+				tmpPartitionMessages[pid].emplace_back(std::move(msg));
+				peekedBytes += tmpPartitionMessages[pid].back().getEstimatedSize();
+			}
+			cursor->nextMessage();
+		}
+
+		if (peekedBytes > 0) {
+			TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", self->myId)
+			    .detail("Take", peekedBytes)
+			    .detail("Current", self->lock->activePermits());
+			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			for (auto& [pid, msgs] : tmpPartitionMessages) {
+				auto& messages = self->partitionMessages[pid];
+				messages.insert(
+				    messages.end(), std::make_move_iterator(msgs.begin()), std::make_move_iterator(msgs.end()));
+			}
+		}
+
+		tagAt = cursor->version().version;
+		self->pulledVersion.set(tagAt);
+		TraceEvent("BWorkerRangePartitionedGot", self->myId).suppressFor(1.0).detail("V", tagAt);
+
+		// For older epochs, we may have an end version to stop at.
+		if (self->pullFinished()) {
+			self->eraseMessagesAfterEndVersion();
+			self->doneTrigger.trigger();
+			TraceEvent("BWorkerRangePartitionedFinishPull", self->myId)
+			    .detail("Tag", self->tag.toString())
+			    .detail("VersionGot", tagAt)
+			    .detail("EndVersion", self->endVersion.get());
+			return Void();
+		}
+		wait(yield());
+	}
 }
