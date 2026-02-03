@@ -24,9 +24,9 @@ encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS
 
 # HA (multi-region) configuration - randomly enabled for test coverage
-generateFearless = false
+generateFearless = true
 simpleConfig = false
-minimumRegions = 1
+minimumRegions = 2
 # singleRegion not set - allows random HA configuration
 
 # Ensure enough storage servers for non-overlapping BulkLoad teams

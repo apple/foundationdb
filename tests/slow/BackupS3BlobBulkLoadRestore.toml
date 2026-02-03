@@ -35,7 +35,7 @@ minimumRegions = 1
 extraMachineCountDC = 3
 
 # Explicit simple config - single replication, single region, explicit process counts
-config = "single usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
 
 # Disable buggify and fault injection to avoid interference with MockS3/BulkLoad
 buggify = false
