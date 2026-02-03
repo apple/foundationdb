@@ -328,11 +328,14 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				}
 
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
 				TraceEvent(SevError, "BARW_BackupWorkerToggleException", randomID)
 				    .error(e)
 				    .detail("Tag", printable(tag))
 				    .detail("ToggleCount", toggleCount);
-				throw e;
+				throw;
 			}
 		}
 		return Void();
