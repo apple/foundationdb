@@ -315,6 +315,10 @@ public:
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
 	                          Optional<std::string> const& encryptionKeyFileName = {},
 	                          int snapshotMode = 0) {
+		// Note: Do NOT call checkAndDisableBackupWorkers here. That function is for cleanup
+		// when backups END (abort/discontinue), not when they START. Calling it here causes
+		// a race where backup workers get disabled while a backup is being submitted,
+		// triggering a transaction subsystem restart that can fail in-flight commit batches.
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -328,8 +332,7 @@ public:
 			                    partitionedLog,
 			                    incrementalBackupOnly,
 			                    encryptionKeyFileName,
-			                    snapshotMode) +
-			       checkAndDisableBackupWorkers(cx);
+			                    snapshotMode);
 		});
 	}
 
