@@ -88,7 +88,11 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		                                 : 0.0);
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
-		allowBackupWorkerToggle = getOption(options, "allowBackupWorkerToggle"_sr, true);
+		// Currently disabling this toggling, as it is causing missing mutation logs,
+		// restorableState for each snapshot is not set properly in this scenario for backup v2
+		// which is causing the restore to fail.
+		// After fixing the issue, I will re-enable the toggling again.
+		allowBackupWorkerToggle = getOption(options, "allowBackupWorkerToggle"_sr, false);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
 		defaultBackup = getOption(options, "defaultBackup"_sr, false);
 		mightMissMutationLogs = false;
@@ -281,11 +285,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 	                                                 Database cx,
 	                                                 Key tag,
 	                                                 UID randomID) {
-		// Currently disabling this toggling, as it is causing missing mutation logs,
-		// restorableState for each snapshot is not set properly in this scenario for backup v2
-		// which is causing the restore to fail.
-		// After fixing the issue, I will re-enable the toggling again.
-		if (self->allowBackupWorkerToggle && deterministicRandom()->random01() < 0) {
+		if (self->allowBackupWorkerToggle && deterministicRandom()->random01() < 0.3) {
 			state int toggleCount = deterministicRandom()->randomInt(1, 4); // Random 1 to 3 toggles
 			TraceEvent("BARW_BackupWorkerToggleTest", randomID)
 			    .detail("Tag", printable(tag))
@@ -332,7 +332,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				    .error(e)
 				    .detail("Tag", printable(tag))
 				    .detail("ToggleCount", toggleCount);
-				// Continue with the test even if toggle fails
+				throw e;
 			}
 		}
 		return Void();
@@ -673,12 +673,9 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 					}
 					self->restoreRanges = modifiedRestoreRanges;
 					if (!systemRestoreRanges.empty()) {
-						// We are able to restore system keys first since we restore an entire cluster at once rather
-						// than partial key ranges. this is where it fails
 						wait(clearAndRestoreSystemKeys(
 						    cx, self, &backupAgent, targetVersion, lastBackupContainer, systemRestoreRanges));
 					}
-					// and here
 
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
