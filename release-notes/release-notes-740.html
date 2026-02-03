@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Release Notes &#8212; FoundationDB 7.4.5 documentation</title>
+    <title>Release Notes &#8212; FoundationDB 7.4.6 documentation</title>
     <link rel="stylesheet" type="text/css" href="../_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="../_static/bootstrap-sphinx.css" />
     <script data-url_root="../" id="documentation_options" src="../_static/documentation_options.js"></script>
@@ -37,7 +37,7 @@
         </button>
         <a class="navbar-brand" href="../index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.5</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.6</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -67,10 +67,14 @@
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">7.4.3</a></li>
-<li><a class="reference internal" href="#id2">7.4.2</a></li>
-<li><a class="reference internal" href="#id3">7.4.1</a></li>
-<li><a class="reference internal" href="#id4">7.4.0</a><ul>
+<li><a class="reference internal" href="#id1">7.4.7</a></li>
+<li><a class="reference internal" href="#id2">7.4.6</a></li>
+<li><a class="reference internal" href="#id3">7.4.5</a></li>
+<li><a class="reference internal" href="#id4">7.4.4</a></li>
+<li><a class="reference internal" href="#id5">7.4.3</a></li>
+<li><a class="reference internal" href="#id6">7.4.2</a></li>
+<li><a class="reference internal" href="#id7">7.4.1</a></li>
+<li><a class="reference internal" href="#id8">7.4.0</a><ul>
 <li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
@@ -122,10 +126,14 @@
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
 <li><a class="reference internal" href="#">Release Notes</a><ul>
-<li><a class="reference internal" href="#id1">7.4.3</a></li>
-<li><a class="reference internal" href="#id2">7.4.2</a></li>
-<li><a class="reference internal" href="#id3">7.4.1</a></li>
-<li><a class="reference internal" href="#id4">7.4.0</a><ul>
+<li><a class="reference internal" href="#id1">7.4.7</a></li>
+<li><a class="reference internal" href="#id2">7.4.6</a></li>
+<li><a class="reference internal" href="#id3">7.4.5</a></li>
+<li><a class="reference internal" href="#id4">7.4.4</a></li>
+<li><a class="reference internal" href="#id5">7.4.3</a></li>
+<li><a class="reference internal" href="#id6">7.4.2</a></li>
+<li><a class="reference internal" href="#id7">7.4.1</a></li>
+<li><a class="reference internal" href="#id8">7.4.0</a><ul>
 <li><a class="reference internal" href="#features-supported">Features (Supported)</a></li>
 <li><a class="reference internal" href="#features-experimental">Features (Experimental)</a></li>
 <li><a class="reference internal" href="#performance">Performance</a></li>
@@ -148,12 +156,55 @@
   <section id="release-notes">
 <h1>Release Notes</h1>
 <section id="id1">
+<h2>7.4.7</h2>
+<ul class="simple">
+<li><p>Same as 7.4.6 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id2">
+<h2>7.4.6</h2>
+<ul class="simple">
+<li><p>Fixed a restore stuck bug where readLogData() errors were not propagated correctly. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12433">(PR #12433)</a></p></li>
+<li><p>Fixed FdbDecode memory issues. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12495">(PR #12495)</a></p></li>
+<li><p>Fixed decode range file keys and values interpretation bug. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12420">(PR #12420)</a></p></li>
+<li><p>Fixed the flags used for opening the backup encryption key file. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12424">(PR #12424)</a></p></li>
+<li><p>Fixed backup encryption on S3. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12289">(PR #12289)</a></p></li>
+<li><p>Added support for backup encryption via fdbbackup modify command. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12591">(PR #12591)</a></p></li>
+<li><p>Added support for backup worker to use proxy from command line to upload to S3. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12566">(PR #12566)</a></p></li>
+<li><p>Added metadata for encrypted backups. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12354">(PR #12354)</a></p></li>
+<li><p>Added FileLevelEncryption field to BackupDescription JSON output. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12626">(PR #12626)</a></p></li>
+<li><p>Added encryption key info to status JSON. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12657">(PR #12657)</a></p></li>
+<li><p>Added SNI in TLS handshake. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12385">(PR #12385)</a></p></li>
+<li><p>Added ARM support for Docker images. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12425">(PR #12425)</a></p></li>
+<li><p>Added restore validation feature allowing backup/restore validation in a single cluster. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12648">(PR #12648)</a></p></li>
+<li><p>Downgraded RocksDB to 8.11.5. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12651">(PR #12651)</a></p></li>
+</ul>
+</section>
+<section id="id3">
+<h2>7.4.5</h2>
+<ul class="simple">
+<li><p>Same as 7.4.4 release with AVX enabled.</p></li>
+</ul>
+</section>
+<section id="id4">
+<h2>7.4.4</h2>
+<ul class="simple">
+<li><p>Fixed a race that could cause recovery to be stuck when purging old generations. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12214">(PR #12214)</a></p></li>
+<li><p>Fixed TSS mismatch handling crashes. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12330">(PR #12330)</a></p></li>
+<li><p>Fixed potential DatabaseContext leaks in multi-version client. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12308">(PR #12308)</a></p></li>
+<li><p>Fixed double-encoding of URIs in requests to S3BlobStore. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12302">(PR #12302)</a></p></li>
+<li><p>Fixed “Unknown error” when configuring regions. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12314">(PR #12314)</a></p></li>
+<li><p>Improved TLS handshake process to avoid blocking main thread. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12346">(PR #12346)</a></p></li>
+<li><p>Fixed an issue in TLog server code that was causing OOMs. <a class="reference external" href="https://github.com/apple/foundationdb/pull/12298">(PR #12298)</a></p></li>
+</ul>
+</section>
+<section id="id5">
 <h2>7.4.3</h2>
 <ul class="simple">
 <li><p>Same as 7.4.2 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id2">
+<section id="id6">
 <h2>7.4.2</h2>
 <ul class="simple">
 <li><p>Fixed a backup restore speed regression. <a class="reference external" href="https://github.com/apple/foundationdb/issues/12098">(PR #12098)</a></p></li>
@@ -166,13 +217,13 @@
 <li><p>Optimized keyInfo lookup in commit proxy. <a class="reference external" href="https://github.com/apple/foundationdb/issues/12106">(PR #12106)</a></p></li>
 </ul>
 </section>
-<section id="id3">
+<section id="id7">
 <h2>7.4.1</h2>
 <ul class="simple">
 <li><p>Same as 7.4.0 release with AVX enabled.</p></li>
 </ul>
 </section>
-<section id="id4">
+<section id="id8">
 <h2>7.4.0</h2>
 <section id="features-supported">
 <h3>Features (Supported)</h3>
@@ -316,7 +367,7 @@
     </p>
     <p>
         &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Sep 13, 2025.<br/>
+      Last updated on Jan 30, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+    <title>Restore Validation Testing Guide &#8212; FoundationDB 7.4.6 documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
+    <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+    <script src="_static/doctools.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Monitored Metrics" href="monitored-metrics.html" />
+    <link rel="prev" title="BulkLoad User Guide" href="bulkload-user.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script type="text/javascript" src="_static/js/jquery-1.12.4.min.js"></script>
+<script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+<script type="text/javascript" src="_static/bootstrap-3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+
+  </head><body>
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>7.4.6</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Restore Validation Testing Guide</a><ul>
+<li><a class="reference internal" href="#quick-setup">Quick Setup</a><ul>
+<li><a class="reference internal" href="#build-required-binaries">1. Build Required Binaries</a></li>
+<li><a class="reference internal" href="#start-test-cluster">2. Start Test Cluster</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#testing-workflow">Testing Workflow</a><ul>
+<li><a class="reference internal" href="#phase-1-set-up-test-data">Phase 1: Set Up Test Data</a><ul>
+<li><a class="reference internal" href="#write-some-test-data">Write Some Test Data</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-2-backup">Phase 2: Backup</a><ul>
+<li><a class="reference internal" href="#start-backup">Start Backup</a></li>
+<li><a class="reference internal" href="#verify-backup-is-ready">Verify Backup is Ready</a></li>
+<li><a class="reference internal" href="#stop-the-backup">Stop the Backup</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-3-restore-to-validation-prefix">Phase 3: Restore to Validation Prefix</a><ul>
+<li><a class="reference internal" href="#lock-the-database">Lock the Database</a></li>
+<li><a class="reference internal" href="#restore-with-prefix">Restore with Prefix</a></li>
+<li><a class="reference internal" href="#verify-restored-data-exists">Verify Restored Data Exists</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-4-run-validation">Phase 4: Run Validation</a><ul>
+<li><a class="reference internal" href="#start-validation-audit">Start Validation Audit</a></li>
+<li><a class="reference internal" href="#monitor-progress">Monitor Progress</a></li>
+<li><a class="reference internal" href="#wait-for-completion">Wait for Completion</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-5-verify-results">Phase 5: Verify Results</a><ul>
+<li><a class="reference internal" href="#check-audit-status">Check Audit Status</a></li>
+<li><a class="reference internal" href="#check-trace-logs">Check Trace Logs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-6-testing-a-failed-audit">Phase 6: Testing a Failed Audit</a><ul>
+<li><a class="reference internal" href="#modify-source-data">Modify Source Data</a></li>
+<li><a class="reference internal" href="#run-audit-again">Run Audit Again</a></li>
+<li><a class="reference internal" href="#check-for-expected-failure">Check for Expected Failure</a></li>
+<li><a class="reference internal" href="#check-error-details">Check Error Details</a></li>
+<li><a class="reference internal" href="#restore-correct-source-data-for-next-tests">Restore Correct Source Data for Next Tests</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-7-understanding-audit-design-and-limitations">Phase 7: Understanding Audit Design and Limitations</a><ul>
+<li><a class="reference internal" href="#what-the-audit-validates">What the Audit Validates</a></li>
+<li><a class="reference internal" href="#what-the-audit-does-not-validate">What the Audit Does NOT Validate</a></li>
+<li><a class="reference internal" href="#when-to-use-restore-validation">When to Use Restore Validation</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-8-cleanup">Phase 8: Cleanup</a><ul>
+<li><a class="reference internal" href="#unlock-the-database">Unlock the Database</a></li>
+<li><a class="reference internal" href="#clear-restored-data">Clear Restored Data</a></li>
+<li><a class="reference internal" href="#verify-cleanup">Verify Cleanup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#troubleshooting">Troubleshooting</a><ul>
+<li><a class="reference internal" href="#restore-destination-not-empty-error">“restore_destination_not_empty” Error</a></li>
+<li><a class="reference internal" href="#no-backup-agents-are-responding">“No backup agents are responding”</a></li>
+<li><a class="reference internal" href="#the-specified-backup-is-not-restorable-to-any-version">“The specified backup is not restorable to any version”</a></li>
+<li><a class="reference internal" href="#backup-not-restorable">Backup Not Restorable</a></li>
+<li><a class="reference internal" href="#no-progress-updates">No Progress Updates</a></li>
+<li><a class="reference internal" href="#cannot-see-restored-data">Cannot See Restored Data</a></li>
+<li><a class="reference internal" href="#validation-completes-but-no-logs">Validation Completes but No Logs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#expected-performance">Expected Performance</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="bulkload-user.html" title="Previous Chapter: BulkLoad User Guide"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; BulkLoad User Guide</span>
+    </a>
+  </li>
+  <li>
+    <a href="monitored-metrics.html" title="Next Chapter: Monitored Metrics"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Monitored Metrics &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Restore Validation Testing Guide</a><ul>
+<li><a class="reference internal" href="#quick-setup">Quick Setup</a><ul>
+<li><a class="reference internal" href="#build-required-binaries">1. Build Required Binaries</a></li>
+<li><a class="reference internal" href="#start-test-cluster">2. Start Test Cluster</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#testing-workflow">Testing Workflow</a><ul>
+<li><a class="reference internal" href="#phase-1-set-up-test-data">Phase 1: Set Up Test Data</a><ul>
+<li><a class="reference internal" href="#write-some-test-data">Write Some Test Data</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-2-backup">Phase 2: Backup</a><ul>
+<li><a class="reference internal" href="#start-backup">Start Backup</a></li>
+<li><a class="reference internal" href="#verify-backup-is-ready">Verify Backup is Ready</a></li>
+<li><a class="reference internal" href="#stop-the-backup">Stop the Backup</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-3-restore-to-validation-prefix">Phase 3: Restore to Validation Prefix</a><ul>
+<li><a class="reference internal" href="#lock-the-database">Lock the Database</a></li>
+<li><a class="reference internal" href="#restore-with-prefix">Restore with Prefix</a></li>
+<li><a class="reference internal" href="#verify-restored-data-exists">Verify Restored Data Exists</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-4-run-validation">Phase 4: Run Validation</a><ul>
+<li><a class="reference internal" href="#start-validation-audit">Start Validation Audit</a></li>
+<li><a class="reference internal" href="#monitor-progress">Monitor Progress</a></li>
+<li><a class="reference internal" href="#wait-for-completion">Wait for Completion</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-5-verify-results">Phase 5: Verify Results</a><ul>
+<li><a class="reference internal" href="#check-audit-status">Check Audit Status</a></li>
+<li><a class="reference internal" href="#check-trace-logs">Check Trace Logs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-6-testing-a-failed-audit">Phase 6: Testing a Failed Audit</a><ul>
+<li><a class="reference internal" href="#modify-source-data">Modify Source Data</a></li>
+<li><a class="reference internal" href="#run-audit-again">Run Audit Again</a></li>
+<li><a class="reference internal" href="#check-for-expected-failure">Check for Expected Failure</a></li>
+<li><a class="reference internal" href="#check-error-details">Check Error Details</a></li>
+<li><a class="reference internal" href="#restore-correct-source-data-for-next-tests">Restore Correct Source Data for Next Tests</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-7-understanding-audit-design-and-limitations">Phase 7: Understanding Audit Design and Limitations</a><ul>
+<li><a class="reference internal" href="#what-the-audit-validates">What the Audit Validates</a></li>
+<li><a class="reference internal" href="#what-the-audit-does-not-validate">What the Audit Does NOT Validate</a></li>
+<li><a class="reference internal" href="#when-to-use-restore-validation">When to Use Restore Validation</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#phase-8-cleanup">Phase 8: Cleanup</a><ul>
+<li><a class="reference internal" href="#unlock-the-database">Unlock the Database</a></li>
+<li><a class="reference internal" href="#clear-restored-data">Clear Restored Data</a></li>
+<li><a class="reference internal" href="#verify-cleanup">Verify Cleanup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#troubleshooting">Troubleshooting</a><ul>
+<li><a class="reference internal" href="#restore-destination-not-empty-error">“restore_destination_not_empty” Error</a></li>
+<li><a class="reference internal" href="#no-backup-agents-are-responding">“No backup agents are responding”</a></li>
+<li><a class="reference internal" href="#the-specified-backup-is-not-restorable-to-any-version">“The specified backup is not restorable to any version”</a></li>
+<li><a class="reference internal" href="#backup-not-restorable">Backup Not Restorable</a></li>
+<li><a class="reference internal" href="#no-progress-updates">No Progress Updates</a></li>
+<li><a class="reference internal" href="#cannot-see-restored-data">Cannot See Restored Data</a></li>
+<li><a class="reference internal" href="#validation-completes-but-no-logs">Validation Completes but No Logs</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#expected-performance">Expected Performance</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="body col-md-9 content" role="main">
+      
+  <section id="restore-validation-testing-guide">
+<span id="restore-validation-testing"></span><h1>Restore Validation Testing Guide</h1>
+<p>This guide provides step-by-step instructions for testing the restore validation feature in FoundationDB.</p>
+<section id="quick-setup">
+<h2>Quick Setup</h2>
+<section id="build-required-binaries">
+<h3>1. Build Required Binaries</h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">cd</span> <span class="o">~/</span><span class="n">build_output</span>
+<span class="n">cmake</span> <span class="o">--</span><span class="n">build</span> <span class="o">.</span> <span class="o">--</span><span class="n">target</span> <span class="n">fdbserver</span> <span class="n">fdbcli</span> <span class="n">fdbbackup</span> <span class="n">backup_agent</span> <span class="o">-</span><span class="n">j4</span>
+</pre></div>
+</div>
+</section>
+<section id="start-test-cluster">
+<h3>2. Start Test Cluster</h3>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create directories and cluster file</span>
+<span class="n">mkdir</span> <span class="o">-</span><span class="n">p</span> <span class="o">~/</span><span class="n">fdb_test_data</span> <span class="o">~/</span><span class="n">fdb_backup</span>
+<span class="n">echo</span> <span class="s2">&quot;test:test@127.0.0.1:4500&quot;</span> <span class="o">&gt;</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># Start fdbserver</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbserver</span> <span class="o">-</span><span class="n">p</span> <span class="mf">127.0.0.1</span><span class="p">:</span><span class="mi">4500</span> <span class="o">-</span><span class="n">d</span> <span class="o">~/</span><span class="n">fdb_test_data</span> \
+  <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> <span class="o">&amp;</span>
+
+<span class="c1"># Configure database</span>
+<span class="n">sleep</span> <span class="mi">3</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> <span class="o">--</span><span class="n">exec</span> <span class="s2">&quot;configure new single memory&quot;</span>
+
+<span class="c1"># Start backup agent (required for backups)</span>
+<span class="n">sleep</span> <span class="mi">2</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">backup_agent</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> <span class="o">&amp;</span>
+
+<span class="n">sleep</span> <span class="mi">2</span>
+<span class="n">echo</span> <span class="s2">&quot;Cluster ready&quot;</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="testing-workflow">
+<h2>Testing Workflow</h2>
+<section id="phase-1-set-up-test-data">
+<h3>Phase 1: Set Up Test Data</h3>
+<section id="write-some-test-data">
+<h4>Write Some Test Data</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># In fdbcli:</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">writemode</span> <span class="n">on</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="nb">set</span> <span class="n">testkey1</span> <span class="n">testvalue1</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="nb">set</span> <span class="n">testkey2</span> <span class="n">testvalue2</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="nb">set</span> <span class="n">testkey3</span> <span class="n">testvalue3</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="nb">set</span> <span class="n">mykey</span> <span class="n">myvalue</span>
+
+<span class="c1"># Verify data</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">getrange</span> <span class="s2">&quot;&quot;</span> <span class="s2">&quot;</span><span class="se">\xff</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="phase-2-backup">
+<h3>Phase 2: Backup</h3>
+<section id="start-backup">
+<h4>Start Backup</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start backup (directory already created in setup)</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">start</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> \
+  <span class="o">-</span><span class="n">d</span> <span class="n">file</span><span class="p">:</span><span class="o">///</span><span class="n">Users</span><span class="o">/</span><span class="n">stack</span><span class="o">/</span><span class="n">fdb_backup</span> <span class="o">-</span><span class="n">z</span>
+
+<span class="c1"># Check status - wait until backup is restorable</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">status</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+</pre></div>
+</div>
+<p>Wait approximately 15-30 seconds until status shows backup is “restorable”. The output should include:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BackupURL:</span> <span class="pre">file:///Users/stack/fdb_backup/backup-&lt;timestamp&gt;</span></code></p></li>
+<li><p>Status showing “completed” or “running differential”</p></li>
+</ul>
+</section>
+<section id="verify-backup-is-ready">
+<h4>Verify Backup is Ready</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Get the specific backup URL from the status output</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">status</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># Verify it&#39;s restorable (use the actual backup URL from status)</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">describe</span> \
+  <span class="o">-</span><span class="n">d</span> <span class="n">file</span><span class="p">:</span><span class="o">///</span><span class="n">Users</span><span class="o">/</span><span class="n">stack</span><span class="o">/</span><span class="n">fdb_backup</span><span class="o">/</span><span class="n">backup</span><span class="o">-&lt;</span><span class="n">timestamp</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p>Look for <code class="docutils literal notranslate"><span class="pre">Restorable:</span> <span class="pre">true</span></code> and <code class="docutils literal notranslate"><span class="pre">MaxRestorableVersion</span></code> in the output.</p>
+</section>
+<section id="stop-the-backup">
+<h4>Stop the Backup</h4>
+<p>Before proceeding with restore validation, stop the backup to ensure no more differential data is being captured:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Stop the backup (use discontinue to keep the backup data)</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">discontinue</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># Verify backup is stopped</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">status</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Use <code class="docutils literal notranslate"><span class="pre">discontinue</span></code> rather than <code class="docutils literal notranslate"><span class="pre">abort</span></code> to preserve the backup data. The <code class="docutils literal notranslate"><span class="pre">discontinue</span></code> command stops the backup gracefully while keeping it restorable.</p>
+</div>
+</section>
+</section>
+<section id="phase-3-restore-to-validation-prefix">
+<h3>Phase 3: Restore to Validation Prefix</h3>
+<section id="lock-the-database">
+<h4>Lock the Database</h4>
+<p>Before starting the restore, lock the database to prevent any writes during validation:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># Lock the database - save the UID returned!</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">lock</span>
+</pre></div>
+</div>
+<p>The lock command returns a UID that you’ll need to unlock the database later.</p>
+</section>
+<section id="restore-with-prefix">
+<h4>Restore with Prefix</h4>
+<p><strong>Important</strong>: Use the SPECIFIC backup URL from the previous step (not the parent directory):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Use fdbrestore with the actual backup URL</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbrestore</span> <span class="n">start</span> \
+  <span class="o">-</span><span class="n">r</span> <span class="n">file</span><span class="p">:</span><span class="o">///</span><span class="n">Users</span><span class="o">/</span><span class="n">stack</span><span class="o">/</span><span class="n">fdb_backup</span><span class="o">/</span><span class="n">backup</span><span class="o">-&lt;</span><span class="n">timestamp</span><span class="o">&gt;</span> \
+  <span class="o">--</span><span class="n">dest</span><span class="o">-</span><span class="n">cluster</span><span class="o">-</span><span class="n">file</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> \
+  <span class="o">--</span><span class="n">add</span><span class="o">-</span><span class="n">prefix</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog/&quot;</span> \
+  <span class="o">-</span><span class="n">w</span>
+</pre></div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Warning</p>
+<p>Using <code class="docutils literal notranslate"><span class="pre">file:///Users/stack/fdb_backup</span></code> (parent dir) instead of the full backup path will fail with “not restorable to any version”.</p>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code> prefix is the <code class="docutils literal notranslate"><span class="pre">validateRestoreLogKeys</span></code> range where validation looks for restored data.</p>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p><strong>Restore will clear and overwrite any existing data at the destination range.</strong> This is standard restore behavior. The restore process explicitly clears the destination range before writing restored data, so any pre-existing keys in <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code> will be replaced.</p>
+</div>
+</section>
+<section id="verify-restored-data-exists">
+<h4>Verify Restored Data Exists</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># In fdbcli, enable system keys to see restored data</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">option</span> <span class="n">on</span> <span class="n">ACCESS_SYSTEM_KEYS</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">getrange</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog/&quot;</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog0&quot;</span>
+
+<span class="c1"># You should see your keys with the prefix</span>
+<span class="c1"># e.g., &quot;\xff\x02/rlog/testkey1&quot; -&gt; &quot;testvalue1&quot;</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="phase-4-run-validation">
+<h3>Phase 4: Run Validation</h3>
+<section id="start-validation-audit">
+<h4>Start Validation Audit</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># Start validation for entire key range</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">audit_storage</span> <span class="n">validate_restore</span> <span class="s2">&quot;&quot;</span> <span class="s2">&quot;</span><span class="se">\xff</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+<p>This returns an Audit ID. <strong>Save this ID!</strong></p>
+<p>Example output:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Audit</span> <span class="n">ID</span><span class="p">:</span> <span class="mi">12345678</span><span class="o">-</span><span class="mi">1234</span><span class="o">-</span><span class="mi">5678</span><span class="o">-</span><span class="mi">1234</span><span class="o">-</span><span class="mi">567812345678</span>
+</pre></div>
+</div>
+</section>
+<section id="monitor-progress">
+<h4>Monitor Progress</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check overall status</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get_audit_status</span> <span class="n">validate_restore</span> <span class="nb">id</span> <span class="o">&lt;</span><span class="n">AuditID</span><span class="o">&gt;</span>
+
+<span class="c1"># Check detailed progress (shows which ranges are complete)</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get_audit_status</span> <span class="n">validate_restore</span> <span class="n">progress</span> <span class="o">&lt;</span><span class="n">AuditID</span><span class="o">&gt;</span>
+
+<span class="c1"># Check for any errors</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get_audit_status</span> <span class="n">validate_restore</span> <span class="n">phase</span> <span class="n">error</span>
+</pre></div>
+</div>
+</section>
+<section id="wait-for-completion">
+<h4>Wait for Completion</h4>
+<p>Keep checking status until the audit completes. For a small dataset, this should take seconds to minutes.</p>
+</section>
+</section>
+<section id="phase-5-verify-results">
+<h3>Phase 5: Verify Results</h3>
+<section id="check-audit-status">
+<h4>Check Audit Status</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get_audit_status</span> <span class="n">validate_restore</span> <span class="nb">id</span> <span class="o">&lt;</span><span class="n">AuditID</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p><strong>Expected Output (Success)</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Audit</span> <span class="n">result</span> <span class="ow">is</span><span class="p">:</span>
+<span class="n">AuditStorageState</span><span class="p">:</span> <span class="p">[</span><span class="n">ID</span><span class="p">]:</span> <span class="o">&lt;</span><span class="n">AuditID</span><span class="o">&gt;</span><span class="p">,</span> <span class="p">[</span><span class="n">Range</span><span class="p">]:</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span><span class="s2">&quot;</span><span class="se">\\</span><span class="s2">xff&quot;</span><span class="p">),</span> <span class="p">[</span><span class="n">Type</span><span class="p">]:</span> <span class="mi">5</span><span class="p">,</span> <span class="p">[</span><span class="n">Phase</span><span class="p">]:</span> <span class="mi">2</span>
+</pre></div>
+</div>
+<p>Where:</p>
+<ul class="simple">
+<li><p>Type: 5 = ValidateRestore</p></li>
+<li><p>Phase: 2 = Complete (no errors)</p></li>
+</ul>
+<p><strong>If Phase: 3 = Error</strong>, there were validation failures!</p>
+</section>
+<section id="check-trace-logs">
+<h4>Check Trace Logs</h4>
+<p>Look for validation events in the server logs:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">grep</span> <span class="s2">&quot;AuditRestore&quot;</span> <span class="o">~/</span><span class="n">fdb_test_data</span><span class="o">/*.</span><span class="n">log</span> <span class="o">|</span> <span class="n">tail</span> <span class="o">-</span><span class="mi">20</span>
+</pre></div>
+</div>
+<p>Look for:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">SSAuditRestoreBegin</span></code> - Validation started</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SSAuditRestoreComplete</span></code> - Validation finished successfully</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SSAuditRestoreError</span></code> - Validation found errors (check details!)</p></li>
+</ul>
+</section>
+</section>
+<section id="phase-6-testing-a-failed-audit">
+<h3>Phase 6: Testing a Failed Audit</h3>
+<p>To verify that the audit correctly detects mismatches, you can intentionally modify the source data and rerun the audit.</p>
+<section id="modify-source-data">
+<h4>Modify Source Data</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">writemode</span> <span class="n">on</span>
+
+<span class="c1"># Modify one of the original source values to create a mismatch</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="nb">set</span> <span class="n">testkey1</span> <span class="s2">&quot;modified_value&quot;</span>
+
+<span class="c1"># Verify the change</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get</span> <span class="n">testkey1</span>
+</pre></div>
+</div>
+<p>This creates a mismatch because:</p>
+<ul class="simple">
+<li><p>Current source data: <code class="docutils literal notranslate"><span class="pre">testkey1</span></code> = <code class="docutils literal notranslate"><span class="pre">modified_value</span></code> (modified after backup)</p></li>
+<li><p>Restored data: <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/testkey1</span></code> = <code class="docutils literal notranslate"><span class="pre">testvalue1</span></code> (from backup)</p></li>
+</ul>
+</section>
+<section id="run-audit-again">
+<h4>Run Audit Again</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start a new validation audit</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">audit_storage</span> <span class="n">validate_restore</span> <span class="s2">&quot;&quot;</span> <span class="s2">&quot;</span><span class="se">\xff</span><span class="s2">&quot;</span>
+</pre></div>
+</div>
+<p>Save the new Audit ID returned.</p>
+</section>
+<section id="check-for-expected-failure">
+<h4>Check for Expected Failure</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Monitor the audit status</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get_audit_status</span> <span class="n">validate_restore</span> <span class="nb">id</span> <span class="o">&lt;</span><span class="n">NewAuditID</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+<p><strong>Expected Output (Failure)</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Audit</span> <span class="n">result</span> <span class="ow">is</span><span class="p">:</span>
+<span class="n">AuditStorageState</span><span class="p">:</span> <span class="p">[</span><span class="n">ID</span><span class="p">]:</span> <span class="o">&lt;</span><span class="n">AuditID</span><span class="o">&gt;</span><span class="p">,</span> <span class="p">[</span><span class="n">Range</span><span class="p">]:</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="p">,</span><span class="s2">&quot;</span><span class="se">\\</span><span class="s2">xff&quot;</span><span class="p">),</span> <span class="p">[</span><span class="n">Type</span><span class="p">]:</span> <span class="mi">5</span><span class="p">,</span> <span class="p">[</span><span class="n">Phase</span><span class="p">]:</span> <span class="mi">3</span>
+</pre></div>
+</div>
+<p>Where:</p>
+<ul class="simple">
+<li><p>Phase: 3 = Error (validation found mismatches)</p></li>
+</ul>
+</section>
+<section id="check-error-details">
+<h4>Check Error Details</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check detailed error information</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get_audit_status</span> <span class="n">validate_restore</span> <span class="n">phase</span> <span class="n">error</span>
+
+<span class="c1"># Check trace logs for specific error details</span>
+<span class="n">grep</span> <span class="s2">&quot;SSAuditRestoreError&quot;</span> <span class="o">~/</span><span class="n">fdb_test_data</span><span class="o">/*.</span><span class="n">log</span> <span class="o">|</span> <span class="n">tail</span> <span class="o">-</span><span class="mi">20</span>
+</pre></div>
+</div>
+<p>The logs should show which key had a mismatch and what the differing values were.</p>
+</section>
+<section id="restore-correct-source-data-for-next-tests">
+<h4>Restore Correct Source Data for Next Tests</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Restore the original source value to match the backup</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">writemode</span> <span class="n">on</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="nb">set</span> <span class="n">testkey1</span> <span class="n">testvalue1</span>
+
+<span class="c1"># Verify the restoration</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">get</span> <span class="n">testkey1</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="phase-7-understanding-audit-design-and-limitations">
+<h3>Phase 7: Understanding Audit Design and Limitations</h3>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p>The restore validation audit is designed to run immediately after a restore operation to verify the restore process didn’t corrupt data. It compares the current database state with the restored data at the time of the audit.</p>
+</div>
+<div class="admonition important">
+<p class="admonition-title">Important</p>
+<p><strong>Lock the database before starting restore validation.</strong> To avoid false positive audit errors caused by writes occurring between the backup snapshot and audit completion, you should lock the database before getting the restorableVersion and keep it locked until the audit completes. Any writes to the source data during this window will cause audit mismatches that are difficult to distinguish from actual restore corruption issues.</p>
+<p><strong>Both restore and audit operations will continue to work on a locked database.</strong> They use <code class="docutils literal notranslate"><span class="pre">LOCK_AWARE</span></code> transactions internally, which allows system operations to proceed while the lock prevents regular application writes. This is the recommended approach for accurate validation.</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Lock the database before restore</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">lock</span>
+
+<span class="c1"># Restore and audit will work - they use LOCK_AWARE transactions</span>
+<span class="c1"># Regular application writes are blocked, preventing false positives</span>
+
+<span class="c1"># Proceed with restore and validation</span>
+<span class="c1"># ... perform restore ...</span>
+<span class="c1"># ... run audit ...</span>
+
+<span class="c1"># Unlock after audit completes</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">unlock</span> <span class="o">&lt;</span><span class="n">UID</span> <span class="kn">from</span><span class="w"> </span><span class="nn">lock</span> <span class="n">command</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+</div>
+<section id="what-the-audit-validates">
+<h4>What the Audit Validates</h4>
+<p>The audit ensures:</p>
+<p>✅ The restore process worked without corruption during the restore operation</p>
+<p>✅ Current source data matches the restored data at the time of audit</p>
+<p>✅ No data corruption occurred between source and restored locations</p>
+</section>
+<section id="what-the-audit-does-not-validate">
+<h4>What the Audit Does NOT Validate</h4>
+<p>The audit has these design limitations:</p>
+<p>❌ It does NOT detect if source data changed after the backup was created</p>
+<p>❌ It compares current source data to restored data, not backup data to restored data</p>
+<p><strong>Why This Matters</strong>:</p>
+<p>If you:</p>
+<ol class="arabic simple">
+<li><p>Create a backup with <code class="docutils literal notranslate"><span class="pre">testkey1=value1</span></code></p></li>
+<li><p>Modify source data to <code class="docutils literal notranslate"><span class="pre">testkey1=value2</span></code></p></li>
+<li><p>Restore the backup (restores <code class="docutils literal notranslate"><span class="pre">testkey1=value1</span></code> to <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code>)</p></li>
+<li><p>Run the audit</p></li>
+</ol>
+<p>The audit will report an ERROR because current source (<code class="docutils literal notranslate"><span class="pre">value2</span></code>) doesn’t match restored (<code class="docutils literal notranslate"><span class="pre">value1</span></code>). This is expected behavior - the audit validates restore integrity by comparing current state to restored state.</p>
+</section>
+<section id="when-to-use-restore-validation">
+<h4>When to Use Restore Validation</h4>
+<p>Use restore validation:</p>
+<p>✅ Immediately after completing a restore operation</p>
+<p>✅ To verify the restore process worked correctly</p>
+<p>✅ To ensure no corruption during data transfer</p>
+<p>Do NOT use restore validation:</p>
+<p>❌ To verify backup data integrity (use backup verification tools instead)</p>
+<p>❌ To check if source data matches the backup (they’re expected to diverge)</p>
+<p>❌ As a long-term consistency check between source and restored data</p>
+</section>
+</section>
+<section id="phase-8-cleanup">
+<h3>Phase 8: Cleanup</h3>
+<section id="unlock-the-database">
+<h4>Unlock the Database</h4>
+<p>After validation is complete, unlock the database to allow normal operations:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="c1"># Unlock using the UID from the lock command</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">unlock</span> <span class="o">&lt;</span><span class="n">UID</span> <span class="kn">from</span><span class="w"> </span><span class="nn">lock</span> <span class="n">command</span><span class="o">&gt;</span>
+</pre></div>
+</div>
+</section>
+<section id="clear-restored-data">
+<h4>Clear Restored Data</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbcli</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">option</span> <span class="n">on</span> <span class="n">ACCESS_SYSTEM_KEYS</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">writemode</span> <span class="n">on</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">clearrange</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog/&quot;</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog0&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="verify-cleanup">
+<h4>Verify Cleanup</h4>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">getrange</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog/&quot;</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog0&quot;</span>
+<span class="c1"># Should return empty</span>
+</pre></div>
+</div>
+</section>
+</section>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting</h2>
+<section id="restore-destination-not-empty-error">
+<h3>“restore_destination_not_empty” Error</h3>
+<p><strong>Symptom</strong>: Restore fails saying destination is not empty</p>
+<p><strong>Cause</strong>: The restore is not using a prefix (addPrefix parameter)</p>
+<p><strong>Fix</strong>: When restoring for validation, you must use the <code class="docutils literal notranslate"><span class="pre">addPrefix</span></code> parameter to restore
+to a different keyspace (e.g., <code class="docutils literal notranslate"><span class="pre">\xff\x02/rlog/</span></code>). This bypasses the empty destination check
+that’s enforced for regular restores (which protect against accidental data loss).</p>
+<p><strong>Note</strong>: All restores (with or without prefix) will clear and overwrite the destination range.
+The difference is that regular restores (no prefix) check for existing data and fail to prevent
+accidents, while validation restores (with prefix) proceed because they’re intentionally writing
+to a dedicated validation keyspace.</p>
+</section>
+<section id="no-backup-agents-are-responding">
+<h3>“No backup agents are responding”</h3>
+<p><strong>Symptom</strong>: After running <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">start</span></code>, you see this message</p>
+<p><strong>Cause</strong>: No backup agent process running to execute the backup</p>
+<p><strong>Fix</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Start backup agent daemon</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">backup_agent</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> <span class="o">&amp;</span>
+
+<span class="c1"># Wait a moment, then check backup status</span>
+<span class="n">sleep</span> <span class="mi">5</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">status</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+</pre></div>
+</div>
+</section>
+<section id="the-specified-backup-is-not-restorable-to-any-version">
+<h3>“The specified backup is not restorable to any version”</h3>
+<p><strong>Symptom</strong>: Restore fails immediately with this error</p>
+<p><strong>Causes</strong>:</p>
+<ol class="arabic simple">
+<li><p><strong>Wrong backup URL</strong>: Using parent directory instead of specific backup path</p></li>
+<li><p><strong>Backup not complete</strong>: Backup hasn’t finished creating a restorable snapshot</p></li>
+</ol>
+<p><strong>Fix</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># 1. Get the correct backup URL from status</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbbackup</span> <span class="n">status</span> <span class="o">-</span><span class="n">C</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span>
+<span class="c1"># Look for: BackupURL: file:///.../backup-&lt;timestamp&gt;</span>
+
+<span class="c1"># 2. Use that EXACT URL in restore command</span>
+<span class="o">~/</span><span class="n">build_output</span><span class="o">/</span><span class="nb">bin</span><span class="o">/</span><span class="n">fdbrestore</span> <span class="n">start</span> \
+  <span class="o">-</span><span class="n">r</span> <span class="n">file</span><span class="p">:</span><span class="o">///</span><span class="n">Users</span><span class="o">/</span><span class="n">stack</span><span class="o">/</span><span class="n">fdb_backup</span><span class="o">/</span><span class="n">backup</span><span class="o">-</span><span class="mi">2025</span><span class="o">-</span><span class="mi">11</span><span class="o">-</span><span class="mi">18</span><span class="o">-</span><span class="mi">09</span><span class="o">-</span><span class="mi">36</span><span class="o">-</span><span class="mf">09.156836</span> \
+  <span class="o">--</span><span class="n">dest</span><span class="o">-</span><span class="n">cluster</span><span class="o">-</span><span class="n">file</span> <span class="o">~/</span><span class="n">fdb_test</span><span class="o">.</span><span class="n">cluster</span> \
+  <span class="o">--</span><span class="n">add</span><span class="o">-</span><span class="n">prefix</span> <span class="s2">&quot;</span><span class="se">\xff\x02</span><span class="s2">/rlog/&quot;</span> <span class="o">-</span><span class="n">w</span>
+</pre></div>
+</div>
+</section>
+<section id="backup-not-restorable">
+<h3>Backup Not Restorable</h3>
+<p><strong>Symptom</strong>: Restore fails with “not restorable to any version”</p>
+<p><strong>Cause</strong>: Backup hasn’t completed or saved a snapshot yet</p>
+<p><strong>Fix</strong>:</p>
+<ul class="simple">
+<li><p>Wait longer (10-30 seconds minimum)</p></li>
+<li><p>Check <code class="docutils literal notranslate"><span class="pre">fdbbackup</span> <span class="pre">status</span></code> for restorable version</p></li>
+<li><p>Ensure backup agent is running</p></li>
+</ul>
+</section>
+<section id="no-progress-updates">
+<h3>No Progress Updates</h3>
+<p><strong>Symptom</strong>: Audit status stays in “Running” phase forever</p>
+<p><strong>Cause</strong>: Storage servers may not have the shard containing your key range</p>
+<p><strong>Fix</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check if data distribution is working</span>
+<span class="n">fdbcli</span><span class="o">&gt;</span> <span class="n">status</span> <span class="n">details</span>
+<span class="c1"># Look for storage servers and their shard assignments</span>
+</pre></div>
+</div>
+</section>
+<section id="cannot-see-restored-data">
+<h3>Cannot See Restored Data</h3>
+<p><strong>Symptom</strong>: <code class="docutils literal notranslate"><span class="pre">getrange</span> <span class="pre">&quot;\xff\x02/rlog/&quot;</span></code> returns empty</p>
+<p><strong>Cause</strong>: Need to enable system keys access</p>
+<p><strong>Fix</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">option</span> <span class="n">on</span> <span class="n">ACCESS_SYSTEM_KEYS</span>
+</pre></div>
+</div>
+</section>
+<section id="validation-completes-but-no-logs">
+<h3>Validation Completes but No Logs</h3>
+<p><strong>Symptom</strong>: Can’t find trace events</p>
+<p><strong>Cause</strong>: Logs may be in different location</p>
+<p><strong>Fix</strong>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># Find log location</span>
+<span class="n">ps</span> <span class="n">aux</span> <span class="o">|</span> <span class="n">grep</span> <span class="n">fdbserver</span>
+<span class="c1"># Look for -L or --logdir parameter</span>
+
+<span class="c1"># Or check default locations</span>
+<span class="n">ls</span> <span class="o">-</span><span class="n">ltr</span> <span class="o">/</span><span class="n">var</span><span class="o">/</span><span class="n">log</span><span class="o">/</span><span class="n">foundationdb</span><span class="o">/</span>
+<span class="n">ls</span> <span class="o">-</span><span class="n">ltr</span> <span class="o">~/</span><span class="n">fdb_test_data</span><span class="o">/*.</span><span class="n">log</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="expected-performance">
+<h2>Expected Performance</h2>
+<ul class="simple">
+<li><p><strong>Small dataset (100s of keys)</strong>: Seconds</p></li>
+<li><p><strong>Medium dataset (10K keys)</strong>: 1-5 minutes</p></li>
+<li><p><strong>Large dataset (1M+ keys)</strong>: Hours (rate limited)</p></li>
+</ul>
+<p>Rate limiting is controlled by <code class="docutils literal notranslate"><span class="pre">AUDIT_STORAGE_RATE_PER_SERVER_MAX</span></code> (default: 50MB/s per server).</p>
+</section>
+</section>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/restore-validation-testing.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jan 30, 2026.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>
