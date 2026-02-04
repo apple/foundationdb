@@ -396,8 +396,7 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 			when(wait(stats->onChange())) {}
 			when(wait(timeout)) {
 				CODE_PROBE(true, "getFirstSize timed out waiting for initial shard metrics");
-				TraceEvent(SevWarn, "GetFirstSizeTimeout")
-				    .detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
+				TraceEvent(SevWarn, "GetFirstSizeTimeout").detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
 				return 0;
 			}
 		}
@@ -2134,8 +2133,7 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 TEST_CASE("/DataDistributor/Tracker/GetFirstSizeTimeout") {
 	// Test that getFirstSize returns 0 when shard metrics never arrive (timeout fires).
 	// This verifies that DD initialization won't block forever if a storage server is unreachable.
-	state Reference<AsyncVar<Optional<ShardMetrics>>> stats =
-	    makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	state Reference<AsyncVar<Optional<ShardMetrics>>> stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 
 	state double startTime = now();
 	int64_t size = wait(getFirstSize(stats));
@@ -2152,8 +2150,7 @@ TEST_CASE("/DataDistributor/Tracker/GetFirstSizeTimeout") {
 
 TEST_CASE("/DataDistributor/Tracker/GetFirstSizeImmediate") {
 	// Test that getFirstSize returns immediately when metrics are already present.
-	state Reference<AsyncVar<Optional<ShardMetrics>>> stats =
-	    makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	state Reference<AsyncVar<Optional<ShardMetrics>>> stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 
 	StorageMetrics sm;
 	sm.bytes = 12345;
@@ -2179,8 +2176,7 @@ ACTOR Future<Void> setStatsAfterDelay(Reference<AsyncVar<Optional<ShardMetrics>>
 
 TEST_CASE("/DataDistributor/Tracker/GetFirstSizeDelayed") {
 	// Test that getFirstSize returns the actual value when metrics arrive before timeout.
-	state Reference<AsyncVar<Optional<ShardMetrics>>> stats =
-	    makeReference<AsyncVar<Optional<ShardMetrics>>>();
+	state Reference<AsyncVar<Optional<ShardMetrics>>> stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 
 	// Set stats after a short delay (well before the timeout)
 	state Future<Void> setter = setStatsAfterDelay(stats, 0.1, 99999);
