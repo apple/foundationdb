@@ -141,12 +141,8 @@ struct DBCoreState {
 	ProtocolVersion lowestCompatibleProtocolVersion;
 
 	// encryptionAtRestModeDeprecated: Leaving this member in here but marked as Deprecated.
-	// It may not be safe to remove this flat out if DBCoreState is persisted
-	// in some way that survives upgrades.  We want to avoid future disasters where
-	// somebody adds a new member but that gets interpreted according to garbage old
-	// bytes in storage associated with the prior encryptionAtRestMode member.
-	// If we are positive that the above cannot happen then I suppose it would be OK
-	// to remove the following member.
+	// DBCoreState is persisted on coordinators and we have to leave it alone to allow
+	// old code to consult the field following a downgrade.
 	//
 	// Another solution would be to do an explicit migration where we run code to
 	// zero out this field in persistent metadata and then rewrite that metadata.

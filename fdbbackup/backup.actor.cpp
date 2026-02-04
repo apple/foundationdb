@@ -136,7 +136,6 @@ enum {
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_USE_PARTITIONED_LOG,
-	OPT_ENCRYPT_FILES,
 	OPT_MODE,
 
 	// Backup and Restore constants
@@ -285,7 +284,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
-	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
 	{ OPT_MODE, "--mode", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
@@ -1143,11 +1141,6 @@ static void printBackupUsage(bool devhelp) {
 	       "                 For modify operations, need to pass encryption key file only if Backup container URL is "
 	       "changed to "
 	       "re-encrypt all future backup files. \n");
-	printf("  --encrypt-files 0/1"
-	       "                 If passed, this argument will allow the user to override the database encryption state to "
-	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
-	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
-	       "Generally, these two options should not be used together.\n");
 
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
@@ -2046,7 +2039,6 @@ ACTOR Future<Void> submitBackup(Database db,
                                 int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                bool encryptionEnabled,
                                 std::string tagName,
                                 bool dryRun,
                                 WaitForComplete waitForCompletion,
@@ -3775,8 +3767,6 @@ int main(int argc, char* argv[]) {
 		bool restoreSystemKeys = false;
 		bool restoreUserKeys = false;
 		RestoreMode restoreMode = RestoreMode::RANGEFILE; // Default to traditional range file restore
-		bool encryptionEnabled = true;
-		bool encryptSnapshotFilesPresent = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3952,25 +3942,6 @@ int main(int argc, char* argv[]) {
 			case OPT_BASEURL:
 				baseUrl = args->OptionArg();
 				break;
-			case OPT_ENCRYPT_FILES: {
-				const char* a = args->OptionArg();
-				int encryptFiles;
-				if (!sscanf(a, "%d", &encryptFiles)) {
-					fprintf(stderr, "ERROR: Could not parse encrypt-files `%s'\n", a);
-					return FDB_EXIT_ERROR;
-				}
-				if (encryptFiles != 0 && encryptFiles != 1) {
-					fprintf(stderr, "ERROR: encrypt-files must be either 0 or 1\n");
-					return FDB_EXIT_ERROR;
-				}
-				encryptSnapshotFilesPresent = true;
-				if (encryptFiles == 0) {
-					encryptionEnabled = false;
-				} else {
-					encryptionEnabled = true;
-				}
-				break;
-			}
 			case OPT_RESTORE_CLUSTERFILE_DEST:
 				restoreClusterFileDest = args->OptionArg();
 				break;
@@ -4261,10 +4232,6 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		if (encryptionKeyFile.present() && encryptSnapshotFilesPresent) {
-			fprintf(stderr, "WARNING: Use of --encrypt-files and --encryption-key-file together is discouraged\n");
-		}
-
 		// Process the extra arguments
 		for (int argLoop = 0; argLoop < args->FileCount(); argLoop++) {
 			switch (programExe) {
@@ -4507,7 +4474,6 @@ int main(int argc, char* argv[]) {
 				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
-				                           encryptionEnabled,
 				                           tagName,
 				                           dryRun,
 				                           waitForDone,

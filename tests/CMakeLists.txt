@@ -13,12 +13,14 @@ set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # for the restart test we optimally want to use the last stable fdbserver
-# to test upgrades
-# FIXME: why is this using 7.1.23?  That is not the "last stable fdbserver".
+# to test upgrades.
+# FIXME: explain what `last stable` means in the above comment.  Does it mean "last stable non-main release?"
+# Below we are using 7.1.* so that is pretty old stuff.  Does it mean "most recent patch release of the oldest X.Y release family"?
+# FIXME: Regardless of what "last stable" refers to, explain why this is important.
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
-    fdbserver-7.1.23 fdbserver fdbserver.exe
-    HINTS /opt/foundationdb/old/7.1.23/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
+    fdbserver-7.1.69 fdbserver fdbserver.exe
+    HINTS /opt/foundationdb/old/7.1.69/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
