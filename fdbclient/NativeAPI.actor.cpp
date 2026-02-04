@@ -5911,6 +5911,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
+	state int wrongShardRetries = 0;
 	loop {
 		if (trState.present()) {
 			wait(trState.get()->startTransaction());
@@ -5950,12 +5951,23 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			Optional<StorageMetrics> res =
 			    wait(waitStorageMetricsWithLocation(version, keys, locations, min, max, permittedError));
 			if (res.present()) {
+				wrongShardRetries = 0;
 				return std::make_pair(res, -1);
 			}
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(keys);
+				if (++wrongShardRetries > CLIENT_KNOBS->STORAGE_METRICS_WRONG_SHARD_MAX_RETRIES) {
+					CODE_PROBE(true, "waitStorageMetrics gave up after persistent wrong_shard_server");
+					TraceEvent(SevWarnAlways, "WaitStorageMetricsWrongShardGaveUp")
+					    .detail("Keys", keys)
+					    .detail("Retries", wrongShardRetries)
+					    .detail("ErrorCode", e.code());
+					// Return zero metrics so callers (e.g. DD shard tracker) can make progress
+					// rather than spinning forever on a persistently stale shard map.
+					return std::make_pair(Optional<StorageMetrics>(StorageMetrics()), -1);
+				}
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else if (e.code() == error_code_future_version) {
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));

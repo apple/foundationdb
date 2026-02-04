@@ -62,6 +62,7 @@ public:
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
 	                                 // mostly wrong (e.g. dumping the database after a test)
+	int STORAGE_METRICS_WRONG_SHARD_MAX_RETRIES;
 	double FUTURE_VERSION_RETRY_DELAY;
 	double GRV_ERROR_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
