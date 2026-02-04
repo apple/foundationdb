@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'MiniCycle'
+
+[[test.workload]]
+testName = 'MiniCycle'
+transactionsPerSecond = 5000.0
+testDuration = 36.0
+expectedRate = 0
+keyPrefix = 'MiniCycle'
