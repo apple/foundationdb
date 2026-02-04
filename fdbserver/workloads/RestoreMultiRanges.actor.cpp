@@ -142,7 +142,6 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 			                                    deterministicRandom()->randomInt(0, 100),
 			                                    tagName,
 			                                    backupRanges,
-			                                    true,
 			                                    StopWhenDone::True,
 			                                    UsePartitionedLog::False,
 			                                    IncrementalBackupOnly::False,

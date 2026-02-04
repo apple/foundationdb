@@ -1582,7 +1582,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 	state Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	state StringRefReader reader(buf, restore_corrupted_data());
 	state Arena arena;
-	state int64_t blockDomainId = -1; // legacy comment: TenantInfo::INVALID_TENANT;
+	state int64_t blockDomainId = -1;
 
 	try {
 		int32_t file_version = reader.consume<int32_t>();
@@ -6986,7 +6986,6 @@ public:
 		}
 	}
 
-	// TODO: Get rid of all of these confusing boolean flags
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent,
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer,
@@ -6995,7 +6994,6 @@ public:
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
 	                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                       bool encryptionEnabled,
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
@@ -7121,7 +7119,6 @@ public:
 		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
-		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
 		config.snapshotMode().set(tr, snapshotMode);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
@@ -8085,8 +8082,6 @@ public:
 			TraceEvent("AS_StartRestore").log();
 			state Standalone<VectorRef<KeyRangeRef>> restoreRange;
 			state Standalone<VectorRef<KeyRangeRef>> systemRestoreRange;
-			// TODO(gglass): the following loop has been simplified with tenant removal.
-			// Possible bug area.  Revisit for possible bugs or simplification opportunities.
 			for (auto r : ranges) {
 				restoreRange.push_back_deep(restoreRange.arena(), r);
 			}
@@ -8372,7 +8367,6 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            int snapshotIntervalSeconds,
                                            std::string const& tagName,
                                            Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                           bool encryptionEnabled,
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
@@ -8386,7 +8380,6 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         snapshotIntervalSeconds,
 	                                         tagName,
 	                                         backupRanges,
-	                                         encryptionEnabled,
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,

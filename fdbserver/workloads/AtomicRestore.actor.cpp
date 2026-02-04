@@ -106,7 +106,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                              deterministicRandom()->randomInt(0, 100),
 			                              BackupAgentBase::getDefaultTagName(),
 			                              self->backupRanges,
-			                              true,
 			                              StopWhenDone::False,
 			                              self->usePartitionedLogs,
 			                              IncrementalBackupOnly::False,
