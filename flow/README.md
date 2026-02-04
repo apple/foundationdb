@@ -333,12 +333,24 @@ you are holding the corresponding future.
     }
     ```
     - Unions
+    Note that, when A, B, C are tables, this is generally compatible with other languages.  If A, B, C are scalars, strings or structs, the corresponding IDL contains things like `struct S { .. }; union T { S, ... }`, which is only partially supported by flatcc (and, in particular, does not work in Rust).  See:  https://github.com/google/flatbuffers/issues/7220
+    
+    The .fbs files we've checked in work around this by hardcoding one of the variant types; as in the workaround below.
+
+    As luck would have it, `union U { [ubyte], ... }` is invalid .fbs syntax, as vectors cannot be directly embedded into union types.  Fortunately, we do not use IDL strings in FDB, and vectors of bytes cannot be embedded in structs.  This forces unions involving StringRefs to be unions of tables, which are supported in Rust.  See the `OptionalString` definition in `common.fbs` for an example.
     ```
-    // Flow type
     using T = std::variant<A, B, C>;
 
     // IDL equivalent
     union T { A, B, C}
+
+    // IDL workaround for Rust, etc -- will fail to parse if it encounters anything structurally incompatible with A.
+    // Only needed if A is *not* a table; unions of tables work normally in Rust.
+    struct T {
+        tag_hack: ubyte;  // Must be 1 (or 2 if hardcoding B, 3 for C, etc...)
+        a: A;
+    }
+
     ```
     - Strings (there's a string type in the idl that guarantees null termination, but flow does not, so it's comparable to a vector of bytes)
     ```
@@ -356,6 +368,26 @@ you are holding the corresponding future.
     // IDL equivalent
     [T]
     ```
+    - Optional
+    (Only tested when T is a table; not sure whether Void will be a struct or table in other circumstances)
+    ```
+    // Flow type
+    Optional<T>
+
+    // IDL equivalent
+    table Void {}
+    union U { T, Void }
+    ```
+    - Maps
+    ```
+    // Flow type
+    std::map<T, U>
+
+    // IDL equivalent
+    table PairTU { t: T, u: U, }
+    [PairTU]
+    ```
+Note that fields inherited from superclasses appear last in the IDL definition.
 
 1. Flatbuffers Traits
 
@@ -391,6 +423,22 @@ you are holding the corresponding future.
     control `T`, you can specialize the `FileIdentifierFor` template. See
     `flow/FileIdentifier.h` for examples. You don't need to change the file
     identifier for a type when evolving its schema.
+
+    Compatibility note:  FlatBuffer file identifiers must be a 4 byte array that is
+    also valid UTF-8.  FDB does not currently enforce this, and uses file identifiers
+    that violate this rule.  As a workaround, third party tools need to serialize
+    with a fake file identifier, then overwrite bytes [4..8) of the serialized buffer
+    before sending it over the wire to FDB.  When deserializing, they need to
+    perform the reverse translation.  Note that flatbuffer file identiers are
+    optional, and that including one changes the layout of the serialized flatbuffer
+    data.  Therefore, telling the serialization logic to omit the file_identifier,
+    or telling the deserializer to simply ignore it is *NOT* adequate.  You must
+    manually rewrite the serialized data before passing it to/from standard
+    flatbuffer implementations.
+
+    This may be fixed in the future, but doing so will force us to rewrite FDB's
+    file identifiers to be valid UTF-8, and audit the usage of (or replace)
+    ComposedIdentifier.  The above was written during the 7.2 release cycle.
 
 1. Schema evolution
 
