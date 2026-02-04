@@ -264,6 +264,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	FDBFuture* (*clusterCreateDatabase)(FDBCluster* cluster, uint8_t* dbName, int dbNameLength);
 	void (*clusterDestroy)(FDBCluster* cluster);
 	fdb_error_t (*futureGetCluster)(FDBFuture* f, FDBCluster** outCluster);
+
+	// Build ID
+	const uint8_t* (*retrieveBuildID)();
 };
 
 // An implementation of ITransaction that wraps a transaction object created on an externally loaded client library.
@@ -398,6 +401,7 @@ public:
 	void selectApiVersion(int apiVersion) override;
 	const char* getClientVersion() override;
 	void useFutureProtocolVersion() override;
+	const uint8_t* retrieveBuildID();
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	void setupNetwork() override;
@@ -800,6 +804,12 @@ public:
 	void runOnExternalClientsAllThreads(std::function<void(Reference<ClientInfo>)>,
 	                                    bool runOnFailedClients = false,
 	                                    bool failOnError = false);
+	void runOnExternalClientsThreadRange(std::function<void(Reference<ClientInfo>)>,
+	                                     int startIdx,
+	                                     int endIdx,
+	                                     bool runOnFailedClients = false,
+	                                     bool failOnError = false);
+
 	bool hasNonFailedExternalClients();
 
 	void updateSupportedVersions();
@@ -832,7 +842,7 @@ private:
 	void addExternalLibraryDirectory(std::string path);
 	// Return a vector of (pathname, unlink_on_close) pairs.  Makes threadCount - 1 copies of the library stored in
 	// path, and returns a vector of length threadCount.
-	std::vector<std::pair<std::string, bool>> copyExternalLibraryPerThread(std::string path);
+	std::vector<std::pair<std::string, bool>> copyExternalLibraryPerThread(std::string path, std::string build_id);
 	void disableLocalClient();
 	void setSupportedClientVersions(Standalone<StringRef> versions);
 
