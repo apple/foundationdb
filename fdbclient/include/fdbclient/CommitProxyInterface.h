@@ -26,9 +26,8 @@
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/GlobalConfig.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.actor.h"
@@ -150,7 +149,6 @@ struct ClientDBInfo {
 extern template class ReplyPromise<struct ClientDBInfo>;
 extern template class ReplyPromise<class CachedSerialization<struct ClientDBInfo>>;
 
-// TODO(gglass): see if this can be removed now that tenant is removed.
 struct ExpireIdempotencyIdRequest {
 	constexpr static FileIdentifier file_identifier = 1900933;
 	Version commitVersion = invalidVersion;
@@ -449,7 +447,7 @@ struct SWIFT_CXX_IMPORT_OWNED GetStorageServerRejoinInfoReply {
 	Optional<Tag> newTag;
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
-	EncryptionAtRestMode encryptMode;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -660,8 +658,5 @@ struct SetThrottledShardRequest {
 
 Standalone<StringRef> getBackupKey(BinaryWriter& wr, uint32_t** partBuffer, int part);
 StringRef getBackupValue(Key& content, int part);
-
-// Instantiated in CommitProxyInterface.cpp
-extern template class GetEncryptCipherKeys<ClientDBInfo>;
 
 #endif

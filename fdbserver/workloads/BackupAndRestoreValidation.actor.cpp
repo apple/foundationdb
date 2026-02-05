@@ -81,7 +81,6 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               self->backupTag.toString(),
 			                               backupRanges,
-			                               true,
 			                               StopWhenDone{ true }));
 		} catch (Error& e) {
 			TraceEvent("BARV_SubmitBackupException").error(e);

@@ -487,7 +487,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			                               self->snapshotInterval,
 			                               tag.toString(),
 			                               backupRanges,
-			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::False,
 			                               IncrementalBackupOnly::False,

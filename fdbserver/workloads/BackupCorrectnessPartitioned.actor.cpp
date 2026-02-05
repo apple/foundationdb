@@ -382,7 +382,6 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
-			                               false,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               UsePartitionedLog::True, // enable partitioned log here
 			                               IncrementalBackupOnly::False,

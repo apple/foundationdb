@@ -295,7 +295,6 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool encryptionEnabled,
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
@@ -309,7 +308,6 @@ public:
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
 	                          Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                          bool encryptionEnabled,
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
@@ -327,7 +325,6 @@ public:
 			                    snapshotIntervalSeconds,
 			                    tagName,
 			                    backupRanges,
-			                    encryptionEnabled,
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
@@ -384,7 +381,6 @@ public:
 	Future<Void> watchTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->watchTaskCount(tr); }
 
 	Future<bool> checkActive(Database cx) { return taskBucket->checkActive(cx); }
-
 	// If "pause" is true, pause all backups; otherwise, resume all.
 	Future<Void> changePause(Database db, bool pause);
 
@@ -930,9 +926,6 @@ public:
 
 	// Stop differential logging if already started or don't start after completing KV ranges
 	KeyBackedProperty<bool> stopWhenDone() { return configSpace.pack(__FUNCTION__sr); }
-
-	// Enable snapshot backup file encryption
-	KeyBackedProperty<bool> enableSnapshotBackupEncryption() { return configSpace.pack(__FUNCTION__sr); }
 
 	// Snapshot mode for backup: 0 = RANGEFILE (legacy), 1 = BULKDUMP (default in FDB 8.0+), 2 = BOTH
 	KeyBackedProperty<int> snapshotMode() { return configSpace.pack(__FUNCTION__sr); }

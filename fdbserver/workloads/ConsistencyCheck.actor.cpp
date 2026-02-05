@@ -1037,21 +1037,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
-		// Check EncryptKeyProxy
-		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.client.encryptKeyProxy.present() &&
-		    (!nonExcludedWorkerProcessMap.contains(db.client.encryptKeyProxy.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.client.encryptKeyProxy.get().address()].processClass.machineClassFitness(
-		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
-			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
-			    .detail("ExistingEncryptKeyProxyFitness",
-			            nonExcludedWorkerProcessMap.contains(db.client.encryptKeyProxy.get().address())
-			                ? nonExcludedWorkerProcessMap[db.client.encryptKeyProxy.get().address()]
-			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)
-			                : -1);
-			return false;
-		}
-
 		// Check ConsistencyScan
 		if (db.consistencyScan.present() &&
 		    (!nonExcludedWorkerProcessMap.contains(db.consistencyScan.get().address()) ||
@@ -1129,12 +1114,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		success &= self->checkSingleSingleton(allProcesses, ev, "Ratekeeper", 1);
 		success &= self->checkSingleSingleton(allProcesses, ev, "DataDistributor", 1);
 		success &= self->checkSingleSingleton(allProcesses, ev, "ConsistencyScan", 1);
-
-		success &= self->checkSingleSingleton(
-		    allProcesses,
-		    ev,
-		    "EncryptKeyProxy",
-		    config.encryptionAtRestMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION ? 1 : 0);
 
 		if (!success) {
 			// TODO REMOVE

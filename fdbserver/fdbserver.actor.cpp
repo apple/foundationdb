@@ -138,8 +138,8 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
-	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, 
+	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
 	OPT_MOCKS3_PERSISTENCE_DIR
 };
 
@@ -239,13 +239,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 	{ OPT_NEW_CLUSTER_KEY,       "--new-cluster-key",           SO_REQ_SEP },
 	{ OPT_AUTHZ_PUBLIC_KEY_FILE, "--authorization-public-key-file", SO_REQ_SEP },
-	{ OPT_KMS_CONN_DISCOVERY_URL_FILE,           "--discover-kms-conn-url-file",            SO_REQ_SEP },
-	{ OPT_KMS_CONNECTOR_TYPE,    "--kms-connector-type",                                    SO_REQ_SEP },
-	{ OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION,  "--kms-rest-allow-not-secure-connection",      SO_NONE },
-	{ OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,     "--kms-conn-validation-token-details",     SO_REQ_SEP },
-	{ OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-encryption-keys-endpoint", SO_REQ_SEP },
-	{ OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-latest-encryption-keys-endpoint", SO_REQ_SEP },
-	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
 	{ OPT_CONSISTENCY_CHECK_URGENT_MODE, 		 "--consistency-check-urgent-mode",			SO_NONE },
 	TLS_OPTION_FLAGS,
@@ -1817,35 +1810,6 @@ private:
 			case TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION:
 				tlsConfig.setDisablePlainTextConnection(true);
 				break;
-			case OPT_KMS_CONN_DISCOVERY_URL_FILE: {
-				knobs.emplace_back("rest_kms_connector_discover_kms_url_file", args.OptionArg());
-				break;
-			}
-			case OPT_KMS_CONNECTOR_TYPE: {
-				knobs.emplace_back("kms_connector_type", args.OptionArg());
-				break;
-			}
-			case OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION: {
-				TraceEvent(SevWarnAlways, "RESTKmsConnAllowNotSecureConnection");
-				knobs.emplace_back("rest_kms_allow_not_secure_connection", "true");
-				break;
-			}
-			case OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS: {
-				knobs.emplace_back("rest_kms_connector_validation_token_details", args.OptionArg());
-				break;
-			}
-			case OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT: {
-				knobs.emplace_back("rest_kms_connector_get_encryption_keys_endpoint", args.OptionArg());
-				break;
-			}
-			case OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT: {
-				knobs.emplace_back("rest_kms_connector_get_latest_encryption_keys_endpoint", args.OptionArg());
-				break;
-			}
-			case OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT: {
-				knobs.emplace_back("rest_kms_connector_get_blob_metadata_endpoint", args.OptionArg());
-				break;
-			}
 			case OPT_NEW_CLUSTER_KEY: {
 				newClusterKey = args.OptionArg();
 				try {

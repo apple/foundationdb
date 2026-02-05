@@ -31,11 +31,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/genericactors.actor.h"
 
-// Valdiate at-rest encryption guarantees. If enabled, test injects a known 'marker' in Key and/or Values
-// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) can scanned to find if
-// 'plaintext marker' is present.
-const std::string ENCRYPTION_AT_REST_MARKER_STRING = "Expecto..Patronum...";
-
 // An enum of API operation types used in the random test
 enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE, UNINITIALIZED };
 
@@ -108,9 +103,6 @@ public:
 	// Maximum time to reset DB to the original state
 	double resetDBTimeout;
 
-	// Validate data at-rest encryption guarantees
-	int validateEncryptionAtRest;
-
 	ApiCorrectnessWorkload(WorkloadContext const& wcx)
 	  : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
 		numGets = getOption(options, "numGets"_sr, 1000);
@@ -126,11 +118,6 @@ public:
 
 		int maxTransactionBytes = getOption(options, "maxTransactionBytes"_sr, 500000);
 		maxKeysPerTransaction = std::max(1, maxTransactionBytes / (maxValueLength + maxLongKeyLength));
-
-		validateEncryptionAtRest =
-		    g_network->isSimulated()
-		        ? getOption(options, "validateEncryptionAtRest"_sr, deterministicRandom()->coinflip() ? 1 : 0)
-		        : 0;
 
 		resetDBTimeout = getOption(options, "resetDBTimeout"_sr, 1800.0);
 
@@ -162,14 +149,6 @@ public:
 
 	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload* self) {
 		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
-		if (g_network->isSimulated() && dbConfig.encryptionAtRestMode.isEncryptionEnabled() &&
-		    self->validateEncryptionAtRest) {
-			TraceEvent("EncryptionAtRestPlainTextMarkerCheckEnabled")
-			    .detail("EncryptionMode", dbConfig.encryptionAtRestMode.toString())
-			    .detail("DataAtRestMarker", ENCRYPTION_AT_REST_MARKER_STRING);
-			g_simulator->dataAtRestPlaintextMarker = ENCRYPTION_AT_REST_MARKER_STRING;
-		}
-
 		// Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe, MultiVersion)
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);

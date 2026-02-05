@@ -3901,10 +3901,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
 
-	Future<EncryptionAtRestMode> encryptionMode() override {
-		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
-	}
-
 	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
 
 	void logRecentRocksDBBackgroundWorkStats(UID ssId, std::string logReason) override {

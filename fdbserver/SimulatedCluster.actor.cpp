@@ -384,13 +384,6 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "disableRemoteKVS") {
 				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
 			}
-			if (attrib == "encryptModes") {
-				std::stringstream ss(value);
-				std::string token;
-				while (std::getline(ss, token, ',')) {
-					encryptModes.push_back(token);
-				}
-			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -443,9 +436,6 @@ public:
 	bool disableHostname = false;
 	// remote key value store is a child process spawned by the SS process to run the storage engine
 	bool disableRemoteKVS = false;
-	// TODO(gglass): see about removing `encryptModes` (it relates to legacy deleted tenant support).
-	// If provided, set using EncryptionAtRestMode::fromString
-	std::vector<std::string> encryptModes;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -524,7 +514,6 @@ public:
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
 		    .add("disableRemoteKVS", &disableRemoteKVS)
-		    .add("encryptModes", &encryptModes)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("singleRegion", &singleRegion)
 		    .add("generateFearless", &generateFearless)
@@ -1537,7 +1526,6 @@ private:
 	void setSimpleConfig();
 	void setSpecificConfig(const TestConfig& testConfig);
 	void setDatacenters(const TestConfig& testConfig);
-	void setEncryptionAtRestMode(const TestConfig& testConfig);
 	void setStorageEngine(const TestConfig& testConfig);
 	void setRegions(const TestConfig& testConfig);
 	void setReplicationType(const TestConfig& testConfig);
@@ -1654,15 +1642,6 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 	}
 }
 
-// TODO(gglass): consider removing this.
-void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
-	// Non-DISABLED encryption at rest values are experimental and are being removed.
-	EncryptionAtRestMode encryptionMode = EncryptionAtRestMode::DISABLED;
-	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
-	CODE_PROBE(true, "Enforce to disable encryption in simulation", probe::decoration::rare);
-	set_config("encryption_at_rest_mode=" + encryptionMode.toString());
-}
-
 namespace {
 
 using StorageEngineConfigFunc = void (*)(SimulationConfig*);
@@ -1694,7 +1673,6 @@ void rocksdbStorageEngineConfig(SimulationConfig* simCfg) {
 
 void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
 	CODE_PROBE(true, "Simulated cluster using Sharded RocksDB storage engine", probe::assert::hasRocksDB);
-	simCfg->set_config("encryption_at_rest_mode=disabled");
 	simCfg->set_config("ssd-sharded-rocksdb");
 }
 
@@ -1727,16 +1705,11 @@ std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStora
 	return str;
 }
 
-SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig, const bool isEncryptionEnabled) {
+SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig) {
 	StringRef reason;
 	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
 
-	if (isEncryptionEnabled) {
-		// Only storage engine supporting encryption is Redwood.
-		reason = "EncryptionEnabled"_sr;
-		result = SimulationStorageEngine::REDWOOD;
-
-	} else if (testConfig.storageEngineType.present()) {
+	if (testConfig.storageEngineType.present()) {
 		reason = "ConfigureSpecified"_sr;
 		result = testConfig.storageEngineType.get();
 		if (testConfig.excludedStorageEngineType(result) ||
@@ -1807,7 +1780,7 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 
 // Sets storage engine based on testConfig details
 void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
-	auto storageEngineType = chooseSimulationStorageEngine(testConfig, db.encryptionAtRestMode.isEncryptionEnabled());
+	auto storageEngineType = chooseSimulationStorageEngine(testConfig);
 	STORAGE_ENGINE_CONFIG_MAPPER.at(storageEngineType)(this);
 }
 
@@ -2230,7 +2203,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 		setSimpleConfig();
 	}
 	setSpecificConfig(testConfig);
-	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
 #if (!NO_MULTIREGION_TEST)

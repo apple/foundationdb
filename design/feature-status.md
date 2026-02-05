@@ -14,7 +14,6 @@
 |[mTLS](https://apple.github.io/foundationdb/tls.html)|production|Since FDB 6.1. Mutual TLS between clients and FDB servers.|Apple FDB Team|Supported|
 |Parallel Restore|experimental|Restore V2 backup files and is used in simulation with V2 backup. Not fault tolerant for production use.|Apple FDB Team|Deprecate and remove the feature.|
 |Encrypted Backup Files|experimental|Use an encryption key to encrypt backup files.|Apple FDB Team|Supported|
-|Encryption at Rest|experimental|Encrypted database contents. Design doc [here](https://github.com/apple/foundationdb/blob/main/design/encryption-data-at-rest.md) talks about a *proposal*.  It is related to the experimental multi-tenant feature.  This feature is experimental and unowned.|None|This feature is unowned and pending deletion.|
 |[V2 backup (partitioned mutation logs)](https://github.com/apple/foundationdb/blob/main/design/backup_v2_partitioned_logs.md)|experimental|Mutation logs are no longer stored separately on storage servers. A new backup worker role pulls mutations from tlogs and uploads to S3, reducing half write bandwidth to tlogs. We are targeting 7.4 release for production use.|Apple FDB Team|Will evolve into range-partitioned mutation logs, i.e., V3 backup.|
 |Sharded RocksDB Storage Engine|experimental|Use column family for shards so that data movement, backup and restore can use file-based data copies, instead of going through the storage engine, for performance gains.|Apple FDB Team|Supported|
 |[Bulk Loading & Dumping](https://apple.github.io/foundationdb/bulkdump.html)|experimental|Since 7.4. Dumping an idle cluster to S3 and loading data from S3 into an empty cluster.|Apple FDB Team|Will evolve into any keyrange dumping and loading with support to work with live clusters.|
@@ -22,7 +21,7 @@
 |gRPC|under development|Adding gRPC endpoints for certain client/server communications, e.g., some fdbcli usage, file transfer to and from fdbserver processes.|Apple FDB Team|Supported|
 |Multitenancy|experimental|Multi-tenant support, contributed from the community.|None|This feature has been deleted.|
 |Metacluster|experimental|contributed from the community.|None|This feature has been deleted.|
-|Encryption at rest|experimental|contributed from the community.|None|This feature is unowned and pending deletion.|
+|Encryption at rest|experimental|contributed from the community.|None|This feature has been deleted.|
 |Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|This feature has been deleted.|
 |Blob granule|experimental|contributed from the community. Related to backup.|None|This feature has been deleted.|
 |ChangeFeed|experimental|contributed from the community.|None|This feature has been deleted.|

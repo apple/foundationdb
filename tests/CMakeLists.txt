@@ -13,11 +13,14 @@ set(TEST_EXCLUDE ".^" CACHE STRING "Exclude all tests matching the given regex")
 set(SANITIZER_OPTIONS "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1;TSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/tsan.suppressions;LSAN_OPTIONS=suppressions=${CMAKE_SOURCE_DIR}/contrib/lsan.suppressions" CACHE STRING "Environment variables setting sanitizer options")
 
 # for the restart test we optimally want to use the last stable fdbserver
-# to test upgrades
+# to test upgrades.
+# FIXME: explain what `last stable` means in the above comment.  Does it mean "last stable non-main release?"
+# Below we are using 7.1.* so that is pretty old stuff.  Does it mean "most recent patch release of the oldest X.Y release family"?
+# FIXME: Regardless of what "last stable" refers to, explain why this is important.
 if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
-    fdbserver-7.1.23 fdbserver fdbserver.exe
-    HINTS /opt/foundationdb/old/7.1.23/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
+    fdbserver-7.1.69 fdbserver fdbserver.exe
+    HINTS /opt/foundationdb/old/7.1.69/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
@@ -172,7 +175,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/RocksdbNondeterministicTest.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
-  add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles
   add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
@@ -310,33 +312,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
 
   if (RESTART_TEST)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-1.txt
-      restarting/from_7.1.0_until_7.3.0/ClientTransactionProfilingCorrectness-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.3.0/CycleTestRestart-1.txt
-      restarting/from_7.1.0_until_7.3.0/CycleTestRestart-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-1.txt
-      restarting/from_7.1.0_until_7.3.0/StorefrontTestRestart-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-1.txt
-      restarting/from_7.1.0_until_7.2.0/DrUpgradeRestart-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
-      restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
-      restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-      restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-1.toml
-      restarting/from_7.1.0_until_7.2.0/UpgradeAndBackupRestore-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-1.toml
-      restarting/from_7.1.63_until_7.2.0/ClientMetricRestart-2.toml)
     add_fdb_test(
       TEST_FILES restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-1.toml
       restarting/from_7.2.0_until_7.3.0/ConfigureTestRestart-2.toml)

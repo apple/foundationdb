@@ -2593,10 +2593,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return Void();
 	}
 
-	Future<EncryptionAtRestMode> encryptionMode() override {
-		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
-	}
-
 	Future<Void> ingestSSTFiles(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {
 		auto a = new Writer::IngestSSTFilesAction(localFileSets);
 		auto res = a->done.getFuture();

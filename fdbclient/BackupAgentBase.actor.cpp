@@ -22,11 +22,9 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -278,12 +276,11 @@ void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena,
  This actor is responsible for taking an original transaction which was added to the backup mutation log (represented
  by "value" parameter), breaking it up into the individual MutationRefs (that constitute the transaction), decrypting
  each mutation (if needed) and adding/removing prefixes from the mutations. The final mutations are then added to the
- "result" vector alongside their encrypted counterparts (which is added to the "encryptedResult" vector)
+ "result" vector.
  Each `value` is a param2
 */
 ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
                                                VectorRef<MutationRef>* result,
-                                               VectorRef<Optional<MutationRef>>* encryptedResult,
                                                int* mutationSize,
                                                Standalone<StringRef> value,
                                                Key addPrefix,
@@ -344,37 +341,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
-			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
-			ASSERT(!dbConfig->encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
-
-			// TODO(gglass): see if the following block is needed.
-			// Decrypt mutation ref if encrypted
-			if (logValue.isEncrypted()) {
-				encryptedLogValue = logValue;
-				state EncryptCipherDomainId domainId = logValue.encryptDomainId();
-				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-				try {
-					TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-					    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
-					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
-				} catch (Error& e) {
-					// It's possible a tenant was deleted and the encrypt key fetch failed
-					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
-					    .detail("Version", version)
-					    .detail("TenantId", domainId);
-					if (e.code() == error_code_encrypt_keys_fetch_failed ||
-					    e.code() == error_code_encrypt_key_not_found) {
-						CODE_PROBE(true, "mutation log restore encrypt keys not found", probe::decoration::rare);
-						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
-						continue;
-					} else {
-						throw;
-					}
-				}
-			}
-			ASSERT(!logValue.isEncrypted());
-
-			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
 				KeyRangeRef range(logValue.param1, logValue.param2);
@@ -405,11 +371,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 							}
 							_addResult(result, mutationSize, arena, logValue);
 						}
-						if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
-							encryptedResult->push_back_deep(*arena, encryptedLogValue);
-						} else {
-							encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
-						}
 					}
 				}
 			} else {
@@ -426,13 +387,6 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 					}
 					_addResult(result, mutationSize, arena, logValue);
-					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
-					// do not have to re-encrypt unnecessarily
-					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
-						encryptedResult->push_back_deep(*arena, encryptedLogValue);
-					} else {
-						encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
-					}
 				}
 			}
 
@@ -710,13 +664,10 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
 
-	// mutations and encrypted mutations (and their relationship) is described in greater detail in the definition of
-	// CommitTransactionRef in CommitTransaction.h
+	// more info on this stuff: CommitTransactionRef in CommitTransaction.h
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
-	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
 	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
-	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
 	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
 
 	// The commit request contains no read conflict ranges, so regardless of what read version we
@@ -783,7 +734,6 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				Standalone<StringRef> value = bw.toValue();
 				wait(decodeBackupLogValue(&curReq.arena,
 				                          &curReq.transaction.mutations,
-				                          &curReq.transaction.encryptedMutations,
 				                          &curBatchMutationSize,
 				                          value,
 				                          addPrefix,
@@ -796,8 +746,6 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 
 				for (int i = 0; i < curReq.transaction.mutations.size(); i++) {
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
-					req.transaction.encryptedMutations.push_back_deep(req.arena,
-					                                                  curReq.transaction.encryptedMutations[i]);
 				}
 				mutationSize += curBatchMutationSize;
 				newBeginVersion = group.groupKey + 1;

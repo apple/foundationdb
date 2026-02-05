@@ -1645,10 +1645,6 @@ public:
 	Future<SpringCleaningWorkPerformed> doClean();
 	void startReadThreads();
 
-	Future<EncryptionAtRestMode> encryptionMode() override {
-		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
-	}
-
 private:
 	KeyValueStoreType type;
 	UID logID;

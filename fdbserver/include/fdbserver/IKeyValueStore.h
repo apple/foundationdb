@@ -20,7 +20,6 @@
 
 #ifndef FDBSERVER_IKEYVALUESTORE_H
 #define FDBSERVER_IKEYVALUESTORE_H
-#include "fdbclient/GetEncryptCipherKeys.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -35,9 +34,7 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
                                               Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                                              Optional<EncryptionAtRestMode> encryptionMode = {},
-                                              int64_t pageCacheBytes = 0,
-                                              Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = {});
+                                              int64_t pageCacheBytes = 0);
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -59,8 +56,7 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               int64_t memoryLimit,
                                               bool disableSnapshot,
                                               bool replaceContent,
-                                              bool exactRecovery,
-                                              bool enableEncryption);
+                                              bool exactRecovery);
 
 extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          std::string const& filename,
@@ -77,9 +73,7 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             bool checkIntegrity = false,
                             bool openRemotely = false,
                             Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                            Optional<EncryptionAtRestMode> encryptionMode = {},
-                            int64_t pageCacheBytes = 0,
-                            Reference<GetEncryptCipherKeysMonitor> encryptionMonitor = {});
+                            int64_t pageCacheBytes = 0);
 
 void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);

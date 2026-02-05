@@ -139,13 +139,25 @@ struct DBCoreState {
 	std::set<int8_t> pseudoLocalities;
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
-	EncryptionAtRestMode encryptionAtRestMode; // cluster encryption data at-rest mode
+
+	// encryptionAtRestModeDeprecated: Leaving this member in here but marked as Deprecated.
+	// DBCoreState is persisted on coordinators and we have to leave it alone to allow
+	// old code to consult the field following a downgrade.
+	//
+	// Another solution would be to do an explicit migration where we run code to
+	// zero out this field in persistent metadata and then rewrite that metadata.
+	// Once all production footprint had zero values for these bytes then
+	// we would delete the member from this struct.  In some contexts
+	// this might be considered the "right way" to do things but it is
+	// way too much work for the value it yields.  It is vastly
+	// simpler to just ignore the ~4 bytes historically used for this
+	// purpose, and add new members after this legacy member.
+	EncryptionAtRestModeDeprecated encryptionAtRestModeDeprecated;
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
 	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion),
-	    encryptionAtRestMode(EncryptionAtRestMode()) {}
+	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
@@ -167,7 +179,7 @@ struct DBCoreState {
 	bool isEqual(const DBCoreState& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
-		       pseudoLocalities == r.pseudoLocalities && encryptionAtRestMode == r.encryptionAtRestMode;
+		       pseudoLocalities == r.pseudoLocalities;
 	}
 	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
 	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
@@ -188,7 +200,7 @@ struct DBCoreState {
 			serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion); // 7.2
 		}
 		if (ar.protocolVersion().hasEncryptionAtRest()) {
-			serializer(ar, encryptionAtRestMode); // 7.2
+			serializer(ar, encryptionAtRestModeDeprecated); // 7.2
 		}
 	}
 };

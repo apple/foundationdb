@@ -158,9 +158,6 @@ public:
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
 
-	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
-	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
-
 	// the files in localFileSets.
 	// Throws an error if the store does not support SST ingestion or if ingestion fails.
 	// It is the responsibility of the caller to ensure the directory exists and the fileSetMap is valid.

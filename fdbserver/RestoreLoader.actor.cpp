@@ -18,15 +18,13 @@
  * limitations under the License.
  */
 
-// This file implements the functions and actors used by the RestoreLoader role.
-// The RestoreLoader role starts with the restoreLoaderCore actor
+// NOTE: this file represents fast restore functionality which is deprecated and
+// slated for removal.
 
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
@@ -371,17 +369,6 @@ void handleRestoreSysInfoRequest(const RestoreSysInfoRequest& req, Reference<Res
 	req.reply.send(RestoreCommonReply(self->id()));
 }
 
-ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database cx, Arena* arena) {
-	ASSERT(mutation.isEncrypted());
-
-	Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-	std::unordered_set<BlobCipherDetails> cipherDetails;
-	mutation.updateEncryptCipherDetails(cipherDetails);
-	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult = wait(
-	    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
-	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);
-}
-
 // Parse a data block in a partitioned mutation log file and store mutations
 // into "kvOpsIter" and samples into "samplesIter".
 ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
@@ -444,10 +431,6 @@ ACTOR static Future<Void> _parsePartitionedLogFileOnLoader(
 			ArenaReader rd(buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
 			state MutationRef mutation;
 			rd >> mutation;
-			if (mutation.isEncrypted()) {
-				MutationRef decryptedMutation = wait(_decryptMutation(mutation, cx, &tempArena));
-				mutation = decryptedMutation;
-			}
 
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, msgVersion.version)) {
@@ -911,10 +894,6 @@ ACTOR Future<Void> sendMutationsToApplier(
 		ASSERT(commitVersion.version <= asset.endVersion); // endVersion is an empty commit to ensure progress
 		for (mIndex = 0; mIndex < kvOp->second.size(); mIndex++) {
 			state MutationRef kvm = kvOp->second[mIndex];
-			if (kvm.isEncrypted()) {
-				MutationRef decryptedMutation = wait(_decryptMutation(kvm, cx, &arena));
-				kvm = decryptedMutation;
-			}
 			// Send the mutation to applier
 			if (isRangeMutation(kvm)) {
 				MutationsVec mvector;
@@ -1147,10 +1126,13 @@ ACTOR Future<Void> _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions
 		if (mutationMapIterator == pmutationMap->end()) {
 			break;
 		}
-		StringRef k = mutationMapIterator->first.contents();
+		// NOTE: this variable used to be called `k` and unintentionally shadowed a
+		// DIFFERENT state variable called `k` below.  This bug was exposed by removal
+		// of an intervening wait call.
+		StringRef outer_k = mutationMapIterator->first.contents();
 		state StringRef val = mutationMapIterator->second.first.contents();
 
-		StringRefReader kReader(k, restore_corrupted_data());
+		StringRefReader kReader(outer_k, restore_corrupted_data());
 		state uint64_t commitVersion = kReader.consume<uint64_t>(); // Consume little Endian data
 		// We have already filter the commit not in [beginVersion, endVersion) when we concatenate kv pair in log file
 		ASSERT_WE_THINK(asset.isInVersionRange(commitVersion));
@@ -1177,10 +1159,6 @@ ACTOR Future<Void> _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions
 			state const uint8_t* v = vReader.consume(vLen);
 
 			state MutationRef mutation((MutationRef::Type)type, KeyRef(k, kLen), KeyRef(v, vLen));
-			if (mutation.isEncrypted()) {
-				MutationRef decryptedMutation = wait(_decryptMutation(mutation, cx, &tempArena));
-				mutation = decryptedMutation;
-			}
 			// Should this mutation be skipped?
 			// Skip mutation whose commitVesion < range kv's version
 			if (logMutationTooOld(pRangeVersions, mutation, commitVersion)) {

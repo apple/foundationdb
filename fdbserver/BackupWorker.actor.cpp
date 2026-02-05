@@ -20,13 +20,11 @@
 
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/BlobCipher.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
@@ -82,17 +80,9 @@ struct VersionedMessage {
 
 	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
 	// metadata version key)
-	bool isCandidateBackupMessage(MutationRef* m,
-	                              const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+	bool isCandidateBackupMessage(MutationRef* m) {
 		if (!isThisMessageMutation(m))
 			return false;
-
-		if (m->isEncrypted()) {
-			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
-			// the decrypted mutation.
-			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
-			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
-		}
 
 		// Return true if the mutation intersects any legal backup ranges
 		if (normalKeys.contains(m->param1) || m->param1 == metadataVersionKey) {
@@ -107,16 +97,6 @@ struct VersionedMessage {
 			}
 
 			return false;
-		}
-	}
-
-	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
-		MutationRef m;
-		if (!isThisMessageMutation(&m))
-			return;
-
-		if (m.isEncrypted()) {
-			m.updateEncryptCipherDetails(cipherDetails);
 		}
 	}
 };
@@ -798,10 +778,7 @@ ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
-ACTOR Future<Void> saveMutationsToFile(BackupData* self,
-                                       Version popVersion,
-                                       int numMsg,
-                                       std::unordered_set<BlobCipherDetails> cipherDetails) {
+ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
 	state std::vector<Reference<IBackupFile>> logFiles;
@@ -810,7 +787,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	state std::vector<Version> beginVersions; // logFiles' begin versions
 	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
 	state std::vector<Standalone<StringRef>> mutations;
-	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
 	state int idx;
 
 	// Make sure all backups are ready, otherwise mutations will be lost.
@@ -866,8 +842,9 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	for (idx = 0; idx < numMsg; idx++) {
 		auto& message = self->messages[idx];
 		MutationRef m;
-		if (!message.isCandidateBackupMessage(&m, cipherKeys))
+		if (!message.isCandidateBackupMessage(&m)) {
 			continue;
+		}
 
 		DEBUG_MUTATION("addMutation", message.version.version, m, self->myId)
 		    .detail("KCV", self->minKnownCommittedVersion)
@@ -935,7 +912,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		state Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
 
 		state int numMsg = 0;
-		state std::unordered_set<BlobCipherDetails> cipherDetails;
 		Version lastPopVersion = popVersion;
 		// index of last version's end position in self->messages
 		int lastVersionIndex = 0;
@@ -952,7 +928,6 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 				lastVersion = popVersion;
 				popVersion = version;
 			}
-			message.collectCipherDetailIfEncrypted(cipherDetails);
 			numMsg++;
 		}
 		if (self->pullFinished()) {
@@ -975,7 +950,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
-			wait(saveMutationsToFile(self, popVersion, numMsg, cipherDetails));
+			wait(saveMutationsToFile(self, popVersion, numMsg));
 			self->eraseMessages(numMsg);
 		}
 
