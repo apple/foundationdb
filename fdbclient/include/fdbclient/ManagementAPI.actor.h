@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -166,6 +166,9 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 // When the mode is on, DD will periodically check if there is any bulkload task to do by scaning the metadata.
 ACTOR Future<int> setBulkLoadMode(Database cx, int mode);
 
+// Get bulk load mode value.
+ACTOR Future<int> getBulkLoadMode(Database cx);
+
 // Create a bulkload task submission transaction without commit
 // Used by ManagementAPI and bulkdumpRestore at DD
 ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask);
@@ -190,7 +193,8 @@ ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database c
 ACTOR Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId = Optional<UID>());
 
 // Get the current running bulk load job
-ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx);
+// Set lockAware=true when checking during database restore (when database is locked).
+ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware = false);
 
 // Cancel bulkLoad job for the given jobId
 ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId);
@@ -203,7 +207,11 @@ ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyR
 // Submit a BulkLoad job: loading data from a remote folder using bulkloading mechanism.
 // There is at most one BulkLoad or one BulkDump job at a time.
 // If there is any existing BulkLoad or BulkDump job, reject the new job.
-ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState);
+// Set lockAware=true when submitting during database restore (when database is locked).
+ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware = false);
+
+// Return the existing BulkLoad job metadata (if any)
+ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr);
 
 // Set bulk dump mode. When the mode is on, DD will periodically check if there is any bulkdump task to do by scaning
 // the metadata.

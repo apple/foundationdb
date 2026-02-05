@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -510,6 +510,8 @@ public:
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
 	double ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
 	bool ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+	int ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+	int ROCKSDB_INDEX_TYPE;
 	double ROCKSDB_METRICS_DELAY;
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
@@ -636,6 +638,8 @@ public:
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
 	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
 	bool SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+	int SHARDED_ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+	int SHARDED_ROCKSDB_INDEX_TYPE;
 	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	int64_t SHARDED_ROCKSDB_RATE_LIMITER_MODE;
 	int SHARDED_ROCKSDB_BACKGROUND_PARALLELISM;
@@ -887,6 +891,7 @@ public:
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
 	double SINGLETON_RECRUIT_BME_DELAY;
+	// TODO: document what this means.  Actually, document a lot of these settings.
 	bool RECORD_RECOVER_AT_IN_CSTATE;
 	bool TRACK_TLOG_RECOVERY;
 	double CC_RERECRUIT_LOG_ROUTER_TIMEOUT;

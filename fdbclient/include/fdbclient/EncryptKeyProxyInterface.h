@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@
 #define FDBSERVER_ENCRYPTKEYPROXYINTERFACE_H
 #pragma once
 
-#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
@@ -291,15 +290,13 @@ struct EKPGetLatestBaseCipherKeysRequest {
 
 struct EKPGetLatestBlobMetadataReply {
 	constexpr static FileIdentifier file_identifier = 5761581;
-	Standalone<VectorRef<BlobMetadataDetailsRef>> blobMetadataDetails;
+	// stuff deleted.  This RPC should not be happening.
 
 	EKPGetLatestBlobMetadataReply() {}
-	explicit EKPGetLatestBlobMetadataReply(const Standalone<VectorRef<BlobMetadataDetailsRef>>& blobMetadataDetails)
-	  : blobMetadataDetails(blobMetadataDetails) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, blobMetadataDetails);
+		serializer(ar);
 	}
 };
 

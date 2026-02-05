@@ -21,8 +21,7 @@ service ControlService {
     // Suggests optimal configuration parameters based on current cluster topology.
     rpc ConfigureAutoSuggest(ConfigureAutoSuggestRequest) returns (ConfigureAutoSuggestReply);
 
-    // Configures database settings including redundancy mode, storage engine, process counts,
-    // encryption, and other critical cluster parameters.
+    // Configures database settings including redundancy mode, storage engine, process counts, etc.
     rpc Configure(ConfigureRequest) returns (ConfigureReply);
 
     // Retrieves comprehensive cluster status including health, performance, and configuration.
@@ -238,17 +237,20 @@ message ConfigureRequest {
     }
     optional PerpetualStorageWiggleConfig perpetual_storage_wiggle_config = 8;
 
-    // Encryption at rest settings control how data is encrypted on disk
-    enum EncryptionAtRestMode {
-        UNSET_ENCRYPTION = 0;     // No change to encryption mode
-        DISABLED_ENCRYPTION = 1;  // Disable encryption at rest
-        CLUSTER_AWARE = 2;        // Cluster-wide encryption
+    // TODO(gglass): delete this outright once we are sure it's not needed.
+    // For now appending "Deprecated" to the symbols helps find code paths
+    // that can be deleted.
+    enum EncryptionAtRestModeDeprecated {
+        UNSET_ENCRYPTION_DEPRECATED = 0;     // No change to encryption mode
+        DISABLED_ENCRYPTION_DEPRECATED = 1;  // Disable encryption at rest
+        CLUSTER_AWARE_DEPRECATED = 2;        // Cluster-wide encryption
     }
-    // Encryption at rest mode for the database
-    optional EncryptionAtRestMode encryption_at_rest_mode = 9;
+    optional EncryptionAtRestModeDeprecated encryption_at_rest_mode_deprecated = 9;
 }
 
 // Response to a database configuration request.
+// NOTE: why does this need errors in a private range?  Why not use standard values
+// from error_definitions.h?
 message ConfigureReply {
     // Result codes indicating the outcome of the configuration operation
     // Refer: GenericManagementAPI.actor.h::ConfigurationResult
@@ -274,7 +276,7 @@ message ConfigureReply {
         SUCCESS_WARN_PPW_GRADUAL = 18;                // Success with warning about perpetual wiggle gradual mode
         SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL = 19; // Success with warning about experimental sharded RocksDB
         DATABASE_IS_REGISTERED = 20;                  // Database is already registered
-        ENCRYPTION_AT_REST_MODE_ALREADY_SET = 21;     // Encryption mode is already set
+        DEPRECATED21 = 21;     	 		      // Deprecated and removed
         INVALID_STORAGE_TYPE = 22;                    // Invalid storage type specified
     }
 

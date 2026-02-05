@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -318,6 +318,13 @@ func (o NetworkOptions) SetClientBuggifySectionActivatedProbability(param int64)
 // Parameter: probability expressed as a percentage between 0 and 100
 func (o NetworkOptions) SetClientBuggifySectionFiredProbability(param int64) error {
 	return o.setOpt(83, int64ToBytes(param))
+}
+
+// Sets the IP address to use for tracing. If not provided, the IP address will be automatically determined when connecting to a cluster. This option allows you to specify the IP address explicitly and avoid the automatic determination process.
+//
+// Parameter: IP address in IPv4 or IPv6 format
+func (o NetworkOptions) SetTraceIp(param string) error {
+	return o.setOpt(84, []byte(param))
 }
 
 // Set a tracer to run on the client. Should be set to the same value as the tracer set on the server.

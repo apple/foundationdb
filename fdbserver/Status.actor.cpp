@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@
  */
 
 #include <cinttypes>
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/genericactors.actor.h"
 #include "fmt/format.h"
@@ -847,10 +846,6 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	if (db->get().consistencyScan.present()) {
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
-	}
-
-	if (db->get().client.encryptKeyProxy.present()) {
-		roles.addRole("encrypt_key_proxy", db->get().client.encryptKeyProxy.get());
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
@@ -2837,27 +2832,6 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 	}
 }
 
-ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db) {
-	state KMSHealthStatus unhealthy;
-	unhealthy.canConnectToEKP = false;
-	unhealthy.canConnectToKms = false;
-	unhealthy.lastUpdatedTS = now();
-	try {
-		if (!db->get().client.encryptKeyProxy.present()) {
-			return unhealthy;
-		}
-		KMSHealthStatus reply = wait(timeoutError(
-		    db->get().client.encryptKeyProxy.get().getHealthStatus.getReply(EncryptKeyProxyHealthStatusRequest()),
-		    FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
-		return reply;
-	} catch (Error& e) {
-		if (e.code() != error_code_timed_out) {
-			throw;
-		}
-		return unhealthy;
-	}
-}
-
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
 ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
                                                            DatabaseConfiguration conf,
@@ -2938,34 +2912,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	try {
 
 		state JsonBuilderObject statusObj;
-
-		// Get EKP Health
-		if (db->get().client.encryptKeyProxy.present()) {
-			KMSHealthStatus status = wait(getKMSHealthStatus(db));
-
-			// encryption-at-rest status
-			JsonBuilderObject earStatusObj;
-			earStatusObj["ekp_is_healthy"] = status.canConnectToEKP;
-			statusObj["encryption_at_rest"] = earStatusObj;
-
-			JsonBuilderObject kmsStatusObj;
-			kmsStatusObj["kms_is_healthy"] = status.canConnectToKms;
-			if (status.canConnectToEKP) {
-				kmsStatusObj["kms_connector_type"] = status.kmsConnectorType;
-				kmsStatusObj["kms_stable"] = status.kmsStable;
-				JsonBuilderArray kmsUrlsArr;
-				for (const auto& url : status.restKMSUrls) {
-					kmsUrlsArr.push_back(url);
-				}
-				kmsStatusObj["kms_urls"] = kmsUrlsArr;
-			}
-			statusObj["kms"] = kmsStatusObj;
-
-			// TODO: In this scenario we should see if we can fetch any status fields that don't depend on encryption
-			if (!status.canConnectToKms || !status.canConnectToEKP) {
-				return StatusReply(statusObj.getJson());
-			}
-		}
 
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());

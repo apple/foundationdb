@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/flow.h"
@@ -32,17 +31,7 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             bool checkIntegrity,
                             bool openRemotely,
                             Reference<AsyncVar<ServerDBInfo> const> db,
-                            Optional<EncryptionAtRestMode> encryptionMode,
-                            int64_t pageCacheBytes,
-                            Reference<GetEncryptCipherKeysMonitor> encryptionMonitor) {
-	// Only Redwood support encryption currently.
-	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
-	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
-		TraceEvent(SevWarn, "KVStoreTypeNotSupportingEncryption")
-		    .detail("KVStoreType", storeType)
-		    .detail("EncryptionMode", encryptionMode);
-		throw encrypt_mode_mismatch();
-	}
+                            int64_t pageCacheBytes) {
 	if (openRemotely) {
 		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	}
@@ -54,7 +43,7 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode, pageCacheBytes, encryptionMonitor);
+		return keyValueStoreRedwoodV1(filename, logID, db, pageCacheBytes);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

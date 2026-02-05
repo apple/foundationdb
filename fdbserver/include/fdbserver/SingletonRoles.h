@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -115,31 +115,6 @@ struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 	void recruit(ClusterControllerData& cc) const {
 		cc.lastRecruitTime = now();
 		cc.recruitConsistencyScan.set(true);
-	}
-};
-
-struct EncryptKeyProxySingleton : Singleton<EncryptKeyProxyInterface> {
-
-	EncryptKeyProxySingleton(const Optional<EncryptKeyProxyInterface>& interface) : Singleton(interface) {}
-
-	Role getRole() const { return Role::ENCRYPT_KEY_PROXY; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::EncryptKeyProxy; }
-
-	void setInterfaceToDbInfo(ClusterControllerData& cc) const {
-		if (interface.present()) {
-			TraceEvent("CCEKP_SetInf", cc.id).detail("Id", interface.get().id());
-			cc.db.setEncryptKeyProxy(interface.get());
-		}
-	}
-	void halt(ClusterControllerData& cc, Optional<Standalone<StringRef>> pid) const {
-		if (interface.present() && cc.id_worker.contains(pid)) {
-			cc.id_worker[pid].haltEncryptKeyProxy =
-			    brokenPromiseToNever(interface.get().haltEncryptKeyProxy.getReply(HaltEncryptKeyProxyRequest(cc.id)));
-		}
-	}
-	void recruit(ClusterControllerData& cc) const {
-		cc.lastRecruitTime = now();
-		cc.recruitEncryptKeyProxy.set(true);
 	}
 };
 

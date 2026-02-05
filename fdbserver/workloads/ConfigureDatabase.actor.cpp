@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -283,17 +283,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
-		// Redwood is the only storage engine type supporting encryption.
 		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
-		if (config.encryptionAtRestMode.isEncryptionEnabled()) {
-			TraceEvent("ConfigureDatabase_EncryptionEnabled");
-			self->storageEngineExcludeTypes = { (int)SimulationStorageEngine::SSD,
-				                                (int)SimulationStorageEngine::MEMORY,
-				                                (int)SimulationStorageEngine::RADIX_TREE,
-				                                (int)SimulationStorageEngine::ROCKSDB,
-				                                (int)SimulationStorageEngine::SHARDED_ROCKSDB };
-		}
 		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			self->storageEngineExcludeTypes.push_back((int)SimulationStorageEngine::SHARDED_ROCKSDB);
 		}

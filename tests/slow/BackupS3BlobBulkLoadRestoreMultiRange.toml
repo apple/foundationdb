@@ -1,0 +1,112 @@
+# BulkDump/BulkLoad Integration Test with Multiple Backup Ranges
+#
+# This test validates BulkDump/BulkLoad with multiple non-contiguous backup ranges:
+# - backupRangesCount=5 creates 5 random key ranges to backup
+# - Tests that BulkDump/BulkLoad correctly handles multiple SST file sets
+# - Tests range boundary handling during restore
+#
+# Multiple range backup validates:
+# 1. Each range gets its own BulkDump SST files
+# 2. BulkLoad correctly identifies and loads all range files
+# 3. Data outside backup ranges is not affected
+# 4. Range boundaries are preserved correctly
+#
+# NOTE: SST file handling is only applicable when simulation randomly chooses
+# RocksDB storage engine. With other storage engines, the test still runs but
+# no SST file injection (instead streams the keyvalues).
+#
+# Based on BackupS3BlobBulkLoadRestore.toml
+
+testClass = "Backup"
+
+[configuration]
+storageEngineExcludeTypes = [5] # TODO(BulkLoad): remove after allowing bulkloading with fetchKey and shardedrocksdb
+encryptModes = ['disabled']
+disableTss = true # TODO(BulkLoad): support TSS
+
+# HA (multi-region) configuration - randomly enabled for test coverage
+# Note: generateFearless controls "fearless DR" configs, simpleConfig=false allows complex configs
+generateFearless = true
+simpleConfig = false
+minimumRegions = 2
+# singleRegion not set - allows random HA configuration
+
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+# Triple replication needs 6+ servers (3 src + 3 different dest) to avoid overlapping
+extraMachineCountDC = 3
+
+config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+
+# Disable buggify and fault injection to avoid interference with MockS3/BulkLoad
+buggify = false
+faultInjection = false
+
+# Required knobs for BulkLoad functionality
+[[knobs]]
+bulkload_sim_failure_injection = false
+shard_encode_location_metadata = true
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+min_byte_sampling_probability = 0.5
+cc_enforce_use_unfit_dd_in_sim = true
+disable_audit_storage_final_replica_check_in_sim = true
+max_trace_lines = 5000000
+# Linux/Joshua runs 4x slower than macOS, and multirange with 5 ranges takes longer
+# Even single-region runs need 3600s+ on Joshua (observed ~4000s in worst cases)
+bulkdump_job_timeout = 5400
+bulkload_job_timeout = 5400
+
+[[flow_knobs]]
+MAX_BUGGIFIED_DELAY = 0.0
+
+# S3/Blobstore settings
+blobstore_max_connection_life = 300
+blobstore_request_timeout_min = 300
+blobstore_request_tries = 5
+blobstore_connect_tries = 5
+blobstore_connect_timeout = 30
+http_send_size = 1024
+http_read_size = 1024
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+dd_team_zero_server_left_log_delay = 0
+dd_rebalance_parallelism = 1
+
+[[test]]
+testTitle = 'BackupS3BlobBulkLoadRestoreMultiRange'
+useDB = true
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescence = false
+waitForQuiescenceEnd = false
+runConsistencyCheck = false
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+timeout = 7200
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 200
+    transactionsPerSecond = 150.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupAfter = 10.0
+    restoreStartAfterBackupFinished = 30.0
+    abortAndRestartAfter = 0.0
+    stopDifferentialAfter = 0.0
+    performRestore = true
+    # Multiple backup ranges: 5 random non-contiguous ranges
+    # Each range gets separate BulkDump SST files
+    backupRangesCount = 5
+    backupRangeLengthMax = 10
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+    # BulkDump/BulkLoad integration options
+    snapshotMode = 1           # 1 = BULKDUMP (creates SST files instead of range files)
+    useRangeFileRestore = false # false = use BulkLoad for restore

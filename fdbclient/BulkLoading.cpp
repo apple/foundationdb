@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -152,6 +152,36 @@ std::string appendToPath(const std::string& path, const std::string& append) {
 
 std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
 	return appendToPath(root, jobId.toString());
+}
+
+// Constructs a URL with the path modified to include "data/" prefix.
+// This is used for BulkDump/BulkLoad to write under the backup container's data directory.
+// Input:  blobstore://creds@host/backup_container?bucket=... , "bulkdump_data"
+// Output: blobstore://creds@host/data/backup_container/bulkdump_data?bucket=...
+std::string getBackupDataPath(const std::string& url, const std::string& suffix) {
+	std::smatch matches;
+	if (!std::regex_match(url, matches, BLOBSTORE_URL_PATTERN)) {
+		// For local paths, prepend "data/" and append suffix
+		return joinPath(joinPath("data", url), suffix);
+	}
+	try {
+		boost::urls::url parsedUrl = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value();
+		std::string originalPath = std::string(parsedUrl.path());
+		// Remove leading slash if present for consistent path manipulation
+		if (!originalPath.empty() && originalPath[0] == '/') {
+			originalPath = originalPath.substr(1);
+		}
+		// Construct new path: data/<original_path>/<suffix>
+		std::string newPath = joinPath(joinPath("data", originalPath), suffix);
+		auto newUrl = std::string(parsedUrl.set_path("/" + newPath).buffer());
+		return matches[1].str() + matches[2].str() + newUrl.substr(matches[1].str().length());
+	} catch (std::system_error& e) {
+		TraceEvent(SevError, "BulkLoadGetBackupDataPathError")
+		    .detail("Url", url)
+		    .detail("Error", e.what())
+		    .detail("Matches", matches.str());
+		throw std::invalid_argument("Invalid url " + url + " " + e.what());
+	}
 }
 
 std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod method) {

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -520,7 +519,6 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
-			dbInfo.client.encryptKeyProxy = db->serverInfo->get().client.encryptKeyProxy;
 			dbInfo.client.clusterId = db->serverInfo->get().client.clusterId;
 			dbInfo.client.clusterType = db->clusterType;
 
@@ -588,7 +586,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			}
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/false));
+			wait(cleanupRecoveryActorCollection(db->recoveryData));
 			ASSERT(addActor.isEmpty());
 
 			wait(spinDelay);
@@ -602,7 +600,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 				wait(delay(0.0));
 
 			recoveryCore.cancel();
-			wait(cleanupRecoveryActorCollection(db->recoveryData, /*exThrown=*/true));
+			wait(cleanupRecoveryActorCollection(db->recoveryData));
 			ASSERT(addActor.isEmpty());
 			if (cluster->outstandingRemoteRequestChecker.isValid()) {
 				cluster->outstandingRemoteRequestChecker.cancel();
@@ -879,29 +877,15 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
 	WorkerDetails newCSWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyScan, id_used);
 
-	WorkerDetails newEKPWorker;
-	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
-	const bool enableKmsCommunication =
-	    encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION;
-	if (enableKmsCommunication) {
-		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
-	}
-
 	// Find best possible fitnesses for each singleton.
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
 	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, ProcessClass::ConsistencyScan);
 
-	ProcessClass::Fitness bestFitnessForEKP;
-	if (enableKmsCommunication) {
-		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
-	}
-
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
 	ConsistencyScanSingleton csSingleton(db.consistencyScan);
-	EncryptKeyProxySingleton ekpSingleton(db.client.encryptKeyProxy);
 
 	// Check if the singletons are healthy.
 	// side effect: try to rerecruit the singletons to more optimal processes
@@ -914,14 +898,9 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool csHealthy = isHealthySingleton<ConsistencyScanSingleton>(
 	    self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
 
-	bool ekpHealthy = true;
-	if (enableKmsCommunication) {
-		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
-		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
-	}
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
-	if (!(rkHealthy && ddHealthy && ekpHealthy && csHealthy)) {
+	if (!(rkHealthy && ddHealthy && csHealthy)) {
 		return;
 	}
 
@@ -934,40 +913,21 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newCSProcessId = newCSWorker.interf.locality.processId();
 
-	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (enableKmsCommunication) {
-		currEKPProcessId = ekpSingleton.getInterface().locality.processId();
-		newEKPProcessId = newEKPWorker.interf.locality.processId();
-	}
-
 	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId, currCSProcessId };
 	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId, newCSProcessId };
-	if (enableKmsCommunication) {
-		currPids.emplace_back(currEKPProcessId);
-		newPids.emplace_back(newEKPProcessId);
-	}
 
 	auto currColocMap = getColocCounts(currPids);
 	auto newColocMap = getColocCounts(newPids);
 
-	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!enableKmsCommunication) {
-		ASSERT(currColocMap[currEKPProcessId] == 0);
-		ASSERT(newColocMap[newEKPProcessId] == 0);
-	}
-
 	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
 	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&
-	    newColocMap[newEKPProcessId] <= currColocMap[currEKPProcessId] &&
 	    newColocMap[newCSProcessId] <= currColocMap[currCSProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
 			rkSingleton.recruit(*self);
 		} else if (newColocMap[newDDProcessId] < currColocMap[currDDProcessId]) {
 			ddSingleton.recruit(*self);
-		} else if (enableKmsCommunication && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
-			ekpSingleton.recruit(*self);
 		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
 			csSingleton.recruit(*self);
 		}
@@ -1245,7 +1205,6 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
-		clientInfo.encryptKeyProxy = db->serverInfo->get().client.encryptKeyProxy;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
@@ -1516,13 +1475,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		auto registeringSingleton = RatekeeperSingleton(req.ratekeeperInterf);
 		haltRegisteringOrCurrentSingleton<RatekeeperSingleton>(
 		    self, w, currSingleton, registeringSingleton, self->recruitingRatekeeperID);
-	}
-
-	if (self->db.config.encryptionAtRestMode.isEncryptionEnabled() && req.encryptKeyProxyInterf.present()) {
-		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().client.encryptKeyProxy);
-		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
-		haltRegisteringOrCurrentSingleton<EncryptKeyProxySingleton>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingEncryptKeyProxyID);
 	}
 
 	if (req.consistencyScanInterf.present()) {
@@ -2636,107 +2588,14 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionAtRestMode encryptMode) {
-	// If master fails at the same time, give it a chance to clear master PID.
-	wait(delay(0.0));
-
-	TraceEvent("CCEKP_Start", self->id).log();
-	loop {
-		try {
-			// EncryptKeyServer interface is critical in recovering tlog encrypted transactions,
-			// hence, the process only waits for the master recruitment and not the full cluster recovery.
-			state bool noEncryptKeyServer = !self->db.serverInfo->get().client.encryptKeyProxy.present();
-			while (!self->masterProcessId.present() ||
-			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
-			       self->db.serverInfo->get().recoveryState < RecoveryState::LOCKING_CSTATE) {
-				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
-			}
-			if (noEncryptKeyServer && self->db.serverInfo->get().client.encryptKeyProxy.present()) {
-				// Existing encryptKeyServer registers while waiting, so skip.
-				return Void();
-			}
-
-			// Recruit EncryptKeyProxy in the same datacenter as the ClusterController.
-			// This should always be possible, given EncryptKeyProxy is stateless, we can recruit EncryptKeyProxy
-			// on the same process as the CluserController.
-			state std::map<Optional<Standalone<StringRef>>, int> id_used;
-			self->updateKnownIds(&id_used);
-			state WorkerFitnessInfo ekpWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                       ProcessClass::EncryptKeyProxy,
-			                                                                       ProcessClass::NeverAssign,
-			                                                                       self->db.config,
-			                                                                       id_used);
-
-			InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
-			req.encryptMode = encryptMode;
-			state WorkerDetails worker = ekpWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::EncryptKeyProxy)) {
-				worker = self->id_worker[self->masterProcessId.get()].details;
-			}
-
-			self->recruitingEncryptKeyProxyID = req.reqId;
-			TraceEvent("CCEKP_Recruit", self->id).detail("Addr", worker.interf.address()).detail("Id", req.reqId);
-
-			ErrorOr<EncryptKeyProxyInterface> interf = wait(worker.interf.encryptKeyProxy.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY, 0));
-			if (interf.present()) {
-				self->recruitEncryptKeyProxy.set(false);
-				self->recruitingEncryptKeyProxyID = interf.get().id();
-				const auto& encryptKeyProxy = self->db.serverInfo->get().client.encryptKeyProxy;
-				TraceEvent("CCEKP_Recruited", self->id)
-				    .detail("Addr", worker.interf.address())
-				    .detail("Id", interf.get().id())
-				    .detail("ProcessId", interf.get().locality.processId());
-				if (encryptKeyProxy.present() && encryptKeyProxy.get().id() != interf.get().id() &&
-				    self->id_worker.contains(encryptKeyProxy.get().locality.processId())) {
-					TraceEvent("CCEKP_HaltAfterRecruit", self->id)
-					    .detail("Id", encryptKeyProxy.get().id())
-					    .detail("DcId", printable(self->clusterControllerDcId));
-					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
-				}
-				if (!encryptKeyProxy.present() || encryptKeyProxy.get().id() != interf.get().id()) {
-					self->db.setEncryptKeyProxy(interf.get());
-					TraceEvent("CCEKP_UpdateInf", self->id)
-					    .detail("Id", self->db.serverInfo->get().client.encryptKeyProxy.get().id());
-				}
-				checkOutstandingRequests(self);
-				return Void();
-			}
-		} catch (Error& e) {
-			TraceEvent("CCEKP_RecruitError", self->id).error(e);
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
-}
-
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
-	state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
-	if (!encryptMode.isEncryptionEnabled() && !SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION) {
+	state EncryptionAtRestModeDeprecated encryptMode = wait(self->encryptionAtRestModeDeprecated.getFuture());
+	if (!encryptMode.isEncryptionEnabled()) {
 		TraceEvent("EKPNotConfigured");
 		return Void();
-	}
-	state SingletonRecruitThrottler recruitThrottler;
-	loop {
-		if (self->db.serverInfo->get().client.encryptKeyProxy.present() && !self->recruitEncryptKeyProxy.get()) {
-			loop choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().client.encryptKeyProxy.get().waitFailure,
-				                            SERVER_KNOBS->ENCRYPT_KEY_PROXY_FAILURE_TIME))) {
-					const auto& encryptKeyProxy = self->db.serverInfo->get().client.encryptKeyProxy;
-					EncryptKeyProxySingleton(encryptKeyProxy).halt(*self, encryptKeyProxy.get().locality.processId());
-					self->db.clearInterf(ProcessClass::EncryptKeyProxyClass);
-					TraceEvent("CCEKP_Died", self->id);
-					break;
-				}
-				when(wait(self->recruitEncryptKeyProxy.onChange())) {
-					break;
-				}
-			}
-		} else {
-			wait(startEncryptKeyProxy(self, encryptMode));
-		}
+	} else {
+		TraceEvent(SevError, "WeBoguslyThinkEKPIsConfigured");
+		return Void();
 	}
 }
 
@@ -2981,7 +2840,7 @@ ACTOR Future<Void> handleGetEncryptionAtRestMode(ClusterControllerData* self, Cl
 	loop {
 		state GetEncryptionAtRestModeRequest req = waitNext(ccInterf.getEncryptionAtRestMode.getFuture());
 		TraceEvent("HandleGetEncryptionAtRestModeStart").detail("TlogId", req.tlogId);
-		EncryptionAtRestMode mode = wait(self->encryptionAtRestMode.getFuture());
+		EncryptionAtRestModeDeprecated mode = wait(self->encryptionAtRestModeDeprecated.getFuture());
 		GetEncryptionAtRestModeResponse resp;
 		resp.mode = mode;
 		req.reply.send(resp);

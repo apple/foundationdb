@@ -1,5 +1,5 @@
 [configuration]
-storageEngineExcludeTypes=[5]
+storageEngineExcludeTypes=[3,5]
 extraMachineCountDC = 2
 encryptModes=['disabled']
 tenantModes=['disabled']

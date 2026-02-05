@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -536,7 +536,7 @@ struct GetEncryptionAtRestModeResponse {
 	constexpr static FileIdentifier file_identifier = 2932156;
 	uint32_t mode;
 
-	GetEncryptionAtRestModeResponse() : mode(EncryptionAtRestMode::Mode::DISABLED) {}
+	GetEncryptionAtRestModeResponse() : mode(EncryptionAtRestModeDeprecated::Mode::DISABLED) {}
 	GetEncryptionAtRestModeResponse(uint32_t m) : mode(m) {}
 
 	template <class Ar>
@@ -713,7 +713,7 @@ struct InitializeCommitProxyRequest {
 	Version recoveryTransactionVersion;
 	bool firstProxy;
 	ReplyPromise<CommitProxyInterface> reply;
-	EncryptionAtRestMode encryptMode;
+	EncryptionAtRestModeDeprecated encryptMode;
 	uint16_t commitProxyIndex;
 
 	template <class Ar>
@@ -798,7 +798,7 @@ struct InitializeResolverRequest {
 	int resolverCount;
 	UID masterId; // master's UID
 	ReplyPromise<ResolverInterface> reply;
-	EncryptionAtRestMode encryptMode;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -827,7 +827,7 @@ struct InitializeStorageRequest {
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
-	EncryptionAtRestMode encryptMode;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -841,7 +841,7 @@ struct InitializeEncryptKeyProxyRequest {
 	UID reqId;
 	UID interfaceId;
 	ReplyPromise<EncryptKeyProxyInterface> reply;
-	EncryptionAtRestMode encryptMode;
+	EncryptionAtRestModeDeprecated encryptMode;
 
 	InitializeEncryptKeyProxyRequest() {}
 	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
@@ -1117,7 +1117,7 @@ class IDiskQueue;
 
 ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
                                          Reference<AsyncVar<ServerDBInfo>> db,
-                                         EncryptionAtRestMode encryptMode);
+                                         EncryptionAtRestModeDeprecated encryptMode);
 
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -1126,16 +1126,15 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
+                                 std::string folder);
+
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
-                                 Reference<GetEncryptCipherKeysMonitor> encryptionMonitor);
-ACTOR Future<Void> storageServer(
-    IKeyValueStore* persistentData,
-    StorageServerInterface ssi,
-    Reference<AsyncVar<ServerDBInfo> const> db,
-    std::string folder,
-    Promise<Void> recovered,
-    Reference<IClusterConnectionRecord> connRecord,
-    Reference<GetEncryptCipherKeysMonitor> encryptionMonitor); // changes pssi->id() to be the recovered ID
+                                 Promise<Void> recovered,
+                                 Reference<IClusterConnectionRecord> connRecord);
+
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
