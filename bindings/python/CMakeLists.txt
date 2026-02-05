@@ -78,15 +78,21 @@ endif()
 
 
 set(setup_file_name foundationdb-${FDB_VERSION}.tar.gz)
+set(wheel_file_name foundationdb-${FDB_VERSION}-py3-none-any.whl)
 set(package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}.tar.gz)
-add_custom_command(OUTPUT ${package_file}
+set(wheel_package_file ${CMAKE_BINARY_DIR}/packages/foundationdb-${FDB_VERSION}${not_fdb_release_string}-py3-none-any.whl)
+
+# Build both source distribution and wheel
+# Note: foundationdb is a pure Python package (uses ctypes), so wheel is py3-none-any
+add_custom_command(OUTPUT ${package_file} ${wheel_package_file}
   COMMAND $<TARGET_FILE:Python3::Interpreter> -m ensurepip
   COMMAND $<TARGET_FILE:Python3::Interpreter> -m pip install --upgrade build
-  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build --sdist &&
-          ${CMAKE_COMMAND} -E copy dist/${setup_file_name} ${package_file}
+  COMMAND $<TARGET_FILE:Python3::Interpreter> -m build
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different dist/${setup_file_name} ${package_file}
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different dist/${wheel_file_name} ${wheel_package_file}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  COMMENT "Create Python package")
-add_custom_target(python_package DEPENDS ${package_file})
+  COMMENT "Create Python source distribution and wheel")
+add_custom_target(python_package DEPENDS ${package_file} ${wheel_package_file})
 add_dependencies(python_package python_binding)
 add_dependencies(packages python_package)
 
