@@ -898,11 +898,6 @@
              "gradual",
              "aggressive"
          ]},
-         "encryption_at_rest_mode": {
-             "$enum":[
-             "disabled",
-             "aes_256_ctr"
-         ]}
       },
       "data":{
          "least_operating_space_bytes_log_server":0,

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -157,9 +157,6 @@ public:
 	// `init()` MUST be idempotent as it will be called more than once on a KeyValueStore in case
 	// of a rollback.
 	virtual Future<Void> init() { return Void(); }
-
-	// Obtain the encryption mode of the storage. The encryption mode needs to match the encryption mode of the cluster.
-	virtual Future<EncryptionAtRestMode> encryptionMode() = 0;
 
 	// the files in localFileSets.
 	// Throws an error if the store does not support SST ingestion or if ingestion fails.

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -510,6 +510,8 @@ public:
 	int64_t ROCKSDB_BLOCK_CACHE_SIZE;
 	double ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
 	bool ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+	int ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+	int ROCKSDB_INDEX_TYPE;
 	double ROCKSDB_METRICS_DELAY;
 	double ROCKSDB_READ_VALUE_TIMEOUT;
 	double ROCKSDB_READ_VALUE_PREFIX_TIMEOUT;
@@ -586,6 +588,7 @@ public:
 	int ROCKSDB_WAL_RECOVERY_MODE;
 	int ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	double ROCKSDB_MAX_BYTES_FOR_LEVEL_MULTIPLIER;
 	bool ROCKSDB_USE_DIRECT_READS;
 	bool ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION;
 	int ROCKSDB_MAX_OPEN_FILES;
@@ -628,12 +631,15 @@ public:
 	int64_t SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
 	int SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+	double SHARDED_ROCKSDB_MAX_BYTES_FOR_LEVEL_MULTIPLIER;
 	bool SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE;
 	int SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD;
 	int SHARDED_ROCKSDB_MAX_BACKGROUND_JOBS;
 	int64_t SHARDED_ROCKSDB_BLOCK_CACHE_SIZE;
 	double SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO;
 	bool SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
+	int SHARDED_ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+	int SHARDED_ROCKSDB_INDEX_TYPE;
 	int64_t SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	int64_t SHARDED_ROCKSDB_RATE_LIMITER_MODE;
 	int SHARDED_ROCKSDB_BACKGROUND_PARALLELISM;
@@ -885,9 +891,13 @@ public:
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
 	double SINGLETON_RECRUIT_BME_DELAY;
+	// TODO: document what this means.  Actually, document a lot of these settings.
 	bool RECORD_RECOVER_AT_IN_CSTATE;
 	bool TRACK_TLOG_RECOVERY;
 	double CC_RERECRUIT_LOG_ROUTER_TIMEOUT;
+	// If enabled, Cluster Controller will rerecruit log router if it detects the log router has failed to avoid
+	// recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before that
+	// state, log router failures will trigger a new recovery.
 	bool CC_RERECRUIT_LOG_ROUTER_ENABLED;
 
 	// Move Keys

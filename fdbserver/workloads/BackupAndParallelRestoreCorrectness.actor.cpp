@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -234,7 +234,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
 			                               backupRanges,
-			                               true,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLogs,
 			                               IncrementalBackupOnly::False,
@@ -503,7 +502,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
 					                                       self->backupRanges,
-					                                       true,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False,
 					                                       IncrementalBackupOnly::False,

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -506,6 +506,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize ); /* Datablocks cache + Index&filter blocks cache */
 	init( ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO,                     0.5 ); /* Share of high priority Index&filter blocks in cache */
 	init( ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS,                true );
+	init( ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL,                    1 ); // RocksDB default.
+	init( ROCKSDB_INDEX_TYPE,                                      0 ); // kBinarySearch, RocksDB default.
 	init( ROCKSDB_METRICS_DELAY,                                60.0 );
 	// ROCKSDB_READ_VALUE_TIMEOUT, ROCKSDB_READ_VALUE_PREFIX_TIMEOUT, ROCKSDB_READ_RANGE_TIMEOUT knobs:
 	// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
@@ -596,6 +598,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WAL_RECOVERY_MODE,                               2 ); // kPointInTimeRecovery, RocksDB default.
 	init( ROCKSDB_TARGET_FILE_SIZE_BASE,                           0 ); // If 0, pick RocksDB default.
 	init( ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,                     1 ); // RocksDB default.
+	init( ROCKSDB_MAX_BYTES_FOR_LEVEL_MULTIPLIER,                 10 ); // RocksDB default.
 	init( ROCKSDB_USE_DIRECT_READS,                             true );
 	init( ROCKSDB_USE_DIRECT_IO_FLUSH_COMPACTION,               true );
 	init( ROCKSDB_MAX_OPEN_FILES,                                 -1 ); // RocksDB default.
@@ -636,6 +639,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER,                 6 ); // RocksDB default.
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE,            16 << 20 ); // 16MB
 	init( SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER,             1 ); // RocksDB default.
+	init( SHARDED_ROCKSDB_MAX_BYTES_FOR_LEVEL_MULTIPLIER,         10 ); // RocksDB default.
 	bool suggestCompactRange = deterministicRandom()->coinflip();
 	init( SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE,             true ); if (isSimulated) SHARDED_ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE = suggestCompactRange;
 	init( SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD,        0 ); if (isSimulated) SHARDED_ROCKSDB_COMPACT_ON_RANGE_DELETION_THRESHOLD = suggestCompactRange? 0:50; 
@@ -643,6 +647,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARDED_ROCKSDB_BLOCK_CACHE_SIZE, isSimulated?   128 << 20 : 3LL << 30); // 3GB
 	init( SHARDED_ROCKSDB_CACHE_HIGH_PRI_POOL_RATIO,              0.5 ); /* Share of high priority Index&filter blocks in cache */
 	init( SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS,         true );
+	init( SHARDED_ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL,             1 ); // RocksDB default.
+	init( SHARDED_ROCKSDB_INDEX_TYPE,                               0 ); // kBinarySearch, RocksDB default.
 	// Set to 0 to disable rocksdb write rate limiting. Rate limiter unit: bytes per second.
 	init( SHARDED_ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,        300 << 20 );
 	init( SHARDED_ROCKSDB_RATE_LIMITER_MODE,                       2 );

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,6 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_IS_REGISTERED,
-	ENCRYPTION_AT_REST_MODE_ALREADY_SET,
 	INVALID_STORAGE_TYPE
 };
 
@@ -130,11 +129,6 @@ ConfigurationResult buildConfiguration(
 bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
-
-// TODO(gglass): consider removing
-bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
-                                       std::map<std::string, std::string> newConfig,
-                                       bool creating);
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
@@ -208,9 +202,6 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		if (!isCompleteConfiguration(m)) {
 			return ConfigurationResult::INCOMPLETE_CONFIGURATION;
 		}
-	} else if (m.count(encryptionAtRestModeConfKey.toString()) != 0) {
-		// Encryption data at-rest mode can be set only at the time of database creation
-		return ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET;
 	}
 
 	state Future<Void> tooLong = delay(60);
@@ -446,6 +437,12 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (i->first == "1") {
 						resetPPWStats = false; // the latter setting will override the former setting
 					}
+				}
+
+				// Clear backup progress when backup workers are disabled
+				if (i->first == backupWorkerEnabledKey && i->second == "0") {
+					tr->clear(backupProgressKeys);
+					TraceEvent("BackupWorkerProgressCleared");
 				}
 			}
 

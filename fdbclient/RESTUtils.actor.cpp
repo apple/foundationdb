@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -239,11 +239,6 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 		std::string protocol = p.toString();
 		boost::algorithm::to_lower(protocol);
 		this->connType = RESTConnectionType::getConnectionType(protocol);
-		if (!this->connType.secure && !CLIENT_KNOBS->REST_KMS_ALLOW_NOT_SECURE_CONNECTION) {
-			TraceEvent(SevWarnAlways, "RESTUtilsUnSupportedNotSecureConn").detail("Protocol", protocol);
-			CODE_PROBE(true, "REST URI not-secure connection not supported");
-			throw rest_unsupported_protocol();
-		}
 
 		// extract 'resource' and optional 'parameter list' if supplied in the URL
 		uint8_t foundSeparator = 0;
@@ -346,32 +341,6 @@ TEST_CASE("/RESTUtils/ValidURIWithParamsSecure") {
 	std::string uri("https://host/foo/bar?param1,param2");
 	RESTUrl r(uri);
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
-	ASSERT_EQ(r.host.compare("host"), 0);
-	ASSERT(r.service.empty());
-	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
-	ASSERT_EQ(r.reqParameters.compare("param1,param2"), 0);
-	return Void();
-}
-
-TEST_CASE("/RESTUtils/ValidURIWithParamsKnobNotEnabled") {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ false }));
-	std::string uri("http://host/foo/bar?param1,param2");
-	try {
-		RESTUrl r(uri);
-		ASSERT(false);
-	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_rest_unsupported_protocol);
-	}
-	return Void();
-}
-
-TEST_CASE("/RESTUtils/ValidURIWithParams") {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ true }));
-	std::string uri("http://host/foo/bar?param1,param2");
-	RESTUrl r(uri);
-	ASSERT_EQ(r.connType.secure, RESTConnectionType::NOT_SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT(r.service.empty());
 	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);

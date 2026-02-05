@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -140,6 +140,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					forwardPromise(onClosedReq.reply, kvStore->onClosed());
 				}
 				when(IKVSDisposeRequest disposeReq = waitNext(ikvsInterface.dispose.getFuture())) {
+					(void)disposeReq; // suppress unused variable warning
 					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", kvsId);
 					kvStore->dispose();
 					guard.invalidate();
@@ -147,6 +148,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					return Void();
 				}
 				when(IKVSCloseRequest closeReq = waitNext(ikvsInterface.close.getFuture())) {
+					(void)closeReq; // suppress unused variable warning
 					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", kvsId);
 					kvStore->close();
 					guard.invalidate();

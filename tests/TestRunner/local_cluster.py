@@ -117,7 +117,6 @@ public-address = {ip_address}:$ID{optional_tls}
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
-{encrypt_config}
 {tls_config}
 {authz_public_key_config}
 {custom_config}
@@ -148,7 +147,6 @@ knob_min_trace_severity=5
         create_config=True,
         port=None,
         ip_address=None,
-        enable_encryption_at_rest: bool = False,
         use_future_protocol_version: bool = False,
         redundancy: str = "single",
         tls_config: TLSConfig = None,
@@ -179,7 +177,6 @@ knob_min_trace_severity=5
         self.ip_address = "127.0.0.1" if ip_address is None else ip_address
         self.first_port = port
         self.custom_config = custom_config
-        self.enable_encryption_at_rest = enable_encryption_at_rest
         self.trace_check_entries = []
         self.use_future_protocol_version = use_future_protocol_version
 
@@ -256,15 +253,8 @@ knob_min_trace_severity=5
         new_conf_file = self.conf_file.parent / (self.conf_file.name + ".new")
         with open(new_conf_file, "x") as f:
             conf_template = LocalCluster.configuration_template
-            encrypt_config = ""
             if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
-            if self.enable_encryption_at_rest:
-                encrypt_config = "\n".join(
-                    [
-                        "knob_kms_connector_type=FDBPerfKmsConnector",
-                    ]
-                )
             f.write(
                 conf_template.format(
                     etcdir=self.etc,
@@ -272,7 +262,6 @@ knob_min_trace_severity=5
                     datadir=self.data,
                     logdir=self.log,
                     ip_address=self.ip_address,
-                    encrypt_config=encrypt_config,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
                     optional_tls=self.tls_optional_string(),
@@ -411,12 +400,7 @@ knob_min_trace_severity=5
         return self.__fdbcli_exec(cmd, subprocess.PIPE, None, timeout)
 
     def create_database(self, storage="ssd"):
-        if self.enable_encryption_at_rest:
-            # only redwood supports EAR
-            storage = "ssd-redwood-1"
         db_config = "configure new {} {}".format(self.redundancy, storage)
-        if self.enable_encryption_at_rest:
-            db_config += " encryption_at_rest_mode=cluster_aware"
         self.fdbcli_exec(db_config)
 
     # Generate and install test certificate chains and keys

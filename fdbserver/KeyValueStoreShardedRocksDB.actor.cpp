@@ -92,18 +92,6 @@ using rocksdb::BackgroundErrorReason;
 using rocksdb::CompactionReason;
 using rocksdb::FlushReason;
 
-void logWriteSize(const rocksdb::WriteBatch* batch) {
-	int64_t fs_write_size = batch->Data().size();
-	// XXX horrors, unlocked increment
-	static int sharded_rocksdb_total_write_size = 0;
-	sharded_rocksdb_total_write_size += fs_write_size;
-	if (sharded_rocksdb_total_write_size > 10 * 1024 * 1024) {
-		TraceEvent(SevInfo, "GGLASSShardedRocksDB")
-		    .detail("TotalWriteSize", sharded_rocksdb_total_write_size)
-		    .detail("FsWriteSize", fs_write_size);
-	}
-}
-
 // Returns string representation of RocksDB background error reason.
 // Error reason code:
 // https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
@@ -472,6 +460,22 @@ rocksdb::CompactionPri getCompactionPriority() {
 	}
 }
 
+rocksdb::BlockBasedTableOptions::IndexType getIndexType() {
+	switch (SERVER_KNOBS->SHARDED_ROCKSDB_INDEX_TYPE) {
+	case 0:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	case 1:
+		return rocksdb::BlockBasedTableOptions::IndexType::kHashSearch;
+	case 2:
+		return rocksdb::BlockBasedTableOptions::IndexType::kTwoLevelIndexSearch;
+	case 3:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearchWithFirstKey;
+	default:
+		TraceEvent(SevWarn, "InvalidIndexType").detail("KnobValue", SERVER_KNOBS->SHARDED_ROCKSDB_INDEX_TYPE);
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	}
+}
+
 rocksdb::WALRecoveryMode getWalRecoveryMode() {
 	switch (SERVER_KNOBS->ROCKSDB_WAL_RECOVERY_MODE) {
 	case 0:
@@ -520,6 +524,7 @@ struct ShardedRocksDBState {
 		options.max_write_buffer_number = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
 		options.target_file_size_base = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_BASE;
 		options.target_file_size_multiplier = SERVER_KNOBS->SHARDED_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER;
+		options.max_bytes_for_level_multiplier = SERVER_KNOBS->SHARDED_ROCKSDB_MAX_BYTES_FOR_LEVEL_MULTIPLIER;
 
 		if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 			options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
@@ -594,6 +599,8 @@ struct ShardedRocksDBState {
 		bbOpts.cache_index_and_filter_blocks_with_high_priority =
 		    SERVER_KNOBS->SHARDED_ROCKSDB_CACHE_INDEX_AND_FILTER_BLOCKS;
 		bbOpts.block_cache = blockCache;
+		bbOpts.index_block_restart_interval = SERVER_KNOBS->SHARDED_ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+		bbOpts.index_type = getIndexType();
 
 		options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
@@ -1467,7 +1474,6 @@ public:
 			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 			persistRangeMapping(specialKeys, true);
 			rocksdb::WriteBatch* b = writeBatch.get();
-			logWriteSize(b);
 			status = db->Write(options, b);
 			if (!status.ok()) {
 				return status;
@@ -2635,8 +2641,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::WriteOptions options;
 			options.sync = !SERVER_KNOBS->ROCKSDB_UNSAFE_AUTO_FSYNC;
-
-			logWriteSize(batch);
 
 			rocksdb::Status s = db->Write(options, batch);
 			if (!s.ok()) {
@@ -3896,10 +3900,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 	// Used for debugging shard mapping issue.
 	std::vector<std::pair<KeyRange, std::string>> getDataMapping() { return shardManager.getDataMapping(); }
-
-	Future<EncryptionAtRestMode> encryptionMode() override {
-		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
-	}
 
 	CoalescedKeyRangeMap<std::string> getExistingRanges() override { return shardManager.getExistingRanges(); }
 

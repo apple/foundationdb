@@ -1,0 +1,121 @@
+# BulkDump/BulkLoad Integration Test WITH S3 Chaos Injection
+#
+# This test validates BulkDump/BulkLoad with minimal S3 fault injection.
+# BulkDump is VERY sensitive to S3 failures because it writes many SST files.
+# Chaos must be minimal to allow the backup snapshot to complete.
+#
+# Chaos configuration (minimal rates for BulkDump compatibility):
+# - 0.5% error rate (very occasional S3 failures)
+# - 1% throttling rate (light throttling)
+# - 0.5% delay rate (minimal random delays)
+# - 0% corruption rate (no corruption - BulkDump can't handle this)
+#
+# NOTE: SST file handling is only applicable when simulation randomly chooses
+# RocksDB storage engine. With other storage engines, the test still runs but
+# no SST file injection (instead streams the keyvalues).
+#
+# Based on BackupS3BlobBulkLoadRestore.toml with light chaos
+
+testClass = "Backup"
+
+[configuration]
+storageEngineExcludeTypes = [5] # TODO(BulkLoad): remove after allowing bulkloading with fetchKey and shardedrocksdb
+encryptModes = ['disabled']
+disableTss = true # TODO(BulkLoad): support TSS
+
+# HA (multi-region) configuration - randomly enabled for test coverage
+generateFearless = true
+simpleConfig = false
+minimumRegions = 2
+# singleRegion not set - allows random HA configuration
+
+# Ensure enough storage servers for non-overlapping BulkLoad teams
+# Triple replication needs 6+ servers (3 src + 3 different dest) to avoid overlapping
+extraMachineCountDC = 3
+
+config = "triple usable_regions=1 storage_engine=ssd-2 perpetual_storage_wiggle=0 commit_proxies=3 grv_proxies=3 resolvers=3 logs=3"
+
+# Disable buggify and fault injection to isolate S3 chaos effects
+buggify = false
+faultInjection = false
+
+# Required knobs for BulkLoad functionality
+[[knobs]]
+bulkload_sim_failure_injection = false
+shard_encode_location_metadata = true
+enable_read_lock_on_range = true
+enable_version_vector = false
+enable_version_vector_tlog_unicast = false
+enable_version_vector_reply_recovery = false
+min_byte_sampling_probability = 0.5
+cc_enforce_use_unfit_dd_in_sim = true
+disable_audit_storage_final_replica_check_in_sim = true
+max_trace_lines = 5000000
+# Longer timeouts to handle chaos-induced delays
+# BulkDump with S3 chaos can take much longer than normal (10x+ on Linux vs macOS)
+# With chaos compounding on many SST files, 3600s wasn't enough - increase to 5400s
+bulkdump_job_timeout = 5400
+bulkload_job_timeout = 5400
+
+[[flow_knobs]]
+MAX_BUGGIFIED_DELAY = 0.0
+
+# S3/Blobstore settings - aggressive retries to handle chaos
+# TODO: consider randomizing some of these values for better coverage
+blobstore_max_connection_life = 600
+blobstore_request_timeout_min = 600
+blobstore_request_tries = 20
+blobstore_connect_tries = 20
+blobstore_connect_timeout = 120
+http_send_size = 1024
+http_read_size = 1024
+connection_monitor_loop_time = 0.1
+connection_monitor_timeout = 1.0
+connection_monitor_idle_timeout = 60.0
+dd_team_zero_server_left_log_delay = 0
+dd_rebalance_parallelism = 1
+
+[[test]]
+testTitle = 'BackupS3BlobBulkLoadRestoreWithChaos'
+useDB = true
+clearAfterTest = false
+simBackupAgents = 'BackupToFile'
+waitForQuiescence = false
+waitForQuiescenceEnd = false
+runConsistencyCheck = false
+connectionFailuresDisableDuration = 1000000
+runFailureWorkloads = false
+timeout = 7200
+
+    [[test.workload]]
+    testName = 'Cycle'
+    # Reduced to limit S3 operations during chaos
+    # More nodes = more SST files = more chances for S3 failures to compound
+    # 200 nodes is minimum to still exercise meaningful BulkDump behavior
+    nodeCount = 200
+    transactionsPerSecond = 150.0
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BackupS3BlobCorrectness'
+    backupAfter = 15.0
+    restoreStartAfterBackupFinished = 60.0
+    abortAndRestartAfter = 0.0
+    stopDifferentialAfter = 0.0
+    performRestore = true
+    backupRangesCount = -1
+    skipDirtyRestore = false
+    backupURL = 'blobstore://mocks3:mocksecret:mocktoken@127.0.0.1:8080/backup_container?bucket=backup_bucket&region=us-east-1&secure_connection=0&cwpf=1&cu=1'
+    # BulkDump/BulkLoad integration options
+    snapshotMode = 1           # 1 = BULKDUMP (creates SST files instead of range files)
+    useRangeFileRestore = false # false = use BulkLoad for restore
+    # S3 Chaos injection - very light rates for BulkDump compatibility
+    # BulkDump writes many SST files, extremely sensitive to S3 failures
+    # These rates compound: with N files, effective failure rate ~ N * rate
+    enableChaos = true
+    errorRate = 0.005
+    throttleRate = 0.01
+    delayRate = 0.005
+    corruptionRate = 0.0
+    maxDelay = 0.3

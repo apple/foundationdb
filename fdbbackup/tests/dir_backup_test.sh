@@ -62,13 +62,6 @@ function resolve_to_absolute_path {
   realpath "${p}"
 }
 
-function create_encryption_key_file {
-  local key_file="${1}"
-  log "Creating encryption key file at ${key_file}"
-  dd if=/dev/urandom bs=32 count=1 of="${key_file}" 2>/dev/null
-  chmod 600 "${key_file}"
-}
-
 # Run the fdbbackup command.
 # $1 The build directory so we can find bin/fdbbackup command.
 # $2 The scratch directory where the fdb.cluster file can be found.
@@ -156,6 +149,9 @@ function test_dir_backup_and_restore {
     err "Failed backup"
     return 1
   fi
+
+  test_fdbcli_status_json_for_bkup "${local_build_dir}" "${scratch_dir}"
+
   log "Clear fdb data"
   if ! clear_data "${local_build_dir}" "${scratch_dir}"; then
     err "Failed clear data in fdb"

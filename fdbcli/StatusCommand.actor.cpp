@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -450,13 +450,6 @@ void printStatus(StatusObjectReader statusObj,
 				    "\n  Log engine             - " + (statusObjConfig.get("log_engine", strVal) ? strVal : "unknown");
 
 				int intVal = 0;
-
-				outputString += "\n  Encryption at-rest     - ";
-				if (statusObjConfig.get("encryption_at_rest_mode", strVal)) {
-					outputString += strVal;
-				} else {
-					outputString += "disabled";
-				}
 
 				outputString += "\n  Coordinators           - ";
 				if (statusObjConfig.get("coordinators_count", intVal)) {

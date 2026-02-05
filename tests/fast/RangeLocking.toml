@@ -1,5 +1,4 @@
 [configuration]
-encryptModes = ['disabled'] # do not support encryption
 
 [[knobs]]
 enable_read_lock_on_range = true

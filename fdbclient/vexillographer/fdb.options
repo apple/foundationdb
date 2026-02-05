@@ -148,6 +148,9 @@ description is not currently required but encouraged.
     <Option name="client_buggify_section_fired_probability" code="83"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active CLIENT_BUGGIFY section being fired. A section will only fire if it was activated" />
+    <Option name="trace_ip" code="84"
+            paramType="String" paramDescription="IP address in IPv4 or IPv6 format"
+            description="Sets the IP address to use for tracing. If not provided, the IP address will be automatically determined when connecting to a cluster. This option allows you to specify the IP address explicitly and avoid the automatic determination process." />
     <Option name="distributed_client_tracer" code="90"
             paramType="String" paramDescription="Distributed tracer type. Choose from none, log_file, or network_lossy"
             description="Set a tracer to run on the client. Should be set to the same value as the tracer set on the server." />

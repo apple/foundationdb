@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,9 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+
+// TODO(gglass): figure out how much of this stuff is needed now that encryption
+// at rest is deleted.  For now leave it is as it's not that much code.
 
 #define DEBUG_ENCRYPT_KEY_CIPHER false
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -126,7 +126,8 @@ public:
 	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
 	                                       int64_t totalBytes,
-	                                       IncludeKeyRangeMap IncludeKeyRangeMap) final;
+	                                       IncludeKeyRangeMap IncludeKeyRangeMap,
+	                                       Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) final;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
@@ -165,10 +166,14 @@ public:
 
 	Future<Void> writeEncryptionMetadata() override;
 
+	// Waits for encryption initialization to complete by reading encryption key file during container opening.
+	Future<Void> encryptionSetupComplete() const override;
+
 protected:
+	// Returns true if an encryption key file was provided.
 	bool usesEncryption() const;
+
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
-	Future<Void> encryptionSetupComplete() const;
 
 	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
 

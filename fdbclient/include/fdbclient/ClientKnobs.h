@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -164,6 +164,8 @@ public:
 	int BACKUP_LOCK_BYTES;
 	double BACKUP_RANGE_TIMEOUT;
 	double BACKUP_RANGE_MINWAIT;
+	double BULKDUMP_JOB_TIMEOUT;
+	double BULKLOAD_JOB_TIMEOUT;
 	int BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC;
 	int BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
 	int BACKUP_SHARD_TASK_LIMIT;
@@ -335,18 +337,6 @@ public:
 	// available again. Using a backoffed retry when it happens.
 	int CHANGE_QUORUM_BAD_STATE_RETRY_TIMES;
 	double CHANGE_QUORUM_BAD_STATE_RETRY_DELAY;
-
-	// Encryption-at-rest
-	bool ENABLE_ENCRYPTION_CPU_TIME_LOGGING;
-	int ENCRYPT_HEADER_FLAGS_VERSION;
-	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
-	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
-	int ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION;
-	double ENCRYPT_GET_CIPHER_KEY_LONG_REQUEST_THRESHOLD;
-
-	// REST KMS configurations
-	bool REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
-	int SIM_KMS_VAULT_MAX_KEYS;
 
 	bool ENABLE_MUTATION_CHECKSUM;
 	// Enable to start accumulative checksum population and validation

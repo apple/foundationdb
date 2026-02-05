@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,17 +30,14 @@ void forceLinkVersionedMapTests();
 void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
 void forceLinkStreamCipherTests();
-void forceLinkBlobCipherTests();
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
-void forceLinkSimKmsConnectorTests();
 void forceLinkIThreadPoolTests();
 void forceLinkJsonWebKeySetTests();
 void forceLinkVersionVectorTests();
 void forceLinkRESTClientTests();
 void forceLinkRESTUtilsTests();
-void forceLinkRESTKmsConnectorTest();
 void forceLinkCompressionUtilsTest();
 void forceLinkAtomicTests();
 void forceLinkIdempotencyIdTests();
@@ -49,8 +46,6 @@ void forceLinkDDSketchTests();
 void forceLinkCommitProxyTests();
 void forceLinkWipedStringTests();
 void forceLinkRandomKeyValueUtilsTests();
-void forceLinkSimKmsVaultTests();
-void forceLinkRESTSimKmsVaultTest();
 void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
@@ -106,17 +101,14 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMemcpyTests();
 		forceLinkMemcpyPerfTests();
 		forceLinkStreamCipherTests();
-		forceLinkBlobCipherTests();
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
-		forceLinkSimKmsConnectorTests();
 		forceLinkIThreadPoolTests();
 		forceLinkJsonWebKeySetTests();
 		forceLinkVersionVectorTests();
 		forceLinkRESTClientTests();
 		forceLinkRESTUtilsTests();
-		forceLinkRESTKmsConnectorTest();
 		forceLinkCompressionUtilsTest();
 		forceLinkAtomicTests();
 		forceLinkIdempotencyIdTests();
@@ -124,8 +116,6 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkDDSketchTests();
 		forceLinkWipedStringTests();
 		forceLinkRandomKeyValueUtilsTests();
-		forceLinkSimKmsVaultTests();
-		forceLinkRESTSimKmsVaultTest();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
 

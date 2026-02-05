@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#
+# This does some amount of cross-version testing involving multiple processes
+# talking to each other.  This isn't covered in simulation upgrade/downgrade
+# tests, which only test compatibility with respect to reading bits on disk.
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import glob

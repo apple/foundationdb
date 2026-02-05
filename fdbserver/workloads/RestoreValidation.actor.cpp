@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -95,7 +95,6 @@ struct RestoreValidationWorkload : TestWorkload {
 		// Wait for restore completion marker
 		// BackupAndRestoreValidation sets this key when restore is fully complete
 		state Key completionMarker = "\xff\x02/restoreValidationComplete"_sr;
-		state bool restoreComplete = false;
 		state int checkAttempts = 0;
 
 		TraceEvent("RestoreValidationWaitingForRestoreCompletion")
@@ -109,7 +108,6 @@ struct RestoreValidationWorkload : TestWorkload {
 
 				Optional<Value> markerValue = wait(tr.get(completionMarker));
 				if (markerValue.present()) {
-					restoreComplete = true;
 					TraceEvent("RestoreValidationRestoreComplete").detail("CheckAttempts", checkAttempts);
 					break;
 				}
@@ -191,7 +189,6 @@ struct RestoreValidationWorkload : TestWorkload {
 				// Monitor audit progress
 				state double startTime = now();
 				state double lastReportTime = startTime;
-				state bool completed = false;
 				state AuditPhase finalPhase = AuditPhase::Invalid;
 				state std::string errorMessage;
 
@@ -264,7 +261,6 @@ struct RestoreValidationWorkload : TestWorkload {
 						}
 
 						if (allComplete || anyError) {
-							completed = true;
 							break;
 						}
 					}

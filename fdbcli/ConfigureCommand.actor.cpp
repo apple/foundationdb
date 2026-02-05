@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -266,10 +266,6 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		        "ERROR: a result of type `ConfigurationResult::DATABASE_IS_REGISTERED` was unexpectedly seen.\n");
 		ret = false;
 		break;
-	case ConfigurationResult::ENCRYPTION_AT_REST_MODE_ALREADY_SET:
-		fprintf(stderr, "ERROR: A cluster cannot change its encryption_at_rest state after database creation.\n");
-		ret = false;
-		break;
 	case ConfigurationResult::INVALID_STORAGE_TYPE:
 		fprintf(stderr, "ERROR: Invalid storage type for storage or TLog.\n");
 		ret = false;
@@ -307,7 +303,6 @@ void configureGenerator(const char* text,
 		                   // TODO(zhewu): update fdbcli command documentation.
 		                   "perpetual_storage_wiggle_engine=",
 		                   "storage_migration_type=",
-		                   "encryption_at_rest_mode=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -320,7 +315,6 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
-        "|encryption_at_rest_mode={disabled|domain_aware|cluster_aware}"
         "|exclude=<ADDRESS...>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
@@ -352,10 +346,6 @@ CommandFactory configureFactory(
         "perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>: Set the process filter for wiggling. "
         "The processes that match the given locality key and locality value are only wiggled. The value 0 will disable "
         "the locality filter and matches all the processes for wiggling.\n\n"
-        "encryption_at_rest_mode=<disabled|domain_aware|cluster_aware>: Sets the cluster encryption data at-rest "
-        "support for the "
-        "database. The configuration can be updated ONLY at the time of database creation and once set can't be "
-        "updated for the lifetime of the database.\n\n"
         "exclude=<ADDRESS...>: Sets the addresses in the format of IP1:port1,IP2:port2 pairs to be excluded during "
         "recruitment. Note this should be only used when the database is unavailable because of the faulty processes "
         "that are blocking the recovery from completion. The number of addresses should be less than the replication "

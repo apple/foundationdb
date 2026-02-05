@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,20 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
+// TODO: the error logging here could be a lot better.  When we get
+// a compatibility bug between versions the log messages should
+// contain exactly what was expected vs what was seen, and just
+// throwing serialization_failed does not accomplish that.
+
+// In general the convention of just throwing a condition-specific
+// error loses the ability to pass and log arbitrary details
+// attached to a generic error code class, but addressing that is
+// out of scope of this here fixme comment.
+
 _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	if (!version.isValid()) {
 		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").backtrace();
+		TraceEvent("SerializationFailed").detail("ProtocolVersionNotValid", version).backtrace();
 		throw serialization_failed();
 	}
 }
@@ -34,8 +44,9 @@ const void* BinaryReader::readBytes(int bytes) {
 	const char* b = begin;
 	const char* e = b + bytes;
 	if (e > end) {
+		uint64_t bytes_short = e - end;
 		ASSERT(!g_network->isSimulated());
-		TraceEvent("SerializationFailed").backtrace();
+		TraceEvent("SerializationFailed").detail("ReadBytesTooShort", bytes_short).backtrace();
 		throw serialization_failed();
 	}
 	begin = e;

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -490,8 +490,14 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 	Optional<NetworkAddress> localAddress;
 	if (connRecord) {
-		auto publicIP = connRecord->getConnectionString().determineLocalSourceIP();
-		localAddress = NetworkAddress(publicIP, ::getpid());
+		IPAddress traceIP;
+		if (networkOptions.traceIP.present()) {
+			traceIP = networkOptions.traceIP.get();
+		} else {
+			// Automatically determine public IP if not provided
+			traceIP = connRecord->getConnectionString().determineLocalSourceIP();
+		}
+		localAddress = NetworkAddress(traceIP, ::getpid());
 	}
 	platform::ImageInfo imageInfo = platform::getImageInfo();
 
@@ -703,6 +709,18 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	case FDBNetworkOptions::TRACE_INITIALIZE_ON_SETUP:
 		networkOptions.traceInitializeOnSetup = true;
 		break;
+	case FDBNetworkOptions::TRACE_IP: {
+		validateOptionValuePresent(value);
+		auto parsedIP = IPAddress::parse(value.get().toString());
+		if (!parsedIP.present()) {
+			fprintf(stderr,
+			        "Invalid format for trace IP: `%s', only IPv4 or IPv6 format is supported.\n",
+			        value.get().toString().c_str());
+			throw invalid_option_value();
+		}
+		networkOptions.traceIP = parsedIP;
+		break;
+	}
 	case FDBNetworkOptions::KNOB: {
 		validateOptionValuePresent(value);
 

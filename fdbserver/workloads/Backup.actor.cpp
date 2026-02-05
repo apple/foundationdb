@@ -177,7 +177,6 @@ struct BackupWorkload : TestWorkload {
 			                               deterministicRandom()->randomInt(0, 2000),
 			                               tag.toString(),
 			                               backupRanges,
-			                               false,
 			                               StopWhenDone{ !stopDifferentialDelay },
 			                               self->usePartitionedLog,
 			                               IncrementalBackupOnly::False,

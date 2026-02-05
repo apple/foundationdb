@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,7 +51,6 @@ struct WorkerInfo : NonCopyable {
 	WorkerDetails details;
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
-	Future<Void> haltEncryptKeyProxy;
 	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
 
@@ -75,7 +74,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
-	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
+	    haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -86,7 +85,6 @@ struct WorkerInfo : NonCopyable {
 		details = std::move(r.details);
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
-		haltEncryptKeyProxy = r.haltEncryptKeyProxy;
 		issues = r.issues;
 	}
 };
@@ -174,18 +172,6 @@ public:
 			serverInfo->set(newInfo);
 		}
 
-		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
-			auto newInfo = serverInfo->get();
-			auto newClientInfo = clientInfo->get();
-			newClientInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.id = deterministicRandom()->randomUniqueID();
-			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.client.encryptKeyProxy = interf;
-			newClientInfo.encryptKeyProxy = interf;
-			serverInfo->set(newInfo);
-			clientInfo->set(newClientInfo);
-		}
-
 		void setConsistencyScan(const ConsistencyScanInterface& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
@@ -204,9 +190,6 @@ public:
 				newInfo.distributor = Optional<DataDistributorInterface>();
 			} else if (t == ProcessClass::RatekeeperClass) {
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
-			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
 				newInfo.consistencyScan = Optional<ConsistencyScanInterface>();
 			}
@@ -301,8 +284,6 @@ public:
 		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().ratekeeper.present() &&
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
-		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
 		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}
@@ -2882,7 +2863,6 @@ public:
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
-		     role != ProcessClass::BlobManager && role != ProcessClass::EncryptKeyProxy &&
 		     role != ProcessClass::ConsistencyScan) ||
 		    pid == masterProcessId.get()) {
 			return false;
@@ -3328,12 +3308,6 @@ public:
 	Optional<UID> recruitingDistributorID;
 	AsyncVar<bool> recruitRatekeeper;
 	Optional<UID> recruitingRatekeeperID;
-	AsyncVar<bool> recruitBlobManager;
-	Optional<UID> recruitingBlobManagerID;
-	AsyncVar<bool> recruitBlobMigrator;
-	Optional<UID> recruitingBlobMigratorID;
-	AsyncVar<bool> recruitEncryptKeyProxy;
-	Optional<UID> recruitingEncryptKeyProxyID;
 	AsyncVar<bool> recruitConsistencyScan;
 	Optional<UID> recruitingConsistencyScanID;
 
@@ -3355,11 +3329,14 @@ public:
 	    excludedDegradedServers;
 	std::queue<double> recentHealthTriggeredRecoveryTime;
 
-	// Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
-	// The promise gets set as part of cluster recovery process and is used by recovering encryption participant
-	// stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with cluster's
-	// encryption status.
-	Promise<EncryptionAtRestMode> encryptionAtRestMode;
+	// Legacy comment:
+	//   Capture cluster's Encryption data at-rest mode; the status is set 'only' at the time of cluster creation.
+	//   The promise gets set as part of cluster recovery process and is used by recovering encryption participant
+	//   stateful processes (such as TLog) to ensure the stateful process on-disk encryption status matches with
+	//   cluster's encryption status.
+	//
+	// Currently this should always be "encryption not enabled". It is left here for protocol compatibility.
+	Promise<EncryptionAtRestModeDeprecated> encryptionAtRestModeDeprecated;
 
 	CounterCollection clusterControllerMetrics;
 
@@ -3382,8 +3359,7 @@ public:
 	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
 	    dcLogServerVersionDifference(0), dcStorageServerVersionDifference(0), datacenterVersionDifference(0),
 	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitBlobMigrator(false),
-	    recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitConsistencyScan(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),

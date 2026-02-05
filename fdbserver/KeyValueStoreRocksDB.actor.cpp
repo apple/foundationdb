@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -115,6 +115,22 @@ rocksdb::CompactionPri getCompactionPriority() {
 	}
 }
 
+rocksdb::BlockBasedTableOptions::IndexType getIndexType() {
+	switch (SERVER_KNOBS->ROCKSDB_INDEX_TYPE) {
+	case 0:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	case 1:
+		return rocksdb::BlockBasedTableOptions::IndexType::kHashSearch;
+	case 2:
+		return rocksdb::BlockBasedTableOptions::IndexType::kTwoLevelIndexSearch;
+	case 3:
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearchWithFirstKey;
+	default:
+		TraceEvent(SevWarn, "InvalidIndexType").detail("KnobValue", SERVER_KNOBS->ROCKSDB_INDEX_TYPE);
+		return rocksdb::BlockBasedTableOptions::IndexType::kBinarySearch;
+	}
+}
+
 class SharedRocksDBState {
 public:
 	SharedRocksDBState(UID id);
@@ -198,6 +214,7 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	options.level0_file_num_compaction_trigger = SERVER_KNOBS->ROCKSDB_LEVEL0_FILENUM_COMPACTION_TRIGGER;
 	options.level0_slowdown_writes_trigger = SERVER_KNOBS->ROCKSDB_LEVEL0_SLOWDOWN_WRITES_TRIGGER;
 	options.level0_stop_writes_trigger = SERVER_KNOBS->ROCKSDB_LEVEL0_STOP_WRITES_TRIGGER;
+	options.max_bytes_for_level_multiplier = SERVER_KNOBS->ROCKSDB_MAX_BYTES_FOR_LEVEL_MULTIPLIER;
 
 	// Compact sstables when there's too much deleted stuff.
 	if (SERVER_KNOBS->ROCKSDB_ENABLE_COMPACT_ON_DELETION) {
@@ -263,6 +280,9 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 	if (SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE > 0) {
 		bbOpts.max_auto_readahead_size = SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	}
+
+	bbOpts.index_block_restart_interval = SERVER_KNOBS->ROCKSDB_INDEX_BLOCK_RESTART_INTERVAL;
+	bbOpts.index_type = getIndexType();
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
@@ -2571,10 +2591,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			throw internal_error();
 		}
 		return Void();
-	}
-
-	Future<EncryptionAtRestMode> encryptionMode() override {
-		return EncryptionAtRestMode(EncryptionAtRestMode::DISABLED);
 	}
 
 	Future<Void> ingestSSTFiles(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets) override {

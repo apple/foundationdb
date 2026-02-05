@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2513,67 +2513,6 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 	}
 }
 
-void encryptionAtRestPlaintextMarkerCheck() {
-	if (!g_network->isSimulated() || !g_simulator->dataAtRestPlaintextMarker.present()) {
-		// Encryption at-rest was not enabled, do nothing
-		return;
-	}
-
-	namespace fs = std::filesystem;
-
-	printf("EncryptionAtRestPlaintextMarkerCheckStart\n");
-	TraceEvent("EncryptionAtRestPlaintextMarkerCheckStart");
-	fs::path p("simfdb/");
-	fs::recursive_directory_iterator end;
-	int scanned = 0;
-	bool success = true;
-	// Enumerate all files in the "simfdb/" folder and look for "marker" string
-	for (fs::recursive_directory_iterator itr(p); itr != end; ++itr) {
-		if (fs::is_regular_file(itr->path())) {
-			std::ifstream f(itr->path());
-			if (f) {
-				std::string buf;
-				int count = 0;
-				while (std::getline(f, buf)) {
-					// SOMEDAY: using 'std::boyer_moore_horspool_searcher' would significantly improve search
-					// time
-					if (!g_network->isSimulated() || !ENABLE_MUTATION_TRACKING_WITH_BLOB_CIPHER) {
-						if (buf.find(g_simulator->dataAtRestPlaintextMarker.get()) != std::string::npos) {
-							TraceEvent(SevError, "EncryptionAtRestPlaintextMarkerCheckPanic")
-							    .detail("Filename", itr->path().string())
-							    .detail("LineBuf", buf)
-							    .detail("Marker", g_simulator->dataAtRestPlaintextMarker.get());
-							success = false;
-						}
-					}
-					count++;
-				}
-				TraceEvent("EncryptionAtRestPlaintextMarkerCheckScanned")
-				    .detail("Filename", itr->path().string())
-				    .detail("NumLines", count);
-				scanned++;
-				if (itr->path().string().find("storage") != std::string::npos) {
-					CODE_PROBE(true,
-					           "EncryptionAtRestPlaintextMarkerCheckScanned storage file scanned",
-					           probe::decoration::rare);
-				} else if (itr->path().string().find("logqueue") != std::string::npos) {
-					CODE_PROBE(
-					    true, "EncryptionAtRestPlaintextMarkerCheckScanned TLog file scanned", probe::decoration::rare);
-				} else if (itr->path().string().find("backup") != std::string::npos) {
-					CODE_PROBE(true,
-					           "EncryptionAtRestPlaintextMarkerCheckScanned KVBackup file scanned",
-					           probe::decoration::rare);
-				}
-			} else {
-				TraceEvent(SevError, "FileOpenError").detail("Filename", itr->path().string());
-			}
-		}
-		ASSERT(success);
-	}
-	printf("EncryptionAtRestPlaintextMarkerCheckEnd NumFiles: %d\n", scanned);
-	TraceEvent("EncryptionAtRestPlaintextMarkerCheckEnd").detail("NumFiles", scanned);
-}
-
 // Disables connection failures after the given time seconds
 ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string context) {
 	if (g_network->isSimulated()) {
@@ -2866,8 +2805,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 	printf("\n");
-
-	encryptionAtRestPlaintextMarkerCheck();
 
 	return Void();
 }

@@ -268,50 +268,6 @@ set -o nounset  # a.k.a. set -u
 set -o pipefail
 set -o noclobber
 
-# Globals
-# TEST_SCRATCH_DIR gets set below. Tests should be their data in here.
-# It gets cleaned up on the way out of the test.
-TEST_SCRATCH_DIR=
-readonly HTTP_VERBOSE_LEVEL=2
-# Should we use S3? If USE_S3 is not defined, then check if
-# OKTETO_NAMESPACE is defined (It is defined on the okteto
-# internal apple dev environments where S3 is available).
-readonly USE_S3="${USE_S3:-$( if [[ -n "${OKTETO_NAMESPACE+x}" ]]; then echo "true" ; else echo "false"; fi )}"
-
-# Set KNOBS based on whether we're using real S3 or MockS3Server
-if [[ "${USE_S3}" == "true" ]]; then
-  # Use AWS KMS encryption for real S3
-  KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-else
-  # No encryption for MockS3Server
-  KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
-fi
-readonly KNOBS
-
-# Set TLS_CA_FILE only when using real S3, not for SeaweedFS or MockS3Server
-if [[ "${USE_S3}" == "true" ]]; then
-  # Try to find a valid TLS CA file if not explicitly set
-  if [[ -z "${TLS_CA_FILE:-}" ]]; then
-    # Common locations for TLS CA files on different systems
-    for ca_file in "/etc/pki/tls/cert.pem" "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt" "/etc/ssl/cert.pem" "/usr/local/share/ca-certificates/"; do
-      if [[ -f "${ca_file}" ]]; then
-        TLS_CA_FILE="${ca_file}"
-        break
-      fi
-    done
-  fi
-  TLS_CA_FILE="${TLS_CA_FILE:-}"
-else
-  # For SeaweedFS and MockS3Server, don't use TLS
-  TLS_CA_FILE=""
-fi
-readonly TLS_CA_FILE
-# Clear these environment variables. fdbbackup goes looking for them
-# and if EITHER is set, it will go via a proxy instead of to where we.
-# want it to go.
-unset HTTP_PROXY
-unset HTTPS_PROXY
-
 # Get the working directory for this script.
 if ! path=$(resolve_to_absolute_path "${BASH_SOURCE[0]}"); then
   echo "ERROR: Failed resolve_to_absolute_path"
@@ -327,6 +283,30 @@ if ! source "${cwd}/tests_common.sh"; then
   echo "ERROR: Failed to source tests_common.sh"
   exit 1
 fi
+
+# Globals
+# TEST_SCRATCH_DIR gets set below by setup_s3_environment.
+TEST_SCRATCH_DIR=
+readonly HTTP_VERBOSE_LEVEL=2
+
+# Setup USE_S3 and TLS_CA_FILE using common functions
+readonly USE_S3="$(get_use_s3_default)"
+setup_tls_ca_file
+
+# Set KNOBS based on whether we're using real S3 or MockS3Server
+if [[ "${USE_S3}" == "true" ]]; then
+  # Use AWS KMS encryption for real S3
+  KNOBS=("--knob_blobstore_encryption_type=aws:kms" "--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+else
+  # No encryption for MockS3Server
+  KNOBS=("--knob_http_verbose_level=${HTTP_VERBOSE_LEVEL}")
+fi
+readonly KNOBS
+
+# Clear proxy environment variables
+unset HTTP_PROXY
+unset HTTPS_PROXY
+
 # Process command-line options.
 if (( $# < 2 )) || (( $# > 3 )); then
     echo "ERROR: ${0} requires the fdb src and build directories --"
@@ -355,65 +335,12 @@ if (( $# == 3 )); then
 fi
 readonly scratch_dir
 
-# Set host, bucket, and blob_credentials_file whether seaweed or s3.
-readonly path_prefix="bulkload/ctests"
-host=
-query_str=
-blob_credentials_file=
-if [[ "${USE_S3}" == "true" ]]; then
-  log "Testing against s3"
-  # Now source in the aws fixture so we can use its methods in the below.
-  # shellcheck source=/dev/null
-  if ! source "${cwd}/../../fdbclient/tests/aws_fixture.sh"; then
-    err "Failed to source aws_fixture.sh"
-    exit 1
-  fi
-  if ! TEST_SCRATCH_DIR=$( create_aws_dir "${scratch_dir}" ); then
-    err "Failed creating local aws_dir"
-    exit 1
-  fi
-  readonly TEST_SCRATCH_DIR
-  if ! readarray -t configs < <(aws_setup "${build_dir}" "${TEST_SCRATCH_DIR}"); then
-    err "Failed aws_setup"
-    exit 1
-  fi
-  readonly host="${configs[0]}"
-  readonly bucket="${configs[1]}"
-  readonly blob_credentials_file="${configs[2]}"
-  readonly region="${configs[3]}"
-  query_str="bucket=${bucket}&region=${region}&secure_connection=1"
-  # Make these environment variables available for the fdb cluster when s3.
-  export FDB_BLOB_CREDENTIALS="${blob_credentials_file}"
-  if [[ -n "${TLS_CA_FILE}" ]]; then
-    export FDB_TLS_CA_FILE="${TLS_CA_FILE}"
-  fi
-else
-  log "Testing against MockS3Server"
-  # Now source in the mocks3 fixture so we can use its methods in the below.
-  # shellcheck source=/dev/null
-  if ! source "${cwd}/../../fdbclient/tests/mocks3_fixture.sh"; then
-    err "Failed to source mocks3_fixture.sh"
-    exit 1
-  fi
-  if ! TEST_SCRATCH_DIR=$(mktemp -d "${scratch_dir}/mocks3_bulkload_test.XXXXXX"); then
-    err "Failed create of the mocks3 test dir." >&2
-    exit 1
-  fi
-  readonly TEST_SCRATCH_DIR
-  # Pass test scratch dir as persistence directory so files are cleaned up with test
-  if ! start_mocks3 "${build_dir}" "${TEST_SCRATCH_DIR}/mocks3_data"; then
-    err "Failed to start MockS3Server"
-    exit 1
-  fi
-  readonly host="${MOCKS3_HOST}:${MOCKS3_PORT}"
-  readonly bucket="test-bucket"
-  readonly region="us-east-1"
-  # Create an empty blob credentials file (MockS3Server uses simple auth)
-  readonly blob_credentials_file="${TEST_SCRATCH_DIR}/blob_credentials.json"
-  echo '{}' > "${blob_credentials_file}"
-  # Let the connection to MockS3Server be insecure -- not-TLS
-  query_str="bucket=${bucket}&region=${region}&secure_connection=0"
-fi
+# Setup S3/MockS3 environment using common function
+# temp_dir_prefix is used for naming the scratch directory
+# url_path_prefix is used in the blobstore URL path
+readonly temp_dir_prefix="mocks3_bulkload_test"
+readonly url_path_prefix="bulkload/ctests"
+setup_s3_environment "${build_dir}" "${scratch_dir}" "${temp_dir_prefix}"
 
 # Source in the fdb cluster.
 # shellcheck source=/dev/null
@@ -431,6 +358,6 @@ log "FDB cluster is up"
 
 # Run tests.
 test="test_basic_bulkdump_and_bulkload"
-url="blobstore://${host}/${path_prefix}/${test}?${query_str}"
+url="blobstore://${host}/${url_path_prefix}/${test}?${query_str}"
 test_basic_bulkdump_and_bulkload "${url}" "${TEST_SCRATCH_DIR}" "${blob_credentials_file}" "${build_dir}"
 log_test_result $? "${test}"

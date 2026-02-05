@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2024 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -965,6 +965,7 @@ ProcessClass decodeProcessClassValue(ValueRef const& value) {
 const KeyRangeRef configKeys("\xff/conf/"_sr, "\xff/conf0"_sr);
 const KeyRef configKeysPrefix = configKeys.begin;
 
+const KeyRef backupWorkerEnabledKey("\xff/conf/backup_worker_enabled"_sr);
 const KeyRef perpetualStorageWiggleKey("\xff/conf/perpetual_storage_wiggle"_sr);
 const KeyRef perpetualStorageWiggleLocalityKey("\xff/conf/perpetual_storage_wiggle_locality"_sr);
 // The below two are there for compatible upgrade and downgrade. After 7.3, the perpetual wiggle related keys should use
@@ -974,10 +975,6 @@ const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); /
 const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
-
-const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
-// TOOD(gglass): see if this can be removed:
-const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);
 
 const KeyRangeRef excludedServersKeys("\xff/conf/excluded/"_sr, "\xff/conf/excluded0"_sr);
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;

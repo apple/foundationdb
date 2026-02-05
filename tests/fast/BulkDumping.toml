@@ -1,7 +1,6 @@
 [configuration]
 storageEngineExcludeTypes = [5] #FIXME: remove after allowing to do bulkloading with fetchKey and shardedrocksdb
 
-encryptModes = ['disabled']
 disableTss = true # TODO(BulkLoad): support TSS. finishMoveShard should wait for TSS if a data move is bulkload data move.
 
 [[knobs]]
