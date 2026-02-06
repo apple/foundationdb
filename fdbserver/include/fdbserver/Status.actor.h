@@ -26,7 +26,6 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
@@ -52,7 +51,6 @@ Future<StatusReply> clusterGetStatus(
     Version const& datacenterVersionDifference,
     Version const& dcLogServerVersionDifference,
     Version const& dcStorageServerVersionDifference,
-    ConfigBroadcaster const* const& conifgBroadcaster,
     std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> const&
         excludedDegradedServers);
 

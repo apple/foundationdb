@@ -10,6 +10,4 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 10
     testsMatching = '/'
-    # ConfigDB tests persist state, so running these tests
-    # sequentially can cause issues
-    testsIgnored = '/fdbserver/ConfigDB/;/fdbrpc/grpc;/flow/thread'
+    testsIgnored = '/fdbrpc/grpc;/flow/thread'

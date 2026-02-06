@@ -110,11 +110,9 @@ if (WITH_SWIFT)
   target_link_options(fdbserver_swift PUBLIC "$<TARGET_OBJECTS:fdbclient_swift>")
   target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbclient_swift>")
   # This dependency ensures that fdbserver depends on fdbclient_swift at link time.
-  set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbclient_swift.a")
 
   target_link_options(fdbserver PRIVATE "$<TARGET_OBJECTS:fdbserver_swift>")
   # This dependency ensures that fdbserver depends on fdbserver_swift at link time.
-  set_source_files_properties(IConfigConsumer.cpp PROPERTIES OBJECT_DEPENDS "${CMAKE_BINARY_DIR}/lib/libfdbserver_swift.a")
 
   swift_get_linker_search_paths(SWIFT_LINK_PATHS)
   target_link_directories(fdbserver PRIVATE "${SWIFT_LINK_PATHS}")

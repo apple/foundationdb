@@ -226,8 +226,6 @@ description is not currently required but encouraged.
     <Option name="transaction_report_conflicting_keys" code="702"
             description="Enables conflicting key reporting on all transactions, allowing them to retrieve the keys that are conflicting with other transactions."
             defaultFor="712"/>/>
-    <Option name="use_config_database" code="800"
-            description="Use configuration database." />
     <Option name="test_causal_read_risky" code="900"
             paramType="Int" paramDescription="integer between 0 and 100 expressing the probability a client will verify it can't read stale data"
             description="Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so." />
