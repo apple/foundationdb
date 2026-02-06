@@ -1109,9 +1109,12 @@ public:
 			                   self->peer_address,
 			                   [conn = self.getPtr()](bool verifyOk) { conn->has_trusted_peer = verifyOk; });
 
-			// Set SNI hostname if we have one (for connections made with hostname)
+			// Set SNI hostname if we have one (for connections made with hostname) and SSL flags to check
+			// certificate against.
 			if (!self->sni_hostname.empty()) {
 				int result = SSL_set_tlsext_host_name(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
+				SSL_set1_host(self->ssl_sock.native_handle(), self->sni_hostname.c_str());
+				SSL_set_hostflags(self->ssl_sock.native_handle(), X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
 				TraceEvent("SSLSetSNIResult")
 				    .detail("Hostname", self->sni_hostname)
 				    .detail("Result", result)
