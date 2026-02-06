@@ -1061,7 +1061,6 @@ class TestRunner:
         return result
 
     def run(self) -> bool:
-        # Check if test_args_file is provided
         if config.test_args_file is not None:
             # Parse the args file to get test parameters
             test_file, seed, buggify_enabled, extra_args = parse_test_args_file(config.test_args_file)

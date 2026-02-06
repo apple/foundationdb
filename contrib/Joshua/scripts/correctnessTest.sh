@@ -244,7 +244,6 @@ if [ "${TH_ARCHIVE_LOGS_ON_FAILURE}" = "true" ]; then
     PYTHON_CMD_ARGS+=("--archive-logs-on-failure")
 fi
 
-# Check for test arguments file
 if [ -f "test_args.txt" ]; then
     echo "Found test_args.txt - running with specific test arguments" >&2
     PYTHON_CMD_ARGS+=("--test-args-file" "test_args.txt")
