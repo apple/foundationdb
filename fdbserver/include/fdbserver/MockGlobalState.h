@@ -117,6 +117,19 @@ public:
 	UID id;
 	bool primary = true; // Only support single region MGS for now
 
+	// Test hook: ranges added here will cause isReadable() to return false,
+	// triggering wrong_shard_server responses for WaitMetricsRequest.
+	std::vector<KeyRange> forceUnreadableRanges;
+
+	bool isReadable(KeyRangeRef const& keys) const override {
+		for (const auto& ur : forceUnreadableRanges) {
+			if (keys.intersects(ur)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	MockStorageServer() = default;
 
 	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
