@@ -29,7 +29,7 @@
 #include <thread>
 
 #define DOCTEST_CONFIG_IMPLEMENT
-#include "doctest.h"
+#include "doctest/doctest.h"
 #include "fdb_api.hpp"
 
 void fdb_check(fdb_error_t e) {
