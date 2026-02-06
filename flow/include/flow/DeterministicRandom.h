@@ -68,6 +68,7 @@ public:
 	void randomBytes(uint8_t* buf, int length) override;
 	bool truePercent(const int percent) override;
 	uint64_t peek() const override;
+	void resetSeed(uint32_t seed) override; // Reset the random number generator with a new seed
 	void addref() override;
 	void delref() override;
 };

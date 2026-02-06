@@ -244,6 +244,11 @@ if [ "${TH_ARCHIVE_LOGS_ON_FAILURE}" = "true" ]; then
     PYTHON_CMD_ARGS+=("--archive-logs-on-failure")
 fi
 
+if [ -f "test_args.txt" ]; then
+    echo "Found test_args.txt - running with specific test arguments" >&2
+    PYTHON_CMD_ARGS+=("--test-args-file" "test_args.txt")
+fi
+
 # Setup joshua output capture
 PYTHON_APP_STDOUT_FILE="${APP_RUN_TEMP_DIR}/python_app_stdout.log"
 PYTHON_APP_STDERR_FILE="${APP_RUN_TEMP_DIR}/python_app_stderr.log"

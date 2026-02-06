@@ -163,6 +163,9 @@ public:
 	virtual uint64_t peek() const = 0; // returns something that is probably different for different random states.
 	                                   // Deterministic (and idempotent) for a deterministic generator.
 
+	// Reset the random number generator with a new seed (only supported by deterministic generators)
+	virtual void resetSeed(uint32_t seed) {}
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
