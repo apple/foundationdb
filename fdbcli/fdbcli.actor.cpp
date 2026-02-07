@@ -1065,12 +1065,9 @@ Future<T> stopNetworkAfter(Future<T> what) {
 	}
 }
 
-enum TransType { Db = 0, None };
-
 ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnectionFile> ccf) {
 	state LineNoise& linenoise = *plinenoise;
 	state bool intrans = false;
-	state TransType transtype = TransType::None;
 
 	state Database localDb;
 	state Reference<IDatabase> db;
@@ -1437,7 +1434,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
 						intrans = true;
-						transtype = TransType::None;
 						getTransaction(db, tr, options, false);
 						printf("Transaction started\n");
 					}
@@ -1456,7 +1452,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						wait(commitTransaction(tr));
 						intrans = false;
-						transtype = TransType::None;
 						options = &globalOptions;
 					}
 
@@ -1475,7 +1470,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
 						options->apply(tr);
-						transtype = TransType::None;
 						printf("Transaction reset\n");
 					}
 					continue;
@@ -1501,9 +1495,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (intrans && transtype == TransType::None) {
-							transtype = TransType::Db;
-						}
 						state ThreadFuture<Optional<Value>> valueF =
 						    getTransaction(db, tr, options, intrans)->get(tokens[1]);
 						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
@@ -1679,9 +1670,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					} else {
 						state int limit;
 						bool valid = true;
-						if (intrans && transtype == TransType::None) {
-							transtype = TransType::Db;
-						}
 						if (tokens.size() == 4) {
 							// INT_MAX is 10 digits; rather than
 							// worrying about overflow we'll just cap
@@ -1770,9 +1758,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (intrans && transtype == TransType::None) {
-							transtype = TransType::Db;
-						}
 						getTransaction(db, tr, options, intrans);
 						tr->set(tokens[1], tokens[2]);
 
@@ -1794,9 +1779,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (intrans && transtype == TransType::None) {
-							transtype = TransType::Db;
-						}
 						getTransaction(db, tr, options, intrans);
 						tr->clear(tokens[1]);
 
@@ -1818,9 +1800,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						if (intrans && transtype == TransType::None) {
-							transtype = TransType::Db;
-						}
 						getTransaction(db, tr, options, intrans);
 						tr->clear(KeyRangeRef(tokens[1], tokens[2]));
 
