@@ -137,7 +137,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_DEPRECATED_CONFIG_PATH, OPT_DEPRECATED_USE_TEST_CONFIG_DB, OPT_DEPRECATED_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, 
 	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
 	OPT_MOCKS3_PERSISTENCE_DIR
@@ -227,6 +227,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BLOB_CREDENTIALS,      "--blob-credentials",          SO_REQ_SEP },
 	{ OPT_MOCKS3_PERSISTENCE_DIR, "--mocks3-persistence-dir",   SO_REQ_SEP },
 	{ OPT_PROXY,                 "--proxy",                     SO_REQ_SEP },
+	{ OPT_DEPRECATED_CONFIG_PATH, "--config-path",              SO_REQ_SEP },
+	{ OPT_DEPRECATED_USE_TEST_CONFIG_DB, "--use-test-config-db", SO_NONE },
+	{ OPT_DEPRECATED_NO_CONFIG_DB, "--no-config-db",            SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
@@ -766,6 +769,9 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " The prefix where this process will store its metric data."
 		                 " Must be specified if using a different database for metrics.");
 		printOptionUsage("--knob-KNOBNAME KNOBVALUE", " Changes a database knob. KNOBNAME should be lowercase.");
+		printOptionUsage("--config-path PATH", " Deprecated and ignored.");
+		printOptionUsage("--use-test-config-db", " Deprecated and ignored.");
+		printOptionUsage("--no-config-db", " Deprecated and ignored.");
 		printOptionUsage("--io-trust-seconds SECONDS",
 		                 " Sets the time in seconds that a read or write operation is allowed to take"
 		                 " before timing out with an error. If an operation times out, all future"
@@ -1236,6 +1242,11 @@ private:
 	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
+		auto warnDeprecatedOption = [](const char* optionText) {
+			fprintf(stderr, "WARNING: option `%s' is deprecated and ignored\n", optionText);
+			TraceEvent(SevWarnAlways, "DeprecatedCommandLineOption").detail("Option", optionText);
+		};
+
 		for (int a = 0; a < argc; a++) {
 			if (a)
 				commandLine += ' ';
@@ -1731,6 +1742,11 @@ private:
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
+				break;
+			case OPT_DEPRECATED_CONFIG_PATH:
+			case OPT_DEPRECATED_USE_TEST_CONFIG_DB:
+			case OPT_DEPRECATED_NO_CONFIG_DB:
+				warnDeprecatedOption(args.OptionText());
 				break;
 			case OPT_FLOW_PROCESS_NAME:
 				flowProcessName = args.OptionArg();
