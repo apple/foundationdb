@@ -34,6 +34,7 @@ public:
 	                                                                                 int expectedShardCount) {
 		state TenantInfo tenantInfo;
 		state Version version = 0;
+		state int wrongShardRetries = 0;
 		loop {
 			auto locations = mgs->getKeyRangeLocations(tenantInfo,
 			                                           keys,
@@ -49,11 +50,37 @@ public:
 			// there shouldn't have any delay to update the locations.
 			ASSERT_EQ(expectedShardCount, locations.size());
 
-			Optional<StorageMetrics> res =
-			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
+			try {
+				Optional<StorageMetrics> res =
+				    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
 
-			if (res.present()) {
-				return std::make_pair(res, -1);
+				TraceEvent(SevDebug, "MGSWaitStorageMetrics")
+				    .detail("Phase", "GetStorageMetrics")
+				    .detail("KeyRange", keys.toString())
+				    .detail("Present", res.present());
+
+				if (res.present()) {
+					wrongShardRetries = 0;
+					return std::make_pair(res, -1);
+				}
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "MGSWaitStorageMetricsHandleError").error(e);
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+					if (++wrongShardRetries > CLIENT_KNOBS->STORAGE_METRICS_WRONG_SHARD_MAX_RETRIES) {
+						CODE_PROBE(true, "MGS waitStorageMetrics gave up after persistent wrong_shard_server");
+						TraceEvent(SevWarnAlways, "MGSWaitStorageMetricsWrongShardGaveUp")
+						    .detail("Keys", keys)
+						    .detail("Retries", wrongShardRetries)
+						    .detail("ErrorCode", e.code());
+						return std::make_pair(Optional<StorageMetrics>(StorageMetrics()), -1);
+					}
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+				} else if (e.code() == error_code_future_version) {
+					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
+				} else {
+					TraceEvent(SevError, "MGSWaitStorageMetricsError").error(e);
+					throw;
+				}
 			}
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
@@ -1025,3 +1052,5 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 	}
 	return Void();
 }
+
+// TEST_CASE WaitStorageMetricsWrongShardRetryLimit removed - uses APIs not available in 7.3
