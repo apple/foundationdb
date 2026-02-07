@@ -153,9 +153,20 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 			}
 		}
 
-		ConfigurationResult r = wait(ManagementAPI::changeConfig(
-		    db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force));
-		result = r;
+		// Check for backup_worker_enabled configuration and reject it.
+		// This setting is now managed automatically by the backup system.
+		for (auto it = tokens.begin() + startToken; it != tokens.end(); ++it) {
+			if (it->startsWith("backup_worker_enabled:="_sr)) {
+				result = ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED;
+				break;
+			}
+		}
+
+		if (result != ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED) {
+			ConfigurationResult r = wait(ManagementAPI::changeConfig(
+			    db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force));
+			result = r;
+		}
 	}
 
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
@@ -268,6 +279,12 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		break;
 	case ConfigurationResult::INVALID_STORAGE_TYPE:
 		fprintf(stderr, "ERROR: Invalid storage type for storage or TLog.\n");
+		ret = false;
+		break;
+	case ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED:
+		fprintf(stderr,
+		        "ERROR: backup_worker_enabled configuration is restricted in fdbcli and managed automatically by the "
+		        "backup system.\n");
 		ret = false;
 		break;
 	default:

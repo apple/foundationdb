@@ -38,6 +38,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                              std::string filePath,
                                              bool isNewDatabase,
                                              bool force) {
+	state ConfigurationResult result;
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
 	if (!json_spirit::read_string(contents, config)) {
@@ -77,7 +78,14 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 		configString.erase(0, 1); // configureStringFromJSON returns a string with leading space.
 	}
 
-	ConfigurationResult result = wait(ManagementAPI::changeConfig(db, configString, force));
+	// Check for backup_worker_enabled configuration and reject it.
+	// This setting is now managed automatically by the backup system.
+	if (configString.find(" backup_worker_enabled:=") != std::string::npos) {
+		result = ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED;
+	} else {
+		ConfigurationResult r = wait(ManagementAPI::changeConfig(db, configString, force));
+		result = r;
+	}
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
 	// there are various results specific to changeConfig() that we need to report:
 	bool ret = true;
@@ -155,6 +163,12 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 		break;
 	case ConfigurationResult::SUCCESS:
 		printf("Configuration changed\n");
+		break;
+	case ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED:
+		fprintf(stderr,
+		        "ERROR: backup_worker_enabled configuration is restricted in fdbcli and managed automatically by the "
+		        "backup system\n");
+		ret = false;
 		break;
 	default:
 		ASSERT(false);
