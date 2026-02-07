@@ -392,8 +392,12 @@ ACTOR Future<int64_t> getFirstSize(Reference<AsyncVar<Optional<ShardMetrics>>> s
 			when(wait(stats->onChange())) {}
 			when(wait(timeout)) {
 				CODE_PROBE(true, "getFirstSize timed out waiting for initial shard metrics");
-				TraceEvent(SevWarn, "GetFirstSizeTimeout").detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT);
-				return 0;
+				// Return average shard size estimate to avoid skewing total DB size calculation
+				int64_t estimate = (SERVER_KNOBS->MIN_SHARD_BYTES + SERVER_KNOBS->MAX_SHARD_BYTES) / 2;
+				TraceEvent(SevWarn, "GetFirstSizeTimeout")
+				    .detail("Timeout", SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT)
+				    .detail("EstimateBytes", estimate);
+				return estimate;
 			}
 		}
 	}
@@ -2329,15 +2333,16 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 }
 
 TEST_CASE("/DataDistributor/Tracker/GetFirstSizeTimeout") {
-	// Test that getFirstSize returns 0 when shard metrics never arrive (timeout fires).
+	// Test that getFirstSize returns an estimate when shard metrics never arrive (timeout fires).
 	// This verifies that DD initialization won't block forever if a storage server is unreachable.
 	state Reference<AsyncVar<Optional<ShardMetrics>>> stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 
 	state double startTime = now();
 	int64_t size = wait(getFirstSize(stats));
 
-	// Should return 0 on timeout
-	ASSERT_EQ(size, 0);
+	// Should return average shard size estimate on timeout
+	int64_t expectedEstimate = (SERVER_KNOBS->MIN_SHARD_BYTES + SERVER_KNOBS->MAX_SHARD_BYTES) / 2;
+	ASSERT_EQ(size, expectedEstimate);
 
 	// Verify it actually waited for approximately the timeout duration
 	double elapsed = now() - startTime;

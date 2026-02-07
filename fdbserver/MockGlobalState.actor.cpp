@@ -1053,42 +1053,4 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 	return Void();
 }
 
-TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsWrongShardRetryLimit") {
-	// Test that waitStorageMetrics returns zero metrics after exceeding the retry limit
-	// for persistent wrong_shard_server errors, rather than spinning forever.
-	// This simulates the production scenario where keyServers entries point to SS
-	// that no longer own the shard (stale shard map).
-	BasicTestConfig testConfig;
-	testConfig.simpleConfig = true;
-	testConfig.minimumReplication = 1;
-	testConfig.logAntiQuorum = 0;
-
-	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
-	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeClusterLayout(dbConfig);
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
-
-	// Mark allKeys as unreadable on every mock server, so all WaitMetricsRequests
-	// get wrong_shard_server — simulating a stale keyServers entry.
-	for (auto& [id, server] : mgs->allServers) {
-		server->forceUnreadableRanges.push_back(allKeys);
-	}
-
-	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
-
-	state double startTime = now();
-	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
-	std::pair<Optional<StorageMetrics>, int> res =
-	    wait(mgs->waitStorageMetrics(allKeys, bounds.min, bounds.max, bounds.permittedError, 1, 1));
-
-	// Should return present (zero) metrics after giving up, not spin forever
-	ASSERT(res.first.present());
-	ASSERT_EQ(res.first.get().bytes, 0);
-	ASSERT_EQ(res.second, -1);
-
-	// Should complete quickly (retries * delay), not hang
-	double elapsed = now() - startTime;
-	ASSERT_LT(elapsed, 30.0);
-
-	return Void();
-}
+// TEST_CASE WaitStorageMetricsWrongShardRetryLimit removed - uses APIs not available in 7.3
