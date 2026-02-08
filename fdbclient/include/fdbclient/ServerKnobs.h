@@ -827,6 +827,9 @@ public:
 	                                               // failover.
 	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
 	                                               // failover.
+	bool CC_TEAM_LOSS_TRIGGER_FAILOVER; // Whether to enable DD Team0Left-triggered failover in CC.
+	double CC_TEAM_LOSS_FAILOVER_TRIGGER_DELAY_SECONDS; // Debounce duration in seconds for DD Team0Left observations
+	                                                    // before triggering failover.
 	bool CC_ENABLE_ENTIRE_SATELLITE_MONITORING; // When enabled, gray failure tries to detect whether the entire
 	                                            // satellite DC is degraded.
 	int CC_SATELLITE_DEGRADATION_MIN_COMPLAINER; // When the network between primary and satellite becomes bad, all the
