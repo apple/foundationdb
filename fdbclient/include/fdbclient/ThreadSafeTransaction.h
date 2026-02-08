@@ -67,7 +67,6 @@ public:
 
 private:
 	friend class ThreadSafeTransaction;
-	bool isConfigDB{ false };
 	DatabaseContext* db;
 
 public: // Internal use only

@@ -85,7 +85,7 @@ public:
 	}
 
 	// Given a list of insertions and clears, applies the necessary changes to
-	// the given transaction to update the global configuration database. Keys
+	// the given transaction to update the global configuration keyspace. Keys
 	// in the list of mutations should not include the global configuration
 	// prefix (`\xff\xff/global_config/`). The caller must still commit the
 	// given transaction in order to persist the changes.

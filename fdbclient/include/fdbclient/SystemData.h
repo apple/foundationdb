@@ -690,10 +690,6 @@ extern const ValueRef writeRecoveryKeyTrue;
 extern const KeyRef snapshotEndVersionKey;
 
 // Configuration database special keys
-extern const KeyRef configTransactionDescriptionKey;
-extern const KeyRange globalConfigKnobKeys;
-extern const KeyRangeRef configKnobKeys;
-extern const KeyRangeRef configClassKeys;
 
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;

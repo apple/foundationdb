@@ -141,7 +141,6 @@ class TestConfig : public BasicTestConfig {
 		                                  std::string,
 		                                  std::vector<int>,
 		                                  std::vector<std::string>,
-		                                  ConfigDBType,
 		                                  SimulationStorageEngine,
 		                                  std::set<SimulationStorageEngine>>;
 		using types =
@@ -169,18 +168,6 @@ class TestConfig : public BasicTestConfig {
 			}
 			void operator()(Optional<std::vector<int>>* val) const {
 				std::vector<int> res;
-				(*this)(&res);
-				*val = std::move(res);
-			}
-			void operator()(ConfigDBType* val) const {
-				if (value.as_string() == "random") {
-					*val = deterministicRandom()->coinflip() ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
-				} else {
-					*val = configDBTypeFromString(value.as_string());
-				}
-			}
-			void operator()(Optional<ConfigDBType>* val) const {
-				ConfigDBType res;
 				(*this)(&res);
 				*val = std::move(res);
 			}
@@ -267,14 +254,6 @@ class TestConfig : public BasicTestConfig {
 				} else {
 					(*this)(&(val->get()));
 				}
-			}
-			void operator()(ConfigDBType const* val) const { evt.detail(key.c_str(), *val); }
-			void operator()(Optional<ConfigDBType> const* val) const {
-				Optional<std::string> optStr;
-				if (val->present()) {
-					optStr = configDBTypeToString(val->get());
-				}
-				evt.detail(key.c_str(), optStr);
 			}
 		};
 
@@ -387,13 +366,6 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
-			if (attrib == "configDBType") {
-				if (value == "random") {
-					configDBType = deterministicRandom()->random01() < 0.1 ? ConfigDBType::SIMPLE : ConfigDBType::PAXOS;
-				} else {
-					configDBType = configDBTypeFromString(value);
-				}
-			}
 			if (attrib == "randomlyRenameZoneId") {
 				randomlyRenameZoneId = strcmp(value.c_str(), "true") == 0;
 			}
@@ -416,8 +388,6 @@ class TestConfig : public BasicTestConfig {
 
 		ifs.close();
 	}
-
-	ConfigDBType configDBType{ ConfigDBType::DISABLED };
 
 public:
 	int extraDB = 0;
@@ -472,8 +442,6 @@ public:
 	Optional<int> remoteDesiredTLogCount;
 	// Number of process classes explictly set as Stateless in all DCs
 	Optional<int> statelessProcessClassesPerDC;
-
-	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
 		if (data.is_table()) {
@@ -533,7 +501,6 @@ public:
 		    .add("asanMachineCount", &asanMachineCount)
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
-		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("extraStorageMachineCountPerDC", &extraStorageMachineCountPerDC)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
@@ -718,7 +685,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
                                                          ProcessMode processMode,
                                                          std::string whitelistBinPaths,
                                                          ProtocolVersion protocolVersion,
-                                                         ConfigDBType configDBType,
                                                          bool isDr) {
 	state ISimulator::ProcessInfo* simProcess = g_simulator->getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
@@ -811,9 +777,6 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					                       "",
 					                       -1,
 					                       whitelistBinPaths,
-					                       "",
-					                       {},
-					                       configDBType,
 					                       false));
 				}
 				if (processRunBackupAgent(processMode)) {
@@ -993,7 +956,6 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
                                     bool sslOnly,
                                     std::string whitelistBinPaths,
                                     ProtocolVersion protocolVersion,
-                                    ConfigDBType configDBType,
                                     bool isDr) {
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
@@ -1076,7 +1038,6 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          ipProcessMode,
 					                                          whitelistBinPaths,
 					                                          protocolVersion,
-					                                          configDBType,
 					                                          isDr));
 					g_simulator->setDiffProtocol = true;
 				} else {
@@ -1096,7 +1057,6 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          ipProcessMode,
 					                                          whitelistBinPaths,
 					                                          g_network->protocolVersion(),
-					                                          configDBType,
 					                                          isDr));
 				}
 				TraceEvent("SimulatedMachineProcess", randomId)
@@ -1323,8 +1283,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
 
-	auto configDBType = testConfig->getConfigDBType();
-
 	// Randomly change data center id names to test that localities
 	// can be modified on cluster restart
 	bool renameZoneIds = testConfig->randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
@@ -1459,7 +1417,6 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
 			                     protocolVersion,
-			                     configDBType,
 			                     false),
 			    processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine"));
 		}
@@ -2180,12 +2137,6 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	}
 }
 
-void setConfigDB(TestConfig const& testConfig) {
-	if (g_simulator) {
-		g_simulator->configDBType = testConfig.getConfigDBType();
-	}
-}
-
 // Generates and sets an appropriate configuration for the database according to
 // the provided testConfig. Some attributes are randomly generated for more coverage
 // of different combinations
@@ -2223,7 +2174,6 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 
 	setProcessesPerMachine(testConfig);
 	setTss(testConfig);
-	setConfigDB(testConfig);
 }
 
 // Configures the system according to the given specifications in order to run
@@ -2257,7 +2207,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
 	}
-	auto configDBType = testConfig.getConfigDBType();
 	startingConfigString += DatabaseConfiguration::configureStringFromJSON(startingConfigJSON);
 
 	// Set a random locality for the perpetual wiggle if any locality is set in the config
@@ -2611,7 +2560,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			                     sslOnly,
 			                     whitelistBinPaths,
 			                     protocolVersion,
-			                     configDBType,
 			                     false),
 			    "SimulatedMachine"));
 
@@ -2643,7 +2591,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 					                     sslOnly,
 					                     whitelistBinPaths,
 					                     protocolVersion,
-					                     configDBType,
 					                     true),
 					    "SimulatedMachine"));
 					++cluster;
@@ -2703,7 +2650,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
-		                                  configDBType,
 		                                  false),
 		                 "SimulatedTesterMachine"));
 	}

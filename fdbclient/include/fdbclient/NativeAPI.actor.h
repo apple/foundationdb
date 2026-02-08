@@ -34,6 +34,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/KnobValue.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"

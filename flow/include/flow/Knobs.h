@@ -43,12 +43,6 @@
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
 
-enum class ConfigDBType {
-	DISABLED,
-	SIMPLE,
-	PAXOS,
-};
-
 enum class Atomic { YES, NO };
 
 class Knobs {

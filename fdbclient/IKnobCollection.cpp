@@ -124,14 +124,3 @@ void IKnobCollection::setupKnobs(const std::vector<std::pair<std::string, std::s
 		}
 	}
 }
-
-ConfigMutationRef IKnobCollection::createSetMutation(Arena arena, KeyRef key, ValueRef value) {
-	ConfigKey configKey = ConfigKeyRef::decodeKey(key);
-	auto knobValue =
-	    IKnobCollection::parseKnobValue(configKey.knobName.toString(), value.toString(), IKnobCollection::Type::TEST);
-	return ConfigMutationRef(arena, configKey, knobValue.contents());
-}
-
-ConfigMutationRef IKnobCollection::createClearMutation(Arena arena, KeyRef key) {
-	return ConfigMutationRef(arena, ConfigKeyRef::decodeKey(key), {});
-}
