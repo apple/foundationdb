@@ -2225,76 +2225,86 @@ ACTOR Future<Void> monitorDDPrimaryTeam0LeftAndFailover(ClusterControllerData* s
 			}
 		}
 
-		int highestPriority = -1;
-		bool const hasHighestPriority = inFlightFuture.get().tryGetInt("HighestPriority", highestPriority);
+		try {
+			int highestPriority = -1;
+			bool const hasHighestPriority = inFlightFuture.get().tryGetInt("HighestPriority", highestPriority);
 
-		int primary = 1;
-		bool const hasPrimaryField = inFlightFuture.get().tryGetInt("Primary", primary);
-		bool const ddEventPrimary = !hasPrimaryField || primary != 0;
+			int primary = 1;
+			bool const hasPrimaryField = inFlightFuture.get().tryGetInt("Primary", primary);
+			bool const ddEventPrimary = !hasPrimaryField || primary != 0;
 
-		// Shard-split events can have higher priority than TEAM_0_LEFT; only TEAM_0_LEFT should trigger failover.
-		bool const primaryTeam0LeftSignal =
-		    hasHighestPriority && ddEventPrimary && highestPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
-		if (!primaryTeam0LeftSignal) {
-			if (self->ddPrimaryTeam0LeftConsecutive > 0 || self->ddPrimaryTeam0LeftRequestedFailover) {
-				TraceEvent("DDPrimaryTeam0LeftSignalCleared", self->id)
-				    .detail("HighestPriority", highestPriority)
-				    .detail("HasHighestPriority", hasHighestPriority)
-				    .detail("DDEventPrimary", ddEventPrimary)
-				    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive);
+			// Shard-split events can have higher priority than TEAM_0_LEFT; only TEAM_0_LEFT should trigger failover.
+			bool const primaryTeam0LeftSignal =
+			    hasHighestPriority && ddEventPrimary && highestPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT;
+			if (!primaryTeam0LeftSignal) {
+				if (self->ddPrimaryTeam0LeftConsecutive > 0 || self->ddPrimaryTeam0LeftRequestedFailover) {
+					TraceEvent("DDPrimaryTeam0LeftSignalCleared", self->id)
+					    .detail("HighestPriority", highestPriority)
+					    .detail("HasHighestPriority", hasHighestPriority)
+					    .detail("DDEventPrimary", ddEventPrimary)
+					    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive);
+				}
+				self->ddPrimaryTeam0LeftConsecutive = 0;
+				self->ddPrimaryTeam0LeftRequestedFailover = false;
+				continue;
 			}
-			self->ddPrimaryTeam0LeftConsecutive = 0;
-			self->ddPrimaryTeam0LeftRequestedFailover = false;
-			continue;
-		}
 
-		if (self->ddPrimaryTeam0LeftRequestedFailover) {
-			continue;
-		}
+			if (self->ddPrimaryTeam0LeftRequestedFailover) {
+				continue;
+			}
 
-		int const triggerThresholdPolls = getTeamLossFailoverConsecutivePollThreshold();
-		bool const debouncedTrigger = self->shouldDebouncedFailoverForTeamLoss(
-		    highestPriority, DDEventPrimary(ddEventPrimary), triggerThresholdPolls);
-		if (!debouncedTrigger) {
-			TraceEvent("DDPrimaryTeam0LeftFailoverSkipped", self->id)
+			int const triggerThresholdPolls = getTeamLossFailoverConsecutivePollThreshold();
+			bool const debouncedTrigger = self->shouldDebouncedFailoverForTeamLoss(
+			    highestPriority, DDEventPrimary(ddEventPrimary), triggerThresholdPolls);
+			if (!debouncedTrigger) {
+				TraceEvent("DDPrimaryTeam0LeftFailoverSkipped", self->id)
+				    .suppressFor(1.0)
+				    .detail("Reason", "FailoverGateOrDebounceRejected")
+				    .detail("HighestPriority", highestPriority)
+				    .detail("DatacenterVersionDifference", self->datacenterVersionDifference)
+				    .detail("VersionDifferenceUpdated", self->versionDifferenceUpdated)
+				    .detail("RemoteHealthy", self->remoteDCIsHealthy())
+				    .detail("UsableRegions", self->db.config.usableRegions)
+				    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive)
+				    .detail("TriggerThresholdSeconds", SERVER_KNOBS->CC_TEAM_LOSS_FAILOVER_TRIGGER_DELAY_SECONDS)
+				    .detail("TriggerThresholdPolls", triggerThresholdPolls);
+				continue;
+			}
+
+			TraceEvent("DDPrimaryTeam0LeftSignal", self->id)
 			    .suppressFor(1.0)
-			    .detail("Reason", "FailoverGateOrDebounceRejected")
 			    .detail("HighestPriority", highestPriority)
-			    .detail("DatacenterVersionDifference", self->datacenterVersionDifference)
-			    .detail("VersionDifferenceUpdated", self->versionDifferenceUpdated)
-			    .detail("RemoteHealthy", self->remoteDCIsHealthy())
-			    .detail("UsableRegions", self->db.config.usableRegions)
 			    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive)
 			    .detail("TriggerThresholdSeconds", SERVER_KNOBS->CC_TEAM_LOSS_FAILOVER_TRIGGER_DELAY_SECONDS)
 			    .detail("TriggerThresholdPolls", triggerThresholdPolls);
-			continue;
+
+			ASSERT(self->clusterControllerDcId.present());
+			ASSERT_GT(self->db.config.regions.size(), 1);
+			auto const remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
+			                            ? self->db.config.regions[1].dcId
+			                            : self->db.config.regions[0].dcId;
+
+			std::vector<Optional<Key>> dcPriority;
+			dcPriority.push_back(remoteDcId);
+			dcPriority.push_back(self->clusterControllerDcId);
+			self->desiredDcIds.set(dcPriority);
+			self->ddPrimaryTeam0LeftRequestedFailover = true;
+			CODE_PROBE(true, "DD Team0Left-triggered failover requested");
+
+			TraceEvent(SevWarnAlways, "DDPrimaryTeam0LeftFailoverTriggered", self->id)
+			    .detail("HighestPriority", highestPriority)
+			    .detail("RemoteDcId", remoteDcId)
+			    .detail("CurrentCcDcId", self->clusterControllerDcId.get())
+			    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive);
+		} catch (Error& e) {
+			if (e.code() == error_code_attribute_not_found) {
+				TraceEvent("DDPrimaryTeam0LeftFailoverSkipped", self->id)
+				    .suppressFor(1.0)
+				    .detail("Reason", "AttributeNotFound");
+				continue;
+			}
+			throw e;
 		}
-
-		TraceEvent("DDPrimaryTeam0LeftSignal", self->id)
-		    .suppressFor(1.0)
-		    .detail("HighestPriority", highestPriority)
-		    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive)
-		    .detail("TriggerThresholdSeconds", SERVER_KNOBS->CC_TEAM_LOSS_FAILOVER_TRIGGER_DELAY_SECONDS)
-		    .detail("TriggerThresholdPolls", triggerThresholdPolls);
-
-		ASSERT(self->clusterControllerDcId.present());
-		ASSERT_GT(self->db.config.regions.size(), 1);
-		auto const remoteDcId = self->db.config.regions[0].dcId == self->clusterControllerDcId.get()
-		                            ? self->db.config.regions[1].dcId
-		                            : self->db.config.regions[0].dcId;
-
-		std::vector<Optional<Key>> dcPriority;
-		dcPriority.push_back(remoteDcId);
-		dcPriority.push_back(self->clusterControllerDcId);
-		self->desiredDcIds.set(dcPriority);
-		self->ddPrimaryTeam0LeftRequestedFailover = true;
-		CODE_PROBE(true, "DD Team0Left-triggered failover requested");
-
-		TraceEvent(SevWarnAlways, "DDPrimaryTeam0LeftFailoverTriggered", self->id)
-		    .detail("HighestPriority", highestPriority)
-		    .detail("RemoteDcId", remoteDcId)
-		    .detail("CurrentCcDcId", self->clusterControllerDcId.get())
-		    .detail("ConsecutiveCount", self->ddPrimaryTeam0LeftConsecutive);
 	}
 }
 
