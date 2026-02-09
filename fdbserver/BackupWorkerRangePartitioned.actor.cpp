@@ -31,7 +31,7 @@ struct RangePartitionedVersionedMessage {
 	LogMessageVersion version;
 	StringRef message;
 	VectorRef<Tag> tags;
-	Arena arena; // Keep a reference to the memory containing the message
+	Arena arena;
 
 	RangePartitionedVersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
 	  : version(v), message(m), tags(t), arena(a) {}
@@ -55,8 +55,7 @@ struct BackupRangePartitionedData {
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
-	// Partition ID to messages map.
-	std::map<uint64_t, std::vector<RangePartitionedVersionedMessage>> partitionMessages;
+	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
 	KeyRangeMap<uint64_t> keyRangeToPartition;
 
@@ -78,16 +77,14 @@ struct BackupRangePartitionedData {
 	void eraseMessagesAfterEndVersion() {
 		ASSERT(endVersion.present());
 		const Version ver = endVersion.get();
-		for (auto& [partitionId, messages] : partitionMessages) {
-			while (!messages.empty()) {
-				if (messages.back().getVersion() > ver) {
-					size_t bytes = messages.back().getEstimatedSize();
-					TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", myId).detail("Release", bytes);
-					lock->release(bytes);
-					messages.pop_back();
-				} else {
-					break;
-				}
+		while (!messages.empty()) {
+			if (messages.back().getVersion() > ver) {
+				size_t bytes = messages.back().getEstimatedSize();
+				TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", myId).detail("Release", bytes);
+				lock->release(bytes);
+				messages.pop_back();
+			} else {
+				break;
 			}
 		}
 	}
@@ -216,17 +213,12 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 		// Hold messages until we know how many we can take, self->messages always
 		// contains messages that we have reserved memory for. Therefore, lock->release()
 		// will always encounter message with reserved memory.
-		state std::map<uint64_t, std::vector<RangePartitionedVersionedMessage>> tmpPartitionMessages;
+		state std::vector<RangePartitionedVersionedMessage> tmpMessages;
 		while (cursor->hasMessage()) {
 			auto msg = RangePartitionedVersionedMessage(
 			    cursor->version(), cursor->getMessage(), cursor->getTags(), cursor->arena());
-			// TODO akanksha: Parse mutation to get the key and determine the partitionId in next PR.
-			KeyRef key;
-			if (key.size() > 0) {
-				uint64_t pid = self->keyRangeToPartition[key];
-				tmpPartitionMessages[pid].emplace_back(std::move(msg));
-				peekedBytes += tmpPartitionMessages[pid].back().getEstimatedSize();
-			}
+			tmpMessages.emplace_back(std::move(msg));
+			peekedBytes += tmpMessages.back().getEstimatedSize();
 			cursor->nextMessage();
 		}
 
@@ -235,25 +227,25 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 			    .detail("Take", peekedBytes)
 			    .detail("Current", self->lock->activePermits());
 			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
-			for (auto& [pid, msgs] : tmpPartitionMessages) {
-				auto& messages = self->partitionMessages[pid];
-				messages.insert(
-				    messages.end(), std::make_move_iterator(msgs.begin()), std::make_move_iterator(msgs.end()));
-			}
+			self->messages.insert(self->messages.end(),
+			                      std::make_move_iterator(tmpMessages.begin()),
+			                      std::make_move_iterator(tmpMessages.end()));
 		}
 
 		tagAt = cursor->version().version;
 		self->pulledVersion.set(tagAt);
-		TraceEvent("BWorkerRangePartitionedGot", self->myId).suppressFor(1.0).detail("V", tagAt);
+		TraceEvent("BWRangePartitionedGot", self->myId).suppressFor(1.0).detail("V", tagAt);
 
 		// For older epochs, we may have an end version to stop at.
 		if (self->pullFinished()) {
 			self->eraseMessagesAfterEndVersion();
 			self->doneTrigger.trigger();
-			TraceEvent("BWorkerRangePartitionedFinishPull", self->myId)
+			TraceEvent("BWRangePartitionedFinishPull", self->myId)
 			    .detail("Tag", self->tag.toString())
 			    .detail("VersionGot", tagAt)
-			    .detail("EndVersion", self->endVersion.get());
+			    .detail("EndVersion", self->endVersion.get())
+				.detail("LogEpoch", self->recruitedEpoch)
+				.detail("BackupEpoch", self->backupEpoch);
 			return Void();
 		}
 		wait(yield());
