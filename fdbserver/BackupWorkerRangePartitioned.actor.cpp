@@ -205,15 +205,14 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 
 		self->minKnownCommittedVersion =
 		    std::max(self->minKnownCommittedVersion, cursor->getMinKnownCommittedVersion());
-
-		// Note we aggressively peek (uncommitted) messages, but only committed
-		// messages/mutations will be flushed to disk/blob in uploadData().
 		state int64_t peekedBytes = 0;
 
 		// Hold messages until we know how many we can take, self->messages always
 		// contains messages that we have reserved memory for. Therefore, lock->release()
 		// will always encounter message with reserved memory.
 		state std::vector<RangePartitionedVersionedMessage> tmpMessages;
+
+		// Messages may be prefetched in peek here, but uncommitted messages should not be uploaded in uploadData().
 		while (cursor->hasMessage()) {
 			auto msg = RangePartitionedVersionedMessage(
 			    cursor->version(), cursor->getMessage(), cursor->getTags(), cursor->arena());
@@ -234,7 +233,7 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 
 		tagAt = cursor->version().version;
 		self->pulledVersion.set(tagAt);
-		TraceEvent("BWRangePartitionedGot", self->myId).suppressFor(1.0).detail("V", tagAt);
+		TraceEvent("BWRangePartitionedGot", self->myId).suppressFor(1.0).detail("LatestPulledVersion", tagAt);
 
 		// For older epochs, we may have an end version to stop at.
 		if (self->pullFinished()) {
@@ -244,8 +243,8 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 			    .detail("Tag", self->tag.toString())
 			    .detail("VersionGot", tagAt)
 			    .detail("EndVersion", self->endVersion.get())
-				.detail("LogEpoch", self->recruitedEpoch)
-				.detail("BackupEpoch", self->backupEpoch);
+			    .detail("LogEpoch", self->recruitedEpoch)
+			    .detail("BackupEpoch", self->backupEpoch);
 			return Void();
 		}
 		wait(yield());
