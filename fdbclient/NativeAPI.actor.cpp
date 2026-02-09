@@ -8022,6 +8022,9 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
     int expectedShardCount,
     Optional<Reference<TransactionState>> trState) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
+	state double startTime = now();
+	state double lastTraceTime = 0;
+	state int retryCount = 0;
 	loop {
 		if (trState.present()) {
 			wait(trState.get()->startTransaction());
@@ -8068,6 +8071,38 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(tenantInfo.prefix, keys);
+				retryCount++;
+				double elapsed = now() - startTime;
+				// Log progress every 60 seconds so operators can see where DD is stuck
+				if (now() - lastTraceTime >= 60.0) {
+					lastTraceTime = now();
+					TraceEvent(SevWarn, "WaitStorageMetricsRetrying")
+					    .detail("Keys", keys)
+					    .detail("Elapsed", elapsed)
+					    .detail("Retries", retryCount)
+					    .detail("ErrorCode", e.code());
+				}
+				// Use longer timeout in simulation (1 hour) vs production (15 minutes).
+				// If we keep getting wrong_shard_server, eventually return an estimate so DD can make progress.
+				double timeout = g_network->isSimulated() ? 3600.0 : CLIENT_KNOBS->STORAGE_METRICS_WRONG_SHARD_TIMEOUT;
+				if (elapsed > timeout) {
+					CODE_PROBE(true, "waitStorageMetrics returning estimate after persistent wrong_shard_server");
+					// Return average of min/max as estimate. This lets DD process the shard
+					// instead of spinning forever on stale keyServers entries.
+					StorageMetrics estimate;
+					estimate.bytes = (min.bytes + max.bytes) / 2;
+					estimate.bytesWrittenPerKSecond = (min.bytesWrittenPerKSecond + max.bytesWrittenPerKSecond) / 2;
+					estimate.iosPerKSecond = (min.iosPerKSecond + max.iosPerKSecond) / 2;
+					estimate.bytesReadPerKSecond = (min.bytesReadPerKSecond + max.bytesReadPerKSecond) / 2;
+					estimate.opsReadPerKSecond = (min.opsReadPerKSecond + max.opsReadPerKSecond) / 2;
+					TraceEvent(SevWarnAlways, "WaitStorageMetricsReturningEstimate")
+					    .detail("Keys", keys)
+					    .detail("Elapsed", elapsed)
+					    .detail("Retries", retryCount)
+					    .detail("EstimateBytes", estimate.bytes)
+					    .detail("ErrorCode", e.code());
+					return std::make_pair(estimate, -1);
+				}
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			} else if (e.code() == error_code_future_version) {
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));

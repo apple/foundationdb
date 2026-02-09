@@ -377,6 +377,13 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 					                      ? unauthorized_attempt()
 					                      : request_maybe_delivered());
 				}
+				when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
+					CODE_PROBE(true, "waitValueOrSignal detected peer disconnect");
+					TraceEvent("WaitValueOrSignalPeerDisconnect")
+					    .detail("Endpoint", endpoint.getPrimaryAddress())
+					    .detail("Token", endpoint.token);
+					return ErrorOr<X>(request_maybe_delivered());
+				}
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
