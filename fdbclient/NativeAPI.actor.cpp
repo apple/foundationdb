@@ -8086,7 +8086,6 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				// If we keep getting wrong_shard_server, eventually return an estimate so DD can make progress.
 				double timeout = g_network->isSimulated() ? 3600.0 : CLIENT_KNOBS->STORAGE_METRICS_WRONG_SHARD_TIMEOUT;
 				if (elapsed > timeout) {
-					CODE_PROBE(true, "waitStorageMetrics returning estimate after persistent wrong_shard_server");
 					// Return average of min/max as estimate. This lets DD process the shard
 					// instead of spinning forever on stale keyServers entries.
 					StorageMetrics estimate;
