@@ -2682,13 +2682,22 @@ using namespace std::literals;
 // Populates the TestConfig fields according to what is found in the test file.
 [[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
+// Actor that waits for a specified simulation time and then resets the random seed
+ACTOR Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
+	wait(delay(waitTime));
+	TraceEvent("ResettingRandomSeed").detail("WaitTime", waitTime).detail("NewSeed", newSeed);
+	deterministicRandom()->resetSeed(newSeed);
+	return Void();
+}
+
 } // namespace
 
 ACTOR void simulationSetupAndRun(std::string dataFolder,
                                  const char* testFile,
                                  bool rebooting,
                                  bool restoring,
-                                 std::string whitelistBinPaths) {
+                                 std::string whitelistBinPaths,
+                                 double reseedTime) {
 	state std::vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connectionString;
 	state Standalone<StringRef> startingConfiguration;
@@ -2813,6 +2822,18 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 				}
 			}
 		}
+
+		// If reseedTime is set, schedule a random seed reset at a random time between [0, reseedTime]
+		if (reseedTime >= 0.0) {
+			double actualReseedTime = nondeterministicRandom()->random01() * reseedTime;
+			uint32_t newSeed = platform::getRandomSeed();
+			TraceEvent("SchedulingRandomSeedReset")
+			    .detail("ReseedTimeMax", reseedTime)
+			    .detail("ActualReseedTime", actualReseedTime)
+			    .detail("NewSeed", newSeed);
+			systemActors.push_back(reseedRandomAtTime(actualReseedTime, newSeed));
+		}
+
 		Future<Void> runTestsF = runTests(connFile,
 		                                  TEST_TYPE_FROM_FILE,
 		                                  TEST_ON_TESTERS,
