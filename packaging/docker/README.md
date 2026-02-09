@@ -15,7 +15,7 @@ the expectation that it is, at least, partially (if not entirely) incorrect.
 
 ## Building images locally without the script
 
-If you only want to build a custom container image based on an alrady released FDB version you run the following command from the root:
+If you only want to build a custom container image based on an already released FDB version you run the following command from the root:
 
 ```bash
 export REGISTRY=docker.io

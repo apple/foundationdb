@@ -1,6 +1,6 @@
 # FoundationDB TestHarness2
 
-This directory contains TestHarness2, a Python-based test harness for FoundationDB (that supercedes [`../TestHarness`](../TestHarness)). It can be used standalone or invoked by the Joshua testing framework via scripts like [`../Joshua/scripts/correctnessTest.sh`](../Joshua/scripts/correctnessTest.sh).
+This directory contains TestHarness2, a Python-based test harness for FoundationDB (that supersedes [`../TestHarness`](../TestHarness)). It can be used standalone or invoked by the Joshua testing framework via scripts like [`../Joshua/scripts/correctnessTest.sh`](../Joshua/scripts/correctnessTest.sh).
 
 ## Quick Start
 
@@ -167,7 +167,7 @@ Set environment variables when you start joshua, and [`correctnessTest.sh`](../J
 
 TestHarness2 integrates with [`../joshua_logtool.py`](../joshua_logtool.py) to automatically upload trace logs to a FoundationDB cluster for long-term storage and analysis when test failures occur.
 
-TODO: Integerate joshua_logtool.py into TestHarness2
+TODO: Integrate joshua_logtool.py into TestHarness2
 
 #### How joshua_logtool.py Works
 
