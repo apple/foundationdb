@@ -751,3 +751,13 @@ class Summary:
                 self.stderr_severity = attrs["NewSeverity"]
 
         self.handler.add_handler(("Type", "StderrSeverity"), stderr_severity)
+
+        def resetting_random_seed(attrs: Dict[str, str]):
+            child = SummaryTree("ResettingRandomSeed")
+            if "NewSeed" in attrs:
+                child.attributes["NewSeed"] = attrs["NewSeed"]
+            if "Time" in attrs:
+                child.attributes["Time"] = attrs["Time"]
+            self.out.append(child)
+
+        self.handler.add_handler(("Type", "ResettingRandomSeed"), resetting_random_seed)

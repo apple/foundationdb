@@ -33,7 +33,8 @@ void simulationSetupAndRun(std::string const& dataFolder,
                            const char* const& testFile,
                            bool const& rebooting,
                            bool const& restoring,
-                           std::string const& whitelistBinPath);
+                           std::string const& whitelistBinPath,
+                           double const& reseedTime = -1.0);
 
 enum class SimulationStorageEngine : uint8_t {
 	SSD = 0,
