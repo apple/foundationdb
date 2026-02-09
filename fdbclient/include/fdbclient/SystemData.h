@@ -689,8 +689,6 @@ extern const ValueRef writeRecoveryKeyTrue;
 //	Allows incremental restore to read and set starting version for consistency.
 extern const KeyRef snapshotEndVersionKey;
 
-// Configuration database special keys
-
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
 
