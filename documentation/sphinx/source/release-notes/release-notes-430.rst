@@ -8,7 +8,7 @@ Release Notes
 Features
 --------
 
-* Improved DR thoughput by having mutations copied into the DR database before applying them.
+* Improved DR throughput by having mutations copied into the DR database before applying them.
 * Renamed db_agent to dr_agent.
 * Added more detailed DR and backup active task detail into layer status.
 

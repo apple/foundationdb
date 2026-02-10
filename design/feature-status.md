@@ -9,7 +9,7 @@
 |[Redwood](https://apple.github.io/foundationdb/redwood.html)|production|Since FDB 7.1 and in production, but not at Apple. Better performance than SQLite storage engine.  This B+ tree implementation needs documentation.|None.|Need a maintainer|
 |Gray failure|production|Since FDB 7.1. Automatically detect gray network failures and trigger recovery to heal the cluster.|Apple FDB Team|Supported|
 |[Testing Storage Server (TSS)](https://apple.github.io/foundationdb/tss.html)|production|Since FDB 7.1. Running a storage server pairs with identical data (but different engines) and compare their performance and correctness.|Apple FDB Team|Supported|
-|[Perpetual Storage Wiggle](https://apple.github.io/foundationdb/perpetual-storage-wiggle.html)|production|Replacing storage servers gradually for storage space reclaimation or storage engine migration.|Apple FDB Team|Supported|
+|[Perpetual Storage Wiggle](https://apple.github.io/foundationdb/perpetual-storage-wiggle.html)|production|Replacing storage servers gradually for storage space reclamation or storage engine migration.|Apple FDB Team|Supported|
 |[FDB K8s Operator](https://github.com/FoundationDB/fdb-kubernetes-operator)|production|Since FDB 6.3 and in a separate repo|Apple FDB Team|Supported|
 |[mTLS](https://apple.github.io/foundationdb/tls.html)|production|Since FDB 6.1. Mutual TLS between clients and FDB servers.|Apple FDB Team|Supported|
 |Parallel Restore|experimental|Restore V2 backup files and is used in simulation with V2 backup. Not fault tolerant for production use.|Apple FDB Team|Deprecate and remove the feature.|

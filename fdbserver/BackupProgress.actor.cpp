@@ -71,9 +71,8 @@ void BackupProgress::updateTagVersions(std::map<Tag, Version>* tagVersions,
 std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgress::getUnfinishedBackup() {
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit;
 
-	// No active backups or no BackupProgress (happens on backup_worker_enabled=0)
-	if (!backupStartedValue.present() || progress.empty())
-		return toRecruit;
+	if (!backupStartedValue.present())
+		return toRecruit; // No active backups
 
 	Version lastEnd = invalidVersion;
 	for (const auto& [epoch, info] : epochInfos) {
@@ -189,7 +188,12 @@ TEST_CASE("/BackupProgress/Unfinished") {
 	progress.setBackupStartedValue(Optional<Value>("1"_sr));
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> unfinished = progress.getUnfinishedBackup();
-	ASSERT(unfinished.size() == 0);
+	ASSERT(unfinished.size() == 1);
+	for (const auto& [epochVersionCount, tagVersion] : unfinished) {
+		ASSERT(std::get<0>(epochVersionCount) == epoch1 && std::get<1>(epochVersionCount) == end1 &&
+		       std::get<2>(epochVersionCount) == 1);
+		ASSERT(tagVersion.size() == 1 && tagVersion.begin()->first == tag1 && tagVersion.begin()->second == begin1);
+	}
 
 	const int saved1 = 50, totalTags = 1;
 	WorkerBackupStatus status1(epoch1, saved1, tag1, totalTags);
