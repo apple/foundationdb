@@ -789,13 +789,31 @@ Future<Void> runWorkloadAsync(Database cx,
 	while (true) {
 		int action = 0;
 		co_await Choose()
-		    .When(workIface.setup.getFuture(), [&](ReplyPromise<Void> const& req) { setupReq = req; action = 1; })
-		    .When(workIface.start.getFuture(), [&](ReplyPromise<Void> const& req) { startReq = req; action = 2; })
+		    .When(workIface.setup.getFuture(),
+		          [&](ReplyPromise<Void> const& req) {
+			          setupReq = req;
+			          action = 1;
+		          })
+		    .When(workIface.start.getFuture(),
+		          [&](ReplyPromise<Void> const& req) {
+			          startReq = req;
+			          action = 2;
+		          })
 		    .When(workIface.check.getFuture(),
-		          [&](ReplyPromise<CheckReply> const& req) { checkReq = req; action = 3; })
+		          [&](ReplyPromise<CheckReply> const& req) {
+			          checkReq = req;
+			          action = 3;
+		          })
 		    .When(workIface.metrics.getFuture(),
-		          [&](ReplyPromise<std::vector<PerfMetric>> const& req) { metricsReq = req; action = 4; })
-		    .When(workIface.stop.getFuture(), [&](ReplyPromise<Void> const& r) { stopReq = r; action = 5; })
+		          [&](ReplyPromise<std::vector<PerfMetric>> const& req) {
+			          metricsReq = req;
+			          action = 4;
+		          })
+		    .When(workIface.stop.getFuture(),
+		          [&](ReplyPromise<Void> const& r) {
+			          stopReq = r;
+			          action = 5;
+		          })
 		    .run();
 
 		if (action == 5) {
@@ -969,9 +987,8 @@ Future<Void> testerServerCore(TesterInterface const& interf,
 	while (true) {
 		int action = 0;
 		WorkloadRequest workReq;
-		Future<Void> checkerDone = consistencyCheckerUrgentTester.second.isValid()
-		                               ? consistencyCheckerUrgentTester.second
-		                               : Never();
+		Future<Void> checkerDone =
+		    consistencyCheckerUrgentTester.second.isValid() ? consistencyCheckerUrgentTester.second : Never();
 
 		co_await Choose()
 		    .When(workerFatalError, [&](Void const&) { action = 1; })
@@ -1026,9 +1043,9 @@ Future<Void> testerServerCore(TesterInterface const& interf,
 						    .detail("ClientId", workReq.clientId)
 						    .detail("ClientCount", workReq.clientCount);
 					}
-					consistencyCheckerUrgentTester = std::make_pair(
-					    workReq.sharedRandomNumber,
-					    testerServerConsistencyCheckerUrgentWorkload(workReq, ccrCopy, dbInfoCopy));
+					consistencyCheckerUrgentTester =
+					    std::make_pair(workReq.sharedRandomNumber,
+					                   testerServerConsistencyCheckerUrgentWorkload(workReq, ccrCopy, dbInfoCopy));
 					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterWorkloadInitialized", interfCopy.id())
 					    .detail("ConsistencyCheckerId", consistencyCheckerUrgentTester.first)
 					    .detail("ClientId", workReq.clientId)
@@ -1660,9 +1677,8 @@ Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optional<Clus
 
 	while (true) {
 		Future<std::vector<WorkerDetails>> getWorkersReq =
-		    cc->get().present()
-		        ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
-		        : Future<std::vector<WorkerDetails>>(Never());
+		    cc->get().present() ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
+		                        : Future<std::vector<WorkerDetails>>(Never());
 		Future<Void> ccChange = cc->onChange();
 
 		int action = 0;
@@ -2600,9 +2616,8 @@ Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFu
 		req.knownServerInfoID = dbInfo->get().id;
 
 		Future<ServerDBInfo> getInfoReq =
-		    ccInterface->get().present()
-		        ? brokenPromiseToNever(ccInterface->get().get().getServerDBInfo.getReply(req))
-		        : Future<ServerDBInfo>(Never());
+		    ccInterface->get().present() ? brokenPromiseToNever(ccInterface->get().get().getServerDBInfo.getReply(req))
+		                                 : Future<ServerDBInfo>(Never());
 		Future<Void> ccChange = ccInterface->onChange();
 
 		int action = 0;
@@ -2622,8 +2637,7 @@ Future<Void> monitorServerDBInfo(Reference<AsyncVar<Optional<ClusterControllerFu
 			    .detail("ChangeID", gotInfo.id)
 			    .detail("MasterID", gotInfo.master.id())
 			    .detail("RatekeeperID", gotInfo.ratekeeper.present() ? gotInfo.ratekeeper.get().id() : UID())
-			    .detail("DataDistributorID",
-			            gotInfo.distributor.present() ? gotInfo.distributor.get().id() : UID());
+			    .detail("DataDistributorID", gotInfo.distributor.present() ? gotInfo.distributor.get().id() : UID());
 
 			gotInfo.myLocality = locality;
 			dbInfo->set(gotInfo);
@@ -3033,9 +3047,8 @@ Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterControllerFullIn
 
 	while (true) {
 		Future<std::vector<WorkerDetails>> getWorkersReq =
-		    cc->get().present()
-		        ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
-		        : Future<std::vector<WorkerDetails>>(Never());
+		    cc->get().present() ? brokenPromiseToNever(cc->get().get().getWorkers.getReply(GetWorkersRequest(flags)))
+		                        : Future<std::vector<WorkerDetails>>(Never());
 		Future<Void> ccChange = cc->onChange();
 
 		int action = 0;
@@ -3204,10 +3217,10 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecord,
 		urgentDbInfo = makeReference<AsyncVar<ServerDBInfo>>();
 		urgentCcMonitor = monitorServerDBInfo(cc, LocalityData(), urgentDbInfo); // FIXME: locality
 		urgentCx = openDBOnServer(urgentDbInfo);
-		tests =
-		    reportErrors(runConsistencyCheckerUrgentHolder(
-		                     cc, urgentCx, Optional<std::vector<TesterInterface>>(), minTestersExpectedCopy, /*repeatRun=*/true),
-		                 "runConsistencyCheckerUrgentHolder");
+		tests = reportErrors(
+		    runConsistencyCheckerUrgentHolder(
+		        cc, urgentCx, Optional<std::vector<TesterInterface>>(), minTestersExpectedCopy, /*repeatRun=*/true),
+		    "runConsistencyCheckerUrgentHolder");
 	} else if (atCopy == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
 		std::vector<TesterInterface> iTesters(1);
@@ -3215,19 +3228,18 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecord,
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(
 		    reportErrors(testerServerCore(iTesters[0], connRecordCopy, db, localityCopy), "TesterServerCore"));
-		tests = runTests(
-		    cc, ci, iTesters, testSet.testSpecs, startingConfigurationCopy, localityCopy, restartingTestCopy);
+		tests =
+		    runTests(cc, ci, iTesters, testSet.testSpecs, startingConfigurationCopy, localityCopy, restartingTestCopy);
 	} else {
-		tests = reportErrors(
-		    runTests(cc,
-		             ci,
-		             testSet.testSpecs,
-		             atCopy,
-		             minTestersExpectedCopy,
-		             startingConfigurationCopy,
-		             localityCopy,
-		             restartingTestCopy),
-		    "RunTests");
+		tests = reportErrors(runTests(cc,
+		                              ci,
+		                              testSet.testSpecs,
+		                              atCopy,
+		                              minTestersExpectedCopy,
+		                              startingConfigurationCopy,
+		                              localityCopy,
+		                              restartingTestCopy),
+		                     "RunTests");
 	}
 
 	Future<Void> actorsFuture = actors.empty() ? Never() : waitForAll(actors);

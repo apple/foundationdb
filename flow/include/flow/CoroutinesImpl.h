@@ -419,9 +419,7 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 
 	void setHandle(n_coroutine::coroutine_handle<> h) { coroActor.handle = h; }
 
-	void resume() {
-		coroActor.handle.resume();
-	}
+	void resume() { coroActor.handle.resume(); }
 
 	int8_t& waitState() { return coroActor.waitState(); }
 
