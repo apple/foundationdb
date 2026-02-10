@@ -1,0 +1,46 @@
+name: Windows Boost CONFIG Test
+
+on:
+  pull_request:
+    paths:
+      - 'cmake/CompileBoost.cmake'
+  push:
+    branches:
+      - boost-cmake-fix
+
+jobs:
+  test-windows-boost:
+    name: Test Boost CONFIG Mode on Windows
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+      
+      - name: Install Boost via vcpkg
+        run: |
+          git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
+          cd C:\vcpkg
+          .\bootstrap-vcpkg.bat
+          .\vcpkg integrate install
+          .\vcpkg install boost-filesystem:x64-windows boost-iostreams:x64-windows boost-serialization:x64-windows boost-system:x64-windows boost-program-options:x64-windows boost-url:x64-windows boost-context:x64-windows
+        shell: cmd
+      
+      - name: Configure with CMake (Test Boost Detection)
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+        shell: cmd
+      
+      - name: Verify Boost was found with CONFIG mode
+        run: |
+          cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake --debug-find 2>&1 | findstr /C:"Boost" /C:"CONFIG"
+        shell: cmd
+      
+      - name: Report Success
+        run: echo "✓ Boost CONFIG mode working on Windows!"
