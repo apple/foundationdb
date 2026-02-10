@@ -29,7 +29,7 @@
 `fdbcstat /usr/lib64/libfdb_c.so`
 ##### Collect all statistics for PID 12345 for 60 seconds with 10 second interval
 `fdbcstat /usr/lib64/libfdb_c.so -p 12345 -d 60 -i 10`
-##### Collect statitics only for get and commit
+##### Collect statistics only for get and commit
 `fdbcstat /usr/lib64/libfdb_c.so -f get,commit`
 
 ## Output Format
