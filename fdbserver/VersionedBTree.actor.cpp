@@ -2901,11 +2901,6 @@ public:
 		return readPhysicalPage(this, pageID, ioMaxPriority, true, PagerEventReasons::MetaData);
 	}
 
-	static bool isReadRequest(PagerEventReasons reason) {
-		return reason == PagerEventReasons::PointRead || reason == PagerEventReasons::FetchRange ||
-		       reason == PagerEventReasons::RangeRead || reason == PagerEventReasons::RangePrefetch;
-	}
-
 	// Reads the most recent version of pageID, either previously committed or written using updatePage()
 	// in the current commit
 	Future<Reference<ArenaPage>> readPage(PagerEventReasons reason,
@@ -10662,16 +10657,6 @@ struct KVSource {
 		} else {
 			return KeyRangeRef(b, a);
 		}
-	}
-
-	// TODO unused, remove?
-	// Like getKeyRef but gets a KeyRangeRef for two keys covering the given number of sorted adjacent prefixes
-	KeyRangeRef getRangeRef(int prefixesCovered, int suffixLen) {
-		prefixesCovered = std::min<int>(prefixesCovered, prefixes.size());
-		int i = deterministicRandom()->randomInt(0, prefixesSorted.size() - prefixesCovered);
-		Prefix* begin = prefixesSorted[i];
-		Prefix* end = prefixesSorted[i + prefixesCovered];
-		return KeyRangeRef(makeKey(*begin, suffixLen), makeKey(*end, suffixLen));
 	}
 
 	KeyRef getValue(int len) { return KeyRef(valueData).substr(0, len); }

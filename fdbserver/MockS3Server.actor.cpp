@@ -1535,13 +1535,6 @@ public:
 // Global registry to track registered servers and avoid conflicts
 static std::map<std::string, bool> registeredServers;
 
-// Clear global storage state for clean test runs
-static void clearSingletonState() {
-	getGlobalStorage().buckets.clear();
-	getGlobalStorage().multipartUploads.clear();
-	TraceEvent("MockS3ServerImpl_StateCleared");
-}
-
 // Process a Mock S3 request directly (for wrapping/chaos injection)
 Future<Void> processMockS3Request(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response) {
 	static MockS3ServerImpl serverInstance;
