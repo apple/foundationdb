@@ -190,7 +190,7 @@ Length: Variable
 Encoding: A big-endian integer encoding the length (1 byte for `0x34`, 2 bytes for `0x35`) followed by the given number of bytes.
 Status: Reserved
 
-This type was added to accomodate use cases that do not need range scans or deal with fixed-length identifiers, such as hashes and EC public keys.  
+This type was added to accommodate use cases that do not need range scans or deal with fixed-length identifiers, such as hashes and EC public keys.  
 This typecode only allows range searches if the length is known beforehand.
 
 Support is currently not included in the first-party bindings. 

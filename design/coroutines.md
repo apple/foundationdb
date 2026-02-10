@@ -366,8 +366,8 @@ The above coroutine returns a stream of random strings. The memory is owned by t
 a `StringRef` and then reuses the memory in the next iteration. This makes this generator very cheap to use, as it only
 does one allocation in its lifetime. With eager execution, this would be much harder to write (and reason about): the
 coroutine would immediately generate a string and then eagerly compute the next one when the string is retrieved.
-However, in Flow a `co_yield` is guarantee to suspend the coroutine until the value was consumed (this is not generally
-a guarantee with `co_yield` -- C++ coroutines give the implementor a great degree of freedom over decisions like this).
+However, in Flow a `co_yield` is guaranteed to suspend the coroutine until the value was consumed (this is not generally
+a guarantee with `co_yield` -- C++ coroutines give the implementer a great degree of freedom over decisions like this).
 
 ### Generators vs Promise Streams
 

@@ -54,7 +54,7 @@ How to use?
 -----------
 Currently, FDBCLI tools and low-level ManagementAPIs are provided to submit a job or clear a job. 
 These operations are achieved by issuing transactions to update the bulkdump metadata.
-Submitting a job is achieved by writting the job metadata to the bulkdump metadata range of the job.
+Submitting a job is achieved by writing the job metadata to the bulkdump metadata range of the job.
 When submitting a job, the API checks if there is any ongoing bulkdump job. If yes, it will reject the job. Otherwise, it accepts the job.
 Clearing a job is achieved by erasing the entire user range space of the bulkdump metadata range. When clearing a job, all metadata will be cleared and any ongoing task is stopped (with some latency).
 

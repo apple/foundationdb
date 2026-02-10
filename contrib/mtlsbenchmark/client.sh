@@ -6,7 +6,7 @@
 # test_remoteAddresses is set to connect to the server
 # test_targetDuration is set to 10 seconds for the client duration
 # test_connectionsOut is set to 10 for the number of outgoing connections
-# knob_disable_mainthread_tls_handshake is enabled to use backgound threads for TLS handshakes only
+# knob_disable_mainthread_tls_handshake is enabled to use background threads for TLS handshakes only
 # knob_tls_handshake_flowlock_priority is set to 8900 for enabling TLS flowlock priority as high as the handshake priority. Default is 7000.
 
 taskset -c 0-0 /root/build_output/bin/fdbserver \
