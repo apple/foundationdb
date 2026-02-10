@@ -1279,9 +1279,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
-ACTOR Future<Void> registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ClusterConnectionString cs) {
-	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
-
+void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 	const WorkerInterface& w = req.wi;
 	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
 	    req.processClass != ProcessClass::TesterClass) {
@@ -1291,20 +1289,13 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req, ClusterControllerDa
 		    .detail("WorkerId", w.id())
 		    .detail("ProcessId", w.locality.processId());
 		req.reply.sendError(invalid_cluster_id());
-		return Void();
+		return;
 	}
 
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-
-	bool isCoordinator =
-	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.address()) !=
-	     coordinatorAddresses.end()) ||
-	    (w.secondaryAddress().present() &&
-	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
-	         coordinatorAddresses.end());
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -1470,8 +1461,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req, ClusterControllerDa
 	if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
 		req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
 	}
-
-	return Void();
 }
 
 #define TIME_KEEPER_VERSION "1"_sr
@@ -2897,7 +2886,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			self.addActor.send(registerWorker(req, &self, coordinators.ccr->getConnectionString()));
+			registerWorker(req, &self);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
