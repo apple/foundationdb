@@ -166,7 +166,7 @@ class _ScopeLinter:
                 f"No {SCOPING_BEGIN_PUNCTUATION} matching {SCOPING_END_PUNCTUATION}, found {start_token.spelling}",
             )
         self._debug_token(
-            start_token, f"Exitting scope starting from line {start_token.line}"
+            start_token, f"Exiting scope starting from line {start_token.line}"
         )
         self._scope_stack.pop()
 
@@ -190,7 +190,7 @@ class _ScopeLinter:
             self._scope_stack.append(token)
             return None
         elif self._is_scope_end(token):
-            self._debug_token(token, "Exitting scope")
+            self._debug_token(token, "Exiting scope")
             return self._exit_scope(token)
         elif self._is_scoping_keyword(token):
             self._debug_token(token, "Keyword found")

@@ -45,7 +45,7 @@ with open(args.input) as f:
 swiftCompilationCommands = {}
 
 if len(args.ninjatool) > 0:
-    print("aquiring Swift compile commands using {}".format(args.ninjatool))
+    print("acquiring Swift compile commands using {}".format(args.ninjatool))
     try:
         ninjaInvocation = subprocess.run([args.ninjatool, "-t", "compdb"], cwd=args.builddir, capture_output=True)
         ninjaCMDs = json.loads(ninjaInvocation.stdout.decode('utf-8'))
@@ -67,7 +67,7 @@ if len(args.ninjatool) > 0:
             for cmdFile in filesInCmd:
                 swiftCompilationCommands[cmdFile] = {'file': cmdFile, 'command': cmd, 'directory': fileCmd['directory']}
     except:
-        print("error: failed to aquire Swift compilation commands")
+        print("error: failed to acquire Swift compilation commands")
 
 result = []
 
