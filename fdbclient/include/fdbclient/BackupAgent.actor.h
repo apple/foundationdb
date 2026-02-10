@@ -57,6 +57,7 @@ FDB_BOOLEAN_PARAM(CheckBackupUID);
 FDB_BOOLEAN_PARAM(DeleteData);
 FDB_BOOLEAN_PARAM(SetValidation);
 FDB_BOOLEAN_PARAM(PartialBackup);
+FDB_BOOLEAN_PARAM(ReadLowPriority);
 
 extern Optional<std::string> fileBackupAgentProxy;
 
@@ -592,7 +593,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  KeyRangeRef range,
                                  Terminator terminator = Terminator::True,
                                  AccessSystemKeys systemAccess = AccessSystemKeys::False,
-                                 LockAware lockAware = LockAware::False);
+                                 LockAware lockAware = LockAware::False,
+                                 ReadLowPriority readLowPriority = ReadLowPriority::False);
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RCGroup> results,
                                  Future<Void> active,
@@ -601,7 +603,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
                                  Terminator terminator = Terminator::True,
                                  AccessSystemKeys systemAccess = AccessSystemKeys::False,
-                                 LockAware lockAware = LockAware::False);
+                                 LockAware lockAware = LockAware::False,
+                                 ReadLowPriority readLowPriority = ReadLowPriority::False);
 
 // Applies the mutations between the beginVersion and endVersion to the database during a restore.
 ACTOR Future<Void> applyMutations(Database cx,
