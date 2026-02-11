@@ -255,10 +255,15 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	return ret;
 }
 
-CertAndKeyRef CertAndKeyRef::make(Arena& arena, CertSpecRef spec, CertAndKeyRef issuerPem) {
+CertAndKeyRef CertAndKeyRef::make(Arena& arena, CertSpecRef spec, CertAndKeyRef issuerPem, StringRef password) {
 	auto issuer = CertAndKeyNative::fromPem(issuerPem);
 	auto newCertAndKey = makeCertNative(spec, issuer);
-	return newCertAndKey.toPem(arena);
+	auto certPem = newCertAndKey.toPem(arena);
+	if (!password.empty()) {
+		auto keyPem = newCertAndKey.privateKey.writePemWithPassword(arena, password);
+		certPem = CertAndKeyRef{ certPem.certPem, keyPem };
+	}
+	return certPem;
 }
 
 CertSpecRef CertSpecRef::make(Arena& arena, CertKind kind) {
@@ -368,6 +373,11 @@ StringRef CertKind::getCommonName(StringRef prefix, Arena& arena) const {
 	} else {
 		return prefix.withSuffix(side, arena);
 	}
+}
+
+CertAndKeyRef makePasswCert(Arena& arena, StringRef password) {
+	auto spec = CertSpecRef::make(arena, CertKind(Server{}));
+	return CertAndKeyRef::make(arena, spec, CertAndKeyRef{}, password);
 }
 
 } // namespace mkcert
