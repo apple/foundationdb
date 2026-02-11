@@ -197,6 +197,16 @@ struct ProxyCommitData {
 	Promise<Void> validState; // Set once txnStateStore and version are valid
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;
+	
+	// Range-partitioned backup support
+	struct BackupPartition {
+		int partitionId;
+		Tag backupTag;
+		
+		BackupPartition() : partitionId(-1) {}
+		BackupPartition(int id, Tag tag) : partitionId(id), backupTag(tag) {}
+	};
+	KeyRangeMap<BackupPartition> backupPartitionMap;
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
@@ -305,6 +315,16 @@ struct ProxyCommitData {
 		return SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE && !SERVER_KNOBS->ENABLE_VERSION_VECTOR &&
 		       !SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	}
+	
+	// Update backup partition mapping for range-partitioned backup
+	void updateBackupPartitionMap(const KeyRange& range, int partitionId, Tag backupTag) {
+		backupPartitionMap.insert(range, BackupPartition(partitionId, backupTag));
+	}
+	
+	// Clear backup partition mapping for a range
+	void clearBackupPartitionMap(const KeyRange& range) {
+		backupPartitionMap.insert(range, BackupPartition());
+	}
 
 	ProxyCommitData(UID dbgid,
 	                MasterInterface master,
@@ -333,7 +353,10 @@ struct ProxyCommitData {
 	                         getCommitProxyAccumulativeChecksumIndex(commitProxyIndex))
 	                   : nullptr),
 	    lastShardMove(invalidVersion), epoch(epoch) {
-		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
+	 commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
+	 
+	 // Initialize backup partition map with default empty partition
+	 backupPartitionMap.insert(allKeys, BackupPartition());
 	}
 };
 struct RangeLock {

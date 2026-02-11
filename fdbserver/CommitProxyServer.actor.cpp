@@ -712,6 +712,14 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				auto& tags = pProxyCommitData->tagsForKey(m.param1);
 				transactionTags.insert(tags.begin(), tags.end());
+				
+				// Add partition-based backup routing for single key mutations
+				if (shouldBackup(m)) {
+					auto partitionRange = pProxyCommitData->backupPartitionMap.rangeContaining(m.param1);
+					if (partitionRange.value().partitionId >= 0) {
+						transactionTags.insert(partitionRange.value().backupTag);
+					}
+				}
 			} else if (m.type == MutationRef::ClearRange) {
 				auto range = pProxyCommitData->keyInfo.rangeContaining(m.param1);
 				if (range.end() >= m.param2) {
@@ -726,7 +734,17 @@ std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
 						++range;
 					}
 				}
-				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				
+				// Add partition-based backup routing for range mutations
+				if (shouldBackup(m)) {
+					KeyRangeRef clearRange(m.param1, m.param2);
+					auto partitionRanges = pProxyCommitData->backupPartitionMap.intersectingRanges(clearRange);
+					for (auto& partitionRange : partitionRanges) {
+						if (partitionRange.value().partitionId >= 0) {
+							transactionTags.insert(partitionRange.value().backupTag);
+						}
+					}
+				}
 			} else {
 				UNREACHABLE();
 			}
