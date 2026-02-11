@@ -280,6 +280,10 @@ public:
 	    IncludeKeyRangeMap includeKeyRangeMap,
 	    Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) = 0;
 
+	// Write a partition map file which contains the mapping of tags and partition info (e.g. key ranges and partition
+	// id).
+	virtual Future<Void> writePartitionMapFile(Version v, std::string contents) = 0;
+
 	// Open a file for read by name
 	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;
 
