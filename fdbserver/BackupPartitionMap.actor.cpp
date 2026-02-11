@@ -18,12 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/DDShardTracker.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<std::vector<KeyRange>> calculateBackupPartitions(DataDistributionTracker* self) {
+// KeyRangeMap guarantees that key ranges are contiguous with no gaps in shards.
+ACTOR Future<std::vector<KeyRange>> calculateBackupPartitions(KeyRangeMap<ShardTrackedData>* shards) {
 	// TODO akanksha: Hardcoded for now.
 	state const int NUM_PARTITIONS = 100;
 	state std::vector<std::pair<KeyRange, int64_t>> userShards; // Pair of shard key range and shard size in bytes.
@@ -35,13 +34,13 @@ ACTOR Future<std::vector<KeyRange>> calculateBackupPartitions(DataDistributionTr
 		state Future<Void> onChange;
 		userShards.clear();
 		totalBytes = 0;
-		for (auto it : self->shards->intersectingRanges(normalKeys)) {
+		for (auto it : shards->intersectingRanges(normalKeys)) {
 			// Await trackShardMetrics to populate stats in cache (waits for notification from background actor, no
 			// RPC).
 			if (!it->value().stats->get().present()) {
 				onChange = it->value().stats->onChange();
 				needWait = true;
-				TraceEvent("BackupPartitionMapShardMetricsWait")
+				TraceEvent("BackupPartitionShardMetricsWait")
 				    .detail("ShardBegin", it->range().begin)
 				    .detail("ShardEnd", it->range().end);
 				break;
@@ -74,39 +73,6 @@ ACTOR Future<std::vector<KeyRange>> calculateBackupPartitions(DataDistributionTr
 	return partitions;
 }
 
-DataDistributionTracker* createTestTracker(KeyRangeMap<ShardTrackedData>* testShards) {
-	// Keep these alive long enough
-	static UID distId = deterministicRandom()->randomUniqueID();
-	static Promise<Void> readyPromise;
-	static PromiseStream<RelocateShard> output;
-
-	static Reference<ShardsAffectedByTeamFailure> sabTF = makeReference<ShardsAffectedByTeamFailure>();
-	static Reference<PhysicalShardCollection> psc = makeReference<PhysicalShardCollection>();
-	static Reference<BulkLoadTaskCollection> bltc = makeReference<BulkLoadTaskCollection>(distId);
-	static Reference<AsyncVar<bool>> anyZero = makeReference<AsyncVar<bool>>(false);
-	static bool cancelled = false;
-
-	DataDistributionTrackerInitParams params{ .db = Reference<IDDTxnProcessor>(),
-		                                      .distributorId = distId,
-		                                      .readyToStart = readyPromise,
-		                                      .output = output,
-		                                      .shardsAffectedByTeamFailure = sabTF,
-		                                      .physicalShardCollection = psc,
-		                                      .bulkLoadTaskCollection = bltc,
-		                                      .anyZeroHealthyTeams = anyZero,
-		                                      .shards = testShards,
-		                                      .trackerCancelled = &cancelled,
-		                                      .usableRegions = 1 };
-
-	auto* tracker = new DataDistributionTracker(params);
-
-	if (!tracker->readyToStart.isSet()) {
-		tracker->readyToStart.send(Void());
-	}
-
-	return tracker;
-}
-
 TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/NoUserShards") {
 	ShardTrackedData defaultData;
 	StorageMetrics zeroMetrics;
@@ -123,13 +89,11 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/NoUserShards") {
 	systemData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(zeroShard);
 	shards.insert(systemKeys, systemData);
 
-	DataDistributionTracker* tracker = createTestTracker(&shards);
-	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(&shards));
 
 	ASSERT(partitions.size() == 1);
 	ASSERT(partitions[0].begin == normalKeys.begin);
 	ASSERT(partitions[0].end == normalKeys.end);
-
 	return Void();
 }
 
@@ -145,12 +109,10 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/SingleShard") {
 	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
 	shards.insert(normalKeys, data);
 
-	DataDistributionTracker* tracker = createTestTracker(&shards);
-	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(&shards));
 	ASSERT(partitions.size() == 1);
 	ASSERT(partitions[0].begin == normalKeys.begin);
 	ASSERT(partitions[0].end == normalKeys.end);
-
 	return Void();
 }
 
@@ -162,12 +124,10 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/VaryingSizes") {
 	state Key key2 = "b"_sr;
 	state Key key3 = "c"_sr;
 	state Key key4 = normalKeys.end;
-
 	std::vector<std::pair<KeyRange, int64_t>> testShards = { { KeyRangeRef(normalKeys.begin, key1), 50000 },
 		                                                     { KeyRangeRef(key1, key2), 200000 },
 		                                                     { KeyRangeRef(key2, key3), 10000 },
 		                                                     { KeyRangeRef(key3, key4), 90000 } };
-
 	for (const auto& shard : testShards) {
 		ShardTrackedData data;
 		StorageMetrics metrics;
@@ -176,9 +136,7 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/VaryingSizes") {
 		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
 		shards.insert(shard.first, data);
 	}
-
-	DataDistributionTracker* tracker = createTestTracker(&shards);
-	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(&shards));
 
 	ASSERT(partitions.size() == 4);
 	ASSERT(partitions[0].begin == normalKeys.begin);
@@ -189,7 +147,6 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/VaryingSizes") {
 	ASSERT(partitions[2].end == key3);
 	ASSERT(partitions[3].begin == key3);
 	ASSERT(partitions[3].end == key4);
-
 	return Void();
 }
 
@@ -213,15 +170,12 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/ZeroSizeShards") {
 		data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
 		shards.insert(shard.first, data);
 	}
-
-	DataDistributionTracker* tracker = createTestTracker(&shards);
-	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(&shards));
 	ASSERT(partitions.size() == 2);
 	ASSERT(partitions[0].begin == normalKeys.begin);
 	ASSERT(partitions[0].end == key2);
 	ASSERT(partitions[1].begin == key2);
 	ASSERT(partitions[1].end == normalKeys.end);
-
 	return Void();
 }
 
@@ -241,24 +195,20 @@ ACTOR Future<Void> testAsyncMetricsUpdate() {
 	dataWithMetrics.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
 	shards.insert(KeyRangeRef(splitKey, normalKeys.end), dataWithMetrics);
 
-	state DataDistributionTracker* tracker = createTestTracker(&shards);
-	state Future<std::vector<KeyRange>> resultFuture = calculateBackupPartitions(tracker);
+	state Future<std::vector<KeyRange>> resultFuture = calculateBackupPartitions(&shards);
 
 	wait(delay(0.1));
 	ASSERT(!resultFuture.isReady());
-
 	StorageMetrics newMetrics;
 	newMetrics.bytes = 50000;
 	ShardMetrics newShardMetrics(newMetrics, 0.0, 1);
 	shards.rangeContaining(normalKeys.begin)->value().stats->set(newShardMetrics);
-
 	std::vector<KeyRange> partitions = wait(resultFuture);
 	ASSERT(partitions.size() == 2);
 	ASSERT(partitions[0].begin == normalKeys.begin);
 	ASSERT(partitions[0].end == splitKey);
 	ASSERT(partitions[1].begin == splitKey);
 	ASSERT(partitions[1].end == normalKeys.end);
-
 	return Void();
 }
 
@@ -287,8 +237,7 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/MultipleSmallShards") {
 		shards.insert(KeyRangeRef(start, end), data);
 	}
 
-	DataDistributionTracker* tracker = createTestTracker(&shards);
-	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(tracker));
+	std::vector<KeyRange> partitions = wait(calculateBackupPartitions(&shards));
 
 	ASSERT(partitions.size() == 100);
 	ASSERT(partitions[0].begin == normalKeys.begin);
@@ -296,6 +245,5 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitions/MultipleSmallShards") {
 	for (int i = 1; i < partitions.size(); i++) {
 		ASSERT(partitions[i - 1].end == partitions[i].begin);
 	}
-
 	return Void();
 }
