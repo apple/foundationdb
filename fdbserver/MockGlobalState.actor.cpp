@@ -34,6 +34,7 @@ public:
 	                                                                                 int shardLimit,
 	                                                                                 int expectedShardCount) {
 		state Version version = 0;
+		state int wrongShardRetries = 0;
 		loop {
 			auto locations = mgs->getKeyRangeLocations(keys,
 			                                           shardLimit,
@@ -65,11 +66,20 @@ public:
 				    .detail("Present", res.present());
 
 				if (res.present()) {
+					wrongShardRetries = 0;
 					return std::make_pair(res, -1);
 				}
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "MGSWaitStorageMetricsHandleError").error(e);
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+					if (++wrongShardRetries > CLIENT_KNOBS->STORAGE_METRICS_WRONG_SHARD_MAX_RETRIES) {
+						CODE_PROBE(true, "MGS waitStorageMetrics gave up after persistent wrong_shard_server");
+						TraceEvent(SevWarnAlways, "MGSWaitStorageMetricsWrongShardGaveUp")
+						    .detail("Keys", keys)
+						    .detail("Retries", wrongShardRetries)
+						    .detail("ErrorCode", e.code());
+						return std::make_pair(Optional<StorageMetrics>(StorageMetrics()), -1);
+					}
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 				} else if (e.code() == error_code_future_version) {
 					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
@@ -1212,5 +1222,45 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 			ASSERT_GT(res.first.get().bytesWrittenPerKSecond, 0);
 		}
 	}
+	return Void();
+}
+
+TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsWrongShardRetryLimit") {
+	// Test that waitStorageMetrics returns zero metrics after exceeding the retry limit
+	// for persistent wrong_shard_server errors, rather than spinning forever.
+	// This simulates the production scenario where keyServers entries point to SS
+	// that no longer own the shard (stale shard map).
+	BasicTestConfig testConfig;
+	testConfig.simpleConfig = true;
+	testConfig.minimumReplication = 1;
+	testConfig.logAntiQuorum = 0;
+
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
+
+	// Mark allKeys as unreadable on every mock server, so all WaitMetricsRequests
+	// get wrong_shard_server — simulating a stale keyServers entry.
+	for (auto& [id, server] : mgs->allServers) {
+		server->forceUnreadableRanges.push_back(allKeys);
+	}
+
+	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
+
+	state double startTime = now();
+	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
+	std::pair<Optional<StorageMetrics>, int> res =
+	    wait(mgs->waitStorageMetrics(allKeys, bounds.min, bounds.max, bounds.permittedError, 1, 1));
+
+	// Should return present (zero) metrics after giving up, not spin forever
+	ASSERT(res.first.present());
+	ASSERT_EQ(res.first.get().bytes, 0);
+	ASSERT_EQ(res.second, -1);
+
+	// Should complete quickly (retries * delay), not hang
+	double elapsed = now() - startTime;
+	ASSERT_LT(elapsed, 30.0);
+
 	return Void();
 }
