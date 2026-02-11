@@ -814,12 +814,6 @@ size_t TwoBuffers::getBufferSize() {
 	return buffers[cur]->size;
 }
 
-static double testKeyToDouble(const KeyRef& p) {
-	uint64_t x = 0;
-	sscanf(p.toString().c_str(), "%" SCNx64, &x);
-	return *(double*)&x;
-}
-
 // only one readNextBlock can be run at a single time, otherwie the same block might be loaded twice
 ACTOR Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int index) {
 	state Reference<IAsyncFile> asyncFile;
@@ -6785,8 +6779,6 @@ struct LogInfo : public ReferenceCounted<LogInfo> {
 
 class FileBackupAgentImpl {
 public:
-	static constexpr int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
-
 	// Parallel restore
 	ACTOR static Future<Void> parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB = UnlockDB::True) {
 		state ReadYourWritesTransaction tr(cx);

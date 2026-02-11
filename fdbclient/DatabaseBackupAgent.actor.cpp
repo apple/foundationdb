@@ -2426,8 +2426,6 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 
 class DatabaseBackupAgentImpl {
 public:
-	static constexpr int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
-
 	ACTOR static Future<Void> waitUpgradeToLatestDrVersion(DatabaseBackupAgent* backupAgent, Database cx, Key tagName) {
 		state UID logUid = wait(backupAgent->getLogUid(cx, tagName));
 		state Key drVersionKey = backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
