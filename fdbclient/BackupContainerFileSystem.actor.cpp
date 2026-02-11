@@ -784,24 +784,26 @@ public:
 
 			desc.snapshotBytes += s.totalSize;
 
-			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
-			// TODO:  Somehow check / report if the restorable range is not or may not be contiguous.
-			if (s.beginVersion == s.endVersion &&
-			    (!desc.contiguousLogEnd.present() || // no logs
-			     (desc.contiguousLogEnd.present() &&
-			      desc.contiguousLogEnd.get() >= s.beginVersion)) // have logs, then should cover snapshot
-			) {
-				if (!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
-					desc.minRestorableVersion = s.endVersion;
-
-				if (!desc.maxRestorableVersion.present() || s.endVersion > desc.maxRestorableVersion.get())
-					desc.maxRestorableVersion = s.endVersion;
+			// If the snapshot is at a single version and then it requires no logs.  Update min and max restorable.
+			// Update only if minRestorableVersion and maxRestorableVersion are not set. If they are set, we should
+			// check for log continuity between current minRestorableVersion to s.endVersion which happens in the
+			// next if block.
+			if (s.beginVersion == s.endVersion && !desc.minRestorableVersion.present() &&
+			    !desc.maxRestorableVersion.present()) {
+				desc.minRestorableVersion = s.endVersion;
+				desc.maxRestorableVersion = s.endVersion;
 			}
 
 			// If the snapshot is covered by the contiguous log chain then update min/max restorable.
 			if (desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() &&
 			    s.endVersion < desc.contiguousLogEnd.get()) {
-				if (!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
+				// If minRestorableVersion not present, update minRestorableVersion to snapshot endVersion.
+				// If minRestorableVersion present and if it has continuous logs from minRestorableVersion
+				// to snapshot endVersion, don't update the minRestorableVersion.
+				// Else, means it has no continous logs, so update minRestorableVersion to s.endVersion.
+				if (!desc.minRestorableVersion.present() ||
+				    !(desc.minRestorableVersion.get() >= desc.minLogBegin.get() &&
+				      desc.minRestorableVersion.get() < desc.contiguousLogEnd.get()))
 					desc.minRestorableVersion = s.endVersion;
 
 				if (!desc.maxRestorableVersion.present() ||
@@ -817,8 +819,6 @@ public:
 			     (desc.contiguousLogEnd.get() == s.beginVersion && s.beginVersion != s.endVersion)) &&
 			    s.restorable.get()) {
 				if (desc.minRestorableVersion.present() && desc.maxRestorableVersion.present()) {
-					ASSERT(desc.minRestorableVersion.get() < s.beginVersion);
-
 					// check if we have contiguous logs from minRestorableVersion to current snapshot endVersion
 					bool contiguousLogs = false;
 					if (desc.partitioned)
