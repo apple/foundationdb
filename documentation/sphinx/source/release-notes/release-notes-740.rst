@@ -2,12 +2,10 @@
 Release Notes
 #############
 
-7.4.7
-=====
-* Same as 7.4.6 release with AVX enabled.
-
 7.4.6
 =====
+
+AVX enabled release.
 
 * Fixed a restore stuck bug where readLogData() errors were not propagated correctly. `(PR #12433) <https://github.com/apple/foundationdb/pull/12433>`_
 * Fixed FdbDecode memory issues. `(PR #12495) <https://github.com/apple/foundationdb/pull/12495>`_
