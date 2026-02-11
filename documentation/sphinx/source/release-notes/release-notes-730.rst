@@ -2,6 +2,23 @@
 Release Notes
 #############
 
+7.3.75
+======
+* Same as 7.3.74 release with AVX enabled.
+
+7.3.74
+======
+* Update rocksdb version to 8.11.5. `(PR #12690) <https://github.com/apple/foundationdb/pull/12690>`_
+
+7.3.73
+======
+* Same as 7.3.72 release with AVX enabled.
+
+7.3.72
+======
+* Added backup encryption support and related status/CLI improvements. `(PR #12580) <https://github.com/apple/foundationdb/pull/12580>`_, `(PR #12590) <https://github.com/apple/foundationdb/pull/12590>`_, `(PR #12621) <https://github.com/apple/foundationdb/pull/12621>`_, and `(PR #12658) <https://github.com/apple/foundationdb/pull/12658>`_
+* Fixed a backup decode range file bug when interpreting keys and values. `(PR #12399) <https://github.com/apple/foundationdb/pull/12399>`_
+
 7.3.71
 ======
 * Same as 7.3.71 release with AVX enabled.
