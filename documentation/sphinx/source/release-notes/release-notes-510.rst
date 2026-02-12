@@ -27,7 +27,7 @@ Fixes
 * The consistency check calculated the size of the database inefficiently. <rdar://problem/38385230>
 * Could not create new directories with the Python and Ruby implementations of the directory layer. <rdar://problem/38911902> <rdar://problem/38477474>
 * fdbcli could erroneously report that it was incompatible with some processes in the cluster. <rdar://problem/39353867>
-* The commit commmand in fdbcli did not wait for the result of the commit before continuing to the next command.
+* The commit command in fdbcli did not wait for the result of the commit before continuing to the next command.
 
 
 Other Changes

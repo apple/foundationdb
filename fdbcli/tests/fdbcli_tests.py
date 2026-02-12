@@ -285,7 +285,7 @@ def lockAndUnlock(logger):
         env=fdbcli_env,
     )
     process.stdout.readline()
-    # The randome passphrease we need to confirm to proceed the unlocking
+    # The random passphrase we need to confirm to proceed the unlocking
     line2 = process.stdout.readline()
     logger.debug("Random passphrase: {}".format(line2))
     output3, err = process.communicate(input=line2)
@@ -1007,7 +1007,7 @@ if __name__ == "__main__":
         lockAndUnlock()
         maintenance()
         profile()
-        # TODO: reenable it until it's stable
+        # TODO: re-enable it until it's stable
         # suspend()
         transaction()
         # this is replaced by the "quota" command

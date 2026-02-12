@@ -40,7 +40,7 @@ class ApiVersion {
 	int _version;
 
 public:
-	// Statics.
+	// Static members.
 	constexpr static int LATEST_VERSION = @FDB_AV_LATEST_VERSION@;
 
 	constexpr explicit ApiVersion(int version) : _version(version) {}

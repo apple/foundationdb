@@ -21,7 +21,7 @@ if(benchmark_FOUND)
   target_link_libraries(flowbench benchmark::benchmark)
 else()
   ## This seems to be copy-pasted from the the google benchmark documentation.
-  ## It breaks if you attempt to re-use a build of googlebenchmark across FDB
+  ## It breaks if you attempt to reuse a build of googlebenchmark across FDB
   ## builds.
 
   # include the configurations from benchmark.cmake

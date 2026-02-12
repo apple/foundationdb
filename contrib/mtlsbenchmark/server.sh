@@ -7,7 +7,7 @@
 # test_targetDuration is set to 0 for indefinite server run
 # knob_tls_handshake_limit is set to 1000 to limit the number of concurrent TLS
 # knob_tls_server_handshake_threads is set to 1 to use one thread for TLS handshakes
-# knob_disable_mainthread_tls_handshake is enabled to use backgound threads for TLS handshakes only
+# knob_disable_mainthread_tls_handshake is enabled to use background threads for TLS handshakes only
 # knob_tls_handshake_flowlock_priority is set to 8900 for enabling TLS flowlock priority as high as the handshake priority. Default is 7000.
 # knob_tls_handshake_timeout_seconds is set to 3.0 seconds to timeout a handshake if not completed in 3 seconds. The default is 2.0 seconds.
 

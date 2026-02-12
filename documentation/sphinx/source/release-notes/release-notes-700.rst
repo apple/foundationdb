@@ -46,7 +46,7 @@ Performance
 Reliability
 -----------
 * Backup agents now pause themselves upon a successful snapshot recovery to avoid unintentional data corruption. Operators should manually abort backup agents and clear the backup agent keyspace to avoid using the old cluster's backup configuration. `(PR #4027) <https://github.com/apple/foundationdb/pull/4027>`_
-* Log class processes are prioritized above transaction class proceses for becoming tlogs. `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_ 
+* Log class processes are prioritized above transaction class processes for becoming tlogs. `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_ 
 * Improved worker recruitment logic to avoid unnecessary recoveries when processes are added or removed from a cluster. `(PR #4695) <https://github.com/apple/foundationdb/pull/4695>`_ `(PR #4631) <https://github.com/apple/foundationdb/pull/4631>`_ `(PR #4509) <https://github.com/apple/foundationdb/pull/4509>`_
 
 Fixes
