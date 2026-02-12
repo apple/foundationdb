@@ -1364,6 +1364,36 @@ struct WorkerBackupStatus {
 	}
 };
 
+// Range-partitioned backup metadata structures
+struct BackupPartitionInfo {
+	int partitionId;
+	KeyRange range;
+	Tag backupTag;
+	
+	BackupPartitionInfo() : partitionId(-1) {}
+	BackupPartitionInfo(int id, KeyRange r, Tag tag) : partitionId(id), range(r), backupTag(tag) {}
+	
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, partitionId, range, backupTag);
+	}
+};
+
+struct BackupPartitionConfig {
+	UID backupUID;
+	int numPartitions;
+	std::vector<BackupPartitionInfo> partitions;
+	bool enabled;
+	
+	BackupPartitionConfig() : numPartitions(0), enabled(false) {}
+	BackupPartitionConfig(UID uid, int num, bool en) : backupUID(uid), numPartitions(num), enabled(en) {}
+	
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, backupUID, numPartitions, partitions, enabled);
+	}
+};
+
 enum class TransactionPriority : uint8_t { BATCH, DEFAULT, IMMEDIATE, MIN = BATCH, MAX = IMMEDIATE };
 
 const std::array<TransactionPriority, (int)TransactionPriority::MAX + 1> allTransactionPriorities = {
