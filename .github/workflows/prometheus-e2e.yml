@@ -18,6 +18,9 @@ jobs:
 
       - name: Install dependencies
         run: |
+            dnf install -y 'dnf-command(config-manager)'
+            dnf config-manager --set-enabled crb
+            dnf install -y epel-release
             dnf install -y git cmake ninja-build gcc-c++ 
 
       - name: Configure CMake
