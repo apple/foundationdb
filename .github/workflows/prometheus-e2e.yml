@@ -8,49 +8,61 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  test-simulation:
+  test-linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux RHEL 9
-            os: ubuntu-latest
-            container: foundationdb/build:rockylinux9-latest
-            cmake_flags: ""
+            image: foundationdb/build:rockylinux9-latest
           - name: Linux CentOS 7
-            os: ubuntu-latest
-            container: foundationdb/build:centos7-latest
-            cmake_flags: ""
-          - name: macOS 13
-            os: macos-13
-            container: null
-            cmake_flags: "-DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)"
-
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
-
+            image: foundationdb/build:centos7-latest
+    container: ${{ matrix.image }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies (Linux)
-        if: runner.os == 'Linux'
+      - name: Install dependencies
         run: |
             dnf install -y 'dnf-command(config-manager)'
-            dnf config-manager --set-enabled crb
-            dnf install -y epel-release
+            dnf config-manager --set-enabled crb || true
+            dnf install -y epel-release || true
             dnf install -y git cmake ninja-build gcc-c++ 
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-            brew install cmake ninja boost openssl@3 mono
 
       - name: Configure CMake
         run: |
           mkdir build
           cd build
-          cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON ${{ matrix.cmake_flags }} ..
+          cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON ..
+
+      - name: Build fdbserver
+        run: |
+          cd build
+          ninja fdbserver
+
+      - name: Run Prometheus Simulation Test
+        run: |
+          cd build
+          ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
+
+  test-macos:
+    name: macOS 13
+    runs-on: macos-13
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+            brew install cmake ninja boost openssl@3
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) ..
 
       - name: Build fdbserver
         run: |
