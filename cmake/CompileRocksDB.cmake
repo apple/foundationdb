@@ -115,16 +115,8 @@ set(RocksDB_CMAKE_ARGS
     -DCMAKE_POSITION_INDEPENDENT_CODE=True)
 
 if(ROCKSDB_FOUND)
-  ExternalProject_Add(rocksdb
-    SOURCE_DIR "${RocksDB_ROOT}"
-    DOWNLOAD_COMMAND ""
-    CMAKE_ARGS ${RocksDB_CMAKE_ARGS}
-    BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
-    INSTALL_COMMAND ""
-  )
-
-  ExternalProject_Get_Property(rocksdb BINARY_DIR)
-  set(ROCKSDB_LIBRARIES ${BINARY_DIR}/librocksdb.a)
+  set(ROCKSDB_LIBRARIES ${ROCKSDB_LIBRARY})
+  add_custom_target(rocksdb DEPENDS ${ROCKSDB_LIBRARIES} ${ROCKSDB_INCLUDE_DIR})
 else()
   # Determine download URL and hash based on whether using commit hash or version
   if(ROCKSDB_GIT_HASH)
@@ -145,7 +137,8 @@ else()
     message(STATUS "Building RocksDB version: ${ROCKSDB_VERSION}")
   endif()
 
-  ExternalProject_Add(rocksdb
+  ExternalProject_Add(
+    rocksdb
     URL ${ROCKSDB_DOWNLOAD_URL}
     ${ROCKSDB_URL_HASH_ARG}
     CMAKE_ARGS ${RocksDB_CMAKE_ARGS}
