@@ -58,7 +58,7 @@ jobs:
             mkdir -p build &&
             cd build &&
             cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
-            ninja fdbserver &&
+            ninja -j2 fdbserver &&
             ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
           "
 
@@ -83,7 +83,7 @@ jobs:
       - name: Build fdbserver
         run: |
           cd build
-          ninja fdbserver
+          ninja -j2 fdbserver
 
       - name: Run Prometheus Simulation Test
         run: |
