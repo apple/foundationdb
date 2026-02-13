@@ -75,6 +75,9 @@
 #include "fdbserver/OnDemandStore.h"
 #include "fdbserver/MockS3Server.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#ifdef WITH_ROCKSDB
+#include "fdbserver/FDBRocksDBVersion.h"
+#endif
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Platform.h"
@@ -581,6 +584,17 @@ static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("source version %s\n", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
+#ifdef WITH_ROCKSDB
+	if (FDB_ROCKSDB_GIT_HASH[0] != '\0') {
+		printf("rocksdb %d.%d.%d (commit %s)\n",
+		       FDB_ROCKSDB_MAJOR,
+		       FDB_ROCKSDB_MINOR,
+		       FDB_ROCKSDB_PATCH,
+		       FDB_ROCKSDB_GIT_HASH);
+	} else {
+		printf("rocksdb %d.%d.%d\n", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH);
+	}
+#endif
 }
 
 static void printHelpTeaser(const char* name) {
