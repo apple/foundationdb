@@ -36,10 +36,13 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
+#include "flow/BooleanParam.h"
 #include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+FDB_BOOLEAN_PARAM(DDEventPrimary);
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
@@ -1852,8 +1855,7 @@ public:
 				std::swap(regions[0], regions[1]);
 			}
 
-			if (regions[1].dcId == clusterControllerDcId.get() &&
-			    (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
+			if (regions[1].dcId == clusterControllerDcId.get() && !canFailoverByVersionDifference()) {
 				if (regions[1].priority >= 0) {
 					TraceEvent("CCSwitchPrimaryDcVersionDifference", id)
 					    .detail("CCDcId", clusterControllerDcId.get())
@@ -2338,8 +2340,8 @@ public:
 		}
 
 		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
-		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
-		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE && remoteDCIsHealthy()) {
+		    db.config.regions[0].dcId != clusterControllerDcId.get() && canFailoverByVersionDifference() &&
+		    remoteDCIsHealthy()) {
 			checkRegions(db.config.regions);
 		}
 
@@ -3143,14 +3145,14 @@ public:
 	}
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
-	bool transactionSystemContainsDegradedServers();
+	bool transactionSystemContainsDegradedServers() const;
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
 	// servers.
-	bool remoteTransactionSystemContainsDegradedServers();
+	bool remoteTransactionSystemContainsDegradedServers() const;
 
 	// Returns true if remote DC is healthy and can failover to.
-	bool remoteDCIsHealthy() {
+	bool remoteDCIsHealthy() const {
 		// Ignore remote DC health if worker health monitor is disabled.
 		if (!SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {
 			return true;
@@ -3200,6 +3202,16 @@ public:
 		    .detail("TransactionSystemContainsDegradedServers", txnSystemContainsDegradedServers);
 		return txnSystemContainsDegradedServers;
 	}
+
+	bool canCcInitiateFailover() const {
+		auto ccWorker = id_worker.find(clusterControllerProcessId);
+		return ccWorker != id_worker.end() && !ccWorker->second.priorityInfo.isExcluded;
+	}
+
+	bool canFailoverByVersionDifference() const {
+		return versionDifferenceUpdated && datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
+	}
+
 	// Returns true when the cluster controller should trigger a failover due to degraded servers used in the
 	// transaction system in the primary data center, and no degradation in the remote data center.
 	bool shouldTriggerFailoverDueToDegradedServers() {
@@ -3230,11 +3242,39 @@ public:
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
 		// anyways once the cluster controller is moved
-		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
+		if (!canCcInitiateFailover()) {
 			return false;
 		}
 
 		return transactionSystemContainsDegradedServers() && remoteIsHealthy;
+	}
+
+	// Returns true when DD reports TEAM_0_LEFT in primary region and CC can safely fail over.
+	bool shouldFailoverForTeamLoss(int highestPriority, DDEventPrimary ddEventPrimary) const {
+		if (db.config.usableRegions <= 1 || !ddEventPrimary || highestPriority != SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
+			return false;
+		}
+
+		if (!canCcInitiateFailover() || !canFailoverByVersionDifference() || !remoteDCIsHealthy() ||
+		    !clusterControllerDcId.present() || db.config.regions.size() <= 1) {
+			return false;
+		}
+
+		RegionInfo const& remoteRegion =
+		    db.config.regions[0].dcId == clusterControllerDcId.get() ? db.config.regions[1] : db.config.regions[0];
+		return remoteRegion.priority >= 0;
+	}
+
+	bool shouldDebouncedFailoverForTeamLoss(int highestPriority,
+	                                        DDEventPrimary ddEventPrimary,
+	                                        int teamLossFailoverConsecutivePolls) {
+		if (!shouldFailoverForTeamLoss(highestPriority, ddEventPrimary)) {
+			ddPrimaryTeam0LeftConsecutive = 0;
+			return false;
+		}
+
+		++ddPrimaryTeam0LeftConsecutive;
+		return ddPrimaryTeam0LeftConsecutive >= teamLossFailoverConsecutivePolls;
 	}
 
 	int recentRecoveryCountDueToHealth() {
@@ -3299,6 +3339,8 @@ public:
 
 	bool remoteDCMonitorStarted;
 	bool remoteTransactionSystemDegraded;
+	int ddPrimaryTeam0LeftConsecutive;
+	bool ddPrimaryTeam0LeftRequestedFailover;
 
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
@@ -3359,7 +3401,8 @@ public:
 	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
 	    dcLogServerVersionDifference(0), dcStorageServerVersionDifference(0), datacenterVersionDifference(0),
 	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitConsistencyScan(false),
+	    ddPrimaryTeam0LeftConsecutive(0), ddPrimaryTeam0LeftRequestedFailover(false), recruitDistributor(false),
+	    recruitRatekeeper(false), recruitConsistencyScan(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
