@@ -352,6 +352,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) final;
 
+	void updateBackupWorkers(const std::vector<int>& tagIds, const std::vector<InitializeBackupReply>& replies) final;
+
 	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
 
 	LogEpoch getOldestBackupEpoch() const final;

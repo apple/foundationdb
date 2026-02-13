@@ -105,7 +105,7 @@ struct BackupData {
 	const UID myId;
 	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
 	const int totalTags; // Total log router tags
-	const Version startVersion; // This worker's start version
+	Version startVersion; // This worker's start version
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
@@ -336,7 +336,7 @@ struct BackupData {
 			    .detail("Version", savedVersion);
 			return;
 		}
-		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
+
 		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		DisabledTraceEvent("BackupWorkerPop", myId)
 		    .detail("Tag", popTag)
@@ -1159,7 +1159,20 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch recoveryCount, BackupData* self) {
+// Checks if this worker has been removed from the log system. If so, throws an error
+// to terminate this backup worker.
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
+                                LogEpoch recoveryCount,
+                                BackupData* self,
+                                bool isReplacement,
+                                double localRecruitmentTime) {
+	while (isReplacement && now() - localRecruitmentTime < SERVER_KNOBS->BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD &&
+	       db->get().recoveryCount == recoveryCount) {
+		// If this is a replacement log router, give grace period for ServerDBInfo to update
+		// in case recruitment happens before ServerDBInfo is updated.
+		wait(delay(1.0));
+	}
+
 	loop {
 		bool isDisplaced =
 		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
@@ -1219,9 +1232,24 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 	    .detail("StartVersion", req.startVersion)
 	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
 	    .detail("LogEpoch", req.recruitedEpoch)
-	    .detail("BackupEpoch", req.backupEpoch);
+	    .detail("BackupEpoch", req.backupEpoch)
+	    .detail("IsReplacement", req.isReplacement);
+
 	try {
-		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
+		// If this is a replacement worker, try to resume from saved progress
+		if (req.isReplacement && req.startVersion == 0) {
+			state Database cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
+			Version savedVersion = wait(BackupProgress::takeover(cx, interf.id(), req.backupEpoch, req.routerTag));
+			// Resume from saved version + 1
+			self.startVersion = req.startVersion = savedVersion + 1;
+			TraceEvent("BackupWorkerResumeFromSavedVersion", interf.id())
+			    .detail("Tag", req.routerTag)
+			    .detail("Epoch", req.backupEpoch)
+			    .detail("SavedVersion", savedVersion)
+			    .detail("StartVersion", req.startVersion);
+		}
+
+		addActor.send(checkRemoved(db, req.recruitedEpoch, &self, req.isReplacement, now()));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
 			addActor.send(monitorBackupProgress(&self));
@@ -1250,7 +1278,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 				TraceEvent("BackupWorkerLogSystem", self.myId)
 				    .detail("HasBackupLocality", hasPseudoLocality)
 				    .detail("OldestBackupEpoch", self.oldestBackupEpoch)
-				    .detail("Tag", self.tag.toString());
+				    .detail("Tag", self.tag);
 			}
 			when(wait(done)) {
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);

@@ -782,6 +782,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BACKUP_NOOP_POP_DELAY,                                 5.0 );
 	init( BACKUP_FILE_BLOCK_BYTES,                       1024 * 1024 );
 	init( BACKUP_WORKER_LOCK_BYTES,                              3e9 ); if(randomize && BUGGIFY) BACKUP_WORKER_LOCK_BYTES = deterministicRandom()->randomInt(2048, 4096) * 4096;
+	init( BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD,               30.0 );
 	init( BACKUP_UPLOAD_DELAY,                                  10.0 ); if(randomize && BUGGIFY) BACKUP_UPLOAD_DELAY = deterministicRandom()->random01() * 60;
 
 	//Cluster Controller
@@ -867,6 +868,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TRACK_TLOG_RECOVERY,                                  true ); if ( randomize && BUGGIFY ) TRACK_TLOG_RECOVERY = deterministicRandom()->coinflip();
 	init( CC_RERECRUIT_LOG_ROUTER_TIMEOUT,                       5.0 );
 	init( CC_RERECRUIT_LOG_ROUTER_ENABLED,                      true ); if ( randomize && BUGGIFY ) CC_RERECRUIT_LOG_ROUTER_ENABLED = deterministicRandom()->coinflip();
+	init( CC_RERECRUIT_BACKUP_WORKER_TIMEOUT,                    5.0 );
+	init( CC_RERECRUIT_BACKUP_WORKER_ENABLED,                   true ); if ( randomize && BUGGIFY ) CC_RERECRUIT_BACKUP_WORKER_ENABLED = deterministicRandom()->coinflip();
 
 	//Move Keys
 	init( SHARD_READY_DELAY,                                    0.25 );
