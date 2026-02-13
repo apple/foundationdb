@@ -360,8 +360,8 @@ public:
 };
 
 Future<DistributedTestResults> runWorkload(Database const& cx,
-                                          std::vector<TesterInterface> const& testers,
-                                          TestSpec const& spec);
+                                           std::vector<TesterInterface> const& testers,
+                                           TestSpec const& spec);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 
