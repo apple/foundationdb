@@ -11,33 +11,31 @@ jobs:
   test-rhel9:
     name: Linux RHEL 9
     runs-on: ubuntu-latest
-    container: foundationdb/build:rockylinux9-latest
     steps:
+      - name: Free Disk Space (Ubuntu)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Run Build in RHEL 9 Docker
         run: |
-            dnf install -y 'dnf-command(config-manager)'
-            dnf config-manager --set-enabled crb || true
-            dnf install -y epel-release || true
-            dnf install -y git cmake ninja-build gcc-c++ 
-
-      - name: Configure CMake
-        run: |
-          mkdir build
-          cd build
-          cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON ..
-
-      - name: Build fdbserver
-        run: |
-          cd build
-          ninja -j2 fdbserver
-
-      - name: Run Prometheus Simulation Test
-        run: |
-          cd build
-          ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace foundationdb/build:rockylinux9-latest /bin/bash -c "
+            dnf install -y 'dnf-command(config-manager)' &&
+            dnf config-manager --set-enabled crb || true &&
+            dnf install -y epel-release || true &&
+            dnf install -y git cmake ninja-build gcc-c++ &&
+            mkdir build &&
+            cd build &&
+            cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
+            ninja -j1 fdbserver &&
+            ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
+          "
 
   test-centos7:
     name: Linux CentOS 7
