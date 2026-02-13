@@ -2163,7 +2163,8 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		                                      KeyRangeRef(beginKey, endKey),
 		                                      Terminator::True,
 		                                      AccessSystemKeys::True,
-		                                      LockAware::True);
+		                                      LockAware::True,
+		                                      ReadLowPriority(CLIENT_KNOBS->BACKUP_READS_USE_LOW_PRIORITY));
 		state std::unique_ptr<IRangeFileWriter> rangeFile;
 		state BackupConfig backup(task);
 		state Arena arena;
@@ -3019,8 +3020,14 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		state std::vector<Future<Void>> rc;
 
 		for (auto& range : ranges) {
-			rc.push_back(
-			    readCommitted(cx, results, lock, range, Terminator::False, AccessSystemKeys::True, LockAware::True));
+			rc.push_back(readCommitted(cx,
+			                           results,
+			                           lock,
+			                           range,
+			                           Terminator::False,
+			                           AccessSystemKeys::True,
+			                           LockAware::True,
+			                           ReadLowPriority(CLIENT_KNOBS->BACKUP_READS_USE_LOW_PRIORITY)));
 		}
 
 		state Future<Void> sendEOS = map(errorOr(waitForAll(rc)), [=](ErrorOr<Void> const& result) mutable {
