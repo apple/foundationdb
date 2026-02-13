@@ -48,8 +48,8 @@ jobs:
           ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
 
   test-macos:
-    name: macOS 13
-    runs-on: macos-13
+    name: macOS (Latest)
+    runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
