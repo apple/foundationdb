@@ -32,7 +32,7 @@ jobs:
       - name: Build fdbserver
         run: |
           cd build
-          ninja fdbserver
+          ninja -j2 fdbserver
 
       - name: Run Prometheus Simulation Test
         run: |
