@@ -289,7 +289,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto addr = NetworkAddress::parse(noTls ? "127.0.0.1:0" : "127.0.0.1:0:tls");
 		auto endpoint = Endpoint();
 		auto receiver = SessionProbeReceiver();
-		try{
+		try {
 			auto listenFuture = transport.bind(addr, addr);
 		} catch (const Error& err) {
 			log("CAUGHT Error in bind: code={} what={}", err.code(), err.what());

@@ -245,14 +245,8 @@ StringRef PrivateKey::writePemWithPassword(Arena& arena, StringRef password) con
 	if (!mem)
 		traceAndThrowEncode("PrivateKeyPemWriteInitError");
 	std::vector<unsigned char> pwBytes(password.begin(), password.end());
-	if (1 !=
-	    ::PEM_write_bio_PrivateKey(mem,
-	                               nativeHandle(),
-	                               ::EVP_aes_256_cbc(),
-	                               pwBytes.data(),
-	                               pwBytes.size(),
-	                               0,
-	                               nullptr))
+	if (1 != ::PEM_write_bio_PrivateKey(
+	             mem, nativeHandle(), ::EVP_aes_256_cbc(), pwBytes.data(), pwBytes.size(), 0, nullptr))
 		traceAndThrowEncode("PrivateKeyPemWithPasswordWrite");
 	auto bioBuf = std::add_pointer_t<char>{};
 	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
