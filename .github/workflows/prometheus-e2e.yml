@@ -42,6 +42,14 @@ jobs:
     needs: test-rhel9
     runs-on: ubuntu-latest
     steps:
+      - name: Free Disk Space (Ubuntu)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
