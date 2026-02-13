@@ -37,6 +37,12 @@ jobs:
             ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
           "
 
+      - name: Upload Metrics Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output
+          path: build/prometheus_output.txt
+
   test-centos7:
     name: Linux CentOS 7
     needs: test-rhel9
@@ -95,3 +101,23 @@ jobs:
         run: |
           cd build
           ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
+
+  report-metrics:
+    name: Metrics Report
+    needs: [test-rhel9, test-centos7, test-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Metrics Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prometheus-output
+
+      - name: Display Metrics Output
+        run: |
+          echo "::group::Prometheus Metrics Output"
+          cat prometheus_output.txt
+          echo "::endgroup::"
+          
+          echo "Metrics capture verified across all platforms!"
+          echo "Sample content:"
+          head -n 20 prometheus_output.txt

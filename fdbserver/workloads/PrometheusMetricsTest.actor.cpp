@@ -22,6 +22,7 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/PrometheusMetrics.h"
+#include <fstream>
 #include "fdbrpc/HTTP.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
@@ -119,6 +120,11 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 
 		ASSERT(body.size() > 0);
 		ASSERT(body.find(" ") != std::string::npos);
+
+		// Write body to file for CI reporting
+		std::ofstream out("prometheus_output.txt");
+		out << body;
+		out.close();
 
 		conn->close();
 
