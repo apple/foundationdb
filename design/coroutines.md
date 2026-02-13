@@ -699,3 +699,111 @@ doesn't seem like UBSAN finds these kind of subtle bugs.
 Another difference is, that if a `state` variables might be initialized twice: once at the creation of the actor using
 the default constructor and a second time at the point where the variable is initialized in the code. With C++
 coroutines we now get the expected behavior, which is better, but nonetheless a potential behavior change.
+
+### `state` Variables Inside Blocks
+
+The actor compiler **hoists** all `state` variables into the actor's state struct, regardless of C++ block scope. This
+means a `state` variable declared inside an `if`, `else`, `for`, or `try` block lives for the entire actor lifetime.
+In a coroutine, these become regular C++ locals that follow normal scoping rules.
+
+This is a source of subtle bugs. Consider:
+
+```c++
+ACTOR Future<Void> example() {
+    if (someCondition) {
+        state Future<Void> background = longRunningTask();
+    }
+    // In ACTOR code, `background` is still alive here — it was hoisted.
+    wait(delay(100.0));
+    return Void();
+}
+```
+
+A naive conversion:
+
+```c++
+Future<Void> example() {
+    if (someCondition) {
+        Future<Void> background = longRunningTask();
+    }
+    // BUG: `background` was destroyed at the `}` above, cancelling longRunningTask()!
+    co_await delay(100.0);
+}
+```
+
+The fix is to move the variable to function scope:
+
+```c++
+Future<Void> example() {
+    Future<Void> background;
+    if (someCondition) {
+        background = longRunningTask();
+    }
+    // `background` is still alive — correct.
+    co_await delay(100.0);
+}
+```
+
+**Rule**: When removing `state` from a variable, check whether it is declared inside a block. If so, move the
+declaration to function scope.
+
+### `const&` Parameters
+
+C++20 coroutines only store a reference in the coroutine frame for `const&` parameters — they do **not** copy the
+argument. If the caller passes a temporary (e.g. a default argument value, or a local that goes out of scope), the
+reference dangles after the first suspend point.
+
+```c++
+// DANGEROUS: if caller passes a temporary, `key` dangles after first co_await
+Future<Void> doSomething(Key const& key) {
+    co_await delay(1.0);
+    fmt::print("{}\n", key.toString()); // potential use-after-free
+}
+```
+
+The fix is to copy `const&` parameters to locals before the first `co_await`:
+
+```c++
+Future<Void> doSomething(Key const& key) {
+    Key keyCopy = key; // safe copy before any suspend
+    co_await delay(1.0);
+    fmt::print("{}\n", keyCopy.toString()); // OK
+}
+```
+
+**Rule**: Copy all `const&` parameters to local variables before the first `co_await`.
+
+### Forward Declarations in `.actor.h` Files
+
+When a function is converted from `ACTOR` to a coroutine, any forward declarations in `.actor.h` files must have the
+`ACTOR` keyword removed. The actor compiler automatically adds `const&` to all parameters in `ACTOR` declarations.
+If you also write `const&` explicitly, the generated code will contain `const& const&`, which is a compile error.
+
+```c++
+// workloads.actor.h — WRONG: ACTOR + const& = double const&
+ACTOR Future<Void> foo(Database const& cx);
+
+// workloads.actor.h — CORRECT: remove ACTOR since foo() is now a coroutine
+Future<Void> foo(Database const& cx);
+```
+
+### File Naming
+
+Converted files should be renamed from `.actor.cpp` to `.cpp` (or `.actor.h` to `.h`) since they no longer need the
+actor compiler. Both `fdbserver` and `flowbench` use `fdb_find_sources()` in their `CMakeLists.txt`, which
+automatically picks up files by glob, so the rename is usually sufficient without any CMake changes.
+
+### Conversion Checklist
+
+1. Rename the file from `.actor.cpp` to `.cpp`.
+2. Remove `ACTOR` from all function definitions.
+3. Remove `UNCANCELLABLE`; add `Uncancellable` as the first parameter instead.
+4. Remove `state` from all local variable declarations.
+   - **Check**: is the variable inside a block (`if`/`else`/`for`/`try`)? If so, move it to function scope.
+5. Replace `wait(expr)` with `co_await expr`. Replace `waitNext(expr)` with `co_await expr`.
+6. Replace `return expr` with `co_return expr`. Replace `return Void()` with `co_return`.
+7. Rewrite `choose`/`when` using the `Choose` class.
+8. Simplify: `wait(success(f))` → `co_await f`; `wait(store(v, f))` → `v = co_await f`.
+9. For `const&` parameters: copy to a local before the first `co_await`.
+10. Remove `ACTOR` from any forward declarations of the converted functions in `.actor.h` files.
+11. Build and run simulation tests to verify correctness.
