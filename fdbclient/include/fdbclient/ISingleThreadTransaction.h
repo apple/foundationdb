@@ -28,7 +28,7 @@
 #include "flow/FastRef.h"
 
 /*
- * Used by ThreadSafeTransaction to execute normal or configuration transaction operations on the network thread
+ * Used by ThreadSafeTransaction to execute transaction operations on the network thread.
  */
 class ISingleThreadTransaction : public ReferenceCounted<ISingleThreadTransaction> {
 protected:
@@ -40,8 +40,6 @@ public:
 
 	enum class Type {
 		RYW,
-		SIMPLE_CONFIG,
-		PAXOS_CONFIG,
 	};
 
 	static ISingleThreadTransaction* allocateOnForeignThread(Type);

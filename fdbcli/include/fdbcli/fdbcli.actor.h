@@ -103,7 +103,6 @@ struct CommandFactory {
 extern const KeyRef advanceVersionSpecialKey;
 extern const KeyRef consistencyCheckSpecialKey;
 extern const KeyRef clusterDescriptionSpecialKey;
-extern const KeyRef configDBSpecialKey;
 extern const KeyRef coordinatorsAutoSpecialKey;
 extern const KeyRef coordinatorsProcessSpecialKey;
 extern const KeyRef ddModeSpecialKey;

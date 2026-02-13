@@ -51,8 +51,7 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 }
 
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
-	auto type = isConfigDB ? ISingleThreadTransaction::Type::PAXOS_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, ISingleThreadTransaction::Type::RYW));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -63,10 +62,6 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}
-	if (itr->first == FDBDatabaseOptions::USE_CONFIG_DATABASE) {
-		isConfigDB = true;
-	}
-
 	DatabaseContext* db = this->db;
 	Standalone<Optional<StringRef>> passValue = value;
 

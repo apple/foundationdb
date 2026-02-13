@@ -72,9 +72,9 @@ thread_local bool ISimulator::isMainThread = false;
 
 ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
-    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    connectionFailureEnableTime(0), disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
+    connectionFailuresDisableDuration(0), speedUpSimulation(false), connectionFailureEnableTime(0),
+    disableTLogRecoveryFinish(false), backupAgents(BackupAgentType::WaitForType),
     drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 

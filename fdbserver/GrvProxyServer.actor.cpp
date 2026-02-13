@@ -362,7 +362,7 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	state Version cachedVersion = 0;
 	state RangeResult cachedData;
 
-	// Attempt to refresh the configuration database while the migration is
+	// Attempt to refresh the global configuration while the migration is
 	// ongoing. This is a small optimization to avoid waiting for the migration
 	// actor to complete.
 	refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),

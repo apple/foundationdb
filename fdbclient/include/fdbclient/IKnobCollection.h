@@ -26,7 +26,7 @@
 #include <memory>
 
 #include "fdbclient/ClientKnobs.h"
-#include "fdbclient/ConfigKnobs.h"
+#include "fdbclient/KnobValue.h"
 #include "fdbclient/ServerKnobs.h"
 #include "flow/Knobs.h"
 
@@ -74,8 +74,7 @@ public:
 	// immediately throws the error.
 	static void setupKnobs(const std::vector<std::pair<std::string, std::string>>& knobs);
 
-	static ConfigMutationRef createSetMutation(Arena, KeyRef, ValueRef);
-	static ConfigMutationRef createClearMutation(Arena, KeyRef);
+	// KnobValue mutations are no longer emitted via config DB.
 };
 
 #endif // FDBCLIENT_IKNOBCOLLECTION_H
