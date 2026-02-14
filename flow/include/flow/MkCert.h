@@ -135,7 +135,7 @@ struct CertAndKeyRef {
 	}
 
 	// Empty (default) issuer produces a self-signed certificate
-	static SelfType make(Arena& arena, CertSpecRef spec, CertAndKeyRef issuer);
+	static SelfType make(Arena& arena, CertSpecRef spec, CertAndKeyRef issuer, StringRef password = {});
 };
 
 using CertChainRef = VectorRef<CertAndKeyRef>;
@@ -157,6 +157,9 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, Optional<
 // Make stub cert chain of given length inc. root authority
 // Note: side does not imply anything different other than the choice of common names
 CertChainRef makeCertChain(Arena& arena, unsigned depth, ESide side);
+
+// Make a single self-signed certificate with password (for testing password-protected keys)
+CertAndKeyRef makePasswCert(Arena& arena, StringRef password);
 
 } // namespace mkcert
 
