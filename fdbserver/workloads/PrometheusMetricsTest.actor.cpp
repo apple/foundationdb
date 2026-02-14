@@ -89,6 +89,7 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 
 	ACTOR Future<Void> makeMetricsRequest(PrometheusMetricsTestWorkload* self) {
 		state Reference<IConnection> conn;
+		state UnsentPacketQueue content;
 
 		wait(store(conn,
 		           timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
@@ -96,7 +97,6 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 		ASSERT(conn.isValid());
 		wait(conn->connectHandshake());
 
-		state UnsentPacketQueue content;
 		state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
 		req->data.content = &content;
 		req->data.contentLen = 0;
