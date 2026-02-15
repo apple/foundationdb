@@ -8,6 +8,7 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
+
   test-rhel9:
     name: Linux RHEL 9
     runs-on: ubuntu-latest
