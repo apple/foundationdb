@@ -63,11 +63,10 @@ jobs:
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace foundationdb/build:centos7-latest /bin/bash -c "
             source /opt/rh/devtoolset-11/enable &&
-            yum install -y epel-release &&
-            yum install -y https://repo.ius.io/ius-release-el7.rpm &&
-            yum install -y python38 python38-pip cmake3 ninja-build &&
+            yum install -y epel-release centos-release-scl &&
+            yum install -y rh-python38 rh-python38-python-pip cmake3 ninja-build &&
             ln -sf /usr/bin/cmake3 /usr/bin/cmake &&
-            ln -sf /usr/bin/python3.8 /usr/bin/python3 &&
+            source /opt/rh/rh-python38/enable &&
             mkdir -p build &&
             cd build &&
             cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
