@@ -163,16 +163,6 @@ jobs:
           fi
           echo "::endgroup::"
           
-          echo "::group::CentOS 7 Metrics Output"
-          if [ -f centos7/prometheus_output.txt ]; then
-            cat centos7/prometheus_output.txt
-            echo ""
-            echo "CentOS 7 metrics captured successfully"
-          else
-            echo "CentOS 7 test did not complete"
-          fi
-          echo "::endgroup::"
-          
           echo "::group::macOS Metrics Output"
           if [ -f macos/prometheus_output.txt ]; then
             cat macos/prometheus_output.txt
