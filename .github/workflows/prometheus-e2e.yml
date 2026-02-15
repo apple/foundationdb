@@ -99,15 +99,15 @@ jobs:
       - name: Install dependencies
         run: |
             brew install cmake ninja openssl@3 toml11
-            # Uninstall latest boost if present to avoid include conflicts (io_service deprecation)
+            # Uninstall latest boost if present to avoid include conflicts
             brew uninstall boost || true
-            brew install boost@1.76
+            brew install boost@1.85
 
       - name: Configure CMake
         run: |
           mkdir build
           cd build
-          cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) -DBOOST_ROOT=$(brew --prefix boost@1.76) ..
+          cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) -DBOOST_ROOT=$(brew --prefix boost@1.85) ..
 
       - name: Build fdbserver
         run: |
