@@ -329,7 +329,7 @@ if(NOT WIN32)
     endforeach()
 
     add_python_venv_test(NAME fdb_c_upgrade_to_future_version
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+      COMMAND python -m fdb_test_runner.upgrade_test
       --build-dir ${CMAKE_BINARY_DIR}
       --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
       --upgrade-path "${FDB_CURRENT_VERSION}" "${FDB_FUTURE_VERSION}" "${FDB_CURRENT_VERSION}"
@@ -344,7 +344,7 @@ if(NOT WIN32)
         )
 
       add_python_venv_test(NAME fdb_c_upgrade_from_prev2_gradual
-        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        COMMAND python -m fdb_test_runner.upgrade_test
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
@@ -352,7 +352,7 @@ if(NOT WIN32)
         )
 
       add_python_venv_test(NAME fdb_c_upgrade_from_prev2_direct
-        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        COMMAND python -m fdb_test_runner.upgrade_test
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
@@ -360,7 +360,7 @@ if(NOT WIN32)
         )
 
       add_python_venv_test(NAME fdb_c_upgrade_from_prev
-        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        COMMAND python -m fdb_test_runner.upgrade_test
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
@@ -368,7 +368,7 @@ if(NOT WIN32)
         )
 
       add_python_venv_test(NAME fdb_c_wiggle_only
-        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        COMMAND python -m fdb_test_runner.upgrade_test
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
@@ -378,7 +378,7 @@ if(NOT WIN32)
         )
 
       add_python_venv_test(NAME fdb_c_wiggle_and_upgrade
-        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        COMMAND python -m fdb_test_runner.upgrade_test
         --build-dir ${CMAKE_BINARY_DIR}
         --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
         --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"

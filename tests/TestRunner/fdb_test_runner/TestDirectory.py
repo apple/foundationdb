@@ -28,9 +28,14 @@ class TestDirectory:
         return os.path.join(r, dirs[-1])
 
 
-if __name__ == "__main__":
+def main():
     parser = ArgumentParser()
     parser.add_argument("builddir")
     args = parser.parse_args()
     td = TestDirectory(args.builddir)
     td.create_new_test_dir()
+
+
+if __name__ == "__main__":
+    main()
+

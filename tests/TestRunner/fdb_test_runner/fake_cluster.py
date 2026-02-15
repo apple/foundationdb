@@ -4,7 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
-from test_util import random_alphanum_string
+from .test_util import random_alphanum_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
 
@@ -37,7 +37,7 @@ class ClusterFileGenerator:
             pass
 
 
-if __name__ == "__main__":
+def main():
     parser = ArgumentParser(
         formatter_class=RawDescriptionHelpFormatter,
         description="""
@@ -81,3 +81,8 @@ if __name__ == "__main__":
         ).returncode
 
     sys.exit(errcode)
+
+
+if __name__ == "__main__":
+    main()
+

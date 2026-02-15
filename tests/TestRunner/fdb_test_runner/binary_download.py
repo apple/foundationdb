@@ -7,9 +7,9 @@ import shutil
 import stat
 from urllib import request
 import hashlib
-from fdb_version import CURRENT_VERSION, FUTURE_VERSION
+from .fdb_version import CURRENT_VERSION, FUTURE_VERSION
 
-from test_util import random_alphanum_string
+from .test_util import random_alphanum_string
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"

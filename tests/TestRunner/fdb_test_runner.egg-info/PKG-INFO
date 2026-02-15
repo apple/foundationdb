@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: fdb-test-runner
+Version: 0.1.0
+Summary: FoundationDB Test Runner utilities
+Requires-Python: >=3.9

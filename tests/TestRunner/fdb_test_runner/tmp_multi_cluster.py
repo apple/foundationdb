@@ -24,10 +24,11 @@ import os
 import subprocess
 import sys
 
-from cluster_args import CreateTmpFdbClusterArgParser
-from tmp_cluster import TempCluster
+from .cluster_args import CreateTmpFdbClusterArgParser
+from .tmp_cluster import TempCluster
 
-if __name__ == "__main__":
+
+def main():
     script_desc = """
     This script automatically configures N temporary local clusters on the machine and then
     calls a command while these clusters are running. As soon as the command returns, all
@@ -84,3 +85,8 @@ if __name__ == "__main__":
             tc.close()
 
     sys.exit(errcode)
+
+
+if __name__ == "__main__":
+    main()
+

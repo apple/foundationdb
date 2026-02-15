@@ -38,9 +38,9 @@ if(WITH_PYTHON)
   Or provide a path to another fdbserver")
   endif()
 
-  configure_file(${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_version.py.cmake ${PROJECT_BINARY_DIR}/tests/TestRunner/fdb_version.py)
+  configure_file(${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_version.py.cmake ${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_test_runner/fdb_version.py)
 
-  set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/TestRunner.py")
+  set(TestRunner "${PROJECT_SOURCE_DIR}/tests/TestRunner/fdb_test_runner/TestRunner.py")
 
   configure_file(${PROJECT_SOURCE_DIR}/tests/CTestCustom.ctest.cmake ${PROJECT_BINARY_DIR}/CTestCustom.ctest @ONLY)
 
@@ -62,7 +62,7 @@ if(WITH_PYTHON)
 
   configure_testing(TEST_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       ERROR_ON_ADDITIONAL_FILES
-      IGNORE_PATTERNS ".*/CMakeLists.txt" ".*/requirements.txt" ${MULTIREGION_IGNORE_PATTERNS})
+      IGNORE_PATTERNS ".*/CMakeLists.txt" ".*/requirements.txt" ".*/pyproject.toml" ".*\\.egg-info/.*" ${MULTIREGION_IGNORE_PATTERNS})
 
   add_fdb_test(TEST_FILES AsyncFileCorrectness.txt UNIT IGNORE)
   add_fdb_test(TEST_FILES AsyncFileMix.txt UNIT IGNORE)

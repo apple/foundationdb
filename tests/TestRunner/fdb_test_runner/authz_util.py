@@ -4,7 +4,7 @@ import base64
 import json
 import time
 
-from test_util import random_alphanum_string
+from .test_util import random_alphanum_string
 
 
 def to_str(s: Union[str, bytes]):

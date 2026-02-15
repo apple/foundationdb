@@ -32,15 +32,9 @@ import string
 import toml
 
 # fmt: off
-from tmp_cluster import TempCluster
-from local_cluster import TLSConfig
+from fdb_test_runner.tmp_cluster import TempCluster
+from fdb_test_runner.local_cluster import TLSConfig
 # fmt: on
-
-sys.path[:0] = [
-    os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "..", "tests", "TestRunner"
-    )
-]
 
 TESTER_STATS_INTERVAL_SEC = 5
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from argparse import ArgumentParser
-from TestDirectory import TestDirectory
+from .TestDirectory import TestDirectory
 
 import logging
 import os
@@ -498,7 +498,7 @@ def run_simulation_test(basedir, options):
     return res and proc.returncode == 0
 
 
-if __name__ == "__main__":
+def main():
     testtypes = ["simulation", "test"]
     parser = ArgumentParser(description="Run a test preprocess trace")
     parser.add_argument("-b", "--builddir", help="Path to build directory")
@@ -582,3 +582,8 @@ if __name__ == "__main__":
         basedir = args.builddir
     res = run_simulation_test(basedir, args)
     sys.exit(0 if res else 1)
+
+
+if __name__ == "__main__":
+    main()
+
