@@ -1,0 +1,7 @@
+[[test]]
+testTitle = 'PrometheusMetricsTest'
+timeout = 120
+
+    [[test.workload]]
+    testName = 'PrometheusMetricsTest'
+    testDuration = 10.0
