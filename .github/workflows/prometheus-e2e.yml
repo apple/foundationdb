@@ -40,12 +40,11 @@ jobs:
       - name: Upload Metrics Output
         uses: actions/upload-artifact@v4
         with:
-          name: prometheus-output
+          name: prometheus-output-rhel9
           path: build/prometheus_output.txt
 
   test-centos7:
     name: Linux CentOS 7
-    needs: test-rhel9
     runs-on: ubuntu-latest
     steps:
       - name: Free Disk Space (Ubuntu)
@@ -61,7 +60,6 @@ jobs:
 
       - name: Run Build in CentOS 7 Docker
         run: |
-          # Run the build inside the container using docker run to avoid GH Actions Node.js issues
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace foundationdb/build:centos7-latest /bin/bash -c "
             source /opt/rh/devtoolset-11/enable &&
             yum install -y epel-release &&
@@ -69,14 +67,19 @@ jobs:
             ln -sf /usr/bin/cmake3 /usr/bin/cmake &&
             mkdir -p build &&
             cd build &&
-            cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
+            cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON -DWITH_PYTHON=OFF .. &&
             ninja -j2 fdbserver &&
             ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
           "
 
+      - name: Upload Metrics Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output-centos7
+          path: build/prometheus_output.txt
+
   test-macos:
-    name: macOS (Latest)
-    needs: test-centos7
+    name: macOS Latest
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -102,22 +105,79 @@ jobs:
           cd build
           ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on
 
+      - name: Upload Metrics Output
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output-macos
+          path: build/prometheus_output.txt
+
   report-metrics:
     name: Metrics Report
     needs: [test-rhel9, test-centos7, test-macos]
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Download Metrics Artifact
+      - name: Download RHEL9 Artifact
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: prometheus-output
+          name: prometheus-output-rhel9
+          path: rhel9
+
+      - name: Download CentOS7 Artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: prometheus-output-centos7
+          path: centos7
+
+      - name: Download macOS Artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: prometheus-output-macos
+          path: macos
 
       - name: Display Metrics Output
         run: |
-          echo "::group::Prometheus Metrics Output"
-          cat prometheus_output.txt
+          echo "::group::RHEL 9 Metrics Output"
+          if [ -f rhel9/prometheus_output.txt ]; then
+            cat rhel9/prometheus_output.txt
+            echo ""
+            echo "RHEL 9 metrics captured successfully"
+          else
+            echo "RHEL 9 test did not complete"
+          fi
           echo "::endgroup::"
           
-          echo "Metrics capture verified across all platforms!"
-          echo "Sample content:"
-          head -n 20 prometheus_output.txt
+          echo "::group::CentOS 7 Metrics Output"
+          if [ -f centos7/prometheus_output.txt ]; then
+            cat centos7/prometheus_output.txt
+            echo ""
+            echo "CentOS 7 metrics captured successfully"
+          else
+            echo "CentOS 7 test did not complete"
+          fi
+          echo "::endgroup::"
+          
+          echo "::group::macOS Metrics Output"
+          if [ -f macos/prometheus_output.txt ]; then
+            cat macos/prometheus_output.txt
+            echo ""
+            echo "macOS metrics captured successfully"
+          else
+            echo "macOS test did not complete"
+          fi
+          echo "::endgroup::"
+          
+          echo ""
+          echo "========================================"
+          echo "TEST SUMMARY"
+          echo "========================================"
+          if [ -f rhel9/prometheus_output.txt ] || [ -f centos7/prometheus_output.txt ] || [ -f macos/prometheus_output.txt ]; then
+            echo "SUCCESS: Prometheus /metrics endpoint is working!"
+            echo "At least one platform successfully exported metrics."
+          else
+            echo "FAILED: No platforms completed successfully"
+            exit 1
+          fi
