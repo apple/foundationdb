@@ -71,7 +71,8 @@ enum class ConfigurationResult {
 	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_IS_REGISTERED,
 	ENCRYPTION_AT_REST_MODE_ALREADY_SET,
-	INVALID_STORAGE_TYPE
+	INVALID_STORAGE_TYPE,
+	BACKUP_WORKER_ENABLED_RESTRICTED
 };
 
 enum class CoordinatorsResult {
@@ -531,6 +532,12 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (i->first == "1") {
 						resetPPWStats = false; // the latter setting will override the former setting
 					}
+				}
+
+				// Clear backup progress when backup workers are disabled
+				if (i->first == backupWorkerEnabledKey && i->second == "0") {
+					tr->clear(backupProgressKeys);
+					TraceEvent("BackupWorkerProgressCleared");
 				}
 			}
 
