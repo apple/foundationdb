@@ -1,0 +1,435 @@
+name: OTEL Metrics E2E Test
+
+on:
+  push:
+    branches: [ feature/prometheus-metrics-endpoint ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-otel-rhel9:
+    runs-on: ubuntu-latest
+    container:
+      image: rockylinux:9
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          dnf install -y python3 python3-pip cmake ninja-build gcc gcc-c++ \
+            openssl-devel git wget tar gzip
+      
+      - name: Install OTEL Collector
+        run: |
+          wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol_0.91.0_linux_amd64.tar.gz
+          tar -xzf otelcol_0.91.0_linux_amd64.tar.gz
+          chmod +x otelcol
+          mv otelcol /usr/local/bin/
+      
+      - name: Create OTEL Collector config
+        run: |
+          cat > otel-config.yaml << 'EOF'
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 127.0.0.1:4317
+                http:
+                  endpoint: 127.0.0.1:4318
+          
+          processors:
+            batch:
+          
+          exporters:
+            file:
+              path: /tmp/otel-metrics.json
+            logging:
+              loglevel: debug
+          
+          service:
+            pipelines:
+              metrics:
+                receivers: [otlp]
+                processors: [batch]
+                exporters: [file, logging]
+          EOF
+      
+      - name: Start OTEL Collector
+        run: |
+          otelcol --config=otel-config.yaml > /tmp/otel-collector.log 2>&1 &
+          echo $! > /tmp/otel-collector.pid
+          sleep 2
+          cat /tmp/otel-collector.log
+      
+      - name: Build FDB
+        run: |
+          mkdir build && cd build
+          cmake -G Ninja .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_SANITIZER=OFF \
+            -DBUILD_TESTING=ON
+          ninja fdbserver
+      
+      - name: Create UDP capture script
+        run: |
+          cat > /tmp/capture_udp.py << 'EOF'
+          #!/usr/bin/env python3
+          import socket
+          import time
+          
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(('127.0.0.1', 8903))
+          sock.settimeout(45.0)
+          
+          print("Listening for OTEL metrics on UDP 127.0.0.1:8903")
+          metrics_received = []
+          start_time = time.time()
+          
+          try:
+              while time.time() - start_time < 40:
+                  try:
+                      data, addr = sock.recvfrom(65536)
+                      timestamp = time.time()
+                      print(f"[{timestamp}] Received {len(data)} bytes from {addr}")
+                      metrics_received.append(data)
+                      
+                      with open('/tmp/otel_udp_capture.bin', 'ab') as f:
+                          f.write(data)
+                      
+                      print(f"First 100 bytes (hex): {data[:100].hex()}")
+                  except socket.timeout:
+                      continue
+          except KeyboardInterrupt:
+              pass
+          
+          print(f"\nTotal packets received: {len(metrics_received)}")
+          print(f"Total bytes: {sum(len(d) for d in metrics_received)}")
+          
+          with open('/tmp/otel_metrics_summary.txt', 'w') as f:
+              f.write(f"Packets received: {len(metrics_received)}\n")
+              f.write(f"Total bytes: {sum(len(d) for d in metrics_received)}\n")
+          
+          sock.close()
+          EOF
+          chmod +x /tmp/capture_udp.py
+      
+      - name: Start UDP capture
+        run: |
+          python3 /tmp/capture_udp.py > /tmp/udp_capture.log 2>&1 &
+          echo $! > /tmp/udp_capture.pid
+          sleep 2
+          echo "UDP capture started, PID: $(cat /tmp/udp_capture.pid)"
+      
+      - name: Run FDB with OTEL
+        run: |
+          cd build
+          ./bin/fdbserver \
+            --metrics_data_model=otel \
+            --otel_udp_emission_addr=127.0.0.1 \
+            --otel_udp_emission_port=8903 \
+            --metrics_emission_interval=5 \
+            -r simulation \
+            -f ../tests/fast/AtomicOps.toml \
+            -s 12345 \
+            > /tmp/fdb_otel_test.log 2>&1 &
+          
+          echo $! > /tmp/fdbserver.pid
+          echo "FDB started, PID: $(cat /tmp/fdbserver.pid)"
+          
+          sleep 35
+          
+          echo "=== FDB Server Logs ==="
+          cat /tmp/fdb_otel_test.log || true
+      
+      - name: Collect results
+        if: always()
+        run: |
+          if [ -f /tmp/fdbserver.pid ]; then
+            kill $(cat /tmp/fdbserver.pid) 2>/dev/null || true
+          fi
+          
+          if [ -f /tmp/udp_capture.pid ]; then
+            kill $(cat /tmp/udp_capture.pid) 2>/dev/null || true
+          fi
+          
+          if [ -f /tmp/otel-collector.pid ]; then
+            kill $(cat /tmp/otel-collector.pid) 2>/dev/null || true
+          fi
+          
+          sleep 2
+          
+          echo "=== UDP Capture Log ==="
+          cat /tmp/udp_capture.log || echo "No UDP capture log"
+          
+          echo "=== OTEL Metrics Summary ==="
+          cat /tmp/otel_metrics_summary.txt || echo "No metrics summary"
+          
+          echo "=== OTEL Collector Log ==="
+          cat /tmp/otel-collector.log || echo "No collector log"
+      
+      - name: Verify metrics
+        run: |
+          if [ -f /tmp/otel_metrics_summary.txt ]; then
+            PACKETS=$(grep "Packets received:" /tmp/otel_metrics_summary.txt | awk '{print $3}')
+            if [ "$PACKETS" -gt 0 ]; then
+              echo "SUCCESS: Received $PACKETS metric packets via UDP"
+              exit 0
+            else
+              echo "FAILURE: No metric packets received"
+              exit 1
+            fi
+          else
+            echo "FAILURE: No metrics summary file found"
+            exit 1
+          fi
+      
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: otel-output-rhel9
+          path: |
+            /tmp/otel_udp_capture.bin
+            /tmp/otel_metrics_summary.txt
+            /tmp/udp_capture.log
+            /tmp/fdb_otel_test.log
+            /tmp/otel-collector.log
+
+  test-otel-centos7:
+    runs-on: ubuntu-latest
+    container:
+      image: centos:7
+    
+    steps:
+      - name: Fix CentOS 7 mirrors
+        run: |
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          yum clean all
+          yum makecache
+      
+      - name: Install Python 3.8
+        run: |
+          yum install -y centos-release-scl epel-release
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          yum install -y rh-python38 rh-python38-python-pip
+      
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          source /opt/rh/rh-python38/enable
+          yum install -y cmake3 ninja-build gcc gcc-c++ openssl-devel git wget tar gzip
+          ln -s /usr/bin/cmake3 /usr/bin/cmake || true
+      
+      - name: Install OTEL Collector
+        run: |
+          wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol_0.91.0_linux_amd64.tar.gz
+          tar -xzf otelcol_0.91.0_linux_amd64.tar.gz
+          chmod +x otelcol
+          mv otelcol /usr/local/bin/
+      
+      - name: Create config and build
+        run: |
+          source /opt/rh/rh-python38/enable
+          
+          cat > otel-config.yaml << 'EOF'
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 127.0.0.1:4317
+          exporters:
+            file:
+              path: /tmp/otel-metrics.json
+            logging:
+              loglevel: debug
+          service:
+            pipelines:
+              metrics:
+                receivers: [otlp]
+                exporters: [file, logging]
+          EOF
+          
+          otelcol --config=otel-config.yaml > /tmp/otel-collector.log 2>&1 &
+          echo $! > /tmp/otel-collector.pid
+          sleep 2
+          
+          mkdir build && cd build
+          cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          ninja fdbserver
+      
+      - name: Test OTEL
+        run: |
+          source /opt/rh/rh-python38/enable
+          
+          cat > /tmp/capture_udp.py << 'EOF'
+          #!/usr/bin/env python3
+          import socket, time
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(('127.0.0.1', 8903))
+          sock.settimeout(45.0)
+          print("Listening on UDP 127.0.0.1:8903")
+          metrics = []
+          start = time.time()
+          while time.time() - start < 40:
+              try:
+                  data, addr = sock.recvfrom(65536)
+                  print(f"Received {len(data)} bytes")
+                  metrics.append(data)
+                  with open('/tmp/otel_udp_capture.bin', 'ab') as f:
+                      f.write(data)
+              except: continue
+          with open('/tmp/otel_metrics_summary.txt', 'w') as f:
+              f.write(f"Packets received: {len(metrics)}\n")
+          sock.close()
+          EOF
+          chmod +x /tmp/capture_udp.py
+          
+          python3 /tmp/capture_udp.py > /tmp/udp_capture.log 2>&1 &
+          sleep 2
+          
+          cd build
+          ./bin/fdbserver --metrics_data_model=otel \
+            --metrics_emission_interval=5 \
+            -r simulation -f ../tests/fast/AtomicOps.toml -s 12345 \
+            > /tmp/fdb_otel_test.log 2>&1 &
+          sleep 35
+          
+          if [ -f /tmp/otel_metrics_summary.txt ]; then
+            PACKETS=$(grep "Packets" /tmp/otel_metrics_summary.txt | awk '{print $3}')
+            echo "Received $PACKETS packets"
+            [ "$PACKETS" -gt 0 ] && echo "SUCCESS" || (echo "FAILURE" && exit 1)
+          fi
+      
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: otel-output-centos7
+          path: /tmp/*.{bin,txt,log}
+
+  test-otel-macos:
+    runs-on: macos-13
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          brew uninstall --ignore-dependencies boost || true
+          brew install boost@1.85 ninja cmake openssl@3
+          brew link --force boost@1.85
+      
+      - name: Install OTEL Collector
+        run: |
+          wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.91.0/otelcol_0.91.0_darwin_amd64.tar.gz
+          tar -xzf otelcol_0.91.0_darwin_amd64.tar.gz
+          chmod +x otelcol
+          sudo mv otelcol /usr/local/bin/
+      
+      - name: Create config and start collector
+        run: |
+          cat > otel-config.yaml << 'EOF'
+          receivers:
+            otlp:
+              protocols:
+                grpc:
+                  endpoint: 127.0.0.1:4317
+          exporters:
+            file:
+              path: /tmp/otel-metrics.json
+            logging:
+              loglevel: debug
+          service:
+            pipelines:
+              metrics:
+                receivers: [otlp]
+                exporters: [file, logging]
+          EOF
+          
+          otelcol --config=otel-config.yaml > /tmp/otel-collector.log 2>&1 &
+          echo $! > /tmp/otel-collector.pid
+          sleep 2
+      
+      - name: Build FDB
+        run: |
+          mkdir build && cd build
+          cmake -G Ninja .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBOOST_ROOT=$(brew --prefix boost@1.85) \
+            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
+            -DBUILD_TESTING=ON
+          ninja fdbserver
+      
+      - name: Test OTEL
+        run: |
+          python3 -c "
+          import socket, time
+          sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+          sock.bind(('127.0.0.1', 8903))
+          sock.settimeout(45.0)
+          print('Listening on UDP 127.0.0.1:8903')
+          metrics = []
+          start = time.time()
+          while time.time() - start < 40:
+              try:
+                  data, _ = sock.recvfrom(65536)
+                  print(f'Received {len(data)} bytes')
+                  metrics.append(data)
+                  open('/tmp/otel_udp_capture.bin', 'ab').write(data)
+              except: continue
+          open('/tmp/otel_metrics_summary.txt', 'w').write(f'Packets received: {len(metrics)}\n')
+          " > /tmp/udp_capture.log 2>&1 &
+          
+          sleep 2
+          
+          cd build
+          ./bin/fdbserver --metrics_data_model=otel \
+            --metrics_emission_interval=5 \
+            -r simulation -f ../tests/fast/AtomicOps.toml -s 12345 \
+            > /tmp/fdb_otel_test.log 2>&1 &
+          sleep 35
+          
+          PACKETS=$(grep "Packets" /tmp/otel_metrics_summary.txt | awk '{print $3}')
+          echo "Received $PACKETS packets"
+          [ "$PACKETS" -gt 0 ] && echo "SUCCESS" || (echo "FAILURE" && exit 1)
+      
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: otel-output-macos
+          path: /tmp/*.{bin,txt,log}
+
+  report-results:
+    needs: [test-otel-rhel9, test-otel-centos7, test-otel-macos]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+      
+      - name: Display results
+        run: |
+          echo "# OTEL Metrics Test Results"
+          echo ""
+          
+          for platform in rhel9 centos7 macos; do
+            echo "## $platform"
+            if [ -f "otel-output-$platform/otel_metrics_summary.txt" ]; then
+              cat "otel-output-$platform/otel_metrics_summary.txt"
+            else
+              echo "No summary file found"
+            fi
+            echo ""
+          done
+          
+          echo "OTEL E2E test complete"
