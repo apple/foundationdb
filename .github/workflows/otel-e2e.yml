@@ -20,9 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y python3 python3-pip cmake gcc gcc-c++ \
-            openssl-devel git wget tar gzip
-          dnf install -y https://dl.fedoraproject.org/pub/epel/9/Everything/x86_64/Packages/n/ninja-build-1.10.2-6.el9.x86_64.rpm || \
-            dnf install -y ninja-build
+            openssl-devel git wget tar gzip make
       
       - name: Install OTEL Collector
         run: |
@@ -217,10 +215,11 @@ jobs:
         run: |
           yum install -y centos-release-scl epel-release
           
-          # Fix SCL repository mirrors
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo
-          sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo
-          sed -i 's/#baseurl/baseurl/g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo
+          # Fix ALL CentOS repos including SCL
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          sed -i 's/#baseurl/baseurl/g' /etc/yum.repos.d/CentOS-*
           
           yum clean all
           yum makecache
@@ -373,7 +372,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBOOST_ROOT=$(brew --prefix boost@1.85) \
             -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
-            -DBUILD_TESTING=ON
+            -DBUILD_TESTING=ON \
+            -DBUILD_SWIFT=OFF
           make -j$(sysctl -n hw.ncpu) fdbserver
       
       - name: Test OTEL
