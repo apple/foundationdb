@@ -59,7 +59,7 @@ struct Coroutine /*: IThreadlike*/ {
 	Coroutine() = default;
 	~Coroutine() { *alive = false; }
 
-	static constexpr auto kStackSize = 32 * (1 << 10);
+	static constexpr auto kStackSize = 256 * (1 << 10);
 
 	void start() {
 		coro.reset(new coro_t::pull_type(boost::coroutines2::fixedsize_stack(kStackSize),

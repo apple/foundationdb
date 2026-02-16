@@ -92,9 +92,6 @@ template <class T, bool IsCancellable>
 struct CoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 	using ValType = std::conditional_t<std::is_void_v<T>, Void, T>;
 
-	static void* operator new(size_t s) { return allocateFast(int(s)); }
-	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
-
 	n_coroutine::coroutine_handle<> handle;
 
 	int8_t& waitState() { return Actor<ValType>::actor_wait_state; }
@@ -116,12 +113,16 @@ struct CoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 
 			// If the actor is waiting, then resume the coroutine to throw actor_cancelled().
 			if (prev_wait_state > 0) {
-				handle.resume();
+				auto h = handle; // Copy to local — frame may be freed during resume
+				h.resume();
 			}
 		}
 	}
 
-	void destroy() override { delete this; }
+	void destroy() override {
+		auto h = handle; // Copy to local — handle is in the frame we're about to free
+		h.destroy();
+	}
 };
 
 template <class U>
@@ -175,13 +176,11 @@ template <class F, class T>
 struct AwaitableResume<F, T, false> {
 	T const& await_resume() {
 		auto self = static_cast<F*>(this);
-		if (self->resumeImpl()) {
-			if (self->future.isError()) {
-				throw self->future.getError();
-			}
-			return self->future.get();
+		self->resumeImpl();
+		if (self->future.isError()) {
+			throw self->future.getError();
 		}
-		return self->store.getRef();
+		return self->future.get();
 	}
 };
 
@@ -206,21 +205,30 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 	using FutureType = std::conditional_t<IsStream, FutureStream<FutureValue>, Future<FutureValue> const&>;
 	FutureType future;
 	promise_type* pt = nullptr;
-	AwaitableFutureStore<FutureValue> store;
+
+	// Store is only needed for streams — non-stream values are already in the SAV after fire()
+	struct Empty {};
+	[[no_unique_address]] std::conditional_t<IsStream, AwaitableFutureStore<FutureValue>, Empty> store;
 
 	AwaitableFuture(const FutureType& f, promise_type* pt) : future(f), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
-		store.set(value);
+		if constexpr (IsStream) {
+			store.set(value);
+		}
 		pt->resume();
 	}
 	void fire(FutureValue&& value) override {
-		store.set(std::move(value));
+		if constexpr (IsStream) {
+			store.set(std::move(value));
+		}
 		pt->resume();
 	}
 
 	void error(Error error) override {
-		store.data = error;
+		if constexpr (IsStream) {
+			store.data = error;
+		}
 		pt->resume();
 	}
 
@@ -339,35 +347,17 @@ struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
 	}
 };
 
-template <class T, bool>
-struct ActorMember {
-	T* member;
-	explicit ActorMember(n_coroutine::coroutine_handle<> handle) : member(new T(handle)) {}
-	T* ptr() { return member; }
-	T* operator->() { return member; }
-	const T* operator->() const { return member; }
-};
-
-template <class T>
-struct ActorMember<T, true> {
-	T member;
-	explicit ActorMember(n_coroutine::coroutine_handle<> handle) : member(handle) {}
-	T* ptr() { return &member; }
-	T* operator->() { return &member; }
-	const T* operator->() const { return &member; }
-};
-
 template <class T, class Promise>
 struct CoroReturn {
 	template <class U>
 	void return_value(U&& value) {
-		static_cast<Promise*>(this)->coroActor->set(std::forward<U>(value));
+		static_cast<Promise*>(this)->coroActor.set(std::forward<U>(value));
 	}
 };
 
 template <class Promise>
 struct CoroReturn<Void, Promise> {
-	void return_void() { static_cast<Promise*>(this)->coroActor->set(Void()); }
+	void return_void() { static_cast<Promise*>(this)->coroActor.set(Void()); }
 };
 
 template <class T, bool IsCancellable>
@@ -377,9 +367,9 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
 	using ReturnFutureType = Future<ReturnValue>;
 
-	ActorType* coroActor;
+	ActorType coroActor; // Embedded in coroutine frame — single allocation
 
-	CoroPromise() : coroActor(new ActorType()) {}
+	CoroPromise() {}
 
 	n_coroutine::coroutine_handle<promise_type> handle() {
 		return n_coroutine::coroutine_handle<promise_type>::from_promise(*this);
@@ -388,27 +378,32 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 	static void* operator new(size_t s) { return allocateFast(int(s)); }
 	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
 
-	ReturnFutureType get_return_object() noexcept { return ReturnFutureType(coroActor); }
+	ReturnFutureType get_return_object() noexcept {
+		coroActor.handle = handle();
+		return ReturnFutureType(&coroActor);
+	}
 
 	[[nodiscard]] n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
 
 	auto final_suspend() noexcept {
 		struct FinalAwaitable {
 			ActorType* sav;
-			// for debugging output only
 			explicit FinalAwaitable(ActorType* sav) : sav(sav) {}
 
-			[[nodiscard]] bool await_ready() const noexcept { return true; }
-			void await_resume() const noexcept {
+			[[nodiscard]] bool await_ready() const noexcept { return false; } // Must suspend
+			void await_resume() const noexcept {} // Never called
+			void await_suspend(n_coroutine::coroutine_handle<>) const noexcept {
+				// Coroutine is fully suspended at final_suspend — safe to destroy frame
 				if (sav->isError()) {
 					sav->finishSendErrorAndDelPromiseRef();
 				} else {
 					sav->finishSendAndDelPromiseRef();
 				}
+				// If refcounts hit 0, destroy() was called → frame freed
+				// If not, frame stays alive at final_suspend until last ref drops
 			}
-			constexpr void await_suspend(n_coroutine::coroutine_handle<>) const noexcept {}
 		};
-		return FinalAwaitable(coroActor);
+		return FinalAwaitable(&coroActor);
 	}
 
 	void unhandled_exception() {
@@ -416,22 +411,17 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 		try {
 			std::rethrow_exception(std::current_exception());
 		} catch (const Error& error) {
-			// if (Actor<ReturnValue>::actor_wait_state == -1 && error.code() == error_code_operation_cancelled) {
-			// 	return;
-			// }
-			coroActor->setError(error);
-			// SAV<ReturnValue>::sendErrorAndDelPromiseRef(error);
+			coroActor.setError(error);
 		} catch (...) {
-			coroActor->setError(unknown_error());
-			// SAV<ReturnValue>::sendErrorAndDelPromiseRef(unknown_error());
+			coroActor.setError(unknown_error());
 		}
 	}
 
-	void setHandle(n_coroutine::coroutine_handle<> h) { coroActor->handle = h; }
+	void setHandle(n_coroutine::coroutine_handle<> h) { coroActor.handle = h; }
 
-	void resume() { coroActor->handle.resume(); }
+	void resume() { coroActor.handle.resume(); }
 
-	int8_t& waitState() { return coroActor->waitState(); }
+	int8_t& waitState() { return coroActor.waitState(); }
 
 	template <class U>
 	auto await_transform(const Future<U>& future) {
