@@ -290,7 +290,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto endpoint = Endpoint();
 		auto receiver = SessionProbeReceiver();
 		try {
-			auto listenFuture = transport.bind(addr, addr);
+			transport.bind(addr, addr);
 		} catch (const Error& err) {
 			log("CAUGHT Error in bind: code={} what={}", err.code(), err.what());
 			return SERVER_BIND_ERROR;
@@ -569,12 +569,20 @@ int main(int argc, char** argv) {
 	constexpr auto singleChainPair = std::pair(ChainLength(1), ChainLength(1));
 	inputs.insert(inputs.end(), 3, singleChainPair);
 
+	std::vector<std::string_view> failedPasswordTests;
 	for (const auto& testCase : std::array{ "no_bad_password", "client", "server" }) {
-		if (runTlsTest(singleChainPair.first, singleChainPair.second, testCase))
+		if (runTlsTest(singleChainPair.first, singleChainPair.second, testCase)) {
 			failed.push_back(singleChainPair);
+			failedPasswordTests.push_back(testCase);
+		}
 	}
 
 	if (!failed.empty()) {
+		if (!failedPasswordTests.empty()) {
+			for (const auto& test : failedPasswordTests) {
+				log(" {}, failed", test);
+			}
+		}
 		log("Test Failed: {}/{} cases: {}", failed.size(), inputs.size(), failed);
 		return MAIN_TEST_FAILED;
 	} else {

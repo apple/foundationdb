@@ -92,10 +92,7 @@ public:
 	PrivateKey& operator=(const PrivateKey& other) noexcept = default;
 
 	// PEM_write_bio_PrivateKey
-	StringRef writePem(Arena& arena) const;
-
-	// PEM_write_bio_PrivateKey with password encryption
-	StringRef writePemWithPassword(Arena& arena, StringRef password) const;
+	StringRef writePem(Arena& arena, StringRef password = StringRef()) const;
 
 	// d2i_PrivateKey
 	StringRef writeDer(Arena& arena) const;

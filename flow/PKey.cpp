@@ -224,30 +224,24 @@ PrivateKey::PrivateKey(DerEncoded, StringRef der) {
 	}
 }
 
-StringRef PrivateKey::writePem(Arena& arena) const {
+StringRef PrivateKey::writePem(Arena& arena, StringRef password) const {
 	ASSERT(ptr);
 	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
 	if (!mem)
 		traceAndThrowEncode("PrivateKeyPemWriteInitError");
-	if (1 != ::PEM_write_bio_PrivateKey(mem, nativeHandle(), nullptr, nullptr, 0, 0, nullptr))
-		traceAndThrowEncode("PrivateKeyDerPemWrite");
-	auto bioBuf = std::add_pointer_t<char>{};
-	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
-	ASSERT_GT(len, 0);
-	auto buf = new (arena) uint8_t[len];
-	::memcpy(buf, bioBuf, len);
-	return StringRef(buf, static_cast<int>(len));
-}
 
-StringRef PrivateKey::writePemWithPassword(Arena& arena, StringRef password) const {
-	ASSERT(ptr);
-	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
-	if (!mem)
-		traceAndThrowEncode("PrivateKeyPemWriteInitError");
-	std::vector<unsigned char> pwBytes(password.begin(), password.end());
+	std::vector<unsigned char> pwBytes;
+	const EVP_CIPHER* cipher = nullptr;
+
+	if (!password.empty()) {
+		pwBytes.assign(password.begin(), password.end());
+		cipher = ::EVP_aes_256_cbc();
+	}
+
 	if (1 != ::PEM_write_bio_PrivateKey(
-	             mem, nativeHandle(), ::EVP_aes_256_cbc(), pwBytes.data(), pwBytes.size(), 0, nullptr))
-		traceAndThrowEncode("PrivateKeyPemWithPasswordWrite");
+	             mem, nativeHandle(), cipher, pwBytes.empty() ? nullptr : pwBytes.data(), pwBytes.size(), 0, nullptr))
+		traceAndThrowEncode(password.empty() ? "PrivateKeyDerPemWrite" : "PrivateKeyPemWithPasswordWrite");
+
 	auto bioBuf = std::add_pointer_t<char>{};
 	auto const len = ::BIO_get_mem_data(mem, &bioBuf);
 	ASSERT_GT(len, 0);
