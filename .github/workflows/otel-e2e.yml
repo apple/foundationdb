@@ -19,8 +19,10 @@ jobs:
       
       - name: Install dependencies
         run: |
-          dnf install -y python3 python3-pip cmake ninja-build gcc gcc-c++ \
+          dnf install -y python3 python3-pip cmake gcc gcc-c++ \
             openssl-devel git wget tar gzip
+          dnf install -y https://dl.fedoraproject.org/pub/epel/9/Everything/x86_64/Packages/n/ninja-build-1.10.2-6.el9.x86_64.rpm || \
+            dnf install -y ninja-build
       
       - name: Install OTEL Collector
         run: |
@@ -67,11 +69,11 @@ jobs:
       - name: Build FDB
         run: |
           mkdir build && cd build
-          cmake -G Ninja .. \
+          cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_SANITIZER=OFF \
             -DBUILD_TESTING=ON
-          ninja fdbserver
+          make -j$(nproc) fdbserver
       
       - name: Create UDP capture script
         run: |
@@ -214,8 +216,14 @@ jobs:
       - name: Install Python 3.8
         run: |
           yum install -y centos-release-scl epel-release
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+          
+          # Fix SCL repository mirrors
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo
+          sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo
+          sed -i 's/#baseurl/baseurl/g' /etc/yum.repos.d/CentOS-SCLo-scl-rh.repo
+          
+          yum clean all
+          yum makecache
           yum install -y rh-python38 rh-python38-python-pip
       
       - name: Checkout code
@@ -224,7 +232,7 @@ jobs:
       - name: Install dependencies
         run: |
           source /opt/rh/rh-python38/enable
-          yum install -y cmake3 ninja-build gcc gcc-c++ openssl-devel git wget tar gzip
+          yum install -y cmake3 gcc gcc-c++ openssl-devel git wget tar gzip make
           ln -s /usr/bin/cmake3 /usr/bin/cmake || true
       
       - name: Install OTEL Collector
@@ -261,8 +269,8 @@ jobs:
           sleep 2
           
           mkdir build && cd build
-          cmake -G Ninja .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          ninja fdbserver
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          make -j$(nproc) fdbserver
       
       - name: Test OTEL
         run: |
@@ -324,7 +332,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew uninstall --ignore-dependencies boost || true
-          brew install boost@1.85 ninja cmake openssl@3
+          brew install boost@1.85 cmake openssl@3
           brew link --force boost@1.85
       
       - name: Install OTEL Collector
@@ -361,12 +369,12 @@ jobs:
       - name: Build FDB
         run: |
           mkdir build && cd build
-          cmake -G Ninja .. \
+          cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DBOOST_ROOT=$(brew --prefix boost@1.85) \
             -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
             -DBUILD_TESTING=ON
-          ninja fdbserver
+          make -j$(sysctl -n hw.ncpu) fdbserver
       
       - name: Test OTEL
         run: |
