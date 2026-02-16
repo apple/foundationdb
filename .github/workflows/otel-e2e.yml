@@ -216,10 +216,10 @@ jobs:
           yum install -y centos-release-scl epel-release
           
           # Fix ALL CentOS repos including SCL
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-          sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-          sed -i 's/#baseurl/baseurl/g' /etc/yum.repos.d/CentOS-*
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's/#baseurl/baseurl/g' /etc/yum.repos.d/CentOS-*.repo
           
           yum clean all
           yum makecache
@@ -331,7 +331,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew uninstall --ignore-dependencies boost || true
-          brew install boost@1.85 cmake openssl@3
+          brew install boost@1.85 cmake openssl@3 ninja
           brew link --force boost@1.85
       
       - name: Install OTEL Collector
@@ -368,13 +368,12 @@ jobs:
       - name: Build FDB
         run: |
           mkdir build && cd build
-          cmake .. \
+          cmake -G Ninja .. \
             -DCMAKE_BUILD_TYPE=Release \
             -DBOOST_ROOT=$(brew --prefix boost@1.85) \
             -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
-            -DBUILD_TESTING=ON \
-            -DBUILD_SWIFT=OFF
-          make -j$(sysctl -n hw.ncpu) fdbserver
+            -DBUILD_TESTING=ON
+          ninja fdbserver
       
       - name: Test OTEL
         run: |
