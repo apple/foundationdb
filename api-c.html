@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>C API &#8212; FoundationDB 7.4.6 documentation</title>
+    <title>C API &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.6</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.73</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -55,7 +55,140 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="api-reference.html">API Reference</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -162,12 +295,12 @@
 <p>FoundationDB’s C bindings are installed with the FoundationDB client binaries (see <a class="reference internal" href="api-general.html#installing-client-binaries"><span class="std std-ref">Installing FoundationDB client binaries</span></a>).</p>
 <dl>
 <dt>On Linux,</dt><dd><div class="line-block">
-<div class="line"><code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_c_types.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_c_internal.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_c_options.g.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.options</span></code> and <code class="docutils literal notranslate"><span class="pre">fdb_c_shim.h</span></code> are installed into <code class="docutils literal notranslate"><span class="pre">/usr/include/foundationdb/</span></code></div>
-<div class="line"><code class="docutils literal notranslate"><span class="pre">libfdb_c.so</span></code> and <code class="docutils literal notranslate"><span class="pre">libfdb_c_shim.so</span></code> is installed into <code class="docutils literal notranslate"><span class="pre">/usr/lib/</span></code> with the <code class="docutils literal notranslate"><span class="pre">deb</span></code> package and into  <code class="docutils literal notranslate"><span class="pre">/usr/lib64/</span></code> with the <code class="docutils literal notranslate"><span class="pre">rpm</span></code> package</div>
+<div class="line"><code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code> is installed into <code class="docutils literal notranslate"><span class="pre">/usr/include/foundationdb/</span></code></div>
+<div class="line"><code class="docutils literal notranslate"><span class="pre">libfdb_c.so</span></code> is installed into <code class="docutils literal notranslate"><span class="pre">/usr/lib/</span></code></div>
 </div>
 </dd>
 <dt>On macOS,</dt><dd><div class="line-block">
-<div class="line"><code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_c_types.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_c_internal.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb_c_options.g.h</span></code>, <code class="docutils literal notranslate"><span class="pre">fdb.options</span></code> and <code class="docutils literal notranslate"><span class="pre">fdb_c_shim.h</span></code> are installed into <code class="docutils literal notranslate"><span class="pre">/usr/local/include/foundationdb/</span></code></div>
+<div class="line"><code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code> is installed into <code class="docutils literal notranslate"><span class="pre">/usr/local/include/foundationdb/</span></code></div>
 <div class="line"><code class="docutils literal notranslate"><span class="pre">libfdb_c.dylib</span></code> is installed into <code class="docutils literal notranslate"><span class="pre">/usr/local/lib/</span></code></div>
 </div>
 </dd>
@@ -187,8 +320,8 @@
 </section>
 <section id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 740.</p>
-<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 740</span>
+<p>Prior to including <code class="docutils literal notranslate"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal notranslate"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal notranslate"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 730.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 730</span>
 <span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span>
 </pre></div>
 </div>
@@ -218,7 +351,7 @@
 <dt><code class="docutils literal notranslate"><span class="pre">runtime_version</span></code></dt><dd><p>The version of run-time behavior the API is requested to provide. Must be less than or equal to <code class="docutils literal notranslate"><span class="pre">header_version</span></code>, and should almost always be equal.</p>
 <p>Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
-<dt><code class="docutils literal notranslate"><span class="pre">header_version</span></code></dt><dd><p>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 740). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</p>
+<dt><code class="docutils literal notranslate"><span class="pre">header_version</span></code></dt><dd><p>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 730). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</p>
 </dd>
 </dl>
 <div class="admonition warning">
@@ -328,7 +461,7 @@
 <dl class="c function">
 <dt class="sig sig-object c" id="c.fdb_future_cancel">
 <span class="kt"><span class="pre">void</span></span><span class="w"> </span><span class="sig-name descname"><span class="n"><span class="pre">fdb_future_cancel</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">future</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Cancels an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> object and its associated asynchronous operation. If called before the future is ready, attempts to access its value will return an <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">operation_cancelled</span></a> error. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have successfully completed and be unable to be cancelled.</p>
+<dd><p>Cancels an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal notranslate"><span class="pre">FDBFuture</span></code></a> object and its associated asynchronous operation. If called before the future is ready, attempts to access its value will return an <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">operation_cancelled</span></a> error. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have succesfully completed and be unable to be cancelled.</p>
 </dd></dl>
 
 <dl class="c function">
@@ -614,8 +747,8 @@
 <dl class="c function">
 <dt class="sig sig-object c" id="c.fdb_database_get_client_status">
 <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><span class="n"><span class="pre">FDBFuture</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="sig-name descname"><span class="n"><span class="pre">fdb_database_get_client_status</span></span></span><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase"><span class="n"><span class="pre">FDBDatabase</span></span></a><span class="w"> </span><span class="p"><span class="pre">*</span></span><span class="n"><span class="pre">db</span></span><span class="sig-paren">)</span><br /></dt>
-<dd><p>Returns a JSON string containing database client-side status information. If the Multi-version client API is disabled an empty string will be returned.
-At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:</p>
+<dd><p>Returns a JSON string containing database client-side status information. At the top level the report describes the status of the
+Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:</p>
 <div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="p">{</span><span class="w">  </span><span class="s">&quot;Healthy&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">overall</span><span class="w"> </span><span class="n">health</span><span class="w"> </span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="w"> </span><span class="n">or</span><span class="w"> </span><span class="nb">false</span><span class="o">&gt;</span><span class="p">,</span>
 <span class="w">   </span><span class="s">&quot;InitializationState&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">initializing</span><span class="o">|</span><span class="n">initialization_failed</span><span class="o">|</span><span class="n">created</span><span class="o">|</span><span class="n">incompatible</span><span class="o">|</span><span class="n">closed</span><span class="o">&gt;</span><span class="p">,</span>
 <span class="w">   </span><span class="s">&quot;InitializationError&quot;</span><span class="o">:</span><span class="w"> </span><span class="o">&lt;</span><span class="n">initialization</span><span class="w"> </span><span class="n">error</span><span class="w"> </span><span class="n">code</span><span class="p">,</span><span class="w"> </span><span class="n">present</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">initialization</span><span class="w"> </span><span class="n">failed</span><span class="o">&gt;</span><span class="p">,</span>
@@ -1175,8 +1308,8 @@ server roles the client is aware of and their connection status. The schema of t
       
     </p>
     <p>
-        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 30, 2026.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Feb 18, 2026.<br/>
     </p>
   </div>
 </footer>

@@ -55,6 +55,6 @@ When operating in the tenant mode ``required_experimental`` or using a metaclust
 
 .. note :: Setting the ``READ_SYSTEM_KEYS`` or ``ACCESS_SYSTEM_KEYS`` options implies ``RAW_ACCESS`` for your transaction.
 
-.. note :: Many :doc:`special keys <special-keys>` operations access parts of the system keys and will implicitly enable raw access on the transactions in which they are used.
+.. note :: Many :doc:`special keys <special-keys>` operations access parts of the system keys and will implictly enable raw access on the transactions in which they are used.
 
 .. warning :: Care should be taken when using raw access to run transactions spanning multiple tenants if the tenant feature is being utilized to aid in moving data between clusters. In such scenarios, it may not be guaranteed that all of the data you intend to access is on a single cluster.

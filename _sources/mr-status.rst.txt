@@ -23,7 +23,7 @@ You can access machine-readable status in three ways ways:
 * From any client, read the key ``\xFF\xFF/status/json``. The value of this key is a JSON object serialized to a byte string with UTF-8 encoding. In Python, given an open database ``db``, the JSON object can be read and deserialized with::
 
     import json
-    status = json.loads(db[b'\xff\xff/status/json'])
+    status = json.loads(db['\xff\xff/status/json'])
 
 Guidance regarding versioning
 =============================
@@ -92,9 +92,9 @@ cluster.messages                      primary_dc_missing                    Unab
 cluster.messages                      fetch_primary_dc_timeout              Fetching primary DC timed out.
 cluster.processes.<process>.messages  file_open_error                       Unable to open ‘<file>’ (<os_error>).
 cluster.processes.<process>.messages  incorrect_cluster_file_contents       Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.
-cluster.processes.<process>.messages  io_error                              <error> occurred in <subsystem>
-cluster.processes.<process>.messages  platform_error                        <error> occurred in <subsystem>
-cluster.processes.<process>.messages  process_error                         <error> occurred in <subsystem>
+cluster.processes.<process>.messages  io_error                              <error> occured in <subsystem>
+cluster.processes.<process>.messages  platform_error                        <error> occured in <subsystem>
+cluster.processes.<process>.messages  process_error                         <error> occured in <subsystem>
 ====================================  ====================================  =================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================================
 
 The JSON path ``cluster.recovery_state``, when it exists, is an Object containing at least ``"name"`` and ``"description"``.  The possible values for those fields are in the following table:

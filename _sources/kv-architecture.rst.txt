@@ -10,12 +10,12 @@ All clients and servers connect to a FoundationDB cluster with a cluster file, w
 Cluster Controller
 ==================
 
-The cluster controller is a singleton elected by a majority of coordinators. It is the entry point for all processes in the cluster. It is responsible for determining when a process has failed, telling processes which roles they should become, and passing system information between all of the processes. The cluster controller is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV (i.e., Get-Read-Version) proxies, commit proxies, resolvers, and transaction logs. These five roles are treated as a unit, and if any of them fail, we will recruit a replacement for all five roles.
+The cluster controller is a singleton elected by a majority of coordinators. It is the entry point for all processes in the cluster. It is responsible for determining when a process has failed, telling processes which roles they should become, and passing system information between all of the processes.
 
 Master
 ======
 
-The master is a singleton that keeps commit proxies' committed version, provides read version for GRV proxies, and provides the commit versions for batches of the mutations to the commit proxies.
+The master is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV proxies, commit proxies, resolvers, and transaction logs. The three roles are treated as a unit, and if any of them fail, we will recruit a replacement for all three roles. The master keeps commit proxies' committed version, provides read version for GRV proxies, provides the commit versions for batches of the mutations to the commit proxies, runs data distribution algorithm, and runs ratekeeper.
 
 GRV Proxies and Commit Proxies
 ==============================
@@ -43,17 +43,7 @@ The resolvers are responsible determining conflicts between transactions. A read
 Storage Servers
 ===============
 
-The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of keys, and are responsible for storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a ``transaction_too_old`` error. The ssd storage engine stores the data in a b-tree. The memory storage engine stores the data in memory with an append only log that is only read from disk if the process is rebooted.
-
-Data Distributor
-================
-
-Data Distributor is a singleton in the cluster that runs the data distribution algorithm. It is responsible for ensuring that all data is replicated to the desired replication factor, and that the data is balanced across all storage servers. It is also responsible for moving data off of failed storage servers, and moving data away from storage servers that are overloaded.
-
-RateKeeper
-==========
-
-The RateKeeper is a singleton in the cluster and is responsible for monitoring the performance of the system and making adjustments to ensure that the cluster operates within its performance targets. Specifically, the throttling of client requests is achieved by controlling the rate of accepted GRV requests from clients.
+The vast majority of processes in a cluster are storage servers. Storage servers are assigned ranges of keys, and are responsible for storing all of the data for that range. They keep 5 seconds of mutations in memory, and an on disk copy of the data as of 5 second ago. Clients must read at a version within the last 5 seconds, or they will get a transaction_too_old error. The ssd storage engine stores the data in a b-tree. The memory storage engine stores the data in memory with an append only log that is only read from disk if the process is rebooted.
 
 Clients
 =======

@@ -107,11 +107,11 @@ Installation
 FoundationDB's C bindings are installed with the FoundationDB client binaries (see :ref:`installing-client-binaries`).
 
 On Linux,
-    | ``fdb_c.h``, ``fdb_c_types.h``, ``fdb_c_internal.h``, ``fdb_c_options.g.h``, ``fdb.options`` and ``fdb_c_shim.h`` are installed into ``/usr/include/foundationdb/``
-    | ``libfdb_c.so`` and ``libfdb_c_shim.so`` is installed into ``/usr/lib/`` with the ``deb`` package and into  ``/usr/lib64/`` with the ``rpm`` package
+    | ``fdb_c.h`` is installed into ``/usr/include/foundationdb/``
+    | ``libfdb_c.so`` is installed into ``/usr/lib/``
 
 On macOS,
-    | ``fdb_c.h``, ``fdb_c_types.h``, ``fdb_c_internal.h``, ``fdb_c_options.g.h``, ``fdb.options`` and ``fdb_c_shim.h`` are installed into ``/usr/local/include/foundationdb/``
+    | ``fdb_c.h`` is installed into ``/usr/local/include/foundationdb/``
     | ``libfdb_c.dylib`` is installed into ``/usr/local/lib/``
 
 Linking
@@ -134,7 +134,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 740
+  #define FDB_API_VERSION 730
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -506,8 +506,8 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
 .. function:: FDBFuture* fdb_database_get_client_status(FDBDatabase* db)
 
-   Returns a JSON string containing database client-side status information. If the Multi-version client API is disabled an empty string will be returned.
-   At the top level the report describes the status of the Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:
+   Returns a JSON string containing database client-side status information. At the top level the report describes the status of the 
+   Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:
 
    .. code-block::
 

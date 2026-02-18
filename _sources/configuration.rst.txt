@@ -218,7 +218,6 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` 
     # initial-restart-delay = 0
     # restart-backoff = 60.0
     # restart-delay-reset-interval = 60
-    # envvars = FOO=BAR BAZ=FOO
     # delete-envvars =
     # kill-on-configuration-change = true
     # disable-lifecycle-logging = false
@@ -226,8 +225,7 @@ Contains basic configuration parameters of the ``fdbmonitor`` process. ``user`` 
 Contains settings applicable to all processes (e.g. fdbserver, backup_agent).
 
 * ``cluster-file``: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the ``[fdbmonitor]`` section).
-* ``envvars``: A space separated list of environment variables to be added to child processes' environment variables. Every environment variable in the list must be of the form ``A=B`` where ``A`` and ``B`` are key and value names respectively.
-* ``delete-envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children. This takes precedence over envvars field.
+* ``delete-envvars``: A space separated list of environment variables to remove from the environments of child processes. This can be used if the ``fdbmonitor`` process needs to be run with environment variables that are undesired in its children.
 * ``kill-on-configuration-change``: If ``true``, affected processes will be restarted whenever the configuration file changes. Defaults to ``true``.
 * ``disable-lifecycle-logging``: If ``true``, ``fdbmonitor`` will not write log events when processes start or terminate. Defaults to ``false``.
 
@@ -724,7 +722,7 @@ The ``usable_regions`` configuration option determines the number of regions whi
 
 .. warning:: In release 6.0, ``usable_regions`` can only be configured to the values of ``1`` or ``2``, and a maximum of 2 regions can be defined in the ``regions`` json object.
 
-Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will drop the replicas in the remote region (on data distributor noticing the configuration change and marking the remote region's replicas as "undesired"). During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
+Increasing the ``usable_regions`` will start copying data from the active region to the remote region. Reducing the ``usable_regions`` will immediately drop the replicas in the remote region. During these changes, only one primary datacenter can have priority >= 0. This enforces exactly which region will lose its replica.
 
 Changing the log routers configuration
 --------------------------------------

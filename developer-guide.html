@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Developer Guide &#8212; FoundationDB 7.4.6 documentation</title>
+    <title>Developer Guide &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -38,7 +38,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.6</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.73</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -55,7 +55,140 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="reference internal" href="client-design.html">Client Design</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -291,19 +424,19 @@
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">user_space</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">set_user_data</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">set_user_data</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">user_space</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">key</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Subspaces support the <a class="reference internal" href="api-python.html#api-python-keys"><span class="std std-ref">as_foundationdb_key</span></a> method to implicitly pack keys, so you could also write the <code class="docutils literal notranslate"><span class="pre">set_user_data</span></code> as:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">set_user_data</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">set_user_data</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">user_space</span><span class="p">[</span><span class="n">key</span><span class="p">]]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Finally, you may want to clear a subspace before working with it (as long as you’re sure it should be empty):</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">clear_subspace</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">subspace</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">clear_subspace</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">subspace</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">clear_range_startswith</span><span class="p">(</span><span class="n">subspace</span><span class="o">.</span><span class="n">key</span><span class="p">())</span>
 </pre></div>
 </div>
@@ -507,7 +640,7 @@
 <p>All reads and modifications of key-value pairs in FoundationDB are done within the context of a transaction. A transaction is a small unit of work that is both reliably performed and logically independent of other transactions.</p>
 <p>In Python, a simple transaction looks like this:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">example</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">example</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="c1"># Read two values from the database</span>
     <span class="n">a</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;a&#39;</span><span class="p">)</span>
     <span class="n">b</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;b&#39;</span><span class="p">)</span>
@@ -539,7 +672,7 @@
 <section id="transaction-retry-loops">
 <h3>Transaction retry loops</h3>
 <p>In most client APIs, there is a way of encapsulating a block of code as part of a transaction. For example, in Python, the <code class="docutils literal notranslate"><span class="pre">&#64;fdb.transactional</span></code> decorator encapsulates retrying errors for the client. Here is a more detailed view of what the encapsulation does:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">example_encapsulated</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">example_encapsulated</span><span class="p">(</span><span class="n">db</span><span class="p">):</span>
     <span class="c1"># make a new Transaction object on the database</span>
     <span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span><span class="p">()</span>
 
@@ -619,7 +752,7 @@ until it’s ready.</p>
 <p>In some situations, you may want to explicitly control the number of key-value pairs returned. You can use the <code class="docutils literal notranslate"><span class="pre">limit</span></code> parameter for this purpose. For example, suppose you want to iterate through a range while retrieving blocks of a predetermined size:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">LIMIT</span> <span class="o">=</span> <span class="mi">100</span> <span class="c1"># adjust according to data characteristics</span>
 
-<span class="k">def</span><span class="w"> </span><span class="nf">get_range_limited</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">begin</span><span class="p">,</span> <span class="n">end</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">get_range_limited</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">begin</span><span class="p">,</span> <span class="n">end</span><span class="p">):</span>
     <span class="n">keys_found</span> <span class="o">=</span> <span class="kc">True</span>
     <span class="k">while</span> <span class="n">keys_found</span><span class="p">:</span>
         <span class="n">keys_found</span> <span class="o">=</span> <span class="p">[]</span>
@@ -655,11 +788,11 @@ change of a reference.</p>
 <p>For example, you can store the version reference using a <code class="docutils literal notranslate"><span class="pre">'mostRecentVersion'</span></code>
 key:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">setMostRecentVersion</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">versionNumber</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">setMostRecentVersion</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">versionNumber</span><span class="p">):</span>
     <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="s1">&#39;mostRecentVersion&#39;</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">versionNumber</span><span class="p">)</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">getMostRecentVersion</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">getMostRecentVersion</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="s1">&#39;mostRecentVersion&#39;</span><span class="p">,))]</span>
 </pre></div>
 </div>
@@ -677,24 +810,24 @@ of the data while concurrently writing the new version.</p>
 <p>An atomic operation is a single database command that carries out several logical steps: reading the value of a key, performing a transformation on that value, and writing the result. Different atomic operations perform different transformations. Like other database operations, an atomic operation is used within a transaction; however, its use within a transaction will not cause the transaction to conflict.</p>
 <p>Atomic operations are ideal for operating on keys that multiple clients modify frequently. For example, you can use a key as a counter and increment/decrement it with atomic <code class="xref py py-func docutils literal notranslate"><span class="pre">add()</span></code>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
 </pre></div>
 </div>
 <p>When the counter value is decremented down to 0, you may want to clear the key from database. An easy way to do that is to use <code class="xref py py-func docutils literal notranslate"><span class="pre">compare_and_clear()</span></code>, which atomically compares the value against given parameter and clears it without issuing a read from client:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">decrement</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counter</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">compare_and_clear</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
 </pre></div>
 </div>
 <p>Similarly, you can use a key as a flag and toggle it with atomic <code class="xref py py-func docutils literal notranslate"><span class="pre">xor()</span></code>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">toggle</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">flag</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">toggle</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">flag</span><span class="p">):</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">xor</span><span class="p">(</span><span class="n">flag</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;=?&#39;</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
 </pre></div>
 </div>
@@ -720,7 +853,7 @@ of the data while concurrently writing the new version.</p>
 <p>The following example illustrates both techniques. Together, they make a transaction idempotent that otherwise would not have been:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Increases account balance and stores a record of the deposit with a unique depositId</span>
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">deposit</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">acctId</span><span class="p">,</span> <span class="n">depositId</span><span class="p">,</span> <span class="n">amount</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">deposit</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">acctId</span><span class="p">,</span> <span class="n">depositId</span><span class="p">,</span> <span class="n">amount</span><span class="p">):</span>
 
     <span class="c1"># If the deposit record exists, the deposit already succeeded, and we can quit</span>
     <span class="n">depositKey</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="s1">&#39;account&#39;</span><span class="p">,</span> <span class="n">acctId</span><span class="p">,</span> <span class="n">depositId</span><span class="p">))</span>
@@ -752,7 +885,7 @@ of the data while concurrently writing the new version.</p>
 </div>
 <p>For example, suppose you have a transactional function that increments a set of counters using atomic addition. <a class="reference internal" href="#developer-guide-atomic-operations"><span class="std std-ref">Atomic operations</span></a> do not add read conflict ranges and so cannot cause the transaction in which they occur to fail. More precisely, the read version for an atomic operation is the same as transaction’s commit version, and thus no conflicting write from other transactions could be serialized between the read and write of the key. Most of the time, this is exactly what we want. However, suppose there is another transaction that (infrequently) resets one or more counters, and our contract requires that we must advance all specified counters in unison. We want to guarantee that if a counter is reset during an incrementing transaction, then the incrementing transaction will conflict. We can selectively add read conflicts ranges for this purpose:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">guarded_increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counters</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">guarded_increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">counters</span><span class="p">):</span>
     <span class="k">for</span> <span class="n">counter</span> <span class="ow">in</span> <span class="n">counters</span><span class="p">:</span>
         <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">counter</span><span class="p">,</span> <span class="n">struct</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;&lt;i&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
         <span class="k">if</span> <span class="n">reset</span><span class="p">(</span><span class="n">counter</span><span class="p">):</span> <span class="n">tr</span><span class="o">.</span><span class="n">add_read_conflict_key</span><span class="p">(</span><span class="n">counter</span><span class="p">)</span>
@@ -765,7 +898,7 @@ of the data while concurrently writing the new version.</p>
 <p>The strictly serializable isolation that transactions maintain by default has little performance cost when there are few conflicts but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads. Snapshot reads differ from ordinary (strictly serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas strictly serializable reads cause conflicts in that case.</p>
 <p>Consider a transaction which needs to remove and return an arbitrary value from a small range of keys.  The simplest implementation (using strictly serializable isolation) would be:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
     <span class="n">all_kv</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="nb">range</span><span class="p">]</span>
     <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">all_kv</span><span class="p">))</span>
     <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
@@ -774,7 +907,7 @@ of the data while concurrently writing the new version.</p>
 </div>
 <p>Unfortunately, if a concurrent transaction happens to insert a new key anywhere in the range, our transaction will conflict with it and fail (resulting in a retry) because seeing the other transaction’s write would change the result of the range read.  FoundationDB is enforcing a stronger contract than we actually need.  A snapshot read allows us to weaken the contract, but we don’t want to weaken it too far: it’s still important to us that the actual value we returned existed in the database at the time of our transaction. Adding a <a class="reference internal" href="#conflict-ranges"><span class="std std-ref">conflict range</span></a> for our key ensures that we will fail if someone else modifies the key simultaneously:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">remove_one</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
     <span class="n">all_kv</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">snapshot</span><span class="p">[</span><span class="nb">range</span><span class="p">]</span>              <span class="c1"># Snapshot read</span>
     <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">all_kv</span><span class="p">))</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">add_read_conflict_key</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>            <span class="c1"># Add conflict range</span>
@@ -810,7 +943,7 @@ of the data while concurrently writing the new version.</p>
 <p>The FoundationDB language bindings all provide a mechanism for cancelling an outstanding transaction. However there are also special transaction options for specifying the conditions under which a transaction should automatically be cancelled.</p>
 <p>In the following example, a retry loop is combined with transaction options that ensure that the operation will not be attempted more than 6 times or for longer than 3 seconds:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-<span class="k">def</span><span class="w"> </span><span class="nf">example_with_cancellation</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+<span class="k">def</span> <span class="nf">example_with_cancellation</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="c1"># Set maximum number of times that on_error() can be called (implicitly by the decorator).</span>
     <span class="c1"># On the 6th time, on_error() will throw retry_limit_exceeded rather than resetting and retrying.</span>
     <span class="n">tr</span><span class="o">.</span><span class="n">options</span><span class="o">.</span><span class="n">set_retry_limit</span><span class="p">(</span><span class="mi">5</span><span class="p">)</span>
@@ -834,10 +967,10 @@ of the data while concurrently writing the new version.</p>
 <h3>Watches</h3>
 <p>Sometimes you want a client to monitor one or more keys for updates to their values by other clients. An obvious way to implement monitoring is by polling, i.e., periodically reading the key-values to check them for a change. FoundationDB provides watches to monitor keys more efficiently. Watches are created for a specified key and return a <a class="reference internal" href="#developer-guide-programming-with-futures"><span class="std std-ref">future</span></a> that becomes ready when there’s a change to the key’s value.</p>
 <p>For example, suppose you have a polling loop that checks keys for changes once a second:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">polling_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">polling_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
 
     <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">read_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">read_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
         <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="n">tr</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">}</span>
 
     <span class="n">cache</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="nb">object</span><span class="p">()</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">}</span>
@@ -855,10 +988,10 @@ of the data while concurrently writing the new version.</p>
 </pre></div>
 </div>
 <p>With watches, you can eliminate the sleep and perform new reads only after a change to one of the keys:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">watching_read_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">watching_read_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
 
     <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">watch_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">watch_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
         <span class="k">return</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="n">tr</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">},</span> <span class="p">[</span><span class="n">tr</span><span class="o">.</span><span class="n">watch</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">]</span>
 
     <span class="n">cache</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span><span class="nb">object</span><span class="p">()</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">}</span>
@@ -877,10 +1010,10 @@ of the data while concurrently writing the new version.</p>
 <p>Watches guarantee only that a value was changed; they make no guarantee about values you may subsequently read. In particular, there is no guarantee that a value you read will correspond to the change that triggered the watch. Another client may have changed a key back to its original value or to some third value between a watch becoming ready and your subsequent read. For further details, see the discussion of watches in the language-specific document of your choice under <a class="reference internal" href="api-reference.html"><span class="doc">API Reference</span></a>.</p>
 </div>
 <p>If you only need to detect the <em>fact</em> of a change, and your response doesn’t depend on the new <em>value</em>, then you can eliminate the reads altogether:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">watching_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">watching_loop</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="n">keys</span><span class="p">):</span>
 
     <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">watch_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+    <span class="k">def</span> <span class="nf">watch_keys</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
         <span class="k">return</span> <span class="p">[</span><span class="n">tr</span><span class="o">.</span><span class="n">watch</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">]</span>
 
     <span class="k">while</span> <span class="kc">True</span><span class="p">:</span>
@@ -979,7 +1112,7 @@ of the data while concurrently writing the new version.</p>
 <p>As mentioned before, the algorithm to assign read versions is a bit more complex. At the start of a transaction, a client will ask a GRV proxy server for a read version. The GRV proxy will reply with the last committed version as of the time it received the request - this is important to guarantee external consistency. This is how this is achieved:</p>
 <ol class="arabic simple">
 <li><p>The client will send a GRV (get read version) request to a GRV proxy.</p></li>
-<li><p>The GRV proxy will batch GRV requests for a short amount of time (it depends on load and configuration how big these batches will be).</p></li>
+<li><p>The GRV proxy will batch GRV requests for a short amount of time (it depends on load and configuartion how big these batches will be).</p></li>
 <li><p>The proxy will do the following steps in parallel:
 * Ask master for their most recent committed version (the largest version of proxies’ committed version for which the transactions are successfully written to the transaction log system).
 * Send a message to the transaction log system to verify that it is still writable. This is to prevent that we fetch read versions from a GRV proxy that has been declared to be dead.</p></li>
@@ -989,7 +1122,7 @@ of the data while concurrently writing the new version.</p>
 <section id="conflict-detection">
 <h4>Conflict Detection</h4>
 <p>This section will only explain conceptually how transactions are resolved in FoundationDB. The implementation will use multiple servers running the <em>Resolver</em> role and the keyspace will be sharded across them. It will also only allow resolving transactions whose read versions are less than 5 million versions older than their commit version (around 5 seconds).</p>
-<p>A resolver will keep a map in memory which stores the written keys of each commit version. A simplified resolver state could look like this:</p>
+<p>A resolver will keep a map in memory which stores the written keys of each commit version. A simpified resolver state could look like this:</p>
 <table class="docutils align-default">
 <thead>
 <tr class="row-odd"><th class="head"><p>Version</p></th>
@@ -1011,7 +1144,7 @@ of the data while concurrently writing the new version.</p>
 </tr>
 </tbody>
 </table>
-<p>Now let’s assume we have a transaction with read version <em>1200</em> and the assigned commit version will be something larger than 1340 - let’s say it is <em>1450</em>. In that transaction we read keys <code class="docutils literal notranslate"><span class="pre">b,</span> <span class="pre">m,</span> <span class="pre">s</span></code> and we want to write to <code class="docutils literal notranslate"><span class="pre">a</span></code>. Note that we didn’t read <code class="docutils literal notranslate"><span class="pre">a</span></code> - so we will issue a blind write. The resolver will check whether any of the read keys (<code class="docutils literal notranslate"><span class="pre">b,</span> <span class="pre">m,</span> <span class="pre">or</span> <span class="pre">s</span></code>) appears in any line between version <em>1200</em> and the most recent version, <em>1450</em>. The last write to <code class="docutils literal notranslate"><span class="pre">b</span></code> was at version 1000 which was before the read version. This means that transaction read the most recent value. We don’t know about any recent writes to the other keys. Therefore the resolver will decide that this transaction does <em>NOT</em> conflict and it can be committed. It will then add this new write set to its internal state so that it can resolve future transactions. The new state will look like this:</p>
+<p>Now let’s assume we have a transaction with read version <em>1200</em> and the assigned commit version will be something larger than 1340 - let’s say it is <em>1450</em>. In that transaction we read keys <code class="docutils literal notranslate"><span class="pre">b,</span> <span class="pre">m,</span> <span class="pre">s</span></code> and we want to write to <code class="docutils literal notranslate"><span class="pre">a</span></code>. Note that we didn’t read <code class="docutils literal notranslate"><span class="pre">a</span></code> - so we will issue a blind write. The resolver will check whether any of the read keys (<code class="docutils literal notranslate"><span class="pre">b,</span> <span class="pre">m,</span> <span class="pre">or</span> <span class="pre">s</span></code>) appers in any line between version <em>1200</em> and the most recent version, <em>1450</em>. The last write to <code class="docutils literal notranslate"><span class="pre">b</span></code> was at version 1000 which was before the read version. This means that transaction read the most recent value. We don’t know about any recent writes to the other keys. Therefore the resolver will decide that this transaction does <em>NOT</em> conflict and it can be committed. It will then add this new write set to its internal state so that it can resolve future transactions. The new state will look like this:</p>
 <table class="docutils align-default">
 <thead>
 <tr class="row-odd"><th class="head"><p>Version</p></th>
@@ -1087,7 +1220,7 @@ of the data while concurrently writing the new version.</p>
 <li><p><code class="docutils literal notranslate"><span class="pre">operation_cancelled</span></code>. This error is thrown if you call <code class="docutils literal notranslate"><span class="pre">cancel()</span></code> on any future returned by a transaction. So if this future is shared by multiple threads or coroutines, all other waiters will see this error.</p></li>
 </ol>
 <p>If you see one of those errors, the best way of action is to fail the client.</p>
-<p>At a first glance this looks very similar to an <code class="docutils literal notranslate"><span class="pre">commit_unknown_result</span></code>. However, these errors lack the one guarantee <code class="docutils literal notranslate"><span class="pre">commit_unknown_result</span></code> still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn’t violate any consistency guarantees, abandoning a transaction means that there are no causality guarantees.</p>
+<p>At a first glance this looks very similar to an <code class="docutils literal notranslate"><span class="pre">commit_unknown_result</span></code>. However, these errors lack the one guarantee <code class="docutils literal notranslate"><span class="pre">commit_unknown_result</span></code> still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn’t violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.</p>
 </section>
 </section>
 </section>
@@ -1112,8 +1245,8 @@ of the data while concurrently writing the new version.</p>
       
     </p>
     <p>
-        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 30, 2026.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Feb 18, 2026.<br/>
     </p>
   </div>
 </footer>

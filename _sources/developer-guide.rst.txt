@@ -874,7 +874,7 @@ In order to assign read and commit versions to transactions, a client will never
 As mentioned before, the algorithm to assign read versions is a bit more complex. At the start of a transaction, a client will ask a GRV proxy server for a read version. The GRV proxy will reply with the last committed version as of the time it received the request - this is important to guarantee external consistency. This is how this is achieved:
 
 #. The client will send a GRV (get read version) request to a GRV proxy.
-#. The GRV proxy will batch GRV requests for a short amount of time (it depends on load and configuration how big these batches will be).
+#. The GRV proxy will batch GRV requests for a short amount of time (it depends on load and configuartion how big these batches will be).
 #. The proxy will do the following steps in parallel:
    * Ask master for their most recent committed version (the largest version of proxies' committed version for which the transactions are successfully written to the transaction log system).
    * Send a message to the transaction log system to verify that it is still writable. This is to prevent that we fetch read versions from a GRV proxy that has been declared to be dead.
@@ -886,7 +886,7 @@ Conflict Detection
 
 This section will only explain conceptually how transactions are resolved in FoundationDB. The implementation will use multiple servers running the *Resolver* role and the keyspace will be sharded across them. It will also only allow resolving transactions whose read versions are less than 5 million versions older than their commit version (around 5 seconds).
 
-A resolver will keep a map in memory which stores the written keys of each commit version. A simplified resolver state could look like this:
+A resolver will keep a map in memory which stores the written keys of each commit version. A simpified resolver state could look like this:
 
 =======    =======
 Version    Keys
@@ -897,7 +897,7 @@ Version    Keys
 1340       t, u, x
 =======    =======
 
-Now let's assume we have a transaction with read version *1200* and the assigned commit version will be something larger than 1340 - let's say it is *1450*. In that transaction we read keys ``b, m, s`` and we want to write to ``a``. Note that we didn't read ``a`` - so we will issue a blind write. The resolver will check whether any of the read keys (``b, m, or s``) appears in any line between version *1200* and the most recent version, *1450*. The last write to ``b`` was at version 1000 which was before the read version. This means that transaction read the most recent value. We don't know about any recent writes to the other keys. Therefore the resolver will decide that this transaction does *NOT* conflict and it can be committed. It will then add this new write set to its internal state so that it can resolve future transactions. The new state will look like this:
+Now let's assume we have a transaction with read version *1200* and the assigned commit version will be something larger than 1340 - let's say it is *1450*. In that transaction we read keys ``b, m, s`` and we want to write to ``a``. Note that we didn't read ``a`` - so we will issue a blind write. The resolver will check whether any of the read keys (``b, m, or s``) appers in any line between version *1200* and the most recent version, *1450*. The last write to ``b`` was at version 1000 which was before the read version. This means that transaction read the most recent value. We don't know about any recent writes to the other keys. Therefore the resolver will decide that this transaction does *NOT* conflict and it can be committed. It will then add this new write set to its internal state so that it can resolve future transactions. The new state will look like this:
 
 =======    =======
 Version    Keys
@@ -970,4 +970,4 @@ The trickiest errors are non-retryable errors. ``Transaction.on_error`` will ret
 
 If you see one of those errors, the best way of action is to fail the client.
 
-At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guarantees.
+At a first glance this looks very similar to an ``commit_unknown_result``. However, these errors lack the one guarantee ``commit_unknown_result`` still gives to the user: if the commit has already been sent to the database, the transaction could get committed at a later point in time. This means that if you retry the transaction, your new transaction might race with the old transaction. While this technically doesn't violate any consistency guarantees, abandoning a transaction means that there are no causality guaranatees.

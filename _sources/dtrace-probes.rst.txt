@@ -21,7 +21,7 @@ Actors
    FDB_TRACE_PROBE(actor_create, "actorname")
    FDB_TRACE_PROBE(actor_destroy, "actorname")
 
-Gets called whenever an actor is created or gets destroyed. It provides one argument which is a
+Get's called whenever an actor is created or gets destroyed. It provides one argument which is a
 string and it is the name of the actor.
 
 .. code-block:: c

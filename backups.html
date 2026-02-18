@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 7.4.6 documentation</title>
+    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB ON documentation</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.4.6</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.3.73</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -53,7 +53,140 @@
      href="index.html">Site <b class="caret"></b></a>
   <ul class="dropdown-menu globaltoc"
       role="menu"
-      aria-labelledby="dLabelGlobalToc"></ul>
+      aria-labelledby="dLabelGlobalToc"><ul>
+<li class="toctree-l1"><a class="reference internal" href="local-dev.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="internal-dev-tools.html">Internal Dev Tools</a></li>
+<li class="toctree-l1"><a class="reference internal" href="why-foundationdb.html">Why FoundationDB</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="transaction-manifesto.html">Transaction Manifesto</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cap-theorem.html">CAP Theorem</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency.html">Consistency</a></li>
+<li class="toctree-l2"><a class="reference internal" href="scalability.html">Scalability</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="technical-overview.html">Technical Overview</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="architecture.html">Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="performance.html">Performance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="benchmarking.html">Benchmarking</a></li>
+<li class="toctree-l2"><a class="reference internal" href="engineering.html">Engineering</a></li>
+<li class="toctree-l2"><a class="reference internal" href="features.html">Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="layer-concept.html">Layer Concept</a></li>
+<li class="toctree-l2"><a class="reference internal" href="anti-features.html">Anti-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="experimental-features.html">Experimental-Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-processing.html">Transaction Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="fault-tolerance.html">Fault Tolerance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="flow.html">Flow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="testing.html">Simulation and Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="kv-architecture.html">FoundationDB Architecture</a></li>
+<li class="toctree-l2"><a class="reference internal" href="read-write-path.html">FDB Read and Write Path</a></li>
+<li class="toctree-l2"><a class="reference internal" href="ha-write-path.html">FDB HA Write Path: How a mutation travels in FDB HA</a></li>
+<li class="toctree-l2"><a class="reference internal" href="consistency-check-urgent.html">Consistency Checker Urgent</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="client-design.html">Client Design</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-mac.html">Getting Started on macOS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="getting-started-linux.html">Getting Started on Linux</a></li>
+<li class="toctree-l2"><a class="reference internal" href="downloads.html">Downloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="developer-guide.html">Developer Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="data-modeling.html">Data Modeling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="transaction-profiler-analyzer.html">Transaction profiling and analyzing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tenants.html">Tenants</a></li>
+<li class="toctree-l2"><a class="reference internal" href="automatic-idempotency.html">Automatic Idempotency</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="design-recipes.html">Design Recipes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="blob.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="blob-java.html">Blob</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="hierarchical-documents-java.html">Hierarchical Documents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="multimaps-java.html">Multimaps</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="priority-queues-java.html">Priority Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="queues-java.html">Queues</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="segmented-range-reads-java.html">Segmented Range Reads</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="simple-indexes-java.html">Simple Indexes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="spatial-indexing-java.html">Spatial Indexing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="subspace-indirection-java.html">Subspace Indirection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tables-java.html">Tables</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector.html">Vector</a></li>
+<li class="toctree-l2"><a class="reference internal" href="vector-java.html">Vector</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api-python.html">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-ruby.html">Ruby API</a></li>
+<li class="toctree-l2"><a class="reference external" href="relative://javadoc/index.html">Java API</a></li>
+<li class="toctree-l2"><a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-c.html">C API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api-error-codes.html">Error Codes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="special-keys.html">Special Keys</a></li>
+<li class="toctree-l2"><a class="reference internal" href="global-configuration.html">Global Configuration</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="class-scheduling.html">Class Scheduling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="largeval.html">Managing Large Values and Blobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="time-series.html">Time-Series Data</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="administration.html">Administration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
+<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
+<li class="toctree-l1"><a class="reference internal" href="redwood.html">Redwood Storage Engine</a></li>
+<li class="toctree-l1"><a class="reference internal" href="visibility.html">Visibility Documents</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="request-tracing.html">Request Tracing</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="earlier-release-notes.html">Earlier Release Notes</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-014.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-016.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-021.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-022.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-023.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-100.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-200.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-300.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-400.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-410.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-420.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-430.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-440.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-450.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-460.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-500.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-510.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-520.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-600.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-610.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-620.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-730.html">Release Notes</a></li>
+</ul>
+</li>
+</ul>
+</ul>
 </li>
               
                 <li class="dropdown">
@@ -91,17 +224,17 @@
 </li>
 <li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
 <li><a class="reference internal" href="#restore-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#id4"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id5"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
-<li><a class="reference internal" href="#id6"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#id3"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id4"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
+<li><a class="reference internal" href="#id5"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#backup-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> command line tool</a></li>
 <li><a class="reference internal" href="#fdbdr-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command line tool</a><ul>
 <li><a class="reference internal" href="#dr-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
 <li><a class="reference internal" href="#switch"><code class="docutils literal notranslate"><span class="pre">switch</span></code></a></li>
-<li><a class="reference internal" href="#id8"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id9"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#id7"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id8"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</a></li>
@@ -166,17 +299,17 @@
 </li>
 <li><a class="reference internal" href="#fdbrestore-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbrestore</span></code> command line tool</a><ul>
 <li><a class="reference internal" href="#restore-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
-<li><a class="reference internal" href="#id4"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id5"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
-<li><a class="reference internal" href="#id6"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#id3"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id4"><code class="docutils literal notranslate"><span class="pre">wait</span></code></a></li>
+<li><a class="reference internal" href="#id5"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#backup-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">backup_agent</span></code> command line tool</a></li>
 <li><a class="reference internal" href="#fdbdr-command-line-tool"><code class="docutils literal notranslate"><span class="pre">fdbdr</span></code> command line tool</a><ul>
 <li><a class="reference internal" href="#dr-start"><code class="docutils literal notranslate"><span class="pre">start</span></code></a></li>
 <li><a class="reference internal" href="#switch"><code class="docutils literal notranslate"><span class="pre">switch</span></code></a></li>
-<li><a class="reference internal" href="#id8"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
-<li><a class="reference internal" href="#id9"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
+<li><a class="reference internal" href="#id7"><code class="docutils literal notranslate"><span class="pre">abort</span></code></a></li>
+<li><a class="reference internal" href="#id8"><code class="docutils literal notranslate"><span class="pre">status</span></code></a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#dr-agent-command-line-tool"><code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> command line tool</a></li>
@@ -229,8 +362,8 @@
 <p>If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the <code class="docutils literal notranslate"><span class="pre">[backup_agent.&lt;ID&gt;]</span></code> sections in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>. Do not comment out the global <code class="docutils literal notranslate"><span class="pre">[backup_agent]</span></code> section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.</p>
 </section>
 <section id="backup-urls">
-<span id="id1"></span><h2>Backup URLs</h2>
-<p>Backup and Restore locations are specified by Backup URLs.  Currently there are two valid Backup URL formats: local directories and blob store.</p>
+<h2>Backup URLs</h2>
+<p>Backup and Restore locations are specified by Backup URLs.  Currently there are two valid Backup URL formats.</p>
 <p>Note that items in angle brackets (&lt; and &gt;) are just placeholders and must be replaced (including the brackets) with meaningful values.  Items within square brackets ([ and ]) are optional.</p>
 <p>For local directories, the Backup URL format is</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">file</span><span class="p">:</span><span class="o">//&lt;/</span><span class="n">absolute</span><span class="o">/</span><span class="n">path</span><span class="o">/</span><span class="n">to</span><span class="o">/</span><span class="n">base_dir</span><span class="o">&gt;</span>
@@ -238,31 +371,29 @@
 </div>
 <p>An example would be <code class="docutils literal notranslate"><span class="pre">file:///home/backups</span></code> which would refer to the directory <code class="docutils literal notranslate"><span class="pre">/home/backups</span></code>.
 Note that since paths must be absolute this will result in three slashes (/) in a row in the URL.</p>
-<p>For local directory URLs the actual backup files will not be written to &lt;base_dir&gt; directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.</p>
+<p>Note that for local directory URLs the actual backup files will not be written to &lt;base_dir&gt; directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.</p>
 <p>For blob store backup locations, the Backup URL format is</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span>blobstore://[&lt;api_key&gt;][:&lt;secret&gt;[:&lt;security_token&gt;]]@&lt;hostname&gt;[:&lt;port&gt;]/&lt;name&gt;?bucket=&lt;bucket_name&gt;[&amp;region=&lt;region_name&gt;][&amp;&lt;param&gt;=&lt;value&gt;]...]
 
-  &lt;api_key&gt;         API key to use for authentication. If S3, it is AWS_ACCESS_KEY_ID. Optional.
-  &lt;secret&gt;          API key&#39;s secret.  If S3, it is AWS_SECRET_ACCESS_KEY. Optional.
-  &lt;security_token&gt;  Security token if temporary credentials are used. If S3, it is AWS_SESSION_TOKEN. Optional.
-  &lt;hostname&gt;        Remote hostname or IP address to connect to
-  &lt;port&gt;            Remote port to connect to.  Optional.  Default is 80.
-  &lt;name&gt;            Name of the backup within the backup bucket.  It can contain &#39;/&#39; characters in order to organize backups into a folder-like structure.
-  &lt;bucket_name&gt;     Name of the bucket to use for backup data.
-  &lt;region_name&gt;     If &lt;hostname&gt; is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
-  &lt;param&gt;=&lt;value&gt;   Optional URL parameters.  See below for details.
+  &lt;api_key&gt; - API key to use for authentication. Optional.
+  &lt;secret&gt; - API key&#39;s secret.  Optional.
+  &lt;security_token&gt; - Security token if temporary credentials are used. Optional.
+  &lt;hostname&gt; - Remote hostname or IP address to connect to
+  &lt;port&gt; - Remote port to connect to.  Optional.  Default is 80.
+  &lt;name&gt; - Name of the backup within the backup bucket.  It can contain &#39;/&#39; characters in order to organize backups into a folder-like structure.
+  &lt;bucket_name&gt; - Name of the bucket to use for backup data.
+  &lt;region_name&gt; - If &lt;hostname&gt; is not in s3 compatible form (s3.region-name.example.com) and aws v4 signature is enabled, region name is required.
+
+  &lt;param&gt;=&lt;value&gt; - Optional URL parameters.  See below for details.
 </pre></div>
 </div>
 <p>A single bucket (specified by &lt;bucket_name&gt;) can hold any number of backups, each with a different &lt;name&gt;.</p>
-<p>If &lt;secret&gt; is not specified on the URL, it will be looked up in <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">blob credential sources</span></a>.</p>
-<p>An example blob store Backup URL would be <code class="docutils literal notranslate"><span class="pre">blobstore://myKey:mySecret&#64;something.domain.com:80/dec_1_2017_0400?bucket=backups</span></code>.
-If S3 is the target blobstore, the URL would look like: <code class="docutils literal notranslate"><span class="pre">blobstore://${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}:${AWS_SESSION_TOKEN}&#64;backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&amp;region=us-west-2</span></code>
-The &lt;secret&gt; and &lt;security_token&gt; may be ommitted from the URL and instead picked up from <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">blob credential sources</span></a>: <code class="docutils literal notranslate"><span class="pre">blobstore://${AWS_ACCESS_KEY_ID}&#64;backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&amp;region=us-west-2</span></code>
-To pickup the &lt;api_key&gt;, &lt;secret&gt;, and &lt;security_token&gt; from <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">blob credentials file</span></a>, write the blob backup URL as: <code class="docutils literal notranslate"><span class="pre">blobstore://&#64;backup-12345-us-west-2.s3.amazonaws.com/dailies?bucket=backup-12345-us-west-2&amp;region=us-west-2</span></code> (Notice the ‘&#64;’ in front of the hostname).</p>
-<p>Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive. A parameter is applied individually on each <code class="docutils literal notranslate"><span class="pre">backup_agent</span></code>, meaning that a global restriction should be calculated based on the number of agent running. The most likely parameter a user would want to change is <code class="docutils literal notranslate"><span class="pre">max_send_bytes_per_second</span></code> (or <code class="docutils literal notranslate"><span class="pre">sbps</span></code> for short) which determines the upload speed to the blob service.</p>
+<p>If &lt;secret&gt; is not specified, it will be looked up in <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">blob credential sources</span></a>.</p>
+<p>An example blob store Backup URL would be <code class="docutils literal notranslate"><span class="pre">blobstore://myKey:mySecret&#64;something.domain.com:80/dec_1_2017_0400?bucket=backups</span></code>.</p>
+<p>Blob store Backup URLs can have optional parameters at the end which set various limits or options used when communicating with the store.  All values must be positive decimal integers unless otherwise specified.  The speed related default values are not very restrictive.  The most likely parameter a user would want to change is <code class="docutils literal notranslate"><span class="pre">max_send_bytes_per_second</span></code> (or <code class="docutils literal notranslate"><span class="pre">sbps</span></code> for short) which determines the upload speed to the blob service.</p>
 <p>Here is a complete list of valid parameters:</p>
 <blockquote>
-<div><p><em>secure_connection</em> (or <em>sc</em>) - Set 1 for secure connection and 0 for insecure connection. Defaults to secure connection.</p>
+<div><p><em>secure_connection</em> (or <em>sc</em>) - Set 1 for secure connection and 0 for unsecure connection. Defaults to secure connection.</p>
 <p><em>connect_tries</em> (or <em>ct</em>) - Number of times to try to connect for each request.</p>
 <p><em>connect_timeout</em> (or <em>cto</em>) - Number of seconds to wait for a connect request to succeed.</p>
 <p><em>max_connection_life</em> (or <em>mcl</em>) - Maximum number of seconds to reuse a single TCP connection.</p>
@@ -301,12 +432,9 @@ To pickup the &lt;api_key&gt;, &lt;secret&gt;, and &lt;security_token&gt; from <
 If the knob is set to <code class="docutils literal notranslate"><span class="pre">true</span></code> then v4 signature will be used and if set to <code class="docutils literal notranslate"><span class="pre">false</span></code> then v2 signature will be used.</p>
 </section>
 <section id="blob-credential-files">
-<span id="id2"></span><h2>Blob Credential Files</h2>
-<p>In order to help safeguard blob store credentials, the &lt;secret&gt; can optionally be omitted from <code class="docutils literal notranslate"><span class="pre">blobstore://</span></code> URLs on the command line.
-Omitted secrets will be resolved at connect time using 1 or more Blob Credential files
-(In fact, the &lt;api_key&gt;, &lt;secret&gt;, and &lt;security_token&gt; may all be omitted from the backup URL and instead read from the credential file;
-for how to write the backup URL in this case see <a class="reference internal" href="#backup-urls"><span class="std std-ref">backup URLs</span></a>).</p>
-<p>Blob Credential files can be specified on the command line (via <code class="docutils literal notranslate"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code>) or via the environment variable <code class="docutils literal notranslate"><span class="pre">FDB_BLOB_CREDENTIALS</span></code> which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.</p>
+<span id="id1"></span><h2>Blob Credential Files</h2>
+<p>In order to help safeguard blob store credentials, the &lt;SECRET&gt; can optionally be omitted from blobstore:// URLs on the command line.  Omitted secrets will be resolved at connect time using 1 or more Blob Credential files.</p>
+<p>Blob Credential files can be specified on the command line (via –blob-credentials &lt;FILE&gt;) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.</p>
 <p>At connect time, the specified files are read in order and the first matching account specification (<a class="reference external" href="mailto:user&#37;&#52;&#48;host">user<span>&#64;</span>host</a>)
 will be used to obtain the secret key.</p>
 <p>The Blob Credential File format is JSON with the following schema:</p>
@@ -321,20 +449,8 @@ will be used to obtain the secret key.</p>
 <p>If temporary credentials are being used, the following schema is also supported</p>
 <div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
   <span class="s2">&quot;accounts&quot;</span> <span class="p">:</span> <span class="p">{</span>
-    <span class="s2">&quot;@host&quot;</span> <span class="p">:</span>     <span class="p">{</span> <span class="s2">&quot;api_key&quot;</span> <span class="p">:</span> <span class="n">user</span><span class="p">,</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY&quot;</span><span class="p">,</span> <span class="s2">&quot;token&quot;</span><span class="p">:</span> <span class="s2">&quot;TOKEN1&quot;</span> <span class="p">},</span>
-    <span class="s2">&quot;@host2&quot;</span> <span class="p">:</span>    <span class="p">{</span> <span class="s2">&quot;api_key&quot;</span> <span class="p">:</span> <span class="n">user2</span><span class="p">,</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY2&quot;</span><span class="p">,</span> <span class="s2">&quot;token&quot;</span><span class="p">:</span> <span class="s2">&quot;TOKEN2&quot;</span> <span class="p">}</span>
-  <span class="p">}</span>
-<span class="p">}</span>
-</pre></div>
-</div>
-<p>For example:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
-  <span class="s2">&quot;accounts&quot;</span><span class="p">:</span> <span class="p">{</span>
-    <span class="s2">&quot;@backup-12345-us-west-2.s3.amazonaws.com&quot;</span><span class="p">:</span> <span class="p">{</span>
-      <span class="s2">&quot;api_key&quot;</span><span class="p">:</span> <span class="s2">&quot;AWS_ACCESS_KEY_ID&quot;</span><span class="p">,</span>
-      <span class="s2">&quot;secret&quot;</span><span class="p">:</span> <span class="s2">&quot;AWS_SECRET_ACCESS_KEY&quot;</span><span class="p">,</span>
-      <span class="s2">&quot;token&quot;</span><span class="p">:</span> <span class="s2">&quot;AWS_SESSION_TOKEN&quot;</span>
-    <span class="p">}</span>
+    <span class="s2">&quot;@host&quot;</span> <span class="p">:</span>     <span class="p">{</span> <span class="s2">&quot;api_key&quot;</span> <span class="p">:</span> <span class="n">user</span><span class="p">,</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="s2">&quot;TOKEN1&quot;</span> <span class="p">},</span>
+    <span class="s2">&quot;@host2&quot;</span> <span class="p">:</span>    <span class="p">{</span> <span class="s2">&quot;api_key&quot;</span> <span class="p">:</span> <span class="n">user2</span><span class="p">,</span> <span class="s2">&quot;secret&quot;</span> <span class="p">:</span> <span class="s2">&quot;SECRETKEY2&quot;</span><span class="p">,</span> <span class="n">token</span><span class="p">:</span> <span class="s2">&quot;TOKEN2&quot;</span> <span class="p">}</span>
   <span class="p">}</span>
 <span class="p">}</span>
 </pre></div>
@@ -576,7 +692,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </dd>
 </dl>
 <section id="restore-start">
-<span id="id3"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
+<span id="id2"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">start</span></code> command will start a new restore on the specified (or default) tag.  The command will fail if a tag is already in use by an active restore.</p>
 <dl class="simple">
 <dt>::</dt><dd><p>user&#64;host$ fdbrestore start -r &lt;BACKUP_URL&gt; [OPTIONS]</p>
@@ -607,15 +723,15 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </dd>
 </dl>
 </section>
-<section id="id4">
+<section id="id3">
 <h3><code class="docutils literal notranslate"><span class="pre">abort</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">abort</span></code> command will stop an active backup on the specified (or default) tag.  It will display the final state of the restore tag.</p>
 </section>
-<section id="id5">
+<section id="id4">
 <h3><code class="docutils literal notranslate"><span class="pre">wait</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">wait</span></code> command will wait for the restore on the specified (or default) tag to reach a final state (such as complete or abort) and then exit.  While waiting it will prints a progress update every few seconds.</p>
 </section>
-<section id="id6">
+<section id="id5">
 <h3><code class="docutils literal notranslate"><span class="pre">status</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> command will print a detailed status report on restore job progress.  If a tag is specified, it will only show status for that specific tag, otherwise status for all tags will be shown.</p>
 </section>
@@ -656,7 +772,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </dd>
 </dl>
 <section id="dr-start">
-<span id="id7"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
+<span id="id6"></span><h3><code class="docutils literal notranslate"><span class="pre">start</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">start</span></code> subcommand is used to start a DR backup.  If there is already a DR backup in progress, the command will fail and the current DR backup will be unaffected.</p>
 <dl class="simple">
 <dt><code class="docutils literal notranslate"><span class="pre">-k</span> <span class="pre">'&lt;BEGIN&gt;[</span> <span class="pre">&lt;END&gt;]'</span></code></dt><dd><p>Specify a key range to be included in the DR.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + ‘xff’.  If no key ranges are different, the default is all user keys (’’ to ‘xff’).</p>
@@ -668,7 +784,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <p>The <code class="docutils literal notranslate"><span class="pre">switch</span></code> subcommand is used to swap the source and destination database clusters of an active DR in differential mode.  This means the destination will be unlocked and start streaming data into the source database, which will subsequently be locked.</p>
 <p>This command requires both databases to be available.  On the destination cluster, a <code class="docutils literal notranslate"><span class="pre">dr_agent</span></code> that points to the source cluster must be running.  While the switch command is working, both databases will be locked for a few seconds.</p>
 </section>
-<section id="id8">
+<section id="id7">
 <h3><code class="docutils literal notranslate"><span class="pre">abort</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">abort</span></code> subcommand is used to abort a DR that is currently in progress.  If there is no backup in progress, the command will return an error.  If the DR had already reached differential status, the abort command will leave the destination database at consistent snapshot of the source database from sometime in the past.</p>
 <blockquote>
@@ -678,7 +794,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </div>
 </div></blockquote>
 </section>
-<section id="id9">
+<section id="id8">
 <h3><code class="docutils literal notranslate"><span class="pre">status</span></code></h3>
 <p>The <code class="docutils literal notranslate"><span class="pre">status</span></code> subcommand is used to get information on the current status of DR backup.  It tells whether or not there is a DR in progress and whether or not there are active DR agents.  It will also report any errors that have been encountered by the DR agents.</p>
 <dl class="simple">
@@ -725,8 +841,8 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
       
     </p>
     <p>
-        &copy; Copyright 2013-2025 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 30, 2026.<br/>
+        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Feb 18, 2026.<br/>
     </p>
   </div>
 </footer>

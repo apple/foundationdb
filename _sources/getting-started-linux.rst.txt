@@ -110,7 +110,7 @@ Managing the FoundationDB service
 Next steps
 ==========
 
-* Install the APIs for :doc:`Ruby <api-ruby>`, :doc:`Python <api-python>`, `Java <https://www.javadoc.io/doc/org.foundationdb/fdb-java/latest/index.html>`_ or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_ if you intend to use those languages. The :doc:`C <api-c>` API was installed along with the ``foundationdb-clients`` package above.
+* Install the APIs for :doc:`Ruby <api-ruby>`, :doc:`Python <api-python>`, `Java <javadoc/index.html>`_ or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_ if you intend to use those languages. The :doc:`C <api-c>` API was installed along with the ``foundationdb-clients`` package above.
 * See :doc:`tutorials` for samples of developing applications with FoundationDB.
 * See :doc:`developer-guide` for information of interest to developers, including common design patterns and performance considerations.
 * See :doc:`administration` for detailed administration information.
