@@ -616,6 +616,7 @@ string(APPEND test_venv_cmd "${Python3_EXECUTABLE} -m venv ${test_venv_dir} ")
 string(APPEND test_venv_cmd "&& ${test_venv_activate} ")
 string(APPEND test_venv_cmd "&& pip install --upgrade pip ")
 string(APPEND test_venv_cmd "&& pip install -r ${CMAKE_SOURCE_DIR}/tests/TestRunner/requirements.txt")
+string(APPEND test_venv_cmd "&& pip install -e ${CMAKE_SOURCE_DIR}/tests/TestRunner ")
 # NOTE: At this stage we are in the virtual environment and Python3_EXECUTABLE is not available anymore
 string(APPEND test_venv_cmd "&& (cd ${CMAKE_BINARY_DIR}/bindings/python && python3 -m pip install .) ")
 add_test(
@@ -656,13 +657,12 @@ function(add_python_venv_test)
     WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${shell_cmd} ${shell_opt} "${test_venv_activate} && ${T_COMMAND}")
   set_tests_properties(${T_NAME} PROPERTIES FIXTURES_REQUIRED test_virtual_env_setup TIMEOUT ${T_TEST_TIMEOUT})
-  set(test_env_vars "PYTHONPATH=${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner")
   if(APPLE)
     set(ld_env_name "DYLD_LIBRARY_PATH")
   else()
     set(ld_env_name "LD_LIBRARY_PATH")
   endif()
-  set(test_env_vars PROPERTIES ENVIRONMENT "${test_env_vars};${ld_env_name}=${CMAKE_BINARY_DIR}/lib:$ENV{${ld_env_name}}")
+  set(test_env_vars "${ld_env_name}=${CMAKE_BINARY_DIR}/lib:$ENV{${ld_env_name}}")
   if(USE_SANITIZER)
     set(test_env_vars "${test_env_vars};${SANITIZER_OPTIONS}")
   endif()
@@ -690,7 +690,7 @@ function(add_fdbclient_test)
   if(NOT T_COMMAND)
     message(FATAL_ERROR "COMMAND is a required argument for add_fdbclient_test")
   endif()
-  set(TMP_CLUSTER_CMD python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py --build-dir ${CMAKE_BINARY_DIR})
+  set(TMP_CLUSTER_CMD python -m fdb_test_runner.tmp_cluster --build-dir ${CMAKE_BINARY_DIR})
   if(T_PROCESS_NUMBER)
     list(APPEND TMP_CLUSTER_CMD --process-number ${T_PROCESS_NUMBER})
   endif()
@@ -743,7 +743,7 @@ function(add_unavailable_fdbclient_test)
   message(STATUS "Adding unavailable client test ${T_NAME}")
   add_python_venv_test(
     NAME ${T_NAME}
-    COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+    COMMAND python -m fdb_test_runner.fake_cluster
             --output-dir ${CMAKE_BINARY_DIR} -- ${T_COMMAND}
     TEST_TIMEOUT ${T_TEST_TIMEOUT})
 endfunction()
@@ -771,7 +771,7 @@ function(add_multi_fdbclient_test)
   message(STATUS "Adding Client test ${T_NAME}")
   add_python_venv_test(
     NAME ${T_NAME}
-    COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_multi_cluster.py
+    COMMAND python -m fdb_test_runner.tmp_multi_cluster
             --build-dir ${CMAKE_BINARY_DIR}
             --clusters 3 -- ${T_COMMAND}
     TEST_TIMEOUT 60)
