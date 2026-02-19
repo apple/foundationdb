@@ -336,7 +336,6 @@ public:
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
-	ConfigDBType configDBType;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;

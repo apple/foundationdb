@@ -20,9 +20,7 @@
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ISingleThreadTransaction.h"
-#include "fdbclient/PaxosConfigTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/SimpleConfigTransaction.h"
 
 ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type type) {
 	if (type == Type::RYW) {
@@ -31,13 +29,6 @@ ISingleThreadTransaction* ISingleThreadTransaction::allocateOnForeignThread(Type
 		// will get initialized on the main thread.
 		auto tr =
 		    (ReadYourWritesTransaction*)ReadYourWritesTransaction::operator new(sizeof(ReadYourWritesTransaction));
-		return tr;
-	} else if (type == Type::SIMPLE_CONFIG) {
-		// Configuration transaction objects expect to be initialized.
-		auto tr = new SimpleConfigTransaction;
-		return tr;
-	} else if (type == Type::PAXOS_CONFIG) {
-		auto tr = new PaxosConfigTransaction;
 		return tr;
 	}
 	ASSERT(false);
@@ -48,10 +39,6 @@ Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type, 
 	Reference<ISingleThreadTransaction> result;
 	if (type == Type::RYW) {
 		result = makeReference<ReadYourWritesTransaction>();
-	} else if (type == Type::SIMPLE_CONFIG) {
-		result = makeReference<SimpleConfigTransaction>();
-	} else {
-		result = makeReference<PaxosConfigTransaction>();
 	}
 	result->construct(cx);
 	return result;

@@ -1392,10 +1392,6 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}
-	if (itr->first == FDBDatabaseOptions::USE_CONFIG_DATABASE) {
-		dbState->isConfigDB = true;
-	}
-
 	int defaultFor = itr->second.defaultFor;
 	if (defaultFor >= 0) {
 		ASSERT(FDBTransactionOptions::optionInfo.find((FDBTransactionOptions::Option)defaultFor) !=
@@ -1500,7 +1496,7 @@ MultiVersionDatabase::DatabaseState::DatabaseState(ClusterConnectionRecord const
                                                    Reference<IDatabase> versionMonitorDb)
   : dbVar(new ThreadSafeAsyncVar<Reference<IDatabase>>(Reference<IDatabase>(nullptr))),
     connectionRecord(connectionRecord), versionMonitorDb(versionMonitorDb),
-    initializationState(InitializationState::INITIALIZING), isConfigDB(false) {}
+    initializationState(InitializationState::INITIALIZING) {}
 
 void MultiVersionDatabase::DatabaseState::setDatabase(Reference<IDatabase> db) {
 	if (db.isValid()) {
@@ -1707,11 +1703,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 	}
 
-	// Verify the database has the necessary functionality to update the shared
-	// state. Avoid updating the shared state if the database is a
-	// configuration database, because a configuration database does not have
-	// access to typical system keys and does not need to be updated.
-	if (newDb && MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap() && !isConfigDB) {
+	// Verify the database has the necessary functionality to update the shared state.
+	if (newDb && MultiVersionApi::api->getApiVersion().hasClusterSharedStateMap()) {
 		Future<std::string> updateResult =
 		    MultiVersionApi::api->updateClusterSharedStateMap(connectionRecord, dbProtocolVersion.get(), newDb);
 		sharedStateUpdater = map(errorOr(updateResult), [this, newDb](ErrorOr<std::string> result) {

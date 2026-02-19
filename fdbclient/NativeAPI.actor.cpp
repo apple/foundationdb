@@ -359,10 +359,6 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			validateOptionValueNotPresent(value);
 			snapshotRywEnabled--;
 			break;
-		case FDBDatabaseOptions::USE_CONFIG_DATABASE:
-			validateOptionValueNotPresent(value);
-			useConfigDatabase = true;
-			break;
 		case FDBDatabaseOptions::TEST_CAUSAL_READ_RISKY:
 			verifyCausalReadsProp = double(extractIntOption(value, 0, 100)) / 100.0;
 			break;

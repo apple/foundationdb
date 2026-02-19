@@ -25,8 +25,7 @@
 |Storage Cache|experimental|contributed from the community. Serve as memory cache for storage servers. This is probably never finished and another solution to read hot shard is using large storage teams.|None|This feature has been deleted.|
 |Blob granule|experimental|contributed from the community. Related to backup.|None|This feature has been deleted.|
 |ChangeFeed|experimental|contributed from the community.|None|This feature has been deleted.|
-|Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|Development is incomplete and feature is unowned. Scheduled for deletion.|
+|Configuration Database|experimental|contributed from the community. Have data consistency issues, probably not finished.|None|This feature has been deleted.|
 |OpenTelemetry|experimental|contributed from the community. Probably not finished.|None|Need a new owner.|
-|Dynamic knobs|experimental|Allows changing fdbserver process knob values without requiring a process restart|None|Need a new owner or become deprecated.|
 |Tag Throttling|experimental|limits the transaction rate for specific transaction tags|None|Need a new owner or become deprecated.|
 |Windows Binary|experimental|FoundationDB on Windows Platform|Community (To be filled out by the the exact company/person)|Unclear if needed.|

@@ -59,8 +59,6 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/ConfigNode.h"
-#include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
@@ -609,9 +607,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      Reference<ConfigNode> configNode,
-                                      Reference<LocalConfiguration> localConfig,
-                                      ConfigBroadcastInterface configBroadcastInterface,
                                       Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                       Promise<Void> recoveredDiskFiles,
                                       Reference<AsyncVar<Optional<UID>>> clusterId) {
@@ -625,7 +620,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 	state Future<Void> cacheProcessFuture;
 	state Future<Void> cacheErrorsFuture;
 	state Optional<double> incorrectTime;
-	state bool firstReg = true;
 	loop {
 		state ClusterConnectionString storedConnectionString;
 		state bool upToDate = true;
@@ -648,11 +642,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              fakeEpkInterf,
 		                              csInterf->get(),
 		                              degraded->get(),
-		                              localConfig.isValid() ? localConfig->lastSeenVersion() : Optional<Version>(),
-		                              localConfig.isValid() ? localConfig->configClassSet()
-		                                                    : Optional<ConfigClassSet>(),
 		                              recoveredDiskFiles.isSet(),
-		                              configBroadcastInterface,
 		                              clusterId->get());
 
 		for (auto const& i : issues->get()) {
@@ -685,11 +675,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 
 		state bool ccInterfacePresent = ccInterface->get().present();
 		if (ccInterfacePresent) {
-			request.requestDbInfo = (ccInterface->get().get().id() != dbInfo->get().clusterInterface.id());
-			if (firstReg) {
-				request.requestDbInfo = true;
-				firstReg = false;
-			}
 			TraceEvent("WorkerRegister")
 			    .detail("CCID", ccInterface->get().get().id())
 			    .detail("Generation", requestGeneration)
@@ -2158,9 +2143,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                ConfigBroadcastInterface configBroadcastInterface,
-                                Reference<ConfigNode> configNode,
-                                Reference<LocalConfiguration> localConfig,
                                 Reference<AsyncVar<Optional<UID>>> clusterId,
                                 bool consistencyCheckUrgentMode) {
 	state PromiseStream<ErrorInfo> errors;
@@ -2496,16 +2478,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
-		                                       configNode,
-		                                       localConfig,
-		                                       configBroadcastInterface,
 		                                       dbInfo,
 		                                       recoveredDiskFiles,
 		                                       clusterId));
-
-		if (configNode.isValid()) {
-			errorForwarders.add(brokenPromiseToNever(localConfig->consume(configBroadcastInterface)));
-		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
 			errorForwarders.add(
@@ -3850,7 +3825,6 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
     LocalityData locality,
     Reference<AsyncVar<ServerDBInfo>> dbInfo,
-    ConfigDBType configDBType,
     Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state Future<Void> monitor = monitorLeaderWithDelayedCandidacyImpl(connRecord, currentCC);
 	state Future<Void> timeout;
@@ -3875,7 +3849,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
-				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, configDBType, clusterId));
+				wait(clusterController(connRecord, currentCC, asyncPriorityInfo, locality, clusterId));
 				return Void();
 			}
 		}
@@ -3946,29 +3920,16 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         std::string metricsPrefix,
                         int64_t memoryProfileThreshold,
                         std::string whitelistBinPaths,
-                        std::string configPath,
-                        std::map<std::string, std::string> manualKnobOverrides,
-                        ConfigDBType configDBType,
                         bool consistencyCheckUrgentMode) {
 	state std::vector<Future<Void>> actors;
-	state Reference<ConfigNode> configNode;
-	state Reference<LocalConfiguration> localConfig;
-	if (configDBType != ConfigDBType::DISABLED) {
-		localConfig = makeReference<LocalConfiguration>(
-		    dataFolder, configPath, manualKnobOverrides, IsTest(g_network->isSimulated()));
-	}
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
-
-	if (configDBType != ConfigDBType::DISABLED) {
-		configNode = makeReference<ConfigNode>(dataFolder);
-	}
 
 	actors.push_back(serveProtocolInfo());
 	actors.push_back(serveProcess());
 
 	try {
-		ServerCoordinators coordinators(connRecord, configDBType);
+		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -3977,15 +3938,12 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("MachineId", localities.machineId())
 		    .detail("DiskPath", dataFolder)
 		    .detail("CoordPath", coordFolder)
-		    .detail("WhiteListBinPath", whitelistBinPaths)
-		    .detail("ConfigDBType", configDBType);
-
-		state ConfigBroadcastInterface configBroadcastInterface;
+		    .detail("WhiteListBinPath", whitelistBinPaths);
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
-			actors.push_back(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface));
+			actors.push_back(coordinationServer(coordFolder, connRecord));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
@@ -3993,10 +3951,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Only one process can execute on a dataFolder from this point onwards
 
 		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
-
-		if (configDBType != ConfigDBType::DISABLED) {
-			wait(localConfig->initialize());
-		}
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
@@ -4016,14 +3970,12 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			actors.push_back(reportErrors(monitorLeader(connRecord, cc), "ClusterController"));
 		} else if (processClass.machineClassFitness(ProcessClass::ClusterController) == ProcessClass::WorstFit &&
 		           SERVER_KNOBS->MAX_DELAY_CC_WORST_FIT_CANDIDACY_SECONDS > 0) {
-			actors.push_back(
-			    reportErrors(monitorLeaderWithDelayedCandidacy(
-			                     connRecord, cc, asyncPriorityInfo, localities, dbInfo, configDBType, clusterId),
-			                 "ClusterController"));
+			actors.push_back(reportErrors(
+			    monitorLeaderWithDelayedCandidacy(connRecord, cc, asyncPriorityInfo, localities, dbInfo, clusterId),
+			    "ClusterController"));
 		} else {
-			actors.push_back(
-			    reportErrors(clusterController(connRecord, cc, asyncPriorityInfo, localities, configDBType, clusterId),
-			                 "ClusterController"));
+			actors.push_back(reportErrors(clusterController(connRecord, cc, asyncPriorityInfo, localities, clusterId),
+			                              "ClusterController"));
 		}
 		actors.push_back(reportErrors(extractClusterInterface(cc, ci), "ExtractClusterInterface"));
 		actors.push_back(reportErrorsExcept(workerServer(connRecord,
@@ -4039,9 +3991,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
-		                                                 configBroadcastInterface,
-		                                                 configNode,
-		                                                 localConfig,
 		                                                 clusterId,
 		                                                 consistencyCheckUrgentMode),
 		                                    "WorkerServer",

@@ -140,7 +140,7 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_PRINT_CODE_PROBES, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIALS, OPT_PROXY, OPT_DEPRECATED_CONFIG_PATH, OPT_DEPRECATED_USE_TEST_CONFIG_DB, OPT_DEPRECATED_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, 
 	OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION, OPT_CONSISTENCY_CHECK_URGENT_MODE,
 	OPT_MOCKS3_PERSISTENCE_DIR
@@ -231,9 +231,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_BLOB_CREDENTIALS,      "--blob-credentials",          SO_REQ_SEP },
 	{ OPT_MOCKS3_PERSISTENCE_DIR, "--mocks3-persistence-dir",   SO_REQ_SEP },
 	{ OPT_PROXY,                 "--proxy",                     SO_REQ_SEP },
-	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
-	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
-	{ OPT_NO_CONFIG_DB,          "--no-config-db",              SO_NONE },
+	{ OPT_DEPRECATED_CONFIG_PATH, "--config-path",              SO_REQ_SEP },
+	{ OPT_DEPRECATED_USE_TEST_CONFIG_DB, "--use-test-config-db", SO_NONE },
+	{ OPT_DEPRECATED_NO_CONFIG_DB, "--no-config-db",            SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
@@ -784,6 +784,9 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " The prefix where this process will store its metric data."
 		                 " Must be specified if using a different database for metrics.");
 		printOptionUsage("--knob-KNOBNAME KNOBVALUE", " Changes a database knob. KNOBNAME should be lowercase.");
+		printOptionUsage("--config-path PATH", " Deprecated and ignored.");
+		printOptionUsage("--use-test-config-db", " Deprecated and ignored.");
+		printOptionUsage("--no-config-db", " Deprecated and ignored.");
 		printOptionUsage("--io-trust-seconds SECONDS",
 		                 " Sets the time in seconds that a read or write operation is allowed to take"
 		                 " before timing out with an error. If an operation times out, all future"
@@ -1159,7 +1162,6 @@ struct CLIOptions {
 	bool useNet2 = true;
 	bool useThreadPool = false;
 	std::vector<std::pair<std::string, std::string>> knobs;
-	std::map<std::string, std::string> manualKnobOverrides;
 	LocalityData localities;
 	int minTesterCount = 1;
 	bool testOnServers = false;
@@ -1173,9 +1175,7 @@ struct CLIOptions {
 	Optional<std::string> proxy;
 	const char* blobCredsFromENV = nullptr;
 
-	std::string configPath;
 	std::string mocks3PersistenceDir; // Directory for MockS3 persistence files
-	ConfigDBType configDBType{ ConfigDBType::PAXOS };
 
 	Reference<IClusterConnectionRecord> connectionFile;
 	Standalone<StringRef> machineId;
@@ -1253,12 +1253,16 @@ private:
 				std::string k = knob.substr(0, pos);
 				std::string v = knob.substr(pos + 1, knob.length());
 				knobs.emplace_back(k, v);
-				manualKnobOverrides[k] = v;
 			}
 		}
 	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
+		auto warnDeprecatedOption = [](const char* optionText) {
+			fprintf(stderr, "WARNING: option `%s' is deprecated and ignored\n", optionText);
+			TraceEvent(SevWarnAlways, "DeprecatedCommandLineOption").detail("Option", optionText);
+		};
+
 		for (int a = 0; a < argc; a++) {
 			if (a)
 				commandLine += ' ';
@@ -1323,7 +1327,6 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				knobs.emplace_back(knobName.get(), args.OptionArg());
-				manualKnobOverrides[knobName.get()] = args.OptionArg();
 				break;
 			}
 			case OPT_PROFILER: {
@@ -1766,14 +1769,10 @@ private:
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				break;
-			case OPT_CONFIG_PATH:
-				configPath = args.OptionArg();
-				break;
-			case OPT_USE_TEST_CONFIG_DB:
-				configDBType = ConfigDBType::SIMPLE;
-				break;
-			case OPT_NO_CONFIG_DB:
-				configDBType = ConfigDBType::DISABLED;
+			case OPT_DEPRECATED_CONFIG_PATH:
+			case OPT_DEPRECATED_USE_TEST_CONFIG_DB:
+			case OPT_DEPRECATED_NO_CONFIG_DB:
+				warnDeprecatedOption(args.OptionText());
 				break;
 			case OPT_FLOW_PROCESS_NAME:
 				flowProcessName = args.OptionArg();
@@ -2107,15 +2106,15 @@ int main(int argc, char* argv[]) {
 		                                         role == ServerRole::Simulation ? IsSimulated::True
 		                                                                        : IsSimulated::False);
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
-		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
+		g_knobs.setKnob("log_directory", KnobValueRef::create(opts.logFolder));
+		g_knobs.setKnob("conn_file", KnobValueRef::create(opts.connFile));
 		if (role != ServerRole::Simulation && opts.memLimit > 0) {
 			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
-			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
+			                KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		}
 
 		IKnobCollection::setupKnobs(opts.knobs);
-		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
+		g_knobs.setKnob("server_mem_limit", KnobValueRef::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
 		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
@@ -2459,14 +2458,14 @@ int main(int argc, char* argv[]) {
 					}
 				}
 				g_knobs.setKnob("encrypt_header_auth_token_enabled",
-				                KnobValue::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
+				                KnobValueRef::create(ini.GetBoolValue("META", "encryptHeaderAuthTokenEnabled", false)));
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
-				                KnobValue::create((int)ini.GetLongValue(
+				                KnobValueRef::create((int)ini.GetLongValue(
 				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
 
 				g_knobs.setKnob(
 				    "shard_encode_location_metadata",
-				    KnobValue::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
+				    KnobValueRef::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
 			simulationSetupAndRun(dataFolder,
 			                      opts.testFile,
@@ -2531,9 +2530,6 @@ int main(int argc, char* argv[]) {
 				                      opts.metricsPrefix,
 				                      opts.rsssize,
 				                      opts.whitelistBinPaths,
-				                      opts.configPath,
-				                      opts.manualKnobOverrides,
-				                      opts.configDBType,
 				                      opts.consistencyCheckUrgentMode));
 				actors.push_back(histogramReport());
 				actors.push_back(metricsReport());

@@ -75,7 +75,6 @@ namespace special_keys {
 
 // TODO: Point fdbcli ones to this.
 const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
-const KeyRef configDBSpecialKey = "\xff\xff/configuration/coordinators/config_db"_sr;
 const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
 const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 

@@ -41,7 +41,6 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "fdbserver/RecoveryState.h"
-#include "fdbserver/ConfigBroadcastInterface.h"
 #include "flow/actorcompiler.h"
 
 struct WorkerInterface {
@@ -401,11 +400,7 @@ struct RegisterWorkerRequest {
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
 	bool degraded;
-	Optional<Version> lastSeenKnobVersion;
-	Optional<ConfigClassSet> knobConfigClassSet;
-	bool requestDbInfo;
 	bool recoveredDiskFiles;
-	ConfigBroadcastInterface configBroadcastInterface;
 	Optional<UID> clusterId;
 
 	RegisterWorkerRequest()
@@ -420,17 +415,12 @@ struct RegisterWorkerRequest {
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
-	                      Optional<Version> lastSeenKnobVersion,
-	                      Optional<ConfigClassSet> knobConfigClassSet,
 	                      bool recoveredDiskFiles,
-	                      ConfigBroadcastInterface configBroadcastInterface,
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
 	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
-	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false),
-	    recoveredDiskFiles(recoveredDiskFiles), configBroadcastInterface(configBroadcastInterface),
-	    clusterId(clusterId) {}
+	    recoveredDiskFiles(recoveredDiskFiles), clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -448,11 +438,7 @@ struct RegisterWorkerRequest {
 		           incompatiblePeers,
 		           reply,
 		           degraded,
-		           lastSeenKnobVersion,
-		           knobConfigClassSet,
-		           requestDbInfo,
 		           recoveredDiskFiles,
-		           configBroadcastInterface,
 		           clusterId);
 	}
 };
@@ -1098,16 +1084,12 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
                         std::string metricsPrefix,
                         int64_t memoryProfilingThreshold,
                         std::string whitelistBinPaths,
-                        std::string configPath,
-                        std::map<std::string, std::string> manualKnobOverrides,
-                        ConfigDBType configDBType,
                         bool consistencyCheckUrgentMode);
 
 ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId);
 
 // These servers are started by workerServer
