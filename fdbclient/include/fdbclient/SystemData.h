@@ -486,7 +486,6 @@ extern const KeyRef primaryLocalityKey;
 extern const KeyRef primaryLocalityPrivateKey;
 extern const KeyRef fastLoggingEnabled;
 extern const KeyRef fastLoggingEnabledPrivateKey;
-extern const KeyRef constructDataKey;
 
 extern const KeyRef moveKeysLockOwnerKey, moveKeysLockWriteKey;
 

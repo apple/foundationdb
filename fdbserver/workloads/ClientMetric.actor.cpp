@@ -32,7 +32,6 @@ static const auto versionStampIndex = sampleTrInfoKey.toString().find('S');
 static const int versionStampLength = 10;
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
-static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
 struct ClientMetricWorkload : TestWorkload {
 	static constexpr auto NAME = "ClientMetric";

@@ -502,8 +502,10 @@ function setup_backup_test_environment {
     KNOBS=("--knob_http_verbose_level=${http_verbose_level}")
   fi
   
-  # Add any additional knobs
-  KNOBS+=("${additional_knobs[@]}")
+  # Add any additional knobs (handle empty array when set -u is enabled)
+  if [[ ${#additional_knobs[@]} -gt 0 ]]; then
+    KNOBS+=("${additional_knobs[@]}")
+  fi
   readonly KNOBS
   
   setup_tls_ca_file

@@ -91,13 +91,13 @@ struct CertAndKeyNative {
 		return ret;
 	}
 
-	PemType toPem(Arena& arena) {
+	PemType toPem(Arena& arena, StringRef password = StringRef()) {
 		auto ret = PemType{};
 		if (null())
 			return ret;
 		ASSERT(valid());
 		ret.certPem = writeX509CertPem(arena, cert);
-		ret.privateKeyPem = privateKey.writePem(arena);
+		ret.privateKeyPem = privateKey.writePem(arena, password);
 		return ret;
 	}
 };
@@ -255,10 +255,10 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	return ret;
 }
 
-CertAndKeyRef CertAndKeyRef::make(Arena& arena, CertSpecRef spec, CertAndKeyRef issuerPem) {
+CertAndKeyRef CertAndKeyRef::make(Arena& arena, CertSpecRef spec, CertAndKeyRef issuerPem, StringRef password) {
 	auto issuer = CertAndKeyNative::fromPem(issuerPem);
 	auto newCertAndKey = makeCertNative(spec, issuer);
-	return newCertAndKey.toPem(arena);
+	return newCertAndKey.toPem(arena, password);
 }
 
 CertSpecRef CertSpecRef::make(Arena& arena, CertKind kind) {
@@ -368,6 +368,11 @@ StringRef CertKind::getCommonName(StringRef prefix, Arena& arena) const {
 	} else {
 		return prefix.withSuffix(side, arena);
 	}
+}
+
+CertAndKeyRef makePasswCert(Arena& arena, StringRef password) {
+	auto spec = CertSpecRef::make(arena, CertKind(Server{}));
+	return CertAndKeyRef::make(arena, spec, CertAndKeyRef{}, password);
 }
 
 } // namespace mkcert

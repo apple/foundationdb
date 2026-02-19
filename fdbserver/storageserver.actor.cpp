@@ -909,7 +909,6 @@ public:
 	    pendingAddRanges; // Pending requests to add ranges to physical shards
 	std::map<Version, std::vector<KeyRange>>
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
-	std::deque<std::pair<Standalone<StringRef>, Standalone<StringRef>>> constructedData;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
 
@@ -9465,34 +9464,6 @@ private:
 					throw worker_removed();
 				}
 			}
-		} else if (SERVER_KNOBS->GENERATE_DATA_ENABLED && m.param1.substr(1).startsWith(constructDataKey)) {
-			uint64_t valSize, keyCount, seed;
-			Standalone<StringRef> prefix;
-			std::tie(prefix, valSize, keyCount, seed) = decodeConstructKeys(m.param2);
-			ASSERT(prefix.size() > 0 && keyCount < UINT16_MAX && valSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT);
-			uint8_t keyBuf[prefix.size() + sizeof(uint16_t)];
-			uint8_t* keyPos = prefix.copyTo(keyBuf);
-			uint8_t valBuf[valSize];
-			setThreadLocalDeterministicRandomSeed(seed);
-			for (uint32_t keyNum = 1; keyNum <= keyCount; keyNum += 1) {
-				if ((keyNum % 0xff) == 0) {
-					*keyPos++ = 0;
-				}
-				*keyPos = keyNum % 0xff;
-				auto r = data->shards.rangeContaining(StringRef(keyBuf, keyPos - keyBuf + 1)).value();
-				if (!r || !(r->getAddingShard() || r->getMoveInShard() || r->isReadable())) {
-					break;
-				}
-
-				deterministicRandom()->randomBytes(&valBuf[0], valSize);
-				data->constructedData.emplace_back(Standalone<StringRef>(StringRef(keyBuf, keyPos - keyBuf + 1)),
-				                                   Standalone<StringRef>(StringRef(valBuf, valSize)));
-			}
-			TraceEvent(SevDebug, "ConstructDataBuilder")
-			    .detail("Prefix", prefix)
-			    .detail("KeyCount", keyCount)
-			    .detail("ValSize", valSize)
-			    .detail("Seed", seed);
 		} else if (isAccumulativeChecksumMutation(m)) {
 			if (data->acsValidator != nullptr) {
 				ASSERT(m.checksum.present() && m.accumulativeChecksumIndex.present());
@@ -9919,27 +9890,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		if (data->acsValidator != nullptr) {
 			data->acsValidator->clearCache(data->thisServerID, data->tag, data->version.get());
-		}
-
-		if (SERVER_KNOBS->GENERATE_DATA_ENABLED && data->constructedData.size() && ver != invalidVersion) {
-			int mutationCount =
-			    std::min(static_cast<int>(data->constructedData.size()), SERVER_KNOBS->GENERATE_DATA_PER_VERSION_MAX);
-			for (int m = 0; m < mutationCount; m++) {
-				auto r = data->shards.rangeContaining(data->constructedData.front().first).value();
-				if (r && (r->getAddingShard() || r->getMoveInShard() || r->isReadable())) {
-					MutationRef constructedMutation(MutationRef::SetValue,
-					                                data->constructedData.front().first,
-					                                data->constructedData.front().second);
-					// TraceEvent(SevDebug, "ConstructDataCommit").detail("Key", constructedMutation.param1).detail("V",ver);
-					updater.applyMutation(data, constructedMutation, ver, false);
-					mutationBytes += constructedMutation.totalSize();
-					data->counters.mutationBytes += constructedMutation.totalSize();
-					data->counters.logicalBytesInput += constructedMutation.expectedSize();
-					++data->counters.mutations;
-					++data->counters.setMutations;
-				}
-				data->constructedData.pop_front();
-			}
 		}
 
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);

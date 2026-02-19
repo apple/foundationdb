@@ -291,7 +291,10 @@ TEST_CASE("/flow/coro/cancel1") {
 	ASSERT(exits);
 	ASSERT(test.getPromiseReferenceCount() == 0 && test.getFutureReferenceCount() == 1 && test.isReady() &&
 	       test.isError() && test.getError().code() == error_code_actor_cancelled);
-	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 0);
+	// With unified allocation, coroutine parameter copies persist in the frame until it's destroyed.
+	// The frame stays alive because 'test' still holds a future ref to the CoroActor.
+	// So param 'f' (which refs p's SAV) is still alive. This matches ACTOR behavior.
+	ASSERT(p.getPromiseReferenceCount() == 1 && p.getFutureReferenceCount() == 1);
 
 	return Void();
 }
@@ -496,7 +499,9 @@ TEST_CASE("/flow/coro/chooseTwoActor") {
 	Future<Void> c = chooseTwoActor(a.getFuture(), b.getFuture());
 	ASSERT(a.getFutureReferenceCount() == 2 && b.getFutureReferenceCount() == 2 && !c.isReady());
 	b.send(Void());
-	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && c.isReady() && !c.isError() &&
+	// With unified allocation, coroutine parameter copies (f, g) persist in the frame until it's destroyed.
+	// The frame stays alive because 'c' holds a future ref. Params f and g each hold one ref.
+	ASSERT(a.getFutureReferenceCount() == 1 && b.getFutureReferenceCount() == 1 && c.isReady() && !c.isError() &&
 	       expectActorCount(1));
 	c = Future<Void>();
 	ASSERT(a.getFutureReferenceCount() == 0 && b.getFutureReferenceCount() == 0 && expectActorCount(0));
@@ -1518,18 +1523,14 @@ Future<Void> futureStreamTest() {
 	PromiseStream<double> promise;
 	auto fut = promise.getFuture();
 	Future<Void> f = delaySequence(std::move(promise), &rnds);
-	int i = 0;
-	while (!f.isReady() || fut.isReady()) {
-		try {
-			ASSERT(co_await fut == rnds[i++]);
-		} catch (Error& e) {
-			if (e.code() == error_code_broken_promise) {
-				break;
-			}
-			throw;
-		}
+	// With unified allocation, coroutine parameters (including the PromiseStream moved
+	// into delaySequence) live as long as the SAV — same as ACTOR behavior. The old loop
+	// relied on frame auto-destruction at final_suspend to close the stream, which no
+	// longer happens. Read exactly 100 items instead.
+	for (int i = 0; i < 100; ++i) {
+		ASSERT(co_await fut == rnds[i]);
 	}
-	ASSERT(i == 100);
+	co_await f;
 }
 
 template <class T>

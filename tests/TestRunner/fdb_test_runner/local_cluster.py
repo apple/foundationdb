@@ -11,8 +11,8 @@ import fcntl
 import sys
 import xml.etree.ElementTree as ET
 import tempfile
-from authz_util import private_key_gen, public_keyset_from_keys
-from test_util import random_alphanum_string
+from .authz_util import private_key_gen, public_keyset_from_keys
+from .test_util import random_alphanum_string
 
 CLUSTER_UPDATE_TIMEOUT_SEC = 10
 EXCLUDE_SERVERS_TIMEOUT_SEC = 120
