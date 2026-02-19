@@ -56,6 +56,34 @@ else()
   add_library(fdb_c SHARED ${FDB_C_SRCS} ${fdb_c_apiversion_file} ${asm_file})
   strip_debug_symbols(fdb_c)
 endif()
+
+function(ensure_doctest)
+  find_package(doctest 2.4.8 CONFIG)
+  if(NOT doctest_FOUND)
+    message(STATUS "doctest not found locally, downloading it from github...")
+    include(ExternalProject)
+    find_package(Git REQUIRED)
+
+    ExternalProject_Add(
+        doctest_proj
+        PREFIX ${CMAKE_BINARY_DIR}/doctest
+        GIT_REPOSITORY https://github.com/onqtam/doctest.git
+        GIT_TAG 7b9885133108ae301ddd16e2651320f54cafeba7 # v2.4.8
+        TIMEOUT 10
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND ""
+        INSTALL_COMMAND ""
+        LOG_DOWNLOAD ON
+    )
+
+    ExternalProject_Get_Property(doctest_proj source_dir)
+
+    add_library(doctest::doctest INTERFACE IMPORTED)
+    add_dependencies(doctest::doctest doctest_proj)
+    set_target_properties(doctest::doctest PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${source_dir}")
+  endif()
+endfunction()
+
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
 add_dependencies(fdbclient_sampling fdb_c_options)
@@ -127,7 +155,6 @@ if(NOT WIN32)
     test/mako/time.hpp
     test/mako/utils.cpp
     test/mako/utils.hpp)
-  add_subdirectory(test/unit/third_party)
   find_package(Threads REQUIRED)
   set(UNIT_TEST_SRCS
     test/unit/unit_tests.cpp
@@ -217,13 +244,15 @@ if(NOT WIN32)
   endif()
   target_link_libraries(fdb_c_api_tester_impl PRIVATE SimpleOpt)
 
+  ensure_doctest()
+
   target_include_directories(fdb_c_unit_tests_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${CMAKE_BINARY_DIR}/flow/include)
-  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads doctest)
-  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson doctest)
-  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
-  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
-  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
+  target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads doctest::doctest)
+  target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson doctest::doctest)
+  target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest::doctest)
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest::doctest)
+  target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest::doctest)
   target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c fdbclient Threads::Threads fmt::fmt)
   target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 
