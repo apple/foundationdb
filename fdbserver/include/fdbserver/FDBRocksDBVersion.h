@@ -23,6 +23,6 @@
 
 #define FDB_ROCKSDB_MAJOR 8
 #define FDB_ROCKSDB_MINOR 11
-#define FDB_ROCKSDB_PATCH 4
+#define FDB_ROCKSDB_PATCH 5
 
 #endif
