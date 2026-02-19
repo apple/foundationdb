@@ -832,6 +832,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_HEALTH_TRIGGER_FAILOVER,                          false, Atomic::NO );
 	init( CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION,               5 );
 	init( CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION,              10 );
+	init( CC_TEAM_LOSS_TRIGGER_FAILOVER,                     false, Atomic::NO ); if( randomize && BUGGIFY ) CC_TEAM_LOSS_TRIGGER_FAILOVER = deterministicRandom()->random01() < 0.1;
+	init( CC_TEAM_LOSS_FAILOVER_TRIGGER_DELAY_SECONDS,         15.0 );
 	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
 	init( CC_SATELLITE_DEGRADATION_MIN_COMPLAINER,                 3 );
 	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
