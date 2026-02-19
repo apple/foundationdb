@@ -444,7 +444,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  KeyRangeRef range,
                                  Terminator terminator,
                                  AccessSystemKeys systemAccess,
-                                 LockAware lockAware) {
+                                 LockAware lockAware,
+                                 ReadLowPriority readLowPriority) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 	state Transaction tr(cx);
@@ -461,6 +462,9 @@ ACTOR Future<Void> readCommitted(Database cx,
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (readLowPriority) {
+				tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
+			}
 			if (CLIENT_KNOBS->ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS) {
 				tr.setOption(FDBTransactionOptions::ENABLE_REPLICA_CONSISTENCY_CHECK);
 				int64_t requiredReplicas = CLIENT_KNOBS->BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
@@ -527,7 +531,8 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
                                  Terminator terminator,
                                  AccessSystemKeys systemAccess,
-                                 LockAware lockAware) {
+                                 LockAware lockAware,
+                                 ReadLowPriority readLowPriority) {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 
@@ -547,6 +552,9 @@ ACTOR Future<Void> readCommitted(Database cx,
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (readLowPriority) {
+				tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
+			}
 
 			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
@@ -644,9 +652,18 @@ Future<Void> readCommitted(Database cx,
                            PromiseStream<RCGroup> results,
                            Reference<FlowLock> lock,
                            KeyRangeRef range,
-                           std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
-	return readCommitted(
-	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
+                           std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
+                           ReadLowPriority readLowPriority) {
+	return readCommitted(cx,
+	                     results,
+	                     Void(),
+	                     lock,
+	                     range,
+	                     groupBy,
+	                     Terminator::True,
+	                     AccessSystemKeys::True,
+	                     LockAware::True,
+	                     readLowPriority);
 }
 
 // restore transaction has to be first in the batch, or it is the only txn in batch to make sure it never conflicts with
@@ -876,7 +893,8 @@ ACTOR Future<Void> applyMutations(Database cx,
 				results.push_back(PromiseStream<RCGroup>());
 				locks.push_back(makeReference<FlowLock>(
 				    std::max(CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / ranges.size(), CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES)));
-				rc.push_back(readCommitted(cx, results[i], locks[i], ranges[i], decodeBKMutationLogKey));
+				rc.push_back(
+				    readCommitted(cx, results[i], locks[i], ranges[i], decodeBKMutationLogKey, ReadLowPriority::False));
 			}
 
 			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
