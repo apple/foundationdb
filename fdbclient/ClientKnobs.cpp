@@ -32,7 +32,7 @@ int getSimulatedTxnTimeoutSeconds() {
 	}
 }
 
-#define init(...) KNOB_FN(__VA_ARGS__, INIT_KNOB_WITH_IGNORED_3RD, INIT_KNOB)(__VA_ARGS__)
+#define init(knob, value) INIT_KNOB(knob, value)
 
 ClientKnobs::ClientKnobs(Randomize randomize, IsSimulated isSimulated) {
 	initialize(randomize, isSimulated);

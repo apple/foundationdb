@@ -21,7 +21,7 @@
 #include "fdbclient/ServerKnobs.h"
 #include "flow/IRandom.h"
 
-#define init(...) KNOB_FN(__VA_ARGS__, INIT_KNOB_WITH_IGNORED_3RD, INIT_KNOB)(__VA_ARGS__)
+#define init(knob, value) INIT_KNOB(knob, value)
 
 ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	initialize(randomize, clientKnobs, isSimulated);

@@ -38,7 +38,7 @@ FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 FlowKnobs bootstrapGlobalFlowKnobs(Randomize::False, IsSimulated::False);
 FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
-#define init(...) KNOB_FN(__VA_ARGS__, INIT_KNOB_WITH_IGNORED_3RD, INIT_KNOB)(__VA_ARGS__)
+#define init(knob, value) INIT_KNOB(knob, value)
 
 // clang-format off
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {

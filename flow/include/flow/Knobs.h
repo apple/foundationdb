@@ -32,11 +32,7 @@
 #include <variant>
 #include <optional>
 
-// Helper macros to allow the init macro to be called with an optional third
-// parameter.
-#define KNOB_FN(_1, _2, _3, FN, ...) FN
 #define INIT_KNOB(knob, value) initKnob(knob, value, #knob)
-#define INIT_KNOB_WITH_IGNORED_3RD(knob, value, ignored) initKnob(knob, value, #knob)
 
 // NOTE: Directly using KnobValueRef as the return type for Knobs::parseKnobValue would result
 // in a cyclic dependency, so we use this intermediate ParsedKnobValue type
