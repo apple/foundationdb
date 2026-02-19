@@ -59,7 +59,3 @@ bool ServerKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef 
 	const bool setServerKnob = knobValue.visitSetKnob(knobName, serverKnobs);
 	return setClientKnob || setServerKnob;
 }
-
-bool ServerKnobCollection::isAtomic(std::string const& knobName) const {
-	return clientKnobCollection.isAtomic(knobName) || serverKnobs.isAtomic(knobName);
-}

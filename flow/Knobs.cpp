@@ -38,7 +38,7 @@ FlowKnobs::FlowKnobs(Randomize randomize, IsSimulated isSimulated) {
 FlowKnobs bootstrapGlobalFlowKnobs(Randomize::False, IsSimulated::False);
 FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 
-#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_KNOB_WITH_IGNORED_3RD, INIT_KNOB)(__VA_ARGS__)
 
 // clang-format off
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
@@ -250,7 +250,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ZERO_LENGTH_FILE_PAD,                                  1 );
 	init( TRACE_FLUSH_INTERVAL,                               0.25 );
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
-	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10, Atomic::NO ); // Related to the trace severity in Trace.h
+	init( MIN_TRACE_SEVERITY,                isSimulated ?  1 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_DATETIME_ENABLED,                             true ); // trace time in human readable format (always real time)
 	init( TRACE_SYNC_ENABLED,                                    0 );
@@ -266,7 +266,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
-	init( MAX_METRIC_SIZE,                                    2500, Atomic::NO );
+	init( MAX_METRIC_SIZE,                                    2500 );
 	init( MAX_METRIC_LEVEL,                                     25 );
 	init( METRIC_LEVEL_DIVISOR,                             log(4) );
 	init( METRIC_LIMIT_START_QUEUE_SIZE,                        10 );  // The queue size at which to start restricting logging by disabling levels
@@ -491,82 +491,52 @@ ParsedKnobValue Knobs::getKnob(const std::string& name) const {
 	return ParsedKnobValue{ NoKnobFound() };
 }
 
-bool Knobs::isAtomic(std::string const& knob) const {
-	if (double_knobs.count(knob)) {
-		return double_knobs.find(knob)->second.atomic == Atomic::YES;
-	} else if (int64_knobs.count(knob)) {
-		return int64_knobs.find(knob)->second.atomic == Atomic::YES;
-	} else if (int_knobs.count(knob)) {
-		return int_knobs.find(knob)->second.atomic == Atomic::YES;
-	} else if (string_knobs.count(knob)) {
-		return string_knobs.find(knob)->second.atomic == Atomic::YES;
-	} else if (bool_knobs.count(knob)) {
-		return bool_knobs.find(knob)->second.atomic == Atomic::YES;
-	}
-	return false;
-}
-
-void Knobs::initKnob(double& knob, double value, std::string const& name, Atomic atomic) {
+void Knobs::initKnob(double& knob, double value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		double_knobs[toLower(name)] = KnobValue<double>{ &knob, atomic };
+		double_knobs[toLower(name)] = KnobValue<double>{ &knob };
 	}
 }
 
-void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name, Atomic atomic) {
+void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		int64_knobs[toLower(name)] = KnobValue<int64_t>{ &knob, atomic };
+		int64_knobs[toLower(name)] = KnobValue<int64_t>{ &knob };
 	}
 }
 
-void Knobs::initKnob(int& knob, int value, std::string const& name, Atomic atomic) {
+void Knobs::initKnob(int& knob, int value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		int_knobs[toLower(name)] = KnobValue<int>{ &knob, atomic };
+		int_knobs[toLower(name)] = KnobValue<int>{ &knob };
 	}
 }
 
-void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic) {
+void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		string_knobs[toLower(name)] = KnobValue<std::string>{ &knob, atomic };
+		string_knobs[toLower(name)] = KnobValue<std::string>{ &knob };
 	}
 }
 
-void Knobs::initKnob(bool& knob, bool value, std::string const& name, Atomic atomic) {
+void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
 	if (!explicitlySetKnobs.count(toLower(name))) {
 		knob = value;
-		bool_knobs[toLower(name)] = KnobValue<bool>{ &knob, atomic };
+		bool_knobs[toLower(name)] = KnobValue<bool>{ &knob };
 	}
 }
 
 void Knobs::trace() const {
 	for (auto& k : double_knobs)
-		TraceEvent("Knob")
-		    .detail("Name", k.first.c_str())
-		    .detail("Value", *k.second.value)
-		    .detail("Atomic", k.second.atomic);
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second.value);
 	for (auto& k : int_knobs)
-		TraceEvent("Knob")
-		    .detail("Name", k.first.c_str())
-		    .detail("Value", *k.second.value)
-		    .detail("Atomic", k.second.atomic);
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second.value);
 	for (auto& k : int64_knobs)
-		TraceEvent("Knob")
-		    .detail("Name", k.first.c_str())
-		    .detail("Value", *k.second.value)
-		    .detail("Atomic", k.second.atomic);
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second.value);
 	for (auto& k : string_knobs)
-		TraceEvent("Knob")
-		    .detail("Name", k.first.c_str())
-		    .detail("Value", *k.second.value)
-		    .detail("Atomic", k.second.atomic);
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second.value);
 	for (auto& k : bool_knobs)
-		TraceEvent("Knob")
-		    .detail("Name", k.first.c_str())
-		    .detail("Value", *k.second.value)
-		    .detail("Atomic", k.second.atomic);
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second.value);
 }
 
 TEST_CASE("/flow/Knobs/ParseKnobValue") {

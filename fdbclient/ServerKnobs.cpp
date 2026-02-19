@@ -21,7 +21,7 @@
 #include "fdbclient/ServerKnobs.h"
 #include "flow/IRandom.h"
 
-#define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
+#define init(...) KNOB_FN(__VA_ARGS__, INIT_KNOB_WITH_IGNORED_3RD, INIT_KNOB)(__VA_ARGS__)
 
 ServerKnobs::ServerKnobs(Randomize randomize, ClientKnobs* clientKnobs, IsSimulated isSimulated) {
 	initialize(randomize, clientKnobs, isSimulated);
@@ -826,10 +826,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE,                      3 );
 	init( CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN,                  1 );
 	init( CC_MAX_EXCLUSION_DUE_TO_HEALTH,                          2 );
-	init( CC_HEALTH_TRIGGER_RECOVERY,                          false, Atomic::NO );
+	init( CC_HEALTH_TRIGGER_RECOVERY,                          false );
 	init( CC_TRACKING_HEALTH_RECOVERY_INTERVAL,               3600.0 );
 	init( CC_MAX_HEALTH_RECOVERY_COUNT,                            5 );
-	init( CC_HEALTH_TRIGGER_FAILOVER,                          false, Atomic::NO );
+	init( CC_HEALTH_TRIGGER_FAILOVER,                          false );
 	init( CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION,               5 );
 	init( CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION,              10 );
 	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
