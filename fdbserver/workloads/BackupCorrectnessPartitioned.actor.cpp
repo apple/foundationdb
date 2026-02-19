@@ -600,7 +600,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 				restoreTags.push_back(restoreTag);
 				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s "
-				       "TargetVersion:%d\n",
+				       "TargetVersion:%" PRId64 "\n",
 				       restoreIndex,
 				       restoreTag.toString().c_str(),
 				       targetVersion);
