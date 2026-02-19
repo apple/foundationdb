@@ -15,10 +15,10 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader
-from fdb_version import CURRENT_VERSION, FUTURE_VERSION
-from local_cluster import LocalCluster
-from test_util import random_alphanum_string
+from .binary_download import FdbBinaryDownloader
+from .fdb_version import CURRENT_VERSION, FUTURE_VERSION
+from .local_cluster import LocalCluster
+from .test_util import random_alphanum_string
 
 CLUSTER_ACTIONS = ["wiggle"]
 HEALTH_CHECK_TIMEOUT_SEC = 5
@@ -400,7 +400,8 @@ class UpgradeTest:
                 print(f.read())
 
 
-if __name__ == "__main__":
+def main():
+    global RUN_WITH_GDB, CLEANUP_ON_EXIT
     parser = ArgumentParser(
         formatter_class=RawDescriptionHelpFormatter,
         description="""
@@ -483,3 +484,8 @@ if __name__ == "__main__":
             CLEANUP_ON_EXIT = False
 
     sys.exit(errcode)
+
+
+if __name__ == "__main__":
+    main()
+

@@ -752,7 +752,6 @@ public:
 		ThreadFuture<Void> protocolVersionMonitor;
 
 		Future<Void> sharedStateUpdater;
-		bool isConfigDB;
 
 		Optional<ProtocolVersion> dbProtocolVersion;
 

@@ -1504,11 +1504,6 @@ const KeyRef writeRecoveryKey = "\xff/writeRecovery"_sr;
 const ValueRef writeRecoveryKeyTrue = "1"_sr;
 const KeyRef snapshotEndVersionKey = "\xff/snapshotEndVersion"_sr;
 
-const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
-const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
-const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
-const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/configClasses0"_sr);
-
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
 const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);
 

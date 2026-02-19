@@ -20,9 +20,7 @@
 
 #include <cstdint>
 
-#include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/ConfigNode.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
@@ -101,22 +99,15 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
 }
 
-ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr, ConfigDBType configDBType)
-  : ClientCoordinators(ccr) {
+ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto h : cs.hostnames) {
 		leaderElectionServers.emplace_back(h);
 		stateServers.emplace_back(h);
-		if (configDBType != ConfigDBType::DISABLED) {
-			configServers.emplace_back(h);
-		}
 	}
 	for (auto s : cs.coords) {
 		leaderElectionServers.emplace_back(s);
 		stateServers.emplace_back(s);
-		if (configDBType != ConfigDBType::DISABLED) {
-			configServers.emplace_back(s);
-		}
 	}
 }
 
@@ -757,42 +748,18 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 	}
 }
 
-ACTOR Future<Void> coordinationServer(std::string dataFolder,
-                                      Reference<IClusterConnectionRecord> ccr,
-                                      Reference<ConfigNode> configNode,
-                                      ConfigBroadcastInterface cbi) {
+ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<IClusterConnectionRecord> ccr) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID, fileCoordinatorPrefix);
-	state ConfigTransactionInterface configTransactionInterface;
-	state ConfigFollowerInterface configFollowerInterface;
-	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
-	    .detail("Folder", dataFolder)
-	    .detail("ConfigNodeValid", configNode.isValid());
-
-	// Serve some of the config node interface even if it is disabled. This
-	// allows clients to get responses to requests and avoid hanging when
-	// running commands such as a coordinator change.
-	bool configNodeValid = configNode.isValid();
-	if (!configNodeValid) {
-		configNode = makeReference<ConfigNode>(dataFolder);
-	}
-	configTransactionInterface.setupWellKnownEndpoints();
-	configFollowerInterface.setupWellKnownEndpoints();
-	if (configNodeValid) {
-		configDatabaseServer =
-		    brokenPromiseToNever(configNode->serve(cbi, configTransactionInterface, configFollowerInterface));
-	} else {
-		configDatabaseServer =
-		    brokenPromiseToNever(configNode->serveDisabled(configTransactionInterface, configFollowerInterface));
-	}
+	    .detail("Folder", dataFolder);
 
 	try {
 		wait(localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store, myID, ccr) ||
-		     store.getError() || configDatabaseServer);
+		     store.getError());
 		throw internal_error();
 	} catch (Error& e) {
 		state Error err = e;

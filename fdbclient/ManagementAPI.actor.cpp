@@ -914,32 +914,6 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 	}
 }
 
-ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
-	state Backoff backoff;
-	state Reference<ISingleThreadTransaction> configTr;
-	loop {
-		try {
-			// Attempt to read a random value from the configuration
-			// database to make sure it is online.
-			configTr = ISingleThreadTransaction::create(ISingleThreadTransaction::Type::PAXOS_CONFIG, cx);
-			Tuple tuple;
-			tuple.appendNull(); // config class
-			tuple << "test"_sr;
-			Optional<Value> serializedValue = wait(configTr->get(tuple.pack()));
-			TraceEvent("ChangeQuorumCheckerNewCoordinatorsOnline").log();
-			return Void();
-		} catch (Error& e) {
-			TraceEvent("ChangeQuorumCheckerNewCoordinatorsError").error(e);
-			if (e.code() == error_code_coordinators_changed) {
-				wait(backoff.onError());
-				configTr->reset();
-			} else {
-				wait(configTr->onError(e));
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 	loop {
 		// When the change coordinators transaction succeeds, it uses the
@@ -964,8 +938,7 @@ ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                ClusterConnectionString* conn,
-                                                               std::string newName,
-                                                               bool disableConfigDB) {
+                                                               std::string newName) {
 	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
 	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
 	    wait(getClusterConnectionStringFromStorageServer(tr));
@@ -998,18 +971,10 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	std::sort(old.coords.begin(), old.coords.end());
 	if (conn->hostnames == old.hostnames && conn->coords == old.coords && old.clusterKeyName() == newName) {
 		connectionStrings.clear();
-		if (g_network->isSimulated() && g_simulator->configDBType == ConfigDBType::DISABLED) {
-			disableConfigDB = true;
-		}
-		if (!disableConfigDB) {
-			wait(verifyConfigurationDatabaseAlive(tr->getDatabase()));
-		}
 		if (BUGGIFY_WITH_PROB(0.1)) {
 			// Introduce a random delay in simulation to allow processes to be
-			// killed before previousCoordinatorKeys has been reset. This will
-			// help test scenarios where the previous configuration database
-			// state has been transferred to the new coordinators but the
-			// broadcaster thinks it has not been transferred.
+			// killed before previousCoordinatorKeys has been reset. This helps
+			// exercise coordinator change edge cases around key cleanup.
 			wait(delay(deterministicRandom()->random01() * 10));
 		}
 		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));

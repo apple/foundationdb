@@ -441,7 +441,7 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			          json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
 			                                    json_spirit::Output_options::none);
 		} else {
-			throw invalid_config_db_key();
+			throw invalid_option_value();
 		}
 	}
 

@@ -40,7 +40,6 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbserver/ConfigBroadcaster.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/ClusterController.actor.h"
@@ -1280,12 +1279,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
-ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
-                                  ClusterControllerData* self,
-                                  ClusterConnectionString cs,
-                                  ConfigBroadcaster* configBroadcaster) {
-	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
-
+void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 	const WorkerInterface& w = req.wi;
 	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
 	    req.processClass != ProcessClass::TesterClass) {
@@ -1295,20 +1289,13 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    .detail("WorkerId", w.id())
 		    .detail("ProcessId", w.locality.processId());
 		req.reply.sendError(invalid_cluster_id());
-		return Void();
+		return;
 	}
 
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-
-	bool isCoordinator =
-	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.address()) !=
-	     coordinatorAddresses.end()) ||
-	    (w.secondaryAddress().present() &&
-	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), w.secondaryAddress().get()) !=
-	         coordinatorAddresses.end());
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -1412,13 +1399,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
-			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
-			                                                    req.lastSeenKnobVersion.get(),
-			                                                    req.knobConfigClassSet.get(),
-			                                                    self->id_worker[w.locality.processId()].watcher,
-			                                                    isCoordinator));
-		}
 		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
@@ -1444,17 +1424,10 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 			info->second.watcher.cancel();
 			info->second.watcher = workerAvailabilityWatch(w, newProcessClass, self);
 		}
-		if (req.requestDbInfo) {
-			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
-			self->updateDBInfo.trigger();
-		}
-		if (configBroadcaster != nullptr && req.lastSeenKnobVersion.present() && req.knobConfigClassSet.present()) {
-			self->addActor.send(configBroadcaster->registerNode(req.configBroadcastInterface,
-			                                                    req.lastSeenKnobVersion.get(),
-			                                                    req.knobConfigClassSet.get(),
-			                                                    info->second.watcher,
-			                                                    isCoordinator));
-		}
+
+		// Re-registrations must refresh DBInfo delivery, otherwise rebooted workers can miss role updates.
+		self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
+		self->updateDBInfo.trigger();
 		checkOutstandingRequests(self);
 	} else {
 		CODE_PROBE(true, "Received an old worker registration request.", probe::decoration::rare);
@@ -1488,8 +1461,6 @@ ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
 	if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
 		req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
 	}
-
-	return Void();
 }
 
 #define TIME_KEEPER_VERSION "1"_sr
@@ -1566,8 +1537,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 
 ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
                                 ClusterControllerData* self,
-                                ServerCoordinators coordinators,
-                                ConfigBroadcaster const* configBroadcaster) {
+                                ServerCoordinators coordinators) {
 	// Seconds since the END of the last GetStatus executed
 	state double last_request_time = 0.0;
 
@@ -1638,7 +1608,6 @@ ACTOR Future<Void> statusServer(FutureStream<StatusRequest> requests,
 			                                                                  self->datacenterVersionDifference,
 			                                                                  self->dcLogServerVersionDifference,
 			                                                                  self->dcStorageServerVersionDifference,
-			                                                                  configBroadcaster,
 			                                                                  self->excludedDegradedServers)));
 
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
@@ -2852,25 +2821,17 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
                                          ServerCoordinators coordinators,
                                          LocalityData locality,
-                                         ConfigDBType configDBType,
                                          Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state ClusterControllerData self(interf, locality, coordinators, clusterId);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
-	state ConfigBroadcaster configBroadcaster;
-	if (configDBType != ConfigDBType::DISABLED) {
-		configBroadcaster = ConfigBroadcaster(coordinators, configDBType, getPreviousCoordinators(&self));
-	}
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
 	self.addActor.send(monitorEncryptKeyProxy(&self));
 	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
-	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(),
-	                                &self,
-	                                coordinators,
-	                                (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
+	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
 	self.addActor.send(timeKeeper(&self));
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
@@ -2925,10 +2886,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			self.addActor.send(registerWorker(req,
-			                                  &self,
-			                                  coordinators.ccr->getConnectionString(),
-			                                  (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
+			registerWorker(req, &self);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
@@ -3003,7 +2961,6 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 	loop {
 		state ClusterControllerFullInterface cci;
@@ -3033,7 +2990,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType, clusterId));
+				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, clusterId));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -3056,14 +3013,12 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
                                      LocalityData locality,
-                                     ConfigDBType configDBType,
                                      Reference<AsyncVar<Optional<UID>>> clusterId) {
 	state bool hasConnected = false;
 	loop {
 		try {
-			ServerCoordinators coordinators(connRecord, configDBType);
-			wait(clusterController(
-			    coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType, clusterId));
+			ServerCoordinators coordinators(connRecord);
+			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, clusterId));
 			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)

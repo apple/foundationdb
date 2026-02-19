@@ -444,11 +444,6 @@ func (o DatabaseOptions) SetTransactionReportConflictingKeys() error {
 	return o.setOpt(702, nil)
 }
 
-// Use configuration database.
-func (o DatabaseOptions) SetUseConfigDatabase() error {
-	return o.setOpt(800, nil)
-}
-
 // Enables verification of causal read risky by checking whether clients are able to read stale data when they detect a recovery, and logging an error if so.
 //
 // Parameter: integer between 0 and 100 expressing the probability a client will verify it can't read stale data

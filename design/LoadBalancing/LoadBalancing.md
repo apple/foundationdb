@@ -18,7 +18,6 @@ In the following sections, the two LBs will be discussed in details.
 
 * Commit proxy interface
 * GetReadVersion proxy interface
-* ConfigFollower interface
 
 Here, the interfaces are assumed to be always *fresh*, i.e. the list of the servers is fixed.
 
@@ -224,4 +223,3 @@ while True:
         next_alt = (next_alt + 1) % alts.size()
         time.sleep(.2)
 ```
-

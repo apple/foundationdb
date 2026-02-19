@@ -47,6 +47,21 @@
 
 using namespace std::literals::string_view_literals;
 
+enum ExitCodes : int {
+	SUCCESS = 0,
+
+	MAIN_TEST_FAILED = 1,
+
+	CLIENT_PIPE_READ_ADDR_FAILED = 2,
+	CLIENT_FAILED = 3,
+	CLIENT_TEST_RESULT_MISMATCH = 4,
+
+	SERVER_BIND_ERROR = 5,
+	SERVER_STDOUT_REDIRECT_FAILED = 6,
+
+	WAITPID_ANY_STATUS = -1,
+};
+
 enum Role : uint8_t { MAIN, CLIENT, SERVER, UNDETERMINED, LAST };
 
 constexpr std::array<std::string_view, Role::LAST> ROLE_STRING{ "MAIN"sv, "CLIENT"sv, "SERVER"sv, "UNDETERMINED"sv };
@@ -118,29 +133,38 @@ struct TLSCreds {
 	std::string certBytes;
 	std::string keyBytes;
 	std::string caBytes;
+	std::string password;
 };
 
-TLSCreds makeCreds(const ChainLength chainLen, const mkcert::ESide side) {
+TLSCreds makeCreds(const ChainLength chainLen, const mkcert::ESide side, StringRef password = {}) {
 	if (chainLen == 0 || chainLen == NO_TLS) {
-		return TLSCreds{ chainLen == NO_TLS, "", "", "" };
+		return TLSCreds{ chainLen == NO_TLS, "", "", "", "" };
 	}
 	auto arena = Arena();
 	auto ret = TLSCreds{};
-	auto specs = mkcert::makeCertChainSpec(arena, std::labs(chainLen), side);
-	if (chainLen < 0) {
-		specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
-		specs[0].offsetNotAfter = -10l; // cert that expired 10 seconds ago
-	}
-	auto chain = mkcert::makeCertChain(arena, specs, {} /* create root CA cert from spec*/);
-	if (chain.size() == 1) {
-		ret.certBytes = concatCertChain(arena, chain).toString();
+	if (!password.empty()) {
+		ret.password = password.toString();
+		auto certAndKeyPem = mkcert::makePasswCert(arena, password);
+		ret.certBytes = certAndKeyPem.certPem.toString();
+		ret.keyBytes = certAndKeyPem.privateKeyPem.toString();
+		ret.caBytes = ret.certBytes;
 	} else {
-		auto nonRootChain = chain;
-		nonRootChain.pop_back();
-		ret.certBytes = concatCertChain(arena, nonRootChain).toString();
+		auto specs = mkcert::makeCertChainSpec(arena, std::labs(chainLen), side);
+		if (chainLen < 0) {
+			specs[0].offsetNotBefore = -60l * 60 * 24 * 365;
+			specs[0].offsetNotAfter = -10l; // cert that expired 10 seconds ago
+		}
+		auto chain = mkcert::makeCertChain(arena, specs, {} /* create root CA cert from spec*/);
+		if (chain.size() == 1) {
+			ret.certBytes = concatCertChain(arena, chain).toString();
+		} else {
+			auto nonRootChain = chain;
+			nonRootChain.pop_back();
+			ret.certBytes = concatCertChain(arena, nonRootChain).toString();
+		}
+		ret.caBytes = chain.back().certPem.toString();
+		ret.keyBytes = chain.front().privateKeyPem.toString();
 	}
-	ret.caBytes = chain.back().certPem.toString();
-	ret.keyBytes = chain.front().privateKeyPem.toString();
 	return ret;
 }
 
@@ -255,6 +279,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		tlsConfig.setCertificateBytes(creds.certBytes);
 		tlsConfig.setCABytes(creds.caBytes);
 		tlsConfig.setKeyBytes(creds.keyBytes);
+		tlsConfig.setPassword(creds.password);
 	}
 	g_network = newNet2(tlsConfig);
 	openTraceFile({}, 10 << 20, 10 << 20, ".", IsServer ? "authz_tls_unittest_server" : "authz_tls_unittest_client");
@@ -264,7 +289,12 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto addr = NetworkAddress::parse(noTls ? "127.0.0.1:0" : "127.0.0.1:0:tls");
 		auto endpoint = Endpoint();
 		auto receiver = SessionProbeReceiver();
-		auto listenFuture = transport.bind(addr, addr);
+		try {
+			transport.bind(addr, addr);
+		} catch (const Error& err) {
+			log("CAUGHT Error in bind: code={} what={}", err.code(), err.what());
+			return SERVER_BIND_ERROR;
+		}
 		transport.addEndpoint(endpoint, &receiver, TaskPriority::ReadSocket);
 		auto thread = std::thread([]() {
 			g_network->run();
@@ -275,13 +305,13 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 			g_network->stop();
 			thread.join();
 		});
-		return 0;
+		return SUCCESS;
 	} else {
 		auto dest = Endpoint();
 		auto& serverAddr = dest.addresses.address;
 		if (sizeof(serverAddr) != ::read(addrPipe, &serverAddr, sizeof(serverAddr))) {
 			log("Failed to read server addr from pipe: {}", strerror(errno));
-			return 1;
+			return CLIENT_PIPE_READ_ADDR_FAILED;
 		}
 		if (noTls)
 			serverAddr.flags &= ~NetworkAddress::FLAG_TLS;
@@ -290,14 +320,14 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto& token = dest.token;
 		if (sizeof(token) != ::read(addrPipe, &token, sizeof(token))) {
 			log("Failed to read server endpoint token from pipe: {}", strerror(errno));
-			return 2;
+			return CLIENT_FAILED;
 		}
 		log("Server address is {}{}", serverAddr.toString(), noTls ? " (TLS suffix removed)" : "");
 		log("Server endpoint token is {}", token.toString());
 		auto sessionProbeReq = SessionProbeRequest{};
 		transport.sendUnreliable(SerializeSource(sessionProbeReq), dest, true /*openConnection*/);
 		log("Request is sent");
-		auto rc = 0;
+		auto rc = SUCCESS;
 		auto result = Result::ERROR;
 		{
 			auto timeout = delay(expect == Result::TIMEOUT ? 0.5 : 5);
@@ -308,12 +338,12 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto done = true;
 		if (sizeof(done) != ::write(completionPipe, &done, sizeof(done))) {
 			log("Failed to signal server to terminate: {}", strerror(errno));
-			rc = 4;
+			rc = CLIENT_FAILED;
 		}
-		if (rc == 0) {
+		if (rc == SUCCESS) {
 			if (expect != result) {
 				log("Test failed: expected {}, got {}", expect, result);
-				rc = 5;
+				rc = CLIENT_TEST_RESULT_MISMATCH;
 			} else {
 				log("Response OK: got {} as expected", result);
 			}
@@ -374,7 +404,7 @@ std::pair<bool, std::string> waitPidStatusInterpreter(const char* procName, cons
 	return { false, message };
 }
 
-bool waitPid(pid_t subProcPid, const char* procName) {
+bool waitPid(pid_t subProcPid, const char* procName, int expectStatus = WAITPID_ANY_STATUS) {
 	auto status = int{};
 	auto pid = ::waitpid(subProcPid, &status, 0);
 
@@ -386,33 +416,56 @@ bool waitPid(pid_t subProcPid, const char* procName) {
 		auto [ok, message] = waitPidStatusInterpreter(procName, status);
 		log("{}", message);
 
-		return ok;
+		return ok || (expectStatus != WAITPID_ANY_STATUS && WEXITSTATUS(status) == expectStatus);
 	}
 }
 
-int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
-	log("==== BEGIN TESTCASE ====");
-	auto const expect = getExpectedResult(serverChainLen, clientChainLen);
-	using namespace std::literals::string_literals;
-	log("Cert chain length: server={} client={}", serverChainLen, clientChainLen);
-	auto arena = Arena();
-	auto serverCreds = makeCreds(serverChainLen, mkcert::ESide::Server);
-	auto clientCreds = makeCreds(clientChainLen, mkcert::ESide::Client);
-	// make server and client trust each other
-	std::swap(serverCreds.caBytes, clientCreds.caBytes);
+int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen, std::string_view passwordTestCase = "") {
+	auto expect = Result::TRUSTED;
+	TLSCreds serverCreds;
+	TLSCreds clientCreds;
+	int expectStatusServer = WAITPID_ANY_STATUS;
+	int expectStatusClient = WAITPID_ANY_STATUS;
+
+	if (passwordTestCase.empty()) {
+		log("==== BEGIN TESTCASE ====");
+		expect = getExpectedResult(serverChainLen, clientChainLen);
+		log("Cert chain length: server={} client={}", serverChainLen, clientChainLen);
+		serverCreds = makeCreds(serverChainLen, mkcert::ESide::Server);
+		clientCreds = makeCreds(clientChainLen, mkcert::ESide::Client);
+		// make server and client trust each other
+		std::swap(serverCreds.caBytes, clientCreds.caBytes);
+	} else {
+		const auto password = "abc123"_sr;
+		serverCreds = makeCreds(serverChainLen, mkcert::ESide::Server, password);
+		clientCreds = serverCreds;
+
+		if (passwordTestCase == "client") {
+			log("==== BEGIN CLIENT BAD PASSWORD TESTCASE ====");
+			expect = Result::TIMEOUT;
+			clientCreds.password = "bad";
+		} else if (passwordTestCase == "server") {
+			log("==== BEGIN SERVER BAD PASSWORD TESTCASE ====");
+			serverCreds.password = "bad";
+			expectStatusServer = SERVER_BIND_ERROR;
+			expectStatusClient = CLIENT_PIPE_READ_ADDR_FAILED;
+		} else {
+			log("==== BEGIN PASSWORD PROTECTED TESTCASE ====");
+		}
+	}
 	auto clientPid = pid_t{};
 	auto serverPid = pid_t{};
 	int addrPipe[2], completionPipe[2], serverStdoutPipe[2], clientStdoutPipe[2];
 	if (::pipe(addrPipe) || ::pipe(completionPipe) || ::pipe(serverStdoutPipe) || ::pipe(clientStdoutPipe)) {
 		log("Pipe open failed: {}", strerror(errno));
-		return 1;
+		return MAIN_TEST_FAILED;
 	}
 	auto ok = true;
 	{
 		serverPid = fork();
 		if (serverPid == -1) {
 			log("fork() for server subprocess failed: {}", strerror(errno));
-			return 1;
+			return MAIN_TEST_FAILED;
 		} else if (serverPid == 0) {
 			role = Role::SERVER;
 			// server subprocess
@@ -429,24 +482,25 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 			if (-1 == ::dup2(serverStdoutPipe[1], STDOUT_FILENO)) {
 				log("Failed to redirect server stdout to pipe: {}", strerror(errno));
 				::close(serverStdoutPipe[1]);
-				return 1;
+				return SERVER_STDOUT_REDIRECT_FAILED;
 			}
 			_exit(runHost<true>(std::move(serverCreds), addrPipe[1], completionPipe[0], expect));
 		}
-		auto serverProcCleanup = ScopeExit([&ok, serverPid]() {
-			if (!waitPid(serverPid, "Server"))
+		auto serverProcCleanup = ScopeExit([&ok, serverPid, expectStatusServer]() {
+			if (!waitPid(serverPid, "Server", expectStatusServer))
 				ok = false;
 		});
+		::close(addrPipe[1]);
+		::close(completionPipe[0]);
+		::close(serverStdoutPipe[1]);
+
 		clientPid = fork();
 		if (clientPid == -1) {
 			log("fork() for client subprocess failed: {}", strerror(errno));
-			return 1;
+			return MAIN_TEST_FAILED;
 		} else if (clientPid == 0) {
 			role = Role::CLIENT;
-			::close(addrPipe[1]);
-			::close(completionPipe[0]);
 			::close(serverStdoutPipe[0]);
-			::close(serverStdoutPipe[1]);
 			::close(clientStdoutPipe[0]);
 			auto pipeCleanup = ScopeExit([&addrPipe, &completionPipe]() {
 				::close(addrPipe[0]);
@@ -455,21 +509,18 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 			if (-1 == ::dup2(clientStdoutPipe[1], STDOUT_FILENO)) {
 				log("Failed to redirect client stdout to pipe: {}", strerror(errno));
 				::close(clientStdoutPipe[1]);
-				return 1;
+				return CLIENT_FAILED;
 			}
 			_exit(runHost<false>(std::move(clientCreds), addrPipe[0], completionPipe[1], expect));
 		}
-		auto clientProcCleanup = ScopeExit([&ok, clientPid]() {
-			if (!waitPid(clientPid, "Client"))
+		auto clientProcCleanup = ScopeExit([&ok, clientPid, expectStatusClient]() {
+			if (!waitPid(clientPid, "Client", expectStatusClient))
 				ok = false;
 		});
 	}
 	// main process
 	::close(addrPipe[0]);
-	::close(addrPipe[1]);
-	::close(completionPipe[0]);
 	::close(completionPipe[1]);
-	::close(serverStdoutPipe[1]);
 	::close(clientStdoutPipe[1]);
 	auto pipeCleanup = ScopeExit([&]() {
 		::close(serverStdoutPipe[0]);
@@ -484,7 +535,7 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen) {
 	logRaw(fmt::runtime(serverStdout));
 	log("/// End Server STDOUT ///");
 	log(fmt::runtime(ok ? "OK" : "FAILED"));
-	return !ok;
+	return ok ? SUCCESS : MAIN_TEST_FAILED;
 }
 
 int main(int argc, char** argv) {
@@ -514,12 +565,29 @@ int main(int argc, char** argv) {
 		if (runTlsTest(serverChainLen, clientChainLen))
 			failed.push_back({ serverChainLen, clientChainLen });
 	}
+
+	constexpr auto singleChainPair = std::pair(ChainLength(1), ChainLength(1));
+	inputs.insert(inputs.end(), 3, singleChainPair);
+
+	std::vector<std::string_view> failedPasswordTests;
+	for (const auto& testCase : std::array{ "no_bad_password", "client", "server" }) {
+		if (runTlsTest(singleChainPair.first, singleChainPair.second, testCase)) {
+			failed.push_back(singleChainPair);
+			failedPasswordTests.push_back(testCase);
+		}
+	}
+
 	if (!failed.empty()) {
+		if (!failedPasswordTests.empty()) {
+			for (const auto& test : failedPasswordTests) {
+				log(" {}, failed", test);
+			}
+		}
 		log("Test Failed: {}/{} cases: {}", failed.size(), inputs.size(), failed);
-		return 1;
+		return MAIN_TEST_FAILED;
 	} else {
 		log("Test OK: {}/{} cases passed", inputs.size(), inputs.size());
-		return 0;
+		return SUCCESS;
 	}
 }
 #else // _WIN32

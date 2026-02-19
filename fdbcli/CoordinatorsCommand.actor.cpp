@@ -64,18 +64,10 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 	state int notEnoughMachineResults = 0;
 	state StringRef new_cluster_description;
 	state std::string auto_coordinators_str;
-	state bool disableConfigDB = false;
 	StringRef nameTokenBegin = "description="_sr;
-	StringRef noConfigDB = "--no-config-db"_sr;
 	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok) {
 		if (tok->startsWith(nameTokenBegin) && new_cluster_description.empty()) {
 			new_cluster_description = tok->substr(nameTokenBegin.size());
-			auto next = tok - 1;
-			std::copy(tok + 1, tokens.end(), tok);
-			tokens.resize(tokens.size() - 1);
-			tok = next;
-		} else if (tok->startsWith(noConfigDB)) {
-			disableConfigDB = true;
 			auto next = tok - 1;
 			std::copy(tok + 1, tokens.end(), tok);
 			tokens.resize(tokens.size() - 1);
@@ -91,10 +83,6 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 			// update cluster description
 			if (new_cluster_description.size()) {
 				tr->set(fdb_cli::clusterDescriptionSpecialKey, new_cluster_description);
-			}
-			if (disableConfigDB) {
-				// All that matters is the key is set.
-				tr->set(fdb_cli::configDBSpecialKey, ""_sr);
 			}
 			// if auto change, read the special key to retrieve the recommended config
 			if (automatic) {
@@ -187,7 +175,6 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 namespace fdb_cli {
 
 const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
-const KeyRef configDBSpecialKey = "\xff\xff/configuration/coordinators/config_db"_sr;
 const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
 const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 
