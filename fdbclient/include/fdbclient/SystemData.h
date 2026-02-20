@@ -315,6 +315,7 @@ UID decodeProcessClassKeyOld(KeyRef const& key);
 //	See DatabaseConfiguration.cpp ::setInternal for more examples.
 extern const KeyRangeRef configKeys;
 extern const KeyRef configKeysPrefix;
+extern const KeyRef configUsableRegionsKey;
 
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
