@@ -133,11 +133,11 @@ public:
 	ClassType classType() const { return (ClassType)_class; }
 	ClassSource classSource() const { return (ClassSource)_source; }
 
-	bool operator == ( const ClassType& rhs ) const { return _class == rhs; }
-	bool operator != ( const ClassType& rhs ) const { return _class != rhs; }
+	bool operator==(const ClassType& rhs) const { return _class == rhs; }
+	bool operator!=(const ClassType& rhs) const { return _class != rhs; }
 
-	bool operator == ( const ProcessClass& rhs ) const { return _class == rhs._class && _source == rhs._source; }
-	bool operator != ( const ProcessClass& rhs ) const { return _class != rhs._class || _source != rhs._source; }
+	bool operator==(const ProcessClass& rhs) const { return _class == rhs._class && _source == rhs._source; }
+	bool operator!=(const ProcessClass& rhs) const { return _class != rhs._class || _source != rhs._source; }
 
 	std::string toString() const;
 
