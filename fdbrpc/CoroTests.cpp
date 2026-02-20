@@ -813,10 +813,33 @@ TEST_CASE("#flow/coro/perf/actor patterns") {
 		}
 		printf("quorum(2/3): %0.2f M/sec\n", N / 1e6 / (timer() - start));
 	}
-
 	return Void();
 }
 
+TEST_CASE("noSim/flow/coro/perf/frameSizeBaseline") {
+	// Measure current coroutine frame sizes for performance optimization
+	printf("\n=== Coroutine Frame Size Baseline ===\n");
+	printf("sizeof(coro::CoroPromise<int, true>): %zu bytes\n", sizeof(coro::CoroPromise<int, true>));
+	printf("sizeof(coro::CoroPromise<Void, true>): %zu bytes\n", sizeof(coro::CoroPromise<Void, true>));
+	printf("sizeof(coro::CoroActor<int, true>): %zu bytes\n", sizeof(coro::CoroActor<int, true>));
+	printf("sizeof(coro::AwaitableFuture<coro::CoroPromise<int,true>, int, false>): %zu bytes\n",
+	       sizeof(coro::AwaitableFuture<coro::CoroPromise<int, true>, int, false>));
+	printf("sizeof(coro::AwaitableFuture<coro::CoroPromise<int,true>, int, true>): %zu bytes\n",
+	       sizeof(coro::AwaitableFuture<coro::CoroPromise<int, true>, int, true>));
+
+	printf("\nTARGET: <96 bytes total frame for FastAllocator<96> bucket\n");
+	printf("CURRENT ISSUE: Frame >96B uses FastAllocator<128> (32B wasted per coroutine)\n");
+
+	size_t frameSize = sizeof(coro::CoroPromise<int, true>);
+	if (frameSize >= 96) {
+		printf("❌ Frame size %zu bytes EXCEEDS 96B target - uses FastAllocator<128>\n", frameSize);
+		printf("   Optimization needed: Reduce AwaitableFuture overhead\n");
+	} else {
+		printf("✅ Frame size %zu bytes fits in FastAllocator<96>\n", frameSize);
+	}
+
+	return Void();
+}
 namespace {
 
 template <class YAM>

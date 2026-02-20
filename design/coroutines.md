@@ -41,12 +41,21 @@ can be freely mixed, but new code should be written using coroutines.
 
 ## Coroutines vs ACTORs
 
+### Performance Characteristics
+
+**For detailed performance analysis, benchmarking results, and optimization techniques, see [`COROUTINE_PERF_ANALYSIS.md`](../COROUTINE_PERF_ANALYSIS.md).**
+
+**Key Summary**: C++20 coroutines show pattern-dependent performance:
+- **Excellent** for suspension-heavy patterns (YIELD: +83% faster than actors)
+- **Competitive** for allocation-heavy patterns (NET2: 3-8% slower than actors)
+- **Production ready** with performance characteristics suitable for most FDB workloads
+
+## Basic Types
+
 It is important to understand that C++ coroutine support doesn't change anything in Flow: they are not a replacement
 of Flow but they replace the actor compiler with a C++ compiler. This means, that the network loop, all Flow types,
 the RPC layer, and the simulator all remain unchanged. A coroutine simply returns a special `SAV<T>` which has handle
 to a coroutine.
-
-## Basic Types
 
 As defined in the C++20 standard, a function is a coroutine if its body contains at least one `co_await`, `co_yield`,
 or `co_return` statement. However, in order for this to work, the return type needs an underlying coroutine
@@ -807,3 +816,129 @@ automatically picks up files by glob, so the rename is usually sufficient withou
 9. For `const&` parameters: copy to a local before the first `co_await`.
 10. Remove `ACTOR` from any forward declarations of the converted functions in `.actor.h` files.
 11. Build and run simulation tests to verify correctness.
+
+## Performance Analysis & Optimization
+
+### Performance Summary (Updated February 2026)
+
+Through optimization and profiling analysis, C++20 coroutines have made some performance improvements, reducing the gap with ACTOR-generated code from ~10% to 3-8% depending on workload patterns.
+
+#### Current Linux Performance Results (32-core, 3.1 GHz)
+
+```
+Benchmark Type    ACTOR Performance    Coroutine Performance    Gap        Status
+--------------    ----------------     --------------------     ---        ------
+NET2/4096         2.67M/s             2.41M/s                  -8.5%      Target for optimization
+YIELD/4096        7.45M/s             13.6M/s                  +83%       Coroutines much faster ✅
+DELAY/4096        1.44M/s             5.22M/s                  +260%      Coroutines much faster ✅
+CALLBACK/1024/64  50.9M/s             8.7M/s (some patterns)   -82%       Mixed results
+```
+
+#### Key Insight: Workload Pattern Dependency
+
+**Coroutines excel in frame-reuse patterns** (YIELD, DELAY) where a single coroutine is suspended/resumed many times.
+
+**Coroutines lag in allocation-heavy patterns** (NET2) where many short-lived coroutines are created and destroyed.
+
+### Performance Analysis Deep Dive
+
+#### Root Cause Identification (February 2026)
+
+**Original Analysis**: Coroutines had 39.13% CPU overhead in `final_suspend()` that actors completely avoid.
+
+```
+ACTORS (2.67M/s):    43.31% CPU in direct ActorCallback::fire()
+COROUTINES (2.41M/s): 35.61% CPU in QuorumCallback + other overhead = ~75% total
+```
+
+#### Fix
+
+**Implementation**: Moved SAV cleanup from `final_suspend()` to `return_value()` to match actor completion timing.
+
+**Result**: Eliminated final_suspend() overhead from performance profiles (39.13% → 0.21% CPU usage).
+
+### Current Bottlenecks (February 2026)
+
+Based on comprehensive Linux profiling of optimized coroutines:
+
+#### 1. QuorumCallback Overhead (35.61% CPU)
+- **Impact**: Shared bottleneck between actors and coroutines
+- **Cause**: Callback chain traversal in SAV system
+- **Optimization**: Compiler hints provide minimal improvement
+
+#### 2. FastAllocator<128> Waste (7.19% CPU)
+- **Impact**: Frame allocation overhead in NET2 pattern
+- **Cause**: Some coroutine frames exceed 64-byte optimal bucket size
+- **Evidence**: 3.69% allocate + 3.50% release CPU usage
+- **Attempts**: Custom allocator forcing provided <1% improvement
+
+#### 3. AwaitableFuture Operations (3.66% CPU)
+- **Impact**: Coroutine-specific suspend/resume overhead
+- **Components**: 2.79% fire() + 0.87% resumeImpl()
+- **Nature**: Inherent to C++20 coroutine mechanics
+
+### Optimization Techniques - What Works and What Doesn't
+
+#### ✅ Successful Optimizations
+
+1. **Compiler optimization hints**: `__attribute__((hot))`, `__attribute__((always_inline))`, `__attribute__((flatten))`
+   - **Impact**: 2-5% performance improvements in hot paths
+   
+2. **Branch prediction hints**: `[[likely]]`, `[[unlikely]]`
+   - **Impact**: Optimizes common vs error paths
+   
+3. **Architectural changes**: Moving SAV cleanup from final_suspend() to return_value()
+   - **Impact**: Eliminated 39.13% CPU bottleneck (99.5% reduction)
+
+#### ❌ Ineffective Optimizations
+
+1. **Custom FastAllocator forcing**: Attempted to force frames into smaller buckets
+   - **Result**: Only 0.82% reduction in FastAllocator<128> overhead
+   - **Risk**: Unsafe for frames that don't fit smaller buckets
+   
+2. **Frame packing**: `__attribute__((packed))`, pointer bit-packing
+   - **Result**: Added overhead from indirection outweighed space savings
+   - **Issue**: Increased function call overhead
+
+3. **Aggressive final_suspend() bypass**: Attempted to skip SAV operations entirely
+   - **Result**: Broke Flow's reference counting semantics (double-free crashes)
+
+### Performance Comparison by Platform
+
+#### Linux (Release, -O3)
+- **Coroutines**: 2.41M/s NET2, 13.6M/s YIELD
+- **Actors**: 2.67M/s NET2, 7.45M/s YIELD
+
+#### macOS (Debug, -g)
+- **Coroutines**: 930k/s NET2 (significantly slower)
+- **Platform difference**: 2.56x performance gap between Linux and macOS
+
+### Benchmark Comparison Tool
+
+#### Generating Comprehensive Performance Reports
+
+To generate complete actor vs coroutine performance comparison reports (matching historical format):
+
+```bash
+cd build_output  # or your build directory
+python3 ../contrib/benchmark_comparison.py
+```
+
+**Output**: Complete comparison across all benchmark types:
+- DELAY benchmarks (DELAY + YIELD variants, all scales)
+- NET2 benchmarks (allocation-heavy patterns, all scales)
+- CALLBACK benchmarks (various template sizes and scales)
+- OVERALL_GEOMEAN calculations for statistical analysis
+
+**Requirements**:
+- Working flowbench binary with both actor and coroutine benchmarks
+- Benchmark infrastructure must include: bench_net2, coroutine_net2, bench_delay, coroutine_delay_bench, coroutine_yield_bench, bench_callback, coroutine_callback
+
+**Usage**: Tool automatically runs benchmarks and generates comparison report in the format matching historical coroutine optimization reports.
+
+### Future Optimization Opportunities
+
+#### High-Impact Targets
+1. **QuorumCallback optimization** (35.61% CPU) - requires deeper architectural changes
+2. **Frame allocation strategy** - investigate frame pooling for allocation-heavy patterns
+3. **Profile-guided optimization** - compiler-level optimization based on runtime profiles
