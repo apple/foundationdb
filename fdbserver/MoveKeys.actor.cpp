@@ -154,34 +154,26 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 
 	tr->clear(KeyRangeRef(beginKey, endKey));
 
-	// Write entries, checking for uncoalesced entries (adjacent with same value).
-	// If DD_COALESCE_UNCOALESCED_KRM is true, auto-coalesce by keeping the first entry
-	// of each same-value group and skipping the rest. Otherwise ASSERT.
-	//
-	// Coalescing is safe because same value means same server assignment - we're just
-	// removing redundant boundary markers.
-	Value lastWrittenValue;
-	bool hasWritten = false;
-	for (int i = 0; i < kvs.size(); ++i) {
-		bool atEnd = kvs[i].key.removePrefix(mapPrefix) == allKeys.end;
-
-		// Check for uncoalesced entry (same value as previous, not at end boundary)
-		if (hasWritten && kvs[i].value == lastWrittenValue && !atEnd) {
+	// Write entries in pairs, checking for uncoalesced entries (adjacent with same value).
+	// Original loop wrote pairs: kvs[i] and kvs[i+1] for each i < size-1.
+	// We maintain that behavior but add uncoalesced detection.
+	for (int i = 0; i < kvs.size() - 1; ++i) {
+		// Check for uncoalesced entry (adjacent entries with same value, not at end boundary)
+		bool atEnd = kvs[i + 1].key.removePrefix(mapPrefix) == allKeys.end;
+		if (kvs[i].value == kvs[i + 1].value && !atEnd) {
 			if (SERVER_KNOBS->DD_COALESCE_UNCOALESCED_KRM) {
-				// Auto-coalesce: skip this redundant entry
-				TraceEvent(SevWarnAlways, "MoveKeysAutoCoalescingUncoalesced", logId)
+				// Log and continue - the entries will still be written but we don't crash
+				TraceEvent(SevWarnAlways, "MoveKeysUncoalescedDetected", logId)
 				    .detail("SSID", ssId)
-				    .detail("SkippedKey", kvs[i].key)
+				    .detail("Key1", kvs[i].key)
+				    .detail("Key2", kvs[i + 1].key)
 				    .detail("Value", kvs[i].value);
-				continue;
 			} else {
-				ASSERT(false); // Uncoalesced KRM entries detected; set DD_COALESCE_UNCOALESCED_KRM=true to auto-fix
+				ASSERT(false); // Uncoalesced KRM entries detected; set DD_COALESCE_UNCOALESCED_KRM=true to skip
 			}
 		}
-
 		tr->set(kvs[i].key, kvs[i].value);
-		lastWrittenValue = kvs[i].value;
-		hasWritten = true;
+		tr->set(kvs[i + 1].key, kvs[i + 1].value);
 	}
 
 	return Void();
