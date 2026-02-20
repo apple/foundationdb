@@ -761,6 +761,7 @@ public:
 	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
 	int64_t BACKUP_WORKER_LOCK_BYTES;
+	double BACKUP_WORKER_REPLACEMENT_GRACE_PERIOD;
 	double BACKUP_UPLOAD_DELAY;
 
 	// Cluster Controller
@@ -899,6 +900,11 @@ public:
 	// recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before that
 	// state, log router failures will trigger a new recovery.
 	bool CC_RERECRUIT_LOG_ROUTER_ENABLED;
+	double CC_RERECRUIT_BACKUP_WORKER_TIMEOUT;
+	// If enabled, Cluster Controller will rerecruit backup workers if it detects some backup workers have failed to
+	// avoid recoveries. Note this feature only covers the period when the cluster is in fully_recovered state. Before
+	// that state, backup worker failures will trigger a new recovery.
+	bool CC_RERECRUIT_BACKUP_WORKER_ENABLED;
 
 	// Move Keys
 	double SHARD_READY_DELAY;

@@ -470,7 +470,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 	loop {
 		std::vector<Future<Void>> failed;
 		std::vector<Future<Void>> routerFailed;
-		std::vector<Future<Void>> backupFailed(1, Never());
+		std::vector<Future<Void>> backupFailed;
 		std::vector<Future<Void>> changes;
 
 		for (auto& it : self->tLogs) {
@@ -545,6 +545,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					}
 				}
 			}
+		} else {
+			if (SERVER_KNOBS->CC_RERECRUIT_BACKUP_WORKER_ENABLED) {
+				TraceEvent("SkipMonitoringBackupWorkers", self->dbgid).log();
+				// Skip monitoring backup workers after full recovery.
+				backupFailed.clear();
+			}
 		}
 
 		if (SERVER_KNOBS->CC_RERECRUIT_LOG_ROUTER_ENABLED) {
@@ -563,9 +569,13 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
+		Future<Void> backupWorkerFailed =
+		    backupFailed.size() > 0
+		        ? tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed())
+		        : Never();
 		wait(quorum(changes, 1) ||
 		     tagError<Void>(traceAfter(quorum(failed, 1), "TPLSOnErrorLogSystemFailed"), tlog_failed()) ||
-		     tagError<Void>(traceAfter(quorum(backupFailed, 1), "TPLSOnErrorBackupFailed"), backup_worker_failed()));
+		     backupWorkerFailed);
 	}
 }
 
@@ -2048,6 +2058,27 @@ void TagPartitionedLogSystem::setBackupWorkers(const std::vector<InitializeBacku
 		TraceEvent("AddBackupWorker", dbgid).detail("Epoch", logsetEpoch).detail("BackupWorkerID", reply.interf.id());
 	}
 	TraceEvent("SetOldestBackupEpoch", dbgid).detail("Epoch", oldestBackupEpoch);
+	backupWorkerChanged.trigger();
+}
+
+void TagPartitionedLogSystem::updateBackupWorkers(const std::vector<int>& tagIds,
+                                                  const std::vector<InitializeBackupReply>& replies) {
+	ASSERT(tLogs.size() > 0);
+
+	Reference<LogSet> logset = tLogs[0];
+
+	int i = 0;
+	for (const auto& reply : replies) {
+		const int tagId = tagIds[i];
+		i++;
+
+		ASSERT(tagId >= 0 && tagId < logset->backupWorkers.size());
+
+		auto worker = makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(
+		    OptionalInterface<BackupInterface>(reply.interf));
+		logset->backupWorkers[tagId] = worker;
+		TraceEvent("UpdateBackupWorker", dbgid).detail("TagId", tagId).detail("BackupWorkerID", reply.interf.id());
+	}
 	backupWorkerChanged.trigger();
 }
 
