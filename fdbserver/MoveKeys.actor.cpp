@@ -154,10 +154,34 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 
 	tr->clear(KeyRangeRef(beginKey, endKey));
 
-	for (int i = 0; i < kvs.size() - 1; ++i) {
-		ASSERT(kvs[i].value != kvs[i + 1].value || kvs[i + 1].key.removePrefix(mapPrefix) == allKeys.end);
+	// Write entries, checking for uncoalesced entries (adjacent with same value).
+	// If DD_COALESCE_UNCOALESCED_KRM is true, auto-coalesce by keeping the first entry
+	// of each same-value group and skipping the rest. Otherwise ASSERT.
+	//
+	// Coalescing is safe because same value means same server assignment - we're just
+	// removing redundant boundary markers.
+	Value lastWrittenValue;
+	bool hasWritten = false;
+	for (int i = 0; i < kvs.size(); ++i) {
+		bool atEnd = kvs[i].key.removePrefix(mapPrefix) == allKeys.end;
+
+		// Check for uncoalesced entry (same value as previous, not at end boundary)
+		if (hasWritten && kvs[i].value == lastWrittenValue && !atEnd) {
+			if (SERVER_KNOBS->DD_COALESCE_UNCOALESCED_KRM) {
+				// Auto-coalesce: skip this redundant entry
+				TraceEvent(SevWarnAlways, "MoveKeysAutoCoalescingUncoalesced", logId)
+				    .detail("SSID", ssId)
+				    .detail("SkippedKey", kvs[i].key)
+				    .detail("Value", kvs[i].value);
+				continue;
+			} else {
+				ASSERT(false); // Uncoalesced KRM entries detected; set DD_COALESCE_UNCOALESCED_KRM=true to auto-fix
+			}
+		}
+
 		tr->set(kvs[i].key, kvs[i].value);
-		tr->set(kvs[i + 1].key, kvs[i + 1].value);
+		lastWrittenValue = kvs[i].value;
+		hasWritten = true;
 	}
 
 	return Void();

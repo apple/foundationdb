@@ -23,6 +23,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/IKnobCollection.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -294,10 +295,25 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 
 	tr->clear(KeyRangeRef(beginKey, endKey));
 
-	ASSERT(value != endValue || endKey == maxWithPrefix.end);
+	// Check for uncoalesced data: if value equals endValue but we're not at maxWithPrefix.end,
+	// there are redundant entries beyond what we read. With the knob enabled, log and continue
+	// (redundant entries remain in DB but DD won't crash). Without knob, ASSERT as before.
+	if (value == endValue && endKey != maxWithPrefix.end) {
+		if (IKnobCollection::getGlobalKnobCollection().getServerKnobs().DD_COALESCE_UNCOALESCED_KRM) {
+			// Log warning and continue - redundant entries remain but DD won't crash
+			TraceEvent(SevWarnAlways, "KRMSkippingUncoalescedEntries")
+			    .detail("MapPrefix", mapPrefix)
+			    .detail("BeginKey", beginKey)
+			    .detail("EndKey", endKey)
+			    .detail("MaxEnd", maxWithPrefix.end)
+			    .detail("Value", value);
+			// Fall through to normal set operations
+		} else {
+			ASSERT(false); // Uncoalesced KRM entries detected; set DD_COALESCE_UNCOALESCED_KRM=true to skip
+		}
+	}
 	tr->set(beginKey, value);
 	tr->set(endKey, endValue);
-
 	return Void();
 }
 Future<Void> krmSetRangeCoalescing(Transaction* const& tr,

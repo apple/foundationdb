@@ -1,0 +1,13 @@
+[configuration]
+allowDefaultTenant = false
+
+[[knobs]]
+dd_coalesce_uncoalesced_krm = true
+
+[[test]]
+testTitle = 'KRMCoalesceTest'
+clearAfterTest = true
+simBackupAgents = 'Disabled'
+
+[[test.workload]]
+testName = 'KRMCoalesceTest'
