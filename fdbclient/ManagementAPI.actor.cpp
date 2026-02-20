@@ -921,8 +921,7 @@ ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 		// This causes the underlying transaction to not be committed. In order
 		// to make sure we clear the previous coordinators key, we have to use
 		// a new transaction here.
-		state Reference<ISingleThreadTransaction> clearTr =
-		    ISingleThreadTransaction::create(ISingleThreadTransaction::Type::RYW, cx);
+		state Reference<ReadYourWritesTransaction> clearTr = makeReference<ReadYourWritesTransaction>(cx);
 		try {
 			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			clearTr->clear(previousCoordinatorsKey);
