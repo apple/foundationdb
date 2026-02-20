@@ -7,7 +7,11 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 var update = flag.Bool("update", false, "update .golden files")
@@ -44,7 +48,7 @@ func writeGolden(t *testing.T, golden map[string][]byte) {
 	}
 }
 
-var testUUID = UUID{
+var testUUID = uuid.UUID{
 	0x11, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
 	0x11, 0x00, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
 }
@@ -81,7 +85,7 @@ var testCases = []struct {
 	name  string
 	tuple Tuple
 }{
-	{"Simple", Tuple{testUUID, "foobarbaz", 1234, nil}},
+	{"Simple", Tuple{testUUID, "foobarbaz", int64(1234), nil}},
 	{"Namespaces", Tuple{testUUID, "github", "com", "apple", "foundationdb", "tree"}},
 	{"ManyStrings", mktuple(genString, 8)},
 	{"ManyStringsNil", mktuple(genStringNil, 8)},
@@ -95,6 +99,8 @@ var testCases = []struct {
 	{"UUIDs", Tuple{testUUID, true, testUUID, false, testUUID, true, testUUID, false, testUUID, true}},
 	{"NilCases", Tuple{"\x00", "\x00\xFF", "\x00\x00\x00", "\xFF\x00", ""}},
 	{"Nested", Tuple{testUUID, mktuple(genInt, 4), nil, mktuple(genBytes, 4), nil, mktuple(genDouble, 4), nil}},
+	{"FixedLength", Tuple{FixedLen("abc"), FixedLen(strings.Repeat("a", 500)), "abc"}},
+	{"Negatives", Tuple{int64(-1), int64(-100), int64(-1000), int64(-100000000), int64(-0x8000_0000_0000_0000), float64(-0.5)}},
 }
 
 func TestTuplePacking(t *testing.T) {
@@ -118,6 +124,17 @@ func TestTuplePacking(t *testing.T) {
 			if !bytes.Equal(result, golden[tt.name]) {
 				t.Errorf("packing mismatch: expected %v, got %v", golden[tt.name], result)
 			}
+
+			unpacked, err := Unpack(result)
+			if err != nil {
+				t.Errorf("unpack error: %v", err)
+			} else {
+				if tt.name == "Simple" {
+				}
+				if !reflect.DeepEqual(unpacked, tt.tuple) {
+					t.Errorf("unpack mismatch: expected %v, got %v", tt.tuple, unpacked)
+				}
+			}
 		})
 	}
 
@@ -126,12 +143,86 @@ func TestTuplePacking(t *testing.T) {
 	}
 }
 
+func TestTuplePackingV2(t *testing.T) {
+	var golden map[string][]byte
+
+	if *update {
+		golden = make(map[string][]byte)
+	} else {
+		golden = loadGolden(t)
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.tuple.Pack()
+
+			if *update {
+				golden[tt.name] = result
+				return
+			}
+
+			if !bytes.Equal(result, golden[tt.name]) {
+				t.Errorf("packing mismatch: expected %v, got %v", golden[tt.name], result)
+			}
+
+			unpacked, err := UnpackToBoxed(result)
+			if err != nil {
+				t.Errorf("unpack error: %v", err)
+			} else {
+				if !reflect.DeepEqual(unpacked.ToTuple(), tt.tuple) {
+					t.Errorf("unpack mismatch: expected %v, got %v", tt.tuple, unpacked.ToTuple())
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkTuplePacking(b *testing.B) {
 	for _, bm := range testCases {
 		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
 			tuple := bm.tuple
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = tuple.Pack()
+			}
+		})
+	}
+}
+
+func BenchmarkTupleUnpackV2(b *testing.B) {
+	for _, bm := range testCases {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			t := bm.tuple
+			packed := t.Pack()
+			for b.Loop() {
+				_, _ = UnpackToBoxed(packed)
+			}
+		})
+	}
+}
+
+func BenchmarkTupleUnpackV2Normal(b *testing.B) {
+	for _, bm := range testCases {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			t := bm.tuple
+			packed := t.Pack()
+			for b.Loop() {
+				_, _ = UnpackV2(packed)
+			}
+		})
+	}
+}
+
+func BenchmarkTupleUnpack(b *testing.B) {
+	for _, bm := range testCases {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			t := bm.tuple
+			packed := t.Pack()
+			for b.Loop() {
+				_, _ = Unpack(packed)
 			}
 		})
 	}
