@@ -83,6 +83,7 @@ struct LogFile {
 	int64_t fileSize;
 	int tagId = -1; // Log router tag. Non-negative for new backup format.
 	int totalTags = -1; // Total number of log router tags.
+	int partitionId = -1; // Partition ID for range-partitioned backups. Non-negative for partitioned logs.
 
 	// Order by beginVersion, break ties with endVersion
 	bool operator<(const LogFile& rhs) const {
@@ -96,6 +97,8 @@ struct LogFile {
 	}
 
 	bool isPartitionedLog() const { return tagId >= 0 && tagId < totalTags; }
+	
+	bool isRangePartitionedLog() const { return partitionId >= 0; }
 
 	std::string toString() const {
 		std::stringstream ss;
@@ -268,6 +271,14 @@ public:
 	                                                          int blockSize,
 	                                                          uint16_t tagId,
 	                                                          int totalTags) = 0;
+
+	// Open a partitioned log file for writing, where partitionId identifies the key range partition.
+	virtual Future<Reference<IBackupFile>> writePartitionedLogFile(Version beginVersion,
+	                                                               Version endVersion,
+	                                                               int blockSize,
+	                                                               uint16_t tagId,
+	                                                               int totalTags,
+	                                                               int partitionId) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.
