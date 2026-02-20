@@ -358,7 +358,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 
 	auto i = r->headers.find("Content-Length");
 	if (i != r->headers.end()) {
-		r->contentLen = strtoll(i->second.c_str(), NULL, 10);
+		r->contentLen = strtoll(i->second.c_str(), nullptr, 10);
 	} else {
 		r->contentLen = -1; // Content length unknown
 	}
