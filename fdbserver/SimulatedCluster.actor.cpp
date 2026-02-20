@@ -2768,6 +2768,10 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	CODE_PROBE(true, "Simulation start");
 
+	state bool testsFinished = false;
+	state int timeoutSeconds = isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+	                                                     : testConfig.simulationNormalRunTestsTimeoutSeconds;
+
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
@@ -2798,6 +2802,8 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 			// Yeah right, I agree, Whyyyyy?  Since it's 1s, should we poll some condition?  Is there a risk
 			// 1s is not enough and random weird bad stuff happens after this?
 		}
+
+		TraceEvent("TestProgress").detail("Progress", "StartedSimulatedSystem");
 
 		wait(HTTP::registerAlwaysFailHTTPHandler());
 
@@ -2834,6 +2840,8 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 			systemActors.push_back(reseedRandomAtTime(actualReseedTime, newSeed));
 		}
 
+		TraceEvent("TestProgress").detail("Progress", "AboutToRunTests");
+
 		Future<Void> runTestsF = runTests(connFile,
 		                                  TEST_TYPE_FROM_FILE,
 		                                  TEST_ON_TESTERS,
@@ -2843,17 +2851,16 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		                                  LocalityData(),
 		                                  UnitTestParameters(),
 		                                  rebooting);
-		wait(testConfig.longRunningTest
-		         ? runTestsF
-		         : timeoutError(runTestsF,
-		                        isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                                  : testConfig.simulationNormalRunTestsTimeoutSeconds));
+		wait(testConfig.longRunningTest ? runTestsF : timeoutError(runTestsF, timeoutSeconds));
+
+		testsFinished = true;
+		TraceEvent("TestProgress").detail("Progress", "RunTestsFinished");
 	} catch (Error& e) {
-		auto timeoutVal = isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-		                                            : testConfig.simulationNormalRunTestsTimeoutSeconds;
-		auto msg = fmt::format("Timeout after {} simulated seconds", timeoutVal);
-		ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
-		TraceEvent(SevError, "SetupAndRunError").error(e);
+		if (e.code() == error_code_timed_out) {
+			auto msg = fmt::format("Timeout after {} simulated seconds", timeoutSeconds);
+			ProcessEvents::trigger("Timeout"_sr, StringRef(msg), e);
+		}
+		TraceEvent(SevError, "SetupAndRunError").error(e).detail("TestsFinished", testsFinished);
 	}
 
 	TraceEvent("TracingMissingCodeProbes").log();
