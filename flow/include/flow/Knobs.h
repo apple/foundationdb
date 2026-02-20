@@ -32,35 +32,28 @@
 #include <variant>
 #include <optional>
 
-// Helper macros to allow the init macro to be called with an optional third
-// parameter, used to explicit set atomicity of knobs.
-#define KNOB_FN(_1, _2, _3, FN, ...) FN
 #define INIT_KNOB(knob, value) initKnob(knob, value, #knob)
-#define INIT_ATOMIC_KNOB(knob, value, atomic) initKnob(knob, value, #knob, atomic)
 
 // NOTE: Directly using KnobValueRef as the return type for Knobs::parseKnobValue would result
 // in a cyclic dependency, so we use this intermediate ParsedKnobValue type
 struct NoKnobFound {};
 using ParsedKnobValue = std::variant<NoKnobFound, int, double, int64_t, bool, std::string>;
 
-enum class Atomic { YES, NO };
-
 class Knobs {
 protected:
 	template <class T>
 	struct KnobValue {
 		T* value;
-		Atomic atomic;
 	};
 
 	Knobs() = default;
 	Knobs(Knobs const&) = delete;
 	Knobs& operator=(Knobs const&) = delete;
-	void initKnob(double& knob, double value, std::string const& name, Atomic atomic = Atomic::YES);
-	void initKnob(int64_t& knob, int64_t value, std::string const& name, Atomic atomic = Atomic::YES);
-	void initKnob(int& knob, int value, std::string const& name, Atomic atomic = Atomic::YES);
-	void initKnob(std::string& knob, const std::string& value, const std::string& name, Atomic atomic = Atomic::YES);
-	void initKnob(bool& knob, bool value, std::string const& name, Atomic atomic = Atomic::YES);
+	void initKnob(double& knob, double value, std::string const& name);
+	void initKnob(int64_t& knob, int64_t value, std::string const& name);
+	void initKnob(int& knob, int value, std::string const& name);
+	void initKnob(std::string& knob, const std::string& value, const std::string& name);
+	void initKnob(bool& knob, bool value, std::string const& name);
 
 	std::map<std::string, KnobValue<double>> double_knobs;
 	std::map<std::string, KnobValue<int64_t>> int64_knobs;
@@ -89,7 +82,6 @@ public:
 	ParsedKnobValue getKnob(const std::string& name) const;
 
 	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
-	bool isAtomic(std::string const& knob) const;
 	void trace() const;
 };
 

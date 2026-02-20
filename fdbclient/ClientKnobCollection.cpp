@@ -58,7 +58,3 @@ bool ClientKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef 
 	const bool setClientKnob = knobValue.visitSetKnob(knobName, clientKnobs);
 	return setFlowKnob || setClientKnob;
 }
-
-bool ClientKnobCollection::isAtomic(std::string const& knobName) const {
-	return flowKnobs.isAtomic(knobName) || clientKnobs.isAtomic(knobName);
-}
