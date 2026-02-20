@@ -310,6 +310,7 @@ public:
 	bool DD_VALIDATE_LOCALITY;
 	int DD_CHECK_INVALID_LOCALITY_DELAY;
 	bool DD_ENABLE_VERBOSE_TRACING;
+	bool DD_COALESCE_UNCOALESCED_KRM; // If true, auto-coalesce uncoalesced KRM entries instead of crashing with ASSERT
 	int64_t
 	    DD_SS_FAILURE_VERSIONLAG; // Allowed SS version lag from the current read version before marking it as failed.
 	int64_t DD_SS_ALLOWED_VERSIONLAG; // SS will be marked as healthy if it's version lag goes below this value.
