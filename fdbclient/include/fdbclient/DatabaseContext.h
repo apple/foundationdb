@@ -71,8 +71,9 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 	LocationInfo(LocationInfo&&) = delete;
 	LocationInfo& operator=(const LocationInfo&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
-	bool hasCaches = false;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
+
+	bool hasCaches = false;
 };
 
 using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
@@ -495,6 +496,7 @@ public:
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
 	Future<Void> grvUpdateHandler;
+	Future<Void> locationCacheCleanup;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.

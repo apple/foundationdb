@@ -97,6 +97,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	// The interval in seconds to run the cache eviction logic. If enabled will iterate over the location cache entries and remove
+    // stale/failed entries.
+	init( LOCATION_CACHE_EVICTION_INTERVAL,                 0.0 );
+	// The maximum entries per cache evition iteration to check if they are expired. If set to a negative number all entries will be validated.
+	init( LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION,         1000.0 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );

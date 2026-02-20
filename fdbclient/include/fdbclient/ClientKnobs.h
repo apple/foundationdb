@@ -94,6 +94,10 @@ public:
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
 	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
 	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
+	double LOCATION_CACHE_EVICTION_INTERVAL;
+	// The maximum entries per cache evition iteration to check if they are expired.
+	// If set to a negative number all entries will be validated.
+	double LOCATION_CACHE_MAX_ENTRIES_PER_ITERATION;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
