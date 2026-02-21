@@ -26,7 +26,7 @@
 // Convert hierarchical metric names into Prometheus-compatible metric
 // names.  Do this by a) removing initial '/' chars, and b) converting
 // remaining '/' chars to '_' chars.
-static std::string hierarchicalToPrometheus(const std::string input) {
+std::string hierarchicalToPrometheus(const std::string& input) {
 	std::string output;
 	for (char ch : input) {
 		if (ch == '/') {
@@ -40,11 +40,10 @@ static std::string hierarchicalToPrometheus(const std::string input) {
 	return output;
 }
 
-// ChatGPT generated code to return true iff `name` is a valid Prometheus
-// metric name. Below we call this on trace event fields for the reason
-// that we are contemplating converting fields in trace events to metrics
-// in downstream Prometheus-compatible metrics systems.
-static bool isValidPrometheusMetricName(std::string_view name) {
+// Returns true iff `name` is a valid Prometheus metric name.
+// Valid names must start with [a-zA-Z_:] and contain only [a-zA-Z0-9_:].
+// Names starting with "__" are reserved.
+bool isValidPrometheusMetricName(std::string_view name) {
 	if (name.empty()) {
 		return false;
 	}
