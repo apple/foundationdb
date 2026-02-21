@@ -47,7 +47,7 @@ double machineStartTime() {
 	return ::machineState.monitorStartTime;
 }
 
-void NetworkMetrics::init() {
+void NetworkData::init() {
 	bytesSent = Int64Metric::getValueOrDefault("Net2.BytesSent"_sr);
 	countPacketsReceived = Int64Metric::getValueOrDefault("Net2.CountPacketsReceived"_sr);
 	countPacketsGenerated = Int64Metric::getValueOrDefault("Net2.CountPacketsGenerated"_sr);
