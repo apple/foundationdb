@@ -26,6 +26,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -147,12 +148,92 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_DUMP_STATUS_USAGE);
 			return UID();
 		}
-		bool anyJob = wait(getOngoingBulkDumpJob(cx));
-		if (!anyJob) {
+
+		// Get aggregated progress
+		Optional<BulkDumpProgress> progressOpt = wait(getBulkDumpProgress(cx));
+		if (!progressOpt.present()) {
+			fmt::println("No bulk dumping job is running");
 			return UID();
 		}
-		KeyRange range = Standalone(KeyRangeRef(normalKeys.begin, normalKeys.end));
-		wait(getBulkDumpCompleteRanges(cx, range));
+
+		state BulkDumpProgress progress = progressOpt.get();
+
+		// Check if this bulkdump is owned by a backup
+		state Transaction tr(cx);
+		state Optional<BulkDumpState> jobState;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<BulkDumpState> job = wait(getSubmittedBulkDumpJob(&tr));
+				jobState = job;
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		if (jobState.present() && jobState.get().hasOwner()) {
+			std::string ownerType = jobState.get().getOwnerType().orDefault("unknown");
+			std::string ownerName = jobState.get().getOwnerName().orDefault("");
+			fmt::println("BulkDump job {} is owned by {} '{}'.", progress.jobId.toString(), ownerType, ownerName);
+			if (ownerType == "backup") {
+				fmt::println("For full status, use: fdbbackup status -t {}", ownerName);
+			}
+			return UID();
+		}
+
+		// Format standalone bulkdump progress
+		fmt::println("BulkDump job {} is in progress.", progress.jobId.toString());
+		fmt::println(" Range: {}", progress.jobRange.toString());
+		fmt::println("");
+		fmt::println("Progress:");
+		fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+		             progress.completeTasks,
+		             progress.totalTasks,
+		             progress.progressPercent());
+
+		fmt::println(" Bytes completed - {} ({}) / {} ({})",
+		             progress.completedBytes,
+		             formatBytesHumanReadable(progress.completedBytes),
+		             progress.totalBytes,
+		             formatBytesHumanReadable(progress.totalBytes));
+
+		double throughput = progress.avgBytesPerSecond();
+		if (throughput > 0) {
+			fmt::println(" Throughput - {:.1f} MB/s", throughput / 1048576.0);
+		}
+
+		if (progress.etaSeconds().present()) {
+			fmt::println(" Estimated time remaining - {}",
+			             formatDurationHumanReadable((int)progress.etaSeconds().get()));
+		}
+
+		if (progress.elapsedSeconds > 0) {
+			fmt::println(" Elapsed time - {}", formatDurationHumanReadable((int)progress.elapsedSeconds));
+		}
+
+		// Show stalled tasks as warnings
+		if (!progress.stalledTasks.empty()) {
+			fmt::println("");
+			fmt::println("WARNING: {} stalled tasks (no progress > 60s):", progress.stalledTasks.size());
+			for (const auto& stalled : progress.stalledTasks) {
+				fmt::println(" Task {}: {}, stalled {:.0f}s, {} restarts",
+				             stalled.taskId.shortString(),
+				             stalled.range.toString(),
+				             stalled.stalledSeconds,
+				             stalled.restartCount);
+				if (!stalled.lastError.empty()) {
+					fmt::println("           Last error: {}", stalled.lastError);
+				}
+			}
+		}
+
+		if (progress.errorTasks > 0) {
+			fmt::println("");
+			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+		}
+
 		return UID();
 
 	} else {

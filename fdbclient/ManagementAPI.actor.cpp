@@ -3221,6 +3221,189 @@ ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToR
 	return completeTaskCount;
 }
 
+// Get aggregated progress for the current BulkDump job
+ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
+	state Transaction tr(cx);
+	state BulkDumpProgress progress;
+	state double currentTime = now();
+
+	// First, get the submitted job to find the job range and start time
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<BulkDumpState> submittedJob = wait(getSubmittedBulkDumpJob(&tr));
+			if (!submittedJob.present()) {
+				return Optional<BulkDumpProgress>();
+			}
+			progress.jobId = submittedJob.get().getJobId();
+			progress.jobRange = submittedJob.get().getJobRange();
+			progress.startTime = submittedJob.get().getSubmitTime();
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	// Now read all task metadata within the job range
+	state Key readBegin = progress.jobRange.begin;
+	state Key readEnd = progress.jobRange.end;
+	state RangeResult rangeResult;
+
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkDumpPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkDumpState taskState = decodeBulkDumpState(rangeResult[i].value);
+			progress.totalTasks++;
+
+			if (taskState.getPhase() == BulkDumpPhase::Complete) {
+				progress.completeTasks++;
+				// Get bytes from manifest
+				progress.completedBytes += taskState.getManifest().getTotalBytes();
+			} else if (taskState.getPhase() == BulkDumpPhase::Submitted) {
+				progress.runningTasks++;
+			}
+
+			// Accumulate total bytes (estimate from completed tasks average if needed)
+			progress.totalBytes += taskState.getManifest().getTotalBytes();
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	// Compute elapsed time from the job's submit time (startTime was set above)
+	progress.elapsedSeconds = currentTime - progress.startTime;
+
+	return progress;
+}
+
+// Get aggregated progress for the current BulkLoad job
+ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
+	state Transaction tr(cx);
+	state BulkLoadProgress progress;
+	state double currentTime = now();
+
+	// First, get the running job to find the job range and start time
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<BulkLoadJobState> runningJob = wait(getRunningBulkLoadJob(cx));
+			if (!runningJob.present()) {
+				return Optional<BulkLoadProgress>();
+			}
+			progress.jobId = runningJob.get().getJobId();
+			progress.jobRange = runningJob.get().getJobRange();
+			Optional<uint64_t> taskCount = runningJob.get().getTaskCount();
+			progress.totalTasks = taskCount.present() ? (int)taskCount.get() : 0;
+			progress.startTime = runningJob.get().getSubmitTime();
+			progress.elapsedSeconds = currentTime - progress.startTime;
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	// Now read all task metadata within the job range
+	state Key readBegin = progress.jobRange.begin;
+	state Key readEnd = progress.jobRange.end;
+	state RangeResult rangeResult;
+
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkLoadTaskPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+
+		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadTaskState taskState = decodeBulkLoadTaskState(rangeResult[i].value);
+
+			switch (taskState.phase) {
+			case BulkLoadPhase::Submitted:
+				progress.submittedTasks++;
+				break;
+			case BulkLoadPhase::Triggered:
+				progress.triggeredTasks++;
+				break;
+			case BulkLoadPhase::Running:
+				progress.runningTasks++;
+				// Check for stall
+				if (taskState.startTime > 0 &&
+				    (currentTime - taskState.startTime) > BULK_TASK_STALL_THRESHOLD_SECONDS) {
+					// This task has been running for longer than threshold
+					BulkLoadStalledTask stalledTask;
+					stalledTask.taskId = taskState.getTaskId();
+					stalledTask.range = taskState.getRange();
+					stalledTask.stalledSeconds = currentTime - taskState.startTime;
+					stalledTask.restartCount = taskState.restartCount;
+					// TODO: Get storage server ID and last error when available
+					progress.stalledTasks.push_back(stalledTask);
+				}
+				break;
+			case BulkLoadPhase::Complete:
+			case BulkLoadPhase::Acknowledged:
+				progress.completeTasks++;
+				progress.completedBytes += taskState.getTotalBytes();
+				break;
+			case BulkLoadPhase::Error:
+				progress.errorTasks++;
+				break;
+			default:
+				break;
+			}
+
+			// Accumulate total bytes from manifests
+			progress.totalBytes += taskState.getTotalBytes();
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	return progress;
+}
+
 // Persist a new owner if input ownerUniqueID is not existing; Update description if input ownerUniqueID exists
 ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description) {
 	if (ownerUniqueID.empty() || description.empty()) {

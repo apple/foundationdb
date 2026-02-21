@@ -45,7 +45,8 @@ public:
 	              BulkLoadType loadType,
 	              BulkLoadTransportMethod transportMethod,
 	              std::string jobRoot)
-	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
+	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted),
+	    submitTime(now()) {
 		manifest = BulkLoadManifest(loadType, transportMethod, jobRoot);
 		ASSERT(isValid());
 	}
@@ -141,9 +142,25 @@ public:
 
 	BulkLoadManifest getManifest() const { return manifest; }
 
+	// Generic ownership tracking - allows any feature to own this bulkdump job
+	// Examples: backup, DR, migration, data export, etc.
+	Optional<UID> getOwnerUID() const { return ownerUID; }
+	Optional<std::string> getOwnerType() const { return ownerType; }
+	Optional<std::string> getOwnerName() const { return ownerName; }
+	bool hasOwner() const { return ownerUID.present(); }
+
+	void setOwner(UID uid, std::string type, std::string name) {
+		ownerUID = uid;
+		ownerType = type;
+		ownerName = name;
+	}
+
+	// Submit time tracking for elapsed time computation
+	double getSubmitTime() const { return submitTime; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, phase, taskId, manifest);
+		serializer(ar, jobId, jobRange, phase, taskId, manifest, ownerUID, ownerType, ownerName, submitTime);
 	}
 
 private:
@@ -163,6 +180,16 @@ private:
 	Optional<UID> taskId;
 	// The manifest metadata persist to system key space and manifest file when a dump task completes.
 	BulkLoadManifest manifest;
+
+	// Generic ownership tracking - set when this bulkdump is triggered by another feature
+	// If not set, this is a standalone bulkdump operation
+	// ownerType examples: "backup", "dr", "migration", "export"
+	Optional<UID> ownerUID;
+	Optional<std::string> ownerType;
+	Optional<std::string> ownerName;
+
+	// Time when the job was submitted, for elapsed time computation
+	double submitTime = 0;
 };
 
 // User API to create bulkDump task metadata

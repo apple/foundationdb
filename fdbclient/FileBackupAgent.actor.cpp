@@ -46,6 +46,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/Util.h"
 
 #include <cinttypes>
 #include <cstdint>
@@ -632,7 +633,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) &&
 	     success(progress) && success(restoreState) && success(useRangeFileRestore) && success(bulkLoadComplete));
 
-	std::string returnStr;
+	state std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
 	for (auto& range : ranges.get()) {
 		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
@@ -644,14 +645,15 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 
 	// Add enhanced status fields for BulkLoad integration
 	// useRangeFileRestore is Future<Optional<bool>>, after wait() we call .get() to get Optional<bool>
-	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
+	state bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
 	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
 	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
 
 	// Add phase status information
-	ERestoreState currentState = restoreState.get();
+	state ERestoreState currentState = restoreState.get();
+	state bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+
 	if (currentState == ERestoreState::RUNNING) {
-		bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
 		if (usingBulkLoad) {
 			std::string snapshotPhase = bulkLoadDone ? "complete" : "in_progress";
 			returnStr += format("  Snapshot Phase: %s", snapshotPhase.c_str());
@@ -662,6 +664,62 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 		}
 	} else if (currentState == ERestoreState::COMPLETED) {
 		returnStr += "  Snapshot Phase: complete  Mutation Log Phase: complete";
+	}
+
+	// Add detailed BulkLoad progress when using bulkload and snapshot is in progress
+	if (usingBulkLoad && currentState == ERestoreState::RUNNING && !bulkLoadDone) {
+		Optional<BulkLoadProgress> blProgressOpt = wait(getBulkLoadProgress(tr->getDatabase()));
+		if (blProgressOpt.present()) {
+			BulkLoadProgress blProgress = blProgressOpt.get();
+			returnStr += "\n\nRange data (bulkload):";
+
+			// Tasks progress
+			returnStr += format("\n Tasks completed - %d / %d (%.1f%%)",
+			                    blProgress.completeTasks,
+			                    blProgress.totalTasks,
+			                    blProgress.progressPercent());
+
+			returnStr += format("\n Bytes completed - %lld (%s) / %lld (%s)",
+			                    blProgress.completedBytes,
+			                    formatBytesHumanReadable(blProgress.completedBytes).c_str(),
+			                    blProgress.totalBytes,
+			                    formatBytesHumanReadable(blProgress.totalBytes).c_str());
+
+			double throughput = blProgress.avgBytesPerSecond();
+			if (throughput > 0) {
+				if (throughput >= 1073741824.0) { // GB/s
+					returnStr += format("\n Throughput - %.2f GB/s", throughput / 1073741824.0);
+				} else {
+					returnStr += format("\n Throughput - %.1f MB/s", throughput / 1048576.0);
+				}
+			}
+
+			if (blProgress.etaSeconds().present()) {
+				returnStr += format("\n Estimated time remaining - %s",
+				                    formatDurationHumanReadable((int)blProgress.etaSeconds().get()).c_str());
+			}
+
+			if (blProgress.elapsedSeconds > 0) {
+				returnStr +=
+				    format("\n Elapsed time - %s", formatDurationHumanReadable((int)blProgress.elapsedSeconds).c_str());
+			}
+
+			// Show stalled tasks as warnings
+			if (!blProgress.stalledTasks.empty()) {
+				returnStr +=
+				    format("\n\nWARNING: %zu stalled tasks (no progress > 60s):", blProgress.stalledTasks.size());
+				for (const auto& stalled : blProgress.stalledTasks) {
+					returnStr += format("\n Task %s: %s, stalled %.0fs, %d restarts",
+					                    stalled.taskId.shortString().c_str(),
+					                    stalled.range.toString().c_str(),
+					                    stalled.stalledSeconds,
+					                    stalled.restartCount);
+					if (!stalled.lastError.empty()) {
+						returnStr += format("\n           Last error: %s", stalled.lastError.c_str());
+					}
+				}
+			}
+		}
 	}
 
 	return returnStr;
@@ -3783,6 +3841,10 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				std::string bulkDumpRoot = getBackupDataPath(bc->getURL(), "bulkdump_data");
 				bulkDumpJob = createBulkDumpJob(normalKeys, bulkDumpRoot, BulkLoadType::SST, transportMethod);
 
+				// Set ownership so bulkdump status shows it belongs to this backup
+				std::string backupTag = wait(config.tag().getOrThrow(cx.getReference()));
+				bulkDumpJob.setOwner(config.getUid(), "backup", backupTag);
+
 				// Submit the BulkDump job
 				wait(submitBulkDumpJob(cx, bulkDumpJob));
 			}
@@ -6269,6 +6331,13 @@ ACTOR Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr,
 	} else
 		tags.push_back(makeRestoreTag(tagName.toString()));
 
+	// If no tags found, return helpful message
+	if (tags.empty()) {
+		return "No restores found.\n\n"
+		       "To start a restore:\n"
+		       "  fdbrestore start -r <BACKUP_URL> [-t <TAG>]\n";
+	}
+
 	state std::string result;
 	state int i = 0;
 
@@ -7564,6 +7633,71 @@ public:
 						doc.setKey("CurrentSnapshot", snapshot);
 					}
 
+					// Add snapshot mode information
+					state Optional<int> snapshotModeOpt = wait(config.snapshotMode().get(tr));
+					state int snapshotModeValue = snapshotModeOpt.present() ? snapshotModeOpt.get() : 0;
+					std::string snapshotModeText;
+					switch (snapshotModeValue) {
+					case 0:
+						snapshotModeText = "rangefile";
+						break;
+					case 1:
+						snapshotModeText = "bulkdump";
+						break;
+					case 2:
+						snapshotModeText = "both";
+						break;
+					default:
+						snapshotModeText = "unknown";
+						break;
+					}
+					doc.setKey("SnapshotMode", snapshotModeText);
+
+					// Check if backup is BulkLoad compatible
+					state Optional<std::string> bulkDumpJobIdOpt = wait(config.bulkDumpJobId().get(tr));
+					doc.setKey("BulkLoadCompatible", bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty());
+
+					// If using bulkdump mode, get bulkdump progress
+					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
+						Optional<BulkDumpProgress> bulkDumpProgressOpt = wait(getBulkDumpProgress(cx));
+						if (bulkDumpProgressOpt.present()) {
+							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
+							JsonBuilderObject bdDoc;
+							bdDoc.setKey("JobId", bdProgress.jobId.toString());
+							bdDoc.setKey("TotalTasks", bdProgress.totalTasks);
+							bdDoc.setKey("CompleteTasks", bdProgress.completeTasks);
+							bdDoc.setKey("RunningTasks", bdProgress.runningTasks);
+							bdDoc.setKey("ErrorTasks", bdProgress.errorTasks);
+							bdDoc.setKey("ProgressPercent", bdProgress.progressPercent());
+							bdDoc.setKey("TotalBytes", bdProgress.totalBytes);
+							bdDoc.setKey("CompletedBytes", bdProgress.completedBytes);
+							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
+							if (bdProgress.etaSeconds().present()) {
+								bdDoc.setKey("EstimatedSecondsRemaining", bdProgress.etaSeconds().get());
+							}
+							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
+
+							// Add stalled tasks if any
+							if (!bdProgress.stalledTasks.empty()) {
+								JsonBuilderArray stalledArray;
+								for (const auto& stalled : bdProgress.stalledTasks) {
+									JsonBuilderObject stalledDoc;
+									stalledDoc.setKey("TaskId", stalled.taskId.toString());
+									stalledDoc.setKey("Range", stalled.range.toString());
+									stalledDoc.setKey("StalledSeconds", stalled.stalledSeconds);
+									stalledDoc.setKey("RestartCount", stalled.restartCount);
+									if (!stalled.lastError.empty()) {
+										stalledDoc.setKey("LastError", stalled.lastError);
+									}
+									stalledArray.push_back(stalledDoc);
+								}
+								bdDoc.setKey("StalledTasks", stalledArray);
+							}
+
+							doc.setKey("BulkDumpProgress", bdDoc);
+						}
+					}
+
 					KeyBackedMap<int64_t, std::pair<std::string, Version>>::RangeResultType errors =
 					    wait(config.lastErrorPerType().getRange(
 					        tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY));
@@ -7615,7 +7749,8 @@ public:
 				}
 
 				if (!uidAndAbortedFlag.present() || backupState == EBackupState::STATE_NEVERRAN) {
-					statusText += "No previous backups found.\n";
+					statusText += "No previous backups found on tag '" + tagName + "'.\n";
+					statusText += "Use 'fdbbackup tags' to list all backup tags.\n";
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state Reference<IBackupContainer> bc;
@@ -7657,10 +7792,10 @@ public:
 					statusText += format("BackupURL: %s\n", bc->getURL().c_str());
 
 					// Add enhanced status fields for BulkLoad integration
-					state Optional<int> snapshotModeOpt = wait(config.snapshotMode().get(tr));
-					int snapshotModeValue = snapshotModeOpt.present() ? snapshotModeOpt.get() : 0;
+					state Optional<int> snapshotModeOptText = wait(config.snapshotMode().get(tr));
+					state int snapshotModeValueText = snapshotModeOptText.present() ? snapshotModeOptText.get() : 0;
 					std::string snapshotModeText;
-					switch (snapshotModeValue) {
+					switch (snapshotModeValueText) {
 					case 0:
 						snapshotModeText = "rangefile";
 						break;
@@ -7680,6 +7815,58 @@ public:
 					state Optional<std::string> bulkDumpJobIdOpt = wait(config.bulkDumpJobId().get(tr));
 					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
 					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+
+					// If using bulkdump mode, show bulkdump progress
+					if (snapshotModeValueText == 1 || snapshotModeValueText == 2) {
+						Optional<BulkDumpProgress> bulkDumpProgressOpt = wait(getBulkDumpProgress(cx));
+						if (bulkDumpProgressOpt.present()) {
+							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
+							statusText += "\nBulkDump progress:\n";
+							statusText += format(" Tasks completed - %d / %d (%.1f%%)\n",
+							                     bdProgress.completeTasks,
+							                     bdProgress.totalTasks,
+							                     bdProgress.progressPercent());
+
+							statusText += format(" Bytes completed - %lld (%s) / %lld (%s)\n",
+							                     bdProgress.completedBytes,
+							                     formatBytesHumanReadable(bdProgress.completedBytes).c_str(),
+							                     bdProgress.totalBytes,
+							                     formatBytesHumanReadable(bdProgress.totalBytes).c_str());
+
+							double throughput = bdProgress.avgBytesPerSecond();
+							if (throughput > 0) {
+								statusText += format(" Throughput - %.1f MB/s\n", throughput / 1048576.0);
+							}
+
+							if (bdProgress.etaSeconds().present()) {
+								statusText +=
+								    format(" Estimated time remaining - %s\n",
+								           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
+							}
+
+							if (bdProgress.elapsedSeconds > 0) {
+								statusText +=
+								    format(" Elapsed time - %s\n",
+								           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
+							}
+
+							// Show stalled tasks as warnings
+							if (!bdProgress.stalledTasks.empty()) {
+								statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
+								                     bdProgress.stalledTasks.size());
+								for (const auto& stalled : bdProgress.stalledTasks) {
+									statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
+									                     stalled.taskId.shortString().c_str(),
+									                     stalled.range.toString().c_str(),
+									                     stalled.stalledSeconds,
+									                     stalled.restartCount);
+									if (!stalled.lastError.empty()) {
+										statusText += format("           Last error: %s\n", stalled.lastError.c_str());
+									}
+								}
+							}
+						}
+					}
 
 					if (snapshotProgress) {
 						state int64_t snapshotInterval;
