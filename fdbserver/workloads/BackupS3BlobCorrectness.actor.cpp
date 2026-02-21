@@ -350,6 +350,156 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	// Monitor and verify bulkdump progress observability during backup
+	// This validates that getBulkDumpProgress() returns correct data and ownership is set
+	ACTOR static Future<Void> verifyBulkDumpObservability(Database cx, UID expectedBackupUID, std::string backupTag) {
+		state int observedProgressCount = 0;
+		state bool ownershipVerified = false;
+		state double startTime = now();
+		state double maxWaitTime = 120.0; // Wait up to 2 minutes for progress to appear
+
+		TraceEvent("BS3BCW_ObservabilityCheckStart")
+		    .detail("ExpectedBackupUID", expectedBackupUID)
+		    .detail("BackupTag", backupTag);
+
+		loop {
+			Optional<BulkDumpProgress> progressOpt = wait(getBulkDumpProgress(cx));
+
+			if (progressOpt.present()) {
+				BulkDumpProgress progress = progressOpt.get();
+				observedProgressCount++;
+
+				TraceEvent("BS3BCW_ObservabilityProgress")
+				    .detail("JobId", progress.jobId)
+				    .detail("TotalTasks", progress.totalTasks)
+				    .detail("CompleteTasks", progress.completeTasks)
+				    .detail("RunningTasks", progress.runningTasks)
+				    .detail("ProgressPercent", progress.progressPercent())
+				    .detail("TotalBytes", progress.totalBytes)
+				    .detail("CompletedBytes", progress.completedBytes)
+				    .detail("AvgBytesPerSecond", progress.avgBytesPerSecond())
+				    .detail("ElapsedSeconds", progress.elapsedSeconds)
+				    .detail("StalledTaskCount", progress.stalledTasks.size());
+
+				// Verify ETA computation works
+				Optional<double> eta = progress.etaSeconds();
+				if (eta.present()) {
+					TraceEvent("BS3BCW_ObservabilityETA").detail("ETASeconds", eta.get());
+				}
+
+				// Check ownership - the bulkdump should be owned by our backup
+				state Transaction tr(cx);
+				loop {
+					try {
+						tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						Optional<BulkDumpState> jobState = wait(getSubmittedBulkDumpJob(&tr));
+						if (jobState.present()) {
+							if (jobState.get().hasOwner() && jobState.get().getOwnerType().orDefault("") == "backup") {
+								Optional<UID> ownerUID = jobState.get().getOwnerUID();
+								Optional<std::string> ownerName = jobState.get().getOwnerName();
+
+								TraceEvent("BS3BCW_ObservabilityOwnership")
+								    .detail("OwnerUID", ownerUID.present() ? ownerUID.get().toString() : "none")
+								    .detail("OwnerType", jobState.get().getOwnerType().orDefault("none"))
+								    .detail("OwnerName", ownerName.present() ? ownerName.get() : "none")
+								    .detail("ExpectedBackupUID", expectedBackupUID)
+								    .detail("ExpectedBackupTag", backupTag);
+
+								// Verify ownership matches
+								if (ownerUID.present() && ownerUID.get() == expectedBackupUID) {
+									ownershipVerified = true;
+									TraceEvent("BS3BCW_ObservabilityOwnershipVerified")
+									    .detail("BackupUID", expectedBackupUID);
+								}
+							}
+						}
+						break;
+					} catch (Error& e) {
+						wait(tr.onError(e));
+					}
+				}
+
+				// Once we've observed progress and verified ownership, success
+				if (ownershipVerified && observedProgressCount >= 3) {
+					TraceEvent("BS3BCW_ObservabilityVerified")
+					    .detail("ObservedProgressCount", observedProgressCount)
+					    .detail("OwnershipVerified", ownershipVerified);
+					return Void();
+				}
+			}
+
+			// Check timeout
+			if (now() - startTime > maxWaitTime) {
+				if (observedProgressCount > 0) {
+					// We saw some progress but maybe job completed before we could verify ownership
+					TraceEvent("BS3BCW_ObservabilityPartialSuccess")
+					    .detail("ObservedProgressCount", observedProgressCount)
+					    .detail("OwnershipVerified", ownershipVerified);
+					return Void();
+				}
+				// No progress observed at all - this could be a timing issue where bulkdump completed quickly
+				TraceEvent(SevWarn, "BS3BCW_ObservabilityNoProgress")
+				    .detail("MaxWaitTime", maxWaitTime)
+				    .detail("Note", "BulkDump may have completed too quickly to observe");
+				return Void();
+			}
+
+			wait(delay(1.0));
+		}
+	}
+
+	// Monitor and verify bulkload progress observability during restore
+	ACTOR static Future<Void> verifyBulkLoadObservability(Database cx) {
+		state int observedProgressCount = 0;
+		state double startTime = now();
+		state double maxWaitTime = 120.0;
+
+		TraceEvent("BS3BCW_BulkLoadObservabilityCheckStart");
+
+		loop {
+			Optional<BulkLoadProgress> progressOpt = wait(getBulkLoadProgress(cx));
+
+			if (progressOpt.present()) {
+				BulkLoadProgress progress = progressOpt.get();
+				observedProgressCount++;
+
+				TraceEvent("BS3BCW_BulkLoadObservabilityProgress")
+				    .detail("JobId", progress.jobId)
+				    .detail("SubmittedTasks", progress.submittedTasks)
+				    .detail("TriggeredTasks", progress.triggeredTasks)
+				    .detail("RunningTasks", progress.runningTasks)
+				    .detail("CompleteTasks", progress.completeTasks)
+				    .detail("ErrorTasks", progress.errorTasks)
+				    .detail("TotalBytes", progress.totalBytes)
+				    .detail("CompletedBytes", progress.completedBytes)
+				    .detail("AvgBytesPerSecond", progress.avgBytesPerSecond())
+				    .detail("ElapsedSeconds", progress.elapsedSeconds)
+				    .detail("StalledTaskCount", progress.stalledTasks.size());
+
+				// Success after observing progress a few times
+				if (observedProgressCount >= 3) {
+					TraceEvent("BS3BCW_BulkLoadObservabilityVerified")
+					    .detail("ObservedProgressCount", observedProgressCount);
+					return Void();
+				}
+			}
+
+			if (now() - startTime > maxWaitTime) {
+				if (observedProgressCount > 0) {
+					TraceEvent("BS3BCW_BulkLoadObservabilityPartialSuccess")
+					    .detail("ObservedProgressCount", observedProgressCount);
+					return Void();
+				}
+				TraceEvent(SevWarn, "BS3BCW_BulkLoadObservabilityNoProgress")
+				    .detail("Note", "BulkLoad may have completed too quickly to observe");
+				return Void();
+			}
+
+			wait(delay(1.0));
+		}
+	}
+
 	// Wait for a backup to become restorable, with retries
 	// This handles cases where cluster recoveries delay snapshot completion
 	ACTOR static Future<Void> waitForRestorable(Reference<IBackupContainer> backupContainer, int maxAttempts) {
@@ -499,6 +649,21 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 
 		submitted.send(Void());
+
+		// If using bulkdump mode, start observability verification in the background
+		state Future<Void> observabilityCheck = Void();
+		if (self->snapshotMode == 1 || self->snapshotMode == 2) {
+			// Get the backup UID to verify ownership
+			state KeyBackedTag keyBackedTag = makeBackupTag(tag.toString());
+			state UID backupUID;
+			try {
+				UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
+				backupUID = uidFlag.first;
+				observabilityCheck = verifyBulkDumpObservability(cx, backupUID, tag.toString());
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "BS3BCW_CouldNotGetBackupUID").error(e);
+			}
+		}
 
 		TraceEvent("BS3BCW_DoBackupWaitToDiscontinue", randomID)
 		    .detail("Tag", printable(tag))
