@@ -32,6 +32,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/Hostname.h"
+#include "flow/Util.h"
 #include "flow/rte_memcpy.h"
 #include "flow/UnitTest.h"
 
@@ -700,6 +701,60 @@ TEST_CASE("/flow/ErrorOr/Map") {
 	ptr = new TestErrorOrMapClass("test_string"_sr, transaction_too_old());
 	checkErrorOr<true>(ErrorOr<TestErrorOrMapClass*>(ptr));
 	delete ptr;
+
+	return Void();
+}
+
+TEST_CASE("/flow/Util/formatBytesHumanReadable") {
+	// Test TB
+	ASSERT(formatBytesHumanReadable(1099511627776LL) == "1.00 TB");
+	ASSERT(formatBytesHumanReadable(2199023255552LL) == "2.00 TB");
+	ASSERT(formatBytesHumanReadable(1649267441664LL) == "1.50 TB");
+
+	// Test GB
+	ASSERT(formatBytesHumanReadable(1073741824LL) == "1.00 GB");
+	ASSERT(formatBytesHumanReadable(2147483648LL) == "2.00 GB");
+	ASSERT(formatBytesHumanReadable(536870912LL + 1073741824LL) == "1.50 GB");
+
+	// Test MB
+	ASSERT(formatBytesHumanReadable(1048576LL) == "1.00 MB");
+	ASSERT(formatBytesHumanReadable(10485760LL) == "10.00 MB");
+	ASSERT(formatBytesHumanReadable(1572864LL) == "1.50 MB");
+
+	// Test KB
+	ASSERT(formatBytesHumanReadable(1024LL) == "1.00 KB");
+	ASSERT(formatBytesHumanReadable(10240LL) == "10.00 KB");
+	ASSERT(formatBytesHumanReadable(1536LL) == "1.50 KB");
+
+	// Test bytes
+	ASSERT(formatBytesHumanReadable(0LL) == "0 bytes");
+	ASSERT(formatBytesHumanReadable(1LL) == "1 bytes");
+	ASSERT(formatBytesHumanReadable(512LL) == "512 bytes");
+	ASSERT(formatBytesHumanReadable(1023LL) == "1023 bytes");
+
+	return Void();
+}
+
+TEST_CASE("/flow/Util/formatDurationHumanReadable") {
+	// Test hours and minutes
+	ASSERT(formatDurationHumanReadable(3600) == "1 hours");
+	ASSERT(formatDurationHumanReadable(7200) == "2 hours");
+	ASSERT(formatDurationHumanReadable(3660) == "1 hours 1 minutes");
+	ASSERT(formatDurationHumanReadable(3720) == "1 hours 2 minutes");
+	ASSERT(formatDurationHumanReadable(5400) == "1 hours 30 minutes");
+	ASSERT(formatDurationHumanReadable(9000) == "2 hours 30 minutes");
+
+	// Test minutes only
+	ASSERT(formatDurationHumanReadable(60) == "1 minutes");
+	ASSERT(formatDurationHumanReadable(120) == "2 minutes");
+	ASSERT(formatDurationHumanReadable(300) == "5 minutes");
+	ASSERT(formatDurationHumanReadable(3540) == "59 minutes");
+
+	// Test seconds only
+	ASSERT(formatDurationHumanReadable(0) == "0 seconds");
+	ASSERT(formatDurationHumanReadable(1) == "1 seconds");
+	ASSERT(formatDurationHumanReadable(30) == "30 seconds");
+	ASSERT(formatDurationHumanReadable(59) == "59 seconds");
 
 	return Void();
 }

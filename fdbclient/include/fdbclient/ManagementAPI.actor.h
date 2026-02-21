@@ -233,6 +233,105 @@ ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr);
 // Get total number of completed tasks within the input range
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead);
 
+// ==================== BulkDump/BulkLoad Progress Tracking ====================
+
+// Represents a stalled task for observability
+struct BulkLoadStalledTask {
+	UID taskId;
+	KeyRange range;
+	UID storageServerId;
+	double stalledSeconds;
+	int restartCount;
+	std::string lastError;
+
+	BulkLoadStalledTask() : stalledSeconds(0), restartCount(0) {}
+	BulkLoadStalledTask(UID taskId,
+	                    KeyRange range,
+	                    UID storageServerId,
+	                    double stalledSeconds,
+	                    int restartCount,
+	                    std::string lastError)
+	  : taskId(taskId), range(range), storageServerId(storageServerId), stalledSeconds(stalledSeconds),
+	    restartCount(restartCount), lastError(lastError) {}
+};
+
+// Aggregated progress for a BulkDump job
+struct BulkDumpProgress {
+	UID jobId;
+	KeyRange jobRange;
+	int totalTasks;
+	int completeTasks;
+	int runningTasks;
+	int errorTasks;
+	int64_t totalBytes;
+	int64_t completedBytes;
+	double elapsedSeconds;
+	double startTime; // For computing current throughput
+	std::vector<BulkLoadStalledTask> stalledTasks;
+
+	BulkDumpProgress()
+	  : totalTasks(0), completeTasks(0), runningTasks(0), errorTasks(0), totalBytes(0), completedBytes(0),
+	    elapsedSeconds(0), startTime(0) {}
+
+	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
+
+	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
+
+	Optional<double> etaSeconds() const {
+		double rate = avgBytesPerSecond();
+		if (rate > 0 && completedBytes < totalBytes) {
+			return (totalBytes - completedBytes) / rate;
+		}
+		return {};
+	}
+};
+
+// Aggregated progress for a BulkLoad job
+struct BulkLoadProgress {
+	UID jobId;
+	KeyRange jobRange;
+	int totalTasks;
+	int submittedTasks;
+	int triggeredTasks;
+	int runningTasks;
+	int completeTasks;
+	int errorTasks;
+	int64_t totalBytes;
+	int64_t completedBytes;
+	double elapsedSeconds;
+	double startTime;
+	std::vector<BulkLoadStalledTask> stalledTasks;
+
+	BulkLoadProgress()
+	  : totalTasks(0), submittedTasks(0), triggeredTasks(0), runningTasks(0), completeTasks(0), errorTasks(0),
+	    totalBytes(0), completedBytes(0), elapsedSeconds(0), startTime(0) {}
+
+	double progressPercent() const { return totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0; }
+
+	double avgBytesPerSecond() const { return elapsedSeconds > 0 ? completedBytes / elapsedSeconds : 0; }
+
+	Optional<double> etaSeconds() const {
+		double rate = avgBytesPerSecond();
+		if (rate > 0 && completedBytes < totalBytes) {
+			return (totalBytes - completedBytes) / rate;
+		}
+		return {};
+	}
+};
+
+// Get aggregated progress for the current BulkDump job (if any)
+// Reads task metadata from system keys and computes aggregate metrics
+ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx);
+
+// Get aggregated progress for the current BulkLoad job (if any)
+// Reads task metadata from system keys and computes aggregate metrics
+ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx);
+
+// Threshold in seconds for considering a task "stalled"
+constexpr double BULK_TASK_STALL_THRESHOLD_SECONDS = 60.0;
+
+// ==================== End Progress Tracking ====================
+
 // Persist a rangeLock owner to database metadata
 // A range can only be locked by a registered owner
 ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description);

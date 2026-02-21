@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -231,14 +232,77 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
 			return UID();
 		}
-		Optional<BulkLoadJobState> job = wait(getRunningBulkLoadJob(cx));
-		if (!job.present()) {
+
+		// Get aggregated progress
+		Optional<BulkLoadProgress> progressOpt = wait(getBulkLoadProgress(cx));
+		if (!progressOpt.present()) {
 			fmt::println("No bulk loading job is running");
 			return UID();
 		}
-		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
-		fmt::println("Job information: {}", job.get().toString());
-		wait(printBulkLoadJobProgress(cx, job.get()));
+
+		BulkLoadProgress progress = progressOpt.get();
+
+		fmt::println("BulkLoad job {} is in progress.", progress.jobId.toString());
+		fmt::println(" Range: {}", progress.jobRange.toString());
+		fmt::println("");
+		fmt::println("Progress:");
+		fmt::println(" Tasks - {} submitted, {} triggered, {} running, {} complete, {} error",
+		             progress.submittedTasks,
+		             progress.triggeredTasks,
+		             progress.runningTasks,
+		             progress.completeTasks,
+		             progress.errorTasks);
+
+		int totalTasks = progress.submittedTasks + progress.triggeredTasks + progress.runningTasks +
+		                 progress.completeTasks + progress.errorTasks;
+		if (totalTasks > 0) {
+			fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+			             progress.completeTasks,
+			             totalTasks,
+			             100.0 * progress.completeTasks / totalTasks);
+		}
+
+		fmt::println(" Bytes completed - {} ({}) / {} ({})",
+		             progress.completedBytes,
+		             formatBytesHumanReadable(progress.completedBytes),
+		             progress.totalBytes,
+		             formatBytesHumanReadable(progress.totalBytes));
+
+		double throughput = progress.avgBytesPerSecond();
+		if (throughput > 0) {
+			fmt::println(" Throughput - {:.1f} MB/s", throughput / 1048576.0);
+		}
+
+		if (progress.etaSeconds().present()) {
+			fmt::println(" Estimated time remaining - {}",
+			             formatDurationHumanReadable((int)progress.etaSeconds().get()));
+		}
+
+		if (progress.elapsedSeconds > 0) {
+			fmt::println(" Elapsed time - {}", formatDurationHumanReadable((int)progress.elapsedSeconds));
+		}
+
+		// Show stalled tasks as warnings
+		if (!progress.stalledTasks.empty()) {
+			fmt::println("");
+			fmt::println("WARNING: {} stalled tasks (no progress > 60s):", progress.stalledTasks.size());
+			for (const auto& stalled : progress.stalledTasks) {
+				fmt::println(" Task {}: {}, stalled {:.0f}s, {} restarts",
+				             stalled.taskId.shortString(),
+				             stalled.range.toString(),
+				             stalled.stalledSeconds,
+				             stalled.restartCount);
+				if (!stalled.lastError.empty()) {
+					fmt::println("           Last error: {}", stalled.lastError);
+				}
+			}
+		}
+
+		if (progress.errorTasks > 0) {
+			fmt::println("");
+			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+		}
+
 		return UID();
 
 	} else if (tokencmp(tokens[1], "history")) {
