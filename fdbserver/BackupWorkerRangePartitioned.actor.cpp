@@ -250,3 +250,264 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 		wait(yield());
 	}
 }
+
+// ============================================================================
+// Unit Tests
+// ============================================================================
+
+#include "flow/UnitTest.h"
+
+// --- Minimal test log message type ---
+
+struct TestLogMessage {
+	LogMessageVersion version;
+	Standalone<StringRef> payload;
+	Standalone<VectorRef<Tag>> tags;
+};
+
+// --- Minimal IPeekCursor that returns a fixed list of messages ---
+
+struct TestPeekCursor : ILogSystem::IPeekCursor, ReferenceCounted<TestPeekCursor> {
+	std::vector<TestLogMessage> msgs;
+	int idx = 0;
+	LogMessageVersion invalidVer;
+	ArenaReader readerObj;
+	ProtocolVersion protoVersion;
+
+	explicit TestPeekCursor(std::vector<TestLogMessage> m)
+	  : msgs(std::move(m)), invalidVer(invalidVersion),
+	    readerObj(Arena(), StringRef(), AssumeVersion(g_network->protocolVersion())),
+	    protoVersion(g_network->protocolVersion()) {}
+
+	void addref() override { ReferenceCounted<TestPeekCursor>::addref(); }
+	void delref() override { ReferenceCounted<TestPeekCursor>::delref(); }
+
+	Future<Void> getMore(TaskPriority = TaskPriority::DefaultYield) override { return Void(); }
+
+	bool hasMessage() const override { return idx < (int)msgs.size(); }
+
+	void nextMessage() override {
+		if (idx < (int)msgs.size())
+			++idx;
+	}
+
+	const LogMessageVersion& version() const override {
+		if (!hasMessage())
+			return invalidVer;
+		return msgs[idx].version;
+	}
+
+	StringRef getMessage() override {
+		ASSERT(hasMessage());
+		return msgs[idx].payload;
+	}
+
+	VectorRef<Tag> getTags() const override {
+		ASSERT(hasMessage());
+		return msgs[idx].tags;
+	}
+
+	Arena& arena() override {
+		ASSERT(hasMessage());
+		return msgs[idx].payload.arena();
+	}
+
+	Version popped() const override { return 0; }
+
+	Version getMinKnownCommittedVersion() const override { return 0; }
+
+	Future<Void> onFailed() const override { return Never(); }
+
+	bool isActive() const override { return true; }
+
+	Reference<IPeekCursor> cloneNoMore() override {
+		auto c = makeReference<TestPeekCursor>(msgs);
+		c->idx = idx;
+		return c.castTo<IPeekCursor>();
+	}
+
+	void setProtocolVersion(ProtocolVersion v) override { protoVersion = v; }
+
+	ArenaReader* reader() override { return &readerObj; }
+
+	Optional<UID> getPrimaryPeekLocation() const override { return Optional<UID>(); }
+	Optional<UID> getCurrentPeekLocation() const override { return Optional<UID>(); }
+
+	bool isExhausted() const override { return false; }
+	void advanceTo(LogMessageVersion) override {}
+	StringRef getMessageWithTags() override { return getMessage(); }
+};
+
+// --- Minimal ILogSystem that hands out the test cursor ---
+
+struct TestLogSystem : ILogSystem, ReferenceCounted<TestLogSystem> {
+	std::vector<TestLogMessage> msgs;
+
+	explicit TestLogSystem(std::vector<TestLogMessage> m) : msgs(std::move(m)) {}
+
+	virtual ~TestLogSystem() {}
+
+	void addref() override { ReferenceCounted<TestLogSystem>::addref(); }
+	void delref() override { ReferenceCounted<TestLogSystem>::delref(); }
+
+	Reference<IPeekCursor> peekSingle(UID, Version, Tag, std::vector<std::pair<Version, Tag>>) override {
+		return makeReference<TestPeekCursor>(msgs).castTo<IPeekCursor>();
+	}
+
+	void pop(Version, Tag, Version = 0, int8_t = tagLocalityInvalid) override {}
+
+	// Unused virtuals: stub as no-ops.
+	LogSystemType getType() const { return LogSystemType::empty; }
+	void stopRejoins() override {}
+	Future<Void> onCoreStateChanged() const override { return Never(); }
+	void coreStateWritten(DBCoreState const&) override {}
+	Future<Void> onError() const override { return Never(); }
+	Future<Version> push(const PushVersionSet&,
+	                     LogPushData&,
+	                     SpanContext const&,
+	                     Optional<UID>,
+	                     Optional<std::unordered_map<uint16_t, Version>>) override {
+		return Version(0);
+	}
+	Reference<IPeekCursor> peek(UID, Version, Optional<Version>, Tag, bool) override {
+		return Reference<IPeekCursor>();
+	}
+	Reference<IPeekCursor> peek(UID, Version, Optional<Version>, std::vector<Tag>, bool) override {
+		return Reference<IPeekCursor>();
+	}
+	Reference<IPeekCursor> peekLogRouter(UID,
+	                                     Version,
+	                                     Tag,
+	                                     bool,
+	                                     Optional<Version>,
+	                                     const Optional<std::map<uint8_t, std::vector<uint16_t>>>&) override {
+		return Reference<IPeekCursor>();
+	}
+	Reference<IPeekCursor> peekTxs(UID, Version, int8_t, Version, bool) override { return Reference<IPeekCursor>(); }
+	Version getKnownCommittedVersion() override { return 0; }
+	Future<Void> onKnownCommittedVersionChange() override { return Never(); }
+	void popTxs(Version, int8_t) override {}
+	Future<Void> confirmEpochLive(Optional<UID>) override { return Void(); }
+	Future<Void> endEpoch() override { return Void(); }
+	LogEpoch getOldestBackupEpoch() const override { return 0; }
+	void setBackupWorkers(const std::vector<InitializeBackupReply>&) override {}
+	bool removeBackupWorker(const BackupWorkerDoneRequest&) override { return false; }
+	LogSystemConfig getLogSystemConfig() const override { return LogSystemConfig(); }
+	Standalone<StringRef> getLogsValue() const override { return Standalone<StringRef>(); }
+	Future<Version> getTxsPoppedVersion() override { return Version(0); }
+	Version getEnd() const override { return 0; }
+	Version getBackupStartVersion() const override { return 0; }
+	std::string describe() const override { return "TestLogSystem"; }
+	UID getDebugID() const override { return UID(); }
+	void toCoreState(DBCoreState&) const override {}
+	bool remoteStorageRecovered() const override { return true; }
+	void purgeOldRecoveredGenerationsCoreState(DBCoreState&) override {}
+	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) override {}
+	std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const override { return {}; }
+	LogSystemType getLogSystemType() const override { return LogSystemType::empty; }
+	Future<Void> onLogSystemConfigChange() override { return Never(); }
+	void updateLogRouter(int, int, TLogInterface const&) override {}
+	std::vector<Reference<LocalitySet>> getPushLocationsForTags(std::vector<int>&) const override { return {}; }
+	bool hasRemoteLogs() const override { return false; }
+	Tag getRandomRouterTag() const override { return Tag(); }
+	int getLogRouterTags() const override { return 0; }
+	Tag getRandomTxsTag() const override { return Tag(); }
+	TLogVersion getTLogVersion() const override { return TLogVersion::DEFAULT; }
+	Tag getPseudoPopTag(Tag, ProcessClass::ClassType) const override { return Tag(); }
+	bool hasPseudoLocality(int8_t) const override { return false; }
+	Version popPseudoLocalityTag(Tag, Version) override { return 0; }
+	void setOldestBackupEpoch(LogEpoch) override {}
+
+	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const&,
+	                                       Future<RecruitRemoteFromConfigurationReply> const&,
+	                                       DatabaseConfiguration const&,
+	                                       LogEpoch,
+	                                       Version,
+	                                       int8_t,
+	                                       int8_t,
+	                                       std::vector<Tag> const&,
+	                                       Reference<AsyncVar<bool>> const&) override {
+		return Future<Reference<ILogSystem>>();
+	}
+
+	void getPushLocations(VectorRef<Tag>,
+	                      std::vector<int>&,
+	                      bool = false,
+	                      Optional<std::vector<Reference<LocalitySet>>> =
+	                          Optional<std::vector<Reference<LocalitySet>>>()) const override {}
+};
+
+// --- Unit test: pullPartitionMapFromTLog returns message version ---
+
+TEST_CASE("/backup/rangePartitioned/pullPartitionMap/basic") {
+	wait(delay(0.0));
+
+	state UID workerId = deterministicRandom()->randomUniqueID();
+	state InitializeBackupRequest req;
+	req.routerTag = Tag(1, 0);
+	req.totalTags = 1;
+	req.startVersion = 100;
+	req.endVersion = Optional<Version>();
+	req.recruitedEpoch = 1;
+	req.backupEpoch = 1;
+
+	state ServerDBInfo dbi;
+	state Reference<AsyncVar<ServerDBInfo> const> dbVar = makeReference<AsyncVar<ServerDBInfo> const>(dbi);
+
+	state BackupRangePartitionedData* self = new BackupRangePartitionedData(workerId, dbVar, req);
+
+	// Prepare a single dummy log message at version 150.
+	state Version v = 150;
+	// Build a small partition map: this worker's tag has two ranges.
+	std::map<Tag, std::vector<PartitionInfo>> pm;
+	pm[req.routerTag].push_back(PartitionInfo(0, KeyRangeRef(""_sr, "m"_sr)));
+	pm[req.routerTag].push_back(PartitionInfo(1, KeyRangeRef("m"_sr, "\xff\xff"_sr)));
+
+	PartitionMapMessage pmMsg;
+	pmMsg.partitionMap = pm;
+
+	// Serialize PartitionMapMessage into a payload using the current protocol version.
+	Standalone<StringRef> payload;
+	{
+		BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+		wr << pmMsg;
+		payload = wr.toValue();
+	}
+
+	Standalone<VectorRef<Tag>> tags;
+	tags.push_back(tags.arena(), req.routerTag);
+
+	std::vector<TestLogMessage> msgs;
+	TestLogMessage m;
+	m.version = LogMessageVersion(v);
+	m.payload = payload;
+	m.tags = tags;
+	msgs.push_back(m);
+
+	self->logSystem.set(Reference<ILogSystem>(new TestLogSystem(std::move(msgs))));
+
+	state std::map<Tag, std::vector<PartitionInfo>> outMap;
+	state Version got = wait(pullPartitionMapFromTLog(self, &outMap));
+
+	ASSERT_EQ(got, v);
+	ASSERT_EQ(outMap.size(), 1);
+	ASSERT(outMap.find(req.routerTag) != outMap.end());
+	ASSERT_EQ(outMap[req.routerTag].size(), 2);
+
+	// Add a real backup container to test partition map upload with actual file writes
+	state std::string testURL = "file://simfdb/backups/test_" + deterministicRandom()->randomUniqueID().toString();
+	state Reference<IBackupContainer> realContainer = IBackupContainer::openContainer(testURL, {}, {});
+	wait(realContainer->create());
+
+	state UID backupId = deterministicRandom()->randomUniqueID();
+
+	BackupRangePartitionedData::PerBackupInfo backupInfo;
+	backupInfo.container = Optional<Reference<IBackupContainer>>(realContainer);
+	backupInfo.stopped = false;
+	self->backups[backupId] = backupInfo;
+
+	wait(uploadPartitionMap(self, got, outMap));
+
+	printf("!!!!! Partition map upload completed successfully to %s\n", testURL.c_str());
+	return Void();
+}
