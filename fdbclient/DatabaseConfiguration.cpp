@@ -207,6 +207,42 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	}
 }
 
+int32_t DatabaseConfiguration::maxZoneFailuresTolerated(int fullyReplicatedRegions, bool forAvailability) const {
+	int worstSatelliteTLogReplicationFactor = regions.size() ? std::numeric_limits<int>::max() : 0;
+	int regionsWithNonNegativePriority = 0;
+	for (auto& r : regions) {
+		if (r.priority >= 0) {
+			regionsWithNonNegativePriority++;
+		}
+		worstSatelliteTLogReplicationFactor = std::min(
+		    worstSatelliteTLogReplicationFactor, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
+		if (r.satelliteTLogUsableDcsFallback > 0) {
+			worstSatelliteTLogReplicationFactor =
+			    std::min(worstSatelliteTLogReplicationFactor,
+			             r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
+		}
+	}
+
+	if (worstSatelliteTLogReplicationFactor <= 0) {
+		// HA is not enabled in this database. Return single cluster zone failures to tolerate.
+		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
+	}
+
+	// Compute HA enabled database zone failure tolerance.
+	auto isGeoReplicatedData = [this, &fullyReplicatedRegions]() {
+		return usableRegions > 1 && fullyReplicatedRegions > 1;
+	};
+
+	if (isGeoReplicatedData() && (!forAvailability || regionsWithNonNegativePriority > 1)) {
+		return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum,
+		                             worstSatelliteTLogReplicationFactor - 1),
+		                    storageTeamSize - 1);
+	}
+	// Primary and Satellite tLogs are synchronously replicated, hence we can lose all but 1.
+	return std::min(tLogReplicationFactor + worstSatelliteTLogReplicationFactor - 1 - tLogWriteAntiQuorum,
+	                storageTeamSize - 1);
+}
+
 bool DatabaseConfiguration::isValid() const {
 	// enable this via `fdbcli --knob_cli_print_invalid_configuration=1` command line parameter
 	auto log_test = [](const char* text, bool val) {
