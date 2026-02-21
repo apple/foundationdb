@@ -700,14 +700,14 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 			}
 
 			if (blProgress.elapsedSeconds > 0) {
-				returnStr += format("\n Elapsed time - %s",
-				                    formatDurationHumanReadable((int)blProgress.elapsedSeconds).c_str());
+				returnStr +=
+				    format("\n Elapsed time - %s", formatDurationHumanReadable((int)blProgress.elapsedSeconds).c_str());
 			}
 
 			// Show stalled tasks as warnings
 			if (!blProgress.stalledTasks.empty()) {
-				returnStr += format("\n\nWARNING: %zu stalled tasks (no progress > 60s):",
-				                    blProgress.stalledTasks.size());
+				returnStr +=
+				    format("\n\nWARNING: %zu stalled tasks (no progress > 60s):", blProgress.stalledTasks.size());
 				for (const auto& stalled : blProgress.stalledTasks) {
 					returnStr += format("\n Task %s: %s, stalled %.0fs, %d restarts",
 					                    stalled.taskId.shortString().c_str(),
@@ -7839,13 +7839,15 @@ public:
 							}
 
 							if (bdProgress.etaSeconds().present()) {
-								statusText += format(" Estimated time remaining - %s\n",
-								                     formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
+								statusText +=
+								    format(" Estimated time remaining - %s\n",
+								           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
 							}
 
 							if (bdProgress.elapsedSeconds > 0) {
-								statusText += format(" Elapsed time - %s\n",
-								                     formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
+								statusText +=
+								    format(" Elapsed time - %s\n",
+								           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
 							}
 
 							// Show stalled tasks as warnings
@@ -7853,12 +7855,11 @@ public:
 								statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
 								                     bdProgress.stalledTasks.size());
 								for (const auto& stalled : bdProgress.stalledTasks) {
-									statusText +=
-									    format(" Task %s: %s, stalled %.0fs, %d restarts\n",
-									           stalled.taskId.shortString().c_str(),
-									           stalled.range.toString().c_str(),
-									           stalled.stalledSeconds,
-									           stalled.restartCount);
+									statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
+									                     stalled.taskId.shortString().c_str(),
+									                     stalled.range.toString().c_str(),
+									                     stalled.stalledSeconds,
+									                     stalled.restartCount);
 									if (!stalled.lastError.empty()) {
 										statusText += format("           Last error: %s\n", stalled.lastError.c_str());
 									}
