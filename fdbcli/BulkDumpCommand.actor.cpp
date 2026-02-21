@@ -176,10 +176,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 		if (jobState.present() && jobState.get().hasOwner()) {
 			std::string ownerType = jobState.get().getOwnerType().orDefault("unknown");
 			std::string ownerName = jobState.get().getOwnerName().orDefault("");
-			fmt::println("BulkDump job {} is owned by {} '{}'.",
-			             progress.jobId.toString(),
-			             ownerType,
-			             ownerName);
+			fmt::println("BulkDump job {} is owned by {} '{}'.", progress.jobId.toString(), ownerType, ownerName);
 			if (ownerType == "backup") {
 				fmt::println("For full status, use: fdbbackup status -t {}", ownerName);
 			}

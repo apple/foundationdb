@@ -3371,7 +3371,8 @@ ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
 			case BulkLoadPhase::Running:
 				progress.runningTasks++;
 				// Check for stall
-				if (taskState.startTime > 0 && (currentTime - taskState.startTime) > BULK_TASK_STALL_THRESHOLD_SECONDS) {
+				if (taskState.startTime > 0 &&
+				    (currentTime - taskState.startTime) > BULK_TASK_STALL_THRESHOLD_SECONDS) {
 					// This task has been running for longer than threshold
 					BulkLoadStalledTask stalledTask;
 					stalledTask.taskId = taskState.getTaskId();
