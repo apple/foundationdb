@@ -2780,6 +2780,13 @@ public:
 		_localAddress = addr;
 		g_sim2.addressMap.emplace(_localAddress, process);
 	}
+	// Ignore those options
+	void setOptionReuseAddress(bool reuse) override { (void)reuse; }
+	void setOptionEnableLoopback(bool enable) override { (void)enable; }
+	void setOptionMulticastGroup(NetworkAddress const& ifaddr, NetworkAddress const& mcaddr) override {
+		(void)ifaddr;
+		(void)mcaddr;
+	}
 
 	NetworkAddress localAddress() const override { return _localAddress; }
 
