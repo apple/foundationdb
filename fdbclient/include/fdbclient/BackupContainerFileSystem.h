@@ -129,6 +129,8 @@ public:
 	                                       IncludeKeyRangeMap IncludeKeyRangeMap,
 	                                       Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) final;
 
+	Future<Void> writePartitionMapFile(Version v, std::string contents) override;
+
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
 	Future<std::vector<LogFile>> listLogFiles(Version beginVersion, Version targetVersion, bool partitioned);

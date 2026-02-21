@@ -1078,6 +1078,11 @@ const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
 extern const KeyRef backupWorkerMaxNoopVersionKey = "\xff\x02/backupWorkerMaxNoopVersion"_sr;
+const KeyRef backupRangePartitionedMapUploadedPrefix = "\xff\x02/backupRangePartitionedMapUploaded/"_sr;
+
+const Key backupRangePartitionedMapUploadedKeyFor(Version v) {
+	return backupRangePartitionedMapUploadedPrefix.withSuffix(format("%lld", v));
+}
 
 const Key backupProgressKeyFor(UID workerID) {
 	BinaryWriter wr(Unversioned());
