@@ -1771,7 +1771,7 @@ std::string hmac_sha256_hex(std::string key, std::string msg) {
 	unsigned char hash[32];
 
 	HMAC_CTX* hmac = HMAC_CTX_new();
-	HMAC_Init_ex(hmac, &key[0], key.length(), EVP_sha256(), NULL);
+	HMAC_Init_ex(hmac, &key[0], key.length(), EVP_sha256(), nullptr);
 	HMAC_Update(hmac, (unsigned char*)&msg[0], msg.length());
 	unsigned int len = 32;
 	HMAC_Final(hmac, hash, &len);
@@ -1789,7 +1789,7 @@ std::string hmac_sha256(std::string key, std::string msg) {
 	unsigned char hash[32];
 
 	HMAC_CTX* hmac = HMAC_CTX_new();
-	HMAC_Init_ex(hmac, &key[0], key.length(), EVP_sha256(), NULL);
+	HMAC_Init_ex(hmac, &key[0], key.length(), EVP_sha256(), nullptr);
 	HMAC_Update(hmac, (unsigned char*)&msg[0], msg.length());
 	unsigned int len = 32;
 	HMAC_Final(hmac, hash, &len);

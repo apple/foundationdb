@@ -3539,8 +3539,8 @@ int main(int argc, char* argv[]) {
 		registerCrashHandler();
 
 		// Set default of line buffering standard out and error
-		setvbuf(stdout, NULL, _IONBF, 0);
-		setvbuf(stderr, NULL, _IONBF, 0);
+		setvbuf(stdout, nullptr, _IONBF, 0);
+		setvbuf(stderr, nullptr, _IONBF, 0);
 
 		ProgramExe programExe = getProgramType(argv[0]);
 		BackupType backupType = BackupType::UNDEFINED;
@@ -3858,12 +3858,12 @@ int main(int argc, char* argv[]) {
 				return FDB_EXIT_SUCCESS;
 				break;
 			case OPT_NOBUFSTDOUT:
-				setvbuf(stdout, NULL, _IONBF, 0);
-				setvbuf(stderr, NULL, _IONBF, 0);
+				setvbuf(stdout, nullptr, _IONBF, 0);
+				setvbuf(stderr, nullptr, _IONBF, 0);
 				break;
 			case OPT_BUFSTDOUTERR:
-				setvbuf(stdout, NULL, _IOFBF, BUFSIZ);
-				setvbuf(stderr, NULL, _IOFBF, BUFSIZ);
+				setvbuf(stdout, nullptr, _IOFBF, BUFSIZ);
+				setvbuf(stderr, nullptr, _IOFBF, BUFSIZ);
 				break;
 			case OPT_QUIET:
 				quietDisplay = true;
@@ -4359,7 +4359,7 @@ int main(int argc, char* argv[]) {
 		    .detail("SourceVersion", getSourceVersion())
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", commandLine)
 		    .setMaxFieldLength(0)
@@ -4834,7 +4834,7 @@ int main(int argc, char* argv[]) {
 				std::string s;
 
 #ifdef __linux__
-				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
+				char* demangled = abi::__cxa_demangle(i->first, nullptr, nullptr, nullptr);
 				if (demangled) {
 					s = demangled;
 					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))

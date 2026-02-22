@@ -1587,7 +1587,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 		initPdhStrings(*statState, dataFolder);
 
 		TraceEvent("SetupQuery").log();
-		handlePdhStatus(PdhOpenQuery(nullptr, NULL, &(*statState)->Query), "PdhOpenQuery");
+		handlePdhStatus(PdhOpenQuery(nullptr, nullptr, &(*statState)->Query), "PdhOpenQuery");
 
 		if (!(*statState)->pdhStrings.diskDevice.empty()) {
 			handlePdhStatus(
@@ -4104,7 +4104,7 @@ void stopRunLoopProfiler() {
 	std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
 	loopProfilerStopRequested.store(true);
 	if (loopProfilerThread) {
-		pthread_join(loopProfilerThread.value(), NULL);
+		pthread_join(loopProfilerThread.value(), nullptr);
 		loopProfilerThread = {};
 	}
 #endif

@@ -326,7 +326,8 @@ public:
 		}
 	}
 
-	ThreadSingleAssignmentVarBase() : status(Unset), callback(NULL), valueReferenceCount(0) {} //, referenceCount(1) {}
+	ThreadSingleAssignmentVarBase()
+	  : status(Unset), callback(nullptr), valueReferenceCount(0) {} //, referenceCount(1) {}
 	~ThreadSingleAssignmentVarBase() {
 		this->mutex.assertNotEntered();
 

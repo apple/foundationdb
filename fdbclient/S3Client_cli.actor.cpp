@@ -451,7 +451,7 @@ int main(int argc, char** argv) {
 		    .detail("SourceVersion", getSourceVersion())
 		    .detail("Version", FDB_VT_VERSION)
 		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
 		    .setMaxFieldLength(10000)
 		    .detail("CommandLine", commandLine)
 		    .setMaxFieldLength(0)
