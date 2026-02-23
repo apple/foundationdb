@@ -1,0 +1,5 @@
+---
+Checks: >
+  -*,
+  bugprone-sizeof-expression
+...

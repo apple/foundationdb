@@ -185,6 +185,25 @@ CMake will not produce a `compile_commands.json` by default; you must pass `-DCM
 
 Note that if the building is done inside the `foundationdb/build` Docker image, the resulting paths will still be incorrect and require manual fixing. One will wish to re-run `cmake` with `-DCMAKE_EXPORT_COMPILE_COMMANDS=OFF` to prevent it from reverting the manual changes.
 
+### Running `clang-tidy`
+
+FoundationDB's CMake build supports opt-in `clang-tidy` execution during C/C++ compilation via `-DUSE_CLANG_TIDY=ON`.
+
+Example:
+
+```sh
+cmake -S <FDB_SOURCE_DIR> -B build -G Ninja \
+  -DUSE_CLANG_TIDY=ON
+ninja -C build fdbserver
+```
+
+Optional CMake variables:
+
+* `CLANG_TIDY`: path to the `clang-tidy` executable (auto-detected by default)
+* `CLANG_TIDY_EXTRA_ARGS`: additional space-separated arguments passed to `clang-tidy`
+
+If you prefer running `clang-tidy` manually, configure with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and build the `processed_compile_commands` target. The generated source-tree `compile_commands.json` is Flow-aware and is usually the best compilation database to point `clang-tidy` at.
+
 ### Using IDEs
 
 CMake provides built-in support for several popular IDEs. However, most FoundationDB files are written in the `flow` language, which is an extension of the C++ programming language,  for coroutine support (Note that when FoundationDB was being developed, C++20 was not available). The `flow` language will be transpiled into C++ code using `actorcompiler`, while preventing most IDEs from recognizing `flow`-specific syntax.

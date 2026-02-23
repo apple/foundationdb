@@ -13,6 +13,9 @@ env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
 env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
+env_set(USE_CLANG_TIDY OFF BOOL "Run clang-tidy during C/C++ compilation")
+env_set(CLANG_TIDY "" STRING "Path to clang-tidy executable (empty to auto-detect)")
+env_set(CLANG_TIDY_EXTRA_ARGS "" STRING "Additional clang-tidy arguments (space-separated)")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
 env_set(USE_WERROR OFF BOOL "Compile with -Werror. Recommended for local development and CI.")
 default_linker(_use_ld)
@@ -99,6 +102,33 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(USE_CLANG_TIDY)
+  if(CLANG_TIDY)
+    set(_clang_tidy_program "${CLANG_TIDY}")
+  else()
+    find_program(_clang_tidy_program NAMES clang-tidy)
+  endif()
+
+  if(NOT _clang_tidy_program)
+    message(
+      FATAL_ERROR
+      "USE_CLANG_TIDY is enabled, but clang-tidy was not found. Install clang-tidy or set CLANG_TIDY=/path/to/clang-tidy.")
+  endif()
+
+  set(_clang_tidy_command "${_clang_tidy_program}")
+  list(APPEND _clang_tidy_command "--config-file=${CMAKE_SOURCE_DIR}/.clang-tidy")
+  if(CLANG_TIDY_EXTRA_ARGS)
+    separate_arguments(_clang_tidy_extra_args NATIVE_COMMAND "${CLANG_TIDY_EXTRA_ARGS}")
+    list(APPEND _clang_tidy_command ${_clang_tidy_extra_args})
+  endif()
+
+  set(CMAKE_C_CLANG_TIDY ${_clang_tidy_command})
+  set(CMAKE_CXX_CLANG_TIDY ${_clang_tidy_command})
+
+  string(REPLACE ";" " " _clang_tidy_command_display "${_clang_tidy_command}")
+  message(STATUS "clang-tidy enabled for C/C++ compilation: ${_clang_tidy_command_display}")
+endif()
 
 if(NOT OPEN_FOR_IDE)
   add_compile_definitions(NO_INTELLISENSE)

@@ -3862,12 +3862,15 @@ struct DequeAllocator : std::allocator<T> {
 	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
 
 	T* allocate(std::size_t n) {
+		// Intentionally count allocated bytes for all allocator rebinds, including deque internals that use pointer
+		// types. NOLINTNEXTLINE(bugprone-sizeof-expression)
 		DequeAllocatorStats::allocatedBytes += n * sizeof(T);
 		// fprintf(stderr, "Allocating %lld objects for %lld bytes (total allocated: %lld)\n", n, n * sizeof(T),
 		// DequeAllocatorStats::allocatedBytes);
 		return std::allocator<T>::allocate(n);
 	}
 	void deallocate(T* p, std::size_t n) {
+		// NOLINTNEXTLINE(bugprone-sizeof-expression)
 		DequeAllocatorStats::allocatedBytes -= n * sizeof(T);
 		// fprintf(stderr, "Deallocating %lld objects for %lld bytes (total allocated: %lld)\n", n, n * sizeof(T),
 		// DequeAllocatorStats::allocatedBytes);
