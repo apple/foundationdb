@@ -1,0 +1,1547 @@
+Loading audit data from: audit.json
+  Loaded audit with 54 servers
+  Total missing from SS: 14178
+  Total extra in SS: 0
+Connected to FoundationDB
+MODE: READ-ONLY (diagnostic only, no modifications)
+============================================================
+
+[0] Getting cluster status via fdbcli...
+    Found 51 running storage servers
+    Cluster healthy: unknown
+    Data state: healing
+
+============================================================
+SERVERLIST vs RUNNING SERVERS CHECK
+============================================================
+
+[1] Reading serverList from FDB...
+    Attempt 1/3 (timeout=30000ms)...
+    Found 51 servers in serverList
+
+[2] Getting running servers from fdbcli status...
+    DEBUG: fdbcli status SS id = 'c1a13af646774b56' (len=16)
+    DEBUG:   -> serverList prefix = 564b7746f63aa1c1 (len=8)
+    DEBUG: fdbcli status SS id = '54a53278896d0d68' (len=16)
+    DEBUG:   -> serverList prefix = 680d6d897832a554 (len=8)
+    DEBUG: fdbcli status SS id = 'a09361c6385e13ba' (len=16)
+    DEBUG:   -> serverList prefix = ba135e38c66193a0 (len=8)
+    Found 51 running storage servers
+
+    DEBUG: Sample serverList keys (raw):
+      Key suffix: 04f75a3239b0d3aedb65f749c4d19485 (len=16)
+      Key suffix: 06a60fe227c3ef75cce4a58405695cba (len=16)
+      Key suffix: 16740ee75df4103f58ac7500cb96638d (len=16)
+
+[3] Comparing serverList vs running servers...
+
+    serverList UIDs:  51
+    Running UIDs:     51
+    In both:          0
+    Only serverList:  51 (stale entries)
+    Only running:     51 (missing from serverList)
+
+    Sample serverList UIDs (raw hex):
+      04f75a3239b0d3aedb65f749c4d19485 (len=16)
+      06a60fe227c3ef75cce4a58405695cba (len=16)
+      16740ee75df4103f58ac7500cb96638d (len=16)
+
+    Sample running UIDs (raw hex):
+      04f75a3239b0d3ae (len=8)
+      06a60fe227c3ef75 (len=8)
+      16740ee75df4103f (len=8)
+
+    Note: UID lengths differ (serverList: {16}, running: {8})
+    Will attempt prefix matching in step [4]...
+
+[4] Checking if fdbcli shows truncated UIDs (first 8 bytes only)...
+    FOUND 51 matches by UID prefix!
+    fdbcli is showing truncated UIDs (first 8 bytes only)
+
+    Matches:
+      de460616df33b7b6 -> de460616df33b7b6e8b9c55f84d1bae8 (100.103.190.47:4501)
+      36baa0a0e1cf7125 -> 36baa0a0e1cf7125c394883b1c0251e7 (100.103.214.80:4501)
+      21c7342593c48372 -> 21c7342593c483721245de582ca75c08 (100.103.164.92:4501)
+      5752ca14aae48b11 -> 5752ca14aae48b11f8d101389cb21f80 (100.103.0.25:4501)
+      9e560c153fd5766f -> 9e560c153fd5766f15183c7560e50488 (100.103.42.0:4501)
+      ... and 46 more
+
+    ✓ ALL 51 running servers found in serverList by prefix match!
+    serverList appears CORRECT (fdbcli just shows truncated UIDs)
+
+    NOTE: Any earlier 'DIFFERENT SUBNET' warnings can be ignored.
+    The IP extraction from binary data may produce false positives.
+
+[5] Skipping address match - prefix match already succeeded
+
+[6] Scanning serverKeys for full 16-byte UIDs...
+      ... scanned 100000 entries
+    Scanned 139421 serverKeys entries
+    Found 682 unique server UIDs in serverKeys
+
+    Sample serverKeys UIDs (full 16-byte):
+      72775d7e74d5b17c1c305392480727ce (5090 entries)
+      bba4f985785108a73559448a37ca6bda (5070 entries)
+      508e73a06107c171270d6a6c9ba2a4f0 (5036 entries)
+      9ae6bcea21826dd5b3c6afeb3299115e (5008 entries)
+      e62a516bc60636c3b7603ba2c37a5938 (5002 entries)
+
+    Checking if serverKeys UIDs match running servers (by 8-byte prefix)...
+
+    ✓ FOUND 51 matches!
+    Running servers' full 16-byte UIDs:
+      04f75a3239b0d3ae -> 04f75a3239b0d3aedb65f749c4d19485 @ 100.103.210.7:4501 (1276 serverKeys entries)
+      06a60fe227c3ef75 -> 06a60fe227c3ef75cce4a58405695cba @ 100.103.190.36:4501 (952 serverKeys entries)
+      16740ee75df4103f -> 16740ee75df4103f58ac7500cb96638d @ 100.103.8.22:4501 (918 serverKeys entries)
+      1c1eeee2f393b409 -> 1c1eeee2f393b4090f10aedd13e76afc @ 100.103.190.27:4501 (4926 serverKeys entries)
+      21c7342593c48372 -> 21c7342593c483721245de582ca75c08 @ 100.103.164.92:4501 (916 serverKeys entries)
+      2577fc18113390c8 -> 2577fc18113390c8a00a4136abc14da5 @ 100.103.208.100:4501 (888 serverKeys entries)
+      351d3c76723e19d8 -> 351d3c76723e19d8b6ce10bcca49d522 @ 100.103.16.17:4501 (808 serverKeys entries)
+      36baa0a0e1cf7125 -> 36baa0a0e1cf7125c394883b1c0251e7 @ 100.103.214.80:4501 (4718 serverKeys entries)
+      386ef6312b857293 -> 386ef6312b8572933e513b3ca0ac4f3a @ 100.103.42.47:4501 (4976 serverKeys entries)
+      3cabed909e40b204 -> 3cabed909e40b2046778fc273cff7fb5 @ 100.103.210.2:4501 (4782 serverKeys entries)
+      4747b66b99c21bbd -> 4747b66b99c21bbd118e7c0cf99f123b @ 100.103.164.29:4501 (918 serverKeys entries)
+      508e73a06107c171 -> 508e73a06107c171270d6a6c9ba2a4f0 @ 100.103.164.12:4501 (5036 serverKeys entries)
+      564b7746f63aa1c1 -> 564b7746f63aa1c130abd793fc5e0d80 @ 100.103.214.18:4501 (885 serverKeys entries)
+      5752ca14aae48b11 -> 5752ca14aae48b11f8d101389cb21f80 @ 100.103.0.25:4501 (938 serverKeys entries)
+      5bb493ec7527272d -> 5bb493ec7527272d74f7b5dbe1b4ee26 @ 100.103.42.28:4501 (932 serverKeys entries)
+      60f768e82644d379 -> 60f768e82644d37945f047309c66d21d @ 100.103.210.16:4501 (918 serverKeys entries)
+      6466f33ca6195c3f -> 6466f33ca6195c3ff7fcb9c45913b569 @ 100.103.190.46:4501 (959 serverKeys entries)
+      667e91ea162d22bf -> 667e91ea162d22bfa2584a8486f10d17 @ 100.103.190.30:4501 (4870 serverKeys entries)
+      67216b127156d8f0 -> 67216b127156d8f031f9dc87ce575cf5 @ 100.103.208.62:4501 (4955 serverKeys entries)
+      679781d55031076c -> 679781d55031076cc500220a4d25f44c @ 100.103.4.73:4501 (838 serverKeys entries)
+      680d6d897832a554 -> 680d6d897832a5540c9aefcfeefb53bb @ 100.103.16.23:4501 (4682 serverKeys entries)
+      72775d7e74d5b17c -> 72775d7e74d5b17c1c305392480727ce @ 100.103.4.29:4501 (5090 serverKeys entries)
+      7cd68e0dabc9ef4a -> 7cd68e0dabc9ef4ab5db0d6c3eafbcd7 @ 100.103.0.28:4501 (796 serverKeys entries)
+      8284c5a8ca96652e -> 8284c5a8ca96652ea77b3f210f0ae570 @ 100.103.208.6:4501 (4868 serverKeys entries)
+      89be241724802131 -> 89be2417248021314d5a8d946836f8ae @ 100.103.0.14:4501 (4850 serverKeys entries)
+      8c152667313eb257 -> 8c152667313eb257d2fa5813ef65dbfb @ 100.103.42.53:4501 (906 serverKeys entries)
+      8e9eafbf11ccc071 -> 8e9eafbf11ccc071a0712b149cf79ad7 @ 100.103.0.29:4501 (1405 serverKeys entries)
+      907a89b5f73b253f -> 907a89b5f73b253f10fa5c84e7a6f5f4 @ 100.103.164.75:4501 (938 serverKeys entries)
+      9755798d28ca738e -> 9755798d28ca738ee7c48ea606c215b6 @ 100.103.0.16:4501 (4666 serverKeys entries)
+      9ae6bcea21826dd5 -> 9ae6bcea21826dd5b3c6afeb3299115e @ 100.103.214.86:4501 (5008 serverKeys entries)
+      9e560c153fd5766f -> 9e560c153fd5766f15183c7560e50488 @ 100.103.42.0:4501 (914 serverKeys entries)
+      a59992dd02c92f65 -> a59992dd02c92f65bd8d7176424a44ea @ 100.103.8.17:4501 (4814 serverKeys entries)
+      b0a077978358337d -> b0a077978358337d84daab95fdf25956 @ 100.103.42.42:4501 (4829 serverKeys entries)
+      b389f4ec5e4bedaf -> b389f4ec5e4bedafc11dbdf6205b958a @ 100.103.208.46:4501 (826 serverKeys entries)
+      ba135e38c66193a0 -> ba135e38c66193a0fe4f9152b6c00fa7 @ 100.103.8.50:4501 (888 serverKeys entries)
+      bba4f985785108a7 -> bba4f985785108a73559448a37ca6bda @ 100.103.8.18:4501 (5070 serverKeys entries)
+      bc2f915d1c76cc4b -> bc2f915d1c76cc4b1c6ed29e0e201cc4 @ 100.103.8.46:4501 (878 serverKeys entries)
+      bd6575cf61e95366 -> bd6575cf61e9536633323fe1f6be139c @ 100.103.190.48:4501 (802 serverKeys entries)
+      c1b5f2e74239b1d9 -> c1b5f2e74239b1d99626815657441fd0 @ 100.103.164.44:4501 (4822 serverKeys entries)
+      c20aa370e81cb687 -> c20aa370e81cb6873cfa367e85233115 @ 100.103.164.46:4501 (4952 serverKeys entries)
+      c99055faa6b8321e -> c99055faa6b8321e91578429cb345146 @ 100.103.208.73:4501 (4790 serverKeys entries)
+      cc19c8c083935b3d -> cc19c8c083935b3dd3866c82096bd767 @ 100.103.4.11:4501 (4752 serverKeys entries)
+      de460616df33b7b6 -> de460616df33b7b6e8b9c55f84d1bae8 @ 100.103.190.47:4501 (914 serverKeys entries)
+      e51c22226369a0b9 -> e51c22226369a0b90f501cf230e8f357 @ 100.103.210.98:4501 (948 serverKeys entries)
+      e62a516bc60636c3 -> e62a516bc60636c3b7603ba2c37a5938 @ 100.103.16.13:4501 (5002 serverKeys entries)
+      e793933011e4113b -> e793933011e4113b627a3c0e7c9144cd @ 100.103.0.22:4501 (906 serverKeys entries)
+      eae96fc565c3ab18 -> eae96fc565c3ab1804f1a26e77f7cb9f @ 100.103.16.15:4501 (4834 serverKeys entries)
+      ede7be141f7648f6 -> ede7be141f7648f62d42b7869e65b636 @ 100.103.214.10:4501 (894 serverKeys entries)
+      f73d366435d744c2 -> f73d366435d744c27a857544a92c0955 @ 100.103.208.95:4501 (906 serverKeys entries)
+      f9fbb04da6184348 -> f9fbb04da6184348eab19e5392c22cf4 @ 100.103.42.29:4501 (4936 serverKeys entries)
+      ff511987e941c18a -> ff511987e941c18a05108496dce83e61 @ 100.103.4.36:4501 (864 serverKeys entries)
+
+    serverKeys UIDs: 682
+    serverList UIDs: 51
+    Overlap: 51
+    Some serverKeys UIDs ARE in serverList
+
+============================================================
+
+*** serverList is CORRECT (all running servers found by prefix match) ***
+
+[1] Getting serverList...
+    Found 51 live servers
+
+[2] Checking keyServers (limit=10000000)...
+    Scanning ALL keyServers entries
+    Scanned 29304 keyServers entries
+
+[3] Checking serverKeys (limit=10000000)...
+    Scanned 139421 serverKeys entries
+    Found entries for 682 unique servers
+
+[3b] Counting blog entries specifically...
+    Blog keyServers entries: 21401
+    Blog serverKeys entries: 0
+
+============================================================
+FINDINGS
+============================================================
+
+[Shard Statistics]
+  Total shards (keyServers entries): 29304
+  Blog keyServers entries: 21401
+  Blog serverKeys entries: 0
+  Unique servers referenced in keyServers: 51
+  Shards with ALL live servers: 29303
+  Shards with SOME dead servers: 0
+  Shards with ALL dead servers: 0 <- DD can't route these!
+
+  WARNING: Blog keyServers exist (21401) but no blog serverKeys!
+           This means keyServers references data no server claims to own.
+
+[keyServers Issues]
+
+  CRITICAL: 283 uncoalesced adjacent entries!
+            (This triggers ASSERT at KeyRangeMap.actor.cpp:297)
+    - keys: b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manif'... -> b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manif'...
+      servers: ['36baa0a0...', 'a59992dd...', 'b0a07797...']
+    - keys: b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manif'... -> b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manif'...
+      servers: ['36baa0a0...', 'a59992dd...', 'b0a07797...']
+    - keys: b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manif'... -> b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manif'...
+      servers: ['36baa0a0...', '508e73a0...', '667e91ea...']
+    - keys: b'\x15?\x02itms11\x00\x02team-manifest\x00\x02vers'... -> b'\x15?\x02itms11\x00\x02team-manifest\x00\x02vers'...
+      servers: ['a59992dd...', 'b0a07797...', 'c20aa370...']
+    - keys: b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'... -> b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'...
+      servers: ['36baa0a0...', '72775d7e...', 'e62a516b...']
+    - keys: b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'... -> b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'...
+      servers: ['36baa0a0...', '72775d7e...', 'e62a516b...']
+    - keys: b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'... -> b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'...
+      servers: ['f9fbb04d...', 'a59992dd...', '67216b12...']
+    - keys: b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'... -> b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'...
+      servers: ['386ef631...', 'bba4f985...', '667e91ea...']
+    - keys: b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'... -> b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'...
+      servers: ['386ef631...', 'bba4f985...', '667e91ea...']
+    - keys: b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'... -> b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manife'...
+      servers: ['386ef631...', 'bba4f985...', '667e91ea...']
+    ... and 273 more
+  No dead server references found
+  No decode errors (values all parseable)
+  No empty source servers (ASSERT(src.size()) OK - DDTxnProcessor.actor.cpp:72)
+  keyServers is not empty (ASSERT_GT(keyServers.size(), 0) OK)
+
+[serverKeys Statistics]
+  Total ranges claimed by servers: 68521
+  Blog ranges: 0
+  Ranges claimed by live servers: 68521
+  Ranges claimed by dead servers: 0
+
+[serverKeys Issues]
+
+  CRITICAL: 686 uncoalesced adjacent entries!
+            (This triggers ASSERT at MoveKeys.actor.cpp:158)
+
+    Breakdown:
+      Live servers: 55 entries across 49 servers
+      Dead servers: 631 entries across 631 servers
+
+    FULL KEYSPACE entries (b'' -> b'\xff\xff') - VERY WRONG:
+      Live servers: 0
+      Dead servers: 0
+
+    Live server uncoalesced entries:
+      - server: 04f75a32...
+        keys: b'/\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\xe5\x00\x00\xbd\xe9'... -> b'/\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\xe5\x00\x00\xbd\xe9'...
+      - server: 04f75a32...
+        keys: b'/\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\xfd\x00\x00\xbd\x90'... -> b'/\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\xfd\x00\x00\xbd\x91'...
+      - server: 04f75a32...
+        keys: b'/\xff\x02/fdbClientInfo/client_laten'... -> b'/\xff\xff'...
+      - server: 06a60fe2...
+        keys: b'/\xff\x02/fdbClientInfo/client_laten'... -> b'/\xff\xff'...
+      - server: 16740ee7...
+        keys: b'/\xff\x02/timeKeeper/map/\x18_\xdfw'... -> b'/\xff\xff'...
+      - server: 1c1eeee2...
+        keys: b'/\xff\x02/fdbClientInfo/client_laten'... -> b'/\xff\xff'...
+      - server: 21c73425...
+        keys: b'/\xff\x02/fdbClientInfo/client_laten'... -> b'/\xff\xff'...
+      - server: 2577fc18...
+        keys: b'/\xff\x02/fdbClientInfo/client_laten'... -> b'/\xff\xff'...
+      - server: 351d3c76...
+        keys: b'/\xff\x02/fdbClientInfo/client_laten'... -> b'/\xff\xff'...
+      - server: 36baa0a0...
+        keys: b'/\xff\x02/timeKeeper/map/\x18f\xba\x97'... -> b'/\xff\xff'...
+      ... and 45 more live server entries
+
+    Dead server uncoalesced entries:
+      - server: 005c0f01...
+        keys: b'/'... -> b'/\xff\xff'...
+      - server: 006c3ee8...
+        keys: b'/'... -> b'/\xff\xff'...
+      - server: 00b51b88...
+        keys: b'/'... -> b'/\xff\xff'...
+      - server: 00c882f8...
+        keys: b'/'... -> b'/\xff\xff'...
+      - server: 00e439d4...
+        keys: b'/'... -> b'/\xff\xff'...
+      ... and 626 more dead server entries
+
+  WARNING: 1262 entries for 631 dead servers
+           (Dead server refs won't crash DD immediately but cause issues)
+    - 1a36d334f7848efaed549dd3739461f3
+    - 8ecea080d2d5f2f81ced7d1575a9d16b
+    - 8fb837903dd4671bca4df03784b877c6
+    - 216a80babdd71574bd749bf509466d1a
+    - 3be19a12811b1b61a20feec55bf304c1
+  No malformed server UIDs (all UIDs are 16 bytes)
+
+[4] Checking for wrong_shard_server scenario...
+    (This detects: keyServers says server owns shard, but serverKeys disagrees)
+    [Step 1] Building serverKeys ownership map...
+        ... processed 100000 serverKeys entries
+    Processed 139421 serverKeys entries for 682 servers
+    [Step 2] Checking each keyServers range against serverKeys...
+    Checked 29303 ranges from 29304 keyServers entries
+    [Step 3] Checking for orphan serverKeys entries...
+
+[wrong_shard_server Issues]
+
+  CRITICAL: 76108 wrong_shard_server issues across 51 servers!
+            Unique ranges affected: 29302
+
+    RANGES WHERE *ALL* SERVERS MISSING: 29302
+    --> DD WILL LOOP FOREVER on these ranges until 15-min timeout!
+
+    BREAKDOWN BY TYPE:
+      Blog ranges (\xff\x02/blog/):     21401
+      Backup ranges:                     0
+      Other system ranges (\xff...):    125
+      User data ranges:                  7776
+
+    CRITICAL - USER DATA RANGES (7776):
+      [b''...)
+        All 3 servers missing from serverKeys
+      [b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc.2x'...)
+        All 3 servers missing from serverKeys
+      [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manifest\x00\x02teams'...)
+        All 3 servers missing from serverKeys
+      [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manifest\x00\x02teams'...)
+        All 3 servers missing from serverKeys
+      [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-manifest\x00\x02teams'...)
+        All 3 servers missing from serverKeys
+      ... and 7771 more user data ranges
+
+    BLOG RANGES (21401) - backup log data:
+      [b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x98\x00\x00\xbd\xd7\xdc\xa2x\xe2\x00\x00\x003'...)
+      [b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x98\x00\x00\xbd\xd8\xb0\x1d\rt\x00\x00\x00\x16'...)
+      [b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x99\x00\x00\xbd\x94\x17\xc4Vn\x00\x00\x00H'...)
+      ... and 21398 more blog ranges
+
+
+    Server 679781d5...: 394 ranges
+      - [b''..., b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      ... and 391 more ranges
+
+    Server 8e9eafbf...: 661 ranges
+      - [b''..., b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'..., b'\x15?\x02itms11\x00\x02content-item\x00\x15'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-m'..., b'\x15?\x02itms5\x00\x02content-item\x00\x15\x01'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      ... and 658 more ranges
+
+    Server 564b7746...: 419 ranges
+      - [b''..., b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'..., b'\x15?\x02itms11\x00\x02content-item\x00\x15'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      ... and 416 more ranges
+
+    Server bc2f915d...: 417 ranges
+      - [b'\x154\x02R\x00\x021549843200\x00\x02umc.cpc'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      ... and 414 more ranges
+
+    Server 680d6d89...: 2661 ranges
+      - [b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'..., b'\x15?\x02itms11\x00\x02Wrapped\x00\x02team-'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-m'..., b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-m'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      - [b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-m'..., b'\x15?\x02itms5\x00\x02Wrapped\x00\x02team-m'...)
+        reason: server_does_not_claim_range_in_serverkeys
+      ... and 2658 more ranges
+
+    ... and 46 more servers with issues
+  No orphan serverKeys entries found
+
+============================================================
+TOTAL: 78339 issues found
+
+[Server ID Comparison]
+  Servers in keyServers:  51
+  Servers in serverList:  51
+  Servers in serverKeys:  682
+  Servers actually running: 51
+
+  Comparisons (using 8-byte UID prefixes):
+    serverList matches running servers: YES
+
+    Running servers referenced in keyServers: 51
+    Running servers NOT in keyServers: 0
+    keyServers references NOT running: 0
+
+    Running servers with serverKeys entries: 51
+    Running servers WITHOUT serverKeys: 0
+
+[Orphan Server Ranges]
+  No orphan servers found (all serverList servers are in keyServers)
+
+[Storage Server Discovery]
+  Attempting to discover what shards running SSs have...
+    Querying special keys (5 second timeout)...
+    Metrics query failed: b'Operation aborted because the transaction timed out' (1031)
+    Special keys query failed: b'Operation aborted because the transaction timed out' (1031)
+  No useful info from special keys
+
+  Attempting to map old server IDs to new (by address)...
+
+[Server ID Mapping Attempt]
+    Building running server address map...
+    Running servers with addresses: 51
+    Extracting addresses from serverList values...
+    ... processed 10/51 serverList entries
+    ... processed 20/51 serverList entries
+    ... processed 30/51 serverList entries
+    ... processed 40/51 serverList entries
+    ... processed 50/51 serverList entries
+  Successful mappings (old -> new): 51
+  Unmatched serverList servers: 0
+  Unmatched running servers: 0
+
+  Sample mappings:
+    04f75a32... -> 04f75a32... @ 100.103.210.7:4501
+    06a60fe2... -> 06a60fe2... @ 100.103.190.36:4501
+    16740ee7... -> 16740ee7... @ 100.103.8.22:4501
+    1c1eeee2... -> 1c1eeee2... @ 100.103.190.27:4501
+    21c73425... -> 21c73425... @ 100.103.164.92:4501
+
+  SUCCESS: Found 51 ID mappings!
+  This means we can potentially rebuild keyServers by:
+    1. Take serverKeys ranges from old (serverList) server IDs
+    2. Map to new (running) server IDs
+    3. Write new keyServers entries pointing to running servers
+
+  NOTE: No orphan ranges to verify (orphan analysis may be skipped or no orphans found)
+
+[SS Shard Probe - Actual Read Test]
+  Probing SSs with actual reads to detect missing shards...
+  (This detects when metadata says SS has shard but SS doesn't have it)
+  Probing all 29303 ranges...
+    ... probed 500/29303 ranges (1%)
+    ... probed 1000/29303 ranges (3%)
+    ... probed 1500/29303 ranges (5%)
+    ... probed 2000/29303 ranges (6%)
+    ... probed 2500/29303 ranges (8%)
+    ... probed 3000/29303 ranges (10%)
+    ... probed 3500/29303 ranges (11%)
+    ... probed 4000/29303 ranges (13%)
+    ... probed 4500/29303 ranges (15%)
+    ... probed 5000/29303 ranges (17%)
+    ... probed 5500/29303 ranges (18%)
+    ... probed 6000/29303 ranges (20%)
+    ... probed 6500/29303 ranges (22%)
+    ... probed 7000/29303 ranges (23%)
+    ... probed 7500/29303 ranges (25%)
+    ... probed 8000/29303 ranges (27%)
+    ... probed 8500/29303 ranges (29%)
+    ... probed 9000/29303 ranges (30%)
+    ... probed 9500/29303 ranges (32%)
+    ... probed 10000/29303 ranges (34%)
+    ... probed 10500/29303 ranges (35%)
+    ... probed 11000/29303 ranges (37%)
+    ... probed 11500/29303 ranges (39%)
+    ... probed 12000/29303 ranges (40%)
+    ... probed 12500/29303 ranges (42%)
+    ... probed 13000/29303 ranges (44%)
+    ... probed 13500/29303 ranges (46%)
+    ... probed 14000/29303 ranges (47%)
+    ... probed 14500/29303 ranges (49%)
+    ... probed 15000/29303 ranges (51%)
+    ... probed 15500/29303 ranges (52%)
+    ... probed 16000/29303 ranges (54%)
+    ... probed 16500/29303 ranges (56%)
+    ... probed 17000/29303 ranges (58%)
+    ... probed 17500/29303 ranges (59%)
+    ... probed 18000/29303 ranges (61%)
+    ... probed 18500/29303 ranges (63%)
+    ... probed 19000/29303 ranges (64%)
+    ... probed 19500/29303 ranges (66%)
+    ... probed 20000/29303 ranges (68%)
+    ... probed 20500/29303 ranges (69%)
+    ... probed 21000/29303 ranges (71%)
+    ... probed 21500/29303 ranges (73%)
+    ... probed 22000/29303 ranges (75%)
+    ... probed 22500/29303 ranges (76%)
+    ... probed 23000/29303 ranges (78%)
+    ... probed 23500/29303 ranges (80%)
+    ... probed 24000/29303 ranges (81%)
+    ... probed 24500/29303 ranges (83%)
+    ... probed 25000/29303 ranges (85%)
+    ... probed 25500/29303 ranges (87%)
+    ... probed 26000/29303 ranges (88%)
+    ... probed 26500/29303 ranges (90%)
+    ... probed 27000/29303 ranges (92%)
+    ... probed 27500/29303 ranges (93%)
+    ... probed 28000/29303 ranges (95%)
+    ... probed 28500/29303 ranges (97%)
+    ... probed 29000/29303 ranges (98%)
+
+  Probe Results:
+    Total probed: 29303
+    SS has shard: 7777
+    wrong_shard_server (SS explicitly missing): 0
+    Timeout (SS slow or overloaded): 0
+    Other errors: 21526
+
+  Error breakdown by code:
+      error_2004 (2004): 21526
+
+  Error samples:
+      Code 2004: b'Key outside legal range' (2004)
+        Key: b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x98\x00\x00\xbd\xd7\xdc'...
+      Code 2004: b'Key outside legal range' (2004)
+        Key: b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x98\x00\x00\xbd\xd8\xb0'...
+      Code 2004: b'Key outside legal range' (2004)
+        Key: b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x99\x00\x00\xbd\x94\x17'...
+      Code 2004: b'Key outside legal range' (2004)
+        Key: b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x99\x00\x00\xbd\x94)'...
+      Code 2004: b'Key outside legal range' (2004)
+        Key: b'\xff\x02/blog/2\xc1\xab\xe0\x8f\xce\xe0Zf/\x82\xb2\x8e\x92\xa7\x04\x99\x00\x00\xbd\x94\x9a'...
+
+  No wrong_shard_server errors, but 21526 other errors occurred.
+    These may be transient (timeouts) or indicate cluster health issues.
+
+[C++ SS Shard Audit - Using preloaded audit data]
+  Total servers: 54
+  Reachable: 54
+  Servers with mismatches: 54
+  Ranges missing from SS: 14178
+  Ranges extra in SS: 0
+
+======================================================================
+AUDIT COMPARISON REPORT: Metadata vs Storage Server State
+======================================================================
+MODE: DIAGNOSTIC ONLY (no changes)
+
+[Summary from C++ Audit Tool]
+  Total servers in serverList:    54
+  Reachable (responded to RPC):   54
+  Unreachable (no response):      0
+  Servers with mismatches:        54
+
+[Server Categories]
+  Servers with matching state:  0
+  Servers missing shards:       54 (metadata says they should have shards they don't)
+  Servers with extra shards:    0 (SS has shards metadata doesn't know about)
+  Unreachable servers:          0
+
+======================================================================
+SERVERS WITH MISSING SHARDS (Metadata claims SS has shards it doesn't)
+======================================================================
+
+  These are STALE serverKeys entries. The metadata (serverKeys) claims
+  these storage servers own certain key ranges, but when we directly
+  queried the SS via getShardState RPC, it reported it doesn't have them.
+
+  This is likely the cause of 'wrong_shard_server' errors and DD looping.
+
+  Server: aed3b039325af7048594d1c449f765db
+    Address: 100.103.210.7:4501
+    Metadata says: 149 ranges
+    SS reports:    0 ranges
+    MISSING:       149 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100027465616d2d6d616e6966657374000276657273, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d73360002636f6e74656e742d6974656d0015010274656d70)
+      ... and 146 more missing ranges
+
+  Server: 75efc327e20fa606ba5c690584a5e4cc
+    Address: 100.103.190.36:4501
+    Metadata says: 100 ranges
+    SS reports:    0 ranges
+    MISSING:       100 ranges (metadata has, SS doesn't)
+      Missing: [15050243000231353434, 150c02520002313535343539353230300002756d632e6370632e316e6e)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d7331310002636f6e74656e742d6974656d00150202636f6e)
+      Missing: [153f0269746d73313100027465616d2d6d616e6966657374000276657273, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      ... and 97 more missing ranges
+
+  Server: 3f10f45de70e74168d6396cb0075ac58
+    Address: 100.103.8.22:4501
+    Metadata says: 102 ranges
+    SS reports:    0 ranges
+    MISSING:       102 ranges (metadata has, SS doesn't)
+      Missing: [15130243000231353339, 1530025200023135343638)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      Missing: [153f0269746d733500026576656e747300027363686564756c6573001501, 153f0269746d733500026576656e747300027363686564756c6573001502)
+      ... and 99 more missing ranges
+
+  Server: 09b493f3e2ee1e1cfc6ae713ddae100f
+    Address: 100.103.190.27:4501
+    Metadata says: 539 ranges
+    SS reports:    0 ranges
+    MISSING:       539 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      Missing: [153f0269746d73313100027465616d2d6d616e6966657374000276657273, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 536 more missing ranges
+
+  Server: 7283c4932534c721085ca72c58de4512
+    Address: 100.103.164.92:4501
+    Metadata says: 108 ranges
+    SS reports:    0 ranges
+    MISSING:       108 ranges (metadata has, SS doesn't)
+      Missing: [150c02520002313535343539353230300002756d632e6370632e316e6e, 15130243000231353339)
+      Missing: [153402520002313534393834333230300002756d632e6370632e3278, 153f0251410002636174616c6f6700026172636869766500026576656e74)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 105 more missing ranges
+
+  Server: c890331118fc7725a54dc1ab36410aa0
+    Address: 100.103.208.100:4501
+    Metadata says: 109 ranges
+    SS reports:    0 ranges
+    MISSING:       109 ranges (metadata has, SS doesn't)
+      Missing: [150c02520002313535343539353230300002756d632e6370632e316e6e, 15130243000231353339)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d7331310002636f6e74656e742d6974656d0015020273706f, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      ... and 106 more missing ranges
+
+  Server: d8193e72763c1d3522d549cabc10ceb6
+    Address: 100.103.16.17:4501
+    Metadata says: 108 ranges
+    SS reports:    0 ranges
+    MISSING:       108 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d73360002636f6e74656e742d6974656d0015010274656d70, 153f0269746d73360002636f6e74656e742d6974656d001502026c656167)
+      ... and 105 more missing ranges
+
+  Server: 2571cfe1a0a0ba36e751021c3b8894c3
+    Address: 100.103.214.80:4501
+    Metadata says: 481 ranges
+    SS reports:    0 ranges
+    MISSING:       481 ranges (metadata has, SS doesn't)
+      Missing: [153f0251410002636174616c6f6700026172636869766500026576656e74, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 478 more missing ranges
+
+  Server: 9372852b31f66e383a4faca03c3b513e
+    Address: 100.103.42.47:4501
+    Metadata says: 483 ranges
+    SS reports:    0 ranges
+    MISSING:       483 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 480 more missing ranges
+
+  Server: 04b2409e90edab3cb57fff3c27fc7867
+    Address: 100.103.210.2:4501
+    Metadata says: 456 ranges
+    SS reports:    0 ranges
+    MISSING:       456 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 453 more missing ranges
+
+  Server: bd1bc2996bb647473b129ff90c7c8e11
+    Address: 100.103.164.29:4501
+    Metadata says: 103 ranges
+    SS reports:    0 ranges
+    MISSING:       103 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733700025772617070656400027465616d2d6d616e696665, 153f0269746d733700025772617070656400027465616d2d6d616e696665)
+      ... and 100 more missing ranges
+
+  Server: 71c10761a0738e50f0a4a29b6c6a0d27
+    Address: 100.103.164.12:4501
+    Metadata says: 589 ranges
+    SS reports:    0 ranges
+    MISSING:       589 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 586 more missing ranges
+
+  Server: c1a13af646774b56800d5efc93d7ab30
+    Address: 100.103.214.18:4501
+    Metadata says: 108 ranges
+    SS reports:    0 ranges
+    MISSING:       108 ranges (metadata has, SS doesn't)
+      Missing: [153402520002313534393834333230300002756d632e6370632e3278, 153f0251410002636174616c6f6700026172636869766500026576656e74)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 105 more missing ranges
+
+  Server: 118be4aa14ca5257801fb29c3801d1f8
+    Address: 100.103.0.25:4501
+    Metadata says: 103 ranges
+    SS reports:    0 ranges
+    MISSING:       103 ranges (metadata has, SS doesn't)
+      Missing: [153402520002313534393834333230300002756d632e6370632e3278, 153f0251410002636174616c6f6700026172636869766500026576656e74)
+      Missing: [153f0269746d7331310002636f6e74656e742d6974656d0015020273706f, 153f0269746d7331310002636f6e74656e742d6974656d0015020273706f)
+      Missing: [153f0269746d73313100027465616d2d6d616e6966657374000276657273, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      ... and 100 more missing ranges
+
+  Server: 2d272775ec93b45b26eeb4e1dbb5f774
+    Address: 100.103.42.28:4501
+    Metadata says: 104 ranges
+    SS reports:    0 ranges
+    MISSING:       104 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 101 more missing ranges
+
+  Server: 73351e16859e2a5c22847d4bbee292df
+    Address: 100.103.4.23:4501
+    Metadata says: 11 ranges
+    SS reports:    0 ranges
+    MISSING:       11 ranges (metadata has, SS doesn't)
+      Missing: [1701c7c902646174610002756d632e6373652e3432753837, 1701c7c902646174610002756d632e6373652e3434377264)
+      Missing: [1701c7c902646174610002756d632e6373652e35383274, 1701c7c902646174610002756d632e6373652e3561736a)
+      Missing: [1701c7c902646174610002756d632e6373652e6c656e6b6e7732707a3170, 1701c7c902646174610002756d632e6373652e6d766f6236637a6e707763)
+      ... and 8 more missing ranges
+
+  Server: f7bb09c5c076db5e186a3a8c77c28400
+    Address: 100.103.8.3:4501
+    Metadata says: 18 ranges
+    SS reports:    0 ranges
+    MISSING:       18 ranges (metadata has, SS doesn't)
+      Missing: [1701c7c902646174610002756d632e6373652e31796673, 1701c7c902646174610002756d632e6373652e3231343263)
+      Missing: [1701c7c902646174610002756d632e6373652e3432753837, 1701c7c902646174610002756d632e6373652e3434377264)
+      Missing: [1701c7c902646174610002756d632e6373652e36306872, 1701c7c902646174610002756d632e6373652e36323136)
+      ... and 15 more missing ranges
+
+  Server: 79d34426e868f7601dd2669c3047f045
+    Address: 100.103.210.16:4501
+    Metadata says: 86 ranges
+    SS reports:    0 ranges
+    MISSING:       86 ranges (metadata has, SS doesn't)
+      Missing: [15340243000231353534353935323030000244656e6f6d696e61746f723a, 153402520002313534393834333230300002756d632e6370632e3278)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      ... and 83 more missing ranges
+
+  Server: 3f5c19a63cf3666469b51359c4b9fcf7
+    Address: 100.103.190.46:4501
+    Metadata says: 111 ranges
+    SS reports:    0 ranges
+    MISSING:       111 ranges (metadata has, SS doesn't)
+      Missing: [15050243000231353434, 150c02520002313535343539353230300002756d632e6370632e316e6e)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 108 more missing ranges
+
+  Server: bf222d16ea917e66170df186844a58a2
+    Address: 100.103.190.30:4501
+    Metadata says: 419 ranges
+    SS reports:    0 ranges
+    MISSING:       419 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 416 more missing ranges
+
+  Server: f0d85671126b2167f55c57ce87dcf931
+    Address: 100.103.208.62:4501
+    Metadata says: 562 ranges
+    SS reports:    0 ranges
+    MISSING:       562 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 559 more missing ranges
+
+  Server: 6c073150d58197674cf4254d0a2200c5
+    Address: 100.103.4.73:4501
+    Metadata says: 98 ranges
+    SS reports:    0 ranges
+    MISSING:       98 ranges (metadata has, SS doesn't)
+      Missing: [150c02520002313535343539353230300002756d632e6370632e316e6e, 15130243000231353339)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d73350002636f6e74656e742d6974656d0015010274656d70)
+      Missing: [153f0269746d733500027465616d2d6d616e696665737400027665727369, 153f0269746d733500027465616d2d6d616e696665737400027665727369)
+      ... and 95 more missing ranges
+
+  Server: 54a53278896d0d68bb53fbeecfef9a0c
+    Address: 100.103.16.23:4501
+    Metadata says: 519 ranges
+    SS reports:    0 ranges
+    MISSING:       519 ranges (metadata has, SS doesn't)
+      Missing: [, 15050243000231353434)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 516 more missing ranges
+
+  Server: 7cb1d5747e5d7772ce2707489253301c
+    Address: 100.103.4.29:4501
+    Metadata says: 530 ranges
+    SS reports:    0 ranges
+    MISSING:       530 ranges (metadata has, SS doesn't)
+      Missing: [153f0251410002636174616c6f6700026172636869766500026576656e74, 153f0251410002636174616c6f6700026172636869766500026576656e74)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 527 more missing ranges
+
+  Server: 4aefc9ab0d8ed67cd7bcaf3e6c0ddbb5
+    Address: 100.103.0.28:4501
+    Metadata says: 100 ranges
+    SS reports:    0 ranges
+    MISSING:       100 ranges (metadata has, SS doesn't)
+      Missing: [15340243000231353534353935323030000244656e6f6d696e61746f723a, 153402520002313534393834333230300002756d632e6370632e3278)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d7331310002636f6e74656e742d6974656d00150202636f6e)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      ... and 97 more missing ranges
+
+  Server: 2e6596caa8c5848270e50a0f213f7ba7
+    Address: 100.103.208.6:4501
+    Metadata says: 495 ranges
+    SS reports:    0 ranges
+    MISSING:       495 ranges (metadata has, SS doesn't)
+      Missing: [153f0251410002636174616c6f6700026172636869766500026576656e74, 153f0251410002636174616c6f6700026172636869766500026576656e74)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 492 more missing ranges
+
+  Server: 312180241724be89aef83668948d5a4d
+    Address: 100.103.0.14:4501
+    Metadata says: 437 ranges
+    SS reports:    0 ranges
+    MISSING:       437 ranges (metadata has, SS doesn't)
+      Missing: [, 15050243000231353434)
+      Missing: [1530025200023135343638, 15340243000231353534353935323030000244656e6f6d696e61746f723a)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 434 more missing ranges
+
+  Server: 57b23e316726158cfbdb65ef1358fad2
+    Address: 100.103.42.53:4501
+    Metadata says: 110 ranges
+    SS reports:    0 ranges
+    MISSING:       110 ranges (metadata has, SS doesn't)
+      Missing: [15130243000231353339, 1530025200023135343638)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733500026576656e747300027363686564756c6573001501, 153f0269746d733500026576656e747300027363686564756c6573001501)
+      ... and 107 more missing ranges
+
+  Server: 71c0cc11bfaf9e8ed79af79c142b71a0
+    Address: 100.103.0.29:4501
+    Metadata says: 152 ranges
+    SS reports:    0 ranges
+    MISSING:       152 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 149 more missing ranges
+
+  Server: 3f253bf7b5897a90f4f5a6e7845cfa10
+    Address: 100.103.164.75:4501
+    Metadata says: 107 ranges
+    SS reports:    0 ranges
+    MISSING:       107 ranges (metadata has, SS doesn't)
+      Missing: [15050243000231353434, 150c02520002313535343539353230300002756d632e6370632e316e6e)
+      Missing: [15340243000231353534353935323030000244656e6f6d696e61746f723a, 153402520002313534393834333230300002756d632e6370632e3278)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      ... and 104 more missing ranges
+
+  Server: 8e73ca288d795597b615c206a68ec4e7
+    Address: 100.103.0.16:4501
+    Metadata says: 418 ranges
+    SS reports:    0 ranges
+    MISSING:       418 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 415 more missing ranges
+
+  Server: d56d8221eabce69a5e119932ebafc6b3
+    Address: 100.103.214.86:4501
+    Metadata says: 520 ranges
+    SS reports:    0 ranges
+    MISSING:       520 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d7331310002636f6e74656e742d6974656d00150202636f6e, 153f0269746d7331310002636f6e74656e742d6974656d0015020273706f)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      Missing: [153f0269746d733500026576656e747300027363686564756c6573001502, 153f0269746d733500026576656e747300027363686564756c6573001502)
+      ... and 517 more missing ranges
+
+  Server: 6f76d53f150c569e8804e560753c1815
+    Address: 100.103.42.0:4501
+    Metadata says: 100 ranges
+    SS reports:    0 ranges
+    MISSING:       100 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d7331310002636f6e74656e742d6974656d0015020273706f, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 97 more missing ranges
+
+  Server: 652fc902dd9299a5ea444a4276718dbd
+    Address: 100.103.8.17:4501
+    Metadata says: 514 ranges
+    SS reports:    0 ranges
+    MISSING:       514 ranges (metadata has, SS doesn't)
+      Missing: [153f0251410002636174616c6f6700026172636869766500026576656e74, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 511 more missing ranges
+
+  Server: 7d3358839777a0b05659f2fd95abda84
+    Address: 100.103.42.42:4501
+    Metadata says: 479 ranges
+    SS reports:    0 ranges
+    MISSING:       479 ranges (metadata has, SS doesn't)
+      Missing: [, 15050243000231353434)
+      Missing: [1530025200023135343638, 15340243000231353534353935323030000244656e6f6d696e61746f723a)
+      Missing: [153f0251410002636174616c6f6700026172636869766500026576656e74, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 476 more missing ranges
+
+  Server: afed4b5eecf489b38a955b20f6bd1dc1
+    Address: 100.103.208.46:4501
+    Metadata says: 89 ranges
+    SS reports:    0 ranges
+    MISSING:       89 ranges (metadata has, SS doesn't)
+      Missing: [15050243000231353434, 150c02520002313535343539353230300002756d632e6370632e316e6e)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 86 more missing ranges
+
+  Server: a09361c6385e13baa70fc0b652914ffe
+    Address: 100.103.8.50:4501
+    Metadata says: 106 ranges
+    SS reports:    0 ranges
+    MISSING:       106 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 103 more missing ranges
+
+  Server: a708517885f9a4bbda6bca378a445935
+    Address: 100.103.8.18:4501
+    Metadata says: 442 ranges
+    SS reports:    0 ranges
+    MISSING:       442 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100026576656e747300027363686564756c65730015, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733500026576656e747300027363686564756c6573001502, 153f0269746d733500026576656e747300027363686564756c6573001502)
+      ... and 439 more missing ranges
+
+  Server: 10b64eb385d2fabbd03c753815583a0d
+    Address: 100.103.214.26:4501
+    Metadata says: 19 ranges
+    SS reports:    0 ranges
+    MISSING:       19 ranges (metadata has, SS doesn't)
+      Missing: [15050243000231353434, 150c02520002313535343539353230300002756d632e6370632e316e6e)
+      Missing: [1701c7c902646174610002756d632e6373652e34667332, 1701c7c902646174610002756d632e6373652e3469723667666271336e75)
+      Missing: [1701c7c902646174610002756d632e6373652e35797a646d, 1701c7c902646174610002756d632e6373652e36306872)
+      ... and 16 more missing ranges
+
+  Server: 4bcc761c5d912fbcc41c200e9ed26e1c
+    Address: 100.103.8.46:4501
+    Metadata says: 14 ranges
+    SS reports:    0 ranges
+    MISSING:       14 ranges (metadata has, SS doesn't)
+      Missing: [1701c7c902646174610002756d632e6373652e3370737565, 1701c7c902646174610002756d632e6373652e337234)
+      Missing: [1701c7c902646174610002756d632e6373652e3434377264, 1701c7c902646174610002756d632e6373652e34356b72)
+      Missing: [1701c7c902646174610002756d632e6373652e34667332, 1701c7c902646174610002756d632e6373652e3469723667666271336e75)
+      ... and 11 more missing ranges
+
+  Server: 6653e961cf7565bd9c13bef6e13f3233
+    Address: 100.103.190.48:4501
+    Metadata says: 104 ranges
+    SS reports:    0 ranges
+    MISSING:       104 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 101 more missing ranges
+
+  Server: d9b13942e7f2b5c1d01f445756812696
+    Address: 100.103.164.44:4501
+    Metadata says: 424 ranges
+    SS reports:    0 ranges
+    MISSING:       424 ranges (metadata has, SS doesn't)
+      Missing: [153f0251410002636174616c6f6700026172636869766500026576656e74, 153f0251410002636174616c6f6700026172636869766500026576656e74)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 421 more missing ranges
+
+  Server: 87b61ce870a30ac2153123857e36fa3c
+    Address: 100.103.164.46:4501
+    Metadata says: 470 ranges
+    SS reports:    0 ranges
+    MISSING:       470 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 467 more missing ranges
+
+  Server: 1e32b8a6fa5590c9465134cb29845791
+    Address: 100.103.208.73:4501
+    Metadata says: 523 ranges
+    SS reports:    0 ranges
+    MISSING:       523 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d73350002636f6e74656e742d6974656d0015010274656d70)
+      ... and 520 more missing ranges
+
+  Server: 3d5b9383c0c819cc67d76b09826c86d3
+    Address: 100.103.4.11:4501
+    Metadata says: 437 ranges
+    SS reports:    0 ranges
+    MISSING:       437 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d73350002636f6e74656e742d6974656d0015010274656d70)
+      Missing: [153f0269746d733600026576656e747300027363686564756c6573001502, 153f0269746d733600027465616d2d6d616e696665737400027665727369)
+      Missing: [153f0269746d733700026576656e747300027363686564756c6573001502, 153f0269746d733700026576656e747300027363686564756c6573001502)
+      ... and 434 more missing ranges
+
+  Server: b6b733df160646dee8bad1845fc5b9e8
+    Address: 100.103.190.47:4501
+    Metadata says: 100 ranges
+    SS reports:    0 ranges
+    MISSING:       100 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d7331310002636f6e74656e742d6974656d0015020273706f, 153f0269746d7331310002636f6e74656e742d6974656d0015020273706f)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 97 more missing ranges
+
+  Server: b9a0696322221ce557f3e830f21c500f
+    Address: 100.103.210.98:4501
+    Metadata says: 109 ranges
+    SS reports:    0 ranges
+    MISSING:       109 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d7331310002636f6e74656e742d6974656d0015020273706f, 153f0269746d73313100026576656e747300027363686564756c65730015)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 106 more missing ranges
+
+  Server: c33606c66b512ae638597ac3a23b60b7
+    Address: 100.103.16.13:4501
+    Metadata says: 502 ranges
+    SS reports:    0 ranges
+    MISSING:       502 ranges (metadata has, SS doesn't)
+      Missing: [1530025200023135343638, 15340243000231353534353935323030000244656e6f6d696e61746f723a)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 499 more missing ranges
+
+  Server: 3b11e411309393e7cd44917c0e3c7a62
+    Address: 100.103.0.22:4501
+    Metadata says: 102 ranges
+    SS reports:    0 ranges
+    MISSING:       102 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100027465616d2d6d616e6966657374000276657273, 153f0269746d73313100027465616d2d6d616e6966657374000276657273)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      ... and 99 more missing ranges
+
+  Server: 18abc365c56fe9ea9fcbf7776ea2f104
+    Address: 100.103.16.15:4501
+    Metadata says: 498 ranges
+    SS reports:    0 ranges
+    MISSING:       498 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 495 more missing ranges
+
+  Server: f648761f14bee7ed36b6659e86b7422d
+    Address: 100.103.214.10:4501
+    Metadata says: 107 ranges
+    SS reports:    0 ranges
+    MISSING:       107 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d73350002636f6e74656e742d6974656d0015010274656d70)
+      Missing: [153f0269746d733500026576656e747300027363686564756c6573001501, 153f0269746d733500026576656e747300027363686564756c6573001502)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 104 more missing ranges
+
+  Server: c244d73564363df755092ca94475857a
+    Address: 100.103.208.95:4501
+    Metadata says: 108 ranges
+    SS reports:    0 ranges
+    MISSING:       108 ranges (metadata has, SS doesn't)
+      Missing: [15130243000231353339, 1530025200023135343638)
+      Missing: [153f0269746d733500025772617070656400027465616d2d6d616e696665, 153f0269746d733500025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 105 more missing ranges
+
+  Server: 484318a64db0fbf9f42cc292539eb1ea
+    Address: 100.103.42.29:4501
+    Metadata says: 489 ranges
+    SS reports:    0 ranges
+    MISSING:       489 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      Missing: [153f0269746d73313100025772617070656400027465616d2d6d616e6966, 153f0269746d73313100025772617070656400027465616d2d6d616e6966)
+      ... and 486 more missing ranges
+
+  Server: 8ac141e9871951ff613ee8dc96841005
+    Address: 100.103.4.36:4501
+    Metadata says: 107 ranges
+    SS reports:    0 ranges
+    MISSING:       107 ranges (metadata has, SS doesn't)
+      Missing: [153f0269746d733500026576656e747300027363686564756c6573001501, 153f0269746d733500026576656e747300027363686564756c6573001502)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      Missing: [153f0269746d733600025772617070656400027465616d2d6d616e696665, 153f0269746d733600025772617070656400027465616d2d6d616e696665)
+      ... and 104 more missing ranges
+
+  TOTAL MISSING RANGES: 14178
+
+======================================================================
+ANALYSIS SUMMARY
+======================================================================
+
+  DISCREPANCIES FOUND:
+
+    14178 ranges: metadata claims SS has shards, but SS doesn't
+      Impact: These cause 'wrong_shard_server' errors. DD will loop forever
+              trying to route to SSs that don't have the data.
+      Root cause: Likely stale serverKeys entries from interrupted data moves.
+      Fix: Delete stale serverKeys entries (--repair-serverkeys)
+
+======================================================================
+NEXT STEPS FOR REPAIR
+======================================================================
+
+  To repair the stale serverKeys entries (remove metadata claims for
+  shards the SS doesn't actually have):
+
+  1. Save the audit output to a file:
+     ./audit_ss_shards -C fdb.cluster --json > audit.json
+
+  2. Dry-run to see what would be repaired:
+     python3 check_krm_corruption.py -c fdb.cluster \
+         --repair-from-audit audit.json --repair-serverkeys
+
+  3. Execute repair (CAREFUL!):
+     python3 check_krm_corruption.py -c fdb.cluster \
+         --repair-from-audit audit.json --repair-serverkeys --execute-repair
+
+
+======================================================================
+CORRELATION: Audit Results vs Metadata Analysis
+======================================================================
+
+[Server Coverage]
+  Servers in audit (from serverList):  54
+  Servers with serverKeys entries:     682
+  Servers in both:                     54
+
+  Servers with serverKeys but not in audit: 628
+    (These may be stale/dead server entries in serverKeys)
+      1a36d334f7848efaed549dd3739461f3
+      8ecea080d2d5f2f81ced7d1575a9d16b
+      8fb837903dd4671bca4df03784b877c6
+      ... and 625 more
+
+[Stale serverKeys Confirmation]
+  The audit directly queries each SS to see what shards it has.
+  Ranges where metadata claims SS owns but SS doesn't have = STALE serverKeys
+
+  Total CONFIRMED stale serverKeys entries: 14178
+  Servers with stale entries: 54
+
+  Top servers by stale entry count:
+    71c10761a0738e50... @ 100.103.164.12:4501: 589 stale entries
+    f0d85671126b2167... @ 100.103.208.62:4501: 562 stale entries
+    09b493f3e2ee1e1c... @ 100.103.190.27:4501: 539 stale entries
+    7cb1d5747e5d7772... @ 100.103.4.29:4501: 530 stale entries
+    1e32b8a6fa5590c9... @ 100.103.208.73:4501: 523 stale entries
+    d56d8221eabce69a... @ 100.103.214.86:4501: 520 stale entries
+    54a53278896d0d68... @ 100.103.16.23:4501: 519 stale entries
+    652fc902dd9299a5... @ 100.103.8.17:4501: 514 stale entries
+    c33606c66b512ae6... @ 100.103.16.13:4501: 502 stale entries
+    18abc365c56fe9ea... @ 100.103.16.15:4501: 498 stale entries
+    ... and 44 more servers
+
+[Correlation Summary]
+  The audit CONFIRMS 14178 serverKeys entries are STALE.
+  These entries claim servers own shards they don't actually have.
+  This is the root cause of wrong_shard_server errors and DD looping.
+
+  RECOMMENDED ACTION: Delete these stale serverKeys entries
+    python3 check_krm_corruption.py -c fdb.cluster \
+        --repair-from-audit audit.json --repair-serverkeys --execute-repair
+
+
+======================================================================
+KEYSERVERS CORRELATION: Will stale serverKeys cause wrong_shard_server?
+======================================================================
+
+  Servers with missing ranges: 54
+  Total missing ranges: 14178
+
+  Reading keyServers entries...
+  Read 29303 keyServers ranges
+  Correlating stale serverKeys with keyServers...
+    ... checked 1000 ranges
+    ... checked 2000 ranges
+    ... checked 3000 ranges
+    ... checked 4000 ranges
+    ... checked 5000 ranges
+    ... checked 6000 ranges
+    ... checked 7000 ranges
+    ... checked 8000 ranges
+    ... checked 9000 ranges
+    ... checked 10000 ranges
+    ... checked 11000 ranges
+    ... checked 12000 ranges
+    ... checked 13000 ranges
+    ... checked 14000 ranges
+
+======================================================================
+CORRELATION RESULTS
+======================================================================
+
+[Category 1: ALL_MISSING - Data Unreachable]
+  Count: 7876
+    Blog ranges: 0
+    User data:   7876
+  CRITICAL: 7876 USER DATA ranges have NO servers with the data!
+  DD will loop forever getting wrong_shard_server from all replicas.
+
+  Sample ALL_MISSING ranges:
+    [153f0269746d73313100027465616d2d6d616e696665737400...)
+      Decoded: '\x15?\x02itms11\x00\x02team-manifest\x00\x02versions\x00\x15\x01\x14\x022'
+      Servers missing: 3
+    [153f0269746d733500025772617070656400027465616d2d6d...)
+      Decoded: '\x15?\x02itms5\x00\x02Wrapped\x00\x02team-manifest\x00\x02teams\x00'
+      Servers missing: 3
+    [153f0269746d733600025772617070656400027465616d2d6d...)
+      Decoded: '\x15?\x02itms6\x00\x02Wrapped\x00\x02team-manifest\x00\x02teams\x00'
+      Servers missing: 3
+    [153f0269746d733800025772617070656400027465616d2d6d...)
+      Decoded: '\x15?\x02itms8\x00\x02Wrapped\x00\x02team-manifest\x00\x02teams\x00'
+      Servers missing: 3
+    [160ef5...)
+      Decoded: '\x16\x0eõ'
+      Servers missing: 3
+    ... and 7871 more
+
+[Category 2: SOME_MISSING - Partial Availability]
+  Count: 214
+  WARNING: These ranges have some servers missing, but others have the data.
+  DD might hit wrong_shard_server but can retry with other replicas.
+
+[Category 3: NOT_IN_KEYSERVERS - Garbage to Clean]
+  Count: 6088
+  INFO: Stale serverKeys entries, but keyServers doesn't point to these servers.
+  These don't cause wrong_shard_server - just garbage to clean up.
+
+======================================================================
+IMPACT SUMMARY
+======================================================================
+  CRITICAL: 7876 USER DATA ranges are UNREACHABLE (data loss?)
+    Action: Investigate - data may be lost or on servers not in audit
+  WARNING: 214 ranges have partial availability
+    Action: Clean stale serverKeys, DD can use remaining replicas
+  INFO: 6088 stale serverKeys (no DD impact)
+    Action: Clean stale serverKeys as garbage collection
+======================================================================
+VERIFICATION: Probing ALL_MISSING ranges (using get_range)
+======================================================================
+
+  Probing 7876 of 7876 ALL_MISSING ranges...
+  (checking both first and last key of each range)
+
+    ... probed 0/7876 (success=0, wrong_shard=0, timeout=0)
+    ... probed 50/7876 (success=50, wrong_shard=0, timeout=0)
+    ... probed 100/7876 (success=100, wrong_shard=0, timeout=0)
+    ... probed 150/7876 (success=150, wrong_shard=0, timeout=0)
+    ... probed 200/7876 (success=200, wrong_shard=0, timeout=0)
+    ... probed 250/7876 (success=250, wrong_shard=0, timeout=0)
+    ... probed 300/7876 (success=300, wrong_shard=0, timeout=0)
+    ... probed 350/7876 (success=350, wrong_shard=0, timeout=0)
+    ... probed 400/7876 (success=400, wrong_shard=0, timeout=0)
+    ... probed 450/7876 (success=450, wrong_shard=0, timeout=0)
+    ... probed 500/7876 (success=500, wrong_shard=0, timeout=0)
+    ... probed 550/7876 (success=550, wrong_shard=0, timeout=0)
+    ... probed 600/7876 (success=600, wrong_shard=0, timeout=0)
+    ... probed 650/7876 (success=650, wrong_shard=0, timeout=0)
+    ... probed 700/7876 (success=700, wrong_shard=0, timeout=0)
+    ... probed 750/7876 (success=750, wrong_shard=0, timeout=0)
+    ... probed 800/7876 (success=800, wrong_shard=0, timeout=0)
+    ... probed 850/7876 (success=850, wrong_shard=0, timeout=0)
+    ... probed 900/7876 (success=900, wrong_shard=0, timeout=0)
+    ... probed 950/7876 (success=950, wrong_shard=0, timeout=0)
+    ... probed 1000/7876 (success=1000, wrong_shard=0, timeout=0)
+    ... probed 1050/7876 (success=1050, wrong_shard=0, timeout=0)
+    ... probed 1100/7876 (success=1100, wrong_shard=0, timeout=0)
+    ... probed 1150/7876 (success=1150, wrong_shard=0, timeout=0)
+    ... probed 1200/7876 (success=1200, wrong_shard=0, timeout=0)
+    ... probed 1250/7876 (success=1250, wrong_shard=0, timeout=0)
+    ... probed 1300/7876 (success=1300, wrong_shard=0, timeout=0)
+    ... probed 1350/7876 (success=1350, wrong_shard=0, timeout=0)
+    ... probed 1400/7876 (success=1400, wrong_shard=0, timeout=0)
+    ... probed 1450/7876 (success=1450, wrong_shard=0, timeout=0)
+    ... probed 1500/7876 (success=1500, wrong_shard=0, timeout=0)
+    ... probed 1550/7876 (success=1550, wrong_shard=0, timeout=0)
+    ... probed 1600/7876 (success=1600, wrong_shard=0, timeout=0)
+    ... probed 1650/7876 (success=1650, wrong_shard=0, timeout=0)
+    ... probed 1700/7876 (success=1700, wrong_shard=0, timeout=0)
+    ... probed 1750/7876 (success=1750, wrong_shard=0, timeout=0)
+    ... probed 1800/7876 (success=1800, wrong_shard=0, timeout=0)
+    ... probed 1850/7876 (success=1850, wrong_shard=0, timeout=0)
+    ... probed 1900/7876 (success=1900, wrong_shard=0, timeout=0)
+    ... probed 1950/7876 (success=1950, wrong_shard=0, timeout=0)
+    ... probed 2000/7876 (success=2000, wrong_shard=0, timeout=0)
+    ... probed 2050/7876 (success=2050, wrong_shard=0, timeout=0)
+    ... probed 2100/7876 (success=2100, wrong_shard=0, timeout=0)
+    ... probed 2150/7876 (success=2150, wrong_shard=0, timeout=0)
+    ... probed 2200/7876 (success=2200, wrong_shard=0, timeout=0)
+    ... probed 2250/7876 (success=2250, wrong_shard=0, timeout=0)
+    ... probed 2300/7876 (success=2300, wrong_shard=0, timeout=0)
+    ... probed 2350/7876 (success=2350, wrong_shard=0, timeout=0)
+    ... probed 2400/7876 (success=2400, wrong_shard=0, timeout=0)
+    ... probed 2450/7876 (success=2450, wrong_shard=0, timeout=0)
+    ... probed 2500/7876 (success=2500, wrong_shard=0, timeout=0)
+    ... probed 2550/7876 (success=2550, wrong_shard=0, timeout=0)
+    ... probed 2600/7876 (success=2600, wrong_shard=0, timeout=0)
+    ... probed 2650/7876 (success=2650, wrong_shard=0, timeout=0)
+    ... probed 2700/7876 (success=2700, wrong_shard=0, timeout=0)
+    ... probed 2750/7876 (success=2750, wrong_shard=0, timeout=0)
+    ... probed 2800/7876 (success=2800, wrong_shard=0, timeout=0)
+    ... probed 2850/7876 (success=2850, wrong_shard=0, timeout=0)
+    ... probed 2900/7876 (success=2900, wrong_shard=0, timeout=0)
+    ... probed 2950/7876 (success=2950, wrong_shard=0, timeout=0)
+    ... probed 3000/7876 (success=3000, wrong_shard=0, timeout=0)
+    ... probed 3050/7876 (success=3050, wrong_shard=0, timeout=0)
+    ... probed 3100/7876 (success=3100, wrong_shard=0, timeout=0)
+    ... probed 3150/7876 (success=3150, wrong_shard=0, timeout=0)
+    ... probed 3200/7876 (success=3200, wrong_shard=0, timeout=0)
+    ... probed 3250/7876 (success=3250, wrong_shard=0, timeout=0)
+    ... probed 3300/7876 (success=3300, wrong_shard=0, timeout=0)
+    ... probed 3350/7876 (success=3350, wrong_shard=0, timeout=0)
+    ... probed 3400/7876 (success=3400, wrong_shard=0, timeout=0)
+    ... probed 3450/7876 (success=3450, wrong_shard=0, timeout=0)
+    ... probed 3500/7876 (success=3500, wrong_shard=0, timeout=0)
+    ... probed 3550/7876 (success=3550, wrong_shard=0, timeout=0)
+    ... probed 3600/7876 (success=3600, wrong_shard=0, timeout=0)
+    ... probed 3650/7876 (success=3650, wrong_shard=0, timeout=0)
+    ... probed 3700/7876 (success=3700, wrong_shard=0, timeout=0)
+    ... probed 3750/7876 (success=3750, wrong_shard=0, timeout=0)
+    ... probed 3800/7876 (success=3800, wrong_shard=0, timeout=0)
+    ... probed 3850/7876 (success=3850, wrong_shard=0, timeout=0)
+    ... probed 3900/7876 (success=3900, wrong_shard=0, timeout=0)
+    ... probed 3950/7876 (success=3950, wrong_shard=0, timeout=0)
+    ... probed 4000/7876 (success=4000, wrong_shard=0, timeout=0)
+    ... probed 4050/7876 (success=4050, wrong_shard=0, timeout=0)
+    ... probed 4100/7876 (success=4100, wrong_shard=0, timeout=0)
+    ... probed 4150/7876 (success=4150, wrong_shard=0, timeout=0)
+    ... probed 4200/7876 (success=4200, wrong_shard=0, timeout=0)
+    ... probed 4250/7876 (success=4250, wrong_shard=0, timeout=0)
+    ... probed 4300/7876 (success=4300, wrong_shard=0, timeout=0)
+    ... probed 4350/7876 (success=4350, wrong_shard=0, timeout=0)
+    ... probed 4400/7876 (success=4400, wrong_shard=0, timeout=0)
+    ... probed 4450/7876 (success=4450, wrong_shard=0, timeout=0)
+    ... probed 4500/7876 (success=4500, wrong_shard=0, timeout=0)
+    ... probed 4550/7876 (success=4550, wrong_shard=0, timeout=0)
+    ... probed 4600/7876 (success=4600, wrong_shard=0, timeout=0)
+    ... probed 4650/7876 (success=4650, wrong_shard=0, timeout=0)
+    ... probed 4700/7876 (success=4700, wrong_shard=0, timeout=0)
+    ... probed 4750/7876 (success=4750, wrong_shard=0, timeout=0)
+    ... probed 4800/7876 (success=4800, wrong_shard=0, timeout=0)
+    ... probed 4850/7876 (success=4850, wrong_shard=0, timeout=0)
+    ... probed 4900/7876 (success=4900, wrong_shard=0, timeout=0)
+    ... probed 4950/7876 (success=4950, wrong_shard=0, timeout=0)
+    ... probed 5000/7876 (success=5000, wrong_shard=0, timeout=0)
+    ... probed 5050/7876 (success=5050, wrong_shard=0, timeout=0)
+    ... probed 5100/7876 (success=5100, wrong_shard=0, timeout=0)
+    ... probed 5150/7876 (success=5150, wrong_shard=0, timeout=0)
+    ... probed 5200/7876 (success=5200, wrong_shard=0, timeout=0)
+    ... probed 5250/7876 (success=5250, wrong_shard=0, timeout=0)
+    ... probed 5300/7876 (success=5300, wrong_shard=0, timeout=0)
+    ... probed 5350/7876 (success=5350, wrong_shard=0, timeout=0)
+    ... probed 5400/7876 (success=5400, wrong_shard=0, timeout=0)
+    ... probed 5450/7876 (success=5450, wrong_shard=0, timeout=0)
+    ... probed 5500/7876 (success=5500, wrong_shard=0, timeout=0)
+    ... probed 5550/7876 (success=5550, wrong_shard=0, timeout=0)
+    ... probed 5600/7876 (success=5600, wrong_shard=0, timeout=0)
+    ... probed 5650/7876 (success=5650, wrong_shard=0, timeout=0)
+    ... probed 5700/7876 (success=5700, wrong_shard=0, timeout=0)
+    ... probed 5750/7876 (success=5750, wrong_shard=0, timeout=0)
+    ... probed 5800/7876 (success=5800, wrong_shard=0, timeout=0)
+    ... probed 5850/7876 (success=5850, wrong_shard=0, timeout=0)
+    ... probed 5900/7876 (success=5900, wrong_shard=0, timeout=0)
+    ... probed 5950/7876 (success=5950, wrong_shard=0, timeout=0)
+    ... probed 6000/7876 (success=6000, wrong_shard=0, timeout=0)
+    ... probed 6050/7876 (success=6050, wrong_shard=0, timeout=0)
+    ... probed 6100/7876 (success=6100, wrong_shard=0, timeout=0)
+    ... probed 6150/7876 (success=6150, wrong_shard=0, timeout=0)
+    ... probed 6200/7876 (success=6200, wrong_shard=0, timeout=0)
+    ... probed 6250/7876 (success=6250, wrong_shard=0, timeout=0)
+    ... probed 6300/7876 (success=6300, wrong_shard=0, timeout=0)
+    ... probed 6350/7876 (success=6350, wrong_shard=0, timeout=0)
+    ... probed 6400/7876 (success=6400, wrong_shard=0, timeout=0)
+    ... probed 6450/7876 (success=6450, wrong_shard=0, timeout=0)
+    ... probed 6500/7876 (success=6500, wrong_shard=0, timeout=0)
+    ... probed 6550/7876 (success=6550, wrong_shard=0, timeout=0)
+    ... probed 6600/7876 (success=6600, wrong_shard=0, timeout=0)
+    ... probed 6650/7876 (success=6650, wrong_shard=0, timeout=0)
+    ... probed 6700/7876 (success=6700, wrong_shard=0, timeout=0)
+    ... probed 6750/7876 (success=6750, wrong_shard=0, timeout=0)
+    ... probed 6800/7876 (success=6800, wrong_shard=0, timeout=0)
+    ... probed 6850/7876 (success=6850, wrong_shard=0, timeout=0)
+    ... probed 6900/7876 (success=6900, wrong_shard=0, timeout=0)
+    ... probed 6950/7876 (success=6950, wrong_shard=0, timeout=0)
+    ... probed 7000/7876 (success=7000, wrong_shard=0, timeout=0)
+    ... probed 7050/7876 (success=7050, wrong_shard=0, timeout=0)
+    ... probed 7100/7876 (success=7100, wrong_shard=0, timeout=0)
+    ... probed 7150/7876 (success=7150, wrong_shard=0, timeout=0)
+    ... probed 7200/7876 (success=7200, wrong_shard=0, timeout=0)
+    ... probed 7250/7876 (success=7250, wrong_shard=0, timeout=0)
+    ... probed 7300/7876 (success=7300, wrong_shard=0, timeout=0)
+    ... probed 7350/7876 (success=7350, wrong_shard=0, timeout=0)
+    ... probed 7400/7876 (success=7400, wrong_shard=0, timeout=0)
+    ... probed 7450/7876 (success=7450, wrong_shard=0, timeout=0)
+    ... probed 7500/7876 (success=7500, wrong_shard=0, timeout=0)
+    ... probed 7550/7876 (success=7550, wrong_shard=0, timeout=0)
+    ... probed 7600/7876 (success=7600, wrong_shard=0, timeout=0)
+    ... probed 7650/7876 (success=7650, wrong_shard=0, timeout=0)
+    ... probed 7700/7876 (success=7700, wrong_shard=0, timeout=0)
+    ... probed 7750/7876 (success=7750, wrong_shard=0, timeout=0)
+    ... probed 7800/7876 (success=7800, wrong_shard=0, timeout=0)
+    ... probed 7850/7876 (success=7850, wrong_shard=0, timeout=0)
+  Range probe results:
+    wrong_shard_server:     0
+    key_outside_range:      0
+    success (fully readable): 7876
+    timeout:                0
+    other_error:            0
+
+  ALL 7876 probed ranges are FULLY READABLE!
+  No gaps in SS shard map for these ranges.
+  These stale serverKeys entries are safe to clean up.
+
+======================================================================
+VERIFIED: No gaps in SS shard map
+======================================================================
+  All 7876 'ALL_MISSING' ranges are fully readable.
+  These stale serverKeys entries will NOT cause DD wrong_shard_server.
+  Safe to clean up as garbage collection.
+
+
+======================================================================
+THREE-WAY CORRELATION: keyServers vs serverKeys vs SS Actual
+======================================================================
+
+[Summary for 51 Live Servers]
+
+  serverKeys entries (claims):           14,130
+    - Confirmed by SS (correct):         0
+    - Stale (SS doesn't have):           14,130
+
+  Missing from serverKeys:               76,108
+    (keyServers says server should own, but serverKeys has no entry)
+
+======================================================================
+[Impact Analysis]
+======================================================================
+
+  OBSERVATION: ALL serverKeys entries for live servers are STALE!
+    - serverKeys claims: 14,130 entries
+    - SS confirmed:      0 entries
+    - ALL 14,130 are stale (SS doesn't have these ranges)
+
+  This means serverKeys is COMPLETELY WRONG for live servers.
+  The SS has DIFFERENT data than what serverKeys claims.
+
+  Why does data still exist?
+    → SS loads shard assignments from keyServers (correct)
+    → serverKeys is stale/never updated
+    → SS has data for keyServers ranges, NOT serverKeys ranges
+
+[Discrepancy Breakdown]
+
+  1. MISSING serverKeys (76,108 entries):
+     - keyServers says server should own range
+     - serverKeys has NO entry for that (server, range)
+     - Impact: serverKeys incomplete, but SS has data via keyServers
+     - DD uses serverKeys for shard metrics - may fail to get metrics
+
+  2. STALE serverKeys (14,130 entries):
+     - serverKeys says server owns range
+     - SS doesn't actually have that data (getShardState = wrong_shard_server)
+     - Impact: Garbage metadata pointing to nonexistent data
+
+  COMBINED PICTURE:
+     serverKeys has 14,130 WRONG entries (stale)
+     serverKeys is missing 76,108 CORRECT entries
+     The serverKeys metadata is severely corrupted.
+
+  The 76,108 'missing' entries represent where
+  serverKeys SHOULD have entries but doesn't. The SS actually has
+  this data (loaded from keyServers), just not recorded in serverKeys.
+
+
+======================================================================
+EXECUTIVE SUMMARY - DD IMPACT PREDICTION
+======================================================================
+
+  RANGES WHERE DD WILL LOOP (until 15-min timeout):
+  ================================================
+    Total unique ranges:     29,302
+
+    Blog ranges:             21,401  (backup mutation logs)
+    Backup/agent ranges:     0
+    Other system ranges:     125
+    USER DATA ranges:        7,776  <-- CRITICAL
+
+  !! WARNING: 7776 USER DATA ranges will timeout !!
+     DD will return estimated metrics after 15 minutes per range.
+
+  ESTIMATED DD IMPACT:
+    If DD hits all 29,302 ranges sequentially:
+    Worst case: 439,530 minutes (7325.5 hours)
+    (In practice, DD may skip some or process in parallel)
+
+======================================================================
+
+============================================================
+ANALYSIS
+============================================================
+
+WRONG_SHARD_SERVER ISSUES DETECTED:
+  Metadata check: 76108 (server, range) pairs where
+    keyServers says server owns range, but serverKeys disagrees
+  Unique ranges affected: 29302
+
+  AUDIT CORRELATION (stale serverKeys vs keyServers):
+    ALL_MISSING (stale serverKeys in keyServers): 7876 ranges
+    SOME_MISSING (partial stale):                 214 ranges
+    NOT_IN_KEYSERVERS (pure garbage):             6088 entries
+
+  VERIFIED: All 7876 'ALL_MISSING' ranges have data!
+            Probing via client API found data on other replicas.
+            These are stale serverKeys entries - garbage to clean.
+            NO data loss. NO DD loops (client routing works).
+
+  THREE-WAY CORRELATION SUMMARY:
+    Missing serverKeys:  76,108 entries
+      (keyServers claims, serverKeys has no entry, but SS has data)
+    Stale serverKeys:    14,130 entries
+      (serverKeys claims, but SS doesn't have data)
+    Correct serverKeys:  0 entries
+      (serverKeys claims, SS confirmed it has data)
+
+  Potential fixes:
+  1. Delete stale serverKeys entries (cleanup)
+  2. Coalesce uncoalesced entries if present
+
+UNCOALESCED ENTRIES DETECTED:
+  Adjacent KRM entries with the same value should be merged.
+  This triggers DD assertions at:
+    - KeyRangeMap.actor.cpp:297 (keyServers)
+    - MoveKeys.actor.cpp:158 (serverKeys)
+
+  Potential fix: Delete the redundant entries to coalesce ranges
+
+DEAD SERVER REFERENCES DETECTED:
+  Entries reference servers not in serverList.
+  This is usually less critical but may cause issues.
+
+============================================================
+Repair is disabled until we understand the full corruption picture.
