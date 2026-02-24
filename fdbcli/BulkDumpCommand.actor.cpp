@@ -173,18 +173,23 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			}
 		}
 
-		if (jobState.present() && jobState.get().hasOwner()) {
-			std::string ownerType = jobState.get().getOwnerType().orDefault("unknown");
-			std::string ownerName = jobState.get().getOwnerName().orDefault("");
-			fmt::println("BulkDump job {} is owned by {} '{}'.", progress.jobId.toString(), ownerType, ownerName);
-			if (ownerType == "backup") {
-				fmt::println("For full status, use: fdbbackup status -t {}", ownerName);
+		// Check if this bulkdump is owned by a backup (stored in separate key)
+		if (jobState.present()) {
+			Optional<BulkDumpOwnerInfo> ownerInfo = wait(getBulkDumpOwner(cx, jobState.get().getJobId()));
+			if (ownerInfo.present()) {
+				std::string ownerType = ownerInfo.get().ownerType;
+				std::string ownerName = ownerInfo.get().ownerName;
+				fmt::println("BulkDump job {} is owned by {} '{}'.", progress.jobId.toString(), ownerType, ownerName);
+				if (ownerType == "backup") {
+					fmt::println("For full status, use: fdbbackup status -t {}", ownerName);
+				}
+				return UID();
 			}
-			return UID();
 		}
 
 		// Format standalone bulkdump progress
-		fmt::println("BulkDump job {} is in progress.", progress.jobId.toString());
+		// CRITICAL: First line must start with "Running bulk dumping job:" for test scripts!
+		fmt::println("Running bulk dumping job: {}", progress.jobId.toString());
 		fmt::println(" Range: {}", progress.jobRange.toString());
 		fmt::println("");
 		fmt::println("Progress:");

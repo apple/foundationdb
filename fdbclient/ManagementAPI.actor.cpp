@@ -3168,6 +3168,8 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			}
 			wait(krmSetRangeCoalescing(
 			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState())));
+			// Clean up owner info when clearing job metadata
+			tr.clear(bulkDumpOwnerKeyFor(jobId));
 			wait(tr.commit());
 			tr.reset();
 
@@ -3177,6 +3179,43 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 		}
 	}
 	return Void();
+}
+
+// Set owner info for a BulkDump job (stored separately from BulkDumpState for backward compatibility)
+ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.set(bulkDumpOwnerKeyFor(jobId), ObjectWriter::toValue(ownerInfo, IncludeVersion()));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Get owner info for a BulkDump job
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> value = wait(tr.get(bulkDumpOwnerKeyFor(jobId)));
+			if (!value.present()) {
+				return Optional<BulkDumpOwnerInfo>();
+			}
+			BulkDumpOwnerInfo info;
+			ObjectReader reader(value.get().begin(), IncludeVersion());
+			reader.deserialize(info);
+			return info;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 }
 
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
@@ -3227,22 +3266,32 @@ ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 	state BulkDumpProgress progress;
 	state double currentTime = now();
 
-	// First, get the submitted job to find the job range and start time
+	// First, get the submitted job to find the job range
+	state Optional<BulkDumpState> submittedJob;
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<BulkDumpState> submittedJob = wait(getSubmittedBulkDumpJob(&tr));
+			Optional<BulkDumpState> job = wait(getSubmittedBulkDumpJob(&tr));
+			submittedJob = job;
 			if (!submittedJob.present()) {
 				return Optional<BulkDumpProgress>();
 			}
 			progress.jobId = submittedJob.get().getJobId();
 			progress.jobRange = submittedJob.get().getJobRange();
-			progress.startTime = submittedJob.get().getSubmitTime();
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
+	}
+
+	// Get start time from owner info (stored separately from BulkDumpState)
+	Optional<BulkDumpOwnerInfo> ownerInfo = wait(getBulkDumpOwner(cx, progress.jobId));
+	if (ownerInfo.present()) {
+		progress.startTime = ownerInfo.get().submitTime;
+	} else {
+		// Fallback if no owner info (standalone bulkdump): use current time (elapsed will be ~0)
+		progress.startTime = currentTime;
 	}
 
 	// Now read all task metadata within the job range

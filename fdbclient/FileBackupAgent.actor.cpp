@@ -3841,12 +3841,14 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				std::string bulkDumpRoot = getBackupDataPath(bc->getURL(), "bulkdump_data");
 				bulkDumpJob = createBulkDumpJob(normalKeys, bulkDumpRoot, BulkLoadType::SST, transportMethod);
 
-				// Set ownership so bulkdump status shows it belongs to this backup
-				std::string backupTag = wait(config.tag().getOrThrow(cx.getReference()));
-				bulkDumpJob.setOwner(config.getUid(), "backup", backupTag);
-
-				// Submit the BulkDump job
+				// Submit the BulkDump job first
 				wait(submitBulkDumpJob(cx, bulkDumpJob));
+
+				// Set ownership so bulkdump status shows it belongs to this backup
+				// Stored separately from BulkDumpState for backward compatibility
+				std::string backupTag = wait(config.tag().getOrThrow(cx.getReference()));
+				BulkDumpOwnerInfo ownerInfo(config.getUid(), "backup", backupTag, now());
+				wait(setBulkDumpOwner(cx, bulkDumpJob.getJobId(), ownerInfo));
 			}
 
 			// Store job ID for monitoring

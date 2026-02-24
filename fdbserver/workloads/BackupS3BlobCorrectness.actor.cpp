@@ -387,36 +387,20 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					TraceEvent("BS3BCW_ObservabilityETA").detail("ETASeconds", eta.get());
 				}
 
-				// Check ownership - the bulkdump should be owned by our backup
-				state Transaction tr(cx);
-				loop {
-					try {
-						tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						Optional<BulkDumpState> jobState = wait(getSubmittedBulkDumpJob(&tr));
-						if (jobState.present()) {
-							if (jobState.get().hasOwner() && jobState.get().getOwnerType().orDefault("") == "backup") {
-								Optional<UID> ownerUID = jobState.get().getOwnerUID();
-								Optional<std::string> ownerName = jobState.get().getOwnerName();
+				// Check ownership - the bulkdump should be owned by our backup (stored in separate key)
+				Optional<BulkDumpOwnerInfo> ownerInfo = wait(getBulkDumpOwner(cx, progress.jobId));
+				if (ownerInfo.present() && ownerInfo.get().ownerType == "backup") {
+					TraceEvent("BS3BCW_ObservabilityOwnership")
+					    .detail("OwnerUID", ownerInfo.get().ownerUID.toString())
+					    .detail("OwnerType", ownerInfo.get().ownerType)
+					    .detail("OwnerName", ownerInfo.get().ownerName)
+					    .detail("ExpectedBackupUID", expectedBackupUID)
+					    .detail("ExpectedBackupTag", backupTag);
 
-								TraceEvent("BS3BCW_ObservabilityOwnership")
-								    .detail("OwnerUID", ownerUID.present() ? ownerUID.get().toString() : "none")
-								    .detail("OwnerType", jobState.get().getOwnerType().orDefault("none"))
-								    .detail("OwnerName", ownerName.present() ? ownerName.get() : "none")
-								    .detail("ExpectedBackupUID", expectedBackupUID)
-								    .detail("ExpectedBackupTag", backupTag);
-
-								// Verify ownership matches
-								if (ownerUID.present() && ownerUID.get() == expectedBackupUID) {
-									ownershipVerified = true;
-									TraceEvent("BS3BCW_ObservabilityOwnershipVerified")
-									    .detail("BackupUID", expectedBackupUID);
-								}
-							}
-						}
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
+					// Verify ownership matches
+					if (ownerInfo.get().ownerUID == expectedBackupUID) {
+						ownershipVerified = true;
+						TraceEvent("BS3BCW_ObservabilityOwnershipVerified").detail("BackupUID", expectedBackupUID);
 					}
 				}
 

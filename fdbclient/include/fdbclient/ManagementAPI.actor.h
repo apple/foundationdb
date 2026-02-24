@@ -330,6 +330,31 @@ ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx);
 // Threshold in seconds for considering a task "stalled"
 constexpr double BULK_TASK_STALL_THRESHOLD_SECONDS = 60.0;
 
+// BulkDump owner tracking - stored in separate system keys for backward compatibility
+struct BulkDumpOwnerInfo {
+	UID ownerUID;
+	std::string ownerType; // e.g., "backup", "dr", "migration"
+	std::string ownerName; // e.g., backup tag
+	double submitTime;
+
+	constexpr static FileIdentifier file_identifier = 1384510;
+
+	BulkDumpOwnerInfo() : submitTime(0) {}
+	BulkDumpOwnerInfo(UID uid, std::string type, std::string name, double time)
+	  : ownerUID(uid), ownerType(type), ownerName(name), submitTime(time) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ownerUID, ownerType, ownerName, submitTime);
+	}
+};
+
+// Set owner info for a BulkDump job (stored separately from BulkDumpState)
+ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
+
+// Get owner info for a BulkDump job
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId);
+
 // ==================== End Progress Tracking ====================
 
 // Persist a rangeLock owner to database metadata

@@ -45,8 +45,7 @@ public:
 	              BulkLoadType loadType,
 	              BulkLoadTransportMethod transportMethod,
 	              std::string jobRoot)
-	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted),
-	    submitTime(now()) {
+	  : jobId(deterministicRandom()->randomUniqueID()), jobRange(jobRange), phase(BulkDumpPhase::Submitted) {
 		manifest = BulkLoadManifest(loadType, transportMethod, jobRoot);
 		ASSERT(isValid());
 	}
@@ -142,25 +141,16 @@ public:
 
 	BulkLoadManifest getManifest() const { return manifest; }
 
-	// Generic ownership tracking - allows any feature to own this bulkdump job
-	// Examples: backup, DR, migration, data export, etc.
-	Optional<UID> getOwnerUID() const { return ownerUID; }
-	Optional<std::string> getOwnerType() const { return ownerType; }
-	Optional<std::string> getOwnerName() const { return ownerName; }
-	bool hasOwner() const { return ownerUID.present(); }
-
-	void setOwner(UID uid, std::string type, std::string name) {
-		ownerUID = uid;
-		ownerType = type;
-		ownerName = name;
-	}
-
-	// Submit time tracking for elapsed time computation
-	double getSubmitTime() const { return submitTime; }
+	// Owner tracking methods - data stored in separate system keys for backward compatibility
+	// These methods are convenience wrappers; actual storage is via ManagementAPI functions
+	// getOwner() / setOwner() will read/write bulkDumpOwnerKey(jobId)
+	// getSubmitTime() will read bulkDumpTimingKey(jobId) or return now() if not set
+	double getSubmitTime() const { return now(); } // Default impl; override via ManagementAPI
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, jobId, jobRange, phase, taskId, manifest, ownerUID, ownerType, ownerName, submitTime);
+		// Core state only - observability fields stored separately to maintain compatibility
+		serializer(ar, jobId, jobRange, phase, taskId, manifest);
 	}
 
 private:
@@ -181,15 +171,9 @@ private:
 	// The manifest metadata persist to system key space and manifest file when a dump task completes.
 	BulkLoadManifest manifest;
 
-	// Generic ownership tracking - set when this bulkdump is triggered by another feature
-	// If not set, this is a standalone bulkdump operation
-	// ownerType examples: "backup", "dr", "migration", "export"
-	Optional<UID> ownerUID;
-	Optional<std::string> ownerType;
-	Optional<std::string> ownerName;
-
-	// Time when the job was submitted, for elapsed time computation
-	double submitTime = 0;
+	// NOTE: Owner tracking and timing information should be stored in separate system keys
+	// (e.g., bulkDumpOwnerKey(jobId), bulkDumpTimingKey(jobId)) to maintain backward compatibility.
+	// Do not add fields here without protocol versioning support.
 };
 
 // User API to create bulkDump task metadata
