@@ -32,7 +32,7 @@ Features
 Performance
 -----------
 * Improved Deque copy performance. `(PR #3197) <https://github.com/apple/foundationdb/pull/3197>`_
-* Increased performance of dr_agent when copying the mutation log. The ``COPY_LOG_BLOCK_SIZE``, ``COPY_LOG_BLOCKS_PER_TASK``, ``COPY_LOG_PREFETCH_BLOCKS``, ``COPY_LOG_READ_AHEAD_BYTES`` and ``COPY_LOG_TASK_DURATION_NANOS`` knobs can be set. `(PR #3436) <https://github.com/apple/foundationdb/pull/3436>`_
+* Increased performance of dr_agent when copying the mutation log. The ``COPY_LOG_BLOCK_SIZE``, ``COPY_LOG_BLOCKS_PER_TASK``, ``COPY_LOG_PREFETCH_BLOCKS``, ``COPY_LOG_READ_AHEAD_BYTES`` and ``COPY_LOG_TASK_DURATION_SECONDS`` knobs can be set. `(PR #3436) <https://github.com/apple/foundationdb/pull/3436>`_
 * Added multiple new microbenchmarks for PromiseStream, Reference, IRandom, and timer, as well as support for benchmarking actors. `(PR #3590) <https://github.com/apple/foundationdb/pull/3590>`_
 * Use xxhash3 for SQLite page checksums. `(PR #4075) <https://github.com/apple/foundationdb/pull/4075>`_
 * fdbserver now uses jemalloc on Linux instead of the system malloc. `(PR #4222) <https://github.com/apple/foundationdb/pull/4222>`_

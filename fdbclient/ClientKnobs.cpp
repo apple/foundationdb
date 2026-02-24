@@ -173,7 +173,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( COPY_LOG_BLOCKS_PER_TASK,               1000 );
 	init( COPY_LOG_PREFETCH_BLOCKS,                  3 );
 	init( COPY_LOG_READ_AHEAD_BYTES,        BACKUP_LOCK_BYTES / COPY_LOG_PREFETCH_BLOCKS); // each task will use up to COPY_LOG_PREFETCH_BLOCKS * COPY_LOG_READ_AHEAD_BYTES memory
-	init( COPY_LOG_TASK_DURATION_NANOS,	      1e10 ); // 10 seconds
+	init( COPY_LOG_TASK_DURATION_SECONDS,	        10 );
 	init( BACKUP_TASKS_PER_AGENT,                   10 );
 	init( BACKUP_POLL_PROGRESS_SECONDS,             10 );
 	init( VERSIONS_PER_SECOND,                     1e6 ); // Must be the same as SERVER_KNOBS->VERSIONS_PER_SECOND

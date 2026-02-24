@@ -882,7 +882,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		state std::vector<Future<Void>> rc;
 		state std::vector<Reference<FlowLock>> locks;
 		state Version nextVersion = beginVersion;
-		state double breakTime = timer_monotonic() + CLIENT_KNOBS->COPY_LOG_TASK_DURATION_NANOS;
+		state double breakTime = timer_monotonic() + CLIENT_KNOBS->COPY_LOG_TASK_DURATION_SECONDS;
 		state int rangeN = 0;
 
 		loop {
@@ -915,7 +915,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				nextVersion = nextVersionBr.get();
 				// cancel prefetch
 				TraceEvent(SevInfo, "CopyLogRangeTaskFuncAborted")
-				    .detail("DurationNanos", CLIENT_KNOBS->COPY_LOG_TASK_DURATION_NANOS)
+				    .detail("DurationSeconds", CLIENT_KNOBS->COPY_LOG_TASK_DURATION_SECONDS)
 				    .detail("RangeN", rangeN)
 				    .detail("BytesWritten", Params.bytesWritten().getOrDefault(task));
 				for (int j = results.size(); --j >= rangeN;)
