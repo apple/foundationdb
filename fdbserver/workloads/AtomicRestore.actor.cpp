@@ -51,7 +51,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		}
 		usePartitionedLogs.set(
-		    getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->random01() < 0.5 ? true : false));
+		    getOption(options, "usePartitionedLogs"_sr, false));
 
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);

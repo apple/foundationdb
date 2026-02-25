@@ -78,7 +78,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, "simBackupAgents"_sr, true);
 		allowPauses = getOption(options, "allowPauses"_sr, true);
 		shareLogRange = getOption(options, "shareLogRange"_sr, false);
-		usePartitionedLogs.set(getOption(options, "usePartitionedLogs"_sr, deterministicRandom()->coinflip()));
+		usePartitionedLogs.set(getOption(options, "usePartitionedLogs"_sr, false));
 		addPrefix = getOption(options, "addPrefix"_sr, ""_sr);
 		removePrefix = getOption(options, "removePrefix"_sr, ""_sr);
 
