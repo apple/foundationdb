@@ -101,8 +101,8 @@ Reference<DirectorySubspace> DirectoryLayer::contentsOfNode(Subspace const& node
 		return Reference<DirectorySubspace>(
 		    new DirectoryPartition(toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this)));
 	} else {
-		return Reference<DirectorySubspace>(
-		    new DirectorySubspace(toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this), layer));
+		return makeReference<DirectorySubspace>(
+		    toAbsolutePath(path), prefix, Reference<DirectoryLayer>::addRef(this), layer);
 	}
 }
 

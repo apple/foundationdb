@@ -5934,7 +5934,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		// If adding to existing batch then join the new block tasks to the existing batch future
 		if (addingToExistingBatch) {
 			Key fKey = wait(restore.batchFuture().getD(tr));
-			allPartsDone = Reference<TaskFuture>(new TaskFuture(futureBucket, fKey));
+			allPartsDone = makeReference<TaskFuture>(futureBucket, fKey);
 		} else {
 			// Otherwise create a new future for the new batch
 			allPartsDone = futureBucket->future(tr);
@@ -6313,8 +6313,7 @@ ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr
 }
 
 ACTOR Future<ERestoreState> abortRestore(Database cx, Key tagName) {
-	state Reference<ReadYourWritesTransaction> tr =
-	    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	loop {
 		try {
@@ -6329,7 +6328,7 @@ ACTOR Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 		}
 	}
 
-	tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+	tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	// Commit a dummy transaction before returning success, to ensure the mutation applier has stopped submitting
 	// mutations
@@ -7957,8 +7956,7 @@ public:
 	                                           Key addPrefix,
 	                                           Key removePrefix,
 	                                           UsePartitionedLog fastRestore) {
-		state Reference<ReadYourWritesTransaction> ryw_tr =
-		    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		state Reference<ReadYourWritesTransaction> ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		state BackupConfig backupConfig;
 		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
 		loop {
@@ -8106,7 +8104,7 @@ public:
 				                     {},
 				                     randomUid)));
 				state Reference<ReadYourWritesTransaction> rywTransaction =
-				    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+				    makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
 				loop {
 					try {

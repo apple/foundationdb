@@ -695,7 +695,7 @@ public:
 
 		state int idx = 0;
 		for (; idx < CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_AMOUNT; ++idx) {
-			tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+			tr = makeReference<ReadYourWritesTransaction>(cx);
 			loop {
 				try {
 					taskBucket->setOptions(tr);

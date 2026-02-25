@@ -1403,7 +1403,7 @@ struct StartThreadFunc : InstructionFunc {
 		state Standalone<StringRef> prefix = Tuple::unpack(s1).getString(0);
 		// printf("=========START_THREAD:%s\n", printable(prefix).c_str());
 
-		Reference<FlowTesterData> newData = Reference<FlowTesterData>(new FlowTesterData(data->api));
+		Reference<FlowTesterData> newData = makeReference<FlowTesterData>(data->api);
 		data->subThreads.push_back(runTest(newData, data->db, prefix));
 
 		return Void();
@@ -1747,8 +1747,8 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			// wait(printFlowTesterStack(&(data->stack)));
 			// wait(debugPrintRange(instruction->tr, "\x01test_results", ""));
 
-			state Reference<InstructionData> instruction = Reference<InstructionData>(
-			    new InstructionData(isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>()));
+			state Reference<InstructionData> instruction = makeReference<InstructionData>(
+			    isDatabase, isSnapshot, data->instructions[idx].value, Reference<Transaction>());
 			if (isDatabase) {
 				state Reference<Transaction> tr = data->db->createTransaction();
 				instruction->tr = tr;
@@ -1851,7 +1851,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		// Connect to the default cluster/database, and create a transaction
 		auto db = fdb->createDatabase(clusterFilename);
 
-		Reference<FlowTesterData> data = Reference<FlowTesterData>(new FlowTesterData(fdb));
+		Reference<FlowTesterData> data = makeReference<FlowTesterData>(fdb);
 		wait(runTest(data, db, prefix));
 
 		// Stopping the network returns from g_network->run() and allows

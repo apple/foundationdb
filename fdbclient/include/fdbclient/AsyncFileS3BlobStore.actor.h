@@ -274,9 +274,9 @@ private:
 
 		// Make a new part to write to
 		if (startNew)
-			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1,
-			                                              f->m_bstore->knobs.multipart_min_part_size,
-			                                              f->m_bstore->knobs.enable_object_integrity_check)));
+			f->m_parts.push_back(makeReference<Part>(f->m_parts.size() + 1,
+			                                         f->m_bstore->knobs.multipart_min_part_size,
+			                                         f->m_bstore->knobs.enable_object_integrity_check));
 
 		return Void();
 	}

@@ -193,7 +193,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					printf("%.6f Wait #%4d for %lld tasks to end\n", now(), waitCycles, (long long)taskCount);
 
 					wait(delay(20.0));
-					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+					tr = makeReference<ReadYourWritesTransaction>(cx);
 					wait(store(taskCount, backupAgent->getTaskCount(tr)));
 				}
 

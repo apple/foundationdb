@@ -1945,10 +1945,7 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 
 	std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
 	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
-	    &tr,
-	    oldCoordinators,
-	    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
-	    result));
+	    &tr, oldCoordinators, makeReference<ClusterConnectionMemoryRecord>(old), result));
 
 	if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
 		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating

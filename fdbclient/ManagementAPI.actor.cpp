@@ -1016,7 +1016,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	}
 
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(*conn)));
+	ClientCoordinators coord(makeReference<ClusterConnectionMemoryRecord>(*conn));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
@@ -1067,12 +1067,11 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			state std::vector<NetworkAddress> oldCoordinators = wait(oldClusterConnectionString.tryResolveHostnames());
 			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (!desiredCoordinators.size()) {
-				std::vector<NetworkAddress> _desiredCoordinators = wait(
-				    change->getDesiredCoordinators(&tr,
-				                                   oldCoordinators,
-				                                   Reference<ClusterConnectionMemoryRecord>(
-				                                       new ClusterConnectionMemoryRecord(oldClusterConnectionString)),
-				                                   result));
+				std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
+				    &tr,
+				    oldCoordinators,
+				    makeReference<ClusterConnectionMemoryRecord>(oldClusterConnectionString),
+				    result));
 				desiredCoordinators = _desiredCoordinators;
 			}
 
