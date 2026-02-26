@@ -747,7 +747,6 @@ public:
 
 	// Backup Worker
 	double BACKUP_TIMEOUT; // master's reaction time for backup failure
-	double BACKUP_NOOP_POP_DELAY;
 	int BACKUP_FILE_BLOCK_BYTES;
 	int64_t BACKUP_WORKER_LOCK_BYTES;
 	double BACKUP_UPLOAD_DELAY;
