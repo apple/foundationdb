@@ -65,7 +65,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 					T returnVal = retryable.apply(t);
 					t.commit().join();
 					return returnVal;
-				} catch (RuntimeException err) {
+				} catch (Exception err) {
 					t = t.onError(err).join();
 				}
 			}
