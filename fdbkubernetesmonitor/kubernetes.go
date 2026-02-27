@@ -225,9 +225,28 @@ func (podClient *kubernetesClient) updateAnnotations(monitor *monitor) error {
 		return err
 	}
 
+	availableBinaries, err := json.Marshal(monitor.availableBinaries)
+	if err != nil {
+		return err
+	}
+
 	return podClient.updateAnnotationsOnPod(map[string]string{
 		api.CurrentConfigurationAnnotation: string(monitor.activeConfigurationBytes),
 		api.EnvironmentAnnotation:          string(jsonEnvironment),
+		api.AvailableBinariesAnnotation:    string(availableBinaries),
+	})
+}
+
+// updateAvailableBinariesAnnotation updates the api.AvailableBinariesAnnotation annotation on the pod
+// after a new fdbserver binary was copied into the shared directory.
+func (podClient *kubernetesClient) updateAvailableBinariesAnnotation(currentBinaries map[string]struct{}) error {
+	availableBinaries, err := json.Marshal(currentBinaries)
+	if err != nil {
+		return err
+	}
+
+	return podClient.updateAnnotationsOnPod(map[string]string{
+		api.AvailableBinariesAnnotation: string(availableBinaries),
 	})
 }
 

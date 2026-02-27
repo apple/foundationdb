@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,15 @@ type monitor struct {
 
 	// metrics represents the prometheus monitor metrics.
 	metrics *metrics
+
+	// runVersionCommand when set to false the monitor will not try to run the fdbserver --version command to ensure
+	// that the binary is executable.
+	runVersionCommand bool
+
+	// availableBinaries represents all available binaries in the sharedBinaryDir. Most of the time this map will be
+	// empty but during version incompatible upgrades, this information will be used to signal the operator that
+	// the new fdbserver binary is present and executable in the sharedBinaryDir.
+	availableBinaries map[string]struct{}
 }
 
 type httpConfig struct {
@@ -129,6 +139,8 @@ func startMonitor(ctx context.Context, logger logr.Logger, configFile string, cu
 		processCount:            processCount,
 		processIDs:              make([]int, processCount+1),
 		currentContainerVersion: currentContainerVersion,
+		runVersionCommand:       true,
+		availableBinaries:       map[string]struct{}{},
 	}
 
 	go func() { mon.watchPodTimestamps() }()
@@ -253,7 +265,8 @@ func (monitor *monitor) readConfiguration() (*api.ProcessConfiguration, []byte) 
 		configuration.BinaryPath = path.Join(sharedBinaryDir, configuration.Version.String(), "fdbserver")
 	}
 
-	err = checkOwnerExecutable(configuration.BinaryPath)
+	// TODO (johscheuer): Should we run this check every time?
+	err = checkOwnerExecutable(configuration.BinaryPath, monitor.runVersionCommand)
 	if err != nil {
 		monitor.logger.Error(err, "Error with binary path for latest configuration", "configuration", configuration, "binaryPath", configuration.BinaryPath)
 		return nil, nil
@@ -295,7 +308,7 @@ func (monitor *monitor) loadConfiguration() {
 
 // checkOwnerExecutable validates that a path is a file that exists and is
 // executable by its owner.
-func checkOwnerExecutable(path string) error {
+func checkOwnerExecutable(path string, runVersionCommand bool) error {
 	binaryStat, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -303,6 +316,18 @@ func checkOwnerExecutable(path string) error {
 	if binaryStat.Mode()&0o100 == 0 {
 		return fmt.Errorf("binary is not executable")
 	}
+
+	if !runVersionCommand {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	if err = cmd.Run(); err != nil {
+		return fmt.Errorf("could not run the version command with binary: %s, error: %w", path, err)
+	}
+
 	return nil
 }
 
@@ -523,7 +548,7 @@ func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
 				return
 			}
 
-			monitor.logger.Info("Detected event on monitor conf file or cluster file", "event", event)
+			monitor.logger.Info("Detected event on monitor conf file, cluster file or shared binaries", "event", event)
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
 				monitor.handleFileChange(event.Name)
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
@@ -542,6 +567,59 @@ func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
 	}
 }
 
+// getBinariesFromSharedBinaryDir returns all fdbserver binaries that are found in the shared binary directory.
+func (monitor *monitor) waitForSharedBinariesAndUpdateAnnotation(dir string) error {
+	var fdbserverBinaries []string
+
+	startTime := time.Now()
+	for len(fdbserverBinaries) == 0 {
+		// If after 5 minutes the new fdbserver binary was not copied, something is probably wrong.
+		if time.Since(startTime) > 5*time.Minute {
+			return fmt.Errorf("could not find fdbserver binary in shared binary dir after more than 2 minutes")
+		}
+
+		monitor.logger.Info("Checking shared binary dir for new fdbserver binary", "sharedBinaryDir", sharedBinaryDir, "fdbserverBinaries", fdbserverBinaries)
+		err := filepath.Walk(dir,
+			func(currentPath string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+
+				if info.IsDir() {
+					return nil
+				}
+
+				if path.Base(currentPath) != "fdbserver" {
+					return nil
+				}
+
+				monitor.logger.Info("found new fdbserver binary in shared binary dir", "sharedBinaryDir", sharedBinaryDir, "currentPath", currentPath)
+				fdbserverBinaries = append(fdbserverBinaries, currentPath)
+
+				return nil
+			})
+
+		if err != nil {
+			monitor.logger.Error(err, "Error getting binaries from sharedBinaryDir", "sharedBinaryDir", sharedBinaryDir)
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	for _, binary := range fdbserverBinaries {
+		err := checkOwnerExecutable(binary, monitor.runVersionCommand)
+		if err != nil {
+			monitor.logger.Error(err, "Error with binary in shared binary directory", "sharedBinaryDir", sharedBinaryDir, "binary", binary)
+			continue
+		}
+
+		monitor.availableBinaries[binary] = struct{}{}
+		monitor.logger.Info("Adding new binary to available binaries", "sharedBinaryDir", sharedBinaryDir, "binary", binary)
+	}
+
+	return monitor.podClient.updateAvailableBinariesAnnotation(monitor.availableBinaries)
+}
+
 // handleFileChange will perform the required action based on the changed/modified file.
 func (monitor *monitor) handleFileChange(changedFile string) {
 	if changedFile == fdbClusterFilePath {
@@ -550,6 +628,18 @@ func (monitor *monitor) handleFileChange(changedFile string) {
 			monitor.logger.Error(err, fmt.Sprintf("could not update %s annotation", api.ClusterFileChangeDetectedAnnotation))
 		}
 		return
+	}
+
+	// If the changed file is in the shared binary path, check if the binary can be executed. If the binary is
+	// executable then we can add it to the available binaries.
+	if strings.HasPrefix(changedFile, sharedBinaryDir) {
+		go func(dir string) {
+			err := monitor.waitForSharedBinariesAndUpdateAnnotation(sharedBinaryDir)
+			if err != nil {
+				monitor.logger.Error(err, "Error getting binaries from sharedBinaryDir", "sharedBinaryDir", sharedBinaryDir, "changedFile", changedFile)
+				return
+			}
+		}(sharedBinaryDir)
 	}
 
 	monitor.loadConfiguration()
@@ -611,6 +701,13 @@ func (monitor *monitor) run() {
 	}
 	monitor.logger.Info("adding watch for file", "path", path.Base(monitor.configFile))
 	err = watcher.Add(monitor.configFile)
+	if err != nil {
+		panic(err)
+	}
+
+	// Create a watcher for the sharedBinaryDir, this watcher will update the available binaries during an upgrade.
+	monitor.logger.Info("adding watch for shared binary path", "path", path.Dir(sharedBinaryDir))
+	err = watcher.Add(path.Dir(sharedBinaryDir))
 	if err != nil {
 		panic(err)
 	}
