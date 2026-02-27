@@ -349,11 +349,15 @@ struct BulkDumpOwnerInfo {
 	}
 };
 
-// Set owner info for a BulkDump job (stored separately from BulkDumpState)
-ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
+// Generic bulk owner tracking (internal implementation)
+ACTOR Future<Void> setBulkOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo, bool isBulkDump);
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool isBulkDump);
 
-// Get owner info for a BulkDump job
+// Public API wrappers (for backward compatibility)
+ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
 ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId);
+ACTOR Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo);
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId);
 
 // ==================== End Progress Tracking ====================
 

@@ -1232,6 +1232,17 @@ const Key bulkDumpOwnerKeyFor(const UID& jobId) {
 	return wr.toValue();
 }
 
+// BulkLoad owner tracking - stored separately for backward compatibility
+const KeyRangeRef bulkLoadOwnerKeys = KeyRangeRef("\xff/bulkLoadOwner/"_sr, "\xff/bulkLoadOwner0"_sr);
+const KeyRef bulkLoadOwnerPrefix = bulkLoadOwnerKeys.begin;
+
+const Key bulkLoadOwnerKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadOwnerPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
 // Range Lock
 const std::string rangeLockNameForBulkLoad = "BulkLoad";
 

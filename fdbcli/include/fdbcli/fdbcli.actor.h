@@ -140,6 +140,17 @@ void printLongDesc(StringRef command);
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
+
+// Shared utilities for BulkDump/BulkLoad commands
+UID validateBulkJobId(StringRef token, const char* usage);
+ACTOR Future<std::string> getBulkOwnerSuffix(Database cx, UID jobId, bool isDumpJob);
+void printProgressMetrics(double avgBytesPerSecond, Optional<double> etaSeconds, double elapsedSeconds);
+void printProgressSummary(const char* operationName,
+                          int completeTasks,
+                          int totalTasks,
+                          int64_t completedBytes,
+                          int64_t totalBytes);
+void printTaskBreakdown(int submittedTasks, int triggeredTasks, int runningTasks, int completeTasks, int errorTasks);
 // Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
 // A worker list will be returned from CC.
 // If verify, we will try to establish connections to all workers returned.

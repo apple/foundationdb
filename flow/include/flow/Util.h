@@ -155,4 +155,48 @@ inline std::string formatDurationHumanReadable(int seconds) {
 	return std::string(buf);
 }
 
+// Format byte progress as "completed (human) / total (human)"
+inline std::string formatBytesProgress(int64_t completedBytes, int64_t totalBytes) {
+	char buf[256];
+	std::snprintf(buf,
+	              sizeof(buf),
+	              "%lld (%s) / %lld (%s)",
+	              static_cast<long long>(completedBytes),
+	              formatBytesHumanReadable(completedBytes).c_str(),
+	              static_cast<long long>(totalBytes),
+	              formatBytesHumanReadable(totalBytes).c_str());
+	return std::string(buf);
+}
+
+// Format throughput display line (returns empty string if throughput <= 0)
+inline std::string formatThroughputLine(double avgBytesPerSecond) {
+	if (avgBytesPerSecond <= 0) {
+		return "";
+	}
+	char buf[128];
+	std::snprintf(buf, sizeof(buf), " Throughput - %.1f MB/s", avgBytesPerSecond / 1048576.0);
+	return std::string(buf);
+}
+
+// Format ETA line (returns empty string if no ETA available)
+inline std::string formatETALine(double etaSeconds) {
+	if (etaSeconds <= 0) {
+		return "";
+	}
+	char buf[128];
+	std::snprintf(
+	    buf, sizeof(buf), " Estimated time remaining - %s", formatDurationHumanReadable((int)etaSeconds).c_str());
+	return std::string(buf);
+}
+
+// Format elapsed time line (returns empty string if elapsedSeconds <= 0)
+inline std::string formatElapsedTimeLine(double elapsedSeconds) {
+	if (elapsedSeconds <= 0) {
+		return "";
+	}
+	char buf[128];
+	std::snprintf(buf, sizeof(buf), " Elapsed time - %s", formatDurationHumanReadable((int)elapsedSeconds).c_str());
+	return std::string(buf);
+}
+
 #endif // _FLOW_UTIL_H_

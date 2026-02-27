@@ -2819,6 +2819,8 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			aliveJob.get().setCancelledPhase();
 			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
 			wait(releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad));
+			// Clean up BulkLoad owner info when clearing job metadata
+			tr.clear(bulkLoadOwnerKeyFor(jobId));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -3181,14 +3183,15 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 	return Void();
 }
 
-// Set owner info for a BulkDump job (stored separately from BulkDumpState for backward compatibility)
-ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+// Generic owner tracking implementation for bulk operations
+ACTOR Future<Void> setBulkOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo, bool isBulkDump) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.set(bulkDumpOwnerKeyFor(jobId), ObjectWriter::toValue(ownerInfo, IncludeVersion()));
+			Key ownerKey = isBulkDump ? bulkDumpOwnerKeyFor(jobId) : bulkLoadOwnerKeyFor(jobId);
+			tr.set(ownerKey, ObjectWriter::toValue(ownerInfo, IncludeVersion()));
 			wait(tr.commit());
 			return Void();
 		} catch (Error& e) {
@@ -3197,14 +3200,14 @@ ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ow
 	}
 }
 
-// Get owner info for a BulkDump job
-ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool isBulkDump) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(bulkDumpOwnerKeyFor(jobId)));
+			Key ownerKey = isBulkDump ? bulkDumpOwnerKeyFor(jobId) : bulkLoadOwnerKeyFor(jobId);
+			Optional<Value> value = wait(tr.get(ownerKey));
 			if (!value.present()) {
 				return Optional<BulkDumpOwnerInfo>();
 			}
@@ -3216,6 +3219,27 @@ ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobI
 			wait(tr.onError(e));
 		}
 	}
+}
+
+// Public API wrappers for backward compatibility
+ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	wait(setBulkOwner(cx, jobId, ownerInfo, true));
+	return Void();
+}
+
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
+	Optional<BulkDumpOwnerInfo> result = wait(getBulkOwner(cx, jobId, true));
+	return result;
+}
+
+ACTOR Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	wait(setBulkOwner(cx, jobId, ownerInfo, false));
+	return Void();
+}
+
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
+	Optional<BulkDumpOwnerInfo> result = wait(getBulkOwner(cx, jobId, false));
+	return result;
 }
 
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {

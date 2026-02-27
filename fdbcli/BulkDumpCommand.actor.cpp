@@ -138,7 +138,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_DUMP_CANCEL_USAGE);
 			return UID();
 		}
-		state UID jobId = UID::fromString(tokens[2].toString());
+		state UID jobId = validateBulkJobId(tokens[2], BULK_DUMP_CANCEL_USAGE);
 		wait(cancelBulkDumpJob(cx, jobId));
 		fmt::println("Job {} has been cancelled. No new tasks will be spawned.", jobId.toString());
 		return UID();
@@ -158,7 +158,10 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 
 		state BulkDumpProgress progress = progressOpt.get();
 
-		// Check if this bulkdump is owned by a backup
+		// ctest is dependent on this output; don't change it.
+		fmt::println("Running bulk dumping job: {}", progress.jobId.toString());
+
+		// Check if this bulkdump is owned by another operation
 		state Transaction tr(cx);
 		state Optional<BulkDumpState> jobState;
 		loop {
@@ -173,24 +176,10 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			}
 		}
 
-		// Check if this bulkdump is owned by a backup (stored in separate key)
-		if (jobState.present()) {
-			Optional<BulkDumpOwnerInfo> ownerInfo = wait(getBulkDumpOwner(cx, jobState.get().getJobId()));
-			if (ownerInfo.present()) {
-				std::string ownerType = ownerInfo.get().ownerType;
-				std::string ownerName = ownerInfo.get().ownerName;
-				fmt::println("BulkDump job {} is owned by {} '{}'.", progress.jobId.toString(), ownerType, ownerName);
-				if (ownerType == "backup") {
-					fmt::println("For full status, use: fdbbackup status -t {}", ownerName);
-				}
-				return UID();
-			}
-		}
+		// Get owner info for range description
+		std::string ownerSuffix = wait(getBulkOwnerSuffix(cx, progress.jobId, true)); // true = isDumpJob
 
-		// Format standalone bulkdump progress
-		// CRITICAL: First line must start with "Running bulk dumping job:" for test scripts!
-		fmt::println("Running bulk dumping job: {}", progress.jobId.toString());
-		fmt::println(" Range: {}", progress.jobRange.toString());
+		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
 		fmt::println("");
 		fmt::println("Progress:");
 		fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
@@ -198,45 +187,43 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 		             progress.totalTasks,
 		             progress.progressPercent());
 
-		fmt::println(" Bytes completed - {} ({}) / {} ({})",
-		             progress.completedBytes,
-		             formatBytesHumanReadable(progress.completedBytes),
-		             progress.totalBytes,
-		             formatBytesHumanReadable(progress.totalBytes));
+		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
 
-		double throughput = progress.avgBytesPerSecond();
-		if (throughput > 0) {
-			fmt::println(" Throughput - {:.1f} MB/s", throughput / 1048576.0);
-		}
+		// Use shared progress metrics display
+		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
 
-		if (progress.etaSeconds().present()) {
-			fmt::println(" Estimated time remaining - {}",
-			             formatDurationHumanReadable((int)progress.etaSeconds().get()));
-		}
+		// Enhanced diagnostics with comprehensive observability framework
+		double efficiency = progress.totalTasks > 0 ? 100.0 * progress.completeTasks / progress.totalTasks : 0.0;
 
-		if (progress.elapsedSeconds > 0) {
-			fmt::println(" Elapsed time - {}", formatDurationHumanReadable((int)progress.elapsedSeconds));
-		}
+		// Advanced health analysis
+		auto healthMetrics = BulkHealthMetrics::analyze(progress.avgBytesPerSecond() / 1048576.0,
+		                                                efficiency,
+		                                                progress.stalledTasks.size(),
+		                                                progress.errorTasks,
+		                                                progress.elapsedSeconds / 60.0);
+		printBulkHealthAnalysis(healthMetrics);
 
-		// Show stalled tasks as warnings
-		if (!progress.stalledTasks.empty()) {
-			fmt::println("");
-			fmt::println("WARNING: {} stalled tasks (no progress > 60s):", progress.stalledTasks.size());
-			for (const auto& stalled : progress.stalledTasks) {
-				fmt::println(" Task {}: {}, stalled {:.0f}s, {} restarts",
-				             stalled.taskId.shortString(),
-				             stalled.range.toString(),
-				             stalled.stalledSeconds,
-				             stalled.restartCount);
-				if (!stalled.lastError.empty()) {
-					fmt::println("           Last error: {}", stalled.lastError);
-				}
-			}
-		}
+		// Stalled task warnings with enhanced details
+		printStalledTaskWarnings(progress.stalledTasks);
+
+		// Error diagnostics
+		std::vector<std::string> recentErrors; // Could be populated from task error details
+		auto errorAnalysis =
+		    BulkErrorAnalysis::analyze(progress.errorTasks, progress.stalledTasks.size(), recentErrors);
+		printErrorDiagnostics(errorAnalysis);
+
+		// Performance optimization recommendations
+		auto recommendations = BulkOptimizationRecommendations::generate(progress.avgBytesPerSecond() / 1048576.0,
+		                                                                 efficiency,
+		                                                                 progress.stalledTasks.size(),
+		                                                                 progress.errorTasks,
+		                                                                 progress.elapsedSeconds / 60.0,
+		                                                                 progress.totalTasks);
+		printOptimizationRecommendations(recommendations);
 
 		if (progress.errorTasks > 0) {
 			fmt::println("");
-			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+			fmt::println("WARNING: {} tasks in error state ⚠️", progress.errorTasks);
 		}
 
 		return UID();

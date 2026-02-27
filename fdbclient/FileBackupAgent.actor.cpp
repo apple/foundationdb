@@ -680,10 +680,7 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 			                    blProgress.progressPercent());
 
 			returnStr += format("\n Bytes completed - %lld (%s) / %lld (%s)",
-			                    blProgress.completedBytes,
-			                    formatBytesHumanReadable(blProgress.completedBytes).c_str(),
-			                    blProgress.totalBytes,
-			                    formatBytesHumanReadable(blProgress.totalBytes).c_str());
+			                    formatBytesProgress(blProgress.completedBytes, blProgress.totalBytes).c_str());
 
 			double throughput = blProgress.avgBytesPerSecond();
 			if (throughput > 0) {
@@ -7829,11 +7826,9 @@ public:
 							                     bdProgress.totalTasks,
 							                     bdProgress.progressPercent());
 
-							statusText += format(" Bytes completed - %lld (%s) / %lld (%s)\n",
-							                     bdProgress.completedBytes,
-							                     formatBytesHumanReadable(bdProgress.completedBytes).c_str(),
-							                     bdProgress.totalBytes,
-							                     formatBytesHumanReadable(bdProgress.totalBytes).c_str());
+							statusText +=
+							    format(" Bytes completed - %lld (%s) / %lld (%s)\n",
+							           formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
 
 							double throughput = bdProgress.avgBytesPerSecond();
 							if (throughput > 0) {

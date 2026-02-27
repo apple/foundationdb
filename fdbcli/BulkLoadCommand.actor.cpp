@@ -188,19 +188,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			return UID();
 		}
-		state UID jobId;
-		try {
-			jobId = UID::fromStringThrowsOnFailure(tokens[2].toString());
-		} catch (Error&) {
-			fmt::println("ERROR: Invalid job id '{}' (expected 32 hex characters)", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			return UID();
-		}
-		if (!jobId.isValid()) {
-			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			return UID();
-		}
+		state UID jobId = validateBulkJobId(tokens[2], BULK_LOAD_LOAD_USAGE);
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
@@ -250,7 +238,11 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 		BulkLoadProgress progress = progressOpt.get();
 
 		fmt::println("BulkLoad job {} is in progress.", progress.jobId.toString());
-		fmt::println(" Range: {}", progress.jobRange.toString());
+
+		// Get owner info for range description
+		std::string ownerSuffix = wait(getBulkOwnerSuffix(cx, progress.jobId, false)); // false = isLoadJob
+
+		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
 		fmt::println("");
 		fmt::println("Progress:");
 		fmt::println(" Tasks - {} submitted, {} triggered, {} running, {} complete, {} error",
@@ -269,45 +261,33 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			             100.0 * progress.completeTasks / totalTasks);
 		}
 
-		fmt::println(" Bytes completed - {} ({}) / {} ({})",
-		             progress.completedBytes,
-		             formatBytesHumanReadable(progress.completedBytes),
-		             progress.totalBytes,
-		             formatBytesHumanReadable(progress.totalBytes));
+		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
 
-		double throughput = progress.avgBytesPerSecond();
-		if (throughput > 0) {
-			fmt::println(" Throughput - {:.1f} MB/s", throughput / 1048576.0);
-		}
+		// Use shared progress metrics display
+		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
 
-		if (progress.etaSeconds().present()) {
-			fmt::println(" Estimated time remaining - {}",
-			             formatDurationHumanReadable((int)progress.etaSeconds().get()));
-		}
+		// Enhanced diagnostics with shared utilities
+		printTaskBreakdown(progress.submittedTasks,
+		                   progress.triggeredTasks,
+		                   progress.runningTasks,
+		                   progress.completeTasks,
+		                   progress.errorTasks);
 
-		if (progress.elapsedSeconds > 0) {
-			fmt::println(" Elapsed time - {}", formatDurationHumanReadable((int)progress.elapsedSeconds));
-		}
+		// Advanced health analysis
+		double efficiency = totalTasks > 0 ? 100.0 * progress.completeTasks / totalTasks : 0.0;
+		auto healthMetrics = BulkHealthMetrics::analyze(progress.avgBytesPerSecond() / 1048576.0,
+		                                                efficiency,
+		                                                progress.stalledTasks.size(),
+		                                                progress.errorTasks,
+		                                                progress.elapsedSeconds / 60.0);
+		printBulkHealthAnalysis(healthMetrics);
 
-		// Show stalled tasks as warnings
-		if (!progress.stalledTasks.empty()) {
-			fmt::println("");
-			fmt::println("WARNING: {} stalled tasks (no progress > 60s):", progress.stalledTasks.size());
-			for (const auto& stalled : progress.stalledTasks) {
-				fmt::println(" Task {}: {}, stalled {:.0f}s, {} restarts",
-				             stalled.taskId.shortString(),
-				             stalled.range.toString(),
-				             stalled.stalledSeconds,
-				             stalled.restartCount);
-				if (!stalled.lastError.empty()) {
-					fmt::println("           Last error: {}", stalled.lastError);
-				}
-			}
-		}
+		// Stalled task warnings using shared utility
+		printStalledTaskWarnings(progress.stalledTasks);
 
 		if (progress.errorTasks > 0) {
 			fmt::println("");
-			fmt::println("WARNING: {} tasks in error state", progress.errorTasks);
+			fmt::println("WARNING: {} tasks in error state ⚠️", progress.errorTasks);
 		}
 
 		return UID();
