@@ -1,4 +1,5 @@
 module github.com/apple/foundationdb/bindings/go
 
-// The FoundationDB go bindings currently have no external golang dependencies outside of
-// the go standard library.
+go 1.20
+
+require github.com/google/uuid v1.6.0 // indirect
