@@ -149,9 +149,17 @@ UID UID::fromStringThrowsOnFailure(std::string const& s) {
 		// invalid string size
 		throw operation_failed();
 	}
-	uint64_t a = 0, b = 0;
-	int r = sscanf(s.c_str(), "%16" SCNx64 "%16" SCNx64, &a, &b);
-	if (r != 2) {
+	// Split into two 16-character hex strings and parse using strtoull
+	std::string first_half = s.substr(0, 16);
+	std::string second_half = s.substr(16, 16);
+
+	char* end1;
+	char* end2;
+	uint64_t a = strtoull(first_half.c_str(), &end1, 16);
+	uint64_t b = strtoull(second_half.c_str(), &end2, 16);
+
+	// Verify entire strings were parsed
+	if (end1 != first_half.c_str() + 16 || end2 != second_half.c_str() + 16) {
 		throw operation_failed();
 	}
 	return UID(a, b);

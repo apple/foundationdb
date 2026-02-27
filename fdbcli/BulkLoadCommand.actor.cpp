@@ -188,7 +188,14 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
+		state UID jobId;
+		try {
+			jobId = UID::fromStringThrowsOnFailure(tokens[2].toString());
+		} catch (Error&) {
+			fmt::println("ERROR: Invalid job id '{}' (expected 32 hex characters)", tokens[2].toString());
+			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
+			return UID();
+		}
 		if (!jobId.isValid()) {
 			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
