@@ -154,8 +154,8 @@ bool verifyMD5(HTTPData<std::string>* data, bool fail_if_header_missing, Optiona
 std::string IncomingResponse::toString() const {
 	std::string r = fmt::format("Response Code: {0}\n", code);
 	r += fmt::format("Response ContentLen: {0}\n", data.contentLen);
-	for (auto h : data.headers)
-		r += fmt::format("Response Header: {0}: {1}\n", h.first, h.second);
+	for (const auto& [headerName, headerValue] : data.headers)
+		r += fmt::format("Response Header: {0}: {1}\n", headerName, headerValue);
 	r.append("-- RESPONSE CONTENT--\n");
 	// Limit the length of the response content to 1024 bytes for logging.
 	// No one wants 40MB of content dumped to the console.
@@ -171,10 +171,10 @@ std::string IncomingResponse::toString() const {
 }
 
 void writeHeaders(HTTP::Headers const& headers, PacketWriter& writer) {
-	for (auto h : headers) {
-		writer.serializeBytes(h.first);
+	for (const auto& [headerName, headerValue] : headers) {
+		writer.serializeBytes(headerName);
 		writer.serializeBytes(": "_sr);
-		writer.serializeBytes(h.second);
+		writer.serializeBytes(headerValue);
 		writer.serializeBytes("\r\n"_sr);
 	}
 	writer.serializeBytes("\r\n"_sr);

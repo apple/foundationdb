@@ -58,10 +58,10 @@ double ratePolicy(Reference<LocalitySet>& localitySet,
 		int largestMode = 0;
 		LocalityEntry largestEntry;
 
-		for (auto& counterItem : counterMap) {
-			if (counterItem.second > largestMode) {
-				largestMode = counterItem.second;
-				largestEntry = counterItem.first;
+		for (const auto& [entry, entryCount] : counterMap) {
+			if (entryCount > largestMode) {
+				largestMode = entryCount;
+				largestEntry = entry;
 			}
 		}
 		rating = (double)largestMode / (double)uniqueResults;
@@ -90,8 +90,8 @@ int mostUsedZoneCount(Reference<LocalitySet>& logServerSet, std::vector<Locality
 		entries[value.get()]++;
 	}
 	int maxEntries = 0;
-	for (auto it : entries) {
-		maxEntries = std::max(maxEntries, it.second);
+	for (const auto& [_zoneId, entryCount] : entries) {
+		maxEntries = std::max(maxEntries, entryCount);
 	}
 	return maxEntries;
 }
@@ -121,8 +121,8 @@ bool findBestPolicySetSimple(int targetUniqueValueCount,
 	ASSERT_WE_THINK(uniqueValueCount == entries.size());
 	std::vector<std::vector<int>> randomizedEntries;
 	randomizedEntries.resize(entries.size());
-	for (auto it : entries) {
-		randomizedEntries.push_back(it.second);
+	for (const auto& [_zoneId, entryIndexes] : entries) {
+		randomizedEntries.push_back(entryIndexes);
 	}
 	deterministicRandom()->randomShuffle(randomizedEntries);
 

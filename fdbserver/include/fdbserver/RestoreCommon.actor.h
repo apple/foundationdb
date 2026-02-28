@@ -263,10 +263,10 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 		try {
 			state std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
 			state std::vector<std::tuple<UID, Request, double>> replyDurations; // double is end time of the request
-			for (auto& request : requests) {
-				RequestStream<Request> const* stream = &(interfaces[request.first].*channel);
-				cmdReplies.push_back(stream->getReply(request.second, taskID));
-				replyDurations.emplace_back(request.first, request.second, 0);
+			for (auto& [requestId, request] : requests) {
+				RequestStream<Request> const* stream = &(interfaces[requestId].*channel);
+				cmdReplies.push_back(stream->getReply(request, taskID));
+				replyDurations.emplace_back(requestId, request, 0);
 			}
 
 			state std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
@@ -332,14 +332,14 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				double latest = std::numeric_limits<double>::min();
 				UID earliestNode, latestNode;
 
-				for (auto& endTime : maxEndTime) {
-					if (earliest > endTime.second) {
-						earliest = endTime.second;
-						earliestNode = endTime.first;
+				for (const auto& [nodeId, endTime] : maxEndTime) {
+					if (earliest > endTime) {
+						earliest = endTime;
+						earliestNode = nodeId;
 					}
-					if (latest < endTime.second) {
-						latest = endTime.second;
-						latestNode = endTime.first;
+					if (latest < endTime) {
+						latest = endTime;
+						latestNode = nodeId;
 					}
 				}
 				if (latest - earliest > SERVER_KNOBS->FASTRESTORE_STRAGGLER_THRESHOLD_SECONDS) {
@@ -362,12 +362,12 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				break;
 			// fprintf(stdout, "sendBatchRequests Error code:%d, error message:%s\n", e.code(), e.what());
 			TraceEvent(SevWarn, "FastRestoreSendBatchRequests").error(e);
-			for (auto& request : requests) {
+			for (auto& [requestId, request] : requests) {
 				TraceEvent(SevWarn, "FastRestoreSendBatchRequests")
 				    .detail("SendBatchRequests", requests.size())
-				    .detail("RequestID", request.first)
-				    .detail("Request", request.second.toString());
-				resetReply(request.second);
+				    .detail("RequestID", requestId)
+				    .detail("Request", request.toString());
+				resetReply(request);
 			}
 		}
 	}

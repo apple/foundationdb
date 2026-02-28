@@ -260,8 +260,8 @@ class TestConfig : public BasicTestConfig {
 	public:
 		~ConfigBuilder() {
 			TraceEvent evt("SimulatorConfigFromToml");
-			for (const auto& p : confMap) {
-				std::visit(trace_visitor(std::string(p.first), evt), p.second);
+			for (const auto& [configKey, configValue] : confMap) {
+				std::visit(trace_visitor(std::string(configKey), evt), configValue);
 			}
 		}
 
@@ -756,8 +756,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				bool client = processClass == ProcessClass::TesterClass || processMode == BackupAgentOnly ||
 				              processMode == SimHTTPServer;
 				FlowTransport::createInstance(client, 1, WLTOKEN_RESERVED_COUNT, &allowList);
-				for (const auto& p : g_simulator->authKeys) {
-					FlowTransport::transport().addPublicKey(p.first, p.second.toPublic());
+				for (const auto& [keyName, key] : g_simulator->authKeys) {
+					FlowTransport::transport().addPublicKey(keyName, key.toPublic());
 				}
 				Sim2FileSystem::newFileSystem();
 
@@ -1115,10 +1115,10 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::set<std::string> filenames;
 			state std::string closingStr;
 			auto& machineCache = g_simulator->getMachineById(localities.machineId())->openFiles;
-			for (auto it : machineCache) {
-				filenames.insert(it.first);
-				closingStr += it.first + ", ";
-				ASSERT(it.second.get().canGet());
+			for (auto& [filename, openFile] : machineCache) {
+				filenames.insert(filename);
+				closingStr += filename + ", ";
+				ASSERT(openFile.get().canGet());
 			}
 
 			for (auto it : g_simulator->getMachineById(localities.machineId())->deletingOrClosingFiles) {
@@ -1504,8 +1504,8 @@ void SimulationConfig::set_config(std::string config) {
 	std::map<std::string, std::string> hack_map;
 	const auto buildResult = buildConfiguration(config, hack_map);
 	ASSERT(buildResult != ConfigurationResult::NO_OPTIONS_PROVIDED);
-	for (auto kv : hack_map)
-		db.set(kv.first, kv.second);
+	for (const auto& [configKey, configValue] : hack_map)
+		db.set(configKey, configValue);
 }
 
 [[maybe_unused]] StringRef StringRefOf(const char* s) {

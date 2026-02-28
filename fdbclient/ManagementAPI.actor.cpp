@@ -2156,16 +2156,16 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 		Optional<Standalone<StringRef>> value = wait(tr->get(logsKey));
 		ASSERT(value.present());
 		auto logs = decodeLogsValue(value.get());
-		for (auto const& log : logs.first) {
-			if (log.second == NetworkAddress() || addressExcluded(*exclusions, log.second)) {
+		for (const auto& [_logId, logAddress] : logs.first) {
+			if (logAddress == NetworkAddress() || addressExcluded(*exclusions, logAddress)) {
 				ok = false;
-				inProgressExclusion->insert(log.second);
+				inProgressExclusion->insert(logAddress);
 			}
 		}
-		for (auto const& log : logs.second) {
-			if (log.second == NetworkAddress() || addressExcluded(*exclusions, log.second)) {
+		for (const auto& [_logId, logAddress] : logs.second) {
+			if (logAddress == NetworkAddress() || addressExcluded(*exclusions, logAddress)) {
 				ok = false;
-				inProgressExclusion->insert(log.second);
+				inProgressExclusion->insert(logAddress);
 			}
 		}
 	}

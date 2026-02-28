@@ -1157,8 +1157,8 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 }
 
 TransportData::~TransportData() {
-	for (auto& p : peers) {
-		p.second->connect.cancel();
+	for (auto& [_peerAddress, peer] : peers) {
+		peer->connect.cancel();
 	}
 }
 
@@ -1818,8 +1818,8 @@ FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IP
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 	if (g_network->isSimulated()) {
-		for (auto const& p : g_simulator->authKeys) {
-			self->publicKeys.emplace(p.first, p.second.toPublic());
+		for (const auto& [keyName, key] : g_simulator->authKeys) {
+			self->publicKeys.emplace(keyName, key.toPublic());
 		}
 	}
 }

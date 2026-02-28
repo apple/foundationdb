@@ -1857,16 +1857,16 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 		headersList.push_back({ "content-type", trim_copy(headers["Content-Type"]) + "\n" });
 	if (headers.find("Content-MD5") != headers.end())
 		headersList.push_back({ "content-md5", trim_copy(headers["Content-MD5"]) + "\n" });
-	for (auto h : headers) {
-		if (StringRef(h.first).startsWith("x-amz"_sr))
-			headersList.push_back({ to_lower_copy(h.first), trim_copy(h.second) + "\n" });
+	for (const auto& [headerName, headerValue] : headers) {
+		if (StringRef(headerName).startsWith("x-amz"_sr))
+			headersList.push_back({ to_lower_copy(headerName), trim_copy(headerValue) + "\n" });
 	}
 	std::sort(headersList.begin(), headersList.end());
 	std::string canonicalHeaders;
 	std::string signedHeaders;
-	for (auto& i : headersList) {
-		canonicalHeaders += i.first + ":" + i.second;
-		signedHeaders += i.first + ";";
+	for (const auto& [headerName, headerValue] : headersList) {
+		canonicalHeaders += headerName + ":" + headerValue;
+		signedHeaders += headerName + ";";
 	}
 	signedHeaders.pop_back();
 	std::string canonicalRequest = verb + "\n" + canonicalURI + "\n" + canonicalQueryString + "\n" + canonicalHeaders +
@@ -1917,12 +1917,12 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append("\n");
 	msg.append(date);
 	msg.append("\n");
-	for (auto h : headers) {
-		StringRef name = h.first;
+	for (const auto& [headerName, headerValue] : headers) {
+		StringRef name = headerName;
 		if (name.startsWith("x-amz"_sr) || name.startsWith("x-icloud"_sr)) {
-			msg.append(h.first);
+			msg.append(headerName);
 			msg.append(":");
-			msg.append(h.second);
+			msg.append(headerValue);
 			msg.append("\n");
 		}
 	}
