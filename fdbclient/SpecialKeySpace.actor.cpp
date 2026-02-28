@@ -407,13 +407,13 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			}
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
-			for (int i = 0; i < pairs.size(); ++i) {
-				ASSERT(iter->range().contains(pairs[i].key));
-				result.push_back(result.arena(), pairs[i]);
+			for (const auto& keyValue : pairs) {
+				ASSERT(iter->range().contains(keyValue.key));
+				result.push_back(result.arena(), keyValue);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it's still
 				// returned. In other words, the total size of the returned value (less the last entry) will be less
 				// than byteLimit
-				limits.decrement(pairs[i]);
+				limits.decrement(keyValue);
 				if (limits.isReached()) {
 					result.more = true;
 					result.readThroughEnd = false;

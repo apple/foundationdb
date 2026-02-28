@@ -221,8 +221,7 @@ std::string guessRegionFromDomain(std::string domain) {
 	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 
-	for (int i = 0; i < knownServices.size(); ++i) {
-		const char* service = knownServices[i];
+	for (const auto& service : knownServices) {
 
 		std::size_t p = domain.find(service);
 		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {

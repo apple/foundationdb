@@ -92,8 +92,8 @@ struct Barrier {
 private:
 	void fire() {
 		numReached = 0;
-		for (int i = 0; i < events.size(); ++i)
-			events[i]->set();
+		for (auto& event : events)
+			event->set();
 
 		events.clear();
 	}

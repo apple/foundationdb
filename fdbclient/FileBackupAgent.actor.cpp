@@ -2288,24 +2288,19 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		    wait(getBlockOfShards(tr, nextKey, endKey, CLIENT_KNOBS->BACKUP_SHARD_TASK_LIMIT));
 
 		std::vector<Future<Key>> addTaskVector;
-		for (int idx = 0; idx < keys.size(); ++idx) {
-			if (nextKey != keys[idx]) {
-				addTaskVector.push_back(addTask(tr,
-				                                taskBucket,
-				                                task,
-				                                task->getPriority(),
-				                                nextKey,
-				                                keys[idx],
-				                                TaskCompletionKey::joinWith(onDone)));
+		for (const auto& splitKey : keys) {
+			if (nextKey != splitKey) {
+				addTaskVector.push_back(addTask(
+				    tr, taskBucket, task, task->getPriority(), nextKey, splitKey, TaskCompletionKey::joinWith(onDone)));
 				TraceEvent("FileBackupRangeSplit")
 				    .suppressFor(60)
 				    .detail("BackupUID", BackupConfig(task).getUid())
 				    .detail("BeginKey", Params.beginKey().get(task).printable())
 				    .detail("EndKey", Params.endKey().get(task).printable())
 				    .detail("SliceBeginKey", nextKey.printable())
-				    .detail("SliceEndKey", keys[idx].printable());
+				    .detail("SliceEndKey", splitKey.printable());
 			}
-			nextKey = keys[idx];
+			nextKey = splitKey;
 		}
 
 		wait(waitForAll(addTaskVector));
