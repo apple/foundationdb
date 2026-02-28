@@ -178,6 +178,74 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 	}
 }
 
+// This function scans all backup progress entries to find the one matching the given
+// (epoch, tag) pair. When found, it deletes the old key and writes a new key with the
+// new workerID, effectively transferring ownership from the failed worker to the
+// replacement worker.
+ACTOR Future<Version> _takeover(Database cx, UID newWorkerID, LogEpoch backupEpoch, Tag tag) {
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state Version readVersion = wait(tr.getReadVersion());
+			state RangeResult results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+
+			// Scan all progress entries to find the one matching our epoch and tag
+			state Version maxTagVersion = invalidVersion;
+			for (auto& it : results) {
+				state WorkerBackupStatus status = decodeBackupProgressValue(it.value);
+				if (status.tag != tag) {
+					continue;
+				}
+				if (status.epoch == backupEpoch) {
+					UID oldWorkerID = decodeBackupProgressKey(it.key);
+					state Version savedVersion = status.version;
+
+					// Delete the old worker's key
+					tr.clear(it.key);
+
+					// Write the new worker's key with the same status
+					Key newKey = backupProgressKeyFor(newWorkerID);
+					tr.set(newKey, it.value);
+
+					TraceEvent("BackupProgressTakeover", newWorkerID)
+					    .detail("Epoch", backupEpoch)
+					    .detail("Tag", tag)
+					    .detail("SavedVersion", savedVersion)
+					    .detail("OldWorkerID", oldWorkerID)
+					    .detail("NewWorkerID", newWorkerID);
+
+					wait(tr.commit());
+					return savedVersion;
+				} else {
+					maxTagVersion = std::max(maxTagVersion, status.version);
+				}
+			}
+
+			// No matching progress found, use the maxTagVersion if exists or
+			// this transaction's read version.
+			TraceEvent("BackupProgressNoTakeover", newWorkerID)
+			    .detail("Epoch", backupEpoch)
+			    .detail("Tag", tag)
+			    .detail("ReadVersion", readVersion)
+			    .detail("MaxTagVersion", maxTagVersion)
+			    .detail("TotalProgressEntries", results.size());
+			return maxTagVersion == invalidVersion ? readVersion : maxTagVersion;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+Future<Version> BackupProgress::takeover(Database cx, UID newWorkerID, LogEpoch backupEpoch, Tag tag) {
+	return _takeover(cx, newWorkerID, backupEpoch, tag);
+}
+
 TEST_CASE("/BackupProgress/Unfinished") {
 	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> epochInfos;
 
