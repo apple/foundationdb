@@ -100,8 +100,20 @@ Once you have your dependencies, you can run `cmake` and then build:
 1. Check out this repository.
 1. Create a build directory (you can place it anywhere you like).
 1. `cd <FDB_BUILD_DIR>`
-1. `cmake -G Ninja <FDB_SOURCE_DIR>`
-1. `ninja`
+
+To build with Swift support:
+
+```sh
+cmake -G Ninja -DWITH_SWIFT=ON <FDB_SOURCE_DIR>
+```
+
+To build without Swift support:
+
+```sh
+cmake -G Ninja -DWITH_SWIFT=OFF <FDB_SOURCE_DIR>
+```
+
+For detailed Swift build instructions, see [SWIFT_GUIDE.md](SWIFT_GUIDE.md).
 
 Building FoundationDB requires at least 8GB of memory. More memory is needed when building in parallel. If the computer freezes or crashes, consider disabling parallelized build using `ninja -j1`.
 
@@ -130,6 +142,7 @@ Building FoundationDB requires at least 8GB of memory. More memory is needed whe
    cmake -G Ninja \
        -DUSE_CCACHE=on \
        -DUSE_DTRACE=off \
+       -DWITH_SWIFT=off \
        ..
    ninja -j 10
    # run fast tests
