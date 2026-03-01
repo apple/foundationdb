@@ -103,6 +103,10 @@ class DDTxnProcessorImpl {
 
 				break;
 			} catch (Error& e) {
+				TraceEvent(SevWarn, "GetSourceServersForRangeRetry")
+				    .detail("KeyBegin", keys.begin)
+				    .detail("KeyEnd", keys.end)
+				    .errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
