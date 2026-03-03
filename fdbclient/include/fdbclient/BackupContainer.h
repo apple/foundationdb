@@ -69,6 +69,9 @@ static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
 // Mutation log version written by BackupWorker
 static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
 
+// Mutation log version written by BackupWorker for range partitioned logs
+static const uint32_t RANGE_PARTITIONED_MLOG_VERSION = 5001;
+
 // Snapshot file version written by FileBackupAgent
 static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
 
@@ -268,6 +271,11 @@ public:
 	                                                          int blockSize,
 	                                                          uint16_t tagId,
 	                                                          int totalTags) = 0;
+
+	virtual Future<Reference<IBackupFile>> writeRangePartitionedLogFile(Version beginVersion,
+	                                                                    Version endVersion,
+	                                                                    int32_t partitionId,
+	                                                                    int blockSize) = 0;
 
 	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
 	// snapshot of the key ranges this backup is targeting.

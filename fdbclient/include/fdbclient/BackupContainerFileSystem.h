@@ -115,6 +115,11 @@ public:
 	                                                  uint16_t tagId,
 	                                                  int totalTags) final;
 
+	Future<Reference<IBackupFile>> writeRangePartitionedLogFile(Version beginVersion,
+	                                                            Version endVersion,
+	                                                            int32_t partitionId,
+	                                                            int blockSize) final;
+
 	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion,
 	                                              int snapshotFileCount,
 	                                              Version fileVersion,
