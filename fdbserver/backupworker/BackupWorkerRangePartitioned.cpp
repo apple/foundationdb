@@ -44,6 +44,23 @@ struct RangePartitionedVersionedMessage {
 
 	Version getVersion() const { return version.version; }
 	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
+
+	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
+	// metadata version key).
+	bool isCandidateBackupMessage(MutationRef* m) {
+		// TODO akanksha: Implement this function to filter out messages that are not mutations or not relevant to
+		// backup. Need to figure out the what those message can be.
+		return true;
+	}
+};
+
+struct RangePartitionedLogFileInfo {
+	UID backupUid;
+	int32_t partitionId;
+	KeyRange fileKeyRange;
+	Version beginVersion;
+	Reference<IBackupFile> file;
+	int64_t blockEnd = 0;
 };
 
 struct BackupRangePartitionedData {
@@ -54,6 +71,7 @@ struct BackupRangePartitionedData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	// TODO akanksha: Check if minKnownCommittedVersion is needed after or remove it.
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
@@ -66,6 +84,8 @@ struct BackupRangePartitionedData {
 	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
 	KeyRangeMap<int> keyRangeToPartitionId;
+	std::unordered_map<int, KeyRange>
+	    partitionToKeyRange; // Partition ID to key range map for easy lookup of partition's key range.
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -82,7 +102,22 @@ struct BackupRangePartitionedData {
 		Future<Optional<Reference<IBackupContainer>>> container;
 		// Backup request's commit version. Mutations are logged at some version after this.
 		Version startVersion = invalidVersion;
+		// The next log's begin version.
+		Version nextFileBeginVersion = invalidVersion;
 		bool stopped = false;
+
+		bool isReady() const { return stopped || (container.isReady() && ranges.isReady()); }
+
+		Future<Void> waitReady() {
+			if (stopped)
+				return Void();
+			return _waitReady(this);
+		}
+
+		ACTOR static Future<Void> _waitReady(PerBackupInfo* info) {
+			wait(success(info->container) && success(info->ranges));
+			return Void();
+		}
 	};
 
 	// TODO akanksha: Add backups in this map when backup worker receives backup request.
@@ -116,11 +151,74 @@ struct BackupRangePartitionedData {
 		}
 	}
 
+	// Inserts a backup's single range into rangeMap.
+	template <class T>
+	void insertRange(KeyRangeMap<std::set<T>>& keyRangeMap, KeyRangeRef range, T value) {
+		for (auto& logRange : keyRangeMap.modify(range)) {
+			logRange->value().insert(value);
+		}
+		for (auto& logRange : keyRangeMap.modify(singleKeyRange(metadataVersionKey))) {
+			logRange->value().insert(value);
+		}
+		TraceEvent("BackupWorkerInsertRange", myId)
+		    .detail("Value", value)
+		    .detail("Begin", range.begin)
+		    .detail("End", range.end);
+	}
+
+	// Finds the intersection between a vector of ranges and a target range.
+	// Returns the union of all intersecting portions as a single range.
+	// Returns empty Optional if there are no intersections.
+	Optional<KeyRange> getKeyRangeIntersection(const std::vector<KeyRange>& ranges, const KeyRange& target) {
+		Optional<KeyRange> result;
+
+		for (const auto& range : ranges) {
+			KeyRange intersection = range & target;
+			if (intersection.empty()) {
+				continue;
+			}
+
+			if (!result.present()) {
+				result = intersection;
+			} else {
+				KeyRef newBegin = std::min(result.get().begin, intersection.begin);
+				KeyRef newEnd = std::max(result.get().end, intersection.end);
+				result = KeyRange(KeyRangeRef(newBegin, newEnd));
+			}
+		}
+		return result;
+	}
+
 	void pop() {
 		if (!logSystem.get()) {
 			return;
 		}
 		logSystem.get()->pop(savedVersion, tag);
+	}
+
+	ACTOR static Future<Void> _waitAllInfoReady(BackupRangePartitionedData* self) {
+		std::vector<Future<Void>> all;
+		for (auto it = self->backups.begin(); it != self->backups.end();) {
+			if (it->second.stopped) {
+				TraceEvent("BWRangeParitionedRemoveStoppedContainer", self->myId).detail("BackupId", it->first);
+				it = self->backups.erase(it);
+				continue;
+			}
+			all.push_back(it->second.waitReady());
+			it++;
+		}
+		wait(waitForAll(all));
+		return Void();
+	}
+
+	Future<Void> waitAllInfoReady() { return _waitAllInfoReady(this); }
+
+	bool isAllInfoReady() const {
+		for (const auto& [uid, info] : backups) {
+			if (!info.isReady())
+				return false;
+		}
+		return true;
 	}
 };
 
@@ -454,4 +552,178 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 		}
 		co_await yield();
 	}
+}
+
+ACTOR Future<Void> writeFileHeader(Reference<IBackupFile> logFile, int32_t partitionId, KeyRange range) {
+	wait(logFile->append((uint8_t*)&RANGE_PARTITIONED_MLOG_VERSION, sizeof(RANGE_PARTITIONED_MLOG_VERSION)));
+
+	BinaryWriter wr(Unversioned());
+	wr << partitionId << range.begin << range.end;
+	Standalone<StringRef> header = wr.toValue();
+	wait(logFile->append(header.begin(), header.size()));
+	return Void();
+}
+
+ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
+                               RangePartitionedVersionedMessage message,
+                               StringRef mutation,
+                               int64_t* blockEnd,
+                               int blockSize) {
+	// Format: version, subversion, messageSize, message
+	state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
+
+	// Convert to big Endianness for version.version, version.sub, and msgSize
+	// The decoder assumes 0xFF is the end, so little endian can easily be
+	// mistaken as the end. In contrast, big endian for version almost guarantee
+	// the first byte is not 0xFF (should always be 0x00).
+	BinaryWriter wr(Unversioned());
+	wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
+	state Standalone<StringRef> mutationHeader = wr.toValue();
+
+	// Start a new block if needed
+	if (logFile->size() + bytes > *blockEnd) {
+		const int bytesLeft = *blockEnd - logFile->size();
+		if (bytesLeft > 0) {
+			state Value paddingFFs = fileBackup::makePadding(bytesLeft);
+			wait(logFile->append(paddingFFs.begin(), bytesLeft));
+		}
+
+		*blockEnd += blockSize;
+		// Block header.
+		wait(logFile->append((uint8_t*)&RANGE_PARTITIONED_MLOG_VERSION, sizeof(RANGE_PARTITIONED_MLOG_VERSION)));
+	}
+
+	wait(logFile->append((void*)mutationHeader.begin(), mutationHeader.size()));
+	wait(logFile->append(mutation.begin(), mutation.size()));
+
+	return Void();
+}
+
+ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastVersionInFile, int numMsg) {
+	// Make sure all backups are ready, otherwise mutations will be lost.
+	while (!self->isAllInfoReady()) {
+		wait(self->waitAllInfoReady());
+	}
+
+	state std::vector<RangePartitionedLogFileInfo> activeFiles;
+	state KeyRangeMap<std::set<int>> keyRangetoFileIdxMap;
+	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	state std::vector<Future<Reference<IBackupFile>>> fileFutures;
+
+	for (auto it = self->backups.begin(); it != self->backups.end();) {
+		if (it->second.stopped || !it->second.container.get().present()) {
+			TraceEvent("BWRangeParititonedNoContainer", self->myId).detail("BackupId", it->first);
+			it = self->backups.erase(it);
+			continue;
+		}
+
+		state Version fileEndVersion = lastVersionInFile + 1;
+		if (it->second.nextFileBeginVersion == invalidVersion) {
+			it->second.nextFileBeginVersion = self->savedVersion + 1;
+		}
+
+		state Version beginVersion = it->second.nextFileBeginVersion;
+
+		for (auto range : self->keyRangeToPartitionId.ranges()) {
+			state int32_t partitionId = range.value();
+			state KeyRange partitionRange = range.range();
+
+			// Calculate intersection between backup's ranges and partition range
+			state Optional<KeyRange> intersection =
+			    self->getKeyRangeIntersection(it->second.ranges.get().get(), partitionRange);
+
+			if (!intersection.present()) {
+				continue; // No overlap, skip this partition for this backup
+			}
+
+			RangePartitionedLogFileInfo lf;
+			lf.backupUid = it->first;
+			lf.partitionId = partitionId;
+			lf.fileKeyRange = intersection.get();
+			lf.beginVersion = beginVersion;
+			lf.blockEnd = 0;
+
+			activeFiles.push_back(lf);
+			int fileIndex = activeFiles.size() - 1;
+
+			fileFutures.push_back(it->second.container.get().get()->writeRangePartitionedLogFile(
+			    beginVersion, fileEndVersion, self->logFolderBaseVersion, partitionId, blockSize));
+			self->insertRange(keyRangetoFileIdxMap, intersection.get(), fileIndex);
+		}
+	}
+
+	if (fileFutures.empty()) {
+		return Void();
+	}
+	wait(waitForAll(fileFutures));
+
+	state std::vector<Future<Void>> headerWrites;
+	state int i;
+	for (i = 0; i < activeFiles.size(); i++) {
+		activeFiles[i].file = fileFutures[i].get();
+		headerWrites.push_back(
+		    writeFileHeader(activeFiles[i].file, activeFiles[i].partitionId, activeFiles[i].fileKeyRange));
+	}
+	wait(waitForAll(headerWrites));
+
+	keyRangetoFileIdxMap.coalesce(allKeys);
+	if (activeFiles.empty()) {
+		return Void();
+	}
+
+	// Process mutations
+	state int idx;
+	for (idx = 0; idx < numMsg; idx++) {
+		auto& message = self->messages[idx];
+		MutationRef m;
+		if (!message.isCandidateBackupMessage(&m)) {
+			continue;
+		}
+
+		DEBUG_MUTATION("BWRangeParitionedAddMutation", message.version.version, m, self->myId)
+		    .detail("KCV", self->minKnownCommittedVersion)
+		    .detail("SavedVersion", self->savedVersion);
+
+		std::vector<Future<Void>> adds;
+		if (m.type != MutationRef::Type::ClearRange) {
+			for (int fileIdx : keyRangetoFileIdxMap[m.param1]) {
+				auto& lf = activeFiles[fileIdx];
+				// Different backups may have different start version so need this check before writing.
+				if (message.getVersion() >= lf.beginVersion) {
+					adds.push_back(addMutation(lf.file, message, message.message, &lf.blockEnd, blockSize));
+				}
+			}
+		} else {
+			KeyRangeRef mutationRange(m.param1, m.param2);
+			std::unordered_set<int> writtenFiles;
+			for (auto range : keyRangetoFileIdxMap.intersectingRanges(mutationRange)) {
+				for (int fileIdx : range.value()) {
+					// For ClearRange, we only need to write the full mutation once for each file.
+					if (writtenFiles.find(fileIdx) != writtenFiles.end()) {
+						continue;
+					}
+					auto& lf = activeFiles[fileIdx];
+					if (message.getVersion() >= lf.beginVersion) {
+						adds.push_back(addMutation(lf.file, message, message.message, &lf.blockEnd, blockSize));
+					}
+					writtenFiles.insert(fileIdx);
+				}
+			}
+		}
+		if (!adds.empty()) {
+			wait(waitForAll(adds));
+		}
+	}
+
+	// Finish files
+	std::vector<Future<Void>> finished;
+	for (auto& lf : activeFiles) {
+		finished.push_back(lf.file->finish());
+	}
+	wait(waitForAll(finished));
+
+	for (auto& lf : activeFiles) {
+		self->backups[lf.backupUid].nextFileBeginVersion = lastVersionInFile + 1;
+	}
+	return Void();
 }

@@ -1441,6 +1441,20 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeTaggedLogFile(Ver
 	                        blockSize));
 }
 
+Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangePartitionedLogFile(Version beginVersion,
+                                                                                       Version endVersion,
+                                                                                       Version baseVersion,
+                                                                                       int32_t partitionId,
+                                                                                       int blockSize) {
+	return writeFile(
+	    BackupContainerFileSystemImpl::logVersionFolderStringForRangePartitioned(beginVersion, baseVersion) +
+	    format("log,%lld,%lld,%s,%d",
+	           beginVersion,
+	           endVersion,
+	           deterministicRandom()->randomUniqueID().toString().c_str(),
+	           blockSize));
+}
+
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version snapshotBeginVersion,
                                                                          int snapshotFileCount,
                                                                          Version fileVersion,
