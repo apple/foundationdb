@@ -22,7 +22,7 @@ timeout = 360000
     startAfter = 10.0
     restoreAfter = 50.0
     fastRestore = true
-    usePartitionedLogs = true
+    usePartitionedLogs = false
 
     [[test.workload]]
     testName = 'RandomClogging'

@@ -952,7 +952,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 ACTOR Future<Void> pullAsyncData(BackupData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion));
+	state Version tagAt = std::max( self->popVersion, std::max(self->pulledVersion.get(), std::max(self->startVersion, self->savedVersion)));
 	state Arena prev;
 
 	TraceEvent("BackupWorkerPull", self->myId).log();
