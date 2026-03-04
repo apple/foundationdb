@@ -2192,12 +2192,13 @@ Future<bool> runTest(Database cx,
 				printf("Consistency check done\n");
 				TraceEvent("TestProgress").log("checkConsistency() returned");
 			} catch (Error& e) {
+				TraceEvent("TestProgress").log("Exception in checkConsistencyUrgentSim or checkConsistency");
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
 				ok = false;
 			}
 
 			// Run auditStorage at the end of simulation
-			if (quiescent && g_network->isSimulated()) {
+			if (ok && quiescent && g_network->isSimulated()) {
 				try {
 					TraceEvent("AuditStorageStart");
 					TraceEvent("TestProgress")
