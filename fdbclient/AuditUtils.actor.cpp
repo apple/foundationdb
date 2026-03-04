@@ -162,8 +162,8 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 				                                         num.present() ? GetRangeLimits(num.get()) : GetRangeLimits(),
 				                                         Snapshot::False,
 				                                         reverse));
-				for (int i = 0; i < res.size(); ++i) {
-					const AuditStorageState auditState = decodeAuditStorageState(res[i].value);
+				for (const auto& auditKeyValue : res) {
+					const AuditStorageState auditState = decodeAuditStorageState(auditKeyValue.value);
 					if (phase.present() && auditState.getPhase() != phase.get()) {
 						continue;
 					}
@@ -807,8 +807,8 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				    .detail("ResMore", result.more)
 				    .detail("ResSize", result.size());
 			}
-			for (int i = 0; i < result.size(); ++i) {
-				auto auditState = decodeAuditStorageState(result[i].value);
+			for (const auto& auditKeyValue : result) {
+				auto auditState = decodeAuditStorageState(auditKeyValue.value);
 				TraceEvent(SevVerbose, "AuditUtilLoadMetadataEach", dataDistributorId)
 				    .detail("CurrentDDID", dataDistributorId)
 				    .detail("AuditDDID", auditState.ddId)

@@ -1896,8 +1896,8 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c,
 
 	printf("writeAndVerify size=%d file=%s\n", size, f->getFileName().c_str());
 	content.resize(content.arena(), size);
-	for (int i = 0; i < content.size(); ++i) {
-		content[i] = (uint8_t)deterministicRandom()->randomInt(0, 256);
+	for (auto& contentByte : content) {
+		contentByte = (uint8_t)deterministicRandom()->randomInt(0, 256);
 	}
 
 	state VectorRef<uint8_t> sendBuf = content;

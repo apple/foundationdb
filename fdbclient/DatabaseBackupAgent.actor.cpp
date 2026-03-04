@@ -482,12 +482,12 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		state Key nextKey = task->params[BackupAgentBase::keyBeginKey];
 
 		std::vector<Future<Key>> addTaskVector;
-		for (int idx = 0; idx < keys.size(); ++idx) {
-			if (nextKey != keys[idx]) {
+		for (const auto& splitKey : keys) {
+			if (nextKey != splitKey) {
 				addTaskVector.push_back(
-				    addTask(tr, taskBucket, task, nextKey, keys[idx], TaskCompletionKey::joinWith(onDone)));
+				    addTask(tr, taskBucket, task, nextKey, splitKey, TaskCompletionKey::joinWith(onDone)));
 			}
-			nextKey = keys[idx];
+			nextKey = splitKey;
 		}
 
 		if (nextKey != task->params[BackupAgentBase::keyEndKey]) {

@@ -40,20 +40,20 @@ std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = { { "Everything",
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
 	const char* label = nullptr;
 
-	for (auto& labelKey : debugKeys) {
+	for (const auto& [keyLabel, debugKey] : debugKeys) {
 		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-		     KeyRangeRef(mutation.param1, mutation.param2).contains(labelKey.second)) ||
-		    mutation.param1 == labelKey.second) {
-			label = labelKey.first;
+		     KeyRangeRef(mutation.param1, mutation.param2).contains(debugKey)) ||
+		    mutation.param1 == debugKey) {
+			label = keyLabel;
 			break;
 		}
 	}
 
-	for (auto& labelRange : debugRanges) {
+	for (const auto& [rangeLabel, debugRange] : debugRanges) {
 		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-		     KeyRangeRef(mutation.param1, mutation.param2).intersects(labelRange.second)) ||
-		    labelRange.second.contains(mutation.param1)) {
-			label = labelRange.first;
+		     KeyRangeRef(mutation.param1, mutation.param2).intersects(debugRange)) ||
+		    debugRange.contains(mutation.param1)) {
+			label = rangeLabel;
 			break;
 		}
 	}

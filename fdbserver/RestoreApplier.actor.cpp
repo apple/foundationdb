@@ -284,10 +284,10 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		    .detail("GetKeys", incompleteStagingKeys.size())
 		    .detail("DelayTime", delayTime);
 		ASSERT(!g_network->isSimulated());
-		for (auto& key : incompleteStagingKeys) {
-			MutationRef m(MutationRef::SetValue, key.first, "0"_sr);
-			key.second->second.add(m, LogMessageVersion(1));
-			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
+		for (auto& [stagingKey, stagingKeyIter] : incompleteStagingKeys) {
+			MutationRef m(MutationRef::SetValue, stagingKey, "0"_sr);
+			stagingKeyIter->second.add(m, LogMessageVersion(1));
+			stagingKeyIter->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
 		}
 		return Void();
 	}
@@ -303,8 +303,8 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 			int i = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			for (auto& key : incompleteStagingKeys) {
-				fValues[i++] = tr->get(key.first);
+			for (auto& [stagingKey, _stagingKeyIter] : incompleteStagingKeys) {
+				fValues[i++] = tr->get(stagingKey);
 				cc->fetchKeys += 1;
 			}
 			wait(waitForAll(fValues));
@@ -327,28 +327,28 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 
 	ASSERT(fValues.size() == incompleteStagingKeys.size());
 	int i = 0;
-	for (auto& key : incompleteStagingKeys) {
+	for (auto& [stagingKey, stagingKeyIter] : incompleteStagingKeys) {
 		if (!fValues[i].get().present()) { // Key not exist in DB
 			// if condition: fValues[i].Valid() && fValues[i].isReady() && !fValues[i].isError() &&
 			TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB", applierID)
 			    .suppressFor(5.0)
 			    .detail("BatchIndex", batchIndex)
-			    .detail("Key", key.first)
+			    .detail("Key", stagingKey)
 			    .detail("IsReady", fValues[i].isReady())
-			    .detail("PendingMutations", key.second->second.pendingMutations.size())
-			    .detail("StagingKeyType", getTypeString(key.second->second.type));
-			for (auto& vm : key.second->second.pendingMutations) {
+			    .detail("PendingMutations", stagingKeyIter->second.pendingMutations.size())
+			    .detail("StagingKeyType", getTypeString(stagingKeyIter->second.type));
+			for (auto& [pendingVersion, pendingMutation] : stagingKeyIter->second.pendingMutations) {
 				TraceEvent(SevDebug, "FastRestoreApplierGetAndComputeStagingKeysNoBaseValueInDB")
-				    .detail("PendingMutationVersion", vm.first.toString())
-				    .detail("PendingMutation", vm.second.toString());
+				    .detail("PendingMutationVersion", pendingVersion.toString())
+				    .detail("PendingMutation", pendingMutation.toString());
 			}
-			key.second->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB", applierID, batchIndex);
+			stagingKeyIter->second.precomputeResult("GetAndComputeStagingKeysNoBaseValueInDB", applierID, batchIndex);
 		} else {
 			// The key's version ideally should be the most recently committed version.
 			// But as long as it is > 1 and less than the start version of the version batch, it is the same result.
-			MutationRef m(MutationRef::SetValue, key.first, fValues[i].get().get());
-			key.second->second.add(m, LogMessageVersion(1));
-			key.second->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
+			MutationRef m(MutationRef::SetValue, stagingKey, fValues[i].get().get());
+			stagingKeyIter->second.add(m, LogMessageVersion(1));
+			stagingKeyIter->second.precomputeResult("GetAndComputeStagingKeys", applierID, batchIndex);
 		}
 		i++;
 	}

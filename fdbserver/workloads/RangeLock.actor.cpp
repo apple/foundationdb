@@ -147,8 +147,8 @@ struct RangeLocking : TestWorkload {
 	std::string getLockRangesString(const std::vector<std::pair<KeyRange, RangeLockState>>& locks) {
 		std::string res = "";
 		int count = 0;
-		for (const auto& lock : locks) {
-			res = res + lock.first.toString();
+		for (const auto& [lockedRange, _lockState] : locks) {
+			res = res + lockedRange.toString();
 			if (count < locks.size()) {
 				res = res + ", ";
 			}
@@ -339,8 +339,8 @@ struct RangeLocking : TestWorkload {
 		state std::vector<std::pair<KeyRange, RangeLockState>> res;
 		wait(store(res, findExclusiveReadLockOnRange(cx, normalKeys)));
 		std::vector<KeyRange> ranges;
-		for (const auto& lock : res) {
-			ranges.push_back(lock.first);
+		for (const auto& [lockedRange, _lockState] : res) {
+			ranges.push_back(lockedRange);
 		}
 		return coalesceRangeList(ranges);
 	}
@@ -486,19 +486,19 @@ struct RangeLocking : TestWorkload {
 			iteration++;
 		}
 		std::vector<std::pair<KeyRange, RangeLockState>> locks2 = wait(findExclusiveReadLockOnRange(cx, normalKeys));
-		for (const auto& lock : locks2) {
+		for (const auto& [lockedRange, lockState] : locks2) {
 			TraceEvent("RangeLockWorkloadProgress")
 			    .detail("Phase", "BeforeLockRelease")
-			    .detail("Range", lock.first)
-			    .detail("State", lock.second.toString());
+			    .detail("Range", lockedRange)
+			    .detail("State", lockState.toString());
 		}
 		wait(releaseExclusiveReadLockByUser(cx, self->rangeLockOwnerName));
 		std::vector<std::pair<KeyRange, RangeLockState>> locks = wait(findExclusiveReadLockOnRange(cx, normalKeys));
-		for (const auto& lock : locks) {
+		for (const auto& [lockedRange, lockState] : locks) {
 			TraceEvent("RangeLockWorkloadProgress")
 			    .detail("Phase", "AfterLockRelease")
-			    .detail("Range", lock.first)
-			    .detail("State", lock.second.toString());
+			    .detail("Range", lockedRange)
+			    .detail("State", lockState.toString());
 		}
 		ASSERT(locks.empty());
 
@@ -591,9 +591,9 @@ struct RangeLocking : TestWorkload {
 				ASSERT(locksPerUser.empty());
 			} else {
 				std::vector<KeyRange> lockedRangeFromMetadata;
-				for (const auto& lock : locksPerUser) {
-					ASSERT(lock.first == lock.second.getRange());
-					lockedRangeFromMetadata.push_back(lock.first);
+				for (const auto& [lockedRange, lockState] : locksPerUser) {
+					ASSERT(lockedRange == lockState.getRange());
+					lockedRangeFromMetadata.push_back(lockedRange);
 				}
 				TraceEvent("RangeLockWorkloadTestUnlockRangeByUser")
 				    .detail("Ops", "Find locked user")

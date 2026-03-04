@@ -270,17 +270,17 @@ SpecialKeySpace::SpecialKeySpace(KeyRef spaceStartKey, KeyRef spaceEndKey, bool 
 }
 
 void SpecialKeySpace::modulesBoundaryInit() {
-	for (const auto& pair : moduleToBoundary) {
-		ASSERT(range.contains(pair.second));
+	for (const auto& [module, moduleBoundary] : moduleToBoundary) {
+		ASSERT(range.contains(moduleBoundary));
 		// Make sure the module is not overlapping with any registered read modules
 		// Note: same like ranges, one module's end cannot be another module's start, relax the condition if needed
-		ASSERT(modules.rangeContaining(pair.second.begin) == modules.rangeContaining(pair.second.end) &&
-		       modules[pair.second.begin] == SpecialKeySpace::MODULE::UNKNOWN);
-		modules.insert(pair.second, pair.first);
+		ASSERT(modules.rangeContaining(moduleBoundary.begin) == modules.rangeContaining(moduleBoundary.end) &&
+		       modules[moduleBoundary.begin] == SpecialKeySpace::MODULE::UNKNOWN);
+		modules.insert(moduleBoundary, module);
 		// Note: Due to underlying implementation, the insertion here is important to make cross_module_read being
 		// handled correctly
-		readImpls.insert(pair.second, nullptr);
-		writeImpls.insert(pair.second, nullptr);
+		readImpls.insert(moduleBoundary, nullptr);
+		writeImpls.insert(moduleBoundary, nullptr);
 	}
 }
 
@@ -407,13 +407,13 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			}
 			result.arena().dependsOn(pairs.arena());
 			// limits handler
-			for (int i = 0; i < pairs.size(); ++i) {
-				ASSERT(iter->range().contains(pairs[i].key));
-				result.push_back(result.arena(), pairs[i]);
+			for (const auto& keyValue : pairs) {
+				ASSERT(iter->range().contains(keyValue.key));
+				result.push_back(result.arena(), keyValue);
 				// Note : behavior here is even the last k-v pair makes total bytes larger than specified, it's still
 				// returned. In other words, the total size of the returned value (less the last entry) will be less
 				// than byteLimit
-				limits.decrement(pairs[i]);
+				limits.decrement(keyValue);
 				if (limits.isReached()) {
 					result.more = true;
 					result.readThroughEnd = false;
@@ -1300,14 +1300,14 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	// for locality based exclusions. The problematic edge case here is a log server that still has mutation on it
 	// but is currently not part of the worker list, e.g. because it was shutdown or is partitioned.
 	auto logs = decodeLogsValue(value.get());
-	for (auto const& log : logs.first) {
-		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
-			inProgressExclusion.insert(log.second);
+	for (const auto& [_logId, logAddress] : logs.first) {
+		if (logAddress == NetworkAddress() || addressExcluded(exclusions, logAddress)) {
+			inProgressExclusion.insert(logAddress);
 		}
 	}
-	for (auto const& log : logs.second) {
-		if (log.second == NetworkAddress() || addressExcluded(exclusions, log.second)) {
-			inProgressExclusion.insert(log.second);
+	for (const auto& [_logId, logAddress] : logs.second) {
+		if (logAddress == NetworkAddress() || addressExcluded(exclusions, logAddress)) {
+			inProgressExclusion.insert(logAddress);
 		}
 	}
 

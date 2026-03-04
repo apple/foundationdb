@@ -4316,9 +4316,9 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 }
 
 void Transaction::cancelWatches(Error const& e) {
-	for (int i = 0; i < watches.size(); ++i)
-		if (!watches[i]->onChangeTrigger.isSet())
-			watches[i]->onChangeTrigger.sendError(e);
+	for (auto& watch : watches)
+		if (!watch->onChangeTrigger.isSet())
+			watch->onChangeTrigger.sendError(e);
 
 	watches.clear();
 }
@@ -4327,11 +4327,11 @@ void Transaction::setupWatches() {
 	try {
 		Future<Version> watchVersion = getCommittedVersion() > 0 ? getCommittedVersion() : getReadVersion();
 
-		for (int i = 0; i < watches.size(); ++i)
-			watches[i]->setWatch(
+		for (auto& watch : watches)
+			watch->setWatch(
 			    watchValueMap(watchVersion,
-			                  watches[i]->key,
-			                  watches[i]->value,
+			                  watch->key,
+			                  watch->value,
 			                  trState->cx,
 			                  trState->options.readTags,
 			                  trState->spanContext,

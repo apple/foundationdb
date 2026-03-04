@@ -1585,11 +1585,13 @@ TEST_CASE("noSim/SystemData/compat/KeyServers") {
 	std::sort(src.begin(), src.end());
 	std::sort(dest.begin(), dest.end());
 	RangeResult idTag;
-	for (int i = 0; i < src.size(); ++i) {
-		idTag.push_back_deep(idTag.arena(), KeyValueRef(serverTagKeyFor(src[i]), serverTagValue(uid_tag[src[i]])));
+	for (const auto& srcServerId : src) {
+		idTag.push_back_deep(idTag.arena(),
+		                     KeyValueRef(serverTagKeyFor(srcServerId), serverTagValue(uid_tag[srcServerId])));
 	}
-	for (int i = 0; i < dest.size(); ++i) {
-		idTag.push_back_deep(idTag.arena(), KeyValueRef(serverTagKeyFor(dest[i]), serverTagValue(uid_tag[dest[i]])));
+	for (const auto& destServerId : dest) {
+		idTag.push_back_deep(idTag.arena(),
+		                     KeyValueRef(serverTagKeyFor(destServerId), serverTagValue(uid_tag[destServerId])));
 	}
 
 	auto decodeAndVerify =

@@ -659,9 +659,9 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	SampledMutationsVec& samples = batchData->sampleMutations[req.param];
 	SampledMutationsVec sampleBatch = SampledMutationsVec(); // sampleBatch: Standalone pointer to the created object
 	long sampleBatchSize = 0;
-	for (int i = 0; i < samples.size(); ++i) {
-		sampleBatchSize += samples[i].totalSize();
-		sampleBatch.push_back_deep(sampleBatch.arena(), samples[i]); // TODO: may not need deep copy
+	for (auto& sampledMutations : samples) {
+		sampleBatchSize += sampledMutations.totalSize();
+		sampleBatch.push_back_deep(sampleBatch.arena(), sampledMutations); // TODO: may not need deep copy
 		if (sampleBatchSize >= SERVER_KNOBS->FASTRESTORE_SAMPLE_MSG_BYTES) {
 			fSendSamples.push_back(self->ci.samples.getReply(
 			    RestoreSamplesRequest(deterministicRandom()->randomUniqueID(), req.batchIndex, sampleBatch)));

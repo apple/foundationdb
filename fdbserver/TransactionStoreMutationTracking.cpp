@@ -56,9 +56,9 @@ TraceEvent transactionStoreDebugMutationEnabled(const char* context,
 		label = DEBUG_KEY.label;
 	}
 
-	for (auto& labelRange : debugRanges) {
-		if (labelRange.second.contains(mutation)) {
-			label = labelRange.first;
+	for (const auto& [rangeLabel, debugRange] : debugRanges) {
+		if (debugRange.contains(mutation)) {
+			label = rangeLabel;
 			break;
 		}
 	}
