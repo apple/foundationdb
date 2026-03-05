@@ -98,14 +98,228 @@ public:
 		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 
 		// Do operation on Storage Server
-		loop{ { Error err;
+		loop {
+			Error err;
+			try {
+				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->clear(key);
+					return Void();
+				});
+				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->atomicOp(key, val, opType);
+					return Void();
+				});
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
+			co_await delay(1);
+		}
+
+		{
+			Optional<Value> outputVal = co_await runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != intValue) {
+				TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput")
+				    .detail("OpOn", "StorageServer")
+				    .detail("Op", opType)
+				    .detail("ExpectedOutput", intValue)
+				    .detail("ActualOutput", output);
+				self->testFailed = true;
+			}
+		}
+
+		{
+			// Do operation on RYW Layer
+			Optional<Value> outputVal =
+			    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+				    tr->clear(key);
+				    tr->atomicOp(key, val, opType);
+				    return tr->get(key);
+			    });
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != intValue) {
+				TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput")
+				    .detail("OpOn", "RYWLayer")
+				    .detail("Op", opType)
+				    .detail("ExpectedOutput", intValue)
+				    .detail("ActualOutput", output);
+				self->testFailed = true;
+			}
+		}
+	}
+
+	// Test Atomic ops on non existing keys that results in a unset
+	Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx,
+	                                               AtomicOpsApiCorrectnessWorkload* self,
+	                                               uint32_t opType,
+	                                               Key key) {
+		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
+		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+
+		// Do operation on Storage Server
+		loop {
+			Error err;
+			try {
+				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->clear(key);
+					return Void();
+				});
+				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->atomicOp(key, val, opType);
+					return Void();
+				});
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
+			co_await delay(1);
+		}
+
+		{
+			Optional<Value> outputVal = co_await runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != 0) {
+				TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput")
+				    .detail("OpOn", "StorageServer")
+				    .detail("Op", opType)
+				    .detail("ExpectedOutput", 0)
+				    .detail("ActualOutput", output);
+				self->testFailed = true;
+			}
+		}
+
+		{
+			// Do operation on RYW Layer
+			Optional<Value> outputVal =
+			    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+				    tr->clear(key);
+				    tr->atomicOp(key, val, opType);
+				    return tr->get(key);
+			    });
+			uint64_t output = 0;
+			ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+			memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+			if (output != 0) {
+				TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput")
+				    .detail("OpOn", "RYWLayer")
+				    .detail("Op", opType)
+				    .detail("ExpectedOutput", 0)
+				    .detail("ActualOutput", output);
+				self->testFailed = true;
+			}
+		}
+	}
+
+	typedef std::function<Value(Value, Value)> DoAtomicOpOnEmptyValueFunction;
+
+	// Test Atomic Ops when one of the value is empty
+	Future<Void> testAtomicOpOnEmptyValue(Database cx,
+	                                      AtomicOpsApiCorrectnessWorkload* self,
+	                                      uint32_t opType,
+	                                      Key key,
+	                                      DoAtomicOpOnEmptyValueFunction opFunc) {
+		Value existingVal;
+		Value otherVal;
+		uint64_t val = deterministicRandom()->randomInt(0, 10000000);
+		if (deterministicRandom()->random01() < 0.5) {
+			existingVal = StringRef((const uint8_t*)&val, sizeof(val));
+			otherVal = StringRef();
+		} else {
+			otherVal = StringRef((const uint8_t*)&val, sizeof(val));
+			existingVal = StringRef();
+		}
+		// Do operation on Storage Server
+		loop {
+			Error err;
+			try {
+				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->set(key, existingVal);
+					return Void();
+				});
+				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+					tr->atomicOp(key, otherVal, opType);
+					return Void();
+				});
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
+			co_await delay(1);
+		}
+
+		{
+			Optional<Value> outputVal = co_await runRYWTransaction(
+			    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+			ASSERT(outputVal.present());
+			Value output = outputVal.get();
+			if (output != opFunc(existingVal, otherVal)) {
+				TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput")
+				    .detail("OpOn", "StorageServer")
+				    .detail("Op", opType)
+				    .detail("ExpectedOutput", opFunc(existingVal, otherVal).toString())
+				    .detail("ActualOutput", output.toString());
+				self->testFailed = true;
+			}
+		}
+
+		{
+			// Do operation on RYW Layer
+			Optional<Value> outputVal =
+			    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+				    tr->set(key, existingVal);
+				    tr->atomicOp(key, otherVal, opType);
+				    return tr->get(key);
+			    });
+			ASSERT(outputVal.present());
+			Value output = outputVal.get();
+			if (output != opFunc(existingVal, otherVal)) {
+				TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput")
+				    .detail("OpOn", "RYWLayer")
+				    .detail("Op", opType)
+				    .detail("ExpectedOutput", opFunc(existingVal, otherVal).toString())
+				    .detail("ActualOutput", output.toString());
+				self->testFailed = true;
+			}
+		}
+	}
+
+typedef std::function<uint64_t(uint64_t, uint64_t)> DoAtomicOpFunction;
+
+// Test atomic ops in the normal case when the existing value is present
+Future<Void> testAtomicOpApi(Database cx,
+	                         AtomicOpsApiCorrectnessWorkload* self,
+	                         uint32_t opType,
+	                         Key key,
+	                         DoAtomicOpFunction opFunc) {
+	uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
+	uint64_t intValue2 = deterministicRandom()->randomInt(0, 10000000);
+	Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
+	Value val2 = StringRef((const uint8_t*)&intValue2, sizeof(intValue2));
+
+	// Do operation on Storage Server
+	loop {
+		Error err;
 		try {
+			// Set the key to a random value
 			co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-				tr->clear(key);
+				tr->set(key, val1);
 				return Void();
 			});
+			// Do atomic op
 			co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-				tr->atomicOp(key, val, opType);
+				tr->atomicOp(key, val2, opType);
 				return Void();
 			});
 			break;
@@ -115,258 +329,49 @@ public:
 		TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
 		co_await delay(1);
 	}
-} {
-	Optional<Value> outputVal = co_await runRYWTransaction(
-	    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
-	uint64_t output = 0;
-	ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-	memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-	if (output != intValue) {
-		TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput")
-		    .detail("OpOn", "StorageServer")
-		    .detail("Op", opType)
-		    .detail("ExpectedOutput", intValue)
-		    .detail("ActualOutput", output);
-		self->testFailed = true;
-	}
-}
 
-{
-	// Do operation on RYW Layer
-	Optional<Value> outputVal =
-	    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-		    tr->clear(key);
-		    tr->atomicOp(key, val, opType);
-		    return tr->get(key);
-	    });
-	uint64_t output = 0;
-	ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-	memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-	if (output != intValue) {
-		TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput")
-		    .detail("OpOn", "RYWLayer")
-		    .detail("Op", opType)
-		    .detail("ExpectedOutput", intValue)
-		    .detail("ActualOutput", output);
-		self->testFailed = true;
+	{
+		// Compare result
+		Optional<Value> outputVal = co_await runRYWTransaction(
+			cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
+		uint64_t output = 0;
+		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+		if (output != opFunc(intValue1, intValue2)) {
+			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
+				.detail("OpOn", "StorageServer")
+				.detail("InValue1", intValue1)
+				.detail("InValue2", intValue2)
+				.detail("AtomicOp", opType)
+				.detail("ExpectedOutput", opFunc(intValue1, intValue2))
+				.detail("ActualOutput", output);
+			self->testFailed = true;
+		}
 	}
-}
-}
 
-// Test Atomic ops on non existing keys that results in a unset
-Future<Void> testAtomicOpUnsetOnNonExistingKey(Database cx,
-                                               AtomicOpsApiCorrectnessWorkload* self,
-                                               uint32_t opType,
-                                               Key key) {
-	uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-	Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
-
-	// Do operation on Storage Server
-	loop{ { Error err;
-	try {
-		co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->clear(key);
-			return Void();
-		});
-		co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->atomicOp(key, val, opType);
-			return Void();
-		});
-		break;
-	} catch (Error& e) {
-		err = e;
+	{
+		// Do operation at RYW layer
+		Optional<Value> outputVal =
+			co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+				tr->set(key, val1);
+				tr->atomicOp(key, val2, opType);
+				return tr->get(key);
+			});
+		// Compare result
+		uint64_t output = 0;
+		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
+		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
+		if (output != opFunc(intValue1, intValue2)) {
+			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
+				.detail("OpOn", "RYWLayer")
+				.detail("InValue1", intValue1)
+				.detail("InValue2", intValue2)
+				.detail("AtomicOp", opType)
+				.detail("ExpectedOutput", opFunc(intValue1, intValue2))
+				.detail("ActualOutput", output);
+			self->testFailed = true;
+		}
 	}
-	TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
-	co_await delay(1);
-}
-}
-{
-	Optional<Value> outputVal = co_await runRYWTransaction(
-	    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
-	uint64_t output = 0;
-	ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-	memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-	if (output != 0) {
-		TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput")
-		    .detail("OpOn", "StorageServer")
-		    .detail("Op", opType)
-		    .detail("ExpectedOutput", 0)
-		    .detail("ActualOutput", output);
-		self->testFailed = true;
-	}
-}
-
-{
-	// Do operation on RYW Layer
-	Optional<Value> outputVal =
-	    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-		    tr->clear(key);
-		    tr->atomicOp(key, val, opType);
-		    return tr->get(key);
-	    });
-	uint64_t output = 0;
-	ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-	memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-	if (output != 0) {
-		TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput")
-		    .detail("OpOn", "RYWLayer")
-		    .detail("Op", opType)
-		    .detail("ExpectedOutput", 0)
-		    .detail("ActualOutput", output);
-		self->testFailed = true;
-	}
-}
-}
-
-typedef std::function<Value(Value, Value)> DoAtomicOpOnEmptyValueFunction;
-
-// Test Atomic Ops when one of the value is empty
-Future<Void> testAtomicOpOnEmptyValue(Database cx,
-                                      AtomicOpsApiCorrectnessWorkload* self,
-                                      uint32_t opType,
-                                      Key key,
-                                      DoAtomicOpOnEmptyValueFunction opFunc) {
-	Value existingVal;
-	Value otherVal;
-	uint64_t val = deterministicRandom()->randomInt(0, 10000000);
-	if (deterministicRandom()->random01() < 0.5) {
-		existingVal = StringRef((const uint8_t*)&val, sizeof(val));
-		otherVal = StringRef();
-	} else {
-		otherVal = StringRef((const uint8_t*)&val, sizeof(val));
-		existingVal = StringRef();
-	}
-	// Do operation on Storage Server
-	loop{ { Error err;
-	try {
-		co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->set(key, existingVal);
-			return Void();
-		});
-		co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->atomicOp(key, otherVal, opType);
-			return Void();
-		});
-		break;
-	} catch (Error& e) {
-		err = e;
-	}
-	TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
-	co_await delay(1);
-}
-}
-{
-	Optional<Value> outputVal = co_await runRYWTransaction(
-	    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
-	ASSERT(outputVal.present());
-	Value output = outputVal.get();
-	if (output != opFunc(existingVal, otherVal)) {
-		TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput")
-		    .detail("OpOn", "StorageServer")
-		    .detail("Op", opType)
-		    .detail("ExpectedOutput", opFunc(existingVal, otherVal).toString())
-		    .detail("ActualOutput", output.toString());
-		self->testFailed = true;
-	}
-}
-
-{
-	// Do operation on RYW Layer
-	Optional<Value> outputVal =
-	    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-		    tr->set(key, existingVal);
-		    tr->atomicOp(key, otherVal, opType);
-		    return tr->get(key);
-	    });
-	ASSERT(outputVal.present());
-	Value output = outputVal.get();
-	if (output != opFunc(existingVal, otherVal)) {
-		TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput")
-		    .detail("OpOn", "RYWLayer")
-		    .detail("Op", opType)
-		    .detail("ExpectedOutput", opFunc(existingVal, otherVal).toString())
-		    .detail("ActualOutput", output.toString());
-		self->testFailed = true;
-	}
-}
-}
-
-typedef std::function<uint64_t(uint64_t, uint64_t)> DoAtomicOpFunction;
-
-// Test atomic ops in the normal case when the existing value is present
-Future<Void> testAtomicOpApi(Database cx,
-                             AtomicOpsApiCorrectnessWorkload* self,
-                             uint32_t opType,
-                             Key key,
-                             DoAtomicOpFunction opFunc) {
-	uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
-	uint64_t intValue2 = deterministicRandom()->randomInt(0, 10000000);
-	Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
-	Value val2 = StringRef((const uint8_t*)&intValue2, sizeof(intValue2));
-
-	// Do operation on Storage Server
-	loop{ { Error err;
-	try {
-		// Set the key to a random value
-		co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->set(key, val1);
-			return Void();
-		});
-		// Do atomic op
-		co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->atomicOp(key, val2, opType);
-			return Void();
-		});
-		break;
-	} catch (Error& e) {
-		err = e;
-	}
-	TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
-	co_await delay(1);
-}
-}
-{
-	// Compare result
-	Optional<Value> outputVal = co_await runRYWTransaction(
-	    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return tr->get(key); });
-	uint64_t output = 0;
-	ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-	memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-	if (output != opFunc(intValue1, intValue2)) {
-		TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
-		    .detail("OpOn", "StorageServer")
-		    .detail("InValue1", intValue1)
-		    .detail("InValue2", intValue2)
-		    .detail("AtomicOp", opType)
-		    .detail("ExpectedOutput", opFunc(intValue1, intValue2))
-		    .detail("ActualOutput", output);
-		self->testFailed = true;
-	}
-}
-
-{
-	// Do operation at RYW layer
-	Optional<Value> outputVal =
-	    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-		    tr->set(key, val1);
-		    tr->atomicOp(key, val2, opType);
-		    return tr->get(key);
-	    });
-	// Compare result
-	uint64_t output = 0;
-	ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
-	memcpy(&output, outputVal.get().begin(), outputVal.get().size());
-	if (output != opFunc(intValue1, intValue2)) {
-		TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput")
-		    .detail("OpOn", "RYWLayer")
-		    .detail("InValue1", intValue1)
-		    .detail("InValue2", intValue2)
-		    .detail("AtomicOp", opType)
-		    .detail("ExpectedOutput", opFunc(intValue1, intValue2))
-		    .detail("ActualOutput", output);
-		self->testFailed = true;
-	}
-}
 }
 
 Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, Key key, bool keySet) {
@@ -613,7 +618,6 @@ Future<Void> testByteMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; });
 }
-}
-;
+};
 
 WorkloadFactory<AtomicOpsApiCorrectnessWorkload> AtomicOpsApiCorrectnessWorkloadFactory;
