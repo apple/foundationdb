@@ -165,7 +165,6 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 				throw e;
 			}
 		}
-
 	}
 
 	Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {

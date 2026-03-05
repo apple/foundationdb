@@ -153,7 +153,7 @@ struct CycleWorkload : TestWorkload, Arena {
 						// Generating a larger range here to increase test coverage.
 						tr.clear(self->keyRange(r),
 						         AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong
-						                                  //ordering
+						                                  // ordering
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
@@ -287,10 +287,9 @@ struct CycleWorkload : TestWorkload, Arena {
 				Error err;
 				try {
 					Version v = co_await tr.getReadVersion();
-					RangeResult data =
-					    co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
-					                         firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
-					                         self->nodeCount + 1);
+					RangeResult data = co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                                        firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                                        self->nodeCount + 1);
 					ok = self->cycleCheckData(data, v) && ok;
 					break;
 				} catch (Error& e) {

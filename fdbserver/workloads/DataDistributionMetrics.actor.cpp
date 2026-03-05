@@ -93,8 +93,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the
 				// starting point, this key selector will never do cross_module_range_read. In addition, the first
 				// key in the result will be the last one <= startKey (Condition #1)
-				KeySelector begin =
-				    KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
+				KeySelector begin = KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
 				// Find the last key less than endKey, move forward 2 keys, and use this key as the (exclusive) end
 				// of the range. If we didn't read through the end of the range, then the second last key in the
 				// result will be the last key less than endKey. (Condition #2)
@@ -179,8 +178,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 					if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
 						TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
 						    .detail("ErrorStr", errorStr.c_str())
-						    .detail("JSON",
-						            json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
+						    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
 						co_return false;
 					}
 					totalBytes += valueObj["shard_bytes"].get_int64();

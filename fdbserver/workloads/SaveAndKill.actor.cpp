@@ -154,7 +154,6 @@ struct SaveAndKillWorkload : TestWorkload {
 		}
 
 		g_simulator->stop();
-
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

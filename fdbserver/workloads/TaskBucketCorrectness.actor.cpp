@@ -103,7 +103,6 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		}
 
 		tr->set(key, value);
-
 	}
 };
 StringRef SayHelloTaskFunc::name = "SayHello"_sr;
@@ -157,7 +156,6 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 		Value value = "Hello, Everyone!"_sr;
 		TraceEvent("TaskBucketCorrectnessSayHello").detail("SayHelloToEveryoneTaskFunc", printable(value));
 		tr->set(key, value);
-
 	}
 };
 StringRef SayHelloToEveryoneTaskFunc::name = "SayHelloToEveryone"_sr;
@@ -191,7 +189,6 @@ struct SaidHelloTaskFunc : TaskFuncBase {
 		Value value = "Said hello to everyone!"_sr;
 		TraceEvent("TaskBucketCorrectnessSayHello").detail("SaidHelloTaskFunc", printable(value));
 		tr->set(key, value);
-
 	}
 };
 StringRef SaidHelloTaskFunc::name = "SaidHello"_sr;
@@ -304,7 +301,6 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			TraceEvent(SevError, "TaskBucketCorrectness").error(err);
 			co_await tr->onError(err);
 		}
-
 	}
 
 	Future<bool> _check(Database cx, TaskBucketCorrectnessWorkload* self) {

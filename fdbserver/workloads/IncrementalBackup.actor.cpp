@@ -253,8 +253,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 						Optional<Value> versionValue = co_await tr->get(snapshotEndVersionKey);
 						TraceEvent("IBackupCheckSpecialKeys")
 						    .detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
-						    .detail("EndVersionValue",
-						            versionValue.present() ? versionValue.get().toString() : "N/A");
+						    .detail("EndVersionValue", versionValue.present() ? versionValue.get().toString() : "N/A");
 						if (!versionValue.present()) {
 							TraceEvent("IBackupCheckSpecialKeysFailure").log();
 							// Snapshot failed to write to special keys, possibly due to snapshot itself failing

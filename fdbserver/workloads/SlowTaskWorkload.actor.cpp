@@ -63,7 +63,6 @@ struct SlowTaskWorkload : TestWorkload {
 		           getNumProfilesDisabled() - startProfilesDisabled,
 		           getNumProfilesOverflowed() - startProfilesOverflowed,
 		           getNumProfilesCaptured() - startProfilesCaptured);
-
 	}
 
 	static void do_slow_exception_thing(int64_t* exc_count) {

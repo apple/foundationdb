@@ -77,7 +77,6 @@ struct LogMetricsWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-
 	}
 
 	Future<Void> _start(Database cx, LogMetricsWorkload* self) {
@@ -88,7 +87,6 @@ struct LogMetricsWorkload : TestWorkload {
 
 		// We're done, set everything back
 		co_await self->setSystemRate(self, cx, 1.0);
-
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

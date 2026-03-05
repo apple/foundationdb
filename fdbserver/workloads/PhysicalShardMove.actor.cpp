@@ -255,7 +255,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		co_await self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs);
 		TraceEvent("TestValueVerified").log();
-
 	}
 
 	Future<Void> deleteCheckpoints(Database cx, std::vector<UID> checkpointIds) {
@@ -293,7 +292,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-
 	}
 
 	Future<Void> checkpointRestore(PhysicalShardMoveWorkLoad* self,
@@ -448,7 +446,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		platform::eraseDirectoryRecursive(checkpointDir);
 
 		TraceEvent(SevDebug, "TestRocksDBClosed").detail("Checkpoint", describe(fetchedCheckpoints));
-
 	}
 
 	Future<Version> populateData(PhysicalShardMoveWorkLoad* self, Database cx, std::map<Key, Value>* kvs) {
@@ -504,7 +501,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		TraceEvent("ValidateTestDataDone").detail("DebugID", debugID);
-
 	}
 
 	Future<Void> readAndVerify(PhysicalShardMoveWorkLoad* self,
@@ -537,7 +533,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		TraceEvent("TestReadSuccess").detail("Version", readVersion);
-
 	}
 
 	Future<Version> writeAndVerify(PhysicalShardMoveWorkLoad* self, Database cx, Key key, Optional<Value> value) {

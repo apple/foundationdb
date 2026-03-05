@@ -119,8 +119,8 @@ struct SidebandWorkload : TestWorkload {
 		loop {
 			Error err;
 			try {
-				Optional<Value> val = co_await tr.get(
-				    StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount)));
+				Optional<Value> val =
+				    co_await tr.get(StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount)));
 				if (!val.present()) {
 					throw operation_failed();
 				}

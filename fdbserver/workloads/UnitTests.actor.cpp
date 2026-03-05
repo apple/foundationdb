@@ -224,7 +224,6 @@ struct UnitTestWorkload : TestWorkload {
 			    .detail("WallTime", wallTime)
 			    .detail("FlowTime", simTime);
 		}
-
 	}
 };
 

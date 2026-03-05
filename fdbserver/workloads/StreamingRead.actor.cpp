@@ -120,10 +120,10 @@ struct StreamingReadWorkload : TestWorkload {
 						else if (currentIndex > maxIndex - thisRangeSize)
 							currentIndex = minIndex;
 
-						RangeResult values = co_await tr.getRange(
-						    firstGreaterOrEqual(self->keyForIndex(currentIndex)),
-						    firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
-						    thisRangeSize);
+						RangeResult values =
+						    co_await tr.getRange(firstGreaterOrEqual(self->keyForIndex(currentIndex)),
+						                         firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
+						                         thisRangeSize);
 
 						for (int i = 0; i < values.size(); i++)
 							self->readValueBytes += values[i].value.size();

@@ -356,7 +356,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
 		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
-
 	}
 
 	// This actor attempts to restore the database without clearing the keyspace.
@@ -409,7 +408,6 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-
 	}
 
 	static Future<Void> _start(Database cx, BackupAndParallelRestoreCorrectnessWorkload* self) {

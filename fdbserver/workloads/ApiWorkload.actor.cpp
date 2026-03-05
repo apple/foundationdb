@@ -64,7 +64,6 @@ Future<Void> setup(Database cx, ApiWorkload* self) {
 	// Clear keyspace before running
 	co_await timeoutError(self->clearKeyspace(), 600);
 	co_await self->performSetup(cx);
-
 }
 
 Future<Void> ApiWorkload::setup(Database const& cx) {
@@ -97,7 +96,6 @@ Future<Void> start(Database cx, ApiWorkload* self) {
 		if (e.code() != error_code_actor_cancelled)
 			self->testFailure(format("Unhandled error %d: %s", e.code(), e.name()));
 	}
-
 }
 
 Future<Void> ApiWorkload::start(Database const& cx) {
@@ -349,7 +347,6 @@ Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> 
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
 		    new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));
 	}
-
 }
 
 Future<Void> ApiWorkload::chooseTransactionFactory(Database const& cx, std::vector<TransactionType> const& choices) {

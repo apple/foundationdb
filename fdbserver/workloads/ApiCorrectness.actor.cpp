@@ -157,7 +157,6 @@ public:
 		types.push_back(MULTI_VERSION);
 
 		co_await self->chooseTransactionFactory(cx, types);
-
 	}
 
 	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
@@ -184,7 +183,6 @@ public:
 			// Run the random test for the user-specified duration
 			co_await timeout(self->runRandomTest(self, data), self->randomTestDuration, Void());
 		}
-
 	}
 
 	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) override {
@@ -230,7 +228,6 @@ public:
 			if (!clearRangeResults)
 				co_return;
 		}
-
 	}
 
 	// Generate and execute a sequence of random operations
@@ -347,16 +344,14 @@ public:
 					// For now, make this transaction self-conflicting to avoid commit errors
 					Optional<Value> value = co_await transaction->get(data[currentIndex].key);
 
-					for (int i = currentIndex;
-					     i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
+					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
 					     i++) {
 						transaction->addReadConflictRange(singleKeyRange(data[i].key));
 						transaction->set(data[i].key, data[i].value);
 					}
 
 					co_await transaction->commit();
-					for (int i = currentIndex;
-					     i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
+					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
 					     i++)
 						DEBUG_MUTATION("ApiCorrectnessSet",
 						               transaction->getCommittedVersion(),
@@ -404,8 +399,7 @@ public:
 				Error err;
 				try {
 					std::vector<Future<Optional<Value>>> dbValueFutures;
-					for (int i = currentIndex;
-					     i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
+					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						dbValueFutures.push_back(transaction->get(keys[i]));
 
@@ -701,16 +695,14 @@ public:
 					// For now, make this transaction self-conflicting to avoid commit errors
 					Optional<Value> value = co_await transaction->get(keys[0]);
 
-					for (int i = currentIndex;
-					     i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
+					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++) {
 						transaction->addReadConflictRange(singleKeyRange(keys[i]));
 						transaction->clear(keys[i]);
 					}
 
 					co_await transaction->commit();
-					for (int i = currentIndex;
-					     i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
+					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						DEBUG_MUTATION("ApiCorrectnessClear",
 						               transaction->getCommittedVersion(),

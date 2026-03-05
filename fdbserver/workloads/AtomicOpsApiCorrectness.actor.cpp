@@ -367,7 +367,6 @@ Future<Void> testAtomicOpApi(Database cx,
 		self->testFailed = true;
 	}
 }
-
 }
 
 Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectnessWorkload* self, Key key, bool keySet) {
@@ -469,7 +468,6 @@ Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectness
 			}
 		}
 	}
-
 }
 
 Future<Void> testMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -504,7 +502,6 @@ Future<Void> testMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		else
 			return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
 	});
-
 }
 
 Future<Void> testMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -516,7 +513,6 @@ Future<Void> testMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	    cx, self, MutationRef::Max, key, [](uint64_t val1, uint64_t val2) { return val1 > val2 ? val1 : val2; });
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::Max, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
-
 }
 
 Future<Void> testAnd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -551,7 +547,6 @@ Future<Void> testAnd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 		else
 			return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
 	});
-
 }
 
 Future<Void> testOr(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -563,7 +558,6 @@ Future<Void> testOr(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	    cx, self, MutationRef::Or, key, [](uint64_t val1, uint64_t val2) { return val1 | val2; });
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::Or, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
-
 }
 
 Future<Void> testXor(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -575,7 +569,6 @@ Future<Void> testXor(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	    cx, self, MutationRef::Xor, key, [](uint64_t val1, uint64_t val2) { return val1 ^ val2; });
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::Xor, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
-
 }
 
 Future<Void> testAdd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -586,7 +579,6 @@ Future<Void> testAdd(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	    cx, self, MutationRef::AddValue, key, [](uint64_t val1, uint64_t val2) { return val1 + val2; });
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::AddValue, key, [](Value v1, Value v2) -> Value { return v2.size() ? v2 : StringRef(); });
-
 }
 
 Future<Void> testCompareAndClear(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -607,7 +599,6 @@ Future<Void> testByteMin(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	});
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::ByteMin, key, [](Value v1, Value v2) -> Value { return StringRef(); });
-
 }
 
 Future<Void> testByteMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
@@ -621,8 +612,8 @@ Future<Void> testByteMax(Database cx, AtomicOpsApiCorrectnessWorkload* self) {
 	});
 	co_await self->testAtomicOpOnEmptyValue(
 	    cx, self, MutationRef::ByteMax, key, [](Value v1, Value v2) -> Value { return v1.size() ? v1 : v2; });
-
 }
-};
+}
+;
 
 WorkloadFactory<AtomicOpsApiCorrectnessWorkload> AtomicOpsApiCorrectnessWorkloadFactory;

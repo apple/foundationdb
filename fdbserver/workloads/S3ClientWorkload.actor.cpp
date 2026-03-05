@@ -305,7 +305,6 @@ private:
 			    .detail("Dir", uniqueRunDir)
 			    .detail("Reason", "Non-fatal in simulation");
 		}
-
 	}
 
 	Future<Void> _setup(S3ClientWorkload* self, Database cx) {
@@ -374,7 +373,6 @@ private:
 			    .detail("DelayRate", self->delayRate)
 			    .detail("CorruptionRate", self->corruptionRate);
 		}
-
 	}
 };
 

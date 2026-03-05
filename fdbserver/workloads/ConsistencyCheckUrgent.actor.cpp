@@ -373,8 +373,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 							} else {
 								e.detail("ResultNotPresentWithError", rangeResult.getError().what());
 								if (g_network->isSimulated() &&
-								    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())
-								        ->failed) {
+								    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())->failed) {
 									e.detail("MachineFailed", "True");
 								}
 							}
@@ -477,8 +476,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 								    .detail(format("Server%dUniques", j).c_str(), currentUniques)
 								    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
 								    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-								    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-								            referenceUniqueKey)
+								    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
 								    .detail("ValueMismatches", valueMismatches)
 								    .detail("ValueMismatchKey", valueMismatchKey)
 								    .detail("MatchingKVPairs", matchingKVPairs)

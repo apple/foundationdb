@@ -105,9 +105,8 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->set(
-			    "Invalid_Network_Address"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
-			    ValueRef());
+			tx->set("Invalid_Network_Address"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("exclude")),
+			        ValueRef());
 			co_await tx->commit();
 			ASSERT(false);
 		} catch (Error& e) {
@@ -254,8 +253,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					ProcessData worker = deterministicRandom()->randomChoice(workers);
 					Key addr =
 					    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
-					        .withPrefix(
-					            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
+					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 					tx->set(addr, "InvalidProcessType"_sr);
 					// test ryw
 					Optional<Value> processType = co_await tx->get(addr);
@@ -333,23 +331,21 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					ProcessData worker = deterministicRandom()->randomChoice(workers);
 					std::string address = formatIpPort(worker.address.ip, worker.address.port);
 					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tx->set(Key("process/class_type/" + address)
-					            .withPrefix(
-					                SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
-					        Value(worker.processClass.toString())); // Set it as the same class type as before, thus
-					                                                // only class source will be changed
+					tx->set(
+					    Key("process/class_type/" + address)
+					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
+					    Value(worker.processClass.toString())); // Set it as the same class type as before, thus
+					                                            // only class source will be changed
 					co_await tx->commit();
 					tx->reset();
 					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 					Optional<Value> class_source = co_await tx->get(
 					    Key("process/class_source/" + address)
-					        .withPrefix(
-					            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin));
+					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin));
 					TraceEvent(SevDebug, "SetClassSourceDebug")
 					    .detail("Address", address)
 					    .detail("Present", class_source.present())
-					    .detail("ClassSource",
-					            class_source.present() ? class_source.get().toString() : "__Nothing");
+					    .detail("ClassSource", class_source.present() ? class_source.get().toString() : "__Nothing");
 					// Very rarely, we get an empty worker list, thus no class_source data
 					if (class_source.present()) {
 						if (class_source.get() == "command_line"_sr) {
@@ -443,10 +439,10 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				if (err.isValid()) {
 					co_await tx->onError(err);
 				}
-				} else {
-					ASSERT(err.code() == error_code_database_locked);
-					break;
-				}
+			} else {
+				ASSERT(err.code() == error_code_database_locked);
+				break;
+			}
 		}
 		// make sure we unlock the database
 		// unlock is idempotent, thus we can commit many times until successful
@@ -531,119 +527,122 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					tx->reset();
 					break;
 				} catch (Error& e) {
-				err = e;
+					err = e;
 				}
 				co_await tx->onError(err);
-		}
+			}
 		}
 		// coordinators
 		// test read, makes sure it's the same as reading from coordinatorsKey
-		loop{ { Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> res = co_await tx->get(coordinatorsKey);
-			ASSERT(res.present()); // Otherwise, database is in a bad state
-			ClusterConnectionString cs(res.get().toString());
-			Optional<Value> coordinator_processes_key = co_await tx->get(
-			    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")));
-			ASSERT(coordinator_processes_key.present());
-			std::vector<std::string> process_addresses;
-			boost::split(
-			    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
-			ASSERT(process_addresses.size() == cs.coords.size() + cs.hostnames.size());
-			// compare the coordinator process network addresses one by one
-			std::vector<NetworkAddress> coordinators = co_await cs.tryResolveHostnames();
-			for (const auto& network_address : coordinators) {
-				ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
-				       process_addresses.end());
-			}
-			tx->reset();
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tx->onError(err);
-	}
-} // advanceversion
-Error advanceVersionErr;
-try {
-	tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-	Version v1 = co_await tx->getReadVersion();
-	TraceEvent(SevDebug, "InitialReadVersion").detail("Version", v1);
-	Version v2 = 2 * v1;
-	loop {
-		{
-			Error err;
-			try {
-				// loop until the grv is larger than the set version
-				Version v3 = co_await tx->getReadVersion();
-				if (v3 > v2) {
-					TraceEvent(SevDebug, "AdvanceVersionSuccess").detail("Version", v3);
+		loop {
+			{
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> res = co_await tx->get(coordinatorsKey);
+					ASSERT(res.present()); // Otherwise, database is in a bad state
+					ClusterConnectionString cs(res.get().toString());
+					Optional<Value> coordinator_processes_key = co_await tx->get(
+					    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")));
+					ASSERT(coordinator_processes_key.present());
+					std::vector<std::string> process_addresses;
+					boost::split(
+					    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
+					ASSERT(process_addresses.size() == cs.coords.size() + cs.hostnames.size());
+					// compare the coordinator process network addresses one by one
+					std::vector<NetworkAddress> coordinators = co_await cs.tryResolveHostnames();
+					for (const auto& network_address : coordinators) {
+						ASSERT(std::find(process_addresses.begin(),
+						                 process_addresses.end(),
+						                 network_address.toString()) != process_addresses.end());
+					}
+					tx->reset();
 					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				// force the cluster to recover at v2
-				tx->set(SpecialKeySpace::getManagementApiCommandPrefix("advanceversion"), std::to_string(v2));
-				co_await tx->commit();
-				ASSERT(false); // Should fail with commit_unknown_result
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent(SevDebug, "AdvanceVersionCommitFailure").error(err);
-			if (err.isValid()) {
 				co_await tx->onError(err);
 			}
-		}
-	}
-	tx->reset();
-} catch (Error& e) {
-	advanceVersionErr = e;
-}
-if (advanceVersionErr.isValid()) {
-	co_await tx->onError(advanceVersionErr);
-}
-// make sure when we change dd related special keys, we grab the two system keys,
-// i.e. moveKeysLockOwnerKey and moveKeysLockWriteKey
-{
-	Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
-	Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
-	loop {
-		Error err;
+		} // advanceversion
+		Error advanceVersionErr;
 		try {
-			tr1->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tr1->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tr2->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-			Version readVersion = co_await tr1->getReadVersion();
-			tr2->setVersion(readVersion);
-			KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-			tr1->set("mode"_sr.withPrefix(ddPrefix), "1"_sr);
-			co_await tr1->commit();
-			// randomly read the moveKeysLockOwnerKey/moveKeysLockWriteKey
-			// both of them should be grabbed when changing dd mode
-			co_await success(
-			    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey));
-			// tr2 should never succeed, just write to a key to make it not a read-only transaction
-			tr2->addWriteConflictRange(singleKeyRange(""_sr));
-			co_await tr2->commit();
-			ASSERT(false); // commit should always fail due to conflict
-		} catch (Error& e) {
-			err = e;
-		}
-		if (err.code() != error_code_not_committed) {
-			// when buggify is enabled, it's possible we get other retriable errors
-			if (err.isValid()) {
-				co_await tr2->onError(err);
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			Version v1 = co_await tx->getReadVersion();
+			TraceEvent(SevDebug, "InitialReadVersion").detail("Version", v1);
+			Version v2 = 2 * v1;
+			loop {
+				{
+					Error err;
+					try {
+						// loop until the grv is larger than the set version
+						Version v3 = co_await tx->getReadVersion();
+						if (v3 > v2) {
+							TraceEvent(SevDebug, "AdvanceVersionSuccess").detail("Version", v3);
+							break;
+						}
+						tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+						tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+						// force the cluster to recover at v2
+						tx->set(SpecialKeySpace::getManagementApiCommandPrefix("advanceversion"), std::to_string(v2));
+						co_await tx->commit();
+						ASSERT(false); // Should fail with commit_unknown_result
+					} catch (Error& e) {
+						err = e;
+					}
+					TraceEvent(SevDebug, "AdvanceVersionCommitFailure").error(err);
+					if (err.isValid()) {
+						co_await tx->onError(err);
+					}
+				}
 			}
-			tr1->reset();
-		} else {
-			// loop until we get conflict error
-			break;
+			tx->reset();
+		} catch (Error& e) {
+			advanceVersionErr = e;
+		}
+		if (advanceVersionErr.isValid()) {
+			co_await tx->onError(advanceVersionErr);
+		}
+		// make sure when we change dd related special keys, we grab the two system keys,
+		// i.e. moveKeysLockOwnerKey and moveKeysLockWriteKey
+		{
+			Reference<ReadYourWritesTransaction> tr1(new ReadYourWritesTransaction(cx));
+			Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
+			loop {
+				Error err;
+				try {
+					tr1->setOption(FDBTransactionOptions::RAW_ACCESS);
+					tr1->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tr2->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+					Version readVersion = co_await tr1->getReadVersion();
+					tr2->setVersion(readVersion);
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tr1->set("mode"_sr.withPrefix(ddPrefix), "1"_sr);
+					co_await tr1->commit();
+					// randomly read the moveKeysLockOwnerKey/moveKeysLockWriteKey
+					// both of them should be grabbed when changing dd mode
+					co_await success(
+					    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey));
+					// tr2 should never succeed, just write to a key to make it not a read-only transaction
+					tr2->addWriteConflictRange(singleKeyRange(""_sr));
+					co_await tr2->commit();
+					ASSERT(false); // commit should always fail due to conflict
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.code() != error_code_not_committed) {
+					// when buggify is enabled, it's possible we get other retriable errors
+					if (err.isValid()) {
+						co_await tr2->onError(err);
+					}
+					tr1->reset();
+				} else {
+					// loop until we get conflict error
+					break;
+				}
+			}
 		}
 	}
-}
-}
 };
 
 WorkloadFactory<SpecialKeySpaceRobustnessWorkload> SpecialKeySpaceRobustnessFactory;

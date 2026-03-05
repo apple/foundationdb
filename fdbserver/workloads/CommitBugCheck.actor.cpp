@@ -160,7 +160,6 @@ struct CommitBugWorkload : TestWorkload {
 				}
 			}
 		}
-
 	}
 
 	Future<bool> check(Database const& cx) override { return success; }

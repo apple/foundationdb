@@ -230,7 +230,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-
 	}
 
 	Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self, Database cx, Key key, Optional<Value> value) {

@@ -254,8 +254,7 @@ struct RestoreWorkload : TestWorkload {
 					// Check the left over tasks
 					// We have to wait for the list to empty since an abort and get status
 					// can leave extra tasks in the queue
-					TraceEvent("RW_CheckLeftoverTasks", self->randomID)
-					    .detail("BackupTag", printable(self->backupTag));
+					TraceEvent("RW_CheckLeftoverTasks", self->randomID).detail("BackupTag", printable(self->backupTag));
 					int64_t taskCount = co_await backupAgent.getTaskCount(tr);
 					int waitCycles = 0;
 

@@ -126,7 +126,6 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Could not open file");
 			throw;
 		}
-
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -174,7 +173,6 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			tasks.push_back(worker(self));
 
 		co_await timeout(waitForAll(tasks), self->testDuration, Void());
-
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

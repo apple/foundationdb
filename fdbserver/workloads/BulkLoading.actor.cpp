@@ -95,8 +95,7 @@ struct BulkLoading : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				co_await krmSetRange(
-				    &tr, bulkLoadTaskPrefix, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
+				co_await krmSetRange(&tr, bulkLoadTaskPrefix, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
 				co_await tr.commit();
 				break;
 			} catch (Error& e) {
@@ -315,8 +314,7 @@ struct BulkLoading : TestWorkload {
 					if (self->keyContainedInRanges(result[i].key, ignoreRanges)) {
 						continue; // ignoreRanges
 					}
-					if (self->backgroundTrafficEnabled &&
-					    !self->keyContainedInRanges(result[i].key, loadedRanges)) {
+					if (self->backgroundTrafficEnabled && !self->keyContainedInRanges(result[i].key, loadedRanges)) {
 						continue; // When background traffic is enabled, ignore any data outside the loaded range
 					}
 					res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
@@ -781,7 +779,6 @@ struct BulkLoading : TestWorkload {
 
 		std::vector<RangeLockOwner> lockOwnersAfterRemove = co_await getAllRangeLockOwners(cx);
 		ASSERT(lockOwnersAfterRemove.empty());
-
 	}
 };
 

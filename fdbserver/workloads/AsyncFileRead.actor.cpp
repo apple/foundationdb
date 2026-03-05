@@ -208,7 +208,6 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 		int64_t fileSize = co_await self->fileHandle->file->size();
 		self->fileSize = fileSize;
-
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -229,7 +228,6 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 		// Try to let the IO operations finish so we can clean up after them
 		co_await timeout(waitForAll(self->readFutures), 10, Void());
-
 	}
 
 	static Future<Void> readLoop(AsyncFileReadWorkload* self, int bufferIndex, double fixedRate) {

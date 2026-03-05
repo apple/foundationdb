@@ -145,7 +145,6 @@ struct RWTransactor : ITransactor {
 			co_await tr.onError(err);
 			stats->retries++;
 		}
-
 	}
 };
 

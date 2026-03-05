@@ -233,21 +233,19 @@ struct ConflictRangeWorkload : TestWorkload {
 					if (self->testReadYourWrites) {
 						trRYOW.clear(KeyRangeRef(StringRef(format("%010d", clearedBegin)),
 						                         StringRef(format("%010d", clearedEnd))));
-						RangeResult res =
-						    co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                             KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-						                             randomLimit,
-						                             Snapshot::False,
-						                             reverse);
+						RangeResult res = co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+						                                           KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                                           randomLimit,
+						                                           Snapshot::False,
+						                                           reverse);
 						co_await trRYOW.commit();
 					} else {
 						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
-						RangeResult res =
-						    co_await tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                          KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-						                          randomLimit,
-						                          Snapshot::False,
-						                          reverse);
+						RangeResult res = co_await tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+						                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                                        randomLimit,
+						                                        Snapshot::False,
+						                                        reverse);
 						co_await tr3.commit();
 					}
 				} catch (Error& e) {
@@ -339,10 +337,9 @@ struct ConflictRangeWorkload : TestWorkload {
 						    .detail("Original", keyStr2);
 
 						tr4 = Transaction(cx);
-						RangeResult res =
-						    co_await tr4.getRange(KeyRangeRef(StringRef(format("%010d", 0)),
-						                                      StringRef(format("%010d", self->maxKeySpace))),
-						                          200);
+						RangeResult res = co_await tr4.getRange(
+						    KeyRangeRef(StringRef(format("%010d", 0)), StringRef(format("%010d", self->maxKeySpace))),
+						    200);
 						std::string allKeyEntries = "";
 						for (int i = 0; i < res.size(); i++) {
 							allKeyEntries += printable(res[i].key) + " ";
@@ -362,8 +359,8 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					if (res.size() == originalResults.size()) {
 						for (int i = 0; i < res.size(); i++) {
-							if (res[i] != originalResults[i] && !(res[i].key.startsWith("\xff"_sr) &&
-							                                      originalResults[i].key.startsWith("\xff"_sr))) {
+							if (res[i] != originalResults[i] &&
+							    !(res[i].key.startsWith("\xff"_sr) && originalResults[i].key.startsWith("\xff"_sr))) {
 								TraceEvent(SevError, "ConflictRangeError")
 								    .detail("Info", "No conflict returned, however results do not match")
 								    .detail("Original",

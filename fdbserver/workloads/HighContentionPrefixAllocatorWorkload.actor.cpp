@@ -100,7 +100,6 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 			}
 			co_await tr->onError(err);
 		}
-
 	}
 
 	static Future<Void> runTest(Database cx, HighContentionPrefixAllocatorWorkload* self) {
@@ -114,7 +113,6 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 			co_await waitForAll(futures);
 		}
-
 	}
 
 	Future<Void> start(Database const& cx) override { return runTest(cx, this); }
@@ -135,8 +133,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 			try {
 				Key k1 = co_await tr->getKey(firstGreaterOrEqual(""_sr));
 				Key k2 = co_await tr->getKey(lastLessThan("\xff"_sr));
-				if (!k1.startsWith(self->allocatorSubspace.key()) ||
-				    !k2.startsWith(self->allocatorSubspace.key())) {
+				if (!k1.startsWith(self->allocatorSubspace.key()) || !k2.startsWith(self->allocatorSubspace.key())) {
 					TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 					    .detail("Reason", "Keys written outside allocator subspace")
 					    .detail("MinKey", k1)

@@ -142,7 +142,6 @@ Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
 	} else {
 		httpKVProcessGet(kvStore, key, req, response);
 	}
-
 }
 
 static Reference<SimHTTPKVStore> globalKVStore = Reference<SimHTTPKVStore>();
@@ -236,11 +235,11 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 						    co_await INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service);
 						ASSERT(!addrs.empty());
 						int idx = deterministicRandom()->randomInt(0, addrs.size());
-						co_await store(
-						    self->conn,
-						    timeoutError(INetworkConnections::net()->connect(
-						                     addrs[idx].ip.toString(), std::to_string(addrs[idx].port), false),
-						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+						co_await store(self->conn,
+						               timeoutError(INetworkConnections::net()->connect(addrs[idx].ip.toString(),
+						                                                                std::to_string(addrs[idx].port),
+						                                                                false),
+						                            FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 
 					} else {
 						co_await store(
@@ -343,7 +342,6 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		self->activePut.reset();
 		self->myData[key] = value;
 		++self->putCount;
-
 	}
 
 	Future<Void> get(HTTPKeyValueStoreWorkload* self, std::string key, bool checkActive) {
@@ -367,7 +365,6 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			ASSERT(contentCorrect || inFlightCorrect);
 		}
 		++self->getCount;
-
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this); }
@@ -394,7 +391,6 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("SimHTTPKeyValueStoreLoaded");
-
 	}
 
 	Future<Void> start(Database const& cx) override {

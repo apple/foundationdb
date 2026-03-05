@@ -87,7 +87,6 @@ struct RandomSelectorWorkload : TestWorkload {
 			co_await tr.onError(err);
 			tr.reset();
 		}
-
 	}
 
 	Future<Void> randomSelectorClient(Database cx, RandomSelectorWorkload* self) {
@@ -251,8 +250,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								Error err;
 								try {
 									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-									tr.atomicOp(
-									    StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
 									co_await tr.commit();
 									tr.reset();
 									break;
@@ -262,8 +260,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -292,8 +289,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -321,8 +317,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -350,8 +345,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -379,8 +373,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -408,8 +401,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -437,8 +429,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -466,8 +457,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -495,8 +485,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = err;
 								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing =
-									    co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -581,9 +570,7 @@ struct RandomSelectorWorkload : TestWorkload {
 										          format("%d", getRangeTest2[k].value.size()) + " ";
 									}
 
-									TraceEvent("RanSelTestLog")
-									    .detail("RYOW", outStr1)
-									    .detail("Normal", outStr2);
+									TraceEvent("RanSelTestLog").detail("RYOW", outStr1).detail("Normal", outStr2);
 								}
 
 								tr.reset();
@@ -606,11 +593,9 @@ struct RandomSelectorWorkload : TestWorkload {
 					Error err;
 					try {
 						RangeResult finalTest1 = co_await finalTransaction.getRange(
-						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")),
-						    self->maxKeySpace);
+						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")), self->maxKeySpace);
 						RangeResult finalTest2 = co_await finalTransaction.getRange(
-						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")),
-						    self->maxKeySpace);
+						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")), self->maxKeySpace);
 
 						if (finalTest1.size() != finalTest2.size()) {
 							TraceEvent(SevError, "RanSelTestFailure")

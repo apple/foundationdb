@@ -239,8 +239,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 				co_await (tr1.commit() && tr2.commit());
 
 				co_await (watch1 || watch2); // since we enter case 5 at least one of the watches should be fired
-				co_await setKeyRandomValue(
-				    cx, key, Optional<Value>()); // fire the watch that possibly wasn't triggered
+				co_await setKeyRandomValue(cx, key, Optional<Value>()); // fire the watch that possibly wasn't triggered
 				co_await (watch1 && watch2);
 
 				co_return;

@@ -185,9 +185,7 @@ struct StorefrontWorkload : TestWorkload {
 					orderID id = ids[idx];
 					Optional<Value> val = co_await tr.get(self->orderKey(id));
 					if (!val.present()) {
-						TraceEvent(SevError, "TestFailure")
-						    .detail("Reason", "OrderNotPresent")
-						    .detail("OrderID", id);
+						TraceEvent(SevError, "TestFailure").detail("Reason", "OrderNotPresent").detail("OrderID", id);
 						co_return false;
 					}
 					std::vector<int> itemList;

@@ -326,7 +326,6 @@ struct ValidateStorage : TestWorkload {
 
 		co_await self->testAuditStorageWhenDDBackToNormalMode(self, cx);
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");
-
 	}
 
 	Future<Version> populateData(ValidateStorage* self, Database cx, std::map<Key, Value>* kvs) {
@@ -403,8 +402,8 @@ struct ValidateStorage : TestWorkload {
 		loop {
 			Error err;
 			try {
-				RangeResult shards = co_await krmGetRanges(
-				    &tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
+				RangeResult shards =
+				    co_await krmGetRanges(&tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!shards.empty() && !shards.more);
 
 				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
@@ -455,7 +454,6 @@ struct ValidateStorage : TestWorkload {
 		}
 
 		TraceEvent("TestSSUserDataValidationDone").detail("Range", range);
-
 	}
 
 	Future<UID> auditStorageForType(ValidateStorage* self,

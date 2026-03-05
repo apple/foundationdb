@@ -107,7 +107,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		// Write will scceed.
 		co_await self->writeAndVerify(self, cx, key, newValue);
-
 	}
 
 	Future<Void> readAndVerify(DataLossRecoveryWorkload* self,
@@ -134,7 +133,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-
 	}
 
 	Future<Void> writeAndVerify(DataLossRecoveryWorkload* self, Database cx, Key key, Optional<Value> value) {
@@ -156,7 +154,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		}
 
 		co_await self->readAndVerify(self, cx, key, value);
-
 	}
 
 	Future<Void> exclude(Database cx, NetworkAddress addr) {

@@ -145,7 +145,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 
 		co_await success(backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::False));
-
 	}
 
 	static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag, DatabaseBackupAgent* backupAgent) {
@@ -271,7 +270,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		if (displaySystemKeys) {
 			co_await TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef());
 		}
-
 	}
 
 	static Future<Void> _setup(Database cx, BackupToDBUpgradeWorkload* self) {
@@ -296,7 +294,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupToDBUpgradeSetupError").error(e);
 			throw;
 		}
-
 	}
 
 	static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
@@ -387,7 +384,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				co_await tr.onError(err);
 			}
 		}
-
 	}
 
 	static Future<Void> _start(Database cx, BackupToDBUpgradeWorkload* self) {
@@ -447,8 +443,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					TraceEvent("DRU_Applied")
 					    .detail("AppliedVersion",
 					            v.present() ? BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) : -1);
-					if (v.present() &&
-					    BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= commitVersion)
+					if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= commitVersion)
 						break;
 
 					Future<Void> versionWatch = versionCheckTr.watch(
@@ -532,7 +527,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);
 			throw;
 		}
-
 	}
 };
 

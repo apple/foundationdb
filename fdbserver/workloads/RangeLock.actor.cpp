@@ -408,7 +408,6 @@ struct RangeLocking : TestWorkload {
 				i++;
 			}
 		}
-
 	}
 
 	Future<Void> checkLockCorrectness(RangeLocking* self, Database cx) {
@@ -450,7 +449,6 @@ struct RangeLocking : TestWorkload {
 				i++;
 			}
 		}
-
 	}
 
 	Future<Void> complexTest(RangeLocking* self, Database cx) {

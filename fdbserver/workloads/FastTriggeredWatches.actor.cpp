@@ -70,7 +70,6 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-
 	}
 
 	Future<Void> start(Database const& cx) override {

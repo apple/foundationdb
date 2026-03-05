@@ -312,7 +312,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// Backup everything
 		self->backupRanges.push_back_deep(self->backupRanges.arena(), normalKeys);
 		self->restoreRanges.push_back_deep(self->restoreRanges.arena(), normalKeys);
-
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -390,7 +389,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_BackupRestorable")
 		    .detail("AttemptsNeeded", restorabilityCheckAttempts)
 		    .detail("SnapshotBytes", lastSnapshotBytes);
-
 	}
 
 	static Future<Void> doBackup(BackupS3BlobCorrectnessWorkload* self,
@@ -537,7 +535,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 
 		TraceEvent("BS3BCW_DoBackupComplete", randomID).detail("Tag", printable(tag));
-
 	}
 
 	static Future<Void> _start(Database cx, BackupS3BlobCorrectnessWorkload* self) {
@@ -866,7 +863,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 			co_await b;
 		}
-
 	}
 };
 

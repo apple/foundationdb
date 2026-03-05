@@ -469,7 +469,6 @@ struct UnreadableWorkload : TestWorkload {
 				}
 			}
 		}
-
 	}
 };
 

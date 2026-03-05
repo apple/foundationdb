@@ -98,7 +98,6 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				co_await tr.onError(err);
 			}
 		}
-
 	}
 
 	Future<Void> SelectorCorrectnessClient(Database cx, SelectorCorrectnessWorkload* self) {
@@ -187,8 +186,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 
 							int trueSize = 0;
 							while (trueSize < getRangeTest.size() &&
-							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key <
-							           maxKey)
+							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key < maxKey)
 								trueSize++;
 
 							if (trueSize != expectedSize) {
@@ -216,8 +214,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 
 							int trueSize = 0;
 							while (trueSize < getRangeTest.size() &&
-							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key <
-							           maxKey)
+							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key < maxKey)
 								trueSize++;
 
 							if (trueSize != expectedSize) {

@@ -175,7 +175,6 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 			delete threadInfo[i];
 		}
-
 	}
 
 	THREAD_FUNC threadStart(void* arg) {

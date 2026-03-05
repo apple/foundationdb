@@ -159,7 +159,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 				co_await tr.onError(err);
 			}
 		}
-
 	}
 
 	static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
@@ -192,7 +191,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
 			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
-
 	}
 };
 

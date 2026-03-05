@@ -68,9 +68,8 @@ struct MemoryLifetime : KVWorkload {
 				if (op == 0) {
 					reverse.set(deterministicRandom()->coinflip());
 					Key getRange_startKey = self->getRandomKey();
-					KeyRange getRange_queryRange = reverse
-					                                   ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
-					                                   : KeyRangeRef(getRange_startKey, normalKeys.end);
+					KeyRange getRange_queryRange = reverse ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
+					                                       : KeyRangeRef(getRange_startKey, normalKeys.end);
 					bool getRange_randomStart = deterministicRandom()->random01();
 					Value getRange_newValue = self->randomValue();
 					snapshot.set(deterministicRandom()->coinflip());

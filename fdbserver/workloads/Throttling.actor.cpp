@@ -145,8 +145,7 @@ struct ThrottlingWorkload : KVWorkload {
 							self->correctSpecialKeys = false;
 						}
 						auto tpsLimit = valueObj.at("tps_limit").get_real();
-						self->tokenBucket.transactionRate =
-						    tpsLimit * self->throttlingMultiplier / self->clientCount;
+						self->tokenBucket.transactionRate = tpsLimit * self->throttlingMultiplier / self->clientCount;
 					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
 						CODE_PROBE(true, "Test storage health metrics schema");
 						UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)

@@ -85,9 +85,9 @@ Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
 				    co_await rangeConfig->getSnapshot(&tr, allKeys.begin, allKeys.end);
 
 				if (verbose) {
-					fmt::print("DD User Range Config:\n{}\n",
-					           json_spirit::write_string(DDConfiguration::toJSON(*snapshot, true),
-					                                     json_spirit::pretty_print));
+					fmt::print(
+					    "DD User Range Config:\n{}\n",
+					    json_spirit::write_string(DDConfiguration::toJSON(*snapshot, true), json_spirit::pretty_print));
 				}
 
 				for (int i = 0; i < rangeTests.size(); ++i) {

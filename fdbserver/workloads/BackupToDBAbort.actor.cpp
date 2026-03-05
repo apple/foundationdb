@@ -93,7 +93,6 @@ struct BackupToDBAbort : TestWorkload {
 		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
 			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
-
 	}
 
 	static Future<bool> _check(BackupToDBAbort* self, Database cx) {

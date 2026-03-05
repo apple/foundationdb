@@ -617,7 +617,6 @@ struct BulkDumping : TestWorkload {
 
 		std::vector<RangeLockOwner> lockOwnersAfterRemove = co_await getAllRangeLockOwners(cx);
 		ASSERT(lockOwnersAfterRemove.empty());
-
 	}
 
 	Future<Void> _setup(BulkDumping* self, Database cx) {
@@ -684,7 +683,6 @@ struct BulkDumping : TestWorkload {
 			    .detail("DelayRate", self->delayRate)
 			    .detail("CorruptionRate", self->corruptionRate);
 		}
-
 	}
 };
 

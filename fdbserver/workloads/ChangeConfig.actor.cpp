@@ -141,7 +141,6 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (!extraConfigureBefore) {
 			co_await self->configureExtraDatabases(self);
 		}
-
 	}
 
 	static Future<Void> coordinatorsChangeActor(Database cx, ChangeConfigWorkload* self, bool autoChange = false) {

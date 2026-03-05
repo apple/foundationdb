@@ -175,8 +175,7 @@ public: // workload functions
 						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
 					}
 					ErrorOr<Void> statusErr = co_await errorOr(status);
-					if (statusErr.isError() &&
-					    statusErr.getError().code() != error_code_duplicate_snapshot_request) {
+					if (statusErr.isError() && statusErr.getError().code() != error_code_duplicate_snapshot_request) {
 						// First request is expected to fail with duplicate_snapshot_request error
 						// Any other errors should be thrown
 						throw statusErr.getError();

@@ -56,7 +56,6 @@ struct RYWPerformanceWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -229,8 +228,8 @@ struct RYWPerformanceWorkload : TestWorkload {
 				double startTime = timer();
 
 				for (i = 0; i < self->ranges; i++) {
-					co_await success(tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)),
-					                             self->nodes));
+					co_await success(
+					    tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
 				}
 
 				fprintf(stderr, "%f", self->ranges / (timer() - startTime));

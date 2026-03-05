@@ -133,7 +133,6 @@ struct LockDatabaseWorkload : TestWorkload {
 		co_await delay(self->unlockAfter - self->lockAfter);
 		checker.cancel();
 		co_await unlockAndCheck(cx, self, lockID, data);
-
 	}
 };
 

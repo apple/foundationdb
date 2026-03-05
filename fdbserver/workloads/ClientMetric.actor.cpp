@@ -109,8 +109,8 @@ struct ClientMetricWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				std::string sampleRateStr = "default";
 				std::string sizeLimitStr = "default";
-				const double sampleRateDbl = cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate,
-				                                                           std::numeric_limits<double>::infinity());
+				const double sampleRateDbl =
+				    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 				if (!std::isinf(sampleRateDbl)) {
 					sampleRateStr = std::to_string(sampleRateDbl);
 				}
@@ -118,8 +118,7 @@ struct ClientMetricWorkload : TestWorkload {
 				if (sizeLimit != -1) {
 					sizeLimitStr = std::to_string(sizeLimit);
 				}
-				std::cout << "Read from globalconfig: rate=" << sampleRateStr << " size=" << sizeLimitStr
-				          << std::endl;
+				std::cout << "Read from globalconfig: rate=" << sampleRateStr << " size=" << sizeLimitStr << std::endl;
 				RangeResult kvRange = co_await tr->getRange(
 				    begin, end, keysLimit, Snapshot::False, reverse ? Reverse::True : Reverse::False);
 				if (kvRange.empty()) {

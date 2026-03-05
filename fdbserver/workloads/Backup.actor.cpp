@@ -294,7 +294,6 @@ struct BackupWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
 		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
-
 	}
 
 	static Future<Void> _start(Database cx, BackupWorkload* self) {

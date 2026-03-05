@@ -66,8 +66,7 @@ struct RYWDisableWorkload : TestWorkload {
 						    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
 					} else if (opType == 2) {
 						//TraceEvent("RYWGetAndWait");
-						co_await success(
-						    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes))));
+						co_await success(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes))));
 					} else {
 						//TraceEvent("RYWNoOp");
 						shouldError = false;

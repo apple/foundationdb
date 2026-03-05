@@ -223,7 +223,6 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			co_await delay(5.0);
 			co_await updateServerShards(cx, self);
 		}
-
 	}
 
 	// calculate hot server count

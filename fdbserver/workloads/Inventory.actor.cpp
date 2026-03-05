@@ -115,9 +115,8 @@ struct InventoryTestWorkload : TestWorkload {
 		loop {
 			Error err;
 			try {
-				RangeResult data = co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0)),
-				                                        firstGreaterOrEqual(doubleToTestKey(1)),
-				                                        self->nProducts);
+				RangeResult data = co_await tr.getRange(
+				    firstGreaterOrEqual(doubleToTestKey(0)), firstGreaterOrEqual(doubleToTestKey(1)), self->nProducts);
 
 				std::map<Key, int> actualResults;
 				for (int i = 0; i < data.size(); i++)

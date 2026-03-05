@@ -93,7 +93,6 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		TraceEvent("BARV_BackupComplete")
 		    .detail("Tag", printable(self->backupTag))
 		    .detail("Status", BackupAgentBase::getStateText(statusValue));
-
 	}
 
 	static Future<Void> doRestore(BackupAndRestoreValidationWorkload* self,
@@ -169,7 +168,6 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		});
 
 		TraceEvent("BARV_DatabaseUnlocked").detail("Tag", printable(restoreTag));
-
 	}
 
 	static Future<Void> _start(Database cx, BackupAndRestoreValidationWorkload* self) {
@@ -237,7 +235,6 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 				throw err;
 			}
 		}
-
 	}
 };
 

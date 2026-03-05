@@ -143,8 +143,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		std::vector<KeyRange> writeConflictRanges;
 
 		loop {
-				{
-					Optional<Error> err;
+			{
+				Optional<Error> err;
 				try {
 					// set the flag for empty key range testing
 					tr1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
@@ -291,15 +291,15 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 							}
 						}
 					}
-					} catch (Error& e) {
-						err = e;
-					}
-					if (err.present()) {
-						Error e2 = err.get();
-						co_await tr1->onError(e2);
-						co_await tr2->onError(e2);
-					}
+				} catch (Error& e) {
+					err = e;
 				}
+				if (err.present()) {
+					Error e2 = err.get();
+					co_await tr1->onError(e2);
+					co_await tr2->onError(e2);
+				}
+			}
 			readConflictRanges.clear();
 			writeConflictRanges.clear();
 			tr1->reset();

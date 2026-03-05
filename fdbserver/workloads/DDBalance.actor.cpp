@@ -106,10 +106,8 @@ struct DDBalanceWorkload : TestWorkload {
 				for (int n = begin; n < end; n++) {
 					int objectnum = n / self->moversPerClient;
 					int moverid = n % self->moversPerClient;
-					setActors.push_back(
-					    self->setKeyIfNotPresent(&tr,
-					                             self->key(self->currentbin, objectnum, moverid, self->clientId),
-					                             self->value(objectnum)));
+					setActors.push_back(self->setKeyIfNotPresent(
+					    &tr, self->key(self->currentbin, objectnum, moverid, self->clientId), self->value(objectnum)));
 				}
 				co_await waitForAll(setActors);
 				co_await tr.commit();
@@ -141,7 +139,6 @@ struct DDBalanceWorkload : TestWorkload {
 		if (self->warmingDelay > 0) {
 			co_await timeout(databaseWarmer(cx), self->warmingDelay, Void());
 		}
-
 	}
 
 	bool shouldRecord(double clientBegin) {
@@ -221,7 +218,6 @@ struct DDBalanceWorkload : TestWorkload {
 			    .detail("NextBin", destinationBin);
 			ASSERT(false);
 		}
-
 	}
 
 	Future<Void> ddBalanceMover(Database cx, DDBalanceWorkload* self, int moverId) {

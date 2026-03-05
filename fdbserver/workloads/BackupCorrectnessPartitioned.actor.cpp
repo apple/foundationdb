@@ -232,8 +232,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			try {
 				for (int restoreIndex = 0; restoreIndex < self->skippedRestoreRanges.size(); restoreIndex++) {
 					KeyRangeRef range = self->skippedRestoreRanges[restoreIndex];
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" +
-					                                 std::to_string(restoreIndex));
+					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					RangeResult res = co_await tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED);
 					if (!res.empty()) {
 						TraceEvent(SevError, "BARW_UnexpectedRangePresent").detail("Range", printable(range));
@@ -436,7 +435,6 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
 		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
-
 	}
 
 	static Future<Void> clearAndRestoreSystemKeys(Database cx,

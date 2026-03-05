@@ -150,9 +150,9 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				Error err;
 				try {
 					Optional<Value> v = co_await tr.get(
-					    useReadKey ? self->readKey
-					               : StringRef(format("testkey%08x",
-					                                  deterministicRandom()->randomInt(0, self->keyCount))));
+					    useReadKey
+					        ? self->readKey
+					        : StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, self->keyCount))));
 					break;
 				} catch (Error& e) {
 					err = e;

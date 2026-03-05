@@ -398,7 +398,6 @@ struct MakoWorkload : TestWorkload {
 		if (self->checksumVerification && self->clientId == 0) {
 			co_await generateChecksum(cx, self);
 		}
-
 	}
 
 	Future<Void> _start(Database cx, MakoWorkload* self) {
@@ -520,8 +519,7 @@ struct MakoWorkload : TestWorkload {
 							char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
 							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
 							for (int range_i = 0; range_i < range; ++range_i) {
-								format("%0.*d", rangeLen, range_i)
-								    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
+								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								if (self->latencyForLocalOperation) {
 									double opBegin = timer();
 									tr.set(rkey, self->randomValue());
@@ -581,8 +579,7 @@ struct MakoWorkload : TestWorkload {
 							std::string scr_end_key;
 							KeyRangeRef scr_key_range_ref;
 							for (int range_i = 0; range_i < range; ++range_i) {
-								format("%0.*d", rangeLen, range_i)
-								    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
+								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								if (self->latencyForLocalOperation) {
 									double opBegin = timer();
 									tr.set(rkey, self->randomValue());
@@ -663,7 +660,6 @@ struct MakoWorkload : TestWorkload {
 			TraceEvent("FailedToCleanData").error(err);
 			co_await tr.onError(err);
 		}
-
 	}
 	template <class T>
 	static Future<Void> logLatency(Future<T> f, DDSketch<double>* opLatencies) {

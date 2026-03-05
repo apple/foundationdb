@@ -168,12 +168,10 @@ struct RestoreValidationWorkload : TestWorkload {
 				// Use shorter timeout for scheduling (60s) to detect cluster issues early
 				UID auditId;
 				try {
-					UID scheduleResult = co_await timeoutError(auditStorage(clusterFile,
-					                                                        self->validationRange,
-					                                                        auditType,
-					                                                        KeyValueStoreType::END,
-					                                                        self->maxWaitTime),
-					                                           60.0);
+					UID scheduleResult = co_await timeoutError(
+					    auditStorage(
+					        clusterFile, self->validationRange, auditType, KeyValueStoreType::END, self->maxWaitTime),
+					    60.0);
 					auditId = scheduleResult;
 				} catch (Error& e) {
 					if (e.code() == error_code_timed_out) {
@@ -343,7 +341,6 @@ struct RestoreValidationWorkload : TestWorkload {
 				throw err;
 			}
 		}
-
 	}
 };
 

@@ -321,7 +321,6 @@ struct TxnTimeout : TestWorkload {
 		    .detail("TxnsFailed", self->txnsFailed)
 		    .detail("TxnsTotal", self->txnsTotal)
 		    .detail("SuccessRate", self->txnsTotal > 0 ? (double)self->txnsSucceeded / self->txnsTotal : 0.0);
-
 	}
 };
 

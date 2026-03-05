@@ -79,7 +79,6 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		int64_t fileSize = co_await self->fileHandle->file->size();
 		if (fileSize != 0)
 			self->fileSize = fileSize;
-
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -100,7 +99,6 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 
 		// Try to let the IO complete so we can clean up after them
 		co_await timeout(waitForAll(self->writeFutures), 10, Void());
-
 	}
 
 	Future<Void> runWriteTest(AsyncFileWriteWorkload* self) {

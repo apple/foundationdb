@@ -158,7 +158,6 @@ struct TargetedKillWorkload : TestWorkload {
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
 
 		co_await self->killEndpoint(workers, machine, cx, self);
-
 	}
 };
 

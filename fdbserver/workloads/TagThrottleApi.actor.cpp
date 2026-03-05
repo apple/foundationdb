@@ -103,7 +103,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 		    std::make_pair(tag, priority),
 		    TagThrottleInfo(
 		        tag, TagThrottleType::MANUAL, priority, rate, now() + duration, duration, TagThrottledReason::MANUAL));
-
 	}
 
 	Future<Void> unthrottleTag(
@@ -140,7 +139,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 		} else {
 			ASSERT(maxExpiration < now());
 		}
-
 	}
 
 	Future<Void> getTags(
@@ -219,7 +217,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 				ASSERT(unthrottled || !unthrottleExpected);
 			}
 		}
-
 	}
 
 	Future<Void> enableAutoThrottling(TagThrottleApiWorkload* self, Database cx) {
@@ -235,7 +232,6 @@ struct TagThrottleApiWorkload : TestWorkload {
 			co_await ThrottleApi::enableAuto(db, false);
 			self->autoThrottleEnabled = false;
 		}
-
 	}
 
 	Future<Void> runThrottleApi(TagThrottleApiWorkload* self, Database cx) {

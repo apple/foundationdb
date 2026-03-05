@@ -106,8 +106,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 						}
 
 						{
-							Standalone<StringRef> res =
-							    co_await tr.getKey(randomizedSelector(startKey, true, diff));
+							Standalone<StringRef> res = co_await tr.getKey(randomizedSelector(startKey, true, diff));
 							endKey = res;
 						}
 					} else {
@@ -117,8 +116,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 						}
 
 						{
-							Standalone<StringRef> res =
-							    co_await tr.getKey(randomizedSelector(endKey, true, -1 * diff));
+							Standalone<StringRef> res = co_await tr.getKey(randomizedSelector(endKey, true, -1 * diff));
 							startKey = res;
 						}
 					}

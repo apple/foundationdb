@@ -55,17 +55,24 @@ class ThroughputQuotaWorkload : public TestWorkload {
 }
 
 public:
-	static constexpr auto NAME = "ThroughputQuota";
-	explicit ThroughputQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
-		reservedQuotaInPages = getOption(options, "reservedQuotaInPages"_sr, 0);
-		totalQuotaInPages = getOption(options, "totalQuotaInPages"_sr, 0);
-	}
+static constexpr auto NAME = "ThroughputQuota";
+explicit ThroughputQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
+	reservedQuotaInPages = getOption(options, "reservedQuotaInPages"_sr, 0);
+	totalQuotaInPages = getOption(options, "totalQuotaInPages"_sr, 0);
+}
 
-	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
-	Future<Void> start(Database const& cx) override { return Void(); }
-	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(std::vector<PerfMetric>& m) override {}
-};
+Future<Void> setup(Database const& cx) override {
+	return clientId ? Void() : setup(this, cx);
+}
+Future<Void> start(Database const& cx) override {
+	return Void();
+}
+Future<bool> check(Database const& cx) override {
+	return true;
+}
+void getMetrics(std::vector<PerfMetric>& m) override {}
+}
+;
 
 WorkloadFactory<ThroughputQuotaWorkload> ThroughputQuotaWorkloadFactory;

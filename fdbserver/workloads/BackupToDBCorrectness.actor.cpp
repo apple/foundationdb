@@ -288,7 +288,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				co_await tr.onError(err);
 			}
 		}
-
 	}
 
 	static Future<Void> doBackup(BackupToDBCorrectnessWorkload* self,
@@ -433,7 +432,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
 		    .detail("StatusValue", statusValue);
-
 	}
 
 	static Future<Void> checkData(Database cx,
@@ -796,7 +794,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);
 			throw;
 		}
-
 	}
 };
 

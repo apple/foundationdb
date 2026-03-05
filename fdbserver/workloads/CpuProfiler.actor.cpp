@@ -94,7 +94,6 @@ struct CpuProfilerWorkload : TestWorkload {
 
 			TraceEvent("DoneSignalingProfiler").log();
 		}
-
 	}
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
@@ -112,7 +111,6 @@ struct CpuProfilerWorkload : TestWorkload {
 				TraceEvent("SignalProfilerOff").log();
 			co_await timeoutError(self->updateProfiler(false, cx, self), 60.0);
 		}
-
 	}
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
