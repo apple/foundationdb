@@ -627,6 +627,16 @@ void decodeServerKeysValue(const ValueRef& value,
 		emptyRange = false;
 		id = UID();
 	} else {
+		// Value is unrecognized and too short to be a versioned UID
+		if (value.size() < sizeof(ProtocolVersion)) {
+			TraceEvent(SevWarnAlways, "DecodeServerKeysValueUnknown")
+			    .detail("Value", value.toHexString())
+			    .detail("Size", value.size());
+			assigned = false;
+			emptyRange = false;
+			id = UID();
+			return;
+		}
 		BinaryReader rd(value, IncludeVersion());
 		ASSERT(rd.protocolVersion().hasShardEncodeLocationMetaData());
 		rd >> id;

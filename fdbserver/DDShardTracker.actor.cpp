@@ -267,13 +267,34 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 
 			loop {
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
-				std::pair<Optional<StorageMetrics>, int> metrics =
-				    wait(self()->db->waitStorageMetrics(keys,
-				                                        bounds.min,
-				                                        bounds.max,
-				                                        bounds.permittedError,
-				                                        CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
-				                                        shardCount));
+				state double metricsStartTime = now();
+				state int logCount = 0;
+				state Future<std::pair<Optional<StorageMetrics>, int>> metricsFuture =
+				    self()->db->waitStorageMetrics(keys,
+				                                   bounds.min,
+				                                   bounds.max,
+				                                   bounds.permittedError,
+				                                   CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+				                                   shardCount);
+
+				// Log periodically while waiting for metrics (helps diagnose stuck DD)
+				state std::pair<Optional<StorageMetrics>, int> metrics;
+				loop {
+					choose {
+						when(std::pair<Optional<StorageMetrics>, int> m = wait(metricsFuture)) {
+							metrics = m;
+							break;
+						}
+						when(wait(delay(60.0))) {
+							logCount++;
+							TraceEvent(SevWarn, "DDWaitStorageMetricsStuck", self()->distributorId)
+							    .detail("Keys", keys)
+							    .detail("Elapsed", now() - metricsStartTime)
+							    .detail("LogCount", logCount);
+						}
+					}
+				}
+
 				if (metrics.first.present()) {
 					BandwidthStatus newBandwidthStatus = getBandwidthStatus(metrics.first.get());
 					if (newBandwidthStatus == BandwidthStatusLow && bandwidthStatus != BandwidthStatusLow) {

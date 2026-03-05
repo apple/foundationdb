@@ -546,6 +546,12 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
                                             PromiseStream<RelocateData> output,
                                             Reference<FlowLock> fetchLock) {
 
+	TraceEvent("GetSourceServersForRangeStart", self->distributorId)
+	    .detail("KeyBegin", input.keys.begin)
+	    .detail("KeyEnd", input.keys.end)
+	    .detail("Priority", input.priority)
+	    .detail("RandomId", input.randomId);
+
 	// FIXME: is the merge case needed
 	if (input.priority == SERVER_KNOBS->PRIORITY_MERGE_SHARD) {
 		wait(delay(0.5, TaskPriority::DataDistributionVeryLow));
@@ -556,7 +562,19 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
 	wait(fetchLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*fetchLock);
 
+	TraceEvent("GetSourceServersForRangeFetching", self->distributorId)
+	    .detail("KeyBegin", input.keys.begin)
+	    .detail("KeyEnd", input.keys.end)
+	    .detail("Priority", input.priority);
+
 	IDDTxnProcessor::SourceServers res = wait(self->txnProcessor->getSourceServersForRange(input.keys));
+
+	TraceEvent("GetSourceServersForRangeComplete", self->distributorId)
+	    .detail("KeyBegin", input.keys.begin)
+	    .detail("KeyEnd", input.keys.end)
+	    .detail("Priority", input.priority)
+	    .detail("NumSources", res.srcServers.size());
+
 	input.src = std::move(res.srcServers);
 	input.completeSources = std::move(res.completeSources);
 	output.send(input);
@@ -830,6 +848,12 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	queueMap.insert(rd.keys, rd);
 
 	// cancel all the getSourceServers actors that intersect the new range that we will be getting
+	TraceEvent("GetSourceActorsCancelling", distributorId)
+	    .detail("CancelRangeBegin", affectedQueuedItems.front().begin)
+	    .detail("CancelRangeEnd", affectedQueuedItems.back().end)
+	    .detail("NewRelocateKeyBegin", rd.keys.begin)
+	    .detail("NewRelocateKeyEnd", rd.keys.end)
+	    .detail("NewPriority", rd.priority);
 	getSourceActors.cancel(KeyRangeRef(affectedQueuedItems.front().begin, affectedQueuedItems.back().end));
 
 	// update fetchingSourcesQueue and the per-server queue based on truncated ranges after insertion, (re-)launch
@@ -1021,6 +1045,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		if (overlappingInFlight) {
 			ASSERT(!rd.isRestore());
 			// logRelocation( rd, "SkippingOverlappingInFlight" );
+			TraceEvent("LaunchSkippedOverlappingInFlight", distributorId)
+			    .detail("KeyBegin", rd.keys.begin)
+			    .detail("KeyEnd", rd.keys.end)
+			    .detail("Priority", rd.priority)
+			    .detail("ActiveRelocations", activeRelocations);
 			continue;
 		}
 
@@ -1040,6 +1069,12 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
 		if (!rd.isRestore() && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 			// logRelocation( rd, "SkippingQueuedRelocation" );
+			TraceEvent("LaunchSkippedSrcBusy", distributorId)
+			    .detail("KeyBegin", rd.keys.begin)
+			    .detail("KeyEnd", rd.keys.end)
+			    .detail("Priority", rd.priority)
+			    .detail("NumSources", rd.src.size())
+			    .detail("ActiveRelocations", activeRelocations);
 			continue;
 		}
 
