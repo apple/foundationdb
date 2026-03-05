@@ -58,6 +58,7 @@ function start_servers {
     # this native bash behavior, we printf the KNOBS string.
     ${2} "${FDB}" -p auto:"${port}" ${KNOBS:+$(printf "%s" "${KNOBS}")} -c "${3}" \
       -d "${datadir}" -L "${logdir}" -C "${CLUSTER}" \
+      --knob_blobstore_encryption_type=aws:kms \
       --datacenter_id="${4}" \
       --locality-zoneid "${zone}" \
       --locality-machineid M-$SERVER_COUNT &
