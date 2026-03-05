@@ -763,34 +763,32 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 						Error auditError;
 						loop {
-							{
-								Error err;
-								try {
-									UID scheduleResult = co_await timeoutError(auditStorage(clusterFile,
-									                                                        normalKeys,
-									                                                        AuditType::ValidateRestore,
-									                                                        KeyValueStoreType::END,
-									                                                        300.0),
-									                                           60.0);
-									auditId = scheduleResult;
-									break;
-								} catch (Error& e) {
-									err = e;
-								}
-								auditError = err;
-								if (auditError.code() == error_code_timed_out ||
-								    auditError.code() == error_code_audit_storage_failed) {
-									auditRetryCount++;
-									if (auditRetryCount < maxAuditRetries) {
-										TraceEvent(SevWarn, "BS3BCW_ValidationAuditRetry")
-										    .error(auditError)
-										    .detail("RetryCount", auditRetryCount);
-										co_await delay(2.0 * auditRetryCount);
-										continue;
-									}
-								}
-								throw auditError;
+							Error err;
+							try {
+								UID scheduleResult = co_await timeoutError(auditStorage(clusterFile,
+								                                                        normalKeys,
+								                                                        AuditType::ValidateRestore,
+								                                                        KeyValueStoreType::END,
+								                                                        300.0),
+								                                           60.0);
+								auditId = scheduleResult;
+								break;
+							} catch (Error& e) {
+								err = e;
 							}
+							auditError = err;
+							if (auditError.code() == error_code_timed_out ||
+							    auditError.code() == error_code_audit_storage_failed) {
+								auditRetryCount++;
+								if (auditRetryCount < maxAuditRetries) {
+									TraceEvent(SevWarn, "BS3BCW_ValidationAuditRetry")
+									    .error(auditError)
+									    .detail("RetryCount", auditRetryCount);
+									co_await delay(2.0 * auditRetryCount);
+									continue;
+								}
+							}
+							throw auditError;
 						}
 
 						TraceEvent("BS3BCW_ValidationAuditScheduled").detail("AuditID", auditId);

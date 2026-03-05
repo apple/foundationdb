@@ -96,20 +96,18 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		                  DataMovementReason::TEAM_HEALTHY,
 		                  UnassignShard(false));
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					co_await createCheckpoint(&tr, { testRange }, format, dataMoveId);
-					co_await tr.commit();
-					version = tr.getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				co_await createCheckpoint(&tr, { testRange }, format, dataMoveId);
+				co_await tr.commit();
+				version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		TraceEvent("TestCheckpointCreated")
@@ -148,21 +146,19 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		for (; it != records.end(); ++it) {
 			loop {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
-				{
-					Error err;
-					try {
-						CheckpointMetaData record = co_await fetchCheckpoint(cx, it->second, folder);
-						fetchedCheckpoints.push_back(record);
-						TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					TraceEvent("TestFetchCheckpointError")
-					    .errorUnsuppressed(err)
-					    .detail("Checkpoint", it->second.toString());
-					co_await delay(1);
+				Error err;
+				try {
+					CheckpointMetaData record = co_await fetchCheckpoint(cx, it->second, folder);
+					fetchedCheckpoints.push_back(record);
+					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("TestFetchCheckpointError")
+				    .errorUnsuppressed(err)
+				    .detail("Checkpoint", it->second.toString());
+				co_await delay(1);
 			}
 		}
 
@@ -184,17 +180,15 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		tr.reset();
 		RangeResult res;
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		RangeResult kvRange = co_await kvStore->readRange(testRange);
@@ -220,23 +214,21 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		Transaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
-					const bool equal = !expectedValue.isError() && res == expectedValue.get();
-					if (!equal) {
-						self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
+				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				if (!equal) {
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
-				if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
-					break;
-				}
-				co_await tr.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
+				break;
+			}
+			co_await tr.onError(err);
 		}
 
 	}
@@ -245,22 +237,20 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		Transaction tr(cx);
 		Version version{ 0 };
 		loop {
-			{
-				Error err;
-				try {
-					if (value.present()) {
-						tr.set(key, value.get());
-					} else {
-						tr.clear(key);
-					}
-					co_await timeoutError(tr.commit(), 30.0);
-					version = tr.getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				if (value.present()) {
+					tr.set(key, value.get());
+				} else {
+					tr.clear(key);
 				}
-				co_await tr.onError(err);
+				co_await timeoutError(tr.commit(), 30.0);
+				version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		co_await self->readAndVerify(self, cx, key, value);

@@ -52,23 +52,35 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 		self->expectedPrefixes += numAllocations;
 
 		loop {
-			{
-				Error err;
-				try {
-					std::vector<Future<Key>> futures;
-					for (int i = 0; i < numAllocations; ++i) {
-						futures.push_back(self->allocator.allocate(tr));
+			Error err;
+			try {
+				std::vector<Future<Key>> futures;
+				for (int i = 0; i < numAllocations; ++i) {
+					futures.push_back(self->allocator.allocate(tr));
+				}
+
+				co_await waitForAll(futures);
+				co_await tr->commit();
+
+				for (auto f : futures) {
+					Key prefix = f.get();
+
+					// There should be no previously allocated prefix that is prefixed by our newly allocated one
+					auto itr = self->allocatedPrefixes.lower_bound(prefix);
+					if (itr != self->allocatedPrefixes.end() && itr->startsWith(prefix)) {
+						TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
+						    .detail("Reason", "Prefix collision")
+						    .detail("AllocatedPrefix", prefix)
+						    .detail("PreviousPrefix", *itr);
+
+						ASSERT(false);
 					}
 
-					co_await waitForAll(futures);
-					co_await tr->commit();
+					// There should be no previously allocated prefix that is a prefix of our newly allocated one
+					if (itr != self->allocatedPrefixes.begin()) {
+						--itr;
 
-					for (auto f : futures) {
-						Key prefix = f.get();
-
-						// There should be no previously allocated prefix that is prefixed by our newly allocated one
-						auto itr = self->allocatedPrefixes.lower_bound(prefix);
-						if (itr != self->allocatedPrefixes.end() && itr->startsWith(prefix)) {
+						if (prefix.startsWith(*itr)) {
 							TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 							    .detail("Reason", "Prefix collision")
 							    .detail("AllocatedPrefix", prefix)
@@ -76,31 +88,17 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 							ASSERT(false);
 						}
-
-						// There should be no previously allocated prefix that is a prefix of our newly allocated one
-						if (itr != self->allocatedPrefixes.begin()) {
-							--itr;
-
-							if (prefix.startsWith(*itr)) {
-								TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
-								    .detail("Reason", "Prefix collision")
-								    .detail("AllocatedPrefix", prefix)
-								    .detail("PreviousPrefix", *itr);
-
-								ASSERT(false);
-							}
-						}
-
-						// This is technically redundant, but the prefix should not have been allocated previously
-						ASSERT(self->allocatedPrefixes.insert(f.get()).second);
 					}
 
-					break;
-				} catch (Error& e) {
-					err = e;
+					// This is technically redundant, but the prefix should not have been allocated previously
+					ASSERT(self->allocatedPrefixes.insert(f.get()).second);
 				}
-				co_await tr->onError(err);
+
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 
 	}
@@ -133,26 +131,24 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 		Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 		loop {
-			{
-				Error err;
-				try {
-					Key k1 = co_await tr->getKey(firstGreaterOrEqual(""_sr));
-					Key k2 = co_await tr->getKey(lastLessThan("\xff"_sr));
-					if (!k1.startsWith(self->allocatorSubspace.key()) ||
-					    !k2.startsWith(self->allocatorSubspace.key())) {
-						TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
-						    .detail("Reason", "Keys written outside allocator subspace")
-						    .detail("MinKey", k1)
-						    .detail("MaxKey", k2);
+			Error err;
+			try {
+				Key k1 = co_await tr->getKey(firstGreaterOrEqual(""_sr));
+				Key k2 = co_await tr->getKey(lastLessThan("\xff"_sr));
+				if (!k1.startsWith(self->allocatorSubspace.key()) ||
+				    !k2.startsWith(self->allocatorSubspace.key())) {
+					TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
+					    .detail("Reason", "Keys written outside allocator subspace")
+					    .detail("MinKey", k1)
+					    .detail("MaxKey", k2);
 
-						co_return false;
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
+					co_return false;
 				}
-				co_await tr->onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 
 		co_return true;

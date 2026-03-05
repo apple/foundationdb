@@ -65,22 +65,20 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		}
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					for (int idx = 0; idx < self->inboxesPerActor; idx++) {
-						int offset = (self->clientId * self->clientCount * self->actorCount * self->inboxesPerActor) +
-						             (actor * self->actorCount * self->inboxesPerActor) + idx;
-						tr.set(self->keyForFeed(offset), self->valueForUInt(feeds[idx]));
-						tr.set(self->keyForInbox(offset), self->valueForUInt(inboxes[idx]));
-					}
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				for (int idx = 0; idx < self->inboxesPerActor; idx++) {
+					int offset = (self->clientId * self->clientCount * self->actorCount * self->inboxesPerActor) +
+					             (actor * self->actorCount * self->inboxesPerActor) + idx;
+					tr.set(self->keyForFeed(offset), self->valueForUInt(feeds[idx]));
+					tr.set(self->keyForInbox(offset), self->valueForUInt(inboxes[idx]));
 				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

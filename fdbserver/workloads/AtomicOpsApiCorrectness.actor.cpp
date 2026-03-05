@@ -387,31 +387,29 @@ Future<Void> testCompareAndClearAtomicOpApi(Database cx, AtomicOpsApiCorrectness
 
 	// Do operation on Storage Server
 	loop {
-		{
-			Error err;
-			try {
-				// Set the key to a random value
-				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-					if (keySet) {
-						tr->set(key, val1);
-					} else {
-						tr->clear(key);
-					}
-					return Void();
-				});
+		Error err;
+		try {
+			// Set the key to a random value
+			co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				if (keySet) {
+					tr->set(key, val1);
+				} else {
+					tr->clear(key);
+				}
+				return Void();
+			});
 
-				// Do atomic op
-				co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-					tr->atomicOp(key, val2, opType);
-					return Void();
-				});
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
-			co_await delay(1);
+			// Do atomic op
+			co_await runRYWTransactionNoRetry(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				tr->atomicOp(key, val2, opType);
+				return Void();
+			});
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", err.code());
+		co_await delay(1);
 	}
 
 	Optional<uint64_t> expectedOutput;

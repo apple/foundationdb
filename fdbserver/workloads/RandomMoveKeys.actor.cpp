@@ -66,19 +66,17 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 			loop {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				{
-					Error err;
-					try {
-						RangeResult res = co_await tr.getRange(configKeys, 1000);
-						ASSERT(res.size() < 1000);
-						for (int i = 0; i < res.size(); i++)
-							self->configuration.set(res[i].key, res[i].value);
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					RangeResult res = co_await tr.getRange(configKeys, 1000);
+					ASSERT(res.size() < 1000);
+					for (int i = 0; i < res.size(); i++)
+						self->configuration.set(res[i].key, res[i].value);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 
 			int oldMode = co_await setDDMode(cx, 0);
@@ -252,41 +250,39 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		}
 
 		loop {
-			{
-				Error err;
-				try {
-					MoveKeysLock lock = co_await takeMoveKeysLock(cx, UID());
-					std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
-					eliminateDuplicates(storageServers);
+			Error err;
+			try {
+				MoveKeysLock lock = co_await takeMoveKeysLock(cx, UID());
+				std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
+				eliminateDuplicates(storageServers);
 
-					loop {
-						co_await poisson(&lastTime, self->meanDelay);
+				loop {
+					co_await poisson(&lastTime, self->meanDelay);
 
-						KeyRange keys = self->getRandomKeys();
-						std::vector<StorageServerInterface> team =
-						    self->getRandomTeam(storageServers, self->configuration.storageTeamSize);
+					KeyRange keys = self->getRandomKeys();
+					std::vector<StorageServerInterface> team =
+					    self->getRandomTeam(storageServers, self->configuration.storageTeamSize);
 
-						// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
-						std::vector<KeyRange> ranges;
-						inFlightActors.getRangesAffectedByInsertion(keys, ranges);
-						inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
-						inFlight.insert(keys, team);
-						for (int r = 0; r < ranges.size(); r++) {
-							auto& rTeam = inFlight.rangeContaining(ranges[r].begin)->value();
-							inFlightActors.insert(ranges[r], self->doMoveKeys(cx, self, ranges[r], rTeam, lock));
-						}
+					// update both inFlightActors and inFlight key range maps, cancelling deleted RelocateShards
+					std::vector<KeyRange> ranges;
+					inFlightActors.getRangesAffectedByInsertion(keys, ranges);
+					inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
+					inFlight.insert(keys, team);
+					for (int r = 0; r < ranges.size(); r++) {
+						auto& rTeam = inFlight.rangeContaining(ranges[r].begin)->value();
+						inFlightActors.insert(ranges[r], self->doMoveKeys(cx, self, ranges[r], rTeam, lock));
 					}
-				} catch (Error& e) {
-					err = e;
 				}
-				if (!err.isValid()) {
-					continue;
-				}
-				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_operation_failed)
-					throw err;
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				// Keep trying to get the moveKeysLock
+			} catch (Error& e) {
+				err = e;
 			}
+			if (!err.isValid()) {
+				continue;
+			}
+			if (err.code() != error_code_movekeys_conflict && err.code() != error_code_operation_failed)
+				throw err;
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			// Keep trying to get the moveKeysLock
 		}
 	}
 };

@@ -65,17 +65,15 @@ struct RestoreBackupWorkload : TestWorkload {
 		UID backupUID;
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					Version v = co_await tr.getReadVersion();
-					waitForVersion = v;
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				Version v = co_await tr.getReadVersion();
+				waitForVersion = v;
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 		EBackupState backupState = co_await self->backupAgent.waitBackup(
 		    cx, self->tag.toString(), self->stopWhenDone, &self->backupContainer, &backupUID);
@@ -114,21 +112,19 @@ struct RestoreBackupWorkload : TestWorkload {
 	static Future<Void> clearDatabase(Database cx) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.clear(normalKeys);
-					for (auto& r : getSystemBackupRanges()) {
-						tr.clear(r);
-					}
-					co_await tr.commit();
-					co_return;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.clear(normalKeys);
+				for (auto& r : getSystemBackupRanges()) {
+					tr.clear(r);
 				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

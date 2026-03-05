@@ -116,23 +116,21 @@ struct TxnTimeout : TestWorkload {
 		while (nodeIdx < self->nodeCountPerClientPerActor) {
 			Transaction tr(db);
 			loop {
-				{
-					Error err;
-					try {
-						// Batch up to batchSize keys in a single transaction
-						int batchEnd = std::min(nodeIdx + batchSize, self->nodeCountPerClientPerActor);
-						for (int i = nodeIdx; i < batchEnd; i++) {
-							Key key = makeKey(self->clientId, actorIdx, i);
-							tr.set(key, "0"_sr);
-						}
-						co_await tr.commit();
-						nodeIdx = batchEnd;
-						break;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					// Batch up to batchSize keys in a single transaction
+					int batchEnd = std::min(nodeIdx + batchSize, self->nodeCountPerClientPerActor);
+					for (int i = nodeIdx; i < batchEnd; i++) {
+						Key key = makeKey(self->clientId, actorIdx, i);
+						tr.set(key, "0"_sr);
 					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					nodeIdx = batchEnd;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -198,99 +196,97 @@ struct TxnTimeout : TestWorkload {
 			self->txnsTotal++;
 
 			loop {
-				{
-					Error caughtErr;
-					try {
-						// Generate the same key pattern as in populate phase
-						Key key = makeKey(self->clientId, actorIdx, nodeIdx);
+				Error caughtErr;
+				try {
+					// Generate the same key pattern as in populate phase
+					Key key = makeKey(self->clientId, actorIdx, nodeIdx);
 
-						// Get read version and read the current value
-						double readStartTime = now();
-						Version rv = co_await tr.getReadVersion();
-						readVersion = rv;
+					// Get read version and read the current value
+					double readStartTime = now();
+					Version rv = co_await tr.getReadVersion();
+					readVersion = rv;
 
-						Optional<Value> val = co_await tr.get(key);
-						double readDuration = now() - readStartTime;
+					Optional<Value> val = co_await tr.get(key);
+					double readDuration = now() - readStartTime;
 
-						// Artificial delay to extend transaction lifetime to target duration
-						// This is the core of the test: keeping transactions open longer than the usual 5 seconds
-						if (self->txnMinDuration > readDuration) {
-							co_await delay(self->txnMinDuration - readDuration);
-						}
-
-						// Perform write operation (increment counter)
-						int currentVal = std::stoi(val.get().toString());
-						std::string newVal = std::to_string(currentVal + 1);
-						tr.set(key, StringRef(newVal));
-
-						// Commit and measure total transaction latency
-						co_await tr.commit();
-						double txnLatency = now() - txnStartTime;
-
-						self->txnsSucceeded++;
-						TraceEvent("TxnTimeoutTxnSuccess")
-						    .detail("ClientId", self->clientId)
-						    .detail("ActorIdx", actorIdx)
-						    .detail("Key", key)
-						    .detail("OldValue", currentVal)
-						    .detail("TxnLatency", txnLatency)
-						    .detail("ReadVersion", readVersion);
-
-						nodeIdx++;
-						break;
-
-					} catch (Error& e) {
-						caughtErr = e;
+					// Artificial delay to extend transaction lifetime to target duration
+					// This is the core of the test: keeping transactions open longer than the usual 5 seconds
+					if (self->txnMinDuration > readDuration) {
+						co_await delay(self->txnMinDuration - readDuration);
 					}
-					Error err = caughtErr;
-					bool isExpectedError = err.code() == error_code_future_version ||
-					                       err.code() == error_code_commit_unknown_result ||
-					                       err.code() == error_code_process_behind;
 
-					TraceEvent(isExpectedError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
+					// Perform write operation (increment counter)
+					int currentVal = std::stoi(val.get().toString());
+					std::string newVal = std::to_string(currentVal + 1);
+					tr.set(key, StringRef(newVal));
+
+					// Commit and measure total transaction latency
+					co_await tr.commit();
+					double txnLatency = now() - txnStartTime;
+
+					self->txnsSucceeded++;
+					TraceEvent("TxnTimeoutTxnSuccess")
 					    .detail("ClientId", self->clientId)
 					    .detail("ActorIdx", actorIdx)
-					    .detail("RecoveryState", self->dbInfo->get().recoveryState)
-					    .detail("ReadVersion", readVersion)
-					    .errorUnsuppressed(err);
+					    .detail("Key", key)
+					    .detail("OldValue", currentVal)
+					    .detail("TxnLatency", txnLatency)
+					    .detail("ReadVersion", readVersion);
 
-					co_await tr.onError(err);
+					nodeIdx++;
+					break;
 
-					// Check if version jumped significantly (e.g stale read version, recovery)
-					Transaction rvTr(db);
-					Version newReadVersion = co_await rvTr.getReadVersion();
-					// The version delta is "best guess" because the newReadVersion could itself be stale, therefore
-					// the delta could be smaller than (sequencer commit version - readVersion)
-					Version versionDelta = newReadVersion - readVersion;
-					const bool isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-					const double txnDuration = now() - txnStartTime;
-					const bool tooMuchTimeHasPassed =
-					    txnDuration >
-					    ((double)SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND);
-
-					if (!isExpectedError && !isHighVersionJump && !tooMuchTimeHasPassed) {
-						self->txnsFailed++;
-						TraceEvent(SevError, "TxnTimeoutUnexpectedFailure")
-						    .detail("ClientId", self->clientId)
-						    .detail("ActorIdx", actorIdx)
-						    .detail("OldReadVersion", readVersion)
-						    .detail("NewReadVersion", newReadVersion)
-						    .detail("VersionDelta", versionDelta)
-						    .detail("TxnDuration", txnDuration)
-						    .errorUnsuppressed(err);
-					} else {
-						TraceEvent("TxnTimeoutExpectedFailure")
-						    .detail("ClientId", self->clientId)
-						    .detail("ActorIdx", actorIdx)
-						    .detail("OldReadVersion", readVersion)
-						    .detail("NewReadVersion", newReadVersion)
-						    .detail("VersionDelta", versionDelta)
-						    .detail("IsExpectedError", isExpectedError)
-						    .detail("IsHighVersionJump", isHighVersionJump);
-					}
-
-					txnStartTime = now();
+				} catch (Error& e) {
+					caughtErr = e;
 				}
+				Error err = caughtErr;
+				bool isExpectedError = err.code() == error_code_future_version ||
+				                       err.code() == error_code_commit_unknown_result ||
+				                       err.code() == error_code_process_behind;
+
+				TraceEvent(isExpectedError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
+				    .detail("ClientId", self->clientId)
+				    .detail("ActorIdx", actorIdx)
+				    .detail("RecoveryState", self->dbInfo->get().recoveryState)
+				    .detail("ReadVersion", readVersion)
+				    .errorUnsuppressed(err);
+
+				co_await tr.onError(err);
+
+				// Check if version jumped significantly (e.g stale read version, recovery)
+				Transaction rvTr(db);
+				Version newReadVersion = co_await rvTr.getReadVersion();
+				// The version delta is "best guess" because the newReadVersion could itself be stale, therefore
+				// the delta could be smaller than (sequencer commit version - readVersion)
+				Version versionDelta = newReadVersion - readVersion;
+				const bool isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+				const double txnDuration = now() - txnStartTime;
+				const bool tooMuchTimeHasPassed =
+				    txnDuration >
+				    ((double)SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND);
+
+				if (!isExpectedError && !isHighVersionJump && !tooMuchTimeHasPassed) {
+					self->txnsFailed++;
+					TraceEvent(SevError, "TxnTimeoutUnexpectedFailure")
+					    .detail("ClientId", self->clientId)
+					    .detail("ActorIdx", actorIdx)
+					    .detail("OldReadVersion", readVersion)
+					    .detail("NewReadVersion", newReadVersion)
+					    .detail("VersionDelta", versionDelta)
+					    .detail("TxnDuration", txnDuration)
+					    .errorUnsuppressed(err);
+				} else {
+					TraceEvent("TxnTimeoutExpectedFailure")
+					    .detail("ClientId", self->clientId)
+					    .detail("ActorIdx", actorIdx)
+					    .detail("OldReadVersion", readVersion)
+					    .detail("NewReadVersion", newReadVersion)
+					    .detail("VersionDelta", versionDelta)
+					    .detail("IsExpectedError", isExpectedError)
+					    .detail("IsHighVersionJump", isHighVersionJump);
+				}
+
+				txnStartTime = now();
 			}
 		}
 	}

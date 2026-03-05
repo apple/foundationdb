@@ -131,44 +131,42 @@ struct StatusWorkload : TestWorkload {
 		loop {
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-						std::string config =
-						    "{"
-						    "\"get_read_version\":{" +
-						    generateBands() +
-						    "},"
-						    "\"read\":{" +
-						    generateBands() +
-						    format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},",
-						           deterministicRandom()->randomInt(0, 10000),
-						           deterministicRandom()->randomInt(0, 1000000)) +
-						    ""
-						    "\"commit\":{" +
-						    generateBands() +
-						    format(", \"max_commit_bytes\":%d", deterministicRandom()->randomInt(0, 1000000)) +
-						    "}"
-						    "}";
+					std::string config =
+					    "{"
+					    "\"get_read_version\":{" +
+					    generateBands() +
+					    "},"
+					    "\"read\":{" +
+					    generateBands() +
+					    format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},",
+					           deterministicRandom()->randomInt(0, 10000),
+					           deterministicRandom()->randomInt(0, 1000000)) +
+					    ""
+					    "\"commit\":{" +
+					    generateBands() +
+					    format(", \"max_commit_bytes\":%d", deterministicRandom()->randomInt(0, 1000000)) +
+					    "}"
+					    "}";
 
-						tr.set(latencyBandConfigKey, ValueRef(config));
-						co_await tr.commit();
-						tr.reset();
+					tr.set(latencyBandConfigKey, ValueRef(config));
+					co_await tr.commit();
+					tr.reset();
 
-						if (deterministicRandom()->random01() < 0.3) {
-							co_return;
-						}
-
-						co_await delay(deterministicRandom()->random01() * 120);
-					} catch (Error& e) {
-						err = e;
+					if (deterministicRandom()->random01() < 0.3) {
+						co_return;
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+
+					co_await delay(deterministicRandom()->random01() * 120);
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		}

@@ -351,65 +351,63 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 
 		loop {
-			{
-				Error caughtErr;
-				try {
-					if (disableRyw) {
-						defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-						defaultTx2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-					}
-					defaultTx1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
-					defaultTx2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
-					co_await success(defaultTx1->getReadVersion());
-					co_await success(defaultTx2->getReadVersion());
-					defaultTx1->addReadConflictRange(singleKeyRange("foo"_sr));
-					defaultTx1->addWriteConflictRange(singleKeyRange("foo"_sr));
-					defaultTx2->addWriteConflictRange(singleKeyRange("foo"_sr));
-					co_await defaultTx2->commit();
-					{
-						Error caughtErr;
-						try {
-							co_await defaultTx1->commit();
-							ASSERT(false);
-						} catch (Error& e) {
-							caughtErr = e;
-						}
-						Error err = caughtErr;
-						if (err.code() != error_code_not_committed) {
-							if (err.isValid()) {
-								co_await defaultTx1->onError(err);
-							}
-							if (err.isValid()) {
-								co_await defaultTx2->onError(err);
-							}
-							continue;
-						}
-						RangeResult readConflictRange =
-						    co_await defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
-						RangeResult writeConflictRange =
-						    co_await defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
-						RangeResult conflictKeys =
-						    co_await defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY);
-
-						// size is 2 because singleKeyRange includes the key after
-						ASSERT(readConflictRange.size() == 2 &&
-						       readConflictRange.begin()->key == readConflictRangeKeysRange.begin.withSuffix("foo"_sr));
-						ASSERT(writeConflictRange.size() == 2 &&
-						       writeConflictRange.begin()->key ==
-						           writeConflictRangeKeysRange.begin.withSuffix("foo"_sr));
-						ASSERT(conflictKeys.size() == 2 &&
-						       conflictKeys.begin()->key == conflictingKeysRange.begin.withSuffix("foo"_sr));
-						defaultTx1->reset();
-						defaultTx2->reset();
-						break;
-					}
-				} catch (Error& e) {
-					caughtErr = e;
+			Error caughtErr;
+			try {
+				if (disableRyw) {
+					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+					defaultTx2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				}
-				if (caughtErr.code() == error_code_actor_cancelled)
-					throw caughtErr;
-				co_await defaultTx2->onError(caughtErr);
+				defaultTx1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				defaultTx2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				co_await success(defaultTx1->getReadVersion());
+				co_await success(defaultTx2->getReadVersion());
+				defaultTx1->addReadConflictRange(singleKeyRange("foo"_sr));
+				defaultTx1->addWriteConflictRange(singleKeyRange("foo"_sr));
+				defaultTx2->addWriteConflictRange(singleKeyRange("foo"_sr));
+				co_await defaultTx2->commit();
+				{
+					Error caughtErr;
+					try {
+						co_await defaultTx1->commit();
+						ASSERT(false);
+					} catch (Error& e) {
+						caughtErr = e;
+					}
+					Error err = caughtErr;
+					if (err.code() != error_code_not_committed) {
+						if (err.isValid()) {
+							co_await defaultTx1->onError(err);
+						}
+						if (err.isValid()) {
+							co_await defaultTx2->onError(err);
+						}
+						continue;
+					}
+					RangeResult readConflictRange =
+					    co_await defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
+					RangeResult writeConflictRange =
+					    co_await defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
+					RangeResult conflictKeys =
+					    co_await defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY);
+
+					// size is 2 because singleKeyRange includes the key after
+					ASSERT(readConflictRange.size() == 2 &&
+					       readConflictRange.begin()->key == readConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(writeConflictRange.size() == 2 &&
+					       writeConflictRange.begin()->key ==
+					           writeConflictRangeKeysRange.begin.withSuffix("foo"_sr));
+					ASSERT(conflictKeys.size() == 2 &&
+					       conflictKeys.begin()->key == conflictingKeysRange.begin.withSuffix("foo"_sr));
+					defaultTx1->reset();
+					defaultTx2->reset();
+					break;
+				}
+			} catch (Error& e) {
+				caughtErr = e;
 			}
+			if (caughtErr.code() == error_code_actor_cancelled)
+				throw caughtErr;
+			co_await defaultTx2->onError(caughtErr);
 		}
 		// begin key outside module range
 		try {
@@ -584,27 +582,25 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->reset();
 		}
 		// test case when registered range is the same as the underlying module
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult result = co_await tx->getRange(
-				    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
-				    CLIENT_KNOBS->TOO_MANY);
-				// Note: there's possibility we get zero workers
-				if (result.size()) {
-					KeyValueRef entry = deterministicRandom()->randomChoice(result);
-					Optional<Value> singleRes = co_await tx->get(entry.key);
-					if (singleRes.present())
-						ASSERT(singleRes.get() == entry.value);
-				}
-				tx->reset();
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			RangeResult result = co_await tx->getRange(
+			    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+			    CLIENT_KNOBS->TOO_MANY);
+			// Note: there's possibility we get zero workers
+			if (result.size()) {
+				KeyValueRef entry = deterministicRandom()->randomChoice(result);
+				Optional<Value> singleRes = co_await tx->get(entry.key);
+				if (singleRes.present())
+					ASSERT(singleRes.get() == entry.value);
 			}
-			if (err.isValid()) {
-				co_await tx->onError(err);
-			}
+			tx->reset();
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			co_await tx->onError(err);
 		}
 
 	}
@@ -779,52 +775,50 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			unsigned retries = 0;
 			bool changeCoordinatorsSucceeded = true;
 			loop {
-				{
-					Error err;
-					try {
-						tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						Optional<Value> ccStrValue = co_await tx->get(coordinatorsKey);
-						ASSERT(ccStrValue.present()); // Otherwise, database is in a bad state
-						ClusterConnectionString ccStr(ccStrValue.get().toString());
-						// choose a new description if configuration allows transactions across differently named
-						// clusters
-						new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
-						                              ? deterministicRandom()->randomAlphaNumeric(8)
-						                              : ccStr.clusterKeyName().toString();
-						// get current coordinators
-						Optional<Value> processes_key = co_await tx->get(
-						    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")));
-						ASSERT(processes_key.present());
-						boost::split(old_coordinators_processes, processes_key.get().toString(), [](char c) {
-							return c == ',';
-						});
-						// pick up one non-coordinator process if possible
-						std::vector<ProcessData> workers = co_await getWorkers(&tx->getTransaction());
-						std::string old_coordinators_processes_string = describe(old_coordinators_processes);
-						TraceEvent(SevDebug, "CoordinatorsManualChange")
-						    .detail("OldCoordinators", old_coordinators_processes_string)
-						    .detail("WorkerSize", workers.size());
-						if (workers.size() > old_coordinators_processes.size()) {
-							loop {
-								auto worker = deterministicRandom()->randomChoice(workers);
-								new_coordinator_process = worker.address.toString();
-								if (old_coordinators_processes_string.find(new_coordinator_process) ==
-								    std::string::npos) {
-									break;
-								}
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Optional<Value> ccStrValue = co_await tx->get(coordinatorsKey);
+					ASSERT(ccStrValue.present()); // Otherwise, database is in a bad state
+					ClusterConnectionString ccStr(ccStrValue.get().toString());
+					// choose a new description if configuration allows transactions across differently named
+					// clusters
+					new_cluster_description = SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT
+					                              ? deterministicRandom()->randomAlphaNumeric(8)
+					                              : ccStr.clusterKeyName().toString();
+					// get current coordinators
+					Optional<Value> processes_key = co_await tx->get(
+					    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")));
+					ASSERT(processes_key.present());
+					boost::split(old_coordinators_processes, processes_key.get().toString(), [](char c) {
+						return c == ',';
+					});
+					// pick up one non-coordinator process if possible
+					std::vector<ProcessData> workers = co_await getWorkers(&tx->getTransaction());
+					std::string old_coordinators_processes_string = describe(old_coordinators_processes);
+					TraceEvent(SevDebug, "CoordinatorsManualChange")
+					    .detail("OldCoordinators", old_coordinators_processes_string)
+					    .detail("WorkerSize", workers.size());
+					if (workers.size() > old_coordinators_processes.size()) {
+						loop {
+							auto worker = deterministicRandom()->randomChoice(workers);
+							new_coordinator_process = worker.address.toString();
+							if (old_coordinators_processes_string.find(new_coordinator_process) ==
+							    std::string::npos) {
+								break;
 							}
-							possible_to_add_coordinator = true;
-						} else {
-							possible_to_add_coordinator = false;
 						}
-						tx->reset();
-						break;
-					} catch (Error& e) {
-						err = e;
+						possible_to_add_coordinator = true;
+					} else {
+						possible_to_add_coordinator = false;
 					}
-					co_await tx->onError(err);
-					co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tx->onError(err);
+				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			}
 			TraceEvent(SevDebug, "CoordinatorsManualChange")
 			    .detail("NewCoordinator", possible_to_add_coordinator ? new_coordinator_process : "")
@@ -887,85 +881,81 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 		}
 		// change successful, now check it is already changed
-		{
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> res = co_await tx->get(coordinatorsKey);
+			ASSERT(res.present()); // Otherwise, database is in a bad state
+			ClusterConnectionString csNew(res.get().toString());
+			// verify the cluster description
+			ASSERT(!changeCoordinatorsSucceeded || new_cluster_description == csNew.clusterKeyName().toString());
+			ASSERT(!changeCoordinatorsSucceeded ||
+			       csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
+			std::vector<NetworkAddress> newCoordinators = co_await csNew.tryResolveHostnames();
+			// verify the coordinators' addresses
+			for (const auto& network_address : newCoordinators) {
+				std::string address_str = network_address.toString();
+				ASSERT(std::find(old_coordinators_processes.begin(),
+				                 old_coordinators_processes.end(),
+				                 address_str) != old_coordinators_processes.end() ||
+				       new_coordinator_process == address_str);
+			}
+			tx->reset();
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			co_await tx->onError(err);
+		}
+		co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+		// change back to original settings
+		while (changeCoordinatorsSucceeded) {
 			Error err;
 			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> res = co_await tx->get(coordinatorsKey);
-				ASSERT(res.present()); // Otherwise, database is in a bad state
-				ClusterConnectionString csNew(res.get().toString());
-				// verify the cluster description
-				ASSERT(!changeCoordinatorsSucceeded || new_cluster_description == csNew.clusterKeyName().toString());
-				ASSERT(!changeCoordinatorsSucceeded ||
-				       csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
-				std::vector<NetworkAddress> newCoordinators = co_await csNew.tryResolveHostnames();
-				// verify the coordinators' addresses
-				for (const auto& network_address : newCoordinators) {
-					std::string address_str = network_address.toString();
-					ASSERT(std::find(old_coordinators_processes.begin(),
-					                 old_coordinators_processes.end(),
-					                 address_str) != old_coordinators_processes.end() ||
-					       new_coordinator_process == address_str);
+				std::string new_processes_key;
+				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				for (const auto& address : old_coordinators_processes) {
+					new_processes_key += new_processes_key.size() ? "," : "";
+					new_processes_key += address;
 				}
-				tx->reset();
+				tx->set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+				        Value(new_processes_key));
+				co_await tx->commit();
+				ASSERT(false);
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tx->onError(err);
+			TraceEvent(SevDebug, "CoordinatorsManualChangeRevert").error(err);
+			if (err.code() == error_code_special_keys_api_failure) {
+				Optional<Value> errorMsg =
+				    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+				ASSERT(errorMsg.present());
+				std::string errorStr;
+				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+				// special_key_space_management_api_error_msg schema validation
+				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+				TraceEvent(SevDebug, "CoordinatorsManualChangeRevert")
+				    .detail("ErrorMessage", valueObj["message"].get_str());
+				ASSERT(valueObj["command"].get_str() == "coordinators");
+				if (valueObj["retriable"].get_bool()) {
+					tx->reset();
+				} else if (valueObj["message"].get_str() ==
+				           "No change (existing configuration satisfies request)") {
+					tx->reset();
+					break;
+				} else {
+					TraceEvent(SevError, "CoordinatorsManualChangeRevert")
+					    .detail("UnexpectedError", valueObj["message"].get_str());
+					throw special_keys_api_failure();
+				}
+			} else {
+				if (err.isValid()) {
+					co_await tx->onError(err);
+				}
 			}
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-		}
-		// change back to original settings
-		while (changeCoordinatorsSucceeded) {
-			{
-				Error err;
-				try {
-					std::string new_processes_key;
-					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					for (const auto& address : old_coordinators_processes) {
-						new_processes_key += new_processes_key.size() ? "," : "";
-						new_processes_key += address;
-					}
-					tx->set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
-					        Value(new_processes_key));
-					co_await tx->commit();
-					ASSERT(false);
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent(SevDebug, "CoordinatorsManualChangeRevert").error(err);
-				if (err.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
-					    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
-					ASSERT(errorMsg.present());
-					std::string errorStr;
-					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-					// special_key_space_management_api_error_msg schema validation
-					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-					TraceEvent(SevDebug, "CoordinatorsManualChangeRevert")
-					    .detail("ErrorMessage", valueObj["message"].get_str());
-					ASSERT(valueObj["command"].get_str() == "coordinators");
-					if (valueObj["retriable"].get_bool()) {
-						tx->reset();
-					} else if (valueObj["message"].get_str() ==
-					           "No change (existing configuration satisfies request)") {
-						tx->reset();
-						break;
-					} else {
-						TraceEvent(SevError, "CoordinatorsManualChangeRevert")
-						    .detail("UnexpectedError", valueObj["message"].get_str());
-						throw special_keys_api_failure();
-					}
-				} else {
-					if (err.isValid()) {
-						co_await tx->onError(err);
-					}
-				}
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-			}
 		}
 	}
 }
@@ -998,94 +988,90 @@ co_await tx->onError(err);
 {
 	// Make sure setting more than one zone as maintenance will fail
 	loop {
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tx->set(Key(deterministicRandom()->randomAlphaNumeric(8))
-				            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
-				        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
-				// make sure this is a different zone id
-				tx->set(Key(deterministicRandom()->randomAlphaNumeric(9))
-				            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
-				        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
-				co_await tx->commit();
-				ASSERT(false);
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(err);
-			if (err.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg =
-				    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
-				ASSERT(errorMsg.present());
-				std::string errorStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-				// special_key_space_management_api_error_msg schema validation
-				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-				ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
-				TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone")
-				    .detail("ErrorMessage", valueObj["message"].get_str());
-				tx->reset();
-				break;
-			} else {
-				if (err.isValid()) {
-					co_await tx->onError(err);
-				}
-			}
-			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->set(Key(deterministicRandom()->randomAlphaNumeric(8))
+			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+			        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+			// make sure this is a different zone id
+			tx->set(Key(deterministicRandom()->randomAlphaNumeric(9))
+			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+			        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+			co_await tx->commit();
+			ASSERT(false);
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(err);
+		if (err.code() == error_code_special_keys_api_failure) {
+			Optional<Value> errorMsg =
+			    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+			ASSERT(errorMsg.present());
+			std::string errorStr;
+			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+			// special_key_space_management_api_error_msg schema validation
+			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+			ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+			TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone")
+			    .detail("ErrorMessage", valueObj["message"].get_str());
+			tx->reset();
+			break;
+		} else {
+			if (err.isValid()) {
+				co_await tx->onError(err);
+			}
+		}
+		co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 	}
 	// Disable DD for SS failures
 	int ignoreSSFailuresRetry = 0;
 	loop {
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tx->set(ignoreSSFailuresZoneString.withPrefix(
-				            SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
-				        Value(boost::lexical_cast<std::string>(0)));
-				co_await tx->commit();
-				tx->reset();
-				ignoreSSFailuresRetry++;
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-			} catch (Error& e) {
-				err = e;
-			}
-			if (!err.isValid()) {
-				ignoreSSFailuresRetry++;
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				continue;
-			}
-			TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures").error(err);
-			// the second commit will fail since maintenance not allowed to use while DD disabled
-			// for SS failures
-			if (err.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg =
-				    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
-				ASSERT(errorMsg.present());
-				std::string errorStr;
-				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-				// special_key_space_management_api_error_msg schema validation
-				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-				ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
-				ASSERT(ignoreSSFailuresRetry > 0);
-				TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures")
-				    .detail("Retry", ignoreSSFailuresRetry)
-				    .detail("ErrorMessage", valueObj["message"].get_str());
-				tx->reset();
-				break;
-			} else {
-				co_await tx->onError(err);
-			}
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->set(ignoreSSFailuresZoneString.withPrefix(
+			            SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+			        Value(boost::lexical_cast<std::string>(0)));
+			co_await tx->commit();
+			tx->reset();
 			ignoreSSFailuresRetry++;
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+		} catch (Error& e) {
+			err = e;
 		}
+		if (!err.isValid()) {
+			ignoreSSFailuresRetry++;
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			continue;
+		}
+		TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures").error(err);
+		// the second commit will fail since maintenance not allowed to use while DD disabled
+		// for SS failures
+		if (err.code() == error_code_special_keys_api_failure) {
+			Optional<Value> errorMsg =
+			    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+			ASSERT(errorMsg.present());
+			std::string errorStr;
+			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+			// special_key_space_management_api_error_msg schema validation
+			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+			ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+			ASSERT(ignoreSSFailuresRetry > 0);
+			TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures")
+			    .detail("Retry", ignoreSSFailuresRetry)
+			    .detail("ErrorMessage", valueObj["message"].get_str());
+			tx->reset();
+			break;
+		} else {
+			co_await tx->onError(err);
+		}
+		ignoreSSFailuresRetry++;
+		co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 	}
 	// set dd mode to 0 and disable DD for rebalance
 	uint8_t ddIgnoreValue = DDIgnore::NONE;
@@ -1096,96 +1082,88 @@ co_await tx->onError(err);
 		ddIgnoreValue |= DDIgnore::REBALANCE_DISK;
 	}
 	loop {
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-				tx->set("mode"_sr.withPrefix(ddPrefix), "0"_sr);
-				tx->set("rebalance_ignored"_sr.withPrefix(ddPrefix),
-				        BinaryWriter::toValue(ddIgnoreValue, Unversioned()));
-				co_await tx->commit();
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent(SevDebug, "DataDistributionDisableModeAndRebalance").error(err);
-			co_await tx->onError(err);
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+			tx->set("mode"_sr.withPrefix(ddPrefix), "0"_sr);
+			tx->set("rebalance_ignored"_sr.withPrefix(ddPrefix),
+			        BinaryWriter::toValue(ddIgnoreValue, Unversioned()));
+			co_await tx->commit();
+			tx->reset();
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent(SevDebug, "DataDistributionDisableModeAndRebalance").error(err);
+		co_await tx->onError(err);
 	}
 	// verify underlying system keys are consistent with the change
 	loop {
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				// check DD disabled for SS failures
-				Optional<Value> val1 = co_await tx->get(healthyZoneKey);
-				ASSERT(val1.present());
-				auto healthyZone = decodeHealthyZoneValue(val1.get());
-				ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
-				// check DD mode
-				Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
-				ASSERT(val2.present());
-				// mode should be set to 0
-				ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
-				// check DD disabled for rebalance
-				Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
-				ASSERT(val3.present() &&
-				       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tx->onError(err);
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			// check DD disabled for SS failures
+			Optional<Value> val1 = co_await tx->get(healthyZoneKey);
+			ASSERT(val1.present());
+			auto healthyZone = decodeHealthyZoneValue(val1.get());
+			ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
+			// check DD mode
+			Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
+			ASSERT(val2.present());
+			// mode should be set to 0
+			ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
+			// check DD disabled for rebalance
+			Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
+			ASSERT(val3.present() &&
+			       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
+			tx->reset();
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tx->onError(err);
 	}
 	// then, clear all changes
 	loop {
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tx->clear(ignoreSSFailuresZoneString.withPrefix(
-				    SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
-				KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-				tx->clear("mode"_sr.withPrefix(ddPrefix));
-				tx->clear("rebalance_ignored"_sr.withPrefix(ddPrefix));
-				co_await tx->commit();
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tx->onError(err);
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+			tx->clear(ignoreSSFailuresZoneString.withPrefix(
+			    SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
+			KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+			tx->clear("mode"_sr.withPrefix(ddPrefix));
+			tx->clear("rebalance_ignored"_sr.withPrefix(ddPrefix));
+			co_await tx->commit();
+			tx->reset();
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tx->onError(err);
 	}
 	// verify all changes are cleared
 	loop {
-		{
-			Error err;
-			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				// check DD SSFailures key
-				Optional<Value> val1 = co_await tx->get(healthyZoneKey);
-				ASSERT(!val1.present());
-				// check DD mode
-				Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
-				ASSERT(!val2.present());
-				// check DD rebalance key
-				Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
-				ASSERT(!val3.present());
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tx->onError(err);
+		Error err;
+		try {
+			tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			// check DD SSFailures key
+			Optional<Value> val1 = co_await tx->get(healthyZoneKey);
+			ASSERT(!val1.present());
+			// check DD mode
+			Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
+			ASSERT(!val2.present());
+			// check DD rebalance key
+			Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
+			ASSERT(!val3.present());
+			tx->reset();
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tx->onError(err);
 	}
 }
 }

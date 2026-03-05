@@ -146,20 +146,18 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		Key completionMarker = restoreValidationCompletionKey;
 		Transaction markTr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					markTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					markTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					markTr.set(completionMarker, "1"_sr);
-					co_await markTr.commit();
-					TraceEvent("BARV_RestoreCompletionMarkerSet").detail("MarkerKey", printable(completionMarker));
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await markTr.onError(err);
+			Error err;
+			try {
+				markTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				markTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				markTr.set(completionMarker, "1"_sr);
+				co_await markTr.commit();
+				TraceEvent("BARV_RestoreCompletionMarkerSet").detail("MarkerKey", printable(completionMarker));
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await markTr.onError(err);
 		}
 
 		// Unlock the database after restore completes
@@ -185,60 +183,58 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		int retryCount = 0;
 
 		loop {
-			{
-				Error err;
-				try {
-					// Wait before starting backup
-					co_await delay(self->backupAfter);
+			Error err;
+			try {
+				// Wait before starting backup
+				co_await delay(self->backupAfter);
 
-					// Perform backup
-					TraceEvent("BARV_StartBackup", randomID)
-					    .detail("Tag", printable(self->backupTag))
-					    .detail("RetryCount", retryCount);
-					co_await doBackup(self, &backupAgent, cx);
+				// Perform backup
+				TraceEvent("BARV_StartBackup", randomID)
+				    .detail("Tag", printable(self->backupTag))
+				    .detail("RetryCount", retryCount);
+				co_await doBackup(self, &backupAgent, cx);
 
-					// Get backup container info
-					KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-					UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
-					UID logUid = uidFlag.first;
-					Reference<IBackupContainer> backupContainer =
-					    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
+				// Get backup container info
+				KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+				UID logUid = uidFlag.first;
+				Reference<IBackupContainer> backupContainer =
+				    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
-					// Wait before starting restore
-					co_await delay(self->restoreAfter - self->backupAfter);
+				// Wait before starting restore
+				co_await delay(self->restoreAfter - self->backupAfter);
 
-					// Perform restore with prefix
-					TraceEvent("BARV_StartRestore", randomID)
-					    .detail("Tag", printable(self->backupTag))
-					    .detail("Container", backupContainer->getURL());
-					co_await doRestore(self, &backupAgent, cx, backupContainer);
+				// Perform restore with prefix
+				TraceEvent("BARV_StartRestore", randomID)
+				    .detail("Tag", printable(self->backupTag))
+				    .detail("Container", backupContainer->getURL());
+				co_await doRestore(self, &backupAgent, cx, backupContainer);
 
-					TraceEvent("BARV_Complete", randomID).detail("Tag", printable(self->backupTag));
-					break; // Success!
+				TraceEvent("BARV_Complete", randomID).detail("Tag", printable(self->backupTag));
+				break; // Success!
 
-				} catch (Error& e) {
-					err = e;
-				}
-				// Retry on transient errors from buggify chaos injection
-				if (err.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    err.code() == error_code_commit_proxy_memory_limit_exceeded ||
-				    err.code() == error_code_database_locked || err.code() == error_code_transaction_too_old ||
-				    err.code() == error_code_future_version) {
-					retryCount++;
-					double backoff = std::min(1.0, 0.1 * retryCount);
-					TraceEvent(SevWarn, "BARV_RetryableError", randomID)
-					    .error(err)
-					    .detail("RetryCount", retryCount)
-					    .detail("BackoffSeconds", backoff);
-					co_await delay(backoff);
-					// Reset state and retry
-					self->backupAfter = 0.0; // Don't wait again
-					self->restoreAfter = self->restoreAfter - self->backupAfter;
-					// Loop will retry
-				} else {
-					TraceEvent(SevError, "BARV_Error", randomID).error(err).detail("RetryCount", retryCount);
-					throw err;
-				}
+			} catch (Error& e) {
+				err = e;
+			}
+			// Retry on transient errors from buggify chaos injection
+			if (err.code() == error_code_grv_proxy_memory_limit_exceeded ||
+			    err.code() == error_code_commit_proxy_memory_limit_exceeded ||
+			    err.code() == error_code_database_locked || err.code() == error_code_transaction_too_old ||
+			    err.code() == error_code_future_version) {
+				retryCount++;
+				double backoff = std::min(1.0, 0.1 * retryCount);
+				TraceEvent(SevWarn, "BARV_RetryableError", randomID)
+				    .error(err)
+				    .detail("RetryCount", retryCount)
+				    .detail("BackoffSeconds", backoff);
+				co_await delay(backoff);
+				// Reset state and retry
+				self->backupAfter = 0.0; // Don't wait again
+				self->restoreAfter = self->restoreAfter - self->backupAfter;
+				// Loop will retry
+			} else {
+				TraceEvent(SevError, "BARV_Error", randomID).error(err).detail("RetryCount", retryCount);
+				throw err;
 			}
 		}
 

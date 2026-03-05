@@ -151,83 +151,79 @@ struct ChangeConfigWorkload : TestWorkload {
 
 		if (autoChange) {
 			loop {
-				{
-					Error err;
-					try {
-						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-						Optional<Value> newCoordinatorsKey = co_await tr.get("auto_coordinators"_sr.withPrefix(
-						    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
-						ASSERT(newCoordinatorsKey.present());
-						desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
-						tr.reset();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					if (err.code() == error_code_special_keys_api_failure) {
-						Optional<Value> errorMsg =
-						    co_await tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
-						ASSERT(errorMsg.present());
-						std::string errorStr;
-						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-						auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-						TraceEvent(SevDebug, "GetAutoCoordinatorsChange")
-						    .detail("ErrorMessage", valueObj["message"].get_str());
-						ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-						ASSERT(valueObj["command"].get_str() == "auto_coordinators");
-						if (valueObj["retriable"].get_bool() && notEnoughMachineResults < 1) {
-							notEnoughMachineResults++;
-							co_await delay(1.0);
-							tr.reset();
-						} else {
-							break;
-						}
-					} else {
-						co_await tr.onError(err);
-					}
-					co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				}
-			}
-		} else {
-			desiredCoordinatorsKey = self->networkAddresses;
-		}
-
-		loop {
-			{
-				Error caughtErr;
+				Error err;
 				try {
-					tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					tr.set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
-					       Value(desiredCoordinatorsKey));
-					TraceEvent(SevDebug, "CoordinatorsChangeBeforeCommit")
-					    .detail("Auto", autoChange)
-					    .detail("NewCoordinatorsKey", describe(desiredCoordinatorsKey));
-					co_await tr.commit();
-					ASSERT(false);
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					Optional<Value> newCoordinatorsKey = co_await tr.get("auto_coordinators"_sr.withPrefix(
+					    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
+					ASSERT(newCoordinatorsKey.present());
+					desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
+					tr.reset();
+					break;
 				} catch (Error& e) {
-					caughtErr = e;
+					err = e;
 				}
-				Error err(caughtErr);
-				if (caughtErr.code() == error_code_special_keys_api_failure) {
+				if (err.code() == error_code_special_keys_api_failure) {
 					Optional<Value> errorMsg =
 					    co_await tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
 					ASSERT(errorMsg.present());
 					std::string errorStr;
 					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
 					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-					TraceEvent(SevDebug, "CoordinatorsChangeError")
-					    .detail("Auto", autoChange)
+					TraceEvent(SevDebug, "GetAutoCoordinatorsChange")
 					    .detail("ErrorMessage", valueObj["message"].get_str());
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-					ASSERT(valueObj["command"].get_str() == "coordinators");
-					break;
-				} else {
-					if (err.isValid()) {
-						co_await tr.onError(err);
+					ASSERT(valueObj["command"].get_str() == "auto_coordinators");
+					if (valueObj["retriable"].get_bool() && notEnoughMachineResults < 1) {
+						notEnoughMachineResults++;
+						co_await delay(1.0);
+						tr.reset();
+					} else {
+						break;
 					}
+				} else {
+					co_await tr.onError(err);
 				}
 				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			}
+		} else {
+			desiredCoordinatorsKey = self->networkAddresses;
+		}
+
+		loop {
+			Error caughtErr;
+			try {
+				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				tr.set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+				       Value(desiredCoordinatorsKey));
+				TraceEvent(SevDebug, "CoordinatorsChangeBeforeCommit")
+				    .detail("Auto", autoChange)
+				    .detail("NewCoordinatorsKey", describe(desiredCoordinatorsKey));
+				co_await tr.commit();
+				ASSERT(false);
+			} catch (Error& e) {
+				caughtErr = e;
+			}
+			Error err(caughtErr);
+			if (caughtErr.code() == error_code_special_keys_api_failure) {
+				Optional<Value> errorMsg =
+				    co_await tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+				ASSERT(errorMsg.present());
+				std::string errorStr;
+				auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+				auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+				TraceEvent(SevDebug, "CoordinatorsChangeError")
+				    .detail("Auto", autoChange)
+				    .detail("ErrorMessage", valueObj["message"].get_str());
+				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+				ASSERT(valueObj["command"].get_str() == "coordinators");
+				break;
+			} else {
+				if (err.isValid()) {
+					co_await tr.onError(err);
+				}
+			}
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 		}
 	}
 };

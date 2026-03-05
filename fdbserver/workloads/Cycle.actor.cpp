@@ -132,53 +132,51 @@ struct CycleWorkload : TestWorkload, Arena {
 					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
-					{
-						Error err;
-						try {
-							// Reverse next and next^2 node
-							Optional<Value> v = co_await tr.get(self->key(r));
-							if (!v.present()) {
-								self->badRead("KeyR", r, tr);
-							}
-							int r2 = self->fromValue(v.get());
-							Optional<Value> v2 = co_await tr.get(self->key(r2));
-							if (!v2.present())
-								self->badRead("KeyR2", r2, tr);
-							int r3 = self->fromValue(v2.get());
-							Optional<Value> v3 = co_await tr.get(self->key(r3));
-							if (!v3.present())
-								self->badRead("KeyR3", r3, tr);
-							int r4 = self->fromValue(v3.get());
-
-							// Single key clear range op will be converted to point delete inside storage engine.
-							// Generating a larger range here to increase test coverage.
-							tr.clear(self->keyRange(r),
-							         AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong
-							                                  //ordering
-							tr.set(self->key(r), self->value(r3));
-							tr.set(self->key(r2), self->value(r4));
-							tr.set(self->key(r3), self->value(r2));
-							// TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString()).log();
-							// TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString()).log();
-							// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
-
-							co_await tr.commit();
-							// TraceEvent("CyclicTestCommit")
-							// 	.detail("R1", r)
-							// 	.detail("R2", r2)
-							// 	.detail("R3", r3)
-							// 	.detail("R4", r4)
-							// 	.log();
-							break;
-						} catch (Error& e) {
-							err = e;
+					Error err;
+					try {
+						// Reverse next and next^2 node
+						Optional<Value> v = co_await tr.get(self->key(r));
+						if (!v.present()) {
+							self->badRead("KeyR", r, tr);
 						}
-						if (err.code() == error_code_transaction_too_old)
-							++self->tooOldRetries;
-						else if (err.code() == error_code_not_committed)
-							++self->commitFailedRetries;
-						co_await tr.onError(err);
+						int r2 = self->fromValue(v.get());
+						Optional<Value> v2 = co_await tr.get(self->key(r2));
+						if (!v2.present())
+							self->badRead("KeyR2", r2, tr);
+						int r3 = self->fromValue(v2.get());
+						Optional<Value> v3 = co_await tr.get(self->key(r3));
+						if (!v3.present())
+							self->badRead("KeyR3", r3, tr);
+						int r4 = self->fromValue(v3.get());
+
+						// Single key clear range op will be converted to point delete inside storage engine.
+						// Generating a larger range here to increase test coverage.
+						tr.clear(self->keyRange(r),
+						         AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong
+						                                  //ordering
+						tr.set(self->key(r), self->value(r3));
+						tr.set(self->key(r2), self->value(r4));
+						tr.set(self->key(r3), self->value(r2));
+						// TraceEvent("CyclicTest1").detail("RawKey", r).detail("RawValue", r3).detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString()).log();
+						// TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString()).log();
+						// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
+
+						co_await tr.commit();
+						// TraceEvent("CyclicTestCommit")
+						// 	.detail("R1", r)
+						// 	.detail("R2", r2)
+						// 	.detail("R3", r3)
+						// 	.detail("R4", r4)
+						// 	.log();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					if (err.code() == error_code_transaction_too_old)
+						++self->tooOldRetries;
+					else if (err.code() == error_code_not_committed)
+						++self->commitFailedRetries;
+					co_await tr.onError(err);
 					++self->retries;
 				}
 				++self->transactions;
@@ -286,28 +284,26 @@ struct CycleWorkload : TestWorkload, Arena {
 			Transaction tr(cx);
 			int retryCount = 0;
 			loop {
-				{
-					Error err;
-					try {
-						Version v = co_await tr.getReadVersion();
-						RangeResult data =
-						    co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
-						                         firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
-						                         self->nodeCount + 1);
-						ok = self->cycleCheckData(data, v) && ok;
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(err);
-					if (g_network->isSimulated() && retryCount > 50) {
-						CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
-						// try to make the read window back to normal size (5 * version_per_sec)
-						g_simulator->speedUpSimulation = true;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					Version v = co_await tr.getReadVersion();
+					RangeResult data =
+					    co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                         firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                         self->nodeCount + 1);
+					ok = self->cycleCheckData(data, v) && ok;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(err);
+				if (g_network->isSimulated() && retryCount > 50) {
+					CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
+					// try to make the read window back to normal size (5 * version_per_sec)
+					g_simulator->speedUpSimulation = true;
+				}
+				co_await tr.onError(err);
 			}
 		}
 		if (!self->unseedCheck) {

@@ -102,41 +102,39 @@ struct ClientMetricWorkload : TestWorkload {
 		// wait to make sure client metrics are updated
 		co_await delay(CLIENT_KNOBS->CSI_STATUS_DELAY);
 		loop {
-			{
-				Error err;
-				try {
-					tr->reset();
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					std::string sampleRateStr = "default";
-					std::string sizeLimitStr = "default";
-					const double sampleRateDbl = cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate,
-					                                                           std::numeric_limits<double>::infinity());
-					if (!std::isinf(sampleRateDbl)) {
-						sampleRateStr = std::to_string(sampleRateDbl);
-					}
-					const int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
-					if (sizeLimit != -1) {
-						sizeLimitStr = std::to_string(sizeLimit);
-					}
-					std::cout << "Read from globalconfig: rate=" << sampleRateStr << " size=" << sizeLimitStr
-					          << std::endl;
-					RangeResult kvRange = co_await tr->getRange(
-					    begin, end, keysLimit, Snapshot::False, reverse ? Reverse::True : Reverse::False);
-					if (kvRange.empty()) {
-						co_await delay(1.0);
-						std::cout << "WaitingForLatencyMetricToBePresent" << std::endl;
-						TraceEvent("WaitingForLatencyMetricToBePresent").log();
-						continue;
-					}
-					txInfoEntries.arena().dependsOn(kvRange.arena());
-					txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				std::string sampleRateStr = "default";
+				std::string sizeLimitStr = "default";
+				const double sampleRateDbl = cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate,
+				                                                           std::numeric_limits<double>::infinity());
+				if (!std::isinf(sampleRateDbl)) {
+					sampleRateStr = std::to_string(sampleRateDbl);
 				}
-				co_await tr->onError(err);
+				const int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+				if (sizeLimit != -1) {
+					sizeLimitStr = std::to_string(sizeLimit);
+				}
+				std::cout << "Read from globalconfig: rate=" << sampleRateStr << " size=" << sizeLimitStr
+				          << std::endl;
+				RangeResult kvRange = co_await tr->getRange(
+				    begin, end, keysLimit, Snapshot::False, reverse ? Reverse::True : Reverse::False);
+				if (kvRange.empty()) {
+					co_await delay(1.0);
+					std::cout << "WaitingForLatencyMetricToBePresent" << std::endl;
+					TraceEvent("WaitingForLatencyMetricToBePresent").log();
+					continue;
+				}
+				txInfoEntries.arena().dependsOn(kvRange.arena());
+				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 		for (auto& kv : txInfoEntries) {
 			uint64_t vs = getVersionStamp(kv.key);
@@ -150,24 +148,22 @@ struct ClientMetricWorkload : TestWorkload {
 		Transaction tr(cx);
 		try {
 			loop {
-				{
-					Error err;
-					try {
-						co_await delay(0.001);
-						tr.reset();
-						tr.set(Key(deterministicRandom()->randomAlphaNumeric(10)),
-						       Value(Key(deterministicRandom()->randomAlphaNumeric(10))));
-						co_await tr.commit();
-						if (cnt >= total) {
-							break;
-						}
-						++cnt;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					co_await delay(0.001);
+					tr.reset();
+					tr.set(Key(deterministicRandom()->randomAlphaNumeric(10)),
+					       Value(Key(deterministicRandom()->randomAlphaNumeric(10))));
+					co_await tr.commit();
+					if (cnt >= total) {
+						break;
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+					++cnt;
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		} catch (Error& e) {

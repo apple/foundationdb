@@ -323,26 +323,24 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		int keysLimit = 10;
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					RangeResult kvRange = co_await tr.getRange(begin, end, keysLimit);
-					if (kvRange.empty())
-						break;
-					txInfoEntries.arena().dependsOn(kvRange.arena());
-					txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
-					begin = firstGreaterThan(kvRange.back().key);
-					tr.reset();
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid() && err.code() == error_code_transaction_too_old)
-					keysLimit = std::max(1, keysLimit / 2);
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				RangeResult kvRange = co_await tr.getRange(begin, end, keysLimit);
+				if (kvRange.empty())
+					break;
+				txInfoEntries.arena().dependsOn(kvRange.arena());
+				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
+				begin = firstGreaterThan(kvRange.back().key);
+				tr.reset();
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid() && err.code() == error_code_transaction_too_old)
+				keysLimit = std::max(1, keysLimit / 2);
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 

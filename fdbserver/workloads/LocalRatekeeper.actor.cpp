@@ -28,24 +28,22 @@ namespace {
 Future<StorageServerInterface> getRandomStorage(Database cx) {
 	Transaction tr(cx);
 	loop {
-		{
-			Error err;
-			try {
-				tr.reset();
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				RangeResult range = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				if (range.size() > 0) {
-					auto idx = deterministicRandom()->randomInt(0, range.size());
-					co_return decodeServerListValue(range[idx].value);
-				} else {
-					co_await delay(1.0);
-				}
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			RangeResult range = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			if (range.size() > 0) {
+				auto idx = deterministicRandom()->randomInt(0, range.size());
+				co_return decodeServerListValue(range[idx].value);
+			} else {
+				co_await delay(1.0);
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -90,17 +88,15 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			tr.reset();
 			Version readVersion = invalidVersion;
 			loop {
-				{
-					Error err;
-					try {
-						Version v = co_await tr.getReadVersion();
-						readVersion = v;
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					Version v = co_await tr.getReadVersion();
+					readVersion = v;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 			requests.clear();
 			// we send 100 requests to this storage node and count how many of those get rejected

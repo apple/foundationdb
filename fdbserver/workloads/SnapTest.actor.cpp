@@ -120,32 +120,30 @@ public: // workload functions
 
 		tr.reset();
 		loop {
-			{
-				Error err;
-				try {
-					for (auto id : keys) {
-						if (even) {
-							if (id % 2 != 0) {
-								id++;
-							}
-						} else {
-							if (id % 2 == 0) {
-								id++;
-							}
+			Error err;
+			try {
+				for (auto id : keys) {
+					if (even) {
+						if (id % 2 != 0) {
+							id++;
 						}
-						std::string Key1 = prefix + std::to_string(id);
-						Key key1Ref(Key1);
-						std::string Val1 = std::to_string(id);
-						Value val1Ref(Val1);
-						tr.set(key1Ref, val1Ref, AddConflictRange::False);
+					} else {
+						if (id % 2 == 0) {
+							id++;
+						}
 					}
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
+					std::string Key1 = prefix + std::to_string(id);
+					Key key1Ref(Key1);
+					std::string Val1 = std::to_string(id);
+					Value val1Ref(Val1);
+					tr.set(key1Ref, val1Ref, AddConflictRange::False);
 				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -167,44 +165,42 @@ public: // workload functions
 			int retry = 0;
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
-				{
-					Error err;
-					try {
-						StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
+				Error err;
+				try {
+					StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
 
-						Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
-						if (self->attemptDuplicateSnapshot) {
-							co_await delay(deterministicRandom()->random01());
-							duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
-						}
-						ErrorOr<Void> statusErr = co_await errorOr(status);
-						if (statusErr.isError() &&
-						    statusErr.getError().code() != error_code_duplicate_snapshot_request) {
-							// First request is expected to fail with duplicate_snapshot_request error
-							// Any other errors should be thrown
-							throw statusErr.getError();
-						}
-						if (self->attemptDuplicateSnapshot) {
-							// If duplicate, the first request is discarded, wait for the latest one
-							co_await duplicateSnapStatus;
-						}
-						break;
-					} catch (Error& e) {
-						err = e;
+					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					if (self->attemptDuplicateSnapshot) {
+						co_await delay(deterministicRandom()->random01());
+						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
 					}
-					TraceEvent("SnapTestCreateError")
-					    .error(err)
-					    .detail("SnapUID", self->snapUID)
-					    .detail("Duplicate", self->attemptDuplicateSnapshot);
-					++retry;
-					// snap v2 can fail for many reasons, so retry until specified times and then fail it
-					if (self->retryLimit != -1 && retry > self->retryLimit) {
-						snapFailed = true;
-						break;
+					ErrorOr<Void> statusErr = co_await errorOr(status);
+					if (statusErr.isError() &&
+					    statusErr.getError().code() != error_code_duplicate_snapshot_request) {
+						// First request is expected to fail with duplicate_snapshot_request error
+						// Any other errors should be thrown
+						throw statusErr.getError();
 					}
-					// increase the retry wait time to avoid endless retry where DD is always disabled by snapshot
-					co_await delay(retry * SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP);
+					if (self->attemptDuplicateSnapshot) {
+						// If duplicate, the first request is discarded, wait for the latest one
+						co_await duplicateSnapStatus;
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("SnapTestCreateError")
+				    .error(err)
+				    .detail("SnapUID", self->snapUID)
+				    .detail("Duplicate", self->attemptDuplicateSnapshot);
+				++retry;
+				// snap v2 can fail for many reasons, so retry until specified times and then fail it
+				if (self->retryLimit != -1 && retry > self->retryLimit) {
+					snapFailed = true;
+					break;
+				}
+				// increase the retry wait time to avoid endless retry where DD is always disabled by snapshot
+				co_await delay(retry * SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP);
 			}
 			CSimpleIni ini;
 			ini.SetUnicode();
@@ -239,37 +235,35 @@ public: // workload functions
 			// keys adds up to the total keys created before snap
 			tr.reset();
 			loop {
-				{
-					Error err;
-					try {
-						RangeResult kvRange = co_await tr.getRange(begin, end, 1000);
-						if (!kvRange.more && kvRange.size() == 0) {
-							TraceEvent("SnapTestNoMoreEntries").log();
-							break;
-						}
+				Error err;
+				try {
+					RangeResult kvRange = co_await tr.getRange(begin, end, 1000);
+					if (!kvRange.more && kvRange.size() == 0) {
+						TraceEvent("SnapTestNoMoreEntries").log();
+						break;
+					}
 
-						for (int i = 0; i < kvRange.size(); i++) {
-							if (kvRange[i].key.startsWith("snapKey"_sr)) {
-								std::string tmp1 = kvRange[i].key.substr(7).toString();
-								int64_t id = strtol(tmp1.c_str(), nullptr, 0);
-								if (id % 2 != 0) {
-									throw operation_failed();
-								}
-								++cnt;
-								std::string tmp2 = kvRange[i].value.toString();
-								int64_t value = strtol(tmp2.c_str(), nullptr, 0);
-								if (id != value) {
-									throw operation_failed();
-								}
+					for (int i = 0; i < kvRange.size(); i++) {
+						if (kvRange[i].key.startsWith("snapKey"_sr)) {
+							std::string tmp1 = kvRange[i].key.substr(7).toString();
+							int64_t id = strtol(tmp1.c_str(), nullptr, 0);
+							if (id % 2 != 0) {
+								throw operation_failed();
+							}
+							++cnt;
+							std::string tmp2 = kvRange[i].value.toString();
+							int64_t value = strtol(tmp2.c_str(), nullptr, 0);
+							if (id != value) {
+								throw operation_failed();
 							}
 						}
-						begin = firstGreaterThan(kvRange.end()[-1].key);
-					} catch (Error& e) {
-						err = e;
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+					begin = firstGreaterThan(kvRange.end()[-1].key);
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 			if (cnt != 1000) {

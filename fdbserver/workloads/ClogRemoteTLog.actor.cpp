@@ -252,29 +252,27 @@ struct ClogRemoteTLog : TestWorkload {
 		std::vector<IPAddress> ret;
 		Transaction tr(db);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-					    co_await NativeAPI::getServerListAndProcessClasses(&tr);
-					for (auto& [ssi, p] : results) {
-						if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
-						    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
-							ret.push_back(ssi.address().ip);
-						}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
+				for (auto& [ssi, p] : results) {
+					if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
+					    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
+						ret.push_back(ssi.address().ip);
 					}
-					co_return ret;
-				} catch (Error& e) {
-					err = e;
 				}
-				if (err.code() != error_code_actor_cancelled) {
-					TraceEvent("GetRemoteSSIPsError").error(err);
-				}
-				co_await tr.onError(err);
+				co_return ret;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (err.code() != error_code_actor_cancelled) {
+				TraceEvent("GetRemoteSSIPsError").error(err);
+			}
+			co_await tr.onError(err);
 		}
 	}
 

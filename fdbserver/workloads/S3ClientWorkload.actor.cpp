@@ -224,38 +224,36 @@ private:
 		bool uploaded = false; // Track if upload started/succeeded
 		Optional<Error> errorToThrow; // State variable to hold error
 
-		{
-			Error err;
-			try {
-				// Use original local path (now inside unique dir) for source, unique URL for destination
-				co_await copyUpFile(self->credentials, file_url);
-				uploaded = true; // Mark as uploaded only after wait() succeeds
-				co_await copyDownFile(file_url, download);
-				co_await deleteResource(file_url); // Attempt deletion on success path
-			} catch (Error& e) {
-				err = e;
-			}
-			if (err.isValid()) {
-				TraceEvent(SevError, "S3ClientWorkloadError") // Log original error
-				    .error(err)
-				    .detail("S3URL", file_url)
-				    .detail("Path", self->credentials)
-				    .detail("Download", download);
+		Error err;
+		try {
+			// Use original local path (now inside unique dir) for source, unique URL for destination
+			co_await copyUpFile(self->credentials, file_url);
+			uploaded = true; // Mark as uploaded only after wait() succeeds
+			co_await copyDownFile(file_url, download);
+			co_await deleteResource(file_url); // Attempt deletion on success path
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			TraceEvent(SevError, "S3ClientWorkloadError") // Log original error
+			    .error(err)
+			    .detail("S3URL", file_url)
+			    .detail("Path", self->credentials)
+			    .detail("Download", download);
 
-				// Store the original error BEFORE attempting cleanup
-				errorToThrow = err;
+			// Store the original error BEFORE attempting cleanup
+			errorToThrow = err;
 
-				// --- Attempt S3 cleanup even on failure ---
-				if (uploaded) { // Only try to delete if we think it was uploaded
-					try {
-						co_await deleteResource(file_url);
-						TraceEvent(SevWarn, "S3ClientWorkloadCleanedS3AfterError").detail("S3URL", file_url);
-					} catch (Error& cleanup_e) {
-						// Log cleanup error but don't overwrite original error
-						TraceEvent(SevWarn, "S3ClientWorkloadS3CleanupError")
-						    .errorUnsuppressed(cleanup_e)
-						    .detail("S3URL", file_url);
-					}
+			// --- Attempt S3 cleanup even on failure ---
+			if (uploaded) { // Only try to delete if we think it was uploaded
+				try {
+					co_await deleteResource(file_url);
+					TraceEvent(SevWarn, "S3ClientWorkloadCleanedS3AfterError").detail("S3URL", file_url);
+				} catch (Error& cleanup_e) {
+					// Log cleanup error but don't overwrite original error
+					TraceEvent(SevWarn, "S3ClientWorkloadS3CleanupError")
+					    .errorUnsuppressed(cleanup_e)
+					    .detail("S3URL", file_url);
 				}
 			}
 		}

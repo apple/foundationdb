@@ -65,19 +65,17 @@ struct LogMetricsWorkload : TestWorkload {
 		br << rate;
 		loop {
 			Transaction tr(cx);
-			{
-				Error err;
-				try {
-					co_await success(tr.getReadVersion());
-					tr.set(fastLoggingEnabled, br.toValue());
-					tr.makeSelfConflicting();
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				co_await success(tr.getReadVersion());
+				tr.set(fastLoggingEnabled, br.toValue());
+				tr.makeSelfConflicting();
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 	}

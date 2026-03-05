@@ -117,24 +117,22 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		Transaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					// add timeout to read so test fails faster if something goes wrong
-					Optional<Value> res = co_await timeoutError(tr.get(key), 90.0);
-					const bool equal = !expectedValue.isError() && res == expectedValue.get();
-					if (!equal) {
-						self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				// add timeout to read so test fails faster if something goes wrong
+				Optional<Value> res = co_await timeoutError(tr.get(key), 90.0);
+				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				if (!equal) {
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
-				if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
-					break;
-				}
-				co_await tr.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
+				break;
+			}
+			co_await tr.onError(err);
 		}
 
 	}
@@ -142,21 +140,19 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	Future<Void> writeAndVerify(DataLossRecoveryWorkload* self, Database cx, Key key, Optional<Value> value) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					if (value.present()) {
-						tr.set(key, value.get());
-					} else {
-						tr.clear(key);
-					}
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				if (value.present()) {
+					tr.set(key, value.get());
+				} else {
+					tr.clear(key);
 				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		co_await self->readAndVerify(self, cx, key, value);
@@ -168,17 +164,15 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
-			{
-				Error err;
-				try {
-					co_await excludeServers(&tr, servers, true);
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				co_await excludeServers(&tr, servers, true);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		// Wait until all data are moved out of servers.
@@ -229,74 +223,72 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		Transaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					BinaryWriter wrMyOwner(Unversioned());
-					wrMyOwner << owner;
-					tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-					co_await tr.commit();
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << owner;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				co_await tr.commit();
 
-					MoveKeysLock moveKeysLock;
-					moveKeysLock.myOwner = owner;
+				MoveKeysLock moveKeysLock;
+				moveKeysLock.myOwner = owner;
 
-					TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
-					std::unique_ptr<MoveKeysParams> params;
-					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-						UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-						                               AssignEmptyRange(false),
-						                               deterministicRandom()->random01() <
-						                                       SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
-						                                   ? DataMoveType::PHYSICAL
-						                                   : DataMoveType::LOGICAL,
-						                               DataMovementReason::TEAM_HEALTHY,
-						                               UnassignShard(false));
-						params = std::make_unique<MoveKeysParams>(dataMoveId,
-						                                          std::vector<KeyRange>{ keys },
-						                                          dest,
-						                                          dest,
-						                                          moveKeysLock,
-						                                          Promise<Void>(),
-						                                          &self->startMoveKeysParallelismLock,
-						                                          &self->finishMoveKeysParallelismLock,
-						                                          false,
-						                                          UID(), // for logging only
-						                                          &ddEnabledState,
-						                                          CancelConflictingDataMoves::True,
-						                                          Optional<BulkLoadTaskState>());
-					} else {
-						UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-						                               AssignEmptyRange(false),
-						                               DataMoveType::LOGICAL,
-						                               DataMovementReason::TEAM_HEALTHY,
-						                               UnassignShard(false));
-						params = std::make_unique<MoveKeysParams>(dataMoveId,
-						                                          keys,
-						                                          dest,
-						                                          dest,
-						                                          moveKeysLock,
-						                                          Promise<Void>(),
-						                                          &self->startMoveKeysParallelismLock,
-						                                          &self->finishMoveKeysParallelismLock,
-						                                          false,
-						                                          UID(), // for logging only
-						                                          &ddEnabledState,
-						                                          CancelConflictingDataMoves::True,
-						                                          Optional<BulkLoadTaskState>());
-					}
-					co_await moveKeys(cx, *params);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent("DataLossRecovery").error(err).detail("Phase", "MoveRangeError");
-				if (err.code() == error_code_movekeys_conflict) {
-					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
-					tr.reset();
+				TraceEvent("DataLossRecovery").detail("Phase", "StartMoveKeys");
+				std::unique_ptr<MoveKeysParams> params;
+				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+					                               AssignEmptyRange(false),
+					                               deterministicRandom()->random01() <
+					                                       SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
+					                                   ? DataMoveType::PHYSICAL
+					                                   : DataMoveType::LOGICAL,
+					                               DataMovementReason::TEAM_HEALTHY,
+					                               UnassignShard(false));
+					params = std::make_unique<MoveKeysParams>(dataMoveId,
+					                                          std::vector<KeyRange>{ keys },
+					                                          dest,
+					                                          dest,
+					                                          moveKeysLock,
+					                                          Promise<Void>(),
+					                                          &self->startMoveKeysParallelismLock,
+					                                          &self->finishMoveKeysParallelismLock,
+					                                          false,
+					                                          UID(), // for logging only
+					                                          &ddEnabledState,
+					                                          CancelConflictingDataMoves::True,
+					                                          Optional<BulkLoadTaskState>());
 				} else {
-					co_await tr.onError(err);
+					UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+					                               AssignEmptyRange(false),
+					                               DataMoveType::LOGICAL,
+					                               DataMovementReason::TEAM_HEALTHY,
+					                               UnassignShard(false));
+					params = std::make_unique<MoveKeysParams>(dataMoveId,
+					                                          keys,
+					                                          dest,
+					                                          dest,
+					                                          moveKeysLock,
+					                                          Promise<Void>(),
+					                                          &self->startMoveKeysParallelismLock,
+					                                          &self->finishMoveKeysParallelismLock,
+					                                          false,
+					                                          UID(), // for logging only
+					                                          &ddEnabledState,
+					                                          CancelConflictingDataMoves::True,
+					                                          Optional<BulkLoadTaskState>());
 				}
+				co_await moveKeys(cx, *params);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent("DataLossRecovery").error(err).detail("Phase", "MoveRangeError");
+			if (err.code() == error_code_movekeys_conflict) {
+				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				tr.reset();
+			} else {
+				co_await tr.onError(err);
 			}
 		}
 
@@ -304,19 +296,17 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		Transaction validateTr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					Standalone<VectorRef<const char*>> addresses = co_await validateTr.getAddressesForKey(keys.begin);
-					// The move function is not what we are testing here, crash the test if the move fails.
-					ASSERT(addresses.size() == 1);
-					ASSERT(std::string(addresses[0]) == addr.toString());
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await validateTr.onError(err);
+			Error err;
+			try {
+				Standalone<VectorRef<const char*>> addresses = co_await validateTr.getAddressesForKey(keys.begin);
+				// The move function is not what we are testing here, crash the test if the move fails.
+				ASSERT(addresses.size() == 1);
+				ASSERT(std::string(addresses[0]) == addr.toString());
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await validateTr.onError(err);
 		}
 
 		co_return addr;

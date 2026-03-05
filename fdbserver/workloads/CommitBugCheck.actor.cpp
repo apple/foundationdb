@@ -41,73 +41,65 @@ struct CommitBugWorkload : TestWorkload {
 		loop {
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						tr.set(key, val1);
-						co_await tr.commit();
-						tr.reset();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					TraceEvent("CommitBugSetVal1Error").error(err);
-					CODE_PROBE(err.code() == error_code_commit_unknown_result, "Commit unknown result");
-					co_await tr.onError(err);
+				Error err;
+				try {
+					tr.set(key, val1);
+					co_await tr.commit();
+					tr.reset();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("CommitBugSetVal1Error").error(err);
+				CODE_PROBE(err.code() == error_code_commit_unknown_result, "Commit unknown result");
+				co_await tr.onError(err);
 			}
 
 			loop {
-				{
-					Error err;
-					try {
-						tr.set(key, val2);
-						co_await tr.commit();
-						tr.reset();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					TraceEvent("CommitBugSetVal2Error").error(err);
-					co_await tr.onError(err);
+				Error err;
+				try {
+					tr.set(key, val2);
+					co_await tr.commit();
+					tr.reset();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("CommitBugSetVal2Error").error(err);
+				co_await tr.onError(err);
 			}
 
 			loop {
-				{
-					Error err;
-					try {
-						Optional<Value> v = co_await tr.get(key);
-						if (!v.present() || v.get() != val2) {
-							TraceEvent(SevError, "CommitBugFailed")
-							    .detail("Value", v.present() ? printable(v.get()) : "Not present");
-							self->success = false;
-							co_return;
-						}
-
-						break;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					Optional<Value> v = co_await tr.get(key);
+					if (!v.present() || v.get() != val2) {
+						TraceEvent(SevError, "CommitBugFailed")
+						    .detail("Value", v.present() ? printable(v.get()) : "Not present");
+						self->success = false;
+						co_return;
 					}
-					TraceEvent("CommitBugGetValError").error(err);
-					co_await tr.onError(err);
+
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("CommitBugGetValError").error(err);
+				co_await tr.onError(err);
 			}
 
 			loop {
-				{
-					Error err;
-					try {
-						tr.clear(key);
-						co_await tr.commit();
-						tr.reset();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					TraceEvent("CommitBugClearValError").error(err);
-					co_await tr.onError(err);
+				Error err;
+				try {
+					tr.clear(key);
+					co_await tr.commit();
+					tr.reset();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("CommitBugClearValError").error(err);
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -119,54 +111,52 @@ struct CommitBugWorkload : TestWorkload {
 			Transaction tr(cx);
 
 			loop {
-				{
-					Error caughtErr;
-					try {
-						Optional<Value> val = co_await tr.get(key);
-						int num = 0;
-						if (val.present()) {
-							num = atoi(val.get().toString().c_str());
-							if (num != i) {
-								TraceEvent(SevError, "CommitBug2Failed").detail("Value", num).detail("Expected", i);
-								self->success = false;
-								co_return;
-							}
+				Error caughtErr;
+				try {
+					Optional<Value> val = co_await tr.get(key);
+					int num = 0;
+					if (val.present()) {
+						num = atoi(val.get().toString().c_str());
+						if (num != i) {
+							TraceEvent(SevError, "CommitBug2Failed").detail("Value", num).detail("Expected", i);
+							self->success = false;
+							co_return;
 						}
-
-						TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
-						tr.set(key, StringRef(format("%d", i + 1)));
-						co_await tr.commit();
-						TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
-						break;
-					} catch (Error& error) {
-						caughtErr = error;
 					}
-					Error e = caughtErr;
-					if (e.code() != error_code_not_committed && e.code() != error_code_transaction_too_old) {
-						tr.reset();
-						loop {
-							{
-								Error caughtErr;
-								try {
-									TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
-									tr.set(key, StringRef(format("%d", i + 1)));
-									TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
-									co_await tr.commit();
-									break;
-								} catch (Error& err) {
-									caughtErr = err;
-								}
-								co_await tr.onError(caughtErr);
+
+					TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
+					tr.set(key, StringRef(format("%d", i + 1)));
+					co_await tr.commit();
+					TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
+					break;
+				} catch (Error& error) {
+					caughtErr = error;
+				}
+				Error e = caughtErr;
+				if (e.code() != error_code_not_committed && e.code() != error_code_transaction_too_old) {
+					tr.reset();
+					loop {
+						{
+							Error caughtErr;
+							try {
+								TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
+								tr.set(key, StringRef(format("%d", i + 1)));
+								TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
+								co_await tr.commit();
+								break;
+							} catch (Error& err) {
+								caughtErr = err;
 							}
+							co_await tr.onError(caughtErr);
 						}
-
-						break;
-					} else {
-						CODE_PROBE(true, "Commit conflict");
-
-						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
-						co_await tr.onError(e);
 					}
+
+					break;
+				} else {
+					CODE_PROBE(true, "Commit conflict");
+
+					TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
+					co_await tr.onError(e);
 				}
 			}
 		}

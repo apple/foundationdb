@@ -88,77 +88,75 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 			loop {
 				Transaction tr(src);
 				Transaction tr2(dest);
-				{
-					Error err;
-					try {
-						loop {
-							Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
-							Future<RangeResult> bkpFuture =
-							    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
-							co_await (success(srcFuture) && success(bkpFuture));
+				Error err;
+				try {
+					loop {
+						Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						Future<RangeResult> bkpFuture =
+						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
+						co_await (success(srcFuture) && success(bkpFuture));
 
-							auto src = srcFuture.get().begin();
-							auto bkp = bkpFuture.get().begin();
+						auto src = srcFuture.get().begin();
+						auto bkp = bkpFuture.get().begin();
 
-							while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
-								KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
-								if (src->key != bkpKey && src->value != bkp->value) {
-									TraceEvent(SevError, "MismatchKeyAndValue")
-									    .detail("SrcKey", printable(src->key))
-									    .detail("SrcVal", printable(src->value))
-									    .detail("BkpKey", printable(bkpKey))
-									    .detail("BkpVal", printable(bkp->value));
-								} else if (src->key != bkpKey) {
-									TraceEvent(SevError, "MismatchKey")
-									    .detail("SrcKey", printable(src->key))
-									    .detail("SrcVal", printable(src->value))
-									    .detail("BkpKey", printable(bkpKey))
-									    .detail("BkpVal", printable(bkp->value));
-								} else if (src->value != bkp->value) {
-									TraceEvent(SevError, "MismatchValue")
-									    .detail("SrcKey", printable(src->key))
-									    .detail("SrcVal", printable(src->value))
-									    .detail("BkpKey", printable(bkpKey))
-									    .detail("BkpVal", printable(bkp->value));
-								}
-								begin = std::min(src->key, bkpKey);
-								if (src->key == bkpKey) {
-									++src;
-									++bkp;
-								} else if (src->key < bkpKey) {
-									++src;
-								} else {
-									++bkp;
-								}
-							}
-							while (src != srcFuture.get().end() && !bkpFuture.get().more) {
-								TraceEvent(SevError, "MissingBkpKey")
+						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
+							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
+							if (src->key != bkpKey && src->value != bkp->value) {
+								TraceEvent(SevError, "MismatchKeyAndValue")
 								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value));
-								begin = src->key;
-								++src;
-							}
-							while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
-								TraceEvent(SevError, "MissingSrcKey")
-								    .detail("BkpKey", printable(bkp->key.substr(backupPrefix.size())))
+								    .detail("SrcVal", printable(src->value))
+								    .detail("BkpKey", printable(bkpKey))
 								    .detail("BkpVal", printable(bkp->value));
-								begin = bkp->key;
+							} else if (src->key != bkpKey) {
+								TraceEvent(SevError, "MismatchKey")
+								    .detail("SrcKey", printable(src->key))
+								    .detail("SrcVal", printable(src->value))
+								    .detail("BkpKey", printable(bkpKey))
+								    .detail("BkpVal", printable(bkp->value));
+							} else if (src->value != bkp->value) {
+								TraceEvent(SevError, "MismatchValue")
+								    .detail("SrcKey", printable(src->key))
+								    .detail("SrcVal", printable(src->value))
+								    .detail("BkpKey", printable(bkpKey))
+								    .detail("BkpVal", printable(bkp->value));
+							}
+							begin = std::min(src->key, bkpKey);
+							if (src->key == bkpKey) {
+								++src;
+								++bkp;
+							} else if (src->key < bkpKey) {
+								++src;
+							} else {
 								++bkp;
 							}
-
-							if (!srcFuture.get().more && !bkpFuture.get().more) {
-								break;
-							}
-
-							begin = keyAfter(begin);
+						}
+						while (src != srcFuture.get().end() && !bkpFuture.get().more) {
+							TraceEvent(SevError, "MissingBkpKey")
+							    .detail("SrcKey", printable(src->key))
+							    .detail("SrcVal", printable(src->value));
+							begin = src->key;
+							++src;
+						}
+						while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
+							TraceEvent(SevError, "MissingSrcKey")
+							    .detail("BkpKey", printable(bkp->key.substr(backupPrefix.size())))
+							    .detail("BkpVal", printable(bkp->value));
+							begin = bkp->key;
+							++bkp;
 						}
 
-						break;
-					} catch (Error& e) {
-						err = e;
+						if (!srcFuture.get().more && !bkpFuture.get().more) {
+							break;
+						}
+
+						begin = keyAfter(begin);
 					}
-					co_await tr.onError(err);
+
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 

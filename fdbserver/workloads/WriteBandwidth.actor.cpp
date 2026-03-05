@@ -102,32 +102,30 @@ struct WriteBandwidthWorkload : KVWorkload {
 			Transaction tr(cx);
 			uint64_t startIdx = deterministicRandom()->random01() * (self->nodeCount - self->keysPerTransaction);
 			loop {
-				{
-					Error err;
-					try {
-						double start = now();
-						co_await success(tr.getReadVersion());
-						self->GRVLatencies.addSample(now() - start);
+				Error err;
+				try {
+					double start = now();
+					co_await success(tr.getReadVersion());
+					self->GRVLatencies.addSample(now() - start);
 
-						// Predefine a single large write conflict range over the whole key space
-						tr.addWriteConflictRange(
-						    KeyRangeRef(self->keyForIndex(startIdx, false),
-						                keyAfter(self->keyForIndex(startIdx + self->keysPerTransaction - 1, false))));
+					// Predefine a single large write conflict range over the whole key space
+					tr.addWriteConflictRange(
+					    KeyRangeRef(self->keyForIndex(startIdx, false),
+					                keyAfter(self->keyForIndex(startIdx + self->keysPerTransaction - 1, false))));
 
-						for (int i = 0; i < self->keysPerTransaction; i++)
-							tr.set(
-							    self->keyForIndex(startIdx + i, false), self->randomValue(), AddConflictRange::False);
+					for (int i = 0; i < self->keysPerTransaction; i++)
+						tr.set(
+						    self->keyForIndex(startIdx + i, false), self->randomValue(), AddConflictRange::False);
 
-						start = now();
-						co_await tr.commit();
-						self->commitLatencies.addSample(now() - start);
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
-					++self->retries;
+					start = now();
+					co_await tr.commit();
+					self->commitLatencies.addSample(now() - start);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
+				++self->retries;
 			}
 			++self->transactions;
 		}

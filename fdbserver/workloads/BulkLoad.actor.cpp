@@ -84,29 +84,27 @@ struct BulkLoadWorkload : TestWorkload {
 			Transaction tr(cx);
 			loop {
 				uint64_t txnBytes = 0;
-				{
-					Error err;
-					try {
-						for (int i = 0; i < self->writesPerTransaction; i++) {
-							std::string key = format("%s/bulkload/%04x/%04x/%08x",
-							                         self->keyPrefix.toString().c_str(),
-							                         self->clientId,
-							                         actorId,
-							                         idx + i);
-							tr.set(key, self->value);
-							txnBytes += key.size() + self->value.size();
-						}
-						tr.makeSelfConflicting();
-						co_await success(tr.getReadVersion());
-						co_await tr.commit();
-						totalBytes += txnBytes;
-						break;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					for (int i = 0; i < self->writesPerTransaction; i++) {
+						std::string key = format("%s/bulkload/%04x/%04x/%08x",
+						                         self->keyPrefix.toString().c_str(),
+						                         self->clientId,
+						                         actorId,
+						                         idx + i);
+						tr.set(key, self->value);
+						txnBytes += key.size() + self->value.size();
 					}
-					co_await tr.onError(err);
-					++self->retries;
+					tr.makeSelfConflicting();
+					co_await success(tr.getReadVersion());
+					co_await tr.commit();
+					totalBytes += txnBytes;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
+				++self->retries;
 			}
 			self->latencies.addSample(now() - tstart);
 			++self->transactions;

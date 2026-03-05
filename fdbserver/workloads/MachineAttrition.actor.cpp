@@ -49,20 +49,18 @@ Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	TraceEvent("IgnoreSSFailureClear").log();
 	Transaction tr(cx);
 	loop {
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.clear(healthyZoneKey);
-				co_await tr.commit();
-				TraceEvent("IgnoreSSFailureComplete").log();
-				co_return true;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.clear(healthyZoneKey);
+			co_await tr.commit();
+			TraceEvent("IgnoreSSFailureComplete").log();
+			co_return true;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -298,18 +296,16 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				if (self->waitForVersion) {
 					Transaction tr(cx);
 					loop {
-						{
-							Error err;
-							try {
-								tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-								tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-								co_await success(tr.getReadVersion());
-								break;
-							} catch (Error& e) {
-								err = e;
-							}
-							co_await tr.onError(err);
+						Error err;
+						try {
+							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							co_await success(tr.getReadVersion());
+							break;
+						} catch (Error& e) {
+							err = e;
 						}
+						co_await tr.onError(err);
 					}
 				}
 				// Pick a worker to kill
@@ -399,18 +395,16 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 					if (self->waitForVersion) {
 						Transaction tr(cx);
 						loop {
-							{
-								Error err;
-								try {
-									tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-									tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-									co_await success(tr.getReadVersion());
-									break;
-								} catch (Error& e) {
-									err = e;
-								}
-								co_await tr.onError(err);
+							Error err;
+							try {
+								tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+								tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+								co_await success(tr.getReadVersion());
+								break;
+							} catch (Error& e) {
+								err = e;
 							}
+							co_await tr.onError(err);
 						}
 					}
 

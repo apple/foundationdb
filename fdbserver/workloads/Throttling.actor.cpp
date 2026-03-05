@@ -127,60 +127,58 @@ struct ThrottlingWorkload : KVWorkload {
 		json_spirit::mValue storageSchema = readJSONStrictly(JSONSchemas::storageHealthSchema.toString()).get_obj();
 		json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
 		loop {
-			{
-				Error err;
-				try {
-					RangeResult result =
-					    co_await tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!result.more);
-					for (const auto& [k, v] : result) {
-						ASSERT(k.startsWith("\xff\xff/metrics/health/"_sr));
-						auto valueObj = readJSONStrictly(v.toString()).get_obj();
-						if (k.removePrefix("\xff\xff/metrics/health/"_sr) == "aggregate"_sr) {
-							CODE_PROBE(true, "Test aggregate health metrics schema");
-							std::string errorStr;
-							if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true)) {
-								TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
-								    .detail("ErrorStr", errorStr.c_str())
-								    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-								self->correctSpecialKeys = false;
-							}
-							auto tpsLimit = valueObj.at("tps_limit").get_real();
-							self->tokenBucket.transactionRate =
-							    tpsLimit * self->throttlingMultiplier / self->clientCount;
-						} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
-							CODE_PROBE(true, "Test storage health metrics schema");
-							UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)
-							                    .toString()); // Will throw if it's not a valid uid
-							std::string errorStr;
-							if (!schemaMatch(storageSchema, valueObj, errorStr, SevError, true)) {
-								TraceEvent(SevError, "StorageHealthSchemaValidationFailed")
-								    .detail("ErrorStr", errorStr.c_str())
-								    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-								self->correctSpecialKeys = false;
-							}
-						} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("log/"_sr)) {
-							CODE_PROBE(true, "Test log health metrics schema");
-							UID::fromString(k.removePrefix("\xff\xff/metrics/health/log/"_sr)
-							                    .toString()); // Will throw if it's not a valid uid
-							std::string errorStr;
-							if (!schemaMatch(logSchema, valueObj, errorStr, SevError, true)) {
-								TraceEvent(SevError, "LogHealthSchemaValidationFailed")
-								    .detail("ErrorStr", errorStr.c_str())
-								    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-								self->correctSpecialKeys = false;
-							}
-						} else {
-							ASSERT(false); // Unrecognized key
+			Error err;
+			try {
+				RangeResult result =
+				    co_await tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!result.more);
+				for (const auto& [k, v] : result) {
+					ASSERT(k.startsWith("\xff\xff/metrics/health/"_sr));
+					auto valueObj = readJSONStrictly(v.toString()).get_obj();
+					if (k.removePrefix("\xff\xff/metrics/health/"_sr) == "aggregate"_sr) {
+						CODE_PROBE(true, "Test aggregate health metrics schema");
+						std::string errorStr;
+						if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true)) {
+							TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
+							    .detail("ErrorStr", errorStr.c_str())
+							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+							self->correctSpecialKeys = false;
 						}
+						auto tpsLimit = valueObj.at("tps_limit").get_real();
+						self->tokenBucket.transactionRate =
+						    tpsLimit * self->throttlingMultiplier / self->clientCount;
+					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
+						CODE_PROBE(true, "Test storage health metrics schema");
+						UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)
+						                    .toString()); // Will throw if it's not a valid uid
+						std::string errorStr;
+						if (!schemaMatch(storageSchema, valueObj, errorStr, SevError, true)) {
+							TraceEvent(SevError, "StorageHealthSchemaValidationFailed")
+							    .detail("ErrorStr", errorStr.c_str())
+							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+							self->correctSpecialKeys = false;
+						}
+					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("log/"_sr)) {
+						CODE_PROBE(true, "Test log health metrics schema");
+						UID::fromString(k.removePrefix("\xff\xff/metrics/health/log/"_sr)
+						                    .toString()); // Will throw if it's not a valid uid
+						std::string errorStr;
+						if (!schemaMatch(logSchema, valueObj, errorStr, SevError, true)) {
+							TraceEvent(SevError, "LogHealthSchemaValidationFailed")
+							    .detail("ErrorStr", errorStr.c_str())
+							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+							self->correctSpecialKeys = false;
+						}
+					} else {
+						ASSERT(false); // Unrecognized key
 					}
-					co_await delayJittered(5);
-				} catch (Error& e) {
-					err = e;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				co_await delayJittered(5);
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}

@@ -144,48 +144,44 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Sanity check if log keyspace has elements
 		ReadYourWritesTransaction tr1(cx);
 		loop {
-			{
-				Error err;
-				try {
-					Key begin(std::string("log"));
-					RangeResult log = co_await tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
-					if (!log.empty()) {
-						TraceEvent(SevError, "AtomicOpSetup")
-						    .detail("LogKeySpace", "Not empty")
-						    .detail("Result", log.toString());
-						for (auto& kv : log) {
-							TraceEvent(SevWarn, "AtomicOpSetup")
-							    .detail("K", kv.key.toString())
-							    .detail("V", kv.value.toString());
-						}
+			Error err;
+			try {
+				Key begin(std::string("log"));
+				RangeResult log = co_await tr1.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
+				if (!log.empty()) {
+					TraceEvent(SevError, "AtomicOpSetup")
+					    .detail("LogKeySpace", "Not empty")
+					    .detail("Result", log.toString());
+					for (auto& kv : log) {
+						TraceEvent(SevWarn, "AtomicOpSetup")
+						    .detail("K", kv.key.toString())
+						    .detail("V", kv.value.toString());
 					}
-					break;
-				} catch (Error& e) {
-					err = e;
 				}
-				co_await tr1.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr1.onError(err);
 		}
 
 		int g = 0;
 		for (; g < 100; g++) {
 			ReadYourWritesTransaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						for (int i = 0; i < self->nodeCount / 100; i++) {
-							uint64_t intValue = 0;
-							tr.set(StringRef(format("ops%08x%08x", g, i)),
-							       StringRef((const uint8_t*)&intValue, sizeof(intValue)));
-						}
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					for (int i = 0; i < self->nodeCount / 100; i++) {
+						uint64_t intValue = 0;
+						tr.set(StringRef(format("ops%08x%08x", g, i)),
+						       StringRef((const uint8_t*)&intValue, sizeof(intValue)));
 					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -202,120 +198,112 @@ struct AtomicOpsWorkload : TestWorkload {
 				std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 				int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
 				Key opsKey(format("ops%08x%08x", group, nodeIndex));
-				{
-					Error err;
-					try {
-						tr.set(logDebugKey.first, val); // set log key
-						tr.set(logDebugKey.second, opsKey); // set debug key; one opsKey can have multiple logs key
-						tr.atomicOp(opsKey, val, self->opType);
-						co_await tr.commit();
-						TraceEvent(SevAtomicOpDebug, "AtomicOpWorker")
-						    .detail("OpsKey", opsKey)
-						    .detail("LogKey", logDebugKey.first)
-						    .detail("Value", val.toString());
-						if (self->opType == MutationRef::AddValue) {
-							self->lbsum += intValue;
-							self->ubsum += intValue;
-						}
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					if (err.code() == 1021) {
+				Error err;
+				try {
+					tr.set(logDebugKey.first, val); // set log key
+					tr.set(logDebugKey.second, opsKey); // set debug key; one opsKey can have multiple logs key
+					tr.atomicOp(opsKey, val, self->opType);
+					co_await tr.commit();
+					TraceEvent(SevAtomicOpDebug, "AtomicOpWorker")
+					    .detail("OpsKey", opsKey)
+					    .detail("LogKey", logDebugKey.first)
+					    .detail("Value", val.toString());
+					if (self->opType == MutationRef::AddValue) {
+						self->lbsum += intValue;
 						self->ubsum += intValue;
-						TraceEvent(SevInfo, "TxnCommitUnknownResult")
-						    .detail("Value", intValue)
-						    .detail("LogKey", logDebugKey.first)
-						    .detail("OpsKey", opsKey);
 					}
-					co_await tr.onError(err);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				if (err.code() == 1021) {
+					self->ubsum += intValue;
+					TraceEvent(SevInfo, "TxnCommitUnknownResult")
+					    .detail("Value", intValue)
+					    .detail("LogKey", logDebugKey.first)
+					    .detail("OpsKey", opsKey);
+				}
+				co_await tr.onError(err);
 			}
 		}
 	}
 
 	Future<Void> dumpLogKV(Database cx, int g) {
 		ReadYourWritesTransaction tr(cx);
-		{
-			Error err;
-			try {
-				Key begin(format("log%08x", g));
-				RangeResult log = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
-				if (log.more) {
-					TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
-				}
-				uint64_t sum = 0;
-				for (auto& kv : log) {
-					uint64_t intValue = 0;
-					memcpy(&intValue, kv.value.begin(), kv.value.size());
-					sum += intValue;
-					TraceEvent("AtomicOpLog")
-					    .detail("Key", kv.key)
-					    .detail("Val", kv.value)
-					    .detail("IntValue", intValue)
-					    .detail("CurSum", sum);
-				}
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			Key begin(format("log%08x", g));
+			RangeResult log = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
+			if (log.more) {
+				TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
 			}
-			if (err.isValid()) {
-				TraceEvent("DumpLogKVError").detail("Error", err.what());
-				co_await tr.onError(err);
+			uint64_t sum = 0;
+			for (auto& kv : log) {
+				uint64_t intValue = 0;
+				memcpy(&intValue, kv.value.begin(), kv.value.size());
+				sum += intValue;
+				TraceEvent("AtomicOpLog")
+				    .detail("Key", kv.key)
+				    .detail("Val", kv.value)
+				    .detail("IntValue", intValue)
+				    .detail("CurSum", sum);
 			}
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			TraceEvent("DumpLogKVError").detail("Error", err.what());
+			co_await tr.onError(err);
 		}
 	}
 
 	Future<Void> dumpDebugKV(Database cx, int g) {
 		ReadYourWritesTransaction tr(cx);
-		{
-			Error err;
-			try {
-				Key begin(format("debug%08x", g));
-				RangeResult debuglog = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
-				if (debuglog.more) {
-					TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
-				}
-				for (auto& kv : debuglog) {
-					TraceEvent("AtomicOpDebug").detail("Key", kv.key).detail("Val", kv.value);
-				}
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			Key begin(format("debug%08x", g));
+			RangeResult debuglog = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
+			if (debuglog.more) {
+				TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
 			}
-			if (err.isValid()) {
-				TraceEvent("DumpDebugKVError").detail("Error", err.what());
-				co_await tr.onError(err);
+			for (auto& kv : debuglog) {
+				TraceEvent("AtomicOpDebug").detail("Key", kv.key).detail("Val", kv.value);
 			}
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			TraceEvent("DumpDebugKVError").detail("Error", err.what());
+			co_await tr.onError(err);
 		}
 	}
 
 	Future<Void> dumpOpsKV(Database cx, int g) {
 		ReadYourWritesTransaction tr(cx);
-		{
-			Error err;
-			try {
-				Key begin(format("ops%08x", g));
-				RangeResult ops = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
-				if (ops.more) {
-					TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
-				}
-				uint64_t sum = 0;
-				for (auto& kv : ops) {
-					uint64_t intValue = 0;
-					memcpy(&intValue, kv.value.begin(), kv.value.size());
-					sum += intValue;
-					TraceEvent("AtomicOpOps")
-					    .detail("Key", kv.key)
-					    .detail("Val", kv.value)
-					    .detail("IntVal", intValue)
-					    .detail("CurSum", sum);
-				}
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			Key begin(format("ops%08x", g));
+			RangeResult ops = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
+			if (ops.more) {
+				TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			}
-			if (err.isValid()) {
-				TraceEvent("DumpOpsKVError").detail("Error", err.what());
-				co_await tr.onError(err);
+			uint64_t sum = 0;
+			for (auto& kv : ops) {
+				uint64_t intValue = 0;
+				memcpy(&intValue, kv.value.begin(), kv.value.size());
+				sum += intValue;
+				TraceEvent("AtomicOpOps")
+				    .detail("Key", kv.key)
+				    .detail("Val", kv.value)
+				    .detail("IntVal", intValue)
+				    .detail("CurSum", sum);
 			}
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			TraceEvent("DumpOpsKVError").detail("Error", err.what());
+			co_await tr.onError(err);
 		}
 	}
 
@@ -388,80 +376,78 @@ struct AtomicOpsWorkload : TestWorkload {
 			ReadYourWritesTransaction tr(cx);
 			RangeResult log;
 			loop {
-				{
-					Error err;
-					try {
-						{
-							// Calculate the accumulated value in the log keyspace for the group g
-							Key begin(format("log%08x", g));
-							RangeResult log_ =
-							    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
-							log = log_;
-							uint64_t zeroValue = 0;
-							tr.set("xlogResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+				Error err;
+				try {
+					{
+						// Calculate the accumulated value in the log keyspace for the group g
+						Key begin(format("log%08x", g));
+						RangeResult log_ =
+						    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
+						log = log_;
+						uint64_t zeroValue = 0;
+						tr.set("xlogResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+						for (auto& kv : log) {
+							uint64_t intValue = 0;
+							memcpy(&intValue, kv.value.begin(), kv.value.size());
+							tr.atomicOp("xlogResult"_sr, kv.value, self->opType);
+						}
+					}
+
+					{
+						// Calculate the accumulated value in the ops keyspace for the group g
+						Key begin(format("ops%08x", g));
+						RangeResult ops =
+						    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
+						uint64_t zeroValue = 0;
+						tr.set("xopsResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+						for (auto& kv : ops) {
+							uint64_t intValue = 0;
+							memcpy(&intValue, kv.value.begin(), kv.value.size());
+							tr.atomicOp("xopsResult"_sr, kv.value, self->opType);
+						}
+
+						if (tr.get("xlogResult"_sr).get() != tr.get("xopsResult"_sr).get()) {
+							Optional<Standalone<StringRef>> logResult = tr.get("xlogResult"_sr).get();
+							Optional<Standalone<StringRef>> opsResult = tr.get("xopsResult"_sr).get();
+							ASSERT(logResult.present());
+							ASSERT(opsResult.present());
+							TraceEvent(SevError, "LogMismatch")
+							    .detail("Index", format("log%08x", g))
+							    .detail("LogResult", printable(logResult))
+							    .detail("OpsResult", printable(opsResult));
+						}
+
+						if (self->opType == MutationRef::AddValue) {
+							uint64_t opsResult = 0;
+							Key opsResultStr = tr.get("xopsResult"_sr).get().get();
+							memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
+							uint64_t logResult = 0;
 							for (auto& kv : log) {
 								uint64_t intValue = 0;
 								memcpy(&intValue, kv.value.begin(), kv.value.size());
-								tr.atomicOp("xlogResult"_sr, kv.value, self->opType);
+								logResult += intValue;
+							}
+							if (logResult != opsResult) {
+								TraceEvent(SevError, "LogAddMismatch")
+								    .detail("LogResult", logResult)
+								    .detail("OpResult", opsResult)
+								    .detail("OpsResultStr", printable(opsResultStr))
+								    .detail("Size", opsResultStr.size())
+								    .detail("LowerBoundSum", self->lbsum)
+								    .detail("UpperBoundSum", self->ubsum);
+								co_await self->dumpLogKV(cx, g);
+								co_await self->dumpDebugKV(cx, g);
+								co_await self->dumpOpsKV(cx, g);
+								co_await self->validateOpsKey(cx, self, g);
 							}
 						}
-
-						{
-							// Calculate the accumulated value in the ops keyspace for the group g
-							Key begin(format("ops%08x", g));
-							RangeResult ops =
-							    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
-							uint64_t zeroValue = 0;
-							tr.set("xopsResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
-							for (auto& kv : ops) {
-								uint64_t intValue = 0;
-								memcpy(&intValue, kv.value.begin(), kv.value.size());
-								tr.atomicOp("xopsResult"_sr, kv.value, self->opType);
-							}
-
-							if (tr.get("xlogResult"_sr).get() != tr.get("xopsResult"_sr).get()) {
-								Optional<Standalone<StringRef>> logResult = tr.get("xlogResult"_sr).get();
-								Optional<Standalone<StringRef>> opsResult = tr.get("xopsResult"_sr).get();
-								ASSERT(logResult.present());
-								ASSERT(opsResult.present());
-								TraceEvent(SevError, "LogMismatch")
-								    .detail("Index", format("log%08x", g))
-								    .detail("LogResult", printable(logResult))
-								    .detail("OpsResult", printable(opsResult));
-							}
-
-							if (self->opType == MutationRef::AddValue) {
-								uint64_t opsResult = 0;
-								Key opsResultStr = tr.get("xopsResult"_sr).get().get();
-								memcpy(&opsResult, opsResultStr.begin(), opsResultStr.size());
-								uint64_t logResult = 0;
-								for (auto& kv : log) {
-									uint64_t intValue = 0;
-									memcpy(&intValue, kv.value.begin(), kv.value.size());
-									logResult += intValue;
-								}
-								if (logResult != opsResult) {
-									TraceEvent(SevError, "LogAddMismatch")
-									    .detail("LogResult", logResult)
-									    .detail("OpResult", opsResult)
-									    .detail("OpsResultStr", printable(opsResultStr))
-									    .detail("Size", opsResultStr.size())
-									    .detail("LowerBoundSum", self->lbsum)
-									    .detail("UpperBoundSum", self->ubsum);
-									co_await self->dumpLogKV(cx, g);
-									co_await self->dumpDebugKV(cx, g);
-									co_await self->dumpOpsKV(cx, g);
-									co_await self->validateOpsKey(cx, self, g);
-								}
-							}
-							break;
-						}
-					} catch (Error& e) {
-						err = e;
+						break;
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		}

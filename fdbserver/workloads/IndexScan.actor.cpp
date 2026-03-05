@@ -73,16 +73,14 @@ struct IndexScanWorkload : KVWorkload {
 		double startTime = now();
 		loop {
 			Transaction tr(cx);
-			{
-				Error err;
-				try {
-					co_await tr.warmRange(allKeys);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				co_await tr.warmRange(allKeys);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		// Wait some small amount of time for things to "settle". Maybe this is historical?
@@ -121,27 +119,25 @@ struct IndexScanWorkload : KVWorkload {
 			rowsRead = 0;
 			chunks = 0;
 
-			{
-				Error err;
-				try {
-					loop {
-						RangeResult r = co_await tr.getRange(begin, end, limits);
-						chunks++;
-						rowsRead += r.size();
-						if (!r.size() || !r.more || (now() - startTime) > self->transactionDuration) {
-							break;
-						}
-						begin = firstGreaterThan(r[r.size() - 1].key);
+			Error err;
+			try {
+				loop {
+					RangeResult r = co_await tr.getRange(begin, end, limits);
+					chunks++;
+					rowsRead += r.size();
+					if (!r.size() || !r.more || (now() - startTime) > self->transactionDuration) {
+						break;
 					}
-
-					break;
-				} catch (Error& e) {
-					err = e;
+					begin = firstGreaterThan(r[r.size() - 1].key);
 				}
-				if (err.code() != error_code_actor_cancelled)
-					++self->failedTransactions;
-				co_await tr.onError(err);
+
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (err.code() != error_code_actor_cancelled)
+				++self->failedTransactions;
+			co_await tr.onError(err);
 		}
 
 		self->rowsRead += rowsRead;

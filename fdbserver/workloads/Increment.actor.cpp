@@ -80,27 +80,25 @@ struct Increment : TestWorkload {
 				double tstart = now();
 				Transaction tr(cx);
 				while (true) {
-					{
-						Error err;
-						try {
-							tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(0, self->nodeCount / 2)),
-							            "\x01"_sr,
-							            MutationRef::AddValue);
-							tr.atomicOp(
-							    intToTestKey(deterministicRandom()->randomInt(self->nodeCount / 2, self->nodeCount)),
-							    "\x01"_sr,
-							    MutationRef::AddValue);
-							co_await tr.commit();
-							break;
-						} catch (Error& e) {
-							err = e;
-						}
-						if (err.code() == error_code_transaction_too_old)
-							++self->tooOldRetries;
-						else if (err.code() == error_code_not_committed)
-							++self->commitFailedRetries;
-						co_await tr.onError(err);
+					Error err;
+					try {
+						tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(0, self->nodeCount / 2)),
+						            "\x01"_sr,
+						            MutationRef::AddValue);
+						tr.atomicOp(
+						    intToTestKey(deterministicRandom()->randomInt(self->nodeCount / 2, self->nodeCount)),
+						    "\x01"_sr,
+						    MutationRef::AddValue);
+						co_await tr.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					if (err.code() == error_code_transaction_too_old)
+						++self->tooOldRetries;
+					else if (err.code() == error_code_not_committed)
+						++self->commitFailedRetries;
+					co_await tr.onError(err);
 					++self->retries;
 				}
 				++self->transactions;
@@ -161,22 +159,20 @@ struct Increment : TestWorkload {
 			Transaction tr(cx);
 			int retryCount = 0;
 			loop {
-				{
-					Error err;
-					try {
-						Version v = co_await tr.getReadVersion();
-						RangeResult data = co_await tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
-						                                        firstGreaterOrEqual(intToTestKey(self->nodeCount)),
-						                                        self->nodeCount + 1);
-						ok = self->incrementCheckData(data, v, self) && ok;
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError").error(err);
-					co_await tr.onError(err);
+				Error err;
+				try {
+					Version v = co_await tr.getReadVersion();
+					RangeResult data = co_await tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
+					                                        firstGreaterOrEqual(intToTestKey(self->nodeCount)),
+					                                        self->nodeCount + 1);
+					ok = self->incrementCheckData(data, v, self) && ok;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError").error(err);
+				co_await tr.onError(err);
 			}
 		}
 		co_return ok;

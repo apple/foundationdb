@@ -113,32 +113,30 @@ struct StreamingReadWorkload : TestWorkload {
 				if (self->readSequentially && thisRangeSize > maxIndex - minIndex)
 					thisRangeSize = maxIndex - minIndex;
 				loop {
-					{
-						Error err;
-						try {
-							if (!self->readSequentially)
-								currentIndex = deterministicRandom()->randomInt(0, self->nodeCount - thisRangeSize);
-							else if (currentIndex > maxIndex - thisRangeSize)
-								currentIndex = minIndex;
+					Error err;
+					try {
+						if (!self->readSequentially)
+							currentIndex = deterministicRandom()->randomInt(0, self->nodeCount - thisRangeSize);
+						else if (currentIndex > maxIndex - thisRangeSize)
+							currentIndex = minIndex;
 
-							RangeResult values = co_await tr.getRange(
-							    firstGreaterOrEqual(self->keyForIndex(currentIndex)),
-							    firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
-							    thisRangeSize);
+						RangeResult values = co_await tr.getRange(
+						    firstGreaterOrEqual(self->keyForIndex(currentIndex)),
+						    firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
+						    thisRangeSize);
 
-							for (int i = 0; i < values.size(); i++)
-								self->readValueBytes += values[i].value.size();
+						for (int i = 0; i < values.size(); i++)
+							self->readValueBytes += values[i].value.size();
 
-							if (self->readSequentially)
-								currentIndex += values.size();
+						if (self->readSequentially)
+							currentIndex += values.size();
 
-							self->readKeys += values.size();
-							break;
-						} catch (Error& e) {
-							err = e;
-						}
-						co_await tr.onError(err);
+						self->readKeys += values.size();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					co_await tr.onError(err);
 				}
 
 				if (now() - tstart > 3)

@@ -38,20 +38,18 @@
 Future<Void> clearKeyspace(ApiWorkload* self) {
 	loop {
 		Reference<TransactionWrapper> transaction = self->createTransaction();
-		{
-			Error err;
-			try {
-				KeyRange range(KeyRangeRef(StringRef(format("%010d", self->clientPrefixInt)),
-				                           StringRef(format("%010d", self->clientPrefixInt + 1))));
+		Error err;
+		try {
+			KeyRange range(KeyRangeRef(StringRef(format("%010d", self->clientPrefixInt)),
+			                           StringRef(format("%010d", self->clientPrefixInt + 1))));
 
-				transaction->clear(range);
-				co_await transaction->commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await transaction->onError(err);
+			transaction->clear(range);
+			co_await transaction->commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await transaction->onError(err);
 	}
 }
 
@@ -186,30 +184,28 @@ Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
 		KeyRangeRef range(startKey, endKey);
 
 		loop {
-			{
-				Error err;
-				try {
-					RangeResult dbResults = co_await transaction->getRange(range, resultsPerRange, Reverse::False);
+			Error err;
+			try {
+				RangeResult dbResults = co_await transaction->getRange(range, resultsPerRange, Reverse::False);
 
-					// Compare results of database and memory store
-					Version v = co_await transaction->getReadVersion();
-					if (!self->compareResults(dbResults, storeResults, v)) {
-						TraceEvent(SevError, "FailedComparisonToMemory").detail("StartTime", startTime);
-						co_return false;
-					}
-
-					// If there are no more results, then return success
-					if (storeResults.size() < resultsPerRange)
-						co_return true;
-
-					startKey = dbResults[dbResults.size() - 1].key;
-
-					break;
-				} catch (Error& e) {
-					err = e;
+				// Compare results of database and memory store
+				Version v = co_await transaction->getReadVersion();
+				if (!self->compareResults(dbResults, storeResults, v)) {
+					TraceEvent(SevError, "FailedComparisonToMemory").detail("StartTime", startTime);
+					co_return false;
 				}
-				co_await transaction->onError(err);
+
+				// If there are no more results, then return success
+				if (storeResults.size() < resultsPerRange)
+					co_return true;
+
+				startKey = dbResults[dbResults.size() - 1].key;
+
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await transaction->onError(err);
 		}
 	}
 }

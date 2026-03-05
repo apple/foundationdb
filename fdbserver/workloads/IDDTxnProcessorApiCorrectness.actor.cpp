@@ -297,34 +297,32 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			mockParams.dataMovementComplete.reset();
 
 			co_await store(realParams.lock, self->real->takeMoveKeysLock(UID()));
-			{
-				Error err;
-				try {
-					// test start
-					co_await self->mock->testRawStartMovement(mockParams, emptyTssMapping);
-					co_await self->real->testRawStartMovement(realParams, emptyTssMapping);
+			Error err;
+			try {
+				// test start
+				co_await self->mock->testRawStartMovement(mockParams, emptyTssMapping);
+				co_await self->real->testRawStartMovement(realParams, emptyTssMapping);
 
-					self->verifyServerKeyDest(realParams);
-					// test finish or started but cancelled movement
-					if (self->testStartOnly || deterministicRandom()->coinflip()) {
-						CODE_PROBE(true, "RawMovementApi partial started");
-						self->testRawStart++;
-						break;
-					}
-
-					// The real transaction should finish first because mock transaction will always success.
-					co_await self->real->testRawFinishMovement(realParams, emptyTssMapping);
-					co_await self->mock->testRawFinishMovement(mockParams, emptyTssMapping);
-					self->testRawFinish++;
+				self->verifyServerKeyDest(realParams);
+				// test finish or started but cancelled movement
+				if (self->testStartOnly || deterministicRandom()->coinflip()) {
+					CODE_PROBE(true, "RawMovementApi partial started");
+					self->testRawStart++;
 					break;
-				} catch (Error& e) {
-					err = e;
 				}
-				if (err.code() != error_code_movekeys_conflict)
-					throw err;
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				// Keep trying to get the moveKeysLock
+
+				// The real transaction should finish first because mock transaction will always success.
+				co_await self->real->testRawFinishMovement(realParams, emptyTssMapping);
+				co_await self->mock->testRawFinishMovement(mockParams, emptyTssMapping);
+				self->testRawFinish++;
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (err.code() != error_code_movekeys_conflict)
+				throw err;
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			// Keep trying to get the moveKeysLock
 		}
 
 		// read initial data again
@@ -408,21 +406,19 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			realParams.dataMovementComplete.reset();
 			mockParams.dataMovementComplete.reset();
 			co_await store(realParams.lock, self->real->takeMoveKeysLock(UID()));
-			{
-				Error err;
-				try {
-					co_await self->mock->moveKeys(mockParams);
-					co_await self->real->moveKeys(realParams);
-					self->testAll++;
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.code() != error_code_movekeys_conflict)
-					throw err;
-				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				// Keep trying to get the moveKeysLock
+			Error err;
+			try {
+				co_await self->mock->moveKeys(mockParams);
+				co_await self->real->moveKeys(realParams);
+				self->testAll++;
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (err.code() != error_code_movekeys_conflict)
+				throw err;
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			// Keep trying to get the moveKeysLock
 		}
 
 		// read initial data again

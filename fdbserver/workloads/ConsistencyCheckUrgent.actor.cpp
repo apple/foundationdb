@@ -82,46 +82,44 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		std::vector<std::pair<KeyRange, Value>> res;
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
-					RangeResult readResult = co_await krmGetRanges(&tr,
-					                                               keyServersPrefix,
-					                                               rangeToRead,
-					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
-					for (int i = 0; i < readResult.size() - 1; ++i) {
-						KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
-						Value valueToCheck = Standalone(readResult[i].value);
-						bool toAdd = false;
-						for (const auto& range : ranges) {
-							if (rangeToCheck.intersects(range) == true) {
-								toAdd = true;
-								break;
-							}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				KeyRange rangeToRead = Standalone(KeyRangeRef(beginKeyToReadKeyServer, endKeyToReadKeyServer));
+				RangeResult readResult = co_await krmGetRanges(&tr,
+				                                               keyServersPrefix,
+				                                               rangeToRead,
+				                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+				                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
+				for (int i = 0; i < readResult.size() - 1; ++i) {
+					KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
+					Value valueToCheck = Standalone(readResult[i].value);
+					bool toAdd = false;
+					for (const auto& range : ranges) {
+						if (rangeToCheck.intersects(range) == true) {
+							toAdd = true;
+							break;
 						}
-						if (toAdd == true) {
-							res.push_back(std::make_pair(rangeToCheck, valueToCheck));
-						}
-						beginKeyToReadKeyServer = readResult[i + 1].key;
 					}
-					if (beginKeyToReadKeyServer >= endKeyToReadKeyServer) {
-						break;
+					if (toAdd == true) {
+						res.push_back(std::make_pair(rangeToCheck, valueToCheck));
 					}
-				} catch (Error& e) {
-					err = e;
+					beginKeyToReadKeyServer = readResult[i + 1].key;
 				}
-				if (err.isValid()) {
-					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryGetKeyLocationsForRangeList")
-					    .error(err)
-					    .detail("ClientCount", self->clientCount)
-					    .detail("ClientId", self->clientId);
-					co_await tr.onError(err);
+				if (beginKeyToReadKeyServer >= endKeyToReadKeyServer) {
+					break;
 				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryGetKeyLocationsForRangeList")
+				    .error(err)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ClientId", self->clientId);
+				co_await tr.onError(err);
 			}
 		}
 		co_return res;
@@ -131,16 +129,14 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		loop {
 			Transaction tr(cx);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			{
-				Error err;
-				try {
-					Version version = co_await tr.getReadVersion();
-					co_return version;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				Version version = co_await tr.getReadVersion();
+				co_return version;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -152,30 +148,28 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		std::vector<std::pair<KeyRange, Value>> shardLocationPairList;
 		int retryCount = 0;
 		loop {
-			{
-				Error err;
-				try {
-					shardLocationPairList.clear();
-					co_await store(shardLocationPairList, self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetKeyLocationListFailed")
-				    .error(err)
-				    .detail("RetryCount", retryCount)
-				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-				    .detail("ClientId", self->clientId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
-				co_await delay(5.0);
-				retryCount++;
-				if (retryCount > 50) {
-					throw timed_out();
-				}
+			Error err;
+			try {
+				shardLocationPairList.clear();
+				co_await store(shardLocationPairList, self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetKeyLocationListFailed")
+			    .error(err)
+			    .detail("RetryCount", retryCount)
+			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+			    .detail("ClientId", self->clientId)
+			    .detail("ClientCount", self->clientCount)
+			    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+			co_await delay(5.0);
+			retryCount++;
+			if (retryCount > 50) {
+				throw timed_out();
 			}
 		}
 
@@ -207,47 +201,45 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			std::unordered_map<UID, Tag> storageServerToTagMap; // populated only when version vector is enabled
 			retryCount = 0;
 			loop {
-				{
-					Error err;
-					try {
-						Transaction tr(cx);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-						ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-						decodeKeyServersValue(UIDtoTagMap,
-						                      shardLocationPairList[shardIdx].second,
-						                      sourceStorageServers,
-						                      destStorageServers,
-						                      false);
-						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-							storageServerToTagMap.reserve(UIDtoTagMap.size());
-							for (auto& it : UIDtoTagMap) {
-								storageServerToTagMap[decodeServerTagKey(it.key)] = decodeServerTagValue(it.value);
-							}
+				Error err;
+				try {
+					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+					decodeKeyServersValue(UIDtoTagMap,
+					                      shardLocationPairList[shardIdx].second,
+					                      sourceStorageServers,
+					                      destStorageServers,
+					                      false);
+					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+						storageServerToTagMap.reserve(UIDtoTagMap.size());
+						for (auto& it : UIDtoTagMap) {
+							storageServerToTagMap[decodeServerTagKey(it.key)] = decodeServerTagValue(it.value);
 						}
-						break;
-					} catch (Error& e) {
-						err = e;
 					}
-					if (err.code() == error_code_actor_cancelled) {
-						throw err;
-					}
-					TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetUIDtoTagMapFailed")
-					    .error(err)
-					    .detail("RetryCount", retryCount)
-					    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-					    .detail("ClientId", self->clientId)
-					    .detail("ClientCount", self->clientCount)
-					    .detail("ShardBegin", range.begin)
-					    .detail("ShardEnd", range.end)
-					    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
-					co_await delay(5.0);
-					retryCount++;
-					if (retryCount > 50) {
-						throw timed_out();
-					}
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
+				}
+				TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetUIDtoTagMapFailed")
+				    .error(err)
+				    .detail("RetryCount", retryCount)
+				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+				    .detail("ClientId", self->clientId)
+				    .detail("ClientCount", self->clientCount)
+				    .detail("ShardBegin", range.begin)
+				    .detail("ShardEnd", range.end)
+				    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+				co_await delay(5.0);
+				retryCount++;
+				if (retryCount > 50) {
+					throw timed_out();
 				}
 			}
 
@@ -278,56 +270,54 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			std::vector<StorageServerInterface> storageServerInterfaces;
 			retryCount = 0;
 			loop {
-				{
-					Error err;
-					try {
-						Transaction tr(cx);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						std::vector<Future<Optional<Value>>> serverListEntries;
-						for (int s = 0; s < storageServers.size(); s++)
-							serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
-						std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
-						for (int s = 0; s < serverListValues.size(); s++) {
-							if (!serverListValues[s].present()) {
-								TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetServerInterfaceFailed")
-								    .detail("SSID", storageServers[s])
-								    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-								    .detail("ClientId", self->clientId)
-								    .detail("ClientCount", self->clientCount)
-								    .detail("ShardBegin", range.begin)
-								    .detail("ShardEnd", range.end)
-								    .detail("RetryCount", retryCount)
-								    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
-								throw operation_failed();
-							}
-							storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
+				Error err;
+				try {
+					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int s = 0; s < storageServers.size(); s++)
+						serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
+					std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
+					for (int s = 0; s < serverListValues.size(); s++) {
+						if (!serverListValues[s].present()) {
+							TraceEvent(SevWarn, "ConsistencyCheckUrgent_TesterGetServerInterfaceFailed")
+							    .detail("SSID", storageServers[s])
+							    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+							    .detail("ClientId", self->clientId)
+							    .detail("ClientCount", self->clientCount)
+							    .detail("ShardBegin", range.begin)
+							    .detail("ShardEnd", range.end)
+							    .detail("RetryCount", retryCount)
+							    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+							throw operation_failed();
 						}
-						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-							for (int j = 0; j < storageServers.size(); j++) {
-								auto iter = storageServerToTagMap.find(storageServers[j]);
-								ASSERT_WE_THINK(iter != storageServerToTagMap.end());
-								// Note: This workload doesn't use the NativeAPI getRange() API for reading
-								// data, so we will need to explicitly populate the (ssid, tag) mapping in
-								// "cx" - this is so version vector APIs can correctly fetch the latest commit
-								// versions of storage servers.
-								cx->addSSIdTagMapping(storageServerInterfaces[j].id(), iter->second);
-							}
+						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
+					}
+					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+						for (int j = 0; j < storageServers.size(); j++) {
+							auto iter = storageServerToTagMap.find(storageServers[j]);
+							ASSERT_WE_THINK(iter != storageServerToTagMap.end());
+							// Note: This workload doesn't use the NativeAPI getRange() API for reading
+							// data, so we will need to explicitly populate the (ssid, tag) mapping in
+							// "cx" - this is so version vector APIs can correctly fetch the latest commit
+							// versions of storage servers.
+							cx->addSSIdTagMapping(storageServerInterfaces[j].id(), iter->second);
 						}
-						break;
-					} catch (Error& e) {
-						err = e;
 					}
-					if (err.code() == error_code_actor_cancelled) {
-						throw err;
-					}
-					co_await delay(5.0);
-					retryCount++;
-					if (retryCount > 10) {
-						// SS could be removed from the cluster
-						throw timed_out();
-					}
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
+				}
+				co_await delay(5.0);
+				retryCount++;
+				if (retryCount > 10) {
+					// SS could be removed from the cluster
+					throw timed_out();
 				}
 			}
 
@@ -338,200 +328,198 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			bool valueAvailableToCheck = true;
 			KeySelector begin = firstGreaterOrEqual(range.begin);
 			loop {
-				{
-					Error err;
-					try {
-						// Get the min version of the storage servers
-						Version version = co_await self->getVersion(cx);
+				Error err;
+				try {
+					// Get the min version of the storage servers
+					Version version = co_await self->getVersion(cx);
 
-						GetKeyValuesRequest req;
-						req.begin = begin;
-						req.end = firstGreaterOrEqual(range.end);
-						req.limit = 1e4;
-						if (g_network->isSimulated() && SERVER_KNOBS->CONSISTENCY_CHECK_BACKWARD_READ) {
-							req.limit = -1e4;
+					GetKeyValuesRequest req;
+					req.begin = begin;
+					req.end = firstGreaterOrEqual(range.end);
+					req.limit = 1e4;
+					if (g_network->isSimulated() && SERVER_KNOBS->CONSISTENCY_CHECK_BACKWARD_READ) {
+						req.limit = -1e4;
+					}
+					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+					req.version = version;
+					req.tags = TagSet();
+
+					// Try getting the entries in the specified range
+					std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
+					int j = 0;
+					for (j = 0; j < storageServerInterfaces.size(); j++) {
+						resetReply(req);
+						if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+							cx->getLatestCommitVersion(
+							    storageServerInterfaces[j], req.version, req.ssLatestCommitVersions);
 						}
-						req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-						req.version = version;
-						req.tags = TagSet();
+						keyValueFutures.push_back(
+						    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+					}
+					co_await waitForAll(keyValueFutures);
 
-						// Try getting the entries in the specified range
-						std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-						int j = 0;
-						for (j = 0; j < storageServerInterfaces.size(); j++) {
-							resetReply(req);
-							if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
-								cx->getLatestCommitVersion(
-								    storageServerInterfaces[j], req.version, req.ssLatestCommitVersions);
-							}
-							keyValueFutures.push_back(
-							    storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-						}
-						co_await waitForAll(keyValueFutures);
-
-						for (j = 0; j < keyValueFutures.size(); j++) {
-							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-							if (!rangeResult.present() || rangeResult.get().error.present()) {
-								valueAvailableToCheck = false;
-								TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
-								e.detail("ResultPresent", rangeResult.present());
-								e.detail("StorageServer", storageServerInterfaces[j].uniqueID);
-								if (rangeResult.present()) {
-									e.detail("ErrorPresent", rangeResult.get().error.present());
-									if (rangeResult.get().error.present()) {
-										e.detail("Error", rangeResult.get().error.get().what());
-									}
-								} else {
-									e.detail("ResultNotPresentWithError", rangeResult.getError().what());
-									if (g_network->isSimulated() &&
-									    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())
-									        ->failed) {
-										e.detail("MachineFailed", "True");
-									}
+					for (j = 0; j < keyValueFutures.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+						if (!rangeResult.present() || rangeResult.get().error.present()) {
+							valueAvailableToCheck = false;
+							TraceEvent e(SevInfo, "ConsistencyCheckUrgent_TesterGetRangeError");
+							e.detail("ResultPresent", rangeResult.present());
+							e.detail("StorageServer", storageServerInterfaces[j].uniqueID);
+							if (rangeResult.present()) {
+								e.detail("ErrorPresent", rangeResult.get().error.present());
+								if (rangeResult.get().error.present()) {
+									e.detail("Error", rangeResult.get().error.get().what());
 								}
-								break;
+							} else {
+								e.detail("ResultNotPresentWithError", rangeResult.getError().what());
+								if (g_network->isSimulated() &&
+								    g_simulator->getProcessByAddress(storageServerInterfaces[j].address())
+								        ->failed) {
+									e.detail("MachineFailed", "True");
+								}
 							}
-						}
-						if (!valueAvailableToCheck) {
-							failedRanges.insert(range, true);
-							TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardAddedToRetry")
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-							    .detail("ClientId", self->clientId)
-							    .detail("ClientCount", self->clientCount)
-							    .detail("ShardBegin", range.begin)
-							    .detail("ShardEnd", range.end)
-							    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
 							break;
 						}
+					}
+					if (!valueAvailableToCheck) {
+						failedRanges.insert(range, true);
+						TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterShardAddedToRetry")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
+						    .detail("ClientId", self->clientId)
+						    .detail("ClientCount", self->clientCount)
+						    .detail("ShardBegin", range.begin)
+						    .detail("ShardEnd", range.end)
+						    .detail("ConsistencyCheckEpoch", consistencyCheckEpoch);
+						break;
+					}
 
-						int firstValidServer = -1;
-						totalReadAmount = 0;
-						for (j = 0; j < keyValueFutures.size(); j++) {
-							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
-							ASSERT(rangeResult.present() && !rangeResult.get().error.present());
+					int firstValidServer = -1;
+					totalReadAmount = 0;
+					for (j = 0; j < keyValueFutures.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+						ASSERT(rangeResult.present() && !rangeResult.get().error.present());
 
-							GetKeyValuesReply current = rangeResult.get();
-							totalReadAmount += current.data.expectedSize();
-							// If we haven't encountered a valid storage server yet, then mark this as the baseline
-							// to compare against
-							if (firstValidServer == -1) {
-								firstValidServer = j;
-								GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-								shardKeyCompared += current.data.size();
-							} else {
-								// Compare this shard against the first
-								GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
-								if (current.data != reference.data || current.more != reference.more) {
-									// Data for trace event
-									// The number of keys unique to the current shard
-									int currentUniques = 0;
-									// The number of keys unique to the reference shard
-									int referenceUniques = 0;
-									// The number of keys in both shards with conflicting values
-									int valueMismatches = 0;
-									// The number of keys in both shards with matching values
-									int matchingKVPairs = 0;
-									// Last unique key on the current shard
-									KeyRef currentUniqueKey;
-									// Last unique key on the reference shard
-									KeyRef referenceUniqueKey;
-									// Last value mismatch
-									KeyRef valueMismatchKey;
+						GetKeyValuesReply current = rangeResult.get();
+						totalReadAmount += current.data.expectedSize();
+						// If we haven't encountered a valid storage server yet, then mark this as the baseline
+						// to compare against
+						if (firstValidServer == -1) {
+							firstValidServer = j;
+							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+							shardKeyCompared += current.data.size();
+						} else {
+							// Compare this shard against the first
+							GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+							if (current.data != reference.data || current.more != reference.more) {
+								// Data for trace event
+								// The number of keys unique to the current shard
+								int currentUniques = 0;
+								// The number of keys unique to the reference shard
+								int referenceUniques = 0;
+								// The number of keys in both shards with conflicting values
+								int valueMismatches = 0;
+								// The number of keys in both shards with matching values
+								int matchingKVPairs = 0;
+								// Last unique key on the current shard
+								KeyRef currentUniqueKey;
+								// Last unique key on the reference shard
+								KeyRef referenceUniqueKey;
+								// Last value mismatch
+								KeyRef valueMismatchKey;
 
-									// Loop indeces
-									int currentI = 0;
-									int referenceI = 0;
-									while (currentI < current.data.size() || referenceI < reference.data.size()) {
-										if (currentI >= current.data.size()) {
-											referenceUniqueKey = reference.data[referenceI].key;
-											referenceUniques++;
+								// Loop indeces
+								int currentI = 0;
+								int referenceI = 0;
+								while (currentI < current.data.size() || referenceI < reference.data.size()) {
+									if (currentI >= current.data.size()) {
+										referenceUniqueKey = reference.data[referenceI].key;
+										referenceUniques++;
+										referenceI++;
+									} else if (referenceI >= reference.data.size()) {
+										currentUniqueKey = current.data[currentI].key;
+										currentUniques++;
+										currentI++;
+									} else {
+										KeyValueRef currentKV = current.data[currentI];
+										KeyValueRef referenceKV = reference.data[referenceI];
+										if (currentKV.key == referenceKV.key) {
+											if (currentKV.value == referenceKV.value)
+												matchingKVPairs++;
+											else {
+												valueMismatchKey = currentKV.key;
+												valueMismatches++;
+											}
+											currentI++;
 											referenceI++;
-										} else if (referenceI >= reference.data.size()) {
-											currentUniqueKey = current.data[currentI].key;
+										} else if (currentKV.key < referenceKV.key) {
+											currentUniqueKey = currentKV.key;
 											currentUniques++;
 											currentI++;
 										} else {
-											KeyValueRef currentKV = current.data[currentI];
-											KeyValueRef referenceKV = reference.data[referenceI];
-											if (currentKV.key == referenceKV.key) {
-												if (currentKV.value == referenceKV.value)
-													matchingKVPairs++;
-												else {
-													valueMismatchKey = currentKV.key;
-													valueMismatches++;
-												}
-												currentI++;
-												referenceI++;
-											} else if (currentKV.key < referenceKV.key) {
-												currentUniqueKey = currentKV.key;
-												currentUniques++;
-												currentI++;
-											} else {
-												referenceUniqueKey = referenceKV.key;
-												referenceUniques++;
-												referenceI++;
-											}
+											referenceUniqueKey = referenceKV.key;
+											referenceUniques++;
+											referenceI++;
 										}
 									}
-
-									TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
-									    .setMaxEventLength(-1)
-									    .setMaxFieldLength(-1)
-									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
-									    .detail(format("StorageServer%d", firstValidServer).c_str(),
-									            storageServers[firstValidServer].toString())
-									    .detail("RangeBegin", req.begin.getKey())
-									    .detail("RangeEnd", req.end.getKey())
-									    .detail("VersionNumber", req.version)
-									    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-									    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-									    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-									    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
-									            referenceUniqueKey)
-									    .detail("ValueMismatches", valueMismatches)
-									    .detail("ValueMismatchKey", valueMismatchKey)
-									    .detail("MatchingKVPairs", matchingKVPairs)
-									    .detail("IsTSS",
-									            storageServerInterfaces[j].isTss() ||
-									                    storageServerInterfaces[firstValidServer].isTss()
-									                ? "True"
-									                : "False")
-									    .detail("ShardBegin", range.begin)
-									    .detail("ShardEnd", range.end);
 								}
+
+								TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
+								    .setMaxEventLength(-1)
+								    .setMaxFieldLength(-1)
+								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
+								    .detail(format("StorageServer%d", firstValidServer).c_str(),
+								            storageServers[firstValidServer].toString())
+								    .detail("RangeBegin", req.begin.getKey())
+								    .detail("RangeEnd", req.end.getKey())
+								    .detail("VersionNumber", req.version)
+								    .detail(format("Server%dUniques", j).c_str(), currentUniques)
+								    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
+								    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
+								    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
+								            referenceUniqueKey)
+								    .detail("ValueMismatches", valueMismatches)
+								    .detail("ValueMismatchKey", valueMismatchKey)
+								    .detail("MatchingKVPairs", matchingKVPairs)
+								    .detail("IsTSS",
+								            storageServerInterfaces[j].isTss() ||
+								                    storageServerInterfaces[firstValidServer].isTss()
+								                ? "True"
+								                : "False")
+								    .detail("ShardBegin", range.begin)
+								    .detail("ShardEnd", range.end);
 							}
 						}
-
-						// RateKeeping
-						co_await rateLimiter->getAllowance(totalReadAmount);
-
-						shardReadAmount += totalReadAmount;
-
-						// Advance to the next set of entries
-						ASSERT(firstValidServer != -1);
-						if (keyValueFutures[firstValidServer].get().get().more) {
-							VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
-							ASSERT(result.size() > 0);
-							begin = firstGreaterThan(result[result.size() - 1].key);
-							ASSERT(begin.getKey() != allKeys.end);
-						} else {
-							break;
-						}
-
-					} catch (Error& e) {
-						err = e;
 					}
-					if (!err.isValid()) {
-						continue;
+
+					// RateKeeping
+					co_await rateLimiter->getAllowance(totalReadAmount);
+
+					shardReadAmount += totalReadAmount;
+
+					// Advance to the next set of entries
+					ASSERT(firstValidServer != -1);
+					if (keyValueFutures[firstValidServer].get().get().more) {
+						VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
+						ASSERT(result.size() > 0);
+						begin = firstGreaterThan(result[result.size() - 1].key);
+						ASSERT(begin.getKey() != allKeys.end);
+					} else {
+						break;
 					}
-					if (err.code() == error_code_actor_cancelled) {
-						throw err;
-					}
-					TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryDataConsistency").error(err);
-					co_await delay(5.0);
+
+				} catch (Error& e) {
+					err = e;
 				}
+				if (!err.isValid()) {
+					continue;
+				}
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
+				}
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterRetryDataConsistency").error(err);
+				co_await delay(5.0);
 			}
 
 			// Step 4: if the shard failed to check, add it to retry queue

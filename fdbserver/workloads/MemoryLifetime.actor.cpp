@@ -61,105 +61,103 @@ struct MemoryLifetime : KVWorkload {
 		Reverse reverse = Reverse::False;
 		Snapshot snapshot = Snapshot::False;
 		loop {
-			{
-				Error err;
-				try {
+			Error err;
+			try {
+				tr = ReadYourWritesTransaction(cx);
+				int op = deterministicRandom()->randomInt(0, 4);
+				if (op == 0) {
+					reverse.set(deterministicRandom()->coinflip());
+					Key getRange_startKey = self->getRandomKey();
+					KeyRange getRange_queryRange = reverse
+					                                   ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
+					                                   : KeyRangeRef(getRange_startKey, normalKeys.end);
+					bool getRange_randomStart = deterministicRandom()->random01();
+					Value getRange_newValue = self->randomValue();
+					snapshot.set(deterministicRandom()->coinflip());
+
+					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", reverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", snapshot);
+					if (getRange_randomStart)
+						tr.set(getRange_startKey, getRange_newValue);
+					RangeResult getRange_res1 =
+					    co_await tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse);
 					tr = ReadYourWritesTransaction(cx);
-					int op = deterministicRandom()->randomInt(0, 4);
-					if (op == 0) {
-						reverse.set(deterministicRandom()->coinflip());
-						Key getRange_startKey = self->getRandomKey();
-						KeyRange getRange_queryRange = reverse
-						                                   ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
-						                                   : KeyRangeRef(getRange_startKey, normalKeys.end);
-						bool getRange_randomStart = deterministicRandom()->random01();
-						Value getRange_newValue = self->randomValue();
-						snapshot.set(deterministicRandom()->coinflip());
-
-						//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", reverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", snapshot);
-						if (getRange_randomStart)
-							tr.set(getRange_startKey, getRange_newValue);
-						RangeResult getRange_res1 =
-						    co_await tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse);
-						tr = ReadYourWritesTransaction(cx);
-						co_await delay(0.01);
-						if (getRange_randomStart)
-							tr.set(getRange_startKey, getRange_newValue);
-						RangeResult getRange_res2 =
-						    co_await tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse);
-						ASSERT(getRange_res1.size() == getRange_res2.size());
-						for (int i = 0; i < getRange_res1.size(); i++) {
-							if (getRange_res1[i].key != getRange_res2[i].key) {
-								TraceEvent(SevError, "MemoryLifetimeCheckKeyError")
-								    .detail("Key1", printable(getRange_res1[i].key))
-								    .detail("Key2", printable(getRange_res2[i].key))
-								    .detail("Value1", getRange_res1[i].value.size())
-								    .detail("Value2", getRange_res2[i].value.size())
-								    .detail("I", i)
-								    .detail("Size", getRange_res2.size());
-								ASSERT(false);
-							}
-							if (getRange_res1[i].value != getRange_res2[i].value) {
-								TraceEvent(SevError, "MemoryLifetimeCheckValueError")
-								    .detail("Key1", printable(getRange_res1[i].key))
-								    .detail("Key2", printable(getRange_res2[i].key))
-								    .detail("Value1", getRange_res1[i].value.size())
-								    .detail("Value2", getRange_res2[i].value.size())
-								    .detail("I", i)
-								    .detail("Size", getRange_res2.size());
-								ASSERT(false);
-							}
+					co_await delay(0.01);
+					if (getRange_randomStart)
+						tr.set(getRange_startKey, getRange_newValue);
+					RangeResult getRange_res2 =
+					    co_await tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse);
+					ASSERT(getRange_res1.size() == getRange_res2.size());
+					for (int i = 0; i < getRange_res1.size(); i++) {
+						if (getRange_res1[i].key != getRange_res2[i].key) {
+							TraceEvent(SevError, "MemoryLifetimeCheckKeyError")
+							    .detail("Key1", printable(getRange_res1[i].key))
+							    .detail("Key2", printable(getRange_res2[i].key))
+							    .detail("Value1", getRange_res1[i].value.size())
+							    .detail("Value2", getRange_res2[i].value.size())
+							    .detail("I", i)
+							    .detail("Size", getRange_res2.size());
+							ASSERT(false);
 						}
-					} else if (op == 1) {
-						Key get_startKey = self->getRandomKey();
-						bool get_randomStart = deterministicRandom()->random01();
-						Value get_newValue = self->randomValue();
-						snapshot.set(deterministicRandom()->coinflip());
-
-						if (get_randomStart)
-							tr.set(get_startKey, get_newValue);
-						Optional<Value> get_res1 = co_await tr.get(get_startKey, snapshot);
-						tr = ReadYourWritesTransaction(cx);
-						co_await delay(0.01);
-						if (get_randomStart)
-							tr.set(get_startKey, get_newValue);
-						Optional<Value> get_res2 = co_await tr.get(get_startKey, snapshot);
-						ASSERT(get_res1 == get_res2);
-					} else if (op == 2) {
-						KeySelector getKey_selector = self->getRandomKeySelector();
-						bool getKey_randomStart = deterministicRandom()->random01();
-						Value getKey_newValue = self->randomValue();
-						snapshot.set(deterministicRandom()->coinflip());
-
-						if (getKey_randomStart)
-							tr.set(getKey_selector.getKey(), getKey_newValue);
-						Key getKey_res1 = co_await tr.getKey(getKey_selector, snapshot);
-						tr = ReadYourWritesTransaction(cx);
-						co_await delay(0.01);
-						if (getKey_randomStart)
-							tr.set(getKey_selector.getKey(), getKey_newValue);
-						Key getKey_res2 = co_await tr.getKey(getKey_selector, snapshot);
-						ASSERT(getKey_res1 == getKey_res2);
-					} else if (op == 3) {
-						Key getAddress_startKey = self->getRandomKey();
-						Standalone<VectorRef<const char*>> getAddress_res1 =
-						    co_await tr.getAddressesForKey(getAddress_startKey);
-						tr = ReadYourWritesTransaction(cx);
-						co_await delay(0.01);
-						// we cannot check the contents like other operations so just touch all the values to make sure
-						// we dont crash
-						for (int i = 0; i < getAddress_res1.size(); i++) {
-							ASSERT(NetworkAddress::parseOptional(getAddress_res1[i]).present());
+						if (getRange_res1[i].value != getRange_res2[i].value) {
+							TraceEvent(SevError, "MemoryLifetimeCheckValueError")
+							    .detail("Key1", printable(getRange_res1[i].key))
+							    .detail("Key2", printable(getRange_res2[i].key))
+							    .detail("Value1", getRange_res1[i].value.size())
+							    .detail("Value2", getRange_res2[i].value.size())
+							    .detail("I", i)
+							    .detail("Size", getRange_res2.size());
+							ASSERT(false);
 						}
 					}
-					if (now() - startTime > self->testDuration)
-						co_return;
-				} catch (Error& e) {
-					err = e;
+				} else if (op == 1) {
+					Key get_startKey = self->getRandomKey();
+					bool get_randomStart = deterministicRandom()->random01();
+					Value get_newValue = self->randomValue();
+					snapshot.set(deterministicRandom()->coinflip());
+
+					if (get_randomStart)
+						tr.set(get_startKey, get_newValue);
+					Optional<Value> get_res1 = co_await tr.get(get_startKey, snapshot);
+					tr = ReadYourWritesTransaction(cx);
+					co_await delay(0.01);
+					if (get_randomStart)
+						tr.set(get_startKey, get_newValue);
+					Optional<Value> get_res2 = co_await tr.get(get_startKey, snapshot);
+					ASSERT(get_res1 == get_res2);
+				} else if (op == 2) {
+					KeySelector getKey_selector = self->getRandomKeySelector();
+					bool getKey_randomStart = deterministicRandom()->random01();
+					Value getKey_newValue = self->randomValue();
+					snapshot.set(deterministicRandom()->coinflip());
+
+					if (getKey_randomStart)
+						tr.set(getKey_selector.getKey(), getKey_newValue);
+					Key getKey_res1 = co_await tr.getKey(getKey_selector, snapshot);
+					tr = ReadYourWritesTransaction(cx);
+					co_await delay(0.01);
+					if (getKey_randomStart)
+						tr.set(getKey_selector.getKey(), getKey_newValue);
+					Key getKey_res2 = co_await tr.getKey(getKey_selector, snapshot);
+					ASSERT(getKey_res1 == getKey_res2);
+				} else if (op == 3) {
+					Key getAddress_startKey = self->getRandomKey();
+					Standalone<VectorRef<const char*>> getAddress_res1 =
+					    co_await tr.getAddressesForKey(getAddress_startKey);
+					tr = ReadYourWritesTransaction(cx);
+					co_await delay(0.01);
+					// we cannot check the contents like other operations so just touch all the values to make sure
+					// we dont crash
+					for (int i = 0; i < getAddress_res1.size(); i++) {
+						ASSERT(NetworkAddress::parseOptional(getAddress_res1[i]).present());
+					}
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				if (now() - startTime > self->testDuration)
+					co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}

@@ -263,37 +263,35 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					std::vector<Future<Optional<Value>>> checkpointEntries;
-					for (const UID& id : checkpointIds) {
-						checkpointEntries.push_back(tr.get(checkpointKeyFor(id)));
-					}
-					std::vector<Optional<Value>> checkpointValues = co_await getAll(checkpointEntries);
-
-					for (int i = 0; i < checkpointIds.size(); ++i) {
-						const auto& value = checkpointValues[i];
-						if (!value.present()) {
-							TraceEvent(SevWarnAlways, "CheckpointNotFound");
-							continue;
-						}
-						CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
-						const Key key = checkpointKeyFor(checkpoint.checkpointID);
-						// Setting the state as CheckpointMetaData::Deleting will trigger private mutations to instruct
-						// all storage servers to delete their local checkpoints.
-						checkpoint.setState(CheckpointMetaData::Deleting);
-						tr.set(key, checkpointValue(checkpoint));
-						tr.clear(singleKeyRange(key));
-						TraceEvent(SevDebug, "DataMoveDeleteCheckpoint").detail("Checkpoint", checkpoint.toString());
-					}
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				std::vector<Future<Optional<Value>>> checkpointEntries;
+				for (const UID& id : checkpointIds) {
+					checkpointEntries.push_back(tr.get(checkpointKeyFor(id)));
 				}
-				co_await tr.onError(err);
+				std::vector<Optional<Value>> checkpointValues = co_await getAll(checkpointEntries);
+
+				for (int i = 0; i < checkpointIds.size(); ++i) {
+					const auto& value = checkpointValues[i];
+					if (!value.present()) {
+						TraceEvent(SevWarnAlways, "CheckpointNotFound");
+						continue;
+					}
+					CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
+					const Key key = checkpointKeyFor(checkpoint.checkpointID);
+					// Setting the state as CheckpointMetaData::Deleting will trigger private mutations to instruct
+					// all storage servers to delete their local checkpoints.
+					checkpoint.setState(CheckpointMetaData::Deleting);
+					tr.set(key, checkpointValue(checkpoint));
+					tr.clear(singleKeyRange(key));
+					TraceEvent(SevDebug, "DataMoveDeleteCheckpoint").detail("Checkpoint", checkpoint.toString());
+				}
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 	}
@@ -314,20 +312,18 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Version version{ 0 };
 
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					co_await createCheckpoint(&tr, checkpointRanges, format, dataMoveId);
-					co_await tr.commit();
-					version = tr.getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				co_await createCheckpoint(&tr, checkpointRanges, format, dataMoveId);
+				co_await tr.commit();
+				version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		// Fetch checkpoint meta data.
@@ -461,22 +457,20 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		UID debugID;
 		loop {
 			debugID = deterministicRandom()->randomUniqueID();
-			{
-				Error err;
-				try {
-					tr->debugTransaction(debugID);
-					for (const auto& [key, value] : *kvs) {
-						tr->set(key, value);
-					}
-					co_await tr->commit();
-					version = tr->getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr->debugTransaction(debugID);
+				for (const auto& [key, value] : *kvs) {
+					tr->set(key, value);
 				}
-				TraceEvent("TestCommitError").errorUnsuppressed(err);
-				co_await tr->onError(err);
+				co_await tr->commit();
+				version = tr->getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("TestCommitError").errorUnsuppressed(err);
+			co_await tr->onError(err);
 		}
 
 		TraceEvent("PopulateTestDataDone")
@@ -491,24 +485,22 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		UID debugID;
 		loop {
 			debugID = deterministicRandom()->randomUniqueID();
-			{
-				Error err;
-				try {
-					TraceEvent("TestValidateDataBegin").detail("DebugID", debugID);
-					tr.debugTransaction(debugID);
-					RangeResult res = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
+			Error err;
+			try {
+				TraceEvent("TestValidateDataBegin").detail("DebugID", debugID);
+				tr.debugTransaction(debugID);
+				RangeResult res = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
 
-					for (const auto& kv : res) {
-						ASSERT((*kvs)[kv.key] == kv.value);
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
+				for (const auto& kv : res) {
+					ASSERT((*kvs)[kv.key] == kv.value);
 				}
-				TraceEvent("TestCommitError").errorUnsuppressed(err);
-				co_await tr.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("TestCommitError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 
 		TraceEvent("ValidateTestDataDone").detail("DebugID", debugID);
@@ -524,26 +516,24 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
-			{
-				Error err;
-				try {
-					Version _readVersion = co_await tr.getReadVersion();
-					readVersion = _readVersion;
-					Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
-					const bool equal = !expectedValue.isError() && res == expectedValue.get();
-					if (!equal) {
-						self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				Version _readVersion = co_await tr.getReadVersion();
+				readVersion = _readVersion;
+				Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
+				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				if (!equal) {
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
-				TraceEvent("TestReadError").errorUnsuppressed(err);
-				if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
-					break;
-				}
-				co_await tr.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("TestReadError").errorUnsuppressed(err);
+			if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
+				break;
+			}
+			co_await tr.onError(err);
 		}
 
 		TraceEvent("TestReadSuccess").detail("Version", readVersion);
@@ -557,27 +547,25 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		UID debugID;
 		loop {
 			debugID = deterministicRandom()->randomUniqueID();
-			{
-				Error err;
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->debugTransaction(debugID);
-					if (value.present()) {
-						tr->set(key, value.get());
-						tr->set("Test?"_sr, value.get());
-						tr->set(key, value.get());
-					} else {
-						tr->clear(key);
-					}
-					co_await timeoutError(tr->commit(), 30.0);
-					version = tr->getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->debugTransaction(debugID);
+				if (value.present()) {
+					tr->set(key, value.get());
+					tr->set("Test?"_sr, value.get());
+					tr->set(key, value.get());
+				} else {
+					tr->clear(key);
 				}
-				TraceEvent("TestCommitError").errorUnsuppressed(err);
-				co_await tr->onError(err);
+				co_await timeoutError(tr->commit(), 30.0);
+				version = tr->getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("TestCommitError").errorUnsuppressed(err);
+			co_await tr->onError(err);
 		}
 
 		TraceEvent("TestCommitSuccess").detail("CommitVersion", tr->getCommittedVersion()).detail("DebugID", debugID);
@@ -613,66 +601,64 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Transaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					TraceEvent("TestMoveShard").detail("Range", keys.toString());
-					MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
+			Error err;
+			try {
+				TraceEvent("TestMoveShard").detail("Range", keys.toString());
+				MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
 
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					RangeResult dataMoves = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
-					Version readVersion = co_await tr.getReadVersion();
-					TraceEvent("TestMoveShardReadDataMoves")
-					    .detail("DataMoves", dataMoves.size())
-					    .detail("ReadVersion", readVersion);
-					int i = 0;
-					for (; i < dataMoves.size(); ++i) {
-						UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
-						DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
-						ASSERT(dataMoveId == dataMove.id);
-						TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
-						if (dataMove.ranges.empty()) {
-							// This dataMove cancellation is delayed to background cancellation
-							// For this case, the dataMove has empty ranges but it is in Deleting phase
-							// We simply bypass this case
-							ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
-							TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
-							continue;
-						}
-						co_await cleanUpDataMove(cx,
-						                         dataMoveId,
-						                         moveKeysLock,
-						                         &self->cleanUpDataMoveParallelismLock,
-						                         dataMove.ranges.front(),
-						                         &ddEnabledState);
-						TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				RangeResult dataMoves = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				Version readVersion = co_await tr.getReadVersion();
+				TraceEvent("TestMoveShardReadDataMoves")
+				    .detail("DataMoves", dataMoves.size())
+				    .detail("ReadVersion", readVersion);
+				int i = 0;
+				for (; i < dataMoves.size(); ++i) {
+					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
+					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
+					ASSERT(dataMoveId == dataMove.id);
+					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
+					if (dataMove.ranges.empty()) {
+						// This dataMove cancellation is delayed to background cancellation
+						// For this case, the dataMove has empty ranges but it is in Deleting phase
+						// We simply bypass this case
+						ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
+						TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
+						continue;
 					}
+					co_await cleanUpDataMove(cx,
+					                         dataMoveId,
+					                         moveKeysLock,
+					                         &self->cleanUpDataMoveParallelismLock,
+					                         dataMove.ranges.front(),
+					                         &ddEnabledState);
+					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
+				}
 
-					TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
-					co_await moveKeys(cx,
-					                  MoveKeysParams(dataMoveId,
-					                                 std::vector<KeyRange>{ keys },
-					                                 dests,
-					                                 dests,
-					                                 moveKeysLock,
-					                                 Promise<Void>(),
-					                                 &self->startMoveKeysParallelismLock,
-					                                 &self->finishMoveKeysParallelismLock,
-					                                 false,
-					                                 deterministicRandom()->randomUniqueID(), // for logging only
-					                                 &ddEnabledState,
-					                                 CancelConflictingDataMoves::False,
-					                                 Optional<BulkLoadTaskState>()));
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.code() == error_code_movekeys_conflict) {
-					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
-					tr.reset();
-				} else {
-					co_await tr.onError(err);
-				}
+				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
+				co_await moveKeys(cx,
+				                  MoveKeysParams(dataMoveId,
+				                                 std::vector<KeyRange>{ keys },
+				                                 dests,
+				                                 dests,
+				                                 moveKeysLock,
+				                                 Promise<Void>(),
+				                                 &self->startMoveKeysParallelismLock,
+				                                 &self->finishMoveKeysParallelismLock,
+				                                 false,
+				                                 deterministicRandom()->randomUniqueID(), // for logging only
+				                                 &ddEnabledState,
+				                                 CancelConflictingDataMoves::False,
+				                                 Optional<BulkLoadTaskState>()));
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.code() == error_code_movekeys_conflict) {
+				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				tr.reset();
+			} else {
+				co_await tr.onError(err);
 			}
 		}
 
@@ -684,20 +670,18 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	Future<std::vector<StorageServerShard>> getStorageServerShards(Database cx, UID ssId, KeyRange range) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(ssId));
-					ASSERT(serverListValue.present());
-					StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-					GetShardStateRequest req(range, GetShardStateRequest::READABLE, true);
-					GetShardStateReply rep = co_await ssi.getShardState.getReply(req, TaskPriority::DefaultEndpoint);
-					co_return rep.shards;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(ssId));
+				ASSERT(serverListValue.present());
+				StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+				GetShardStateRequest req(range, GetShardStateRequest::READABLE, true);
+				GetShardStateReply rep = co_await ssi.getShardState.getReply(req, TaskPriority::DefaultEndpoint);
+				co_return rep.shards;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

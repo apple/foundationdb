@@ -88,73 +88,71 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				TraceEvent("QuitEarlyNotCompleteServerExclude").log();
 				break;
 			}
-			{
-				Error err;
-				try {
-					servers.clear();
-					// including an invalid address means include everything(clear all exclude prefix)
-					co_await includeServers(cx, std::vector<AddressExclusion>(1));
+			Error err;
+			try {
+				servers.clear();
+				// including an invalid address means include everything(clear all exclude prefix)
+				co_await includeServers(cx, std::vector<AddressExclusion>(1));
 
-					tr = Transaction(cx);
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr = Transaction(cx);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					// get all storage servers
-					std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-					    co_await NativeAPI::getServerListAndProcessClasses(&tr);
-					for (auto& [ssi, p] : results) {
-						if (!g_simulator->protectedAddresses.contains(ssi.address())) {
-							servers.insert(AddressExclusion(ssi.address().ip, ssi.address().port));
+				// get all storage servers
+				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
+				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
+				for (auto& [ssi, p] : results) {
+					if (!g_simulator->protectedAddresses.contains(ssi.address())) {
+						servers.insert(AddressExclusion(ssi.address().ip, ssi.address().port));
+					}
+				}
+
+				// get all TLogs and remove from SS candidate set
+				Optional<Standalone<StringRef>> value = co_await tr.get(logsKey);
+				ASSERT(value.present());
+				auto logs = decodeLogsValue(value.get());
+				for (auto const& log : logs.first) {
+					servers.erase(AddressExclusion(log.second.ip, log.second.port));
+				}
+
+				// get all log routers and remove from SS candidate set
+				for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
+					for (const auto& logRouter : tLogSet.logRouters) {
+						if (logRouter.present()) {
+							const auto& logRouterInterf = logRouter.interf();
+							servers.erase(
+							    AddressExclusion(logRouterInterf.address().ip, logRouterInterf.address().port));
 						}
 					}
-
-					// get all TLogs and remove from SS candidate set
-					Optional<Standalone<StringRef>> value = co_await tr.get(logsKey);
-					ASSERT(value.present());
-					auto logs = decodeLogsValue(value.get());
-					for (auto const& log : logs.first) {
-						servers.erase(AddressExclusion(log.second.ip, log.second.port));
-					}
-
-					// get all log routers and remove from SS candidate set
-					for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
-						for (const auto& logRouter : tLogSet.logRouters) {
-							if (logRouter.present()) {
-								const auto& logRouterInterf = logRouter.interf();
-								servers.erase(
-								    AddressExclusion(logRouterInterf.address().ip, logRouterInterf.address().port));
-							}
-						}
-					}
-
-					if (servers.empty()) {
-						// sometimes all SS are running alongside a TLog, cannot exclude any of them, so quit
-						TraceEvent("QuitEarlyNoEligibleSSToExclude").log();
-						break;
-					}
-
-					// find a SS and exclude it
-					it = std::next(servers.begin(), deterministicRandom()->randomInt(0, servers.size()));
-					co_await excludeServers(cx, std::vector<AddressExclusion>{ *it });
-					// timeoutError() is needed because sometimes excluding process can take forever
-					std::set<NetworkAddress> inProgress = co_await timeoutError(
-					    checkForExcludingServers(cx, std::vector<AddressExclusion>{ *it }, true), timeout);
-					ASSERT(inProgress.empty());
-					if (--round <= 0) {
-						break;
-					}
-				} catch (Error& e) {
-					err = e;
 				}
-				if (err.isValid() && err.code() == error_code_timed_out) {
-					// it might never be excluded from serverList
-					timeoutCnt++;
-					continue;
+
+				if (servers.empty()) {
+					// sometimes all SS are running alongside a TLog, cannot exclude any of them, so quit
+					TraceEvent("QuitEarlyNoEligibleSSToExclude").log();
+					break;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
+
+				// find a SS and exclude it
+				it = std::next(servers.begin(), deterministicRandom()->randomInt(0, servers.size()));
+				co_await excludeServers(cx, std::vector<AddressExclusion>{ *it });
+				// timeoutError() is needed because sometimes excluding process can take forever
+				std::set<NetworkAddress> inProgress = co_await timeoutError(
+				    checkForExcludingServers(cx, std::vector<AddressExclusion>{ *it }, true), timeout);
+				ASSERT(inProgress.empty());
+				if (--round <= 0) {
+					break;
 				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid() && err.code() == error_code_timed_out) {
+				// it might never be excluded from serverList
+				timeoutCnt++;
+				continue;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 		// if it is still in the middle of a exclude, then DD cannot finish and test would timeout

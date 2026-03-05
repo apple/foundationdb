@@ -246,65 +246,63 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));
 		Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get("futures"_sr)));
 
-		{
-			Error err;
-			try {
-				if (self->clientId == 0) {
-					TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
-					co_await taskBucket->clear(cx);
+		Error err;
+		try {
+			if (self->clientId == 0) {
+				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
+				co_await taskBucket->clear(cx);
 
-					TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
-					co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-						return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount);
-					});
+				TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+					return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount);
+				});
 
-					TraceEvent("TaskBucketCorrectness").detail("RunningTasks", "...");
-				}
+				TraceEvent("TaskBucketCorrectness").detail("RunningTasks", "...");
+			}
 
-				loop {
-					{
-						Error err;
-						try {
-							bool oneTaskDone = co_await taskBucket->doOne(cx, futureBucket);
-							if (!oneTaskDone) {
-								bool isEmpty = co_await taskBucket->isEmpty(cx);
-								if (isEmpty) {
-									co_await delay(5.0);
-									bool isFutureEmpty = co_await futureBucket->isEmpty(cx);
-									if (isFutureEmpty)
-										break;
-									else {
-										co_await TaskBucket::debugPrintRange(
-										    cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId)));
-										TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
-									}
-								} else {
-									co_await delay(1.0);
+			loop {
+				{
+					Error err;
+					try {
+						bool oneTaskDone = co_await taskBucket->doOne(cx, futureBucket);
+						if (!oneTaskDone) {
+							bool isEmpty = co_await taskBucket->isEmpty(cx);
+							if (isEmpty) {
+								co_await delay(5.0);
+								bool isFutureEmpty = co_await futureBucket->isEmpty(cx);
+								if (isFutureEmpty)
+									break;
+								else {
+									co_await TaskBucket::debugPrintRange(
+									    cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId)));
+									TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
 								}
+							} else {
+								co_await delay(1.0);
 							}
-						} catch (Error& e) {
-							err = e;
 						}
-						if (err.isValid()) {
-							if (err.code() == error_code_timed_out)
-								TraceEvent(SevWarn, "TaskBucketCorrectness").error(err);
-							else
-								co_await tr->onError(err);
-						}
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.isValid()) {
+						if (err.code() == error_code_timed_out)
+							TraceEvent(SevWarn, "TaskBucketCorrectness").error(err);
+						else
+							co_await tr->onError(err);
 					}
 				}
+			}
 
-				if (self->clientId == 0) {
-					TraceEvent("TaskBucketCorrectness").detail("NotTasksRemain", "...");
-					co_await TaskBucket::debugPrintRange(cx, StringRef(), StringRef());
-				}
-			} catch (Error& e) {
-				err = e;
+			if (self->clientId == 0) {
+				TraceEvent("TaskBucketCorrectness").detail("NotTasksRemain", "...");
+				co_await TaskBucket::debugPrintRange(cx, StringRef(), StringRef());
 			}
-			if (err.isValid()) {
-				TraceEvent(SevError, "TaskBucketCorrectness").error(err);
-				co_await tr->onError(err);
-			}
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			TraceEvent(SevError, "TaskBucketCorrectness").error(err);
+			co_await tr->onError(err);
 		}
 
 	}

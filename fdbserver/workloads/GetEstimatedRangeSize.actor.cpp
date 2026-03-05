@@ -97,24 +97,22 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		double totalDelay = 0.0;
 
 		loop {
-			{
-				Error err;
-				try {
-					int64_t size = co_await tr.getEstimatedRangeSizeBytes(normalKeys);
-					TraceEvent(SevDebug, "GetSizeResult").detail("Size", size);
-					if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
-						totalDelay += 5.0;
-						co_await delay(5.0);
-					} else {
-						co_return size;
-					}
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				int64_t size = co_await tr.getEstimatedRangeSizeBytes(normalKeys);
+				TraceEvent(SevDebug, "GetSizeResult").detail("Size", size);
+				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
+					totalDelay += 5.0;
+					co_await delay(5.0);
+				} else {
+					co_return size;
 				}
-				if (err.isValid()) {
-					TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
-					co_await tr.onError(err);
-				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
+				co_await tr.onError(err);
 			}
 		}
 	}

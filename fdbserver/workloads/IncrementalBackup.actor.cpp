@@ -104,16 +104,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 			Version v{ 0 };
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						co_await store(v, tr.getReadVersion());
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					co_await store(v, tr.getReadVersion());
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 			loop {
 				// Wait for backup container to be created and avoid race condition
@@ -219,19 +217,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 				Transaction clearTr(cx);
 				// Clear Relevant System Keys
 				loop {
-					{
-						Error err;
-						try {
-							clearTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-							clearTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							clearTr.clear(fileBackupPrefixRange);
-							co_await clearTr.commit();
-							break;
-						} catch (Error& e) {
-							err = e;
-						}
-						co_await clearTr.onError(err);
+					Error err;
+					try {
+						clearTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						clearTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						clearTr.clear(fileBackupPrefixRange);
+						co_await clearTr.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					co_await clearTr.onError(err);
 				}
 			}
 			Reference<IBackupContainer> backupContainer;
@@ -249,34 +245,32 @@ struct IncrementalBackupWorkload : TestWorkload {
 				TraceEvent("IBackupReadSystemKeys").log();
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				loop {
-					{
-						Error err;
-						try {
-							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-							Optional<Value> writeFlag = co_await tr->get(writeRecoveryKey);
-							Optional<Value> versionValue = co_await tr->get(snapshotEndVersionKey);
-							TraceEvent("IBackupCheckSpecialKeys")
-							    .detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
-							    .detail("EndVersionValue",
-							            versionValue.present() ? versionValue.get().toString() : "N/A");
-							if (!versionValue.present()) {
-								TraceEvent("IBackupCheckSpecialKeysFailure").log();
-								// Snapshot failed to write to special keys, possibly due to snapshot itself failing
-								throw key_not_found();
-							}
-							beginVersion = BinaryReader::fromStringRef<Version>(versionValue.get(), Unversioned());
-							TraceEvent("IBackupCheckBeginVersion").detail("Version", beginVersion);
-							break;
-						} catch (Error& e) {
-							err = e;
+					Error err;
+					try {
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+						Optional<Value> writeFlag = co_await tr->get(writeRecoveryKey);
+						Optional<Value> versionValue = co_await tr->get(snapshotEndVersionKey);
+						TraceEvent("IBackupCheckSpecialKeys")
+						    .detail("WriteRecoveryValue", writeFlag.present() ? writeFlag.get().toString() : "N/A")
+						    .detail("EndVersionValue",
+						            versionValue.present() ? versionValue.get().toString() : "N/A");
+						if (!versionValue.present()) {
+							TraceEvent("IBackupCheckSpecialKeysFailure").log();
+							// Snapshot failed to write to special keys, possibly due to snapshot itself failing
+							throw key_not_found();
 						}
-						TraceEvent("IBackupReadSystemKeysError").error(err);
-						if (err.code() == error_code_key_not_found) {
-							throw err;
-						}
-						co_await tr->onError(err);
+						beginVersion = BinaryReader::fromStringRef<Version>(versionValue.get(), Unversioned());
+						TraceEvent("IBackupCheckBeginVersion").detail("Version", beginVersion);
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					TraceEvent("IBackupReadSystemKeysError").error(err);
+					if (err.code() == error_code_key_not_found) {
+						throw err;
+					}
+					co_await tr->onError(err);
 				}
 			}
 			TraceEvent("IBackupStartListContainersAttempt").log();

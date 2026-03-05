@@ -95,23 +95,21 @@ struct SidebandWorkload : TestWorkload {
 		wr << self->interf;
 		Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
-			{
-				Error err;
-				try {
-					Optional<Value> val = co_await tr.get(StringRef(format("Sideband/Client/%d", self->clientId)));
-					if (val.present()) {
-						if (val.get() != serializedInterface)
-							throw operation_failed();
-						break;
-					}
-					tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
-					co_await tr.commit();
+			Error err;
+			try {
+				Optional<Value> val = co_await tr.get(StringRef(format("Sideband/Client/%d", self->clientId)));
+				if (val.present()) {
+					if (val.get() != serializedInterface)
+						throw operation_failed();
 					break;
-				} catch (Error& e) {
-					err = e;
 				}
-				co_await tr.onError(err);
+				tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 		TraceEvent("SidebandPersisted", self->interf.id()).detail("ClientIdx", self->clientId);
 	}
@@ -119,24 +117,22 @@ struct SidebandWorkload : TestWorkload {
 	Future<SidebandInterface> fetchSideband(SidebandWorkload* self, Database cx) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					Optional<Value> val = co_await tr.get(
-					    StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount)));
-					if (!val.present()) {
-						throw operation_failed();
-					}
-					SidebandInterface sideband;
-					BinaryReader br(val.get(), IncludeVersion());
-					br >> sideband;
-					TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
-					co_return sideband;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				Optional<Value> val = co_await tr.get(
+				    StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount)));
+				if (!val.present()) {
+					throw operation_failed();
 				}
-				co_await tr.onError(err);
+				SidebandInterface sideband;
+				BinaryReader br(val.get(), IncludeVersion());
+				br >> sideband;
+				TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
+				co_return sideband;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -152,24 +148,22 @@ struct SidebandWorkload : TestWorkload {
 
 			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
 			loop {
-				{
-					Error err;
-					try {
-						Optional<Value> val = co_await tr.get(messageKey);
-						if (val.present()) {
-							commitVersion = tr.getReadVersion().get();
-							++self->keysUnexpectedlyPresent;
-							break;
-						}
-						tr.set(messageKey, "deadbeef"_sr);
-						co_await tr.commit();
-						commitVersion = tr.getCommittedVersion();
+				Error err;
+				try {
+					Optional<Value> val = co_await tr.get(messageKey);
+					if (val.present()) {
+						commitVersion = tr.getReadVersion().get();
+						++self->keysUnexpectedlyPresent;
 						break;
-					} catch (Error& e) {
-						err = e;
 					}
-					co_await tr.onError(err);
+					tr.set(messageKey, "deadbeef"_sr);
+					co_await tr.commit();
+					commitVersion = tr.getCommittedVersion();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 			++self->messages;
 			checker.updates.send(SidebandMessage(key, commitVersion));
@@ -182,24 +176,22 @@ struct SidebandWorkload : TestWorkload {
 			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						Optional<Value> val = co_await tr.get(messageKey);
-						if (!val.present()) {
-							TraceEvent(SevError, "CausalConsistencyError", self->interf.id())
-							    .detail("MessageKey", messageKey.toString().c_str())
-							    .detail("RemoteCommitVersion", message.commitVersion)
-							    .detail("LocalReadVersion",
-							            tr.getReadVersion().get()); // will assert that ReadVersion is set
-							++self->consistencyErrors;
-						}
-						break;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					Optional<Value> val = co_await tr.get(messageKey);
+					if (!val.present()) {
+						TraceEvent(SevError, "CausalConsistencyError", self->interf.id())
+						    .detail("MessageKey", messageKey.toString().c_str())
+						    .detail("RemoteCommitVersion", message.commitVersion)
+						    .detail("LocalReadVersion",
+						            tr.getReadVersion().get()); // will assert that ReadVersion is set
+						++self->consistencyErrors;
 					}
-					co_await tr.onError(err);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 	}

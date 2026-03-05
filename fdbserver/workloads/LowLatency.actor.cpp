@@ -77,30 +77,28 @@ struct LowLatencyWorkload : TestWorkload {
 				double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
 				++self->operations;
 				loop {
-					{
-						Error err;
-						try {
-							TraceEvent("LowLatencyTransactionStart").detail("Retries", self->retries.getValue());
-							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							if (doCommit) {
-								TraceEvent("LowLatencyTransactionCommitStart");
-								tr.set(self->testKey, ""_sr);
-								co_await tr.commit();
-								TraceEvent("LowLatencyTransactionCommitFinish");
-							} else {
-								TraceEvent("LowLatencyTransactionGRVStart");
-								co_await success(tr.getReadVersion());
-								TraceEvent("LowLatencyTransactionGRVFinish");
-							}
-							break;
-						} catch (Error& e) {
-							err = e;
+					Error err;
+					try {
+						TraceEvent("LowLatencyTransactionStart").detail("Retries", self->retries.getValue());
+						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						if (doCommit) {
+							TraceEvent("LowLatencyTransactionCommitStart");
+							tr.set(self->testKey, ""_sr);
+							co_await tr.commit();
+							TraceEvent("LowLatencyTransactionCommitFinish");
+						} else {
+							TraceEvent("LowLatencyTransactionGRVStart");
+							co_await success(tr.getReadVersion());
+							TraceEvent("LowLatencyTransactionGRVFinish");
 						}
-						TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(err);
-						co_await tr.onError(err);
-						++self->retries;
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(err);
+					co_await tr.onError(err);
+					++self->retries;
 				}
 				if (now() - operationStart > maxLatency) {
 					TraceEvent(SevError, "LatencyTooLarge")

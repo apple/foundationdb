@@ -226,54 +226,52 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		bool dontUpdateResults = false;
 		std::vector<RangeResult> results;
 		loop {
-			{
-				Error err;
-				try {
-					for (int i = 0; i < sequence.size(); ++i) {
-						Operation op = sequence[i];
+			Error err;
+			try {
+				for (int i = 0; i < sequence.size(); ++i) {
+					Operation op = sequence[i];
 
-						if (op.type == Operation::SET) {
-							transaction->set(op.beginKey, op.value);
-						} else if (op.type == Operation::GET) {
-							Optional<Value> val = co_await transaction->get(op.beginKey);
-							if (!dontUpdateResults)
-								self->pushKVPair(results, op.beginKey, val);
-						} else if (op.type == Operation::GET_RANGE) {
-							KeyRangeRef range(op.beginKey, op.endKey);
-							RangeResult result = co_await transaction->getRange(range, op.limit, op.reverse);
-							if (!dontUpdateResults)
-								results.push_back((RangeResultRef)result);
-						} else if (op.type == Operation::GET_RANGE_SELECTOR) {
-							RangeResult result =
-							    co_await transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse);
-							if (!dontUpdateResults)
-								results.push_back((RangeResultRef)result);
-						} else if (op.type == Operation::GET_KEY) {
-							Key key = co_await transaction->getKey(op.beginSelector);
-							if (!dontUpdateResults)
-								self->pushKVPair(results, key, Value());
-						} else if (op.type == Operation::CLEAR) {
-							transaction->clear(op.beginKey);
-						} else if (op.type == Operation::CLEAR_RANGE) {
-							KeyRangeRef range(op.beginKey, op.endKey);
-							transaction->clear(range);
-						}
+					if (op.type == Operation::SET) {
+						transaction->set(op.beginKey, op.value);
+					} else if (op.type == Operation::GET) {
+						Optional<Value> val = co_await transaction->get(op.beginKey);
+						if (!dontUpdateResults)
+							self->pushKVPair(results, op.beginKey, val);
+					} else if (op.type == Operation::GET_RANGE) {
+						KeyRangeRef range(op.beginKey, op.endKey);
+						RangeResult result = co_await transaction->getRange(range, op.limit, op.reverse);
+						if (!dontUpdateResults)
+							results.push_back((RangeResultRef)result);
+					} else if (op.type == Operation::GET_RANGE_SELECTOR) {
+						RangeResult result =
+						    co_await transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse);
+						if (!dontUpdateResults)
+							results.push_back((RangeResultRef)result);
+					} else if (op.type == Operation::GET_KEY) {
+						Key key = co_await transaction->getKey(op.beginSelector);
+						if (!dontUpdateResults)
+							self->pushKVPair(results, key, Value());
+					} else if (op.type == Operation::CLEAR) {
+						transaction->clear(op.beginKey);
+					} else if (op.type == Operation::CLEAR_RANGE) {
+						KeyRangeRef range(op.beginKey, op.endKey);
+						transaction->clear(range);
 					}
-
-					co_await transaction->commit();
-					co_return results;
-				} catch (Error& e) {
-					err = e;
 				}
-				// If the transaction was possibly committed, then keep the results that we got (since they might
-				// change the next time around the loop), but try to commit the transaction again
-				if (err.code() == error_code_commit_unknown_result)
-					dontUpdateResults = true;
-				else if (!dontUpdateResults)
-					results.clear();
 
-				co_await transaction->onError(err);
+				co_await transaction->commit();
+				co_return results;
+			} catch (Error& e) {
+				err = e;
 			}
+			// If the transaction was possibly committed, then keep the results that we got (since they might
+			// change the next time around the loop), but try to commit the transaction again
+			if (err.code() == error_code_commit_unknown_result)
+				dontUpdateResults = true;
+			else if (!dontUpdateResults)
+				results.clear();
+
+			co_await transaction->onError(err);
 		}
 	}
 

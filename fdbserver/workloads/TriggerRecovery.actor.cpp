@@ -63,21 +63,19 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Future<Void> returnIfClusterRecovered(Database cx) {
 		loop {
 			ReadYourWritesTransaction tr(cx);
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					Version v = co_await tr.getReadVersion();
-					tr.makeSelfConflicting();
-					co_await tr.commit();
-					TraceEvent(SevInfo, "TriggerRecoveryLoop_ClusterVersion").detail("Version", v);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Version v = co_await tr.getReadVersion();
+				tr.makeSelfConflicting();
+				co_await tr.commit();
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_ClusterVersion").detail("Version", v);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -108,35 +106,33 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 	Future<Void> killAll(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					RangeResult kvs = co_await tr.getRange(
-					    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
-					    CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!kvs.more);
-					std::map<Key, Value> address_interface;
-					for (auto it : kvs) {
-						auto ip_port = (it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key)
-						                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
-						address_interface[ip_port] = it.value;
-					}
-					for (auto it : address_interface) {
-						if (cx->apiVersionAtLeast(700))
-							BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
-							    .reboot.send(RebootRequest());
-						else
-							tr.set("\xff\xff/reboot_worker"_sr, it.second);
-					}
-					TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
-					co_return;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				RangeResult kvs = co_await tr.getRange(
+				    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+				    CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!kvs.more);
+				std::map<Key, Value> address_interface;
+				for (auto it : kvs) {
+					auto ip_port = (it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key)
+					                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
+					address_interface[ip_port] = it.value;
 				}
-				co_await tr.onError(err);
+				for (auto it : address_interface) {
+					if (cx->apiVersionAtLeast(700))
+						BinaryReader::fromStringRef<ClientWorkerInterface>(it.second, IncludeVersion())
+						    .reboot.send(RebootRequest());
+					else
+						tr.set("\xff\xff/reboot_worker"_sr, it.second);
+				}
+				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

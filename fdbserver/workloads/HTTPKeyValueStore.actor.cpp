@@ -226,103 +226,101 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		int seqNo = self->nextSeqNo;
 		++self->nextSeqNo;
 		loop {
-			{
-				Error err;
-				try {
-					while (!self->conn) {
-						// sometimes do resolve and connect directly, other times simulate what rest kms connector does
-						// and resolve endpoints themself and then connect to one directly
-						if (self->manualResolve) {
-							std::vector<NetworkAddress> addrs =
-							    co_await INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service);
-							ASSERT(!addrs.empty());
-							int idx = deterministicRandom()->randomInt(0, addrs.size());
-							co_await store(
-							    self->conn,
-							    timeoutError(INetworkConnections::net()->connect(
-							                     addrs[idx].ip.toString(), std::to_string(addrs[idx].port), false),
-							                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+			Error err;
+			try {
+				while (!self->conn) {
+					// sometimes do resolve and connect directly, other times simulate what rest kms connector does
+					// and resolve endpoints themself and then connect to one directly
+					if (self->manualResolve) {
+						std::vector<NetworkAddress> addrs =
+						    co_await INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service);
+						ASSERT(!addrs.empty());
+						int idx = deterministicRandom()->randomInt(0, addrs.size());
+						co_await store(
+						    self->conn,
+						    timeoutError(INetworkConnections::net()->connect(
+						                     addrs[idx].ip.toString(), std::to_string(addrs[idx].port), false),
+						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 
-						} else {
-							co_await store(
-							    self->conn,
-							    timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
-							                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
-						}
-						if (self->conn.isValid()) {
-							co_await self->conn->connectHandshake();
-							++self->connectCount;
-						} else {
-							co_await delay(0.1);
-							++self->failedConnectCount;
-						}
-					}
-
-					content.discardAll();
-					Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
-					UID requestID = deterministicRandom()->randomUniqueID();
-					req->data.content = &content;
-					req->data.contentLen = 0;
-					req->resource = "/kv";
-					req->data.headers["Key"] = key;
-					req->data.headers["ClientID"] = std::to_string(self->clientId);
-					req->data.headers["UID"] = requestID.toString();
-					req->data.headers["SeqNo"] = std::to_string(seqNo);
-
-					if (value.present()) {
-						// put key-value pair
-						req->verb = HTTP::HTTP_VERB_PUT;
-						PacketWriter pw(req->data.content->getWriteBuffer(value.get().size()), nullptr, Unversioned());
-						pw.serializeBytes(value.get());
-						req->data.contentLen = value.get().size();
 					} else {
-						// get key-value pair
-						req->verb = HTTP::HTTP_VERB_GET;
+						co_await store(
+						    self->conn,
+						    timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
+						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 					}
-
-					Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-					int64_t bytes_sent = 0;
-					Reference<HTTP::IncomingResponse> response = co_await timeoutError(
-					    HTTP::doRequest(self->conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 5.0);
-
-					// sometimes randomly close connection anyway
-					if (BUGGIFY_WITH_PROB(0.1)) {
-						ASSERT(self->conn.isValid());
-						self->conn->close();
-						self->conn.clear();
+					if (self->conn.isValid()) {
+						co_await self->conn->connectHandshake();
+						++self->connectCount;
+					} else {
+						co_await delay(0.1);
+						++self->failedConnectCount;
 					}
+				}
 
-					ASSERT_EQ(response->code, 200);
-					ASSERT(response->data.headers.contains("ClientID"));
-					ASSERT_EQ(response->data.headers["ClientID"], std::to_string(self->clientId));
-					ASSERT(response->data.headers.contains("Key"));
-					ASSERT_EQ(response->data.headers["Key"], key);
-					ASSERT(response->data.headers.contains("UID"));
-					ASSERT_EQ(response->data.headers["UID"], requestID.toString());
+				content.discardAll();
+				Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+				UID requestID = deterministicRandom()->randomUniqueID();
+				req->data.content = &content;
+				req->data.contentLen = 0;
+				req->resource = "/kv";
+				req->data.headers["Key"] = key;
+				req->data.headers["ClientID"] = std::to_string(self->clientId);
+				req->data.headers["UID"] = requestID.toString();
+				req->data.headers["SeqNo"] = std::to_string(seqNo);
 
-					co_return response;
-				} catch (Error& e) {
-					err = e;
+				if (value.present()) {
+					// put key-value pair
+					req->verb = HTTP::HTTP_VERB_PUT;
+					PacketWriter pw(req->data.content->getWriteBuffer(value.get().size()), nullptr, Unversioned());
+					pw.serializeBytes(value.get());
+					req->data.contentLen = value.get().size();
+				} else {
+					// get key-value pair
+					req->verb = HTTP::HTTP_VERB_GET;
 				}
-				if (err.code() == error_code_operation_cancelled) {
-					throw err;
-				}
-				if (DEBUG_HTTPKV) {
-					fmt::print("REQ: ERROR: {0}\n", err.name());
-				}
-				if (self->conn) {
+
+				Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+				int64_t bytes_sent = 0;
+				Reference<HTTP::IncomingResponse> response = co_await timeoutError(
+				    HTTP::doRequest(self->conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 5.0);
+
+				// sometimes randomly close connection anyway
+				if (BUGGIFY_WITH_PROB(0.1)) {
+					ASSERT(self->conn.isValid());
 					self->conn->close();
 					self->conn.clear();
 				}
-				if (err.code() != error_code_timed_out && err.code() != error_code_connection_failed &&
-				    err.code() != error_code_lookup_failed) {
-					throw err;
-				}
 
-				// request got timed out or connection could not be established, close conn and try again
+				ASSERT_EQ(response->code, 200);
+				ASSERT(response->data.headers.contains("ClientID"));
+				ASSERT_EQ(response->data.headers["ClientID"], std::to_string(self->clientId));
+				ASSERT(response->data.headers.contains("Key"));
+				ASSERT_EQ(response->data.headers["Key"], key);
+				ASSERT(response->data.headers.contains("UID"));
+				ASSERT_EQ(response->data.headers["UID"], requestID.toString());
 
-				co_await delay(0.1);
+				co_return response;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (err.code() == error_code_operation_cancelled) {
+				throw err;
+			}
+			if (DEBUG_HTTPKV) {
+				fmt::print("REQ: ERROR: {0}\n", err.name());
+			}
+			if (self->conn) {
+				self->conn->close();
+				self->conn.clear();
+			}
+			if (err.code() != error_code_timed_out && err.code() != error_code_connection_failed &&
+			    err.code() != error_code_lookup_failed) {
+				throw err;
+			}
+
+			// request got timed out or connection could not be established, close conn and try again
+
+			co_await delay(0.1);
 		}
 	}
 

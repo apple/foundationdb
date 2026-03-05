@@ -452,194 +452,192 @@ struct MakoWorkload : TestWorkload {
 		loop {
 			// used for throttling
 			co_await poisson(&lastTime, delay);
-			{
-				Error err;
-				try {
-					// user-defined value: whether commit read-only ops or not; default is false
-					doCommit = self->commitGet;
-					for (i = 0; i < MAX_OP; ++i) {
-						if (i == OP_COMMIT)
-							continue;
-						for (count = 0; count < self->operations[i][0]; ++count) {
-							range = self->operations[i][1];
-							rangeLen = digits(range);
-							// generate random key-val pair for operation
-							indBegin = self->getRandomKeyIndex(self->rowCount);
-							rkey = self->keyForIndex(indBegin);
-							rval = self->randomValue();
-							indEnd = std::min(indBegin + range, self->rowCount);
-							rkey2 = self->keyForIndex(indEnd);
-							// KeyRangeRef(min, maxPlusOne)
-							rkeyRangeRef = KeyRangeRef(rkey, rkey2);
+			Error err;
+			try {
+				// user-defined value: whether commit read-only ops or not; default is false
+				doCommit = self->commitGet;
+				for (i = 0; i < MAX_OP; ++i) {
+					if (i == OP_COMMIT)
+						continue;
+					for (count = 0; count < self->operations[i][0]; ++count) {
+						range = self->operations[i][1];
+						rangeLen = digits(range);
+						// generate random key-val pair for operation
+						indBegin = self->getRandomKeyIndex(self->rowCount);
+						rkey = self->keyForIndex(indBegin);
+						rval = self->randomValue();
+						indEnd = std::min(indBegin + range, self->rowCount);
+						rkey2 = self->keyForIndex(indEnd);
+						// KeyRangeRef(min, maxPlusOne)
+						rkeyRangeRef = KeyRangeRef(rkey, rkey2);
 
-							// used for mako-level consistency check
-							if (self->checksumVerification) {
-								if (i == OP_INSERT | i == OP_UPDATE | i == OP_CLEAR) {
-									updateCSFlags(self, csChangedFlags, indBegin, indBegin + 1);
-								} else if (i == OP_CLEARRANGE) {
-									updateCSFlags(self, csChangedFlags, indBegin, indEnd);
-								}
-							}
-
-							if (i == OP_GETREADVERSION) {
-								co_await logLatency(tr.getReadVersion(), &self->opLatencies[i]);
-							} else if (i == OP_GET) {
-								co_await logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[i]);
-							} else if (i == OP_GETRANGE) {
-								co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::False),
-								                    &self->opLatencies[i]);
-							} else if (i == OP_SGET) {
-								co_await logLatency(tr.get(rkey, Snapshot::True), &self->opLatencies[i]);
-							} else if (i == OP_SGETRANGE) {
-								// do snapshot get range here
-								co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::True),
-								                    &self->opLatencies[i]);
-							} else if (i == OP_UPDATE) {
-								co_await logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[OP_GET]);
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.set(rkey, rval);
-									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
-								} else {
-									tr.set(rkey, rval);
-								}
-								doCommit = true;
-							} else if (i == OP_INSERT) {
-								// generate an (almost) unique key here, it starts with 'mako' and then comes with
-								// randomly generated characters
-								randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN,
-								        self->keyBytes - self->KEYPREFIXLEN);
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.set(rkey, rval);
-									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
-								} else {
-									tr.set(rkey, rval);
-								}
-								doCommit = true;
-							} else if (i == OP_INSERTRANGE) {
-								char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
-								randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
-								for (int range_i = 0; range_i < range; ++range_i) {
-									format("%0.*d", rangeLen, range_i)
-									    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
-									if (self->latencyForLocalOperation) {
-										double opBegin = timer();
-										tr.set(rkey, self->randomValue());
-										self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
-									} else {
-										tr.set(rkey, self->randomValue());
-									}
-								}
-								doCommit = true;
-							} else if (i == OP_CLEAR) {
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.clear(rkey);
-									self->opLatencies[OP_CLEAR].addSample(timer() - opBegin);
-								} else {
-									tr.clear(rkey);
-								}
-								doCommit = true;
-							} else if (i == OP_SETCLEAR) {
-								randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN,
-								        self->keyBytes - self->KEYPREFIXLEN);
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.set(rkey, rval);
-									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
-								} else {
-									tr.set(rkey, rval);
-								}
-								co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
-								// commit the change and update metrics
-								commitStart = timer();
-								co_await tr.commit();
-								self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
-								++perOpCount[OP_COMMIT];
-								tr.reset();
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.clear(rkey);
-									self->opLatencies[OP_CLEAR].addSample(timer() - opBegin);
-								} else {
-									tr.clear(rkey);
-								}
-								doCommit = true;
+						// used for mako-level consistency check
+						if (self->checksumVerification) {
+							if (i == OP_INSERT | i == OP_UPDATE | i == OP_CLEAR) {
+								updateCSFlags(self, csChangedFlags, indBegin, indBegin + 1);
 							} else if (i == OP_CLEARRANGE) {
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.clear(rkeyRangeRef);
-									self->opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
-								} else {
-									tr.clear(rkeyRangeRef);
-								}
-								doCommit = true;
-							} else if (i == OP_SETCLEARRANGE) {
-								char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
-								randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
-								std::string scr_start_key;
-								std::string scr_end_key;
-								KeyRangeRef scr_key_range_ref;
-								for (int range_i = 0; range_i < range; ++range_i) {
-									format("%0.*d", rangeLen, range_i)
-									    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
-									if (self->latencyForLocalOperation) {
-										double opBegin = timer();
-										tr.set(rkey, self->randomValue());
-										self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
-									} else {
-										tr.set(rkey, self->randomValue());
-									}
-									if (range_i == 0)
-										scr_start_key = rkey.toString();
-								}
-								scr_end_key = rkey.toString();
-								scr_key_range_ref = KeyRangeRef(KeyRef(scr_start_key), KeyRef(scr_end_key));
-								co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
-								commitStart = timer();
-								co_await tr.commit();
-								self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
-								++perOpCount[OP_COMMIT];
-								tr.reset();
-								if (self->latencyForLocalOperation) {
-									double opBegin = timer();
-									tr.clear(scr_key_range_ref);
-									self->opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
-								} else {
-									tr.clear(scr_key_range_ref);
-								}
-								doCommit = true;
+								updateCSFlags(self, csChangedFlags, indBegin, indEnd);
 							}
-							++perOpCount[i];
 						}
-					}
 
-					if (doCommit) {
-						co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
-						commitStart = timer();
-						co_await tr.commit();
-						self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
-						++perOpCount[OP_COMMIT];
+						if (i == OP_GETREADVERSION) {
+							co_await logLatency(tr.getReadVersion(), &self->opLatencies[i]);
+						} else if (i == OP_GET) {
+							co_await logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[i]);
+						} else if (i == OP_GETRANGE) {
+							co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::False),
+							                    &self->opLatencies[i]);
+						} else if (i == OP_SGET) {
+							co_await logLatency(tr.get(rkey, Snapshot::True), &self->opLatencies[i]);
+						} else if (i == OP_SGETRANGE) {
+							// do snapshot get range here
+							co_await logLatency(tr.getRange(rkeyRangeRef, CLIENT_KNOBS->TOO_MANY, Snapshot::True),
+							                    &self->opLatencies[i]);
+						} else if (i == OP_UPDATE) {
+							co_await logLatency(tr.get(rkey, Snapshot::False), &self->opLatencies[OP_GET]);
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.set(rkey, rval);
+								self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+							} else {
+								tr.set(rkey, rval);
+							}
+							doCommit = true;
+						} else if (i == OP_INSERT) {
+							// generate an (almost) unique key here, it starts with 'mako' and then comes with
+							// randomly generated characters
+							randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN,
+							        self->keyBytes - self->KEYPREFIXLEN);
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.set(rkey, rval);
+								self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+							} else {
+								tr.set(rkey, rval);
+							}
+							doCommit = true;
+						} else if (i == OP_INSERTRANGE) {
+							char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
+							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
+							for (int range_i = 0; range_i < range; ++range_i) {
+								format("%0.*d", rangeLen, range_i)
+								    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
+								if (self->latencyForLocalOperation) {
+									double opBegin = timer();
+									tr.set(rkey, self->randomValue());
+									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+								} else {
+									tr.set(rkey, self->randomValue());
+								}
+							}
+							doCommit = true;
+						} else if (i == OP_CLEAR) {
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.clear(rkey);
+								self->opLatencies[OP_CLEAR].addSample(timer() - opBegin);
+							} else {
+								tr.clear(rkey);
+							}
+							doCommit = true;
+						} else if (i == OP_SETCLEAR) {
+							randStr(reinterpret_cast<char*>(mutateString(rkey)) + self->KEYPREFIXLEN,
+							        self->keyBytes - self->KEYPREFIXLEN);
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.set(rkey, rval);
+								self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+							} else {
+								tr.set(rkey, rval);
+							}
+							co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
+							// commit the change and update metrics
+							commitStart = timer();
+							co_await tr.commit();
+							self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
+							++perOpCount[OP_COMMIT];
+							tr.reset();
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.clear(rkey);
+								self->opLatencies[OP_CLEAR].addSample(timer() - opBegin);
+							} else {
+								tr.clear(rkey);
+							}
+							doCommit = true;
+						} else if (i == OP_CLEARRANGE) {
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.clear(rkeyRangeRef);
+								self->opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
+							} else {
+								tr.clear(rkeyRangeRef);
+							}
+							doCommit = true;
+						} else if (i == OP_SETCLEARRANGE) {
+							char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
+							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
+							std::string scr_start_key;
+							std::string scr_end_key;
+							KeyRangeRef scr_key_range_ref;
+							for (int range_i = 0; range_i < range; ++range_i) {
+								format("%0.*d", rangeLen, range_i)
+								    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
+								if (self->latencyForLocalOperation) {
+									double opBegin = timer();
+									tr.set(rkey, self->randomValue());
+									self->opLatencies[OP_INSERT].addSample(timer() - opBegin);
+								} else {
+									tr.set(rkey, self->randomValue());
+								}
+								if (range_i == 0)
+									scr_start_key = rkey.toString();
+							}
+							scr_end_key = rkey.toString();
+							scr_key_range_ref = KeyRangeRef(KeyRef(scr_start_key), KeyRef(scr_end_key));
+							co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
+							commitStart = timer();
+							co_await tr.commit();
+							self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
+							++perOpCount[OP_COMMIT];
+							tr.reset();
+							if (self->latencyForLocalOperation) {
+								double opBegin = timer();
+								tr.clear(scr_key_range_ref);
+								self->opLatencies[OP_CLEARRANGE].addSample(timer() - opBegin);
+							} else {
+								tr.clear(scr_key_range_ref);
+							}
+							doCommit = true;
+						}
+						++perOpCount[i];
 					}
-					// successfully finish the transaction, update metrics
-					++self->xacts;
-					for (int op = 0; op < MAX_OP; ++op) {
-						self->opCounters[op] += perOpCount[op];
-						self->totalOps += perOpCount[op];
-					}
-				} catch (Error& e) {
-					err = e;
 				}
-				if (err.isValid()) {
-					TraceEvent("FailedToExecOperations").error(err);
-					if (err.code() == error_code_operation_cancelled)
-						throw err;
-					else if (err.code() == error_code_not_committed)
-						++self->conflicts;
-					co_await tr.onError(err);
-					++self->retries;
+
+				if (doCommit) {
+					co_await self->updateCSBeforeCommit(&tr, self, &csChangedFlags);
+					commitStart = timer();
+					co_await tr.commit();
+					self->opLatencies[OP_COMMIT].addSample(timer() - commitStart);
+					++perOpCount[OP_COMMIT];
 				}
+				// successfully finish the transaction, update metrics
+				++self->xacts;
+				for (int op = 0; op < MAX_OP; ++op) {
+					self->opCounters[op] += perOpCount[op];
+					self->totalOps += perOpCount[op];
+				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				TraceEvent("FailedToExecOperations").error(err);
+				if (err.code() == error_code_operation_cancelled)
+					throw err;
+				else if (err.code() == error_code_not_committed)
+					++self->conflicts;
+				co_await tr.onError(err);
+				++self->retries;
 			}
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);
@@ -653,19 +651,17 @@ struct MakoWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					tr.clear(prefixRange(keyPrefix));
-					co_await tr.commit();
-					TraceEvent("CleanUpMakoRelatedData").detail("KeyPrefix", self->keyPrefix);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent("FailedToCleanData").error(err);
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.clear(prefixRange(keyPrefix));
+				co_await tr.commit();
+				TraceEvent("CleanUpMakoRelatedData").detail("KeyPrefix", self->keyPrefix);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("FailedToCleanData").error(err);
+			co_await tr.onError(err);
 		}
 
 	}
@@ -812,42 +808,40 @@ struct MakoWorkload : TestWorkload {
 		Value csValue;
 
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-					for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
-						Optional<Value> temp = co_await tr.get(self->csKeys[csIdx]);
-						if (!temp.present()) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
+					Optional<Value> temp = co_await tr.get(self->csKeys[csIdx]);
+					if (!temp.present()) {
+						TraceEvent(SevError, "TestFailure")
+						    .detail("Reason", "NoExistingChecksum")
+						    .detail("missedChecksumIndex", csIdx);
+						co_return false;
+					} else {
+						csValue = temp.get();
+						ASSERT(csValue.size() == sizeof(uint32_t));
+						uint32_t calculatedCS = co_await calcCheckSum(&tr, self, csIdx);
+						uint32_t existingCS = *(reinterpret_cast<const uint32_t*>(csValue.begin()));
+						if (existingCS != calculatedCS) {
 							TraceEvent(SevError, "TestFailure")
-							    .detail("Reason", "NoExistingChecksum")
-							    .detail("missedChecksumIndex", csIdx);
-							co_return false;
-						} else {
-							csValue = temp.get();
-							ASSERT(csValue.size() == sizeof(uint32_t));
-							uint32_t calculatedCS = co_await calcCheckSum(&tr, self, csIdx);
-							uint32_t existingCS = *(reinterpret_cast<const uint32_t*>(csValue.begin()));
-							if (existingCS != calculatedCS) {
-								TraceEvent(SevError, "TestFailure")
-								    .detail("Reason", "ChecksumVerificationFailure")
-								    .detail("ChecksumIndex", csIdx)
-								    .detail("ExistingChecksum", existingCS)
-								    .detail("CurrentChecksum", calculatedCS);
-								co_return false;
-							}
-							TraceEvent("ChecksumVerificationPass")
+							    .detail("Reason", "ChecksumVerificationFailure")
 							    .detail("ChecksumIndex", csIdx)
-							    .detail("ChecksumValue", existingCS);
+							    .detail("ExistingChecksum", existingCS)
+							    .detail("CurrentChecksum", calculatedCS);
+							co_return false;
 						}
+						TraceEvent("ChecksumVerificationPass")
+						    .detail("ChecksumIndex", csIdx)
+						    .detail("ChecksumValue", existingCS);
 					}
-					co_return true;
-				} catch (Error& e) {
-					err = e;
 				}
-				TraceEvent("FailedToCalculateChecksum").error(err).detail("ChecksumIndex", csIdx);
-				co_await tr.onError(err);
+				co_return true;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("FailedToCalculateChecksum").error(err).detail("ChecksumIndex", csIdx);
+			co_await tr.onError(err);
 		}
 	}
 
@@ -855,23 +849,21 @@ struct MakoWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 		int csIdx{ 0 };
 		loop {
-			{
-				Error err;
-				try {
-					for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
-						Optional<Value> temp = co_await tr.get(self->csKeys[csIdx]);
-						if (temp.present())
-							TraceEvent("DuplicatePopulationOnSamePrefix").detail("KeyPrefix", self->keyPrefix);
-						co_await self->updateCheckSum(&tr, self, csIdx);
-					}
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				for (csIdx = 0; csIdx < self->csCount; ++csIdx) {
+					Optional<Value> temp = co_await tr.get(self->csKeys[csIdx]);
+					if (temp.present())
+						TraceEvent("DuplicatePopulationOnSamePrefix").detail("KeyPrefix", self->keyPrefix);
+					co_await self->updateCheckSum(&tr, self, csIdx);
 				}
-				TraceEvent("FailedToGenerateChecksumForPopulatedData").error(err);
-				co_await tr.onError(err);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("FailedToGenerateChecksumForPopulatedData").error(err);
+			co_await tr.onError(err);
 		}
 	}
 

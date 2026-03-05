@@ -66,17 +66,15 @@ class TransactionCostWorkload : public TestWorkload {
 		static Future<Void> setup(TransactionCostWorkload const* workload, ReadLargeValueTest* self, Database cx) {
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
-						co_await tr.commit();
-						co_return;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
+					co_await tr.commit();
+					co_return;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -156,19 +154,17 @@ class TransactionCostWorkload : public TestWorkload {
 		static Future<Void> setup(ReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						for (int i = 0; i < 10; ++i) {
-							tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
-						}
-						co_await tr.commit();
-						co_return;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					for (int i = 0; i < 10; ++i) {
+						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
 					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					co_return;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -191,19 +187,17 @@ class TransactionCostWorkload : public TestWorkload {
 		static Future<Void> setup(ReadMultipleValuesTest* self, TransactionCostWorkload const* workload, Database cx) {
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						for (int i = 0; i < 10; ++i) {
-							tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
-						}
-						co_await tr.commit();
-						co_return;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					for (int i = 0; i < 10; ++i) {
+						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
 					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					co_return;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -229,20 +223,18 @@ class TransactionCostWorkload : public TestWorkload {
 		static Future<Void> setup(LargeReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						for (int i = 0; i < 10; ++i) {
-							tr.set(workload->getKey(self->testNumber, i),
-							       workload->getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
-						}
-						co_await tr.commit();
-						co_return;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					for (int i = 0; i < 10; ++i) {
+						tr.set(workload->getKey(self->testNumber, i),
+						       workload->getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
 					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					co_return;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -291,18 +283,16 @@ class TransactionCostWorkload : public TestWorkload {
 			test->debugTransaction(*tr);
 		}
 		loop {
-			{
-				Error err;
-				try {
-					co_await test->exec(*self, tr);
-					co_await tr->commit();
-					ASSERT_EQ(tr->getTotalCost(), test->expectedFinalCost());
-					co_return;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr->onError(err);
+			Error err;
+			try {
+				co_await test->exec(*self, tr);
+				co_await tr->commit();
+				ASSERT_EQ(tr->getTotalCost(), test->expectedFinalCost());
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 	}
 

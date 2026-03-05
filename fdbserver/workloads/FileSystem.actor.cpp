@@ -119,22 +119,20 @@ struct FileSystemWorkload : TestWorkload {
 	Future<Void> setupRange(Database cx, FileSystemWorkload* self, int begin, int end) {
 		Transaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				try {
-					Optional<Value> f = co_await tr.get(self->keyForFileID(begin));
-					if (f.present())
-						break; // The transaction already completed!
+			Error err;
+			try {
+				Optional<Value> f = co_await tr.get(self->keyForFileID(begin));
+				if (f.present())
+					break; // The transaction already completed!
 
-					for (int n = begin; n < end; n++)
-						self->initializeFile(&tr, self, n);
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+				for (int n = begin; n < end; n++)
+					self->initializeFile(&tr, self, n);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -207,17 +205,15 @@ struct FileSystemWorkload : TestWorkload {
 			double tstart = now();
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						Optional<Version> ver = co_await operation->run(self, &tr);
-						if (ver.present())
-							break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					Optional<Version> ver = co_await operation->run(self, &tr);
+					if (ver.present())
+						break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 			if (self->shouldRecord(clientBegin)) {
 				++self->queries;
@@ -243,35 +239,33 @@ struct FileSystemWorkload : TestWorkload {
 			double tstart = now();
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						double time = now();
-						if (isDeleting) {
-							Optional<Value> deleted = co_await tr.get(StringRef(keyStr + "/deleted"));
-							ASSERT(deleted.present());
-							Optional<Value> serverStr = co_await tr.get(StringRef(keyStr + "/server"));
-							ASSERT(serverStr.present());
-							int serverID = testKeyToInt(serverStr.get());
-							if (deleted.get().toString() == "1") {
-								tr.set(keyStr + "/deleted", "0"_sr);
-								tr.clear(format("/files/server/%08x/deleted/%016llx", serverID, fileID));
-							} else {
-								tr.set(keyStr + "/deleted", "1"_sr);
-								tr.set(format("/files/server/%08x/deleted/%016llx", serverID, fileID),
-								       doubleToTestKey(time));
-							}
+				Error err;
+				try {
+					double time = now();
+					if (isDeleting) {
+						Optional<Value> deleted = co_await tr.get(StringRef(keyStr + "/deleted"));
+						ASSERT(deleted.present());
+						Optional<Value> serverStr = co_await tr.get(StringRef(keyStr + "/server"));
+						ASSERT(serverStr.present());
+						int serverID = testKeyToInt(serverStr.get());
+						if (deleted.get().toString() == "1") {
+							tr.set(keyStr + "/deleted", "0"_sr);
+							tr.clear(format("/files/server/%08x/deleted/%016llx", serverID, fileID));
 						} else {
-							tr.set(keyStr + "/size", format("%d", size));
+							tr.set(keyStr + "/deleted", "1"_sr);
+							tr.set(format("/files/server/%08x/deleted/%016llx", serverID, fileID),
+							       doubleToTestKey(time));
 						}
-						tr.set(keyStr + "/lastupdated", doubleToTestKey(time));
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
+					} else {
+						tr.set(keyStr + "/size", format("%d", size));
 					}
-					co_await tr.onError(err);
+					tr.set(keyStr + "/lastupdated", doubleToTestKey(time));
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 			if (self->shouldRecord(clientBegin)) {
 				++self->writes;

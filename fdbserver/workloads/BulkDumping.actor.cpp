@@ -143,22 +143,20 @@ struct BulkDumping : TestWorkload {
 	Future<Void> setKeys(Database cx, std::map<Key, Value> kvs) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					for (const auto& [key, value] : kvs) {
-						tr.set(key, value);
-					}
-					co_await tr.commit();
-					TraceEvent("BulkDumpingWorkLoadSetKey")
-					    .detail("KeyCount", kvs.size())
-					    .detail("Version", tr.getCommittedVersion());
-					co_return;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				for (const auto& [key, value] : kvs) {
+					tr.set(key, value);
 				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				TraceEvent("BulkDumpingWorkLoadSetKey")
+				    .detail("KeyCount", kvs.size())
+				    .detail("Version", tr.getCommittedVersion());
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -173,24 +171,22 @@ struct BulkDumping : TestWorkload {
 			}
 			// Create a fresh transaction each iteration to avoid stale reads
 			Transaction tr(cx);
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Optional<BulkDumpState> aliveJob = co_await getSubmittedBulkDumpJob(&tr);
-					if (!aliveJob.present()) {
-						break;
-					}
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<BulkDumpState> aliveJob = co_await getSubmittedBulkDumpJob(&tr);
+				if (!aliveJob.present()) {
+					break;
 				}
-				if (err.isValid() && err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid() && err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 			co_await delay(30.0);
 		}
@@ -199,41 +195,37 @@ struct BulkDumping : TestWorkload {
 	Future<Void> clearDatabase(Database cx) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.clear(normalKeys);
-					tr.clear(bulkDumpKeys);
-					tr.clear(bulkLoadJobKeys);
-					tr.clear(bulkLoadTaskKeys);
-					tr.clear(bulkLoadJobHistoryKeys);
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.clear(normalKeys);
+				tr.clear(bulkDumpKeys);
+				tr.clear(bulkLoadJobKeys);
+				tr.clear(bulkLoadTaskKeys);
+				tr.clear(bulkLoadJobHistoryKeys);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
 	Future<Void> clearRangeData(Database cx, KeyRange range) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.clear(range);
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.clear(range);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -255,48 +247,46 @@ struct BulkDumping : TestWorkload {
 		    .detail("Range", jobRange)
 		    .detail("AllowIntermediateStates", allowIntermediateStates);
 		while (beginKey < endKey) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					rangeResult.clear();
-					co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
-					for (int i = 0; i < rangeResult.size() - 1; ++i) {
-						if (rangeResult[i].value.empty()) {
-							continue;
-						}
-						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(rangeResult[i].value);
-						if (!bulkLoadTaskState.isValid()) {
-							continue; // Has been cleared by engine
-						}
-						if (bulkLoadTaskState.getJobId() != jobId) {
-							throw bulkload_task_outdated();
-						}
-						if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
-							TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadBulkLoadTaskHasError")
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("Task", bulkLoadTaskState.toString());
-							errorTasks.push_back(bulkLoadTaskState);
-						}
-						// Only assert on wrong phases if we're in normal completion mode (not timeout)
-						if (!allowIntermediateStates && bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
-						    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
-							TraceEvent(SevError, "BulkDumpingWorkLoadBulkLoadTaskWrongPhase")
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("Task", bulkLoadTaskState.toString());
-							ASSERT(false);
-						}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				rangeResult.clear();
+				co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+				for (int i = 0; i < rangeResult.size() - 1; ++i) {
+					if (rangeResult[i].value.empty()) {
+						continue;
 					}
-					beginKey = rangeResult.back().key;
-				} catch (Error& e) {
-					err = e;
+					BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(rangeResult[i].value);
+					if (!bulkLoadTaskState.isValid()) {
+						continue; // Has been cleared by engine
+					}
+					if (bulkLoadTaskState.getJobId() != jobId) {
+						throw bulkload_task_outdated();
+					}
+					if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+						TraceEvent(SevWarnAlways, "BulkDumpingWorkLoadBulkLoadTaskHasError")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("Task", bulkLoadTaskState.toString());
+						errorTasks.push_back(bulkLoadTaskState);
+					}
+					// Only assert on wrong phases if we're in normal completion mode (not timeout)
+					if (!allowIntermediateStates && bulkLoadTaskState.phase != BulkLoadPhase::Acknowledged &&
+					    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
+						TraceEvent(SevError, "BulkDumpingWorkLoadBulkLoadTaskWrongPhase")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("Task", bulkLoadTaskState.toString());
+						ASSERT(false);
+					}
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				beginKey = rangeResult.back().key;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 		co_return errorTasks;
@@ -378,22 +368,20 @@ struct BulkDumping : TestWorkload {
 		Transaction tr(cx);
 		std::map<Key, Value> kvs;
 		loop {
-			{
-				Error err;
-				try {
-					RangeResult kvsRes = co_await tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!kvsRes.more);
-					kvs.clear();
-					for (auto& kv : kvsRes) {
-						auto res = kvs.insert({ kv.key, kv.value });
-						ASSERT(res.second);
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				RangeResult kvsRes = co_await tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!kvsRes.more);
+				kvs.clear();
+				for (auto& kv : kvsRes) {
+					auto res = kvs.insert({ kv.key, kv.value });
+					ASSERT(res.second);
 				}
-				co_await tr.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 		co_return kvs;
 	}

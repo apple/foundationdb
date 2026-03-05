@@ -369,17 +369,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		Transaction tr(cx);
 		int rowCount = 0;
 		loop {
-			{
-				Error err;
-				try {
-					RangeResult existingRows = co_await tr.getRange(normalKeys, 1);
-					rowCount = existingRows.size();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				RangeResult existingRows = co_await tr.getRange(normalKeys, 1);
+				rowCount = existingRows.size();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		// Try doing a restore without clearing the keys
@@ -674,115 +672,113 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
 
-				{
-					Error err;
-					try {
-						tr->reset();
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Error err;
+				try {
+					tr->reset();
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-						// Check the left over tasks
-						// We have to wait for the list to empty since an abort and get status
-						// can leave extra tasks in the queue
-						TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(self->backupTag));
-						int64_t taskCount = co_await backupAgent.getTaskCount(tr);
-						int waitCycles = 0;
+					// Check the left over tasks
+					// We have to wait for the list to empty since an abort and get status
+					// can leave extra tasks in the queue
+					TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(self->backupTag));
+					int64_t taskCount = co_await backupAgent.getTaskCount(tr);
+					int waitCycles = 0;
 
-						loop {
-							waitCycles++;
+					loop {
+						waitCycles++;
 
-							TraceEvent("BARW_NonzeroTaskWait", randomID)
-							    .detail("BackupTag", printable(self->backupTag))
-							    .detail("TaskCount", taskCount)
-							    .detail("WaitCycles", waitCycles);
-							printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
-							       now(),
-							       randomID.toString().c_str(),
-							       waitCycles,
-							       (long long)taskCount);
+						TraceEvent("BARW_NonzeroTaskWait", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("TaskCount", taskCount)
+						    .detail("WaitCycles", waitCycles);
+						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
+						       now(),
+						       randomID.toString().c_str(),
+						       waitCycles,
+						       (long long)taskCount);
 
-							co_await delay(5.0);
-							co_await tr->commit();
-							tr = makeReference<ReadYourWritesTransaction>(cx);
-							int64_t _taskCount = co_await backupAgent.getTaskCount(tr);
-							taskCount = _taskCount;
+						co_await delay(5.0);
+						co_await tr->commit();
+						tr = makeReference<ReadYourWritesTransaction>(cx);
+						int64_t _taskCount = co_await backupAgent.getTaskCount(tr);
+						taskCount = _taskCount;
 
-							if (!taskCount) {
-								break;
-							}
+						if (!taskCount) {
+							break;
 						}
-
-						if (taskCount) {
-							displaySystemKeys++;
-							TraceEvent(SevError, "BARW_NonzeroTaskCount", randomID)
-							    .detail("BackupTag", printable(self->backupTag))
-							    .detail("TaskCount", taskCount)
-							    .detail("WaitCycles", waitCycles);
-							printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
-						}
-
-						RangeResult agentValues =
-						    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
-
-						// Error if the system keyspace for the backup tag is not empty
-						if (agentValues.size() > 0) {
-							displaySystemKeys++;
-							printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
-							       agentValues.size(),
-							       printable(backupAgentKey).c_str());
-							TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
-							    .detail("BackupTag", printable(self->backupTag))
-							    .detail("LeftOverKeys", agentValues.size())
-							    .detail("KeySpace", printable(backupAgentKey));
-							for (auto& s : agentValues) {
-								TraceEvent("BARW_LeftOverKey", randomID)
-								    .detail("Key", printable(StringRef(s.key.toString())))
-								    .detail("Value", printable(StringRef(s.value.toString())));
-								printf("   Key: %-50s  Value: %s\n",
-								       printable(StringRef(s.key.toString())).c_str(),
-								       printable(StringRef(s.value.toString())).c_str());
-							}
-						} else {
-							printf("No left over backup agent configuration keys\n");
-						}
-
-						Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
-						if (latestVersion.present()) {
-							TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
-							    .detail("BackupTag", printable(self->backupTag))
-							    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
-							    .detail("DestUidValue", destUidValue.printable());
-						} else {
-							printf("No left over backup version key\n");
-						}
-
-						RangeResult versions = co_await tr->getRange(
-						    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-						if (!self->shareLogRange || !versions.size()) {
-							RangeResult logValues = co_await tr->getRange(
-							    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
-
-							// Error if the log/mutation keyspace for the backup tag  is not empty
-							if (logValues.size() > 0) {
-								displaySystemKeys++;
-								printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
-								       logValues.size(),
-								       printable(backupLogValuesKey).c_str());
-								TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
-								    .detail("BackupTag", printable(self->backupTag))
-								    .detail("LeftOverKeys", logValues.size())
-								    .detail("KeySpace", printable(backupLogValuesKey));
-							} else {
-								printf("No left over backup log keys\n");
-							}
-						}
-
-						break;
-					} catch (Error& e) {
-						err = e;
 					}
-					TraceEvent("BARW_CheckException", randomID).error(err);
-					co_await tr->onError(err);
+
+					if (taskCount) {
+						displaySystemKeys++;
+						TraceEvent(SevError, "BARW_NonzeroTaskCount", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("TaskCount", taskCount)
+						    .detail("WaitCycles", waitCycles);
+						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
+					}
+
+					RangeResult agentValues =
+					    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
+
+					// Error if the system keyspace for the backup tag is not empty
+					if (agentValues.size() > 0) {
+						displaySystemKeys++;
+						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
+						       agentValues.size(),
+						       printable(backupAgentKey).c_str());
+						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("LeftOverKeys", agentValues.size())
+						    .detail("KeySpace", printable(backupAgentKey));
+						for (auto& s : agentValues) {
+							TraceEvent("BARW_LeftOverKey", randomID)
+							    .detail("Key", printable(StringRef(s.key.toString())))
+							    .detail("Value", printable(StringRef(s.value.toString())));
+							printf("   Key: %-50s  Value: %s\n",
+							       printable(StringRef(s.key.toString())).c_str(),
+							       printable(StringRef(s.value.toString())).c_str());
+						}
+					} else {
+						printf("No left over backup agent configuration keys\n");
+					}
+
+					Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
+					if (latestVersion.present()) {
+						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
+						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
+						    .detail("DestUidValue", destUidValue.printable());
+					} else {
+						printf("No left over backup version key\n");
+					}
+
+					RangeResult versions = co_await tr->getRange(
+					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
+					if (!self->shareLogRange || !versions.size()) {
+						RangeResult logValues = co_await tr->getRange(
+						    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
+
+						// Error if the log/mutation keyspace for the backup tag  is not empty
+						if (logValues.size() > 0) {
+							displaySystemKeys++;
+							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
+							       logValues.size(),
+							       printable(backupLogValuesKey).c_str());
+							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
+							    .detail("BackupTag", printable(self->backupTag))
+							    .detail("LeftOverKeys", logValues.size())
+							    .detail("KeySpace", printable(backupLogValuesKey));
+						} else {
+							printf("No left over backup log keys\n");
+						}
+					}
+
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				TraceEvent("BARW_CheckException", randomID).error(err);
+				co_await tr->onError(err);
 			}
 
 			if (displaySystemKeys) {

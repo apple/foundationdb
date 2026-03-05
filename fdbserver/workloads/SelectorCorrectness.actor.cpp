@@ -68,38 +68,34 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 
 		if (!self->testReadYourWrites) {
 			loop {
-				{
-					Error err;
-					try {
-						for (int i = 0; i < self->maxKeySpace; i += 2)
-							tr.set(StringRef(format("%010d", i)), myValue);
+				Error err;
+				try {
+					for (int i = 0; i < self->maxKeySpace; i += 2)
+						tr.set(StringRef(format("%010d", i)), myValue);
 
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		} else {
 			loop {
-				{
-					Error err;
-					try {
-						for (int i = 0; i < self->maxKeySpace; i += 4)
+				Error err;
+				try {
+					for (int i = 0; i < self->maxKeySpace; i += 4)
+						tr.set(StringRef(format("%010d", i)), myValue);
+					for (int i = 2; i < self->maxKeySpace; i += 4)
+						if (deterministicRandom()->random01() > 0.5)
 							tr.set(StringRef(format("%010d", i)), myValue);
-						for (int i = 2; i < self->maxKeySpace; i += 4)
-							if (deterministicRandom()->random01() > 0.5)
-								tr.set(StringRef(format("%010d", i)), myValue);
 
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -134,128 +130,126 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						trRYOW.set(StringRef(format("%010d", i)), myValue);
 			}
 
-			{
-				Error err;
-				try {
-					for (i = 0; i < deterministicRandom()->randomInt(self->minOperationsPerTransaction,
-					                                                 self->maxOperationsPerTransaction + 1);
-					     i++) {
-						j = deterministicRandom()->randomInt(0, 2);
-						if (j < 1) {
-							int searchInt = deterministicRandom()->randomInt(0, self->maxKeySpace);
-							myKeyA = format("%010d", searchInt);
+			Error err;
+			try {
+				for (i = 0; i < deterministicRandom()->randomInt(self->minOperationsPerTransaction,
+				                                                 self->maxOperationsPerTransaction + 1);
+				     i++) {
+					j = deterministicRandom()->randomInt(0, 2);
+					if (j < 1) {
+						int searchInt = deterministicRandom()->randomInt(0, self->maxKeySpace);
+						myKeyA = format("%010d", searchInt);
 
-							if (self->testReadYourWrites) {
-								Optional<Value> getTest = co_await trRYOW.get(StringRef(myKeyA));
-								if ((searchInt % 2 == 0 && !getTest.present()) ||
-								    (searchInt % 2 == 1 && getTest.present())) {
-									TraceEvent(SevError, "RanSelTestFailure")
-									    .detail("Reason", "Value not present")
-									    .detail("KeyA", myKeyA);
-								}
-							} else {
-								Optional<Value> getTest = co_await tr.get(StringRef(myKeyA));
-								if ((searchInt % 2 == 0 && !getTest.present()) ||
-								    (searchInt % 2 == 1 && getTest.present())) {
-									TraceEvent(SevError, "RanSelTestFailure")
-									    .detail("Reason", "Value not present")
-									    .detail("KeyA", myKeyA);
-								}
+						if (self->testReadYourWrites) {
+							Optional<Value> getTest = co_await trRYOW.get(StringRef(myKeyA));
+							if ((searchInt % 2 == 0 && !getTest.present()) ||
+							    (searchInt % 2 == 1 && getTest.present())) {
+								TraceEvent(SevError, "RanSelTestFailure")
+								    .detail("Reason", "Value not present")
+								    .detail("KeyA", myKeyA);
 							}
 						} else {
-							int a = deterministicRandom()->randomInt(2, self->maxKeySpace);
-							int b = deterministicRandom()->randomInt(2, 2 * self->maxKeySpace);
-							int abmax = std::max(a, b);
-							int abmin = std::min(a, b) - 1;
-							myKeyA = format("%010d", abmin);
-							myKeyB = format("%010d", abmax);
-							onEqualA = deterministicRandom()->randomInt(0, 2) != 0;
-							onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
-							offsetA = 1; //-1*deterministicRandom()->randomInt( 0, self->maxOffset );
-							offsetB = deterministicRandom()->randomInt(1, self->maxOffset);
-							reverse.set(deterministicRandom()->coinflip());
+							Optional<Value> getTest = co_await tr.get(StringRef(myKeyA));
+							if ((searchInt % 2 == 0 && !getTest.present()) ||
+							    (searchInt % 2 == 1 && getTest.present())) {
+								TraceEvent(SevError, "RanSelTestFailure")
+								    .detail("Reason", "Value not present")
+								    .detail("KeyA", myKeyA);
+							}
+						}
+					} else {
+						int a = deterministicRandom()->randomInt(2, self->maxKeySpace);
+						int b = deterministicRandom()->randomInt(2, 2 * self->maxKeySpace);
+						int abmax = std::max(a, b);
+						int abmin = std::min(a, b) - 1;
+						myKeyA = format("%010d", abmin);
+						myKeyB = format("%010d", abmax);
+						onEqualA = deterministicRandom()->randomInt(0, 2) != 0;
+						onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
+						offsetA = 1; //-1*deterministicRandom()->randomInt( 0, self->maxOffset );
+						offsetB = deterministicRandom()->randomInt(1, self->maxOffset);
+						reverse.set(deterministicRandom()->coinflip());
 
-							//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
-							int expectedSize =
-							    (std::min(abmax + 2 * offsetB - (abmax % 2 == 1 ? 1 : (onEqualB ? 0 : 2)),
-							              self->maxKeySpace) -
-							     (std::max(abmin + 2 * offsetA - (abmin % 2 == 1 ? 1 : (onEqualA ? 0 : 2)), 0))) /
-							    2;
+						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
+						int expectedSize =
+						    (std::min(abmax + 2 * offsetB - (abmax % 2 == 1 ? 1 : (onEqualB ? 0 : 2)),
+						              self->maxKeySpace) -
+						     (std::max(abmin + 2 * offsetA - (abmin % 2 == 1 ? 1 : (onEqualA ? 0 : 2)), 0))) /
+						    2;
 
-							if (self->testReadYourWrites) {
-								RangeResult getRangeTest =
-								    co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-								                             KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-								                             2 * (self->maxKeySpace + self->maxOffset),
-								                             Snapshot::False,
-								                             reverse);
+						if (self->testReadYourWrites) {
+							RangeResult getRangeTest =
+							    co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+							                             KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+							                             2 * (self->maxKeySpace + self->maxOffset),
+							                             Snapshot::False,
+							                             reverse);
 
-								int trueSize = 0;
-								while (trueSize < getRangeTest.size() &&
-								       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key <
-								           maxKey)
-									trueSize++;
+							int trueSize = 0;
+							while (trueSize < getRangeTest.size() &&
+							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key <
+							           maxKey)
+								trueSize++;
 
-								if (trueSize != expectedSize) {
-									std::string outStr = "";
-									for (int k = 0; k < trueSize; k++) {
-										std::string keyStr =
-										    printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
-										outStr = outStr + keyStr + " ";
-									}
-
-									TraceEvent(SevError, "RanSelTestFailure")
-									    .detail("Reason", "The getRange results did not match expected size")
-									    .detail("Size", trueSize)
-									    .detail("Expected", expectedSize)
-									    .detail("Data", outStr)
-									    .detail("DataSize", getRangeTest.size());
+							if (trueSize != expectedSize) {
+								std::string outStr = "";
+								for (int k = 0; k < trueSize; k++) {
+									std::string keyStr =
+									    printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
+									outStr = outStr + keyStr + " ";
 								}
-							} else {
-								RangeResult getRangeTest =
-								    co_await tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-								                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-								                         2 * (self->maxKeySpace + self->maxOffset),
-								                         Snapshot::False,
-								                         reverse);
 
-								int trueSize = 0;
-								while (trueSize < getRangeTest.size() &&
-								       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key <
-								           maxKey)
-									trueSize++;
+								TraceEvent(SevError, "RanSelTestFailure")
+								    .detail("Reason", "The getRange results did not match expected size")
+								    .detail("Size", trueSize)
+								    .detail("Expected", expectedSize)
+								    .detail("Data", outStr)
+								    .detail("DataSize", getRangeTest.size());
+							}
+						} else {
+							RangeResult getRangeTest =
+							    co_await tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+							                         2 * (self->maxKeySpace + self->maxOffset),
+							                         Snapshot::False,
+							                         reverse);
 
-								if (trueSize != expectedSize) {
-									std::string outStr = "";
-									for (int k = 0; k < trueSize; k++) {
-										std::string keyStr =
-										    printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
-										outStr = outStr + keyStr + " ";
-									}
+							int trueSize = 0;
+							while (trueSize < getRangeTest.size() &&
+							       getRangeTest[!reverse ? trueSize : getRangeTest.size() - trueSize - 1].key <
+							           maxKey)
+								trueSize++;
 
-									TraceEvent(SevError, "RanSelTestFailure")
-									    .detail("Reason", "The getRange results did not match expected size")
-									    .detail("Size", trueSize)
-									    .detail("Expected", expectedSize)
-									    .detail("Data", outStr)
-									    .detail("DataSize", getRangeTest.size());
+							if (trueSize != expectedSize) {
+								std::string outStr = "";
+								for (int k = 0; k < trueSize; k++) {
+									std::string keyStr =
+									    printable(getRangeTest[!reverse ? k : getRangeTest.size() - k - 1].key);
+									outStr = outStr + keyStr + " ";
 								}
+
+								TraceEvent(SevError, "RanSelTestFailure")
+								    .detail("Reason", "The getRange results did not match expected size")
+								    .detail("Size", trueSize)
+								    .detail("Expected", expectedSize)
+								    .detail("Data", outStr)
+								    .detail("DataSize", getRangeTest.size());
 							}
 						}
 					}
+				}
 
-					tr.reset();
-					trRYOW.reset();
-					++self->transactions;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await trRYOW.onError(err);
-				}
+				tr.reset();
 				trRYOW.reset();
-				++self->retries;
+				++self->transactions;
+			} catch (Error& e) {
+				err = e;
 			}
+			if (err.isValid()) {
+				co_await trRYOW.onError(err);
+			}
+			trRYOW.reset();
+			++self->retries;
 		}
 	}
 };

@@ -100,26 +100,24 @@ struct DDBalanceWorkload : TestWorkload {
 	Future<Void> ddbalanceSetupRange(Database cx, DDBalanceWorkload* self, int begin, int end) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					std::vector<Future<Void>> setActors;
-					for (int n = begin; n < end; n++) {
-						int objectnum = n / self->moversPerClient;
-						int moverid = n % self->moversPerClient;
-						setActors.push_back(
-						    self->setKeyIfNotPresent(&tr,
-						                             self->key(self->currentbin, objectnum, moverid, self->clientId),
-						                             self->value(objectnum)));
-					}
-					co_await waitForAll(setActors);
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				std::vector<Future<Void>> setActors;
+				for (int n = begin; n < end; n++) {
+					int objectnum = n / self->moversPerClient;
+					int moverid = n % self->moversPerClient;
+					setActors.push_back(
+					    self->setKeyIfNotPresent(&tr,
+					                             self->key(self->currentbin, objectnum, moverid, self->clientId),
+					                             self->value(objectnum)));
 				}
-				co_await tr.onError(err);
+				co_await waitForAll(setActors);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -173,38 +171,36 @@ struct DDBalanceWorkload : TestWorkload {
 			loop {
 				int startvalue = i;
 				moves = 0;
-				{
-					Error err;
-					try {
-						for (j = 0; i < end && j < self->writesPerTransaction; j++) {
-							Key myKey = self->key(sourceBin, i, moverId, self->clientId);
-							Key nextKey = self->key(destinationBin, i, moverId, self->clientId);
-							moves++;
-							i++;
+				Error err;
+				try {
+					for (j = 0; i < end && j < self->writesPerTransaction; j++) {
+						Key myKey = self->key(sourceBin, i, moverId, self->clientId);
+						Key nextKey = self->key(destinationBin, i, moverId, self->clientId);
+						moves++;
+						i++;
 
-							Optional<Value> f = co_await tr.get(myKey);
-							if (f.present()) {
-								maxMovedAmount++;
-								tr.set(nextKey, f.get());
-								tr.clear(myKey);
-							} else {
-								TraceEvent("KeyNotPresent")
-								    .detail("ClientId", self->clientId)
-								    .detail("MoverId", moverId)
-								    .detail("CurrentBin", sourceBin)
-								    .detail("NextBin", destinationBin);
-							}
+						Optional<Value> f = co_await tr.get(myKey);
+						if (f.present()) {
+							maxMovedAmount++;
+							tr.set(nextKey, f.get());
+							tr.clear(myKey);
+						} else {
+							TraceEvent("KeyNotPresent")
+							    .detail("ClientId", self->clientId)
+							    .detail("MoverId", moverId)
+							    .detail("CurrentBin", sourceBin)
+							    .detail("NextBin", destinationBin);
 						}
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
 					}
-					co_await tr.onError(err);
-					if (self->shouldRecord(clientBegin))
-						++self->retries;
-					i = startvalue;
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
+				if (self->shouldRecord(clientBegin))
+					++self->retries;
+				i = startvalue;
 			}
 
 			tr = Transaction();

@@ -44,19 +44,17 @@ struct RYWPerformanceWorkload : TestWorkload {
 		Transaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					for (int i = 0; i < self->nodes; i++)
-						tr.set(self->keyForIndex(i), "bar"_sr);
+			Error err;
+			try {
+				for (int i = 0; i < self->nodes; i++)
+					tr.set(self->keyForIndex(i), "bar"_sr);
 
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 	}
@@ -174,25 +172,23 @@ struct RYWPerformanceWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					co_await self->fillCache(&tr, self, cacheType);
+			Error err;
+			try {
+				co_await self->fillCache(&tr, self, cacheType);
 
-					double startTime = timer();
+				double startTime = timer();
 
-					for (i = 0; i < self->nodes; i++) {
-						co_await success(tr.get(self->keyForIndex(self->nodes / 2)));
-					}
-
-					fprintf(stderr, "%f", self->nodes / (timer() - startTime));
-
-					co_return;
-				} catch (Error& e) {
-					err = e;
+				for (i = 0; i < self->nodes; i++) {
+					co_await success(tr.get(self->keyForIndex(self->nodes / 2)));
 				}
-				co_await tr.onError(err);
+
+				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
+
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -201,25 +197,23 @@ struct RYWPerformanceWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					co_await self->fillCache(&tr, self, cacheType);
+			Error err;
+			try {
+				co_await self->fillCache(&tr, self, cacheType);
 
-					double startTime = timer();
+				double startTime = timer();
 
-					for (i = 0; i < self->nodes; i++) {
-						co_await success(tr.get(self->keyForIndex(i)));
-					}
-
-					fprintf(stderr, "%f", self->nodes / (timer() - startTime));
-
-					co_return;
-				} catch (Error& e) {
-					err = e;
+				for (i = 0; i < self->nodes; i++) {
+					co_await success(tr.get(self->keyForIndex(i)));
 				}
-				co_await tr.onError(err);
+
+				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
+
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -228,26 +222,24 @@ struct RYWPerformanceWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					co_await self->fillCache(&tr, self, cacheType);
+			Error err;
+			try {
+				co_await self->fillCache(&tr, self, cacheType);
 
-					double startTime = timer();
+				double startTime = timer();
 
-					for (i = 0; i < self->ranges; i++) {
-						co_await success(tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)),
-						                             self->nodes));
-					}
-
-					fprintf(stderr, "%f", self->ranges / (timer() - startTime));
-
-					co_return;
-				} catch (Error& e) {
-					err = e;
+				for (i = 0; i < self->ranges; i++) {
+					co_await success(tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)),
+					                             self->nodes));
 				}
-				co_await tr.onError(err);
+
+				fprintf(stderr, "%f", self->ranges / (timer() - startTime));
+
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -256,28 +248,26 @@ struct RYWPerformanceWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 
 		loop {
-			{
-				Error err;
-				try {
-					co_await self->fillCache(&tr, self, cacheType);
+			Error err;
+			try {
+				co_await self->fillCache(&tr, self, cacheType);
 
-					tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(self->nodes));
+				tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(self->nodes));
 
-					double startTime = timer();
+				double startTime = timer();
 
-					for (i = 0; i < self->nodes; i++) {
-						co_await success(tr.get(self->keyForIndex(self->nodes / 2)));
-						tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(i));
-					}
-
-					fprintf(stderr, "%f", self->nodes / (timer() - startTime));
-
-					co_return;
-				} catch (Error& e) {
-					err = e;
+				for (i = 0; i < self->nodes; i++) {
+					co_await success(tr.get(self->keyForIndex(self->nodes / 2)));
+					tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(i));
 				}
-				co_await tr.onError(err);
+
+				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
+
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

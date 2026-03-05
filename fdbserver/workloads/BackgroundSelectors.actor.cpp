@@ -97,38 +97,36 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 			// Setup start and end key
 			loop {
-				{
-					Error err;
-					try {
-						if (forward) {
-							{
-								Standalone<StringRef> res = co_await tr.getKey(KeySelectorRef(allKeys.begin, false, 1));
-								startKey = res;
-							}
-
-							{
-								Standalone<StringRef> res =
-								    co_await tr.getKey(randomizedSelector(startKey, true, diff));
-								endKey = res;
-							}
-						} else {
-							{
-								Standalone<StringRef> res = co_await tr.getKey(KeySelectorRef(allKeys.end, false, 0));
-								endKey = res;
-							}
-
-							{
-								Standalone<StringRef> res =
-								    co_await tr.getKey(randomizedSelector(endKey, true, -1 * diff));
-								startKey = res;
-							}
+				Error err;
+				try {
+					if (forward) {
+						{
+							Standalone<StringRef> res = co_await tr.getKey(KeySelectorRef(allKeys.begin, false, 1));
+							startKey = res;
 						}
-						break;
-					} catch (Error& e) {
-						err = e;
+
+						{
+							Standalone<StringRef> res =
+							    co_await tr.getKey(randomizedSelector(startKey, true, diff));
+							endKey = res;
+						}
+					} else {
+						{
+							Standalone<StringRef> res = co_await tr.getKey(KeySelectorRef(allKeys.end, false, 0));
+							endKey = res;
+						}
+
+						{
+							Standalone<StringRef> res =
+							    co_await tr.getKey(randomizedSelector(endKey, true, -1 * diff));
+							startKey = res;
+						}
 					}
-					co_await tr.onError(err);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 
 			loop {
@@ -148,74 +146,72 @@ struct BackgroundSelectorWorkload : TestWorkload {
 				}
 
 				loop {
-					{
-						Error err;
-						try {
-							if (diff < 0) {
-								RangeResult rangeResult_ =
-								    co_await tr.getRange(randomizedSelector(endKey, true, endDrift),
-								                         randomizedSelector(startKey, true, startDrift + 1),
-								                         self->resultLimit);
-								rangeResult = rangeResult_;
-								Standalone<StringRef> endResult_ =
-								    co_await tr.getKey(randomizedSelector(startKey, true, startDrift));
-								endResult = endResult_;
-								Standalone<StringRef> startResult_ =
-								    co_await tr.getKey(randomizedSelector(endKey, true, endDrift));
-								startResult = startResult_;
-							} else {
-								RangeResult rangeResult_ =
-								    co_await tr.getRange(randomizedSelector(startKey, true, startDrift),
-								                         randomizedSelector(endKey, true, endDrift + 1),
-								                         self->resultLimit);
-								rangeResult = rangeResult_;
-								Standalone<StringRef> startResult_ =
-								    co_await tr.getKey(randomizedSelector(startKey, true, startDrift));
-								startResult = startResult_;
-								Standalone<StringRef> endResult_ =
-								    co_await tr.getKey(randomizedSelector(endKey, true, endDrift));
-								endResult = endResult_;
-							}
-
-							restartProcess = false;
-							if (rangeResult.size() == 0) {
-								restartProcess = true;
-								break;
-							}
-
-							if (rangeResult.size() < self->resultLimit && startResult != allKeys.begin &&
-							    startResult != allKeys.end) {
-								if (startResult != rangeResult[0].key)
-									TraceEvent(SevError, "BackgroundSelectorError")
-									    .detail("Diff", diff)
-									    .detail("ResultSize", rangeResult.size())
-									    .detail("StartResult", printable(startResult))
-									    .detail("RangeResult", printable(rangeResult[0].key));
-							} else
-								restartProcess = true;
-
-							if (rangeResult.size() < self->resultLimit && endResult != allKeys.begin &&
-							    endResult != allKeys.end) {
-								if (endResult != rangeResult[rangeResult.size() - 1].key)
-									TraceEvent(SevError, "BackgroundSelectorError")
-									    .detail("Diff", diff)
-									    .detail("ResultSize", rangeResult.size())
-									    .detail("EndResult  ", printable(endResult))
-									    .detail("RangeResult", printable(rangeResult[rangeResult.size() - 1].key));
-							} else
-								restartProcess = true;
-
-							diff = std::min(rangeResult.size() - 1, self->maxDiff);
-							startKey = rangeResult[0].key;
-							endKey = rangeResult[diff].key;
-
-							break;
-						} catch (Error& e) {
-							err = e;
+					Error err;
+					try {
+						if (diff < 0) {
+							RangeResult rangeResult_ =
+							    co_await tr.getRange(randomizedSelector(endKey, true, endDrift),
+							                         randomizedSelector(startKey, true, startDrift + 1),
+							                         self->resultLimit);
+							rangeResult = rangeResult_;
+							Standalone<StringRef> endResult_ =
+							    co_await tr.getKey(randomizedSelector(startKey, true, startDrift));
+							endResult = endResult_;
+							Standalone<StringRef> startResult_ =
+							    co_await tr.getKey(randomizedSelector(endKey, true, endDrift));
+							startResult = startResult_;
+						} else {
+							RangeResult rangeResult_ =
+							    co_await tr.getRange(randomizedSelector(startKey, true, startDrift),
+							                         randomizedSelector(endKey, true, endDrift + 1),
+							                         self->resultLimit);
+							rangeResult = rangeResult_;
+							Standalone<StringRef> startResult_ =
+							    co_await tr.getKey(randomizedSelector(startKey, true, startDrift));
+							startResult = startResult_;
+							Standalone<StringRef> endResult_ =
+							    co_await tr.getKey(randomizedSelector(endKey, true, endDrift));
+							endResult = endResult_;
 						}
-						co_await tr.onError(err);
-						++self->retries;
+
+						restartProcess = false;
+						if (rangeResult.size() == 0) {
+							restartProcess = true;
+							break;
+						}
+
+						if (rangeResult.size() < self->resultLimit && startResult != allKeys.begin &&
+						    startResult != allKeys.end) {
+							if (startResult != rangeResult[0].key)
+								TraceEvent(SevError, "BackgroundSelectorError")
+								    .detail("Diff", diff)
+								    .detail("ResultSize", rangeResult.size())
+								    .detail("StartResult", printable(startResult))
+								    .detail("RangeResult", printable(rangeResult[0].key));
+						} else
+							restartProcess = true;
+
+						if (rangeResult.size() < self->resultLimit && endResult != allKeys.begin &&
+						    endResult != allKeys.end) {
+							if (endResult != rangeResult[rangeResult.size() - 1].key)
+								TraceEvent(SevError, "BackgroundSelectorError")
+								    .detail("Diff", diff)
+								    .detail("ResultSize", rangeResult.size())
+								    .detail("EndResult  ", printable(endResult))
+								    .detail("RangeResult", printable(rangeResult[rangeResult.size() - 1].key));
+						} else
+							restartProcess = true;
+
+						diff = std::min(rangeResult.size() - 1, self->maxDiff);
+						startKey = rangeResult[0].key;
+						endKey = rangeResult[diff].key;
+
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
+					co_await tr.onError(err);
+					++self->retries;
 				}
 				++self->operations;
 				if (restartProcess)

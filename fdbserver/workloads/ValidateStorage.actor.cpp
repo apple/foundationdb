@@ -114,36 +114,34 @@ struct ValidateStorage : TestWorkload {
 			                                                       KeyValueStoreType::END };
 		KeyValueStoreType storageEngine = deterministicRandom()->randomChoice(storageEngineCollection);
 		loop {
-			{
-				Error err;
-				try {
-					UID auditId_ = co_await auditStorage(cx->getConnectionRecord(),
-					                                     auditRange,
-					                                     type,
-					                                     storageEngine,
-					                                     /*timeoutSecond=*/300);
-					auditId = auditId_;
-					TraceEvent("TestAuditStorageTriggered")
-					    .detail("Context", context)
-					    .detail("AuditID", auditId)
-					    .detail("AuditType", type)
-					    .detail("AuditStorageEngine", storageEngine)
-					    .detail("AuditRange", auditRange);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent(SevWarn, "TestAuditStorageError")
-				    .errorUnsuppressed(err)
+			Error err;
+			try {
+				UID auditId_ = co_await auditStorage(cx->getConnectionRecord(),
+				                                     auditRange,
+				                                     type,
+				                                     storageEngine,
+				                                     /*timeoutSecond=*/300);
+				auditId = auditId_;
+				TraceEvent("TestAuditStorageTriggered")
 				    .detail("Context", context)
+				    .detail("AuditID", auditId)
 				    .detail("AuditType", type)
 				    .detail("AuditStorageEngine", storageEngine)
 				    .detail("AuditRange", auditRange);
-				if (auditRange.empty() && err.code() == error_code_audit_storage_failed) {
-					break;
-				}
-				co_await delay(1);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent(SevWarn, "TestAuditStorageError")
+			    .errorUnsuppressed(err)
+			    .detail("Context", context)
+			    .detail("AuditType", type)
+			    .detail("AuditStorageEngine", storageEngine)
+			    .detail("AuditRange", auditRange);
+			if (auditRange.empty() && err.code() == error_code_audit_storage_failed) {
+				break;
+			}
+			co_await delay(1);
 		}
 		co_return auditId;
 	}
@@ -155,41 +153,39 @@ struct ValidateStorage : TestWorkload {
 	                                           bool stopWaitWhenCleared) {
 		AuditStorageState auditState;
 		loop {
-			{
-				Error err;
-				try {
-					AuditStorageState auditState_ = co_await getAuditState(cx, type, auditId);
-					auditState = auditState_;
-					if (auditState.getPhase() == AuditPhase::Complete) {
-						break;
-					} else if (auditState.getPhase() == AuditPhase::Running) {
-						TraceEvent("TestAuditStorageWait")
-						    .detail("Context", context)
-						    .detail("AuditID", auditId)
-						    .detail("AuditType", type);
-						co_await delay(30);
-						continue;
-					} else if (auditState.getPhase() == AuditPhase::Error) {
-						break;
-					} else if (auditState.getPhase() == AuditPhase::Failed) {
-						break;
-					} else {
-						UNREACHABLE();
-					}
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				AuditStorageState auditState_ = co_await getAuditState(cx, type, auditId);
+				auditState = auditState_;
+				if (auditState.getPhase() == AuditPhase::Complete) {
+					break;
+				} else if (auditState.getPhase() == AuditPhase::Running) {
+					TraceEvent("TestAuditStorageWait")
+					    .detail("Context", context)
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					co_await delay(30);
+					continue;
+				} else if (auditState.getPhase() == AuditPhase::Error) {
+					break;
+				} else if (auditState.getPhase() == AuditPhase::Failed) {
+					break;
+				} else {
+					UNREACHABLE();
 				}
-				if (stopWaitWhenCleared && err.code() == error_code_key_not_found) {
-					break; // this audit has been cleared
-				}
-				TraceEvent("TestAuditStorageWaitError")
-				    .errorUnsuppressed(err)
-				    .detail("Context", context)
-				    .detail("AuditID", auditId)
-				    .detail("AuditType", type)
-				    .detail("AuditState", auditState.toString());
-				co_await delay(1);
+			} catch (Error& e) {
+				err = e;
 			}
+			if (stopWaitWhenCleared && err.code() == error_code_key_not_found) {
+				break; // this audit has been cleared
+			}
+			TraceEvent("TestAuditStorageWaitError")
+			    .errorUnsuppressed(err)
+			    .detail("Context", context)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", type)
+			    .detail("AuditState", auditState.toString());
+			co_await delay(1);
 		}
 		TraceEvent("TestAuditStorageEnd")
 		    .detail("Context", context)
@@ -202,88 +198,84 @@ struct ValidateStorage : TestWorkload {
 		// Check the number of existing persisted audits is no more than PERSIST_FINISH_AUDIT_COUNT
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					RangeResult res = co_await tr.getRange(auditKeyRange(type), GetRangeLimits());
-					ASSERT(!res.more);
-					int i = 0;
-					for (; i < res.size(); ++i) {
-						AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
-						TraceEvent("TestAuditStorageCheckPersistStateExists")
-						    .detail("Context", context)
-						    .detail("ExistAuditID", existingAuditState.id)
-						    .detail("ExistAuditPhase", existingAuditState.getPhase())
-						    .detail("AuditID", auditId)
-						    .detail("AuditType", type);
-						ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
-						       existingAuditState.getPhase() == AuditPhase::Failed ||
-						       existingAuditState.getPhase() == AuditPhase::Running);
-						if (existingAuditState.getPhase() == AuditPhase::Complete) {
-							if (type == AuditType::ValidateStorageServerShard) {
-								RangeResult serverBasedRes = co_await tr.getRange(
-								    auditServerBasedProgressRangeFor(type, existingAuditState.id), GetRangeLimits());
-								ASSERT(serverBasedRes.empty() && !serverBasedRes.more);
-							} else {
-								RangeResult rangeBasedRes = co_await tr.getRange(
-								    auditRangeBasedProgressRangeFor(type, existingAuditState.id), GetRangeLimits());
-								ASSERT(rangeBasedRes.empty() && !rangeBasedRes.more);
-							}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res = co_await tr.getRange(auditKeyRange(type), GetRangeLimits());
+				ASSERT(!res.more);
+				int i = 0;
+				for (; i < res.size(); ++i) {
+					AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
+					TraceEvent("TestAuditStorageCheckPersistStateExists")
+					    .detail("Context", context)
+					    .detail("ExistAuditID", existingAuditState.id)
+					    .detail("ExistAuditPhase", existingAuditState.getPhase())
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
+					       existingAuditState.getPhase() == AuditPhase::Failed ||
+					       existingAuditState.getPhase() == AuditPhase::Running);
+					if (existingAuditState.getPhase() == AuditPhase::Complete) {
+						if (type == AuditType::ValidateStorageServerShard) {
+							RangeResult serverBasedRes = co_await tr.getRange(
+							    auditServerBasedProgressRangeFor(type, existingAuditState.id), GetRangeLimits());
+							ASSERT(serverBasedRes.empty() && !serverBasedRes.more);
+						} else {
+							RangeResult rangeBasedRes = co_await tr.getRange(
+							    auditRangeBasedProgressRangeFor(type, existingAuditState.id), GetRangeLimits());
+							ASSERT(rangeBasedRes.empty() && !rangeBasedRes.more);
 						}
 					}
-					if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 5) {
-						// Note that 5 is the sum of 4 + 1
-						// In the test, we issue at most 4 concurrent audits at the same time
-						// The 4 concurrent audits may not be complete in time
-						// So, the cleanup does not precisely guarantee PERSIST_FINISH_AUDIT_COUNT
-						TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
-						    .detail("ExistCount", res.size())
-						    .detail("Context", context)
-						    .detail("AuditID", auditId)
-						    .detail("AuditType", type);
-						co_await delay(30);
-						tr.reset();
-						continue;
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
 				}
-				TraceEvent("TestAuditStorageCheckPersistStateError")
-				    .errorUnsuppressed(err)
-				    .detail("Context", context)
-				    .detail("AuditID", auditId)
-				    .detail("AuditType", type);
-				co_await tr.onError(err);
+				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 5) {
+					// Note that 5 is the sum of 4 + 1
+					// In the test, we issue at most 4 concurrent audits at the same time
+					// The 4 concurrent audits may not be complete in time
+					// So, the cleanup does not precisely guarantee PERSIST_FINISH_AUDIT_COUNT
+					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
+					    .detail("ExistCount", res.size())
+					    .detail("Context", context)
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					co_await delay(30);
+					tr.reset();
+					continue;
+				}
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("TestAuditStorageCheckPersistStateError")
+			    .errorUnsuppressed(err)
+			    .detail("Context", context)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", type);
+			co_await tr.onError(err);
 		}
 	}
 
 	Future<Void> waitCancelAuditStorageUntilComplete(Database cx, AuditType type, UID auditId) {
 		loop {
-			{
-				Error err;
-				try {
-					UID auditId_ = co_await cancelAuditStorage(cx->getConnectionRecord(),
-					                                           type,
-					                                           auditId,
-					                                           /*timeoutSecond=*/300);
-					ASSERT(auditId == auditId_);
-					TraceEvent("TestAuditStorageWaitCancelAuditStorageUntilComplete")
-					    .detail("AuditID", auditId)
-					    .detail("AuditType", type);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent(SevWarn, "TestAuditStorageWaitCancelAuditStorageUntilCompleteError")
-				    .errorUnsuppressed(err)
+			Error err;
+			try {
+				UID auditId_ = co_await cancelAuditStorage(cx->getConnectionRecord(),
+				                                           type,
+				                                           auditId,
+				                                           /*timeoutSecond=*/300);
+				ASSERT(auditId == auditId_);
+				TraceEvent("TestAuditStorageWaitCancelAuditStorageUntilComplete")
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", type);
-				co_await delay(1);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent(SevWarn, "TestAuditStorageWaitCancelAuditStorageUntilCompleteError")
+			    .errorUnsuppressed(err)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", type);
+			co_await delay(1);
 		}
 	}
 
@@ -344,22 +336,20 @@ struct ValidateStorage : TestWorkload {
 
 		loop {
 			debugID = deterministicRandom()->randomUniqueID();
-			{
-				Error err;
-				try {
-					tr->debugTransaction(debugID);
-					for (const auto& [key, value] : *kvs) {
-						tr->set(key, value);
-					}
-					co_await tr->commit();
-					version = tr->getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				tr->debugTransaction(debugID);
+				for (const auto& [key, value] : *kvs) {
+					tr->set(key, value);
 				}
-				TraceEvent("TestCommitError").errorUnsuppressed(err);
-				co_await tr->onError(err);
+				co_await tr->commit();
+				version = tr->getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent("TestCommitError").errorUnsuppressed(err);
+			co_await tr->onError(err);
 		}
 
 		TraceEvent("PopulateTestDataDone")
@@ -411,58 +401,56 @@ struct ValidateStorage : TestWorkload {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		int retryCount = 0;
 		loop {
-			{
-				Error err;
-				try {
-					RangeResult shards = co_await krmGetRanges(
-					    &tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!shards.empty() && !shards.more);
+			Error err;
+			try {
+				RangeResult shards = co_await krmGetRanges(
+				    &tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!shards.empty() && !shards.more);
 
-					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-					int i = 0;
-					for (i = 0; i < shards.size() - 1; ++i) {
-						std::vector<UID> src;
-						std::vector<UID> dest;
-						UID srcId, destId;
-						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+				int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-						const int idx = deterministicRandom()->randomInt(0, src.size());
-						Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(src[idx]));
-						ASSERT(serverListValue.present());
-						const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-						TraceEvent("TestSSUserDataValidationSendingRequest")
-						    .detail("Range", range)
-						    .detail("StorageServer", ssi.toString());
-						AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
-						                        KeyRangeRef(shards[i].key, shards[i + 1].key),
-						                        AuditType::ValidateHA);
-						req.ddId = deterministicRandom()->randomUniqueID();
-						Optional<AuditStorageState> vResult =
-						    co_await timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5);
-						if (!vResult.present()) {
-							co_return;
-						}
-					}
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (retryCount > 5) {
-					TraceEvent(SevWarnAlways, "TestSSUserDataValidationFailed")
-					    .errorUnsuppressed(err)
-					    .detail("Range", range);
-					break;
-				} else {
-					TraceEvent(SevWarn, "TestSSUserDataValidationFailedRetry")
-					    .errorUnsuppressed(err)
+					const int idx = deterministicRandom()->randomInt(0, src.size());
+					Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(src[idx]));
+					ASSERT(serverListValue.present());
+					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+					TraceEvent("TestSSUserDataValidationSendingRequest")
 					    .detail("Range", range)
-					    .detail("RetryCount", retryCount);
-					co_await delay(1);
-					retryCount++;
-					continue;
+					    .detail("StorageServer", ssi.toString());
+					AuditStorageRequest req(deterministicRandom()->randomUniqueID(),
+					                        KeyRangeRef(shards[i].key, shards[i + 1].key),
+					                        AuditType::ValidateHA);
+					req.ddId = deterministicRandom()->randomUniqueID();
+					Optional<AuditStorageState> vResult =
+					    co_await timeout<AuditStorageState>(ssi.auditStorage.getReply(req), 5);
+					if (!vResult.present()) {
+						co_return;
+					}
 				}
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (retryCount > 5) {
+				TraceEvent(SevWarnAlways, "TestSSUserDataValidationFailed")
+				    .errorUnsuppressed(err)
+				    .detail("Range", range);
+				break;
+			} else {
+				TraceEvent(SevWarn, "TestSSUserDataValidationFailedRetry")
+				    .errorUnsuppressed(err)
+				    .detail("Range", range)
+				    .detail("RetryCount", retryCount);
+				co_await delay(1);
+				retryCount++;
+				continue;
 			}
 		}
 
@@ -675,23 +663,21 @@ struct ValidateStorage : TestWorkload {
 		Transaction tr(cx);
 		RangeResult auditStates;
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					co_await krmSetRange(&tr,
-					                     auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
-					                     auditState.range,
-					                     auditStorageStateValue(auditState));
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				co_await krmSetRange(&tr,
+				                     auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
+				                     auditState.range,
+				                     auditStorageStateValue(auditState));
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

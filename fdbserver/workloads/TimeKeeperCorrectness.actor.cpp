@@ -46,18 +46,16 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 			Transaction tr(cx);
 
 			loop {
-				{
-					Error err;
-					try {
-						int64_t curTime = now();
-						Version v = co_await tr.getReadVersion();
-						self->inMemTimeKeeper[curTime] = v;
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					co_await tr.onError(err);
+				Error err;
+				try {
+					int64_t curTime = now();
+					Version v = co_await tr.getReadVersion();
+					self->inMemTimeKeeper[curTime] = v;
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 
 			// For every sample from Timekeeper collect two samples here.
@@ -78,51 +76,49 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		    .detail("TimeKeeperDelay", SERVER_KNOBS->TIME_KEEPER_DELAY);
 
 		loop {
-			{
-				Error err;
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					KeyBackedRangeResult<std::pair<int64_t, Version>> allItems =
-					    co_await dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2);
+				KeyBackedRangeResult<std::pair<int64_t, Version>> allItems =
+				    co_await dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2);
 
-					if (allItems.results.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
-						TraceEvent(SevError, "TKCorrectness_TooManyEntries")
-						    .detail("Expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1)
-						    .detail("Found", allItems.results.size());
+				if (allItems.results.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
+					TraceEvent(SevError, "TKCorrectness_TooManyEntries")
+					    .detail("Expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1)
+					    .detail("Found", allItems.results.size());
+					co_return false;
+				}
+
+				if (allItems.results.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
+					TraceEvent(SevWarnAlways, "TKCorrectness_TooFewEntries")
+					    .detail("Expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
+					    .detail("Found", allItems.results.size());
+				}
+
+				for (auto item : allItems.results) {
+					auto it = self->inMemTimeKeeper.lower_bound(item.first);
+					if (it == self->inMemTimeKeeper.end()) {
+						continue;
+					}
+
+					if (item.second >= it->second) {
+						TraceEvent(SevError, "TKCorrectness_VersionIncorrectBounds")
+						    .detail("ClusterTime", item.first)
+						    .detail("ClusterVersion", item.second)
+						    .detail("LocalTime", it->first)
+						    .detail("LocalVersion", it->second);
 						co_return false;
 					}
-
-					if (allItems.results.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
-						TraceEvent(SevWarnAlways, "TKCorrectness_TooFewEntries")
-						    .detail("Expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
-						    .detail("Found", allItems.results.size());
-					}
-
-					for (auto item : allItems.results) {
-						auto it = self->inMemTimeKeeper.lower_bound(item.first);
-						if (it == self->inMemTimeKeeper.end()) {
-							continue;
-						}
-
-						if (item.second >= it->second) {
-							TraceEvent(SevError, "TKCorrectness_VersionIncorrectBounds")
-							    .detail("ClusterTime", item.first)
-							    .detail("ClusterVersion", item.second)
-							    .detail("LocalTime", it->first)
-							    .detail("LocalVersion", it->second);
-							co_return false;
-						}
-					}
-
-					TraceEvent(SevInfo, "TKCorrectness_Passed").log();
-					co_return true;
-				} catch (Error& e) {
-					err = e;
 				}
-				co_await tr->onError(err);
+
+				TraceEvent(SevInfo, "TKCorrectness_Passed").log();
+				co_return true;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 	}
 

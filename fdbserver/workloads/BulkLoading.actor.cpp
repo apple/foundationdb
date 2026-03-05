@@ -91,49 +91,45 @@ struct BulkLoading : TestWorkload {
 	Future<Void> clearAllBulkLoadTask(Database cx) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					co_await krmSetRange(
-					    &tr, bulkLoadTaskPrefix, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				co_await krmSetRange(
+				    &tr, bulkLoadTaskPrefix, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
 	// Submit task can be failed due to range lock reject
 	Future<bool> submitBulkLoadTask(Database cx, BulkLoadTaskState bulkLoadTask) {
 		loop {
-			{
-				Error err;
-				try {
-					Transaction tr(cx);
-					co_await setBulkLoadSubmissionTransaction(&tr, bulkLoadTask);
-					co_await takeExclusiveReadLockOnRange(&tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad);
-					co_await tr.commit();
-					TraceEvent(SevDebug, "BulkLoadingSubmitBulkLoadTask")
-					    .detail("BulkLoadTaskState", bulkLoadTask.toString());
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent(SevWarn, "BulkLoadingSubmitBulkLoadTaskError")
-				    .setMaxEventLength(-1)
-				    .setMaxFieldLength(-1)
-				    .errorUnsuppressed(err)
+			Error err;
+			try {
+				Transaction tr(cx);
+				co_await setBulkLoadSubmissionTransaction(&tr, bulkLoadTask);
+				co_await takeExclusiveReadLockOnRange(&tr, bulkLoadTask.getRange(), rangeLockNameForBulkLoad);
+				co_await tr.commit();
+				TraceEvent(SevDebug, "BulkLoadingSubmitBulkLoadTask")
 				    .detail("BulkLoadTaskState", bulkLoadTask.toString());
-				if (err.code() == error_code_range_lock_reject) {
-					co_return false;
-				}
-				co_await delay(0.1);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent(SevWarn, "BulkLoadingSubmitBulkLoadTaskError")
+			    .setMaxEventLength(-1)
+			    .setMaxFieldLength(-1)
+			    .errorUnsuppressed(err)
+			    .detail("BulkLoadTaskState", bulkLoadTask.toString());
+			if (err.code() == error_code_range_lock_reject) {
+				co_return false;
+			}
+			co_await delay(0.1);
 		}
 		co_return true;
 	}
@@ -141,27 +137,25 @@ struct BulkLoading : TestWorkload {
 	// Finish task must always succeed
 	Future<Void> finalizeBulkLoadTask(Database cx, KeyRange range, UID taskId) {
 		loop {
-			{
-				Error err;
-				try {
-					Transaction tr(cx);
-					co_await setBulkLoadFinalizeTransaction(&tr, range, taskId);
-					co_await releaseExclusiveReadLockOnRange(&tr, range, rangeLockNameForBulkLoad);
-					co_await tr.commit();
-					TraceEvent(SevDebug, "BulkLoadingAcknowledgeBulkLoadTask")
-					    .detail("TaskID", taskId.toString())
-					    .detail("TaskRange", range);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				TraceEvent(SevWarn, "BulkLoadingAcknowledgeBulkLoadTaskError")
-				    .errorUnsuppressed(err)
+			Error err;
+			try {
+				Transaction tr(cx);
+				co_await setBulkLoadFinalizeTransaction(&tr, range, taskId);
+				co_await releaseExclusiveReadLockOnRange(&tr, range, rangeLockNameForBulkLoad);
+				co_await tr.commit();
+				TraceEvent(SevDebug, "BulkLoadingAcknowledgeBulkLoadTask")
 				    .detail("TaskID", taskId.toString())
 				    .detail("TaskRange", range);
-				ASSERT(err.code() != error_code_bulkload_task_outdated && err.code() != error_code_range_lock_reject);
-				co_await delay(0.1);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			TraceEvent(SevWarn, "BulkLoadingAcknowledgeBulkLoadTaskError")
+			    .errorUnsuppressed(err)
+			    .detail("TaskID", taskId.toString())
+			    .detail("TaskRange", range);
+			ASSERT(err.code() != error_code_bulkload_task_outdated && err.code() != error_code_range_lock_reject);
+			co_await delay(0.1);
 		}
 	}
 
@@ -169,22 +163,20 @@ struct BulkLoading : TestWorkload {
 		loop {
 			Transaction tr(cx);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			{
-				Error err;
-				try {
-					int ddMode = 1;
-					Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
-					if (mode.present()) {
-						BinaryReader rd(mode.get(), Unversioned());
-						rd >> ddMode;
-					}
-					co_return ddMode == 1;
-
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				int ddMode = 1;
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					rd >> ddMode;
 				}
-				co_await tr.onError(err);
+				co_return ddMode == 1;
+
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -196,47 +188,45 @@ struct BulkLoading : TestWorkload {
 		Key endKey = allKeys.end;
 		std::vector<BulkLoadTaskState> errorTasks;
 		while (beginKey < endKey) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					RangeResult res =
-					    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, Standalone(KeyRangeRef(beginKey, endKey)));
-					for (int i = 0; i < res.size() - 1; i++) {
-						if (!res[i].value.empty()) {
-							BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
-							if (!bulkLoadTaskState.isValid()) {
-								continue;
-							}
-							// We do not check manifest because we are not fully setting manifest in this simulation
-							// test
-							if (bulkLoadTaskState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
-								continue; // Ignore outdated task
-							}
-							if (bulkLoadTaskState.phase != BulkLoadPhase::Complete &&
-							    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
-								TraceEvent("BulkLoadingWorkLoadIncompleteTasks")
-								    .setMaxEventLength(-1)
-								    .setMaxFieldLength(-1)
-								    .detail("Task", bulkLoadTaskState.toString());
-								co_return std::make_pair(false, errorTasks);
-							}
-							if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
-								TraceEvent("BulkLoadingWorkLoadFailedTasks")
-								    .setMaxEventLength(-1)
-								    .setMaxFieldLength(-1)
-								    .detail("Task", bulkLoadTaskState.toString());
-								errorTasks.push_back(bulkLoadTaskState);
-							}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res =
+				    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, Standalone(KeyRangeRef(beginKey, endKey)));
+				for (int i = 0; i < res.size() - 1; i++) {
+					if (!res[i].value.empty()) {
+						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
+						if (!bulkLoadTaskState.isValid()) {
+							continue;
+						}
+						// We do not check manifest because we are not fully setting manifest in this simulation
+						// test
+						if (bulkLoadTaskState.getRange() != KeyRangeRef(res[i].key, res[i + 1].key)) {
+							continue; // Ignore outdated task
+						}
+						if (bulkLoadTaskState.phase != BulkLoadPhase::Complete &&
+						    bulkLoadTaskState.phase != BulkLoadPhase::Error) {
+							TraceEvent("BulkLoadingWorkLoadIncompleteTasks")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
+							    .detail("Task", bulkLoadTaskState.toString());
+							co_return std::make_pair(false, errorTasks);
+						}
+						if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+							TraceEvent("BulkLoadingWorkLoadFailedTasks")
+							    .setMaxEventLength(-1)
+							    .setMaxFieldLength(-1)
+							    .detail("Task", bulkLoadTaskState.toString());
+							errorTasks.push_back(bulkLoadTaskState);
 						}
 					}
-					beginKey = res[res.size() - 1].key;
-				} catch (Error& e) {
-					err = e;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				beginKey = res[res.size() - 1].key;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 		co_return std::make_pair(true, errorTasks);
@@ -257,46 +247,44 @@ struct BulkLoading : TestWorkload {
 		Key endKey = normalKeys.end;
 		Transaction tr(cx);
 		while (beginKey < endKey) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					RangeResult res = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
-					int clearedCount = 0;
-					int nonEmptyCount = 0;
-					for (int i = 0; i < res.size() - 1; i++) {
-						ASSERT(!self->initializeBulkLoadMetadata || !res[i].value.empty());
-						if (res[i].value.empty()) {
-							continue;
-						}
-						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
-						if (!bulkLoadTaskState.isValid()) {
-							clearedCount++;
-							continue;
-						}
-						KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
-						if (bulkLoadTaskState.getRange() == currentRange) {
-							TraceEvent("BulkLoadingWorkLoadMetadataNotCleared")
-							    .setMaxEventLength(-1)
-							    .setMaxFieldLength(-1)
-							    .detail("BulkLoadTask", bulkLoadTaskState.toString());
-							co_return false;
-						}
-						ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
-						nonEmptyCount++;
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
+				int clearedCount = 0;
+				int nonEmptyCount = 0;
+				for (int i = 0; i < res.size() - 1; i++) {
+					ASSERT(!self->initializeBulkLoadMetadata || !res[i].value.empty());
+					if (res[i].value.empty()) {
+						continue;
 					}
-					if (self->initializeBulkLoadMetadata && (clearedCount > nonEmptyCount + 1)) {
-						TraceEvent(SevError, "BulkLoadingWorkLoadTooManyClearedCount")
-						    .detail("ClearedCount", clearedCount)
-						    .detail("NonEmptyCount", nonEmptyCount);
+					BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
+					if (!bulkLoadTaskState.isValid()) {
+						clearedCount++;
+						continue;
 					}
-					beginKey = res.back().key;
-				} catch (Error& e) {
-					err = e;
+					KeyRange currentRange = Standalone(KeyRangeRef(res[i].key, res[i + 1].key));
+					if (bulkLoadTaskState.getRange() == currentRange) {
+						TraceEvent("BulkLoadingWorkLoadMetadataNotCleared")
+						    .setMaxEventLength(-1)
+						    .setMaxFieldLength(-1)
+						    .detail("BulkLoadTask", bulkLoadTaskState.toString());
+						co_return false;
+					}
+					ASSERT(bulkLoadTaskState.getRange().contains(currentRange));
+					nonEmptyCount++;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
+				if (self->initializeBulkLoadMetadata && (clearedCount > nonEmptyCount + 1)) {
+					TraceEvent(SevError, "BulkLoadingWorkLoadTooManyClearedCount")
+					    .detail("ClearedCount", clearedCount)
+					    .detail("NonEmptyCount", nonEmptyCount);
 				}
+				beginKey = res.back().key;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 		co_return true;
@@ -319,27 +307,25 @@ struct BulkLoading : TestWorkload {
 		Transaction tr(cx);
 		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBStart");
 		loop {
-			{
-				Error err;
-				try {
-					RangeResult result = co_await tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!result.more);
-					for (int i = 0; i < result.size(); i++) {
-						if (self->keyContainedInRanges(result[i].key, ignoreRanges)) {
-							continue; // ignoreRanges
-						}
-						if (self->backgroundTrafficEnabled &&
-						    !self->keyContainedInRanges(result[i].key, loadedRanges)) {
-							continue; // When background traffic is enabled, ignore any data outside the loaded range
-						}
-						res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
+			Error err;
+			try {
+				RangeResult result = co_await tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!result.more);
+				for (int i = 0; i < result.size(); i++) {
+					if (self->keyContainedInRanges(result[i].key, ignoreRanges)) {
+						continue; // ignoreRanges
 					}
-					break;
-				} catch (Error& e) {
-					err = e;
+					if (self->backgroundTrafficEnabled &&
+					    !self->keyContainedInRanges(result[i].key, loadedRanges)) {
+						continue; // When background traffic is enabled, ignore any data outside the loaded range
+					}
+					res.push_back(Standalone(KeyValueRef(result[i].key, result[i].value)));
 				}
-				co_await tr.onError(err);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 		TraceEvent("BulkLoadingWorkLoadGetKVSFromDBDone");
 		co_return res;
@@ -615,19 +601,17 @@ struct BulkLoading : TestWorkload {
 	Future<Void> setKeys(Database cx, std::vector<KeyValue> kvs) {
 		Transaction tr(cx);
 		loop {
-			{
-				Error err;
-				try {
-					for (const auto& kv : kvs) {
-						tr.set(kv.key, kv.value);
-					}
-					co_await tr.commit();
-					co_return;
-				} catch (Error& e) {
-					err = e;
+			Error err;
+			try {
+				for (const auto& kv : kvs) {
+					tr.set(kv.key, kv.value);
 				}
-				co_await tr.onError(err);
+				co_await tr.commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

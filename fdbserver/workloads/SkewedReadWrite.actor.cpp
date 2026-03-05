@@ -104,20 +104,18 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		loop {
 			// read in transaction to ensure two key ranges are transactionally consistent
-			{
-				Error err;
-				try {
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-					Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
-					co_await store(serverList, serverListF);
-					co_await store(range, rangeF);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr->onError(err);
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
+				co_await store(serverList, serverListF);
+				co_await store(range, rangeF);
+				break;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 		// decode server interfaces
 		self->serverInterfaces.clear();
@@ -304,54 +302,52 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			self->transactionSuccessMetric->commitLatency = -1;
 
 			loop {
-				{
-					Error err;
-					try {
-						GRVStartTime = now();
-						self->transactionFailureMetric->startLatency = -1;
+				Error err;
+				try {
+					GRVStartTime = now();
+					self->transactionFailureMetric->startLatency = -1;
 
-						double grvLatency = now() - GRVStartTime;
-						self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
-						self->transactionFailureMetric->startLatency = grvLatency * 1e9;
-						if (self->shouldRecord())
-							self->GRVLatencies.addSample(grvLatency);
-
-						double readStart = now();
-						co_await self->readOp(&tr, keys, self, self->shouldRecord());
-
-						double readLatency = now() - readStart;
-						if (self->shouldRecord())
-							self->fullReadLatencies.addSample(readLatency);
-
-						if (!writes)
-							break;
-
-						for (int op = 0; op < writes; op++)
-							tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
-
-						double commitStart = now();
-						co_await tr.commit();
-
-						double commitLatency = now() - commitStart;
-						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
-						if (self->shouldRecord())
-							self->commitLatencies.addSample(commitLatency);
-
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					self->transactionFailureMetric->errorCode = err.code();
-					self->transactionFailureMetric->log();
-
-					co_await tr.onError(err);
-
-					++self->transactionSuccessMetric->retries;
-					++self->totalRetriesMetric;
-
+					double grvLatency = now() - GRVStartTime;
+					self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
+					self->transactionFailureMetric->startLatency = grvLatency * 1e9;
 					if (self->shouldRecord())
-						++self->retries;
+						self->GRVLatencies.addSample(grvLatency);
+
+					double readStart = now();
+					co_await self->readOp(&tr, keys, self, self->shouldRecord());
+
+					double readLatency = now() - readStart;
+					if (self->shouldRecord())
+						self->fullReadLatencies.addSample(readLatency);
+
+					if (!writes)
+						break;
+
+					for (int op = 0; op < writes; op++)
+						tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
+
+					double commitStart = now();
+					co_await tr.commit();
+
+					double commitLatency = now() - commitStart;
+					self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
+					if (self->shouldRecord())
+						self->commitLatencies.addSample(commitLatency);
+
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				self->transactionFailureMetric->errorCode = err.code();
+				self->transactionFailureMetric->log();
+
+				co_await tr.onError(err);
+
+				++self->transactionSuccessMetric->retries;
+				++self->totalRetriesMetric;
+
+				if (self->shouldRecord())
+					++self->retries;
 			}
 
 			if (debugID != UID())
