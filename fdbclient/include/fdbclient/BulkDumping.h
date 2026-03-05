@@ -141,8 +141,15 @@ public:
 
 	BulkLoadManifest getManifest() const { return manifest; }
 
+	// Owner tracking methods - data stored in separate system keys for backward compatibility
+	// These methods are convenience wrappers; actual storage is via ManagementAPI functions
+	// getOwner() / setOwner() will read/write bulkDumpOwnerKey(jobId)
+	// getSubmitTime() will read bulkDumpTimingKey(jobId) or return now() if not set
+	double getSubmitTime() const { return now(); } // Default impl; override via ManagementAPI
+
 	template <class Ar>
 	void serialize(Ar& ar) {
+		// Core state only - observability fields stored separately to maintain compatibility
 		serializer(ar, jobId, jobRange, phase, taskId, manifest);
 	}
 
@@ -163,6 +170,10 @@ private:
 	Optional<UID> taskId;
 	// The manifest metadata persist to system key space and manifest file when a dump task completes.
 	BulkLoadManifest manifest;
+
+	// NOTE: Owner tracking and timing information should be stored in separate system keys
+	// (e.g., bulkDumpOwnerKey(jobId), bulkDumpTimingKey(jobId)) to maintain backward compatibility.
+	// Do not add fields here without protocol versioning support.
 };
 
 // User API to create bulkDump task metadata

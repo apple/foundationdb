@@ -1220,6 +1220,28 @@ BulkDumpState decodeBulkDumpState(const ValueRef& value) {
 	return bulkDumpState;
 }
 
+// BulkDump owner tracking - stored separately for backward compatibility
+const KeyRangeRef bulkDumpOwnerKeys = KeyRangeRef("\xff/bulkDumpOwner/"_sr, "\xff/bulkDumpOwner0"_sr);
+const KeyRef bulkDumpOwnerPrefix = bulkDumpOwnerKeys.begin;
+
+const Key bulkDumpOwnerKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkDumpOwnerPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
+// BulkLoad owner tracking - stored separately for backward compatibility
+const KeyRangeRef bulkLoadOwnerKeys = KeyRangeRef("\xff/bulkLoadOwner/"_sr, "\xff/bulkLoadOwner0"_sr);
+const KeyRef bulkLoadOwnerPrefix = bulkLoadOwnerKeys.begin;
+
+const Key bulkLoadOwnerKeyFor(const UID& jobId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(bulkLoadOwnerPrefix);
+	wr << jobId;
+	return wr.toValue();
+}
+
 // Range Lock
 const std::string rangeLockNameForBulkLoad = "BulkLoad";
 

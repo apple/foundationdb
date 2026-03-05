@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Util.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -187,12 +188,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
-		if (!jobId.isValid()) {
-			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			return UID();
-		}
+		state UID jobId = validateBulkJobId(tokens[2], BULK_LOAD_LOAD_USAGE);
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
@@ -231,14 +227,69 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
 			return UID();
 		}
-		Optional<BulkLoadJobState> job = wait(getRunningBulkLoadJob(cx));
-		if (!job.present()) {
+
+		// Get aggregated progress
+		Optional<BulkLoadProgress> progressOpt = wait(getBulkLoadProgress(cx));
+		if (!progressOpt.present()) {
 			fmt::println("No bulk loading job is running");
 			return UID();
 		}
-		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
-		fmt::println("Job information: {}", job.get().toString());
-		wait(printBulkLoadJobProgress(cx, job.get()));
+
+		BulkLoadProgress progress = progressOpt.get();
+
+		fmt::println("BulkLoad job {} is in progress.", progress.jobId.toString());
+
+		// Get owner info for range description
+		std::string ownerSuffix = wait(getBulkOwnerSuffix(cx, progress.jobId, false)); // false = isLoadJob
+
+		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
+		fmt::println("");
+		fmt::println("Progress:");
+		fmt::println(" Tasks - {} submitted, {} triggered, {} running, {} complete, {} error",
+		             progress.submittedTasks,
+		             progress.triggeredTasks,
+		             progress.runningTasks,
+		             progress.completeTasks,
+		             progress.errorTasks);
+
+		int totalTasks = progress.submittedTasks + progress.triggeredTasks + progress.runningTasks +
+		                 progress.completeTasks + progress.errorTasks;
+		if (totalTasks > 0) {
+			fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+			             progress.completeTasks,
+			             totalTasks,
+			             100.0 * progress.completeTasks / totalTasks);
+		}
+
+		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+
+		// Use shared progress metrics display
+		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+
+		// Enhanced diagnostics with shared utilities
+		printTaskBreakdown(progress.submittedTasks,
+		                   progress.triggeredTasks,
+		                   progress.runningTasks,
+		                   progress.completeTasks,
+		                   progress.errorTasks);
+
+		// Advanced health analysis
+		double efficiency = totalTasks > 0 ? 100.0 * progress.completeTasks / totalTasks : 0.0;
+		auto healthMetrics = BulkHealthMetrics::analyze(progress.avgBytesPerSecond() / 1048576.0,
+		                                                efficiency,
+		                                                progress.stalledTasks.size(),
+		                                                progress.errorTasks,
+		                                                progress.elapsedSeconds / 60.0);
+		printBulkHealthAnalysis(healthMetrics);
+
+		// Stalled task warnings using shared utility
+		printStalledTaskWarnings(progress.stalledTasks);
+
+		if (progress.errorTasks > 0) {
+			fmt::println("");
+			fmt::println("WARNING: {} tasks in error state ⚠️", progress.errorTasks);
+		}
+
 		return UID();
 
 	} else if (tokencmp(tokens[1], "history")) {
