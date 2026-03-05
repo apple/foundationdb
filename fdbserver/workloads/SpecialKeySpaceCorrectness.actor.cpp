@@ -963,210 +963,213 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			}
 		}
 		// data_distribution & maintenance get
-		loop{ { Error err;
-		try {
-			// maintenance
-			RangeResult maintenanceKVs = co_await tx->getRange(
-			    SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY);
-			// By default, no maintenance is going on
-			ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
-			// datadistribution
-			RangeResult ddKVs = co_await tx->getRange(SpecialKeySpace::getManagementApiCommandRange("datadistribution"),
-			                                          CLIENT_KNOBS->TOO_MANY);
-			// By default, data_distribution/mode := "-1"
-			ASSERT(!ddKVs.more && ddKVs.size() == 1);
-			ASSERT(ddKVs[0].key ==
-			       "mode"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
-			TraceEvent("DDKVsValue").detail("Value", ddKVs[0].value);
-			ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
-			tx->reset();
-			break;
-		} catch (Error& e) {
-			err = e;
+		loop {
+			Error err;
+			try {
+				// maintenance
+				RangeResult maintenanceKVs = co_await tx->getRange(
+				    SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY);
+				// By default, no maintenance is going on
+				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
+				// datadistribution
+				RangeResult ddKVs = co_await tx->getRange(
+				    SpecialKeySpace::getManagementApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY);
+				// By default, data_distribution/mode := "-1"
+				ASSERT(!ddKVs.more && ddKVs.size() == 1);
+				ASSERT(ddKVs[0].key ==
+				       "mode"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("datadistribution")));
+				TraceEvent("DDKVsValue").detail("Value", ddKVs[0].value);
+				ASSERT(ddKVs[0].value == Value(boost::lexical_cast<std::string>(-1)));
+				tx->reset();
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent(SevDebug, "MaintenanceGet").error(err);
+			co_await tx->onError(err);
 		}
-		TraceEvent(SevDebug, "MaintenanceGet").error(err);
-		co_await tx->onError(err);
-	}
-}
-// maintenance set
-{
-	// Make sure setting more than one zone as maintenance will fail
-	loop {
-		Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->set(Key(deterministicRandom()->randomAlphaNumeric(8))
-			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
-			        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
-			// make sure this is a different zone id
-			tx->set(Key(deterministicRandom()->randomAlphaNumeric(9))
-			            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
-			        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
-			co_await tx->commit();
-			ASSERT(false);
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(err);
-		if (err.code() == error_code_special_keys_api_failure) {
-			Optional<Value> errorMsg =
-			    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
-			ASSERT(errorMsg.present());
-			std::string errorStr;
-			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-			// special_key_space_management_api_error_msg schema validation
-			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-			ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
-			TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").detail("ErrorMessage", valueObj["message"].get_str());
-			tx->reset();
-			break;
-		} else {
-			if (err.isValid()) {
+		// maintenance set
+		{
+			// Make sure setting more than one zone as maintenance will fail
+			loop {
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(Key(deterministicRandom()->randomAlphaNumeric(8))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+					// make sure this is a different zone id
+					tx->set(Key(deterministicRandom()->randomAlphaNumeric(9))
+					            .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(deterministicRandom()->randomInt(1, 100))));
+					co_await tx->commit();
+					ASSERT(false);
+				} catch (Error& e) {
+					err = e;
+				}
+				TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(err);
+				if (err.code() == error_code_special_keys_api_failure) {
+					Optional<Value> errorMsg =
+					    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+					ASSERT(errorMsg.present());
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+					// special_key_space_management_api_error_msg schema validation
+					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+					ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+					TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone")
+					    .detail("ErrorMessage", valueObj["message"].get_str());
+					tx->reset();
+					break;
+				} else {
+					if (err.isValid()) {
+						co_await tx->onError(err);
+					}
+				}
+				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			}
+			// Disable DD for SS failures
+			int ignoreSSFailuresRetry = 0;
+			loop {
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->set(ignoreSSFailuresZoneString.withPrefix(
+					            SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
+					        Value(boost::lexical_cast<std::string>(0)));
+					co_await tx->commit();
+					tx->reset();
+					ignoreSSFailuresRetry++;
+					co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+				} catch (Error& e) {
+					err = e;
+				}
+				if (!err.isValid()) {
+					ignoreSSFailuresRetry++;
+					co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+					continue;
+				}
+				TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures").error(err);
+				// the second commit will fail since maintenance not allowed to use while DD disabled
+				// for SS failures
+				if (err.code() == error_code_special_keys_api_failure) {
+					Optional<Value> errorMsg =
+					    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
+					ASSERT(errorMsg.present());
+					std::string errorStr;
+					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+					auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+					// special_key_space_management_api_error_msg schema validation
+					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+					ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
+					ASSERT(ignoreSSFailuresRetry > 0);
+					TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures")
+					    .detail("Retry", ignoreSSFailuresRetry)
+					    .detail("ErrorMessage", valueObj["message"].get_str());
+					tx->reset();
+					break;
+				} else {
+					co_await tx->onError(err);
+				}
+				ignoreSSFailuresRetry++;
+				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			}
+			// set dd mode to 0 and disable DD for rebalance
+			uint8_t ddIgnoreValue = DDIgnore::NONE;
+			if (deterministicRandom()->coinflip()) {
+				ddIgnoreValue |= DDIgnore::REBALANCE_READ;
+			}
+			if (deterministicRandom()->coinflip()) {
+				ddIgnoreValue |= DDIgnore::REBALANCE_DISK;
+			}
+			loop {
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tx->set("mode"_sr.withPrefix(ddPrefix), "0"_sr);
+					tx->set("rebalance_ignored"_sr.withPrefix(ddPrefix),
+					        BinaryWriter::toValue(ddIgnoreValue, Unversioned()));
+					co_await tx->commit();
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				TraceEvent(SevDebug, "DataDistributionDisableModeAndRebalance").error(err);
+				co_await tx->onError(err);
+			}
+			// verify underlying system keys are consistent with the change
+			loop {
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// check DD disabled for SS failures
+					Optional<Value> val1 = co_await tx->get(healthyZoneKey);
+					ASSERT(val1.present());
+					auto healthyZone = decodeHealthyZoneValue(val1.get());
+					ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
+					// check DD mode
+					Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
+					ASSERT(val2.present());
+					// mode should be set to 0
+					ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
+					// check DD disabled for rebalance
+					Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
+					ASSERT(val3.present() &&
+					       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tx->onError(err);
+			}
+			// then, clear all changes
+			loop {
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
+					tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tx->clear(ignoreSSFailuresZoneString.withPrefix(
+					    SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
+					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
+					tx->clear("mode"_sr.withPrefix(ddPrefix));
+					tx->clear("rebalance_ignored"_sr.withPrefix(ddPrefix));
+					co_await tx->commit();
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tx->onError(err);
+			}
+			// verify all changes are cleared
+			loop {
+				Error err;
+				try {
+					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// check DD SSFailures key
+					Optional<Value> val1 = co_await tx->get(healthyZoneKey);
+					ASSERT(!val1.present());
+					// check DD mode
+					Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
+					ASSERT(!val2.present());
+					// check DD rebalance key
+					Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
+					ASSERT(!val3.present());
+					tx->reset();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
 				co_await tx->onError(err);
 			}
 		}
-		co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-	}
-	// Disable DD for SS failures
-	int ignoreSSFailuresRetry = 0;
-	loop {
-		Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->set(
-			    ignoreSSFailuresZoneString.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")),
-			    Value(boost::lexical_cast<std::string>(0)));
-			co_await tx->commit();
-			tx->reset();
-			ignoreSSFailuresRetry++;
-			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-		} catch (Error& e) {
-			err = e;
-		}
-		if (!err.isValid()) {
-			ignoreSSFailuresRetry++;
-			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-			continue;
-		}
-		TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures").error(err);
-		// the second commit will fail since maintenance not allowed to use while DD disabled
-		// for SS failures
-		if (err.code() == error_code_special_keys_api_failure) {
-			Optional<Value> errorMsg =
-			    co_await tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
-			ASSERT(errorMsg.present());
-			std::string errorStr;
-			auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
-			auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
-			// special_key_space_management_api_error_msg schema validation
-			ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
-			ASSERT(valueObj["command"].get_str() == "maintenance" && !valueObj["retriable"].get_bool());
-			ASSERT(ignoreSSFailuresRetry > 0);
-			TraceEvent(SevDebug, "MaintenanceDDIgnoreSSFailures")
-			    .detail("Retry", ignoreSSFailuresRetry)
-			    .detail("ErrorMessage", valueObj["message"].get_str());
-			tx->reset();
-			break;
-		} else {
-			co_await tx->onError(err);
-		}
-		ignoreSSFailuresRetry++;
-		co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-	}
-	// set dd mode to 0 and disable DD for rebalance
-	uint8_t ddIgnoreValue = DDIgnore::NONE;
-	if (deterministicRandom()->coinflip()) {
-		ddIgnoreValue |= DDIgnore::REBALANCE_READ;
-	}
-	if (deterministicRandom()->coinflip()) {
-		ddIgnoreValue |= DDIgnore::REBALANCE_DISK;
-	}
-	loop {
-		Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-			tx->set("mode"_sr.withPrefix(ddPrefix), "0"_sr);
-			tx->set("rebalance_ignored"_sr.withPrefix(ddPrefix), BinaryWriter::toValue(ddIgnoreValue, Unversioned()));
-			co_await tx->commit();
-			tx->reset();
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		TraceEvent(SevDebug, "DataDistributionDisableModeAndRebalance").error(err);
-		co_await tx->onError(err);
-	}
-	// verify underlying system keys are consistent with the change
-	loop {
-		Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			// check DD disabled for SS failures
-			Optional<Value> val1 = co_await tx->get(healthyZoneKey);
-			ASSERT(val1.present());
-			auto healthyZone = decodeHealthyZoneValue(val1.get());
-			ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
-			// check DD mode
-			Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
-			ASSERT(val2.present());
-			// mode should be set to 0
-			ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
-			// check DD disabled for rebalance
-			Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
-			ASSERT(val3.present() && BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
-			tx->reset();
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tx->onError(err);
-	}
-	// then, clear all changes
-	loop {
-		Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->clear(
-			    ignoreSSFailuresZoneString.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("maintenance")));
-			KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
-			tx->clear("mode"_sr.withPrefix(ddPrefix));
-			tx->clear("rebalance_ignored"_sr.withPrefix(ddPrefix));
-			co_await tx->commit();
-			tx->reset();
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tx->onError(err);
-	}
-	// verify all changes are cleared
-	loop {
-		Error err;
-		try {
-			tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			// check DD SSFailures key
-			Optional<Value> val1 = co_await tx->get(healthyZoneKey);
-			ASSERT(!val1.present());
-			// check DD mode
-			Optional<Value> val2 = co_await tx->get(dataDistributionModeKey);
-			ASSERT(!val2.present());
-			// check DD rebalance key
-			Optional<Value> val3 = co_await tx->get(rebalanceDDIgnoreKey);
-			ASSERT(!val3.present());
-			tx->reset();
-			break;
-		} catch (Error& e) {
-			err = e;
-		}
-		co_await tx->onError(err);
-	}
-}
 }
 
 Future<Void> metricsApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {

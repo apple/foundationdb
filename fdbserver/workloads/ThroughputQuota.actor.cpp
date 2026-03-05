@@ -35,24 +35,25 @@ class ThroughputQuotaWorkload : public TestWorkload {
 
 	static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop{ { Error err;
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
-			    .detail("Tag", printable(self->transactionTag))
-			    .detail("ReservedQuota", self->getReservedQuota())
-			    .detail("TotalQuota", self->getTotalQuota());
-			ThrottleApi::setTagQuota(tr, self->transactionTag, self->getReservedQuota(), self->getTotalQuota());
-			co_await tr->commit();
-			co_return;
-		} catch (Error& e) {
-			err = e;
+		loop {
+			Error err;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
+				    .detail("Tag", printable(self->transactionTag))
+				    .detail("ReservedQuota", self->getReservedQuota())
+				    .detail("TotalQuota", self->getTotalQuota());
+				ThrottleApi::setTagQuota(tr, self->transactionTag, self->getReservedQuota(), self->getTotalQuota());
+				co_await tr->commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			TraceEvent("ThroughputQuotaWorkload_SetupError").error(err);
+			co_await tr->onError(err);
 		}
-		TraceEvent("ThroughputQuotaWorkload_SetupError").error(err);
-		co_await tr->onError(err);
 	}
 };
-}
 
 public:
 static constexpr auto NAME = "ThroughputQuota";
