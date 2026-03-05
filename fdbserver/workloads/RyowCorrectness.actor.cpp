@@ -67,12 +67,11 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		opsPerTransaction = getOption(options, "opsPerTransaction"_sr, 50);
 	}
 
-	ACTOR Future<Void> performSetup(Database cx, RyowCorrectnessWorkload* self) {
+	Future<Void> performSetup(Database cx, RyowCorrectnessWorkload* self) {
 		std::vector<TransactionType> types;
 		types.push_back(READ_YOUR_WRITES);
 
-		wait(self->chooseTransactionFactory(cx, types));
-		return Void();
+		co_await self->chooseTransactionFactory(cx, types);
 	}
 
 	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
@@ -221,56 +220,59 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	}
 
 	// Applies a sequence of operations to the database and returns the results
-	ACTOR Future<std::vector<RangeResult>> applySequenceToDatabase(Reference<TransactionWrapper> transaction,
-	                                                               std::vector<Operation> sequence,
-	                                                               RyowCorrectnessWorkload* self) {
-		state bool dontUpdateResults = false;
-		state std::vector<RangeResult> results;
+	Future<std::vector<RangeResult>> applySequenceToDatabase(Reference<TransactionWrapper> transaction,
+	                                                         std::vector<Operation> sequence,
+	                                                         RyowCorrectnessWorkload* self) {
+		bool dontUpdateResults = false;
+		std::vector<RangeResult> results;
 		loop {
-			try {
-				state int i;
-				for (i = 0; i < sequence.size(); ++i) {
-					state Operation op = sequence[i];
+			{
+				Error err;
+				try {
+					for (int i = 0; i < sequence.size(); ++i) {
+						Operation op = sequence[i];
 
-					if (op.type == Operation::SET) {
-						transaction->set(op.beginKey, op.value);
-					} else if (op.type == Operation::GET) {
-						Optional<Value> val = wait(transaction->get(op.beginKey));
-						if (!dontUpdateResults)
-							self->pushKVPair(results, op.beginKey, val);
-					} else if (op.type == Operation::GET_RANGE) {
-						KeyRangeRef range(op.beginKey, op.endKey);
-						RangeResult result = wait(transaction->getRange(range, op.limit, op.reverse));
-						if (!dontUpdateResults)
-							results.push_back((RangeResultRef)result);
-					} else if (op.type == Operation::GET_RANGE_SELECTOR) {
-						RangeResult result =
-						    wait(transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse));
-						if (!dontUpdateResults)
-							results.push_back((RangeResultRef)result);
-					} else if (op.type == Operation::GET_KEY) {
-						Key key = wait(transaction->getKey(op.beginSelector));
-						if (!dontUpdateResults)
-							self->pushKVPair(results, key, Value());
-					} else if (op.type == Operation::CLEAR) {
-						transaction->clear(op.beginKey);
-					} else if (op.type == Operation::CLEAR_RANGE) {
-						KeyRangeRef range(op.beginKey, op.endKey);
-						transaction->clear(range);
+						if (op.type == Operation::SET) {
+							transaction->set(op.beginKey, op.value);
+						} else if (op.type == Operation::GET) {
+							Optional<Value> val = co_await transaction->get(op.beginKey);
+							if (!dontUpdateResults)
+								self->pushKVPair(results, op.beginKey, val);
+						} else if (op.type == Operation::GET_RANGE) {
+							KeyRangeRef range(op.beginKey, op.endKey);
+							RangeResult result = co_await transaction->getRange(range, op.limit, op.reverse);
+							if (!dontUpdateResults)
+								results.push_back((RangeResultRef)result);
+						} else if (op.type == Operation::GET_RANGE_SELECTOR) {
+							RangeResult result =
+							    co_await transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse);
+							if (!dontUpdateResults)
+								results.push_back((RangeResultRef)result);
+						} else if (op.type == Operation::GET_KEY) {
+							Key key = co_await transaction->getKey(op.beginSelector);
+							if (!dontUpdateResults)
+								self->pushKVPair(results, key, Value());
+						} else if (op.type == Operation::CLEAR) {
+							transaction->clear(op.beginKey);
+						} else if (op.type == Operation::CLEAR_RANGE) {
+							KeyRangeRef range(op.beginKey, op.endKey);
+							transaction->clear(range);
+						}
 					}
-				}
 
-				wait(transaction->commit());
-				return results;
-			} catch (Error& e) {
-				// If the transaction was possibly committed, then keep the results that we got (since they might change
-				// the next time around the loop), but try to commit the transaction again
-				if (e.code() == error_code_commit_unknown_result)
+					co_await transaction->commit();
+					co_return results;
+				} catch (Error& e) {
+					err = e;
+				}
+				// If the transaction was possibly committed, then keep the results that we got (since they might
+				// change the next time around the loop), but try to commit the transaction again
+				if (err.code() == error_code_commit_unknown_result)
 					dontUpdateResults = true;
 				else if (!dontUpdateResults)
 					results.clear();
 
-				wait(transaction->onError(e));
+				co_await transaction->onError(err);
 			}
 		}
 	}
@@ -326,27 +328,25 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 	}
 
 	// Execute transactions with multiple random operations each
-	ACTOR Future<Void> performTest(Database cx,
-	                               Standalone<VectorRef<KeyValueRef>> data,
-	                               RyowCorrectnessWorkload* self) {
+	Future<Void> performTest(Database cx, Standalone<VectorRef<KeyValueRef>> data, RyowCorrectnessWorkload* self) {
 		loop {
-			state Reference<TransactionWrapper> transaction = self->createTransaction();
-			state std::vector<Operation> sequence = self->generateOperationSequence(data);
-			state std::vector<RangeResult> storeResults = self->applySequenceToStore(sequence);
-			state std::vector<RangeResult> dbResults = wait(self->applySequenceToDatabase(transaction, sequence, self));
+			Reference<TransactionWrapper> transaction = self->createTransaction();
+			std::vector<Operation> sequence = self->generateOperationSequence(data);
+			std::vector<RangeResult> storeResults = self->applySequenceToStore(sequence);
+			std::vector<RangeResult> dbResults = co_await self->applySequenceToDatabase(transaction, sequence, self);
 
-			Version readVersion = wait(transaction->getReadVersion());
+			Version readVersion = co_await transaction->getReadVersion();
 
-			state bool result = self->compareResults(dbResults, storeResults, sequence, readVersion);
+			bool result = self->compareResults(dbResults, storeResults, sequence, readVersion);
 			if (!result)
 				self->testFailure("Transaction results did not match");
 
-			bool result2 = wait(self->compareDatabaseToMemory());
+			bool result2 = co_await self->compareDatabaseToMemory();
 			if (result && !result2)
 				self->testFailure("Database contents did not match");
 
 			if (!result || !result2)
-				return Void();
+				co_return;
 		}
 	}
 

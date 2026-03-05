@@ -66,88 +66,103 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		return passed;
 	}
 
-	ACTOR Future<Void> _setup(Database cx, ReadHotDetectionWorkload* self) {
-		state Standalone<StringRef> largeValue;
-		state Standalone<StringRef> smallValue;
+	Future<Void> _setup(Database cx, ReadHotDetectionWorkload* self) {
+		Standalone<StringRef> largeValue;
+		Standalone<StringRef> smallValue;
 		largeValue = self->randomString(largeValue.arena(), 100000);
 		smallValue = self->randomString(smallValue.arena(), 100);
-		state ReadYourWritesTransaction tr(cx);
+		ReadYourWritesTransaction tr(cx);
 		loop {
-			try {
-				for (int i = 0; i < self->keyCount; i++) {
-					Standalone<StringRef> key = StringRef(format("testkey%08x", i));
-					if (key == self->readKey) {
-						tr.set(key, largeValue);
-					} else {
-						tr.set(key, deterministicRandom()->random01() > 0.8 ? largeValue : smallValue);
+			{
+				Error err;
+				try {
+					for (int i = 0; i < self->keyCount; i++) {
+						Standalone<StringRef> key = StringRef(format("testkey%08x", i));
+						if (key == self->readKey) {
+							tr.set(key, largeValue);
+						} else {
+							tr.set(key, deterministicRandom()->random01() > 0.8 ? largeValue : smallValue);
+						}
 					}
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 		self->wholeRange = KeyRangeRef(""_sr, "\xff"_sr);
 		// TraceEvent("RHDLog").detail("Phase", "DoneSetup");
-		return Void();
 	}
 
-	ACTOR Future<Void> _check(Database cx, ReadHotDetectionWorkload* self) {
+	Future<Void> _check(Database cx, ReadHotDetectionWorkload* self) {
 		loop {
-			state Transaction tr(cx);
-			try {
-				StorageMetrics sm = wait(cx->getStorageMetrics(self->wholeRange, 100));
-				(void)sm; // suppress unused variable warning
-				// TraceEvent("RHDCheckPhaseLog")
-				//     .detail("KeyRangeSize", sm.bytes)
-				//     .detail("KeyRangeReadBandwidth", sm.bytesReadPerKSecond);
-				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(cx->getReadHotRanges(self->wholeRange));
-				// TraceEvent("RHDCheckPhaseLog")
-				//     .detail("KeyRangesSize", keyRanges.size())
-				//     .detail("ReadKey", self->readKey.printable().c_str())
-				//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
-				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
-				// Loose check.
-				for (const auto& kr : keyRanges) {
-					if (kr.keys.contains(self->readKey)) {
-						self->passed = true;
-						return Void();
+			Transaction tr(cx);
+			{
+				Error err;
+				try {
+					StorageMetrics sm = co_await cx->getStorageMetrics(self->wholeRange, 100);
+					(void)sm; // suppress unused variable warning
+					// TraceEvent("RHDCheckPhaseLog")
+					//     .detail("KeyRangeSize", sm.bytes)
+					//     .detail("KeyRangeReadBandwidth", sm.bytesReadPerKSecond);
+					Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges =
+					    co_await cx->getReadHotRanges(self->wholeRange);
+					// TraceEvent("RHDCheckPhaseLog")
+					//     .detail("KeyRangesSize", keyRanges.size())
+					//     .detail("ReadKey", self->readKey.printable().c_str())
+					//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
+					//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
+					// Loose check.
+					for (const auto& kr : keyRanges) {
+						if (kr.keys.contains(self->readKey)) {
+							self->passed = true;
+							co_return;
+						}
 					}
+					// The key ranges deemed read hot does not contain the readKey, which is impossible here.
+					// TraceEvent("RHDCheckPhaseFailed")
+					// 	.detail("KeyRangesSize", keyRanges.size())
+					// 	.detail("ReadKey", self->readKey.printable().c_str())
+					// 	.detail("KeyRangesBackBeginKey", keyRanges.back().begin)
+					// 	.detail("KeyRangesBackEndKey", keyRanges.back().end);
+					// for(auto kr : keyRanges) {
+					// 	TraceEvent("RHDCheckPhaseFailed").detail("KeyRagneBegin", kr.begin).detail("KeyRagneEnd",
+					// kr.end);
+					// }
+					self->passed = false;
+				} catch (Error& e) {
+					err = e;
 				}
-				// The key ranges deemed read hot does not contain the readKey, which is impossible here.
-				// TraceEvent("RHDCheckPhaseFailed")
-				// 	.detail("KeyRangesSize", keyRanges.size())
-				// 	.detail("ReadKey", self->readKey.printable().c_str())
-				// 	.detail("KeyRangesBackBeginKey", keyRanges.back().begin)
-				// 	.detail("KeyRangesBackEndKey", keyRanges.back().end);
-				// for(auto kr : keyRanges) {
-				// 	TraceEvent("RHDCheckPhaseFailed").detail("KeyRagneBegin", kr.begin).detail("KeyRagneEnd", kr.end);
-				// }
-				self->passed = false;
-			} catch (Error& e) {
 				// TraceEvent("RHDCheckPhaseReadGotError").error(e);
-				wait(tr.onError(e));
+				if (err.isValid()) {
+					co_await tr.onError(err);
+				}
 			}
 		}
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
-		state double lastTime = now();
+	Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
+		double lastTime = now();
 		loop {
-			wait(poisson(&lastTime, delay));
-			state ReadYourWritesTransaction tr(cx);
+			co_await poisson(&lastTime, delay);
+			ReadYourWritesTransaction tr(cx);
 			loop {
-				try {
-					Optional<Value> v = wait(tr.get(
-					    useReadKey
-					        ? self->readKey
-					        : StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, self->keyCount)))));
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				{
+					Error err;
+					try {
+						Optional<Value> v = co_await tr.get(
+						    useReadKey ? self->readKey
+						               : StringRef(format("testkey%08x",
+						                                  deterministicRandom()->randomInt(0, self->keyCount))));
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await tr.onError(err);
 				}
 			}
 		}

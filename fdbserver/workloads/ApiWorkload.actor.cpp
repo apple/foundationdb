@@ -35,18 +35,22 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Clears the keyspace used by this test
-ACTOR Future<Void> clearKeyspace(ApiWorkload* self) {
+Future<Void> clearKeyspace(ApiWorkload* self) {
 	loop {
-		state Reference<TransactionWrapper> transaction = self->createTransaction();
-		try {
-			KeyRange range(KeyRangeRef(StringRef(format("%010d", self->clientPrefixInt)),
-			                           StringRef(format("%010d", self->clientPrefixInt + 1))));
+		Reference<TransactionWrapper> transaction = self->createTransaction();
+		{
+			Error err;
+			try {
+				KeyRange range(KeyRangeRef(StringRef(format("%010d", self->clientPrefixInt)),
+				                           StringRef(format("%010d", self->clientPrefixInt + 1))));
 
-			transaction->clear(range);
-			wait(transaction->commit());
-			return Void();
-		} catch (Error& e) {
-			wait(transaction->onError(e));
+				transaction->clear(range);
+				co_await transaction->commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await transaction->onError(err);
 		}
 	}
 }
@@ -55,15 +59,14 @@ Future<Void> ApiWorkload::clearKeyspace() {
 	return ::clearKeyspace(this);
 }
 
-ACTOR Future<Void> setup(Database cx, ApiWorkload* self) {
+Future<Void> setup(Database cx, ApiWorkload* self) {
 	self->transactionFactory = Reference<TransactionFactoryInterface>(
 	    new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, cx, false));
 
 	// Clear keyspace before running
-	wait(timeoutError(self->clearKeyspace(), 600));
-	wait(self->performSetup(cx));
+	co_await timeoutError(self->clearKeyspace(), 600);
+	co_await self->performSetup(cx);
 
-	return Void();
 }
 
 Future<Void> ApiWorkload::setup(Database const& cx) {
@@ -73,14 +76,14 @@ Future<Void> ApiWorkload::setup(Database const& cx) {
 	return Void();
 }
 
-ACTOR Future<Void> start(Database cx, ApiWorkload* self) {
+Future<Void> start(Database cx, ApiWorkload* self) {
 	// Generate the data to store in this client's key-space
-	state Standalone<VectorRef<KeyValueRef>> data = self->generateData(self->numKeys * self->shortKeysRatio,
-	                                                                   self->minShortKeyLength,
-	                                                                   self->maxShortKeyLength,
-	                                                                   self->minValueLength,
-	                                                                   self->maxValueLength,
-	                                                                   self->clientPrefix);
+	Standalone<VectorRef<KeyValueRef>> data = self->generateData(self->numKeys * self->shortKeysRatio,
+	                                                             self->minShortKeyLength,
+	                                                             self->maxShortKeyLength,
+	                                                             self->minValueLength,
+	                                                             self->maxValueLength,
+	                                                             self->clientPrefix);
 	Standalone<VectorRef<KeyValueRef>> bigKeyData = self->generateData(self->numKeys * (1 - self->shortKeysRatio),
 	                                                                   self->minLongKeyLength,
 	                                                                   self->maxLongKeyLength,
@@ -91,13 +94,12 @@ ACTOR Future<Void> start(Database cx, ApiWorkload* self) {
 	data.append_deep(data.arena(), bigKeyData.begin(), bigKeyData.size());
 
 	try {
-		wait(self->performTest(cx, data));
+		co_await self->performTest(cx, data);
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
 			self->testFailure(format("Unhandled error %d: %s", e.code(), e.name()));
 	}
 
-	return Void();
 }
 
 Future<Void> ApiWorkload::start(Database const& cx) {
@@ -170,40 +172,43 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 }
 
 // Compares the contents of this client's key-space in the database with the in-memory key-value store
-ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
-	state Key startKey(self->clientPrefix);
-	state Key endKey(self->clientPrefix + "\xff");
-	state int resultsPerRange = 100;
-	state double startTime = now();
+Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
+	Key startKey(self->clientPrefix);
+	Key endKey(self->clientPrefix + "\xff");
+	int resultsPerRange = 100;
+	double startTime = now();
 
 	loop {
 		// Fetch a subset of the results from each of the database and the memory store and compare them
-		state RangeResult storeResults =
-		    self->store.getRange(KeyRangeRef(startKey, endKey), resultsPerRange, Reverse::False);
+		RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), resultsPerRange, Reverse::False);
 
-		state Reference<TransactionWrapper> transaction = self->createTransaction();
-		state KeyRangeRef range(startKey, endKey);
+		Reference<TransactionWrapper> transaction = self->createTransaction();
+		KeyRangeRef range(startKey, endKey);
 
 		loop {
-			try {
-				state RangeResult dbResults = wait(transaction->getRange(range, resultsPerRange, Reverse::False));
+			{
+				Error err;
+				try {
+					RangeResult dbResults = co_await transaction->getRange(range, resultsPerRange, Reverse::False);
 
-				// Compare results of database and memory store
-				Version v = wait(transaction->getReadVersion());
-				if (!self->compareResults(dbResults, storeResults, v)) {
-					TraceEvent(SevError, "FailedComparisonToMemory").detail("StartTime", startTime);
-					return false;
+					// Compare results of database and memory store
+					Version v = co_await transaction->getReadVersion();
+					if (!self->compareResults(dbResults, storeResults, v)) {
+						TraceEvent(SevError, "FailedComparisonToMemory").detail("StartTime", startTime);
+						co_return false;
+					}
+
+					// If there are no more results, then return success
+					if (storeResults.size() < resultsPerRange)
+						co_return true;
+
+					startKey = dbResults[dbResults.size() - 1].key;
+
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-
-				// If there are no more results, then return success
-				if (storeResults.size() < resultsPerRange)
-					return true;
-
-				startKey = dbResults[dbResults.size() - 1].key;
-
-				break;
-			} catch (Error& e) {
-				wait(transaction->onError(e));
+				co_await transaction->onError(err);
 			}
 		}
 	}
@@ -319,7 +324,7 @@ Value ApiWorkload::generateValue() {
 }
 
 // Creates a random transaction factory to produce transaction of one of the TransactionType choices
-ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> choices, ApiWorkload* self) {
+Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> choices, ApiWorkload* self) {
 	TransactionType transactionType = deterministicRandom()->randomChoice(choices);
 	self->transactionType = transactionType;
 
@@ -336,20 +341,19 @@ ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<Transaction
 	} else if (transactionType == THREAD_SAFE) {
 		printf("client %d: Running ThreadSafe Transactions\n", self->clientPrefixInt);
 		Reference<IDatabase> dbHandle =
-		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+		    co_await unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx));
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
 		    new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));
 	} else if (transactionType == MULTI_VERSION) {
 		printf("client %d: Running Multi-Version Transactions\n", self->clientPrefixInt);
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		Reference<IDatabase> threadSafeHandle =
-		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+		    co_await unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx));
 		Reference<IDatabase> dbHandle = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
 		    new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));
 	}
 
-	return Void();
 }
 
 Future<Void> ApiWorkload::chooseTransactionFactory(Database const& cx, std::vector<TransactionType> const& choices) {

@@ -109,9 +109,9 @@ public: // workload functions
 		out.insert("Attrition");
 	}
 
-	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
-		state Transaction tr(cx);
-		state std::vector<int64_t> keys;
+	Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
+		Transaction tr(cx);
+		std::vector<int64_t> keys;
 
 		keys.reserve(1000);
 		for (int i = 0; i < 1000; i++) {
@@ -120,72 +120,80 @@ public: // workload functions
 
 		tr.reset();
 		loop {
-			try {
-				for (auto id : keys) {
-					if (even) {
-						if (id % 2 != 0) {
-							id++;
+			{
+				Error err;
+				try {
+					for (auto id : keys) {
+						if (even) {
+							if (id % 2 != 0) {
+								id++;
+							}
+						} else {
+							if (id % 2 == 0) {
+								id++;
+							}
 						}
-					} else {
-						if (id % 2 == 0) {
-							id++;
-						}
+						std::string Key1 = prefix + std::to_string(id);
+						Key key1Ref(Key1);
+						std::string Val1 = std::to_string(id);
+						Value val1Ref(Val1);
+						tr.set(key1Ref, val1Ref, AddConflictRange::False);
 					}
-					std::string Key1 = prefix + std::to_string(id);
-					Key key1Ref(Key1);
-					std::string Val1 = std::to_string(id);
-					Value val1Ref(Val1);
-					tr.set(key1Ref, val1Ref, AddConflictRange::False);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, SnapTestWorkload* self) {
-		state Transaction tr(cx);
-		state bool snapFailed = false;
-		state Future<Void> duplicateSnapStatus;
+	Future<Void> _start(Database cx, SnapTestWorkload* self) {
+		Transaction tr(cx);
+		bool snapFailed = false;
+		Future<Void> duplicateSnapStatus;
 
 		if (self->testID == 0) {
 			// create even keys before the snapshot
-			wait(self->_create_keys(cx, "snapKey"));
+			co_await self->_create_keys(cx, "snapKey");
 		} else if (self->testID == 1) {
 			// create a snapshot
-			state double toDelay = fmod(deterministicRandom()->randomUInt32(), self->maxSnapDelay);
+			double toDelay = fmod(deterministicRandom()->randomUInt32(), self->maxSnapDelay);
 			TraceEvent("ToDelay").detail("Value", toDelay);
 			ASSERT(toDelay < self->maxSnapDelay);
-			wait(delay(toDelay));
+			co_await delay(toDelay);
 
-			state int retry = 0;
+			int retry = 0;
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
-				try {
-					state StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
+				{
+					Error err;
+					try {
+						StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
 
-					state Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
-					if (self->attemptDuplicateSnapshot) {
-						wait(delay(deterministicRandom()->random01()));
-						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
+						Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+						if (self->attemptDuplicateSnapshot) {
+							co_await delay(deterministicRandom()->random01());
+							duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
+						}
+						ErrorOr<Void> statusErr = co_await errorOr(status);
+						if (statusErr.isError() &&
+						    statusErr.getError().code() != error_code_duplicate_snapshot_request) {
+							// First request is expected to fail with duplicate_snapshot_request error
+							// Any other errors should be thrown
+							throw statusErr.getError();
+						}
+						if (self->attemptDuplicateSnapshot) {
+							// If duplicate, the first request is discarded, wait for the latest one
+							co_await duplicateSnapStatus;
+						}
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-					ErrorOr<Void> statusErr = wait(errorOr(status));
-					if (statusErr.isError() && statusErr.getError().code() != error_code_duplicate_snapshot_request) {
-						// First request is expected to fail with duplicate_snapshot_request error
-						// Any other errors should be thrown
-						throw statusErr.getError();
-					}
-					if (self->attemptDuplicateSnapshot) {
-						// If duplicate, the first request is discarded, wait for the latest one
-						wait(duplicateSnapStatus);
-					}
-					break;
-				} catch (Error& e) {
 					TraceEvent("SnapTestCreateError")
-					    .error(e)
+					    .error(err)
 					    .detail("SnapUID", self->snapUID)
 					    .detail("Duplicate", self->attemptDuplicateSnapshot);
 					++retry;
@@ -195,7 +203,7 @@ public: // workload functions
 						break;
 					}
 					// increase the retry wait time to avoid endless retry where DD is always disabled by snapshot
-					wait(delay(retry * SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP));
+					co_await delay(retry * SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP);
 				}
 			}
 			CSimpleIni ini;
@@ -211,7 +219,7 @@ public: // workload functions
 			self->snapSucceeded = !snapFailed;
 		} else if (self->testID == 2) {
 			// create odd keys after the snapshot
-			wait(self->_create_keys(cx, "snapKey", false /*even*/));
+			co_await self->_create_keys(cx, "snapKey", false /*even*/);
 		} else if (self->testID == 3) {
 			CSimpleIni ini;
 			ini.SetUnicode();
@@ -220,42 +228,48 @@ public: // workload functions
 			if (backupFailed) {
 				// since backup failed, skip the restore checking
 				TraceEvent(SevWarnAlways, "BackupFailedSkippingRestoreCheck").log();
-				return Void();
+				co_return;
 			}
-			state KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
-			state KeySelector end = firstGreaterOrEqual(normalKeys.end);
-			state int cnt = 0;
+			KeySelector begin = firstGreaterOrEqual(normalKeys.begin);
+			KeySelector end = firstGreaterOrEqual(normalKeys.end);
+			int cnt = 0;
 			// read the entire normalKeys range and look at keys prefixed
 			// with snapKeys 1) validate that all key ids are even ie -
 			// created before snap 2) values are same as the key id 3) # of
 			// keys adds up to the total keys created before snap
 			tr.reset();
 			loop {
-				try {
-					RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
-					if (!kvRange.more && kvRange.size() == 0) {
-						TraceEvent("SnapTestNoMoreEntries").log();
-						break;
-					}
+				{
+					Error err;
+					try {
+						RangeResult kvRange = co_await tr.getRange(begin, end, 1000);
+						if (!kvRange.more && kvRange.size() == 0) {
+							TraceEvent("SnapTestNoMoreEntries").log();
+							break;
+						}
 
-					for (int i = 0; i < kvRange.size(); i++) {
-						if (kvRange[i].key.startsWith("snapKey"_sr)) {
-							std::string tmp1 = kvRange[i].key.substr(7).toString();
-							int64_t id = strtol(tmp1.c_str(), nullptr, 0);
-							if (id % 2 != 0) {
-								throw operation_failed();
-							}
-							++cnt;
-							std::string tmp2 = kvRange[i].value.toString();
-							int64_t value = strtol(tmp2.c_str(), nullptr, 0);
-							if (id != value) {
-								throw operation_failed();
+						for (int i = 0; i < kvRange.size(); i++) {
+							if (kvRange[i].key.startsWith("snapKey"_sr)) {
+								std::string tmp1 = kvRange[i].key.substr(7).toString();
+								int64_t id = strtol(tmp1.c_str(), nullptr, 0);
+								if (id % 2 != 0) {
+									throw operation_failed();
+								}
+								++cnt;
+								std::string tmp2 = kvRange[i].value.toString();
+								int64_t value = strtol(tmp2.c_str(), nullptr, 0);
+								if (id != value) {
+									throw operation_failed();
+								}
 							}
 						}
+						begin = firstGreaterThan(kvRange.end()[-1].key);
+					} catch (Error& e) {
+						err = e;
 					}
-					begin = firstGreaterThan(kvRange.end()[-1].key);
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					if (err.isValid()) {
+						co_await tr.onError(err);
+					}
 				}
 			}
 			if (cnt != 1000) {
@@ -265,14 +279,14 @@ public: // workload functions
 		} else if (self->testID == 4) {
 			// create a snapshot with a non whitelisted binary path and operation
 			// should fail
-			state bool testedFailure = false;
+			bool testedFailure = false;
 			snapFailed = false;
 			loop {
 				self->snapUID = deterministicRandom()->randomUniqueID();
 				try {
 					StringRef snapCmdRef = "/bin/snap_create1.sh"_sr;
 					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
-					wait(status);
+					co_await status;
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_snap_not_fully_recovered_unsupported) {
@@ -287,8 +301,7 @@ public: // workload functions
 			}
 			ASSERT(testedFailure || snapFailed);
 		}
-		wait(delay(0.0));
-		return Void();
+		co_await delay(0.0);
 	}
 };
 

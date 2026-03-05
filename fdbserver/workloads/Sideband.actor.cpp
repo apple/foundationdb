@@ -89,75 +89,86 @@ struct SidebandWorkload : TestWorkload {
 		m.push_back(keysUnexpectedlyPresent.getMetric());
 	}
 
-	ACTOR Future<Void> persistInterface(SidebandWorkload* self, Database cx) {
-		state Transaction tr(cx);
+	Future<Void> persistInterface(SidebandWorkload* self, Database cx) {
+		Transaction tr(cx);
 		BinaryWriter wr(IncludeVersion());
 		wr << self->interf;
-		state Standalone<StringRef> serializedInterface = wr.toValue();
+		Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
-			try {
-				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
-				if (val.present()) {
-					if (val.get() != serializedInterface)
-						throw operation_failed();
+			{
+				Error err;
+				try {
+					Optional<Value> val = co_await tr.get(StringRef(format("Sideband/Client/%d", self->clientId)));
+					if (val.present()) {
+						if (val.get() != serializedInterface)
+							throw operation_failed();
+						break;
+					}
+					tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
+					co_await tr.commit();
 					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 		TraceEvent("SidebandPersisted", self->interf.id()).detail("ClientIdx", self->clientId);
-		return Void();
 	}
 
-	ACTOR Future<SidebandInterface> fetchSideband(SidebandWorkload* self, Database cx) {
-		state Transaction tr(cx);
+	Future<SidebandInterface> fetchSideband(SidebandWorkload* self, Database cx) {
+		Transaction tr(cx);
 		loop {
-			try {
-				Optional<Value> val =
-				    wait(tr.get(StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount))));
-				if (!val.present()) {
-					throw operation_failed();
+			{
+				Error err;
+				try {
+					Optional<Value> val = co_await tr.get(
+					    StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount)));
+					if (!val.present()) {
+						throw operation_failed();
+					}
+					SidebandInterface sideband;
+					BinaryReader br(val.get(), IncludeVersion());
+					br >> sideband;
+					TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
+					co_return sideband;
+				} catch (Error& e) {
+					err = e;
 				}
-				SidebandInterface sideband;
-				BinaryReader br(val.get(), IncludeVersion());
-				br >> sideband;
-				TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
-				return sideband;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR Future<Void> mutator(SidebandWorkload* self, Database cx) {
-		state SidebandInterface checker = wait(self->fetchSideband(self, cx->clone()));
-		state double lastTime = now();
-		state Version commitVersion;
+	Future<Void> mutator(SidebandWorkload* self, Database cx) {
+		SidebandInterface checker = co_await self->fetchSideband(self, cx->clone());
+		double lastTime = now();
+		Version commitVersion{ 0 };
 
 		loop {
-			wait(poisson(&lastTime, 1.0 / self->operationsPerSecond));
-			state Transaction tr(cx);
-			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
+			co_await poisson(&lastTime, 1.0 / self->operationsPerSecond);
+			Transaction tr(cx);
+			uint64_t key = deterministicRandom()->randomUniqueID().hash();
 
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
+			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
 			loop {
-				try {
-					Optional<Value> val = wait(tr.get(messageKey));
-					if (val.present()) {
-						commitVersion = tr.getReadVersion().get();
-						++self->keysUnexpectedlyPresent;
+				{
+					Error err;
+					try {
+						Optional<Value> val = co_await tr.get(messageKey);
+						if (val.present()) {
+							commitVersion = tr.getReadVersion().get();
+							++self->keysUnexpectedlyPresent;
+							break;
+						}
+						tr.set(messageKey, "deadbeef"_sr);
+						co_await tr.commit();
+						commitVersion = tr.getCommittedVersion();
 						break;
+					} catch (Error& e) {
+						err = e;
 					}
-					tr.set(messageKey, "deadbeef"_sr);
-					wait(tr.commit());
-					commitVersion = tr.getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 			++self->messages;
@@ -165,25 +176,29 @@ struct SidebandWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> checker(SidebandWorkload* self, Database cx) {
+	Future<Void> checker(SidebandWorkload* self, Database cx) {
 		loop {
-			state SidebandMessage message = waitNext(self->interf.updates.getFuture());
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
-			state Transaction tr(cx);
+			SidebandMessage message = co_await self->interf.updates.getFuture();
+			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
+			Transaction tr(cx);
 			loop {
-				try {
-					Optional<Value> val = wait(tr.get(messageKey));
-					if (!val.present()) {
-						TraceEvent(SevError, "CausalConsistencyError", self->interf.id())
-						    .detail("MessageKey", messageKey.toString().c_str())
-						    .detail("RemoteCommitVersion", message.commitVersion)
-						    .detail("LocalReadVersion",
-						            tr.getReadVersion().get()); // will assert that ReadVersion is set
-						++self->consistencyErrors;
+				{
+					Error err;
+					try {
+						Optional<Value> val = co_await tr.get(messageKey);
+						if (!val.present()) {
+							TraceEvent(SevError, "CausalConsistencyError", self->interf.id())
+							    .detail("MessageKey", messageKey.toString().c_str())
+							    .detail("RemoteCommitVersion", message.commitVersion)
+							    .detail("LocalReadVersion",
+							            tr.getReadVersion().get()); // will assert that ReadVersion is set
+							++self->consistencyErrors;
+						}
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 		}

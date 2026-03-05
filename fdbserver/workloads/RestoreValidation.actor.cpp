@@ -82,260 +82,272 @@ struct RestoreValidationWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> _start(RestoreValidationWorkload* self, Database cx) {
+	static Future<Void> _start(RestoreValidationWorkload* self, Database cx) {
 		// Only run on client 0 to avoid conflicts (backup/restore runs on client 0)
 		if (self->clientId != 0) {
-			return Void();
+			co_return;
 		}
 
 		// Wait for the specified time before starting validation
 		TraceEvent("RestoreValidationWorkloadWaiting").detail("WaitTime", self->validateAfter);
-		wait(delay(self->validateAfter));
+		co_await delay(self->validateAfter);
 
 		// Wait for restore completion marker
 		// BackupAndRestoreValidation sets this key when restore is fully complete
-		state Key completionMarker = "\xff\x02/restoreValidationComplete"_sr;
-		state int checkAttempts = 0;
+		Key completionMarker = "\xff\x02/restoreValidationComplete"_sr;
+		int checkAttempts = 0;
 
 		TraceEvent("RestoreValidationWaitingForRestoreCompletion")
 		    .detail("CompletionMarker", printable(completionMarker));
 
 		loop {
-			try {
-				state Transaction tr(cx);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			{
+				Error err;
+				try {
+					Transaction tr(cx);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> markerValue = wait(tr.get(completionMarker));
-				if (markerValue.present()) {
-					TraceEvent("RestoreValidationRestoreComplete").detail("CheckAttempts", checkAttempts);
-					break;
-				}
+					Optional<Value> markerValue = co_await tr.get(completionMarker);
+					if (markerValue.present()) {
+						TraceEvent("RestoreValidationRestoreComplete").detail("CheckAttempts", checkAttempts);
+						break;
+					}
 
-				checkAttempts++;
-				// No max check limit - keep waiting until test timeout or marker appears
-				// This is necessary because buggify can make operations arbitrarily slow
-				if (checkAttempts % 12 == 0) { // Log every minute
-					TraceEvent("RestoreValidationStillWaitingForRestore")
-					    .detail("CheckAttempts", checkAttempts)
-					    .detail("WaitTimeSeconds", checkAttempts * 5);
+					checkAttempts++;
+					// No max check limit - keep waiting until test timeout or marker appears
+					// This is necessary because buggify can make operations arbitrarily slow
+					if (checkAttempts % 12 == 0) { // Log every minute
+						TraceEvent("RestoreValidationStillWaitingForRestore")
+						    .detail("CheckAttempts", checkAttempts)
+						    .detail("WaitTimeSeconds", checkAttempts * 5);
+					}
+					co_await delay(5.0);
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(delay(5.0));
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
+				if (!err.isValid()) {
+					continue;
+				}
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
 				}
 				// Retry on transient errors from buggify chaos injection
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_commit_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_database_locked || e.code() == error_code_transaction_too_old ||
-				    e.code() == error_code_future_version || e.code() == error_code_audit_storage_failed ||
-				    e.code() == error_code_tag_throttled) {
+				if (err.code() == error_code_grv_proxy_memory_limit_exceeded ||
+				    err.code() == error_code_commit_proxy_memory_limit_exceeded ||
+				    err.code() == error_code_database_locked || err.code() == error_code_transaction_too_old ||
+				    err.code() == error_code_future_version || err.code() == error_code_audit_storage_failed ||
+				    err.code() == error_code_tag_throttled) {
 					TraceEvent(SevWarn, "RestoreValidationRetryableError")
-					    .error(e)
+					    .error(err)
 					    .detail("CheckAttempts", checkAttempts);
-					wait(delay(1.0)); // Backoff before retry
+					co_await delay(1.0); // Backoff before retry
 					// Loop will retry
 				} else {
-					throw;
+					throw err;
 				}
 			}
 		}
 
 		TraceEvent("RestoreValidationWorkloadStarting").detail("Range", self->validationRange);
 
-		state int auditRetryCount = 0;
-		state int maxAuditRetries = 5;
+		int auditRetryCount = 0;
+		int maxAuditRetries = 5;
 
 		loop {
-			try {
-				// Trigger the audit_storage validate_restore command
-				state AuditType auditType = AuditType::ValidateRestore;
-				state Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
-
-				TraceEvent("RestoreValidationTriggeringAudit")
-				    .detail("AuditType", (int)auditType)
-				    .detail("Range", self->validationRange)
-				    .detail("RetryCount", auditRetryCount);
-
-				// Trigger the audit using ManagementAPI with timeout
-				// Use shorter timeout for scheduling (60s) to detect cluster issues early
-				state UID auditId;
+			{
+				Error err;
 				try {
-					UID scheduleResult = wait(timeoutError(
-					    auditStorage(
-					        clusterFile, self->validationRange, auditType, KeyValueStoreType::END, self->maxWaitTime),
-					    60.0));
-					auditId = scheduleResult;
-				} catch (Error& e) {
-					if (e.code() == error_code_timed_out) {
-						TraceEvent(SevWarn, "RestoreValidationAuditScheduleTimeout")
-						    .detail("RetryCount", auditRetryCount)
-						    .detail("MaxRetries", maxAuditRetries);
-						// Treat as retryable - cluster might be recovering
-						if (auditRetryCount < maxAuditRetries) {
-							throw audit_storage_failed();
-						} else {
-							throw;
-						}
-					}
-					throw;
-				}
+					// Trigger the audit_storage validate_restore command
+					AuditType auditType = AuditType::ValidateRestore;
+					Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
 
-				TraceEvent("RestoreValidationAuditScheduled")
-				    .detail("AuditID", auditId)
-				    .detail("RetryCount", auditRetryCount);
+					TraceEvent("RestoreValidationTriggeringAudit")
+					    .detail("AuditType", (int)auditType)
+					    .detail("Range", self->validationRange)
+					    .detail("RetryCount", auditRetryCount);
 
-				// Monitor audit progress
-				state double startTime = now();
-				state double lastReportTime = startTime;
-				state AuditPhase finalPhase = AuditPhase::Invalid;
-				state std::string errorMessage;
-
-				loop {
-					wait(delay(self->checkInterval));
-
-					// Get audit status (newFirst=true to get latest states first)
-					// Add timeout to handle cluster recovery/instability
-					state std::vector<AuditStorageState> auditStates;
+					// Trigger the audit using ManagementAPI with timeout
+					// Use shorter timeout for scheduling (60s) to detect cluster issues early
+					UID auditId;
 					try {
-						std::vector<AuditStorageState> states =
-						    wait(timeoutError(getAuditStates(cx, auditType, true), 60.0));
-						auditStates = states;
+						UID scheduleResult = co_await timeoutError(auditStorage(clusterFile,
+						                                                        self->validationRange,
+						                                                        auditType,
+						                                                        KeyValueStoreType::END,
+						                                                        self->maxWaitTime),
+						                                           60.0);
+						auditId = scheduleResult;
 					} catch (Error& e) {
 						if (e.code() == error_code_timed_out) {
-							// Cluster is likely recovering - check overall timeout and continue
-							if (now() - startTime > self->maxWaitTime) {
-								TraceEvent(SevError, "RestoreValidationTimeout")
-								    .detail("AuditID", auditId)
-								    .detail("ElapsedTime", now() - startTime)
-								    .detail("MaxWaitTime", self->maxWaitTime)
-								    .detail("Reason", "getAuditStates timed out");
-								throw timed_out();
+							TraceEvent(SevWarn, "RestoreValidationAuditScheduleTimeout")
+							    .detail("RetryCount", auditRetryCount)
+							    .detail("MaxRetries", maxAuditRetries);
+							// Treat as retryable - cluster might be recovering
+							if (auditRetryCount < maxAuditRetries) {
+								throw audit_storage_failed();
+							} else {
+								throw;
 							}
-							continue; // Skip this iteration, try again
 						}
 						throw;
 					}
 
-					// Filter for our audit ID
-					state bool foundOurAudit = false;
-					state bool allComplete = true;
-					state bool anyError = false;
+					TraceEvent("RestoreValidationAuditScheduled")
+					    .detail("AuditID", auditId)
+					    .detail("RetryCount", auditRetryCount);
 
-					for (const auto& auditState : auditStates) {
-						if (auditState.id == auditId) {
-							foundOurAudit = true;
+					// Monitor audit progress
+					double startTime = now();
+					double lastReportTime = startTime;
+					AuditPhase finalPhase = AuditPhase::Invalid;
+					std::string errorMessage;
 
-							if (auditState.getPhase() == AuditPhase::Running) {
-								allComplete = false;
-							} else if (auditState.getPhase() == AuditPhase::Error ||
-							           auditState.getPhase() == AuditPhase::Failed) {
-								anyError = true;
-								finalPhase = auditState.getPhase();
-								if (!auditState.error.empty()) {
-									errorMessage = auditState.error;
-								} else {
-									errorMessage = "Unknown error";
+					loop {
+						co_await delay(self->checkInterval);
+
+						// Get audit status (newFirst=true to get latest states first)
+						// Add timeout to handle cluster recovery/instability
+						std::vector<AuditStorageState> auditStates;
+						try {
+							std::vector<AuditStorageState> states =
+							    co_await timeoutError(getAuditStates(cx, auditType, true), 60.0);
+							auditStates = states;
+						} catch (Error& e) {
+							if (e.code() == error_code_timed_out) {
+								// Cluster is likely recovering - check overall timeout and continue
+								if (now() - startTime > self->maxWaitTime) {
+									TraceEvent(SevError, "RestoreValidationTimeout")
+									    .detail("AuditID", auditId)
+									    .detail("ElapsedTime", now() - startTime)
+									    .detail("MaxWaitTime", self->maxWaitTime)
+									    .detail("Reason", "getAuditStates timed out");
+									throw timed_out();
 								}
-							} else if (auditState.getPhase() == AuditPhase::Complete) {
-								finalPhase = AuditPhase::Complete;
+								continue; // Skip this iteration, try again
+							}
+							throw;
+						}
+
+						// Filter for our audit ID
+						bool foundOurAudit = false;
+						bool allComplete = true;
+						bool anyError = false;
+
+						for (const auto& auditState : auditStates) {
+							if (auditState.id == auditId) {
+								foundOurAudit = true;
+
+								if (auditState.getPhase() == AuditPhase::Running) {
+									allComplete = false;
+								} else if (auditState.getPhase() == AuditPhase::Error ||
+								           auditState.getPhase() == AuditPhase::Failed) {
+									anyError = true;
+									finalPhase = auditState.getPhase();
+									if (!auditState.error.empty()) {
+										errorMessage = auditState.error;
+									} else {
+										errorMessage = "Unknown error";
+									}
+								} else if (auditState.getPhase() == AuditPhase::Complete) {
+									finalPhase = AuditPhase::Complete;
+								}
 							}
 						}
-					}
 
-					if (!foundOurAudit) {
-						TraceEvent(SevWarn, "RestoreValidationNoAuditStates")
-						    .detail("AuditID", auditId)
-						    .detail("ElapsedTime", now() - startTime);
-					} else {
-						// Report progress periodically
-						if (now() - lastReportTime >= 10.0) {
-							TraceEvent("RestoreValidationProgress")
+						if (!foundOurAudit) {
+							TraceEvent(SevWarn, "RestoreValidationNoAuditStates")
 							    .detail("AuditID", auditId)
-							    .detail("AllComplete", allComplete)
-							    .detail("AnyError", anyError)
-							    .detail("FinalPhase", (int)finalPhase)
 							    .detail("ElapsedTime", now() - startTime);
-							lastReportTime = now();
+						} else {
+							// Report progress periodically
+							if (now() - lastReportTime >= 10.0) {
+								TraceEvent("RestoreValidationProgress")
+								    .detail("AuditID", auditId)
+								    .detail("AllComplete", allComplete)
+								    .detail("AnyError", anyError)
+								    .detail("FinalPhase", (int)finalPhase)
+								    .detail("ElapsedTime", now() - startTime);
+								lastReportTime = now();
+							}
+
+							if (allComplete || anyError) {
+								break;
+							}
 						}
 
-						if (allComplete || anyError) {
-							break;
+						// Check timeout
+						if (now() - startTime > self->maxWaitTime) {
+							TraceEvent(SevError, "RestoreValidationTimeout")
+							    .detail("AuditID", auditId)
+							    .detail("ElapsedTime", now() - startTime)
+							    .detail("MaxWaitTime", self->maxWaitTime);
+							throw timed_out();
 						}
 					}
 
-					// Check timeout
-					if (now() - startTime > self->maxWaitTime) {
-						TraceEvent(SevError, "RestoreValidationTimeout")
-						    .detail("AuditID", auditId)
-						    .detail("ElapsedTime", now() - startTime)
-						    .detail("MaxWaitTime", self->maxWaitTime);
-						throw timed_out();
+					// Verify the results
+					TraceEvent("RestoreValidationComplete")
+					    .detail("AuditID", auditId)
+					    .detail("FinalPhase", (int)finalPhase)
+					    .detail("ExpectedPhase", self->expectedPhase)
+					    .detail("ErrorMessage", errorMessage)
+					    .detail("ElapsedTime", now() - startTime);
+
+					if (self->expectSuccess) {
+						if (finalPhase != AuditPhase::Complete) {
+							// Log as warning since we may retry - only becomes error if all retries fail
+							TraceEvent(SevWarn, "RestoreValidationUnexpectedPhase")
+							    .detail("AuditID", auditId)
+							    .detail("FinalPhase", (int)finalPhase)
+							    .detail("ExpectedPhase", self->expectedPhase)
+							    .detail("ErrorMessage", errorMessage);
+							throw audit_storage_failed();
+						}
+						if (!errorMessage.empty()) {
+							TraceEvent(SevError, "RestoreValidationUnexpectedError")
+							    .detail("AuditID", auditId)
+							    .detail("ErrorMessage", errorMessage);
+							throw audit_storage_error();
+						}
+					} else {
+						if (finalPhase == AuditPhase::Complete) {
+							TraceEvent(SevError, "RestoreValidationUnexpectedSuccess")
+							    .detail("AuditID", auditId)
+							    .detail("ExpectedPhase", self->expectedPhase);
+							throw audit_storage_task_outdated();
+						}
 					}
+
+					TraceEvent("RestoreValidationSuccess").detail("AuditID", auditId);
+					break; // Success!
+
+				} catch (Error& e) {
+					err = e;
 				}
-
-				// Verify the results
-				TraceEvent("RestoreValidationComplete")
-				    .detail("AuditID", auditId)
-				    .detail("FinalPhase", (int)finalPhase)
-				    .detail("ExpectedPhase", self->expectedPhase)
-				    .detail("ErrorMessage", errorMessage)
-				    .detail("ElapsedTime", now() - startTime);
-
-				if (self->expectSuccess) {
-					if (finalPhase != AuditPhase::Complete) {
-						// Log as warning since we may retry - only becomes error if all retries fail
-						TraceEvent(SevWarn, "RestoreValidationUnexpectedPhase")
-						    .detail("AuditID", auditId)
-						    .detail("FinalPhase", (int)finalPhase)
-						    .detail("ExpectedPhase", self->expectedPhase)
-						    .detail("ErrorMessage", errorMessage);
-						throw audit_storage_failed();
-					}
-					if (!errorMessage.empty()) {
-						TraceEvent(SevError, "RestoreValidationUnexpectedError")
-						    .detail("AuditID", auditId)
-						    .detail("ErrorMessage", errorMessage);
-						throw audit_storage_error();
-					}
-				} else {
-					if (finalPhase == AuditPhase::Complete) {
-						TraceEvent(SevError, "RestoreValidationUnexpectedSuccess")
-						    .detail("AuditID", auditId)
-						    .detail("ExpectedPhase", self->expectedPhase);
-						throw audit_storage_task_outdated();
-					}
-				}
-
-				TraceEvent("RestoreValidationSuccess").detail("AuditID", auditId);
-				break; // Success!
-
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
 				}
 				// Retry audit on failures caused by cluster instability during buggify
-				if (e.code() == error_code_audit_storage_failed && auditRetryCount < maxAuditRetries) {
+				if (err.code() == error_code_audit_storage_failed && auditRetryCount < maxAuditRetries) {
 					auditRetryCount++;
 					double backoff = std::min(10.0, 2.0 * auditRetryCount);
 					TraceEvent(SevWarn, "RestoreValidationAuditRetry")
-					    .error(e)
+					    .error(err)
 					    .detail("RetryCount", auditRetryCount)
 					    .detail("MaxRetries", maxAuditRetries)
 					    .detail("BackoffSeconds", backoff);
-					wait(delay(backoff));
+					co_await delay(backoff);
 					// Loop will retry the entire audit
 				} else {
 					TraceEvent(SevError, "RestoreValidationError")
-					    .errorUnsuppressed(e)
+					    .errorUnsuppressed(err)
 					    .detail("RetryCount", auditRetryCount);
-					throw;
+					throw err;
 				}
 			}
 		}
 
-		return Void();
 	}
 };
 

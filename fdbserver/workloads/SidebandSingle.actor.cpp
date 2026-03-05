@@ -80,43 +80,51 @@ struct SidebandSingleWorkload : TestWorkload {
 		m.push_back(keysUnexpectedlyPresent.getMetric());
 	}
 
-	ACTOR Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
-		state double lastTime = now();
-		state Version commitVersion;
-		state bool unknown = false;
+	Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
+		double lastTime = now();
+		Version commitVersion{ 0 };
+		bool unknown = false;
 
 		loop {
-			wait(poisson(&lastTime, 1.0 / self->operationsPerSecond));
-			state Transaction tr0(cx);
-			state Transaction tr(cx);
-			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
+			co_await poisson(&lastTime, 1.0 / self->operationsPerSecond);
+			Transaction tr0(cx);
+			Transaction tr(cx);
+			uint64_t key = deterministicRandom()->randomUniqueID().hash();
 
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
+			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
 			// first set, this is the "old" value, always retry
 			loop {
-				try {
-					tr0.set(messageKey, "oldbeef"_sr);
-					wait(tr0.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr0.onError(e));
+				{
+					Error err;
+					try {
+						tr0.set(messageKey, "oldbeef"_sr);
+						co_await tr0.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await tr0.onError(err);
 				}
 			}
 			// second set, the checker should see this, no retries on unknown result
 			loop {
-				try {
-					tr.set(messageKey, "deadbeef"_sr);
-					wait(tr.commit());
-					commitVersion = tr.getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					if (e.code() == error_code_commit_unknown_result) {
+				{
+					Error err;
+					try {
+						tr.set(messageKey, "deadbeef"_sr);
+						co_await tr.commit();
+						commitVersion = tr.getCommittedVersion();
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.code() == error_code_commit_unknown_result) {
 						unknown = true;
 						++self->messages;
 						self->interf.send(std::pair(key, invalidVersion));
 						break;
 					}
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 			if (unknown) {
@@ -128,7 +136,7 @@ struct SidebandSingleWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
+	Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
 		// Required for GRV Cache to work in simulation.
 		// Normally, MVC would set the shared state and it is verified upon setting the
 		// transaction option for GRV Cache.
@@ -136,56 +144,64 @@ struct SidebandSingleWorkload : TestWorkload {
 		cx->initSharedState();
 		loop {
 			// Pair represents <Key, commitVersion>
-			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
-			state Transaction tr(cx);
+			std::pair<uint64_t, Version> message = co_await self->interf.getFuture();
+			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
+			Transaction tr(cx);
 			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
-					state Optional<Value> val = wait(tr.get(messageKey));
-					if (!val.present()) {
-						TraceEvent(SevError, "CausalConsistencyError1")
-						    .detail("MessageKey", messageKey.toString().c_str())
-						    .detail("RemoteCommitVersion", message.second)
-						    .detail("LocalReadVersion",
-						            tr.getReadVersion().get()); // will assert that ReadVersion is set
-						++self->consistencyErrors;
-					} else if (val.get() != "deadbeef"_sr) {
-						// If we read something NOT "deadbeef" and there was no commit_unknown_result,
-						// the cache somehow read a stale version of our key
-						if (message.second != invalidVersion) {
-							TraceEvent(SevError, "CausalConsistencyError2")
-							    .detail("MessageKey", messageKey.toString().c_str());
-							++self->consistencyErrors;
-							break;
-						}
-						// check again without cache, and if it's the same, that's expected
-						state Transaction tr2(cx);
-						state Optional<Value> val2;
-						loop {
-							try {
-								wait(store(val2, tr2.get(messageKey)));
-								break;
-							} catch (Error& e) {
-								TraceEvent("DebugSidebandNoCacheError").errorUnsuppressed(e);
-								wait(tr2.onError(e));
-							}
-						}
-						if (val != val2) {
-							TraceEvent(SevError, "CausalConsistencyError3")
+				{
+					Error err;
+					try {
+						tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
+						Optional<Value> val = co_await tr.get(messageKey);
+						if (!val.present()) {
+							TraceEvent(SevError, "CausalConsistencyError1")
 							    .detail("MessageKey", messageKey.toString().c_str())
-							    .detail("Val1", val)
-							    .detail("Val2", val2)
 							    .detail("RemoteCommitVersion", message.second)
 							    .detail("LocalReadVersion",
 							            tr.getReadVersion().get()); // will assert that ReadVersion is set
 							++self->consistencyErrors;
+						} else if (val.get() != "deadbeef"_sr) {
+							// If we read something NOT "deadbeef" and there was no commit_unknown_result,
+							// the cache somehow read a stale version of our key
+							if (message.second != invalidVersion) {
+								TraceEvent(SevError, "CausalConsistencyError2")
+								    .detail("MessageKey", messageKey.toString().c_str());
+								++self->consistencyErrors;
+								break;
+							}
+							// check again without cache, and if it's the same, that's expected
+							Transaction tr2(cx);
+							Optional<Value> val2;
+							loop {
+								{
+									Error err;
+									try {
+										co_await store(val2, tr2.get(messageKey));
+										break;
+									} catch (Error& e) {
+										err = e;
+									}
+									TraceEvent("DebugSidebandNoCacheError").errorUnsuppressed(err);
+									co_await tr2.onError(err);
+								}
+							}
+							if (val != val2) {
+								TraceEvent(SevError, "CausalConsistencyError3")
+								    .detail("MessageKey", messageKey.toString().c_str())
+								    .detail("Val1", val)
+								    .detail("Val2", val2)
+								    .detail("RemoteCommitVersion", message.second)
+								    .detail("LocalReadVersion",
+								            tr.getReadVersion().get()); // will assert that ReadVersion is set
+								++self->consistencyErrors;
+							}
 						}
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-					break;
-				} catch (Error& e) {
-					TraceEvent("DebugSidebandCheckError").errorUnsuppressed(e);
-					wait(tr.onError(e));
+					TraceEvent("DebugSidebandCheckError").errorUnsuppressed(err);
+					co_await tr.onError(err);
 				}
 			}
 		}

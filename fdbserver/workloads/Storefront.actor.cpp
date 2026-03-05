@@ -100,9 +100,9 @@ struct StorefrontWorkload : TestWorkload {
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(itemKey(n), itemValue(0)); }
 
-	ACTOR Future<Void> itemUpdater(Transaction* tr, StorefrontWorkload* self, int item, int quantity) {
-		state Key iKey = self->itemKey(item);
-		Optional<Value> val = wait(tr->get(iKey));
+	Future<Void> itemUpdater(Transaction* tr, StorefrontWorkload* self, int item, int quantity) {
+		Key iKey = self->itemKey(item);
+		Optional<Value> val = co_await tr->get(iKey);
 		if (!val.present()) {
 			TraceEvent(SevError, "StorefrontItemMissing")
 			    .detail("Key", printable(iKey))
@@ -113,55 +113,58 @@ struct StorefrontWorkload : TestWorkload {
 		}
 		int currentCount = valueToInt(val.get());
 		tr->set(iKey, self->itemValue(currentCount + quantity));
-		return Void();
 	}
 
-	ACTOR Future<Void> orderingClient(Database cx, StorefrontWorkload* self, double delay) {
-		state double lastTime = now();
+	Future<Void> orderingClient(Database cx, StorefrontWorkload* self, double delay) {
+		double lastTime = now();
 		try {
 			loop {
-				wait(poisson(&lastTime, delay));
+				co_await poisson(&lastTime, delay);
 
-				state double tstart = now();
-				state int itemsToOrder = deterministicRandom()->randomInt(1, self->maxOrderSize);
-				state orderID id = deterministicRandom()->randomUniqueID().hash();
-				state Key orderKey = self->orderKey(id);
-				state Transaction tr(cx);
+				double tstart = now();
+				int itemsToOrder = deterministicRandom()->randomInt(1, self->maxOrderSize);
+				orderID id = deterministicRandom()->randomUniqueID().hash();
+				Key orderKey = self->orderKey(id);
+				Transaction tr(cx);
 				loop {
-					try {
-						Optional<Value> order = wait(tr.get(orderKey));
-						if (order.present()) {
-							++self->spuriousCommitFailures;
-							break; // the order was already committed
+					{
+						Error err;
+						try {
+							Optional<Value> order = co_await tr.get(orderKey);
+							if (order.present()) {
+								++self->spuriousCommitFailures;
+								break; // the order was already committed
+							}
+
+							// pick items
+							std::map<int, int> items;
+							for (int i = 0; i < itemsToOrder; i++)
+								items[deterministicRandom()->randomInt(0, self->itemCount)]++;
+
+							// create "value"
+							std::vector<int> itemList;
+							std::map<int, int>::iterator it;
+							std::vector<Future<Void>> updaters;
+							for (it = items.begin(); it != items.end(); it++) {
+								for (int i = 0; i < it->second; i++)
+									itemList.push_back(it->first);
+								updaters.push_back(self->itemUpdater(&tr, self, it->first, it->second));
+							}
+							co_await waitForAll(updaters);
+							updaters.clear();
+
+							// set value for the order
+							BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+							wr << itemList;
+							tr.set(orderKey, wr.toValue());
+
+							co_await tr.commit();
+							self->orders[id] = items; // save this in a local list to test durability
+							break;
+						} catch (Error& e) {
+							err = e;
 						}
-
-						// pick items
-						state std::map<int, int> items;
-						for (int i = 0; i < itemsToOrder; i++)
-							items[deterministicRandom()->randomInt(0, self->itemCount)]++;
-
-						// create "value"
-						state std::vector<int> itemList;
-						std::map<int, int>::iterator it;
-						state std::vector<Future<Void>> updaters;
-						for (it = items.begin(); it != items.end(); it++) {
-							for (int i = 0; i < it->second; i++)
-								itemList.push_back(it->first);
-							updaters.push_back(self->itemUpdater(&tr, self, it->first, it->second));
-						}
-						wait(waitForAll(updaters));
-						updaters.clear();
-
-						// set value for the order
-						BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
-						wr << itemList;
-						tr.set(orderKey, wr.toValue());
-
-						wait(tr.commit());
-						self->orders[id] = items; // save this in a local list to test durability
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
+						co_await tr.onError(err);
 					}
 					++self->retries;
 				}
@@ -174,43 +177,49 @@ struct StorefrontWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<bool> orderChecker(Database cx, StorefrontWorkload* self, std::vector<orderID> ids) {
-		state Transaction tr(cx);
-		state int idx = 0;
+	Future<bool> orderChecker(Database cx, StorefrontWorkload* self, std::vector<orderID> ids) {
+		Transaction tr(cx);
+		int idx = 0;
 		loop {
-			try {
-				for (; idx < ids.size(); idx++) {
-					state orderID id = ids[idx];
-					Optional<Value> val = wait(tr.get(self->orderKey(id)));
-					if (!val.present()) {
-						TraceEvent(SevError, "TestFailure").detail("Reason", "OrderNotPresent").detail("OrderID", id);
-						return false;
+			{
+				Error err;
+				try {
+					for (; idx < ids.size(); idx++) {
+						orderID id = ids[idx];
+						Optional<Value> val = co_await tr.get(self->orderKey(id));
+						if (!val.present()) {
+							TraceEvent(SevError, "TestFailure")
+							    .detail("Reason", "OrderNotPresent")
+							    .detail("OrderID", id);
+							co_return false;
+						}
+						std::vector<int> itemList;
+						std::map<int, int>::iterator it;
+						for (it = self->orders[id].begin(); it != self->orders[id].end(); it++) {
+							for (int i = 0; i < it->second; i++)
+								itemList.push_back(it->first);
+						}
+						BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+						wr << itemList;
+						if (wr.toValue() != val.get().toString()) {
+							TraceEvent(SevError, "TestFailure")
+							    .detail("Reason", "OrderContentsMismatch")
+							    .detail("OrderID", id);
+							co_return false;
+						}
 					}
-					std::vector<int> itemList;
-					std::map<int, int>::iterator it;
-					for (it = self->orders[id].begin(); it != self->orders[id].end(); it++) {
-						for (int i = 0; i < it->second; i++)
-							itemList.push_back(it->first);
-					}
-					BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
-					wr << itemList;
-					if (wr.toValue() != val.get().toString()) {
-						TraceEvent(SevError, "TestFailure")
-						    .detail("Reason", "OrderContentsMismatch")
-						    .detail("OrderID", id);
-						return false;
-					}
+					co_return true;
+				} catch (Error& e) {
+					err = e;
 				}
-				return true;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR Future<bool> inventoryCheck(Database cx, StorefrontWorkload* self, bool ok) {
-		state std::vector<Future<bool>> checkers;
-		state std::map<orderID, std::map<int, int>>::iterator it(self->orders.begin());
+	Future<bool> inventoryCheck(Database cx, StorefrontWorkload* self, bool ok) {
+		std::vector<Future<bool>> checkers;
+		std::map<orderID, std::map<int, int>>::iterator it(self->orders.begin());
 		while (it != self->orders.end()) {
 			for (int a = 0; a < self->actorCount && it != self->orders.end(); a++) {
 				std::vector<orderID> orderIDs;
@@ -220,7 +229,7 @@ struct StorefrontWorkload : TestWorkload {
 				}
 				checkers.push_back(self->orderChecker(cx->clone(), self, orderIDs));
 			}
-			wait(waitForAll(checkers));
+			co_await waitForAll(checkers);
 			for (int c = 0; c < checkers.size(); c++)
 				ok = ok && !checkers[c].isError() && checkers[c].isReady() && checkers[c].get();
 			checkers.clear();
@@ -228,7 +237,7 @@ struct StorefrontWorkload : TestWorkload {
 
 		// FIXME: match order table with inventory table
 
-		return ok;
+		co_return ok;
 	}
 };
 

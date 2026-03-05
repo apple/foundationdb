@@ -53,44 +53,45 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	Key keyForInbox(int i) { return StringRef(format("/PSM/inbox/%d", i)); }
 	Value valueForUInt(uint64_t i) { return StringRef(format("%llx", i)); }
 
-	ACTOR Future<Void> createNodeSwath(PubSubMultiplesWorkload* self, int actor, Database cx) {
-		state PubSub ps(cx);
-		state std::vector<uint64_t> feeds;
-		state std::vector<uint64_t> inboxes;
-		state int idx;
-		for (idx = 0; idx < self->inboxesPerActor; idx++) {
-			uint64_t feedIdx = wait(ps.createFeed(StringRef()));
+	Future<Void> createNodeSwath(PubSubMultiplesWorkload* self, int actor, Database cx) {
+		PubSub ps(cx);
+		std::vector<uint64_t> feeds;
+		std::vector<uint64_t> inboxes;
+		for (int idx = 0; idx < self->inboxesPerActor; idx++) {
+			uint64_t feedIdx = co_await ps.createFeed(StringRef());
 			feeds.push_back(feedIdx);
-			uint64_t inboxIdx = wait(ps.createInbox(StringRef()));
+			uint64_t inboxIdx = co_await ps.createInbox(StringRef());
 			inboxes.push_back(inboxIdx);
 		}
-		state Transaction tr(cx);
+		Transaction tr(cx);
 		loop {
-			try {
-				for (int idx = 0; idx < self->inboxesPerActor; idx++) {
-					int offset = (self->clientId * self->clientCount * self->actorCount * self->inboxesPerActor) +
-					             (actor * self->actorCount * self->inboxesPerActor) + idx;
-					tr.set(self->keyForFeed(offset), self->valueForUInt(feeds[idx]));
-					tr.set(self->keyForInbox(offset), self->valueForUInt(inboxes[idx]));
+			{
+				Error err;
+				try {
+					for (int idx = 0; idx < self->inboxesPerActor; idx++) {
+						int offset = (self->clientId * self->clientCount * self->actorCount * self->inboxesPerActor) +
+						             (actor * self->actorCount * self->inboxesPerActor) + idx;
+						tr.set(self->keyForFeed(offset), self->valueForUInt(feeds[idx]));
+						tr.set(self->keyForInbox(offset), self->valueForUInt(inboxes[idx]));
+					}
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> createNodes(PubSubMultiplesWorkload* self, Database cx) {
-		state PubSub ps(cx);
+	Future<Void> createNodes(PubSubMultiplesWorkload* self, Database cx) {
+		PubSub ps(cx);
 		std::vector<Future<Void>> actors;
 		actors.reserve(self->actorCount);
 		for (int i = 0; i < self->actorCount; i++)
 			actors.push_back(self->createNodeSwath(self, i, cx->clone()));
-		wait(waitForAll(actors));
+		co_await waitForAll(actors);
 		TraceEvent("PSMNodesCreated").detail("ClientIdx", self->clientId);
-		return Void();
 	}
 
 	/*ACTOR*/ Future<Void> createSubscriptions(PubSubMultiplesWorkload* self, int actor, Database cx) {
@@ -103,15 +104,14 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> startTests(PubSubMultiplesWorkload* self, Database cx) {
+	Future<Void> startTests(PubSubMultiplesWorkload* self, Database cx) {
 		std::vector<Future<Void>> subscribers;
 		subscribers.reserve(self->actorCount);
 		for (int i = 0; i < self->actorCount; i++)
 			subscribers.push_back(self->createSubscriptions(self, i, cx));
-		wait(waitForAll(subscribers));
+		co_await waitForAll(subscribers);
 
-		state Future<Void> sender = self->messageSender(self, cx);
-		return Void();
+		Future<Void> sender = self->messageSender(self, cx);
 	}
 };
 

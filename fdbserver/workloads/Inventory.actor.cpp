@@ -100,10 +100,10 @@ struct InventoryTestWorkload : TestWorkload {
 		// return s;
 	}
 
-	ACTOR Future<bool> inventoryTestCheck(Database cx, InventoryTestWorkload* self) {
+	Future<bool> inventoryTestCheck(Database cx, InventoryTestWorkload* self) {
 		if (self->failures()) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client failures.");
-			return false;
+			co_return false;
 		}
 		/*if (self->transactions.getValue() < .9 * self->transactionsPerSecond * self->testDuration) {
 		    TraceEvent(SevError, "TestFailure").detail("Reason", "Less than 90% desired transaction rate.");
@@ -111,64 +111,68 @@ struct InventoryTestWorkload : TestWorkload {
 		}*/
 		self->clients.clear();
 
-		state Transaction tr(cx);
+		Transaction tr(cx);
 		loop {
-			try {
-				RangeResult data = wait(tr.getRange(
-				    firstGreaterOrEqual(doubleToTestKey(0)), firstGreaterOrEqual(doubleToTestKey(1)), self->nProducts));
+			{
+				Error err;
+				try {
+					RangeResult data = co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0)),
+					                                        firstGreaterOrEqual(doubleToTestKey(1)),
+					                                        self->nProducts);
 
-				std::map<Key, int> actualResults;
-				for (int i = 0; i < data.size(); i++)
-					actualResults[data[i].key] = atoi(data[i].value.toString().c_str());
-				for (auto i = self->minExpectedResults.begin(); i != self->minExpectedResults.end(); ++i)
-					actualResults[i->first];
-				bool error = false;
-				for (auto i = actualResults.begin(); i != actualResults.end(); ++i)
-					if (i->second < self->minExpectedResults[i->first] ||
-					    i->second > self->maxExpectedResults[i->first]) {
-						if (!error)
-							TraceEvent(SevError, "TestFailure").detail("Reason", "Incorrect results.");
-						error = true;
-						std::string str;
-						for (int d = 0; d < data.size(); d++)
-							if (data[d].key == i->first)
-								str = data[d].value.toString();
-						TraceEvent(SevError, "IncorrectTestResult")
-						    .detail("Key", printable(i->first))
-						    .detail("ActualValue", i->second)
-						    .detail("ActualValueString", str)
-						    .detail("MinExpected", self->minExpectedResults[i->first])
-						    .detail("MaxExpected", self->maxExpectedResults[i->first]);
-					}
-				if (error)
-					return false;
-				return true;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+					std::map<Key, int> actualResults;
+					for (int i = 0; i < data.size(); i++)
+						actualResults[data[i].key] = atoi(data[i].value.toString().c_str());
+					for (auto i = self->minExpectedResults.begin(); i != self->minExpectedResults.end(); ++i)
+						actualResults[i->first];
+					bool error = false;
+					for (auto i = actualResults.begin(); i != actualResults.end(); ++i)
+						if (i->second < self->minExpectedResults[i->first] ||
+						    i->second > self->maxExpectedResults[i->first]) {
+							if (!error)
+								TraceEvent(SevError, "TestFailure").detail("Reason", "Incorrect results.");
+							error = true;
+							std::string str;
+							for (int d = 0; d < data.size(); d++)
+								if (data[d].key == i->first)
+									str = data[d].value.toString();
+							TraceEvent(SevError, "IncorrectTestResult")
+							    .detail("Key", printable(i->first))
+							    .detail("ActualValue", i->second)
+							    .detail("ActualValueString", str)
+							    .detail("MinExpected", self->minExpectedResults[i->first])
+							    .detail("MaxExpected", self->maxExpectedResults[i->first]);
+						}
+					if (error)
+						co_return false;
+					co_return true;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR Future<Void> inventoryTestWrite(Transaction* tr, Key key) {
-		Optional<Value> val = wait(tr->get(key));
+	Future<Void> inventoryTestWrite(Transaction* tr, Key key) {
+		Optional<Value> val = co_await tr->get(key);
 		int count = !val.present() ? 0 : atoi(val.get().toString().c_str());
 		ASSERT(count >= 0 && count < 1000000);
 		tr->set(key, format("%d", count + 1));
-		return Void();
 	}
 
-	ACTOR Future<Void> inventoryTestClient(Database cx,
-	                                       InventoryTestWorkload* self,
-	                                       double transactionDelay,
-	                                       double fractionWriteTransactions,
-	                                       int productsPerWrite) {
-		state double lastTime = now();
+	Future<Void> inventoryTestClient(Database cx,
+	                                 InventoryTestWorkload* self,
+	                                 double transactionDelay,
+	                                 double fractionWriteTransactions,
+	                                 int productsPerWrite) {
+		double lastTime = now();
 		loop {
-			wait(poisson(&lastTime, transactionDelay));
-			state double st = now();
-			state Transaction tr(cx);
+			co_await poisson(&lastTime, transactionDelay);
+			double st = now();
+			Transaction tr(cx);
 			if (deterministicRandom()->random01() < fractionWriteTransactions) {
-				state std::set<Key> products;
+				std::set<Key> products;
 				for (int i = 0; i < productsPerWrite; i++)
 					products.insert(self->chooseProduct());
 				for (auto p = products.begin(); p != products.end(); ++p)
@@ -177,19 +181,23 @@ struct InventoryTestWorkload : TestWorkload {
 					std::vector<Future<Void>> todo;
 					for (auto p = products.begin(); p != products.end(); ++p)
 						todo.push_back(self->inventoryTestWrite(&tr, *p));
-					try {
+					{
+						Error err;
 						try {
-							wait(waitForAll(todo));
+							try {
+								co_await waitForAll(todo);
+							} catch (Error& e) {
+								if (e.code() == error_code_actor_cancelled)
+									for (auto p = products.begin(); p != products.end(); ++p)
+										self->maxExpectedResults[*p]--;
+								throw e;
+							}
+							co_await tr.commit();
+							break;
 						} catch (Error& e) {
-							if (e.code() == error_code_actor_cancelled)
-								for (auto p = products.begin(); p != products.end(); ++p)
-									self->maxExpectedResults[*p]--;
-							throw e;
+							err = e;
 						}
-						wait(tr.commit());
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
+						co_await tr.onError(err);
 					}
 					++self->retries;
 					for (auto p = products.begin(); p != products.end(); ++p)
@@ -199,11 +207,15 @@ struct InventoryTestWorkload : TestWorkload {
 					self->minExpectedResults[*p]++;
 			} else {
 				loop {
-					try {
-						Optional<Value> val = wait(tr.get(self->chooseProduct()));
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
+					{
+						Error err;
+						try {
+							Optional<Value> val = co_await tr.get(self->chooseProduct());
+							break;
+						} catch (Error& e) {
+							err = e;
+						}
+						co_await tr.onError(err);
 					}
 				}
 			}

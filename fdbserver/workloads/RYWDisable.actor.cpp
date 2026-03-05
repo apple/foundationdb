@@ -45,54 +45,61 @@ struct RYWDisableWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, RYWDisableWorkload* self) {
-		state double testStart = now();
+	static Future<Void> _start(Database cx, RYWDisableWorkload* self) {
+		double testStart = now();
 
 		loop {
-			state ReadYourWritesTransaction tr(cx);
+			ReadYourWritesTransaction tr(cx);
 			loop {
-				try {
-					// do some operations
-					state int opType = deterministicRandom()->randomInt(0, 4);
-					state bool shouldError = true;
-
-					if (opType == 0) {
-						//TraceEvent("RYWSetting");
-						tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)), StringRef());
-					} else if (opType == 1) {
-						//TraceEvent("RYWGetNoWait");
-						Future<Optional<Value>> _ =
-						    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
-					} else if (opType == 2) {
-						//TraceEvent("RYWGetAndWait");
-						wait(success(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)))));
-					} else {
-						//TraceEvent("RYWNoOp");
-						shouldError = false;
-					}
-
-					// set ryw disable, check that it fails
+				{
+					Error err;
 					try {
-						tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-						if (shouldError)
-							ASSERT(false);
+						// do some operations
+						int opType = deterministicRandom()->randomInt(0, 4);
+						bool shouldError = true;
+
+						if (opType == 0) {
+							//TraceEvent("RYWSetting");
+							tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)), StringRef());
+						} else if (opType == 1) {
+							//TraceEvent("RYWGetNoWait");
+							Future<Optional<Value>> _ =
+							    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
+						} else if (opType == 2) {
+							//TraceEvent("RYWGetAndWait");
+							co_await success(
+							    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes))));
+						} else {
+							//TraceEvent("RYWNoOp");
+							shouldError = false;
+						}
+
+						// set ryw disable, check that it fails
+						try {
+							tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+							if (shouldError)
+								ASSERT(false);
+						} catch (Error& e) {
+							if (!shouldError)
+								ASSERT(false);
+							ASSERT(e.code() == error_code_client_invalid_operation);
+						}
+
+						co_await delay(0.1);
+
+						if (now() - testStart > self->testDuration)
+							co_return;
+
+						if (deterministicRandom()->random01() < 0.5)
+							break;
+
+						tr.reset();
 					} catch (Error& e) {
-						if (!shouldError)
-							ASSERT(false);
-						ASSERT(e.code() == error_code_client_invalid_operation);
+						err = e;
 					}
-
-					wait(delay(0.1));
-
-					if (now() - testStart > self->testDuration)
-						return Void();
-
-					if (deterministicRandom()->random01() < 0.5)
-						break;
-
-					tr.reset();
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					if (err.isValid()) {
+						co_await tr.onError(err);
+					}
 				}
 			}
 		}

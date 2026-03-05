@@ -62,11 +62,9 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> doBackup(BackupAndRestoreValidationWorkload* self,
-	                                   FileBackupAgent* backupAgent,
-	                                   Database cx) {
-		state std::string backupContainer = "file://simfdb/backups/";
-		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+	static Future<Void> doBackup(BackupAndRestoreValidationWorkload* self, FileBackupAgent* backupAgent, Database cx) {
+		std::string backupContainer = "file://simfdb/backups/";
+		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 
 		// Only backup normal user keys (not system keys)
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
@@ -74,14 +72,14 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		TraceEvent("BARV_SubmitBackup").detail("Tag", printable(self->backupTag)).detail("Container", backupContainer);
 
 		try {
-			wait(backupAgent->submitBackup(cx,
-			                               StringRef(backupContainer),
-			                               {},
-			                               deterministicRandom()->randomInt(0, 60),
-			                               deterministicRandom()->randomInt(0, 100),
-			                               self->backupTag.toString(),
-			                               backupRanges,
-			                               StopWhenDone{ true }));
+			co_await backupAgent->submitBackup(cx,
+			                                   StringRef(backupContainer),
+			                                   {},
+			                                   deterministicRandom()->randomInt(0, 60),
+			                                   deterministicRandom()->randomInt(0, 100),
+			                                   self->backupTag.toString(),
+			                                   backupRanges,
+			                                   StopWhenDone{ true });
 		} catch (Error& e) {
 			TraceEvent("BARV_SubmitBackupException").error(e);
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -90,26 +88,24 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 
 		// Wait for backup to complete
 		TraceEvent("BARV_WaitBackup").detail("Tag", printable(self->backupTag));
-		state EBackupState statusValue =
-		    wait(backupAgent->waitBackup(cx, self->backupTag.toString(), StopWhenDone::True));
+		EBackupState statusValue = co_await backupAgent->waitBackup(cx, self->backupTag.toString(), StopWhenDone::True);
 
 		TraceEvent("BARV_BackupComplete")
 		    .detail("Tag", printable(self->backupTag))
 		    .detail("Status", BackupAgentBase::getStateText(statusValue));
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> doRestore(BackupAndRestoreValidationWorkload* self,
-	                                    FileBackupAgent* backupAgent,
-	                                    Database cx,
-	                                    Reference<IBackupContainer> backupContainer) {
-		state Standalone<VectorRef<KeyRangeRef>> restoreRanges;
+	static Future<Void> doRestore(BackupAndRestoreValidationWorkload* self,
+	                              FileBackupAgent* backupAgent,
+	                              Database cx,
+	                              Reference<IBackupContainer> backupContainer) {
+		Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 
 		// Restore normal user keys only
 		restoreRanges.push_back_deep(restoreRanges.arena(), normalKeys);
 
-		state Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
+		Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
 
 		TraceEvent("BARV_StartRestore")
 		    .detail("Tag", printable(restoreTag))
@@ -119,23 +115,23 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		// Don't clear keys - we want to keep original data for validation comparison
 		// The restore will put data at the addPrefix location
 
-		wait(success(backupAgent->restore(cx,
-		                                  cx,
-		                                  restoreTag,
-		                                  KeyRef(backupContainer->getURL()),
-		                                  backupContainer->getProxy(),
-		                                  restoreRanges,
-		                                  WaitForComplete::True,
-		                                  ::invalidVersion,
-		                                  Verbose::True,
-		                                  self->addPrefix,
-		                                  Key(), // removePrefix
-		                                  LockDB{ false },
-		                                  UnlockDB::True,
-		                                  OnlyApplyMutationLogs::False,
-		                                  InconsistentSnapshotOnly::False,
-		                                  ::invalidVersion,
-		                                  backupContainer->getEncryptionKeyFileName())));
+		co_await success(backupAgent->restore(cx,
+		                                      cx,
+		                                      restoreTag,
+		                                      KeyRef(backupContainer->getURL()),
+		                                      backupContainer->getProxy(),
+		                                      restoreRanges,
+		                                      WaitForComplete::True,
+		                                      ::invalidVersion,
+		                                      Verbose::True,
+		                                      self->addPrefix,
+		                                      Key(), // removePrefix
+		                                      LockDB{ false },
+		                                      UnlockDB::True,
+		                                      OnlyApplyMutationLogs::False,
+		                                      InconsistentSnapshotOnly::False,
+		                                      ::invalidVersion,
+		                                      backupContainer->getEncryptionKeyFileName()));
 
 		TraceEvent("BARV_RestoreComplete")
 		    .detail("Tag", printable(restoreTag))
@@ -143,103 +139,109 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 
 		// Wait a bit to ensure all restored data is committed and visible
 		// The restore API returns success before all data is fully flushed to storage servers
-		wait(delay(5.0));
+		co_await delay(5.0);
 		TraceEvent("BARV_RestoreDataStabilizationWait").detail("WaitTime", 5.0);
 
 		// Write a completion marker so RestoreValidation knows restore is fully done
-		state Key completionMarker = restoreValidationCompletionKey;
-		state Transaction markTr(cx);
+		Key completionMarker = restoreValidationCompletionKey;
+		Transaction markTr(cx);
 		loop {
-			try {
-				markTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				markTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				markTr.set(completionMarker, "1"_sr);
-				wait(markTr.commit());
-				TraceEvent("BARV_RestoreCompletionMarkerSet").detail("MarkerKey", printable(completionMarker));
-				break;
-			} catch (Error& e) {
-				wait(markTr.onError(e));
+			{
+				Error err;
+				try {
+					markTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					markTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					markTr.set(completionMarker, "1"_sr);
+					co_await markTr.commit();
+					TraceEvent("BARV_RestoreCompletionMarkerSet").detail("MarkerKey", printable(completionMarker));
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await markTr.onError(err);
 			}
 		}
 
 		// Unlock the database after restore completes
-		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->clear(databaseLockedKey);
 			return Void();
-		}));
+		});
 
 		TraceEvent("BARV_DatabaseUnlocked").detail("Tag", printable(restoreTag));
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, BackupAndRestoreValidationWorkload* self) {
+	static Future<Void> _start(Database cx, BackupAndRestoreValidationWorkload* self) {
 		// Only run on client 0 to avoid conflicts
 		if (self->clientId != 0) {
-			return Void();
+			co_return;
 		}
 
-		state FileBackupAgent backupAgent;
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
-		state int retryCount = 0;
+		FileBackupAgent backupAgent;
+		UID randomID = nondeterministicRandom()->randomUniqueID();
+		int retryCount = 0;
 
 		loop {
-			try {
-				// Wait before starting backup
-				wait(delay(self->backupAfter));
+			{
+				Error err;
+				try {
+					// Wait before starting backup
+					co_await delay(self->backupAfter);
 
-				// Perform backup
-				TraceEvent("BARV_StartBackup", randomID)
-				    .detail("Tag", printable(self->backupTag))
-				    .detail("RetryCount", retryCount);
-				wait(doBackup(self, &backupAgent, cx));
+					// Perform backup
+					TraceEvent("BARV_StartBackup", randomID)
+					    .detail("Tag", printable(self->backupTag))
+					    .detail("RetryCount", retryCount);
+					co_await doBackup(self, &backupAgent, cx);
 
-				// Get backup container info
-				state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-				UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
-				state UID logUid = uidFlag.first;
-				state Reference<IBackupContainer> backupContainer =
-				    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
+					// Get backup container info
+					KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+					UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+					UID logUid = uidFlag.first;
+					Reference<IBackupContainer> backupContainer =
+					    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
-				// Wait before starting restore
-				wait(delay(self->restoreAfter - self->backupAfter));
+					// Wait before starting restore
+					co_await delay(self->restoreAfter - self->backupAfter);
 
-				// Perform restore with prefix
-				TraceEvent("BARV_StartRestore", randomID)
-				    .detail("Tag", printable(self->backupTag))
-				    .detail("Container", backupContainer->getURL());
-				wait(doRestore(self, &backupAgent, cx, backupContainer));
+					// Perform restore with prefix
+					TraceEvent("BARV_StartRestore", randomID)
+					    .detail("Tag", printable(self->backupTag))
+					    .detail("Container", backupContainer->getURL());
+					co_await doRestore(self, &backupAgent, cx, backupContainer);
 
-				TraceEvent("BARV_Complete", randomID).detail("Tag", printable(self->backupTag));
-				break; // Success!
+					TraceEvent("BARV_Complete", randomID).detail("Tag", printable(self->backupTag));
+					break; // Success!
 
-			} catch (Error& e) {
+				} catch (Error& e) {
+					err = e;
+				}
 				// Retry on transient errors from buggify chaos injection
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_commit_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_database_locked || e.code() == error_code_transaction_too_old ||
-				    e.code() == error_code_future_version) {
+				if (err.code() == error_code_grv_proxy_memory_limit_exceeded ||
+				    err.code() == error_code_commit_proxy_memory_limit_exceeded ||
+				    err.code() == error_code_database_locked || err.code() == error_code_transaction_too_old ||
+				    err.code() == error_code_future_version) {
 					retryCount++;
 					double backoff = std::min(1.0, 0.1 * retryCount);
 					TraceEvent(SevWarn, "BARV_RetryableError", randomID)
-					    .error(e)
+					    .error(err)
 					    .detail("RetryCount", retryCount)
 					    .detail("BackoffSeconds", backoff);
-					wait(delay(backoff));
+					co_await delay(backoff);
 					// Reset state and retry
 					self->backupAfter = 0.0; // Don't wait again
 					self->restoreAfter = self->restoreAfter - self->backupAfter;
 					// Loop will retry
 				} else {
-					TraceEvent(SevError, "BARV_Error", randomID).error(e).detail("RetryCount", retryCount);
-					throw;
+					TraceEvent(SevError, "BARV_Error", randomID).error(err).detail("RetryCount", retryCount);
+					throw err;
 				}
 			}
 		}
 
-		return Void();
 	}
 };
 

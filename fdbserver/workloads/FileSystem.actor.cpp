@@ -116,31 +116,34 @@ struct FileSystemWorkload : TestWorkload {
 		tr->set("/files/path/" + path, format("%016llx", id));
 	}
 
-	ACTOR Future<Void> setupRange(Database cx, FileSystemWorkload* self, int begin, int end) {
-		state Transaction tr(cx);
+	Future<Void> setupRange(Database cx, FileSystemWorkload* self, int begin, int end) {
+		Transaction tr(cx);
 		while (true) {
-			try {
-				Optional<Value> f = wait(tr.get(self->keyForFileID(begin)));
-				if (f.present())
-					break; // The transaction already completed!
+			{
+				Error err;
+				try {
+					Optional<Value> f = co_await tr.get(self->keyForFileID(begin));
+					if (f.present())
+						break; // The transaction already completed!
 
-				for (int n = begin; n < end; n++)
-					self->initializeFile(&tr, self, n);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+					for (int n = begin; n < end; n++)
+						self->initializeFile(&tr, self, n);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
 			}
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> nodeSetup(Database cx, FileSystemWorkload* self) {
-		state int i;
-		state std::vector<int> order;
-		state int nodesToSetUp = self->fileCount / self->clientCount + 1;
-		state int startingNode = nodesToSetUp * self->clientId;
-		state int batchCount = 5;
+	Future<Void> nodeSetup(Database cx, FileSystemWorkload* self) {
+		int i{ 0 };
+		std::vector<int> order;
+		int nodesToSetUp = self->fileCount / self->clientCount + 1;
+		int startingNode = nodesToSetUp * self->clientId;
+		int batchCount = 5;
 		for (int o = 0; o <= nodesToSetUp / batchCount; o++)
 			order.push_back(o * batchCount);
 		deterministicRandom()->randomShuffle(order);
@@ -154,23 +157,22 @@ struct FileSystemWorkload : TestWorkload {
 				    std::min(startingNode + order[i] + batchCount, nodesToSetUp * (self->clientId + 1))));
 				i++;
 			}
-			wait(waitForAll(fs));
+			co_await waitForAll(fs);
 		}
 		TraceEvent("FileSetupOK")
 		    .detail("ClientIdx", self->clientId)
 		    .detail("ClientCount", self->clientCount)
 		    .detail("StartingFile", startingNode)
 		    .detail("FilesToSetUp", nodesToSetUp);
-		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, FileSystemWorkload* self) {
-		state FileSystemOp* operation;
+	Future<Void> _start(Database cx, FileSystemWorkload* self) {
+		FileSystemOp* operation;
 		if (self->operationName == "deletionQuery")
 			operation = new ServerDeletionCountQuery();
 		else
 			operation = new RecentModificationQuery();
-		wait(timeout(self->operationClient(cx, self, operation, 0.01), 1.0, Void()));
+		co_await timeout(self->operationClient(cx, self, operation, 0.01), 1.0, Void());
 		self->queries.clear();
 		self->writes.clear();
 
@@ -185,11 +187,10 @@ struct FileSystemWorkload : TestWorkload {
 			            self->testDuration,
 			            Void()));
 		}
-		wait(waitForAll(self->clients));
+		co_await waitForAll(self->clients);
 
-		wait(delay(0.01)); // Make sure the deletion happens after actor cancellation
+		co_await delay(0.01); // Make sure the deletion happens after actor cancellation
 		delete operation;
-		return Void();
 	}
 
 	bool shouldRecord(double clientBegin) {
@@ -198,20 +199,24 @@ struct FileSystemWorkload : TestWorkload {
 		       (n > (clientBegin + testDuration * 0.125) && n < (clientBegin + testDuration * 0.875));
 	}
 
-	ACTOR Future<Void> operationClient(Database cx, FileSystemWorkload* self, FileSystemOp* operation, double delay) {
-		state double clientBegin = now();
-		state double lastTime = now();
+	Future<Void> operationClient(Database cx, FileSystemWorkload* self, FileSystemOp* operation, double delay) {
+		double clientBegin = now();
+		double lastTime = now();
 		loop {
-			wait(poisson(&lastTime, delay));
-			state double tstart = now();
-			state Transaction tr(cx);
+			co_await poisson(&lastTime, delay);
+			double tstart = now();
+			Transaction tr(cx);
 			loop {
-				try {
-					Optional<Version> ver = wait(operation->run(self, &tr));
-					if (ver.present())
-						break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				{
+					Error err;
+					try {
+						Optional<Version> ver = co_await operation->run(self, &tr);
+						if (ver.present())
+							break;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await tr.onError(err);
 				}
 			}
 			if (self->shouldRecord(clientBegin)) {
@@ -228,40 +233,44 @@ struct FileSystemWorkload : TestWorkload {
 		return x;
 	}
 
-	ACTOR Future<Void> writeClient(Database cx, FileSystemWorkload* self) {
-		state double clientBegin = now();
+	Future<Void> writeClient(Database cx, FileSystemWorkload* self) {
+		double clientBegin = now();
 		loop {
-			state int fileID = deterministicRandom()->randomInt(0, self->fileCount);
-			state bool isDeleting = deterministicRandom()->random01() < 0.25;
-			state int size = isDeleting ? 0 : deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
-			state std::string keyStr = self->keyForFileID(fileID).toString();
-			state double tstart = now();
-			state Transaction tr(cx);
+			int fileID = deterministicRandom()->randomInt(0, self->fileCount);
+			bool isDeleting = deterministicRandom()->random01() < 0.25;
+			int size = isDeleting ? 0 : deterministicRandom()->randomInt(0, std::numeric_limits<int>::max());
+			std::string keyStr = self->keyForFileID(fileID).toString();
+			double tstart = now();
+			Transaction tr(cx);
 			loop {
-				try {
-					state double time = now();
-					if (isDeleting) {
-						state Optional<Value> deleted = wait(tr.get(StringRef(keyStr + "/deleted")));
-						ASSERT(deleted.present());
-						Optional<Value> serverStr = wait(tr.get(StringRef(keyStr + "/server")));
-						ASSERT(serverStr.present());
-						int serverID = testKeyToInt(serverStr.get());
-						if (deleted.get().toString() == "1") {
-							tr.set(keyStr + "/deleted", "0"_sr);
-							tr.clear(format("/files/server/%08x/deleted/%016llx", serverID, fileID));
+				{
+					Error err;
+					try {
+						double time = now();
+						if (isDeleting) {
+							Optional<Value> deleted = co_await tr.get(StringRef(keyStr + "/deleted"));
+							ASSERT(deleted.present());
+							Optional<Value> serverStr = co_await tr.get(StringRef(keyStr + "/server"));
+							ASSERT(serverStr.present());
+							int serverID = testKeyToInt(serverStr.get());
+							if (deleted.get().toString() == "1") {
+								tr.set(keyStr + "/deleted", "0"_sr);
+								tr.clear(format("/files/server/%08x/deleted/%016llx", serverID, fileID));
+							} else {
+								tr.set(keyStr + "/deleted", "1"_sr);
+								tr.set(format("/files/server/%08x/deleted/%016llx", serverID, fileID),
+								       doubleToTestKey(time));
+							}
 						} else {
-							tr.set(keyStr + "/deleted", "1"_sr);
-							tr.set(format("/files/server/%08x/deleted/%016llx", serverID, fileID),
-							       doubleToTestKey(time));
+							tr.set(keyStr + "/size", format("%d", size));
 						}
-					} else {
-						tr.set(keyStr + "/size", format("%d", size));
+						tr.set(keyStr + "/lastupdated", doubleToTestKey(time));
+						co_await tr.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-					tr.set(keyStr + "/lastupdated", doubleToTestKey(time));
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 			if (self->shouldRecord(clientBegin)) {
@@ -271,13 +280,13 @@ struct FileSystemWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Optional<Version>> modificationQuery(FileSystemWorkload* self, Transaction* tr) {
-		state uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
-		state std::string base = format("/files/user/%016llx", userID);
+	Future<Optional<Version>> modificationQuery(FileSystemWorkload* self, Transaction* tr) {
+		uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
+		std::string base = format("/files/user/%016llx", userID);
 		if (self->loggingQueries)
 			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
 		Key keyEnd(base + "/updated0");
-		RangeResult val = wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
+		RangeResult val = co_await tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10);
 		Key keyBegin(base + "/updated/");
 		for (int i = val.size() - 1; i >= 0; i--) {
 			if (val[i].key.startsWith(keyBegin) && self->loggingQueries) {
@@ -288,23 +297,23 @@ struct FileSystemWorkload : TestWorkload {
 				break;
 			}
 		}
-		return Optional<Version>(Version(0));
+		co_return Optional<Version>(Version(0));
 	}
 
-	ACTOR Future<Optional<Version>> deletionQuery(FileSystemWorkload* self, Transaction* tr) {
-		state uint64_t serverID = deterministicRandom()->randomInt(0, self->serverCount);
-		state std::string base = format("/files/server/%08x/deleted", serverID);
+	Future<Optional<Version>> deletionQuery(FileSystemWorkload* self, Transaction* tr) {
+		uint64_t serverID = deterministicRandom()->randomInt(0, self->serverCount);
+		std::string base = format("/files/server/%08x/deleted", serverID);
 		if (self->loggingQueries)
 			TraceEvent("DeletionQuery").detail("ServerID", serverID).detail("PathBase", base);
-		state Key keyBegin(base + "/");
-		state Key keyEnd(base + "0");
-		state KeySelectorRef begin = firstGreaterThan(keyBegin);
-		state KeySelectorRef end = firstGreaterOrEqual(keyEnd);
-		state int transferred = 1000;
-		state int transferSize = 1000;
-		state uint64_t deletedFiles = 0;
+		Key keyBegin(base + "/");
+		Key keyEnd(base + "0");
+		KeySelectorRef begin = firstGreaterThan(keyBegin);
+		KeySelectorRef end = firstGreaterOrEqual(keyEnd);
+		int transferred = 1000;
+		int transferSize = 1000;
+		uint64_t deletedFiles = 0;
 		while (transferred == transferSize) {
-			RangeResult val = wait(tr->getRange(begin, end, transferSize));
+			RangeResult val = co_await tr->getRange(begin, end, transferSize);
 			transferred = val.size();
 			deletedFiles += transferred;
 			begin = begin + transferred;
@@ -315,7 +324,7 @@ struct FileSystemWorkload : TestWorkload {
 			    .detail("PathBase", base)
 			    .detail("DeletedFiles", deletedFiles);
 		}
-		return Optional<Version>(Version(0));
+		co_return Optional<Version>(Version(0));
 	}
 
 	class RecentModificationQuery : public FileSystemOp {

@@ -72,22 +72,22 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		out.insert("Attrition");
 	}
 
-	ACTOR Future<Void> _start(SSCheckpointRestoreWorkload* self, Database cx) {
-		state Key key = "TestKey"_sr;
-		state Key endKey = "TestKey0"_sr;
-		state Value oldValue = "TestValue"_sr;
-		state KeyRange testRange = KeyRangeRef(key, endKey);
-		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
+	Future<Void> _start(SSCheckpointRestoreWorkload* self, Database cx) {
+		Key key = "TestKey"_sr;
+		Key endKey = "TestKey0"_sr;
+		Value oldValue = "TestValue"_sr;
+		KeyRange testRange = KeyRangeRef(key, endKey);
+		std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 
 		TraceEvent("TestCheckpointRestoreBegin");
-		wait(success(setDDMode(cx, 0)));
-		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
+		co_await success(setDDMode(cx, 0));
+		Version version = co_await self->writeAndVerify(self, cx, key, oldValue);
 
 		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
 		// Create checkpoint.
-		state Transaction tr(cx);
-		state CheckpointFormat format = DataMoveRocksCF;
-		state UID dataMoveId =
+		Transaction tr(cx);
+		CheckpointFormat format = DataMoveRocksCF;
+		UID dataMoveId =
 		    newDataMoveId(deterministicRandom()->randomUInt64(),
 		                  AssignEmptyRange(false),
 		                  deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY
@@ -96,15 +96,19 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		                  DataMovementReason::TEAM_HEALTHY,
 		                  UnassignShard(false));
 		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(createCheckpoint(&tr, { testRange }, format, dataMoveId));
-				wait(tr.commit());
-				version = tr.getCommittedVersion();
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			{
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					co_await createCheckpoint(&tr, { testRange }, format, dataMoveId);
+					co_await tr.commit();
+					version = tr.getCommittedVersion();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -117,8 +121,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		loop {
 			records.clear();
 			try {
-				wait(store(records,
-				           getCheckpointMetaData(cx, { testRange }, version, format, Optional<UID>(dataMoveId))));
+				co_await store(records,
+				               getCheckpointMetaData(cx, { testRange }, version, format, Optional<UID>(dataMoveId)));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
@@ -133,40 +137,44 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		TraceEvent("TestCheckpointFetched").detail("Range", testRange).detail("Version", version);
 
-		state std::string pwd = platform::getWorkingDirectory();
-		state std::string folder = pwd + "/checkpoints";
+		std::string pwd = platform::getWorkingDirectory();
+		std::string folder = pwd + "/checkpoints";
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
 
 		// Fetch checkpoint.
-		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state std::vector<std::pair<KeyRange, CheckpointMetaData>>::iterator it = records.begin();
+		std::vector<CheckpointMetaData> fetchedCheckpoints;
+		std::vector<std::pair<KeyRange, CheckpointMetaData>>::iterator it = records.begin();
 		for (; it != records.end(); ++it) {
 			loop {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
-				try {
-					state CheckpointMetaData record = wait(fetchCheckpoint(cx, it->second, folder));
-					fetchedCheckpoints.push_back(record);
-					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
+				{
+					Error err;
+					try {
+						CheckpointMetaData record = co_await fetchCheckpoint(cx, it->second, folder);
+						fetchedCheckpoints.push_back(record);
+						TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
 					TraceEvent("TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
+					    .errorUnsuppressed(err)
 					    .detail("Checkpoint", it->second.toString());
-					wait(delay(1));
+					co_await delay(1);
 				}
 			}
 		}
 
-		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
+		std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
 		platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 		// Restore KVS.
-		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
+		IKeyValueStore* kvStore = keyValueStoreRocksDB(
 		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
-		wait(kvStore->init());
+		co_await kvStore->init();
 		try {
-			wait(kvStore->restore(fetchedCheckpoints));
+			co_await kvStore->restore(fetchedCheckpoints);
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestRestoreCheckpointError").errorUnsuppressed(e);
 		}
@@ -174,18 +182,22 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		// Compare the keyrange between the original database and the one restored from checkpoint.
 		// For now, it should have been a single key.
 		tr.reset();
-		state RangeResult res;
+		RangeResult res;
 		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY)));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			{
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
 			}
 		}
 
-		RangeResult kvRange = wait(kvStore->readRange(testRange));
+		RangeResult kvRange = co_await kvStore->readRange(testRange);
 		ASSERT(res.size() == kvRange.size());
 		for (int i = 0; i < res.size(); ++i) {
 			ASSERT(res[i] == kvRange[i]);
@@ -193,64 +205,67 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		Future<Void> close = kvStore->onClosed();
 		kvStore->dispose();
-		wait(close);
+		co_await close;
 
 		{
-			int ignore = wait(setDDMode(cx, 1));
+			int ignore = co_await setDDMode(cx, 1);
 			(void)ignore;
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> readAndVerify(SSCheckpointRestoreWorkload* self,
-	                                 Database cx,
-	                                 Key key,
-	                                 ErrorOr<Optional<Value>> expectedValue) {
-		state Transaction tr(cx);
+	Future<Void> readAndVerify(SSCheckpointRestoreWorkload* self,
+	                           Database cx,
+	                           Key key,
+	                           ErrorOr<Optional<Value>> expectedValue) {
+		Transaction tr(cx);
 
 		loop {
-			try {
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
-				const bool equal = !expectedValue.isError() && res == expectedValue.get();
-				if (!equal) {
-					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
+			{
+				Error err;
+				try {
+					Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
+					const bool equal = !expectedValue.isError() && res == expectedValue.get();
+					if (!equal) {
+						self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				break;
-			} catch (Error& e) {
-				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
+				if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
 					break;
 				}
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 
-		return Void();
 	}
 
-	ACTOR Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self,
-	                                     Database cx,
-	                                     Key key,
-	                                     Optional<Value> value) {
-		state Transaction tr(cx);
-		state Version version;
+	Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self, Database cx, Key key, Optional<Value> value) {
+		Transaction tr(cx);
+		Version version{ 0 };
 		loop {
-			try {
-				if (value.present()) {
-					tr.set(key, value.get());
-				} else {
-					tr.clear(key);
+			{
+				Error err;
+				try {
+					if (value.present()) {
+						tr.set(key, value.get());
+					} else {
+						tr.clear(key);
+					}
+					co_await timeoutError(tr.commit(), 30.0);
+					version = tr.getCommittedVersion();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(timeoutError(tr.commit(), 30.0));
-				version = tr.getCommittedVersion();
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 
-		wait(self->readAndVerify(self, cx, key, value));
+		co_await self->readAndVerify(self, cx, key, value);
 
-		return version;
+		co_return version;
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }

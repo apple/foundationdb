@@ -73,41 +73,44 @@ struct DiskDurabilityTest : TestWorkload {
 		return ipage[0];
 	}
 
-	ACTOR static Future<Void> durabilityTest(DiskDurabilityTest* self, Database db) {
-		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+	static Future<Void> durabilityTest(DiskDurabilityTest* self, Database db) {
+		Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
 		    self->filename,
 		    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNBUFFERED |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_LOCK,
-		    0600));
-		state std::vector<uint8_t> pagedata(4096 * 128);
-		state uint8_t* page = (uint8_t*)((intptr_t(&pagedata[0]) | intptr_t(4095)) + 1);
+		    0600);
+		std::vector<uint8_t> pagedata(4096 * 128);
+		uint8_t* page = (uint8_t*)((intptr_t(&pagedata[0]) | intptr_t(4095)) + 1);
 
-		state int64_t size = wait(file->size());
-		state bool failed = false;
-		state int verifyPages;
+		int64_t size = co_await file->size();
+		bool failed = false;
+		int verifyPages{ 0 };
 
 		// Verify
-		state Transaction tr(db);
+		Transaction tr(db);
 		loop {
-			try {
-				state RangeResult r = wait(tr.getRange(self->range, GetRangeLimits(1000000)));
-				verifyPages = r.size();
-				state int i;
-				for (i = 0; i < r.size(); i++) {
-					int bytesRead = wait(file->read(page, 4096, self->decodeKey(r[i].key) * 4096));
-					if (bytesRead != 4096 || self->decodePage(page) != self->decodeValue(r[i].value)) {
-						printf("ValidationError\n");
-						TraceEvent(SevError, "ValidationError")
-						    .detail("At", self->decodeKey(r[i].key))
-						    .detail("Expected", self->decodeValue(r[i].value))
-						    .detail("Found", self->decodePage(page))
-						    .detail("Read", bytesRead);
-						failed = true;
+			{
+				Error err;
+				try {
+					RangeResult r = co_await tr.getRange(self->range, GetRangeLimits(1000000));
+					verifyPages = r.size();
+					for (int i = 0; i < r.size(); i++) {
+						int bytesRead = co_await file->read(page, 4096, self->decodeKey(r[i].key) * 4096);
+						if (bytesRead != 4096 || self->decodePage(page) != self->decodeValue(r[i].value)) {
+							printf("ValidationError\n");
+							TraceEvent(SevError, "ValidationError")
+							    .detail("At", self->decodeKey(r[i].key))
+							    .detail("Expected", self->decodeValue(r[i].value))
+							    .detail("Found", self->decodePage(page))
+							    .detail("Read", bytesRead);
+							failed = true;
+						}
 					}
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 
@@ -118,9 +121,9 @@ struct DiskDurabilityTest : TestWorkload {
 		TraceEvent(SevInfo, "Verified").detail("Pages", verifyPages).detail("Of", size / 4096);
 
 		// Run
-		state bool first = true;
+		bool first = true;
 		loop {
-			state std::vector<int64_t> targetPages;
+			std::vector<int64_t> targetPages;
 			for (int i = deterministicRandom()->randomInt(1, 100); i > 0 && targetPages.size() < size / 4096; i--) {
 				auto p = deterministicRandom()->randomInt(0, size / 4096);
 				if (std::find(targetPages.begin(), targetPages.end(), p) == targetPages.end())
@@ -131,31 +134,35 @@ struct DiskDurabilityTest : TestWorkload {
 				size += 4096;
 			}
 
-			state std::vector<int64_t> targetValues(targetPages.size());
+			std::vector<int64_t> targetValues(targetPages.size());
 			for (auto& v : targetValues)
 				v = deterministicRandom()->randomUniqueID().first();
 
 			tr.reset();
 			loop {
-				try {
-					for (int i = 0; i < targetPages.size(); i++)
-						tr.clear(self->encodeKey(targetPages[i]));
+				{
+					Error err;
+					try {
+						for (int i = 0; i < targetPages.size(); i++)
+							tr.clear(self->encodeKey(targetPages[i]));
 
-					if (!first) {
-						Optional<Value> v = wait(tr.get("syncs"_sr.withPrefix(self->metrics.begin)));
-						int64_t count = v.present() ? self->decodeValue(v.get()) : 0;
-						count++;
-						tr.set("syncs"_sr.withPrefix(self->metrics.begin), self->encodeValue(count));
+						if (!first) {
+							Optional<Value> v = co_await tr.get("syncs"_sr.withPrefix(self->metrics.begin));
+							int64_t count = v.present() ? self->decodeValue(v.get()) : 0;
+							count++;
+							tr.set("syncs"_sr.withPrefix(self->metrics.begin), self->encodeValue(count));
+						}
+
+						co_await tr.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 			tr.reset();
-			state Future<Version> rv = tr.getReadVersion(); // hide this latency
+			Future<Version> rv = tr.getReadVersion(); // hide this latency
 
 			std::vector<Future<Void>> fresults;
 
@@ -165,18 +172,22 @@ struct DiskDurabilityTest : TestWorkload {
 				fresults.push_back(file->write(p, 4096, targetPages[i] * 4096));
 			}
 
-			wait(waitForAll(fresults));
+			co_await waitForAll(fresults);
 
-			wait(file->sync());
+			co_await file->sync();
 
 			loop {
-				try {
-					for (int i = 0; i < targetPages.size(); i++)
-						tr.set(self->encodeKey(targetPages[i]), self->encodeValue(targetValues[i]));
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				{
+					Error err;
+					try {
+						for (int i = 0; i < targetPages.size(); i++)
+							tr.set(self->encodeKey(targetPages[i]), self->encodeValue(targetValues[i]));
+						co_await tr.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await tr.onError(err);
 				}
 			}
 

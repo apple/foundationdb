@@ -61,7 +61,7 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(AsyncFileWriteWorkload* self) {
+	Future<Void> _setup(AsyncFileWriteWorkload* self) {
 		// Allow only 4K aligned writes if using unbuffered IO
 		if (self->unbufferedIO && self->writeSize % AsyncFileWorkload::_PAGE_SIZE != 0)
 			self->writeSize = std::max(AsyncFileWorkload::_PAGE_SIZE,
@@ -74,13 +74,12 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		if (self->sequential)
 			initialSize = 0;
 
-		wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, initialSize));
+		co_await self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, initialSize);
 
-		int64_t fileSize = wait(self->fileHandle->file->size());
+		int64_t fileSize = co_await self->fileHandle->file->size();
 		if (fileSize != 0)
 			self->fileSize = fileSize;
 
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -90,24 +89,23 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(AsyncFileWriteWorkload* self) {
-		state StatisticsState statState;
+	Future<Void> _start(AsyncFileWriteWorkload* self) {
+		StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		wait(timeout(self->runWriteTest(self), self->testDuration, Void()));
+		co_await timeout(self->runWriteTest(self), self->testDuration, Void());
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
 		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		// Try to let the IO complete so we can clean up after them
-		wait(timeout(waitForAll(self->writeFutures), 10, Void()));
+		co_await timeout(waitForAll(self->writeFutures), 10, Void());
 
-		return Void();
 	}
 
-	ACTOR Future<Void> runWriteTest(AsyncFileWriteWorkload* self) {
-		state int64_t offset = self->fileSize;
-		state Future<Void> prevSync = Void();
+	Future<Void> runWriteTest(AsyncFileWriteWorkload* self) {
+		int64_t offset = self->fileSize;
+		Future<Void> prevSync = Void();
 		loop {
 			// Write chunks of the file using different actors
 			for (int i = 0; i < self->numParallelWrites; i++) {
@@ -134,8 +132,8 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 					offset = (int64_t)(deterministicRandom()->random01() * (self->fileSize - 1));
 			}
 
-			wait(waitForAll(self->writeFutures));
-			wait(prevSync);
+			co_await waitForAll(self->writeFutures);
+			co_await prevSync;
 			prevSync = self->fileHandle->file->sync();
 
 			self->writeFutures.clear();

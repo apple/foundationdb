@@ -58,11 +58,10 @@ struct DDBalanceWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	ACTOR Future<Void> _start(Database cx, DDBalanceWorkload* self) {
+	Future<Void> _start(Database cx, DDBalanceWorkload* self) {
 		for (int c = 0; c < self->moversPerClient; c++)
 			self->clients.push_back(timeout(self->ddBalanceMover(cx, self, c), self->testDuration, Void()));
-		wait(waitForAll(self->clients));
-		return Void();
+		co_await waitForAll(self->clients);
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -92,37 +91,41 @@ struct DDBalanceWorkload : TestWorkload {
 
 	Value value(int n) { return doubleToTestKey(n); }
 
-	ACTOR Future<Void> setKeyIfNotPresent(Transaction* tr, Key key, Value val) {
-		Optional<Value> f = wait(tr->get(key));
+	Future<Void> setKeyIfNotPresent(Transaction* tr, Key key, Value val) {
+		Optional<Value> f = co_await tr->get(key);
 		if (!f.present())
 			tr->set(key, val);
-		return Void();
 	}
 
-	ACTOR Future<Void> ddbalanceSetupRange(Database cx, DDBalanceWorkload* self, int begin, int end) {
-		state Transaction tr(cx);
+	Future<Void> ddbalanceSetupRange(Database cx, DDBalanceWorkload* self, int begin, int end) {
+		Transaction tr(cx);
 		loop {
-			try {
-				std::vector<Future<Void>> setActors;
-				for (int n = begin; n < end; n++) {
-					int objectnum = n / self->moversPerClient;
-					int moverid = n % self->moversPerClient;
-					setActors.push_back(self->setKeyIfNotPresent(
-					    &tr, self->key(self->currentbin, objectnum, moverid, self->clientId), self->value(objectnum)));
+			{
+				Error err;
+				try {
+					std::vector<Future<Void>> setActors;
+					for (int n = begin; n < end; n++) {
+						int objectnum = n / self->moversPerClient;
+						int moverid = n % self->moversPerClient;
+						setActors.push_back(
+						    self->setKeyIfNotPresent(&tr,
+						                             self->key(self->currentbin, objectnum, moverid, self->clientId),
+						                             self->value(objectnum)));
+					}
+					co_await waitForAll(setActors);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(waitForAll(setActors));
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> ddbalanceSetup(Database cx, DDBalanceWorkload* self) {
-		state int i;
-		state std::vector<int> order;
+	Future<Void> ddbalanceSetup(Database cx, DDBalanceWorkload* self) {
+		int i{ 0 };
+		std::vector<int> order;
 
 		for (int o = 0; o <= self->nodesPerActor * self->actorsPerClient / 10; o++)
 			order.push_back(o * 10);
@@ -134,14 +137,13 @@ struct DDBalanceWorkload : TestWorkload {
 				fs.push_back(self->ddbalanceSetupRange(cx, self, order[i], order[i] + 10));
 				i++;
 			}
-			wait(waitForAll(fs));
+			co_await waitForAll(fs);
 		}
 
 		if (self->warmingDelay > 0) {
-			wait(timeout(databaseWarmer(cx), self->warmingDelay, Void()));
+			co_await timeout(databaseWarmer(cx), self->warmingDelay, Void());
 		}
 
-		return Void();
 	}
 
 	bool shouldRecord(double clientBegin) {
@@ -150,51 +152,55 @@ struct DDBalanceWorkload : TestWorkload {
 		       (n > (clientBegin + testDuration * 0.125) && n < (clientBegin + testDuration * 0.875));
 	}
 
-	ACTOR Future<Void> ddBalanceWorker(Database cx,
-	                                   DDBalanceWorkload* self,
-	                                   int moverId,
-	                                   int sourceBin,
-	                                   int destinationBin,
-	                                   int begin,
-	                                   int end,
-	                                   double clientBegin,
-	                                   double* lastTime,
-	                                   double delay) {
-		state int i;
-		state int j;
-		state int moves;
-		state int maxMovedAmount = 0;
+	Future<Void> ddBalanceWorker(Database cx,
+	                             DDBalanceWorkload* self,
+	                             int moverId,
+	                             int sourceBin,
+	                             int destinationBin,
+	                             int begin,
+	                             int end,
+	                             double clientBegin,
+	                             double* lastTime,
+	                             double delay) {
+		int i{ 0 };
+		int j{ 0 };
+		int moves{ 0 };
+		int maxMovedAmount = 0;
 		for (i = begin; i < end;) {
-			wait(poisson(lastTime, delay));
-			state double tstart = now();
-			state Transaction tr(cx);
+			co_await poisson(lastTime, delay);
+			double tstart = now();
+			Transaction tr(cx);
 			loop {
-				state int startvalue = i;
+				int startvalue = i;
 				moves = 0;
-				try {
-					for (j = 0; i < end && j < self->writesPerTransaction; j++) {
-						state Key myKey = self->key(sourceBin, i, moverId, self->clientId);
-						state Key nextKey = self->key(destinationBin, i, moverId, self->clientId);
-						moves++;
-						i++;
+				{
+					Error err;
+					try {
+						for (j = 0; i < end && j < self->writesPerTransaction; j++) {
+							Key myKey = self->key(sourceBin, i, moverId, self->clientId);
+							Key nextKey = self->key(destinationBin, i, moverId, self->clientId);
+							moves++;
+							i++;
 
-						Optional<Value> f = wait(tr.get(myKey));
-						if (f.present()) {
-							maxMovedAmount++;
-							tr.set(nextKey, f.get());
-							tr.clear(myKey);
-						} else {
-							TraceEvent("KeyNotPresent")
-							    .detail("ClientId", self->clientId)
-							    .detail("MoverId", moverId)
-							    .detail("CurrentBin", sourceBin)
-							    .detail("NextBin", destinationBin);
+							Optional<Value> f = co_await tr.get(myKey);
+							if (f.present()) {
+								maxMovedAmount++;
+								tr.set(nextKey, f.get());
+								tr.clear(myKey);
+							} else {
+								TraceEvent("KeyNotPresent")
+								    .detail("ClientId", self->clientId)
+								    .detail("MoverId", moverId)
+								    .detail("CurrentBin", sourceBin)
+								    .detail("NextBin", destinationBin);
+							}
 						}
+						co_await tr.commit();
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 					if (self->shouldRecord(clientBegin))
 						++self->retries;
 					i = startvalue;
@@ -220,16 +226,15 @@ struct DDBalanceWorkload : TestWorkload {
 			ASSERT(false);
 		}
 
-		return Void();
 	}
 
-	ACTOR Future<Void> ddBalanceMover(Database cx, DDBalanceWorkload* self, int moverId) {
-		state int currentBin = self->currentbin;
-		state int nextBin = 0;
-		state int key_space_drift = 0;
+	Future<Void> ddBalanceMover(Database cx, DDBalanceWorkload* self, int moverId) {
+		int currentBin = self->currentbin;
+		int nextBin = 0;
+		int key_space_drift = 0;
 
-		state double clientBegin = now();
-		state double lastTime = now();
+		double clientBegin = now();
+		double lastTime = now();
 
 		loop {
 			nextBin = deterministicRandom()->randomInt(key_space_drift, self->binCount + key_space_drift);
@@ -249,7 +254,7 @@ struct DDBalanceWorkload : TestWorkload {
 				                                   clientBegin,
 				                                   &lastTime,
 				                                   1.0 / self->transactionsPerSecond));
-			wait(waitForAll(fs));
+			co_await waitForAll(fs);
 
 			currentBin = nextBin;
 			key_space_drift += self->keySpaceDriftFactor;

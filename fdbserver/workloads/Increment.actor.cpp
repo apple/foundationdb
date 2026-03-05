@@ -71,31 +71,35 @@ struct Increment : TestWorkload {
 
 	static Key intToTestKey(int i) { return StringRef(format("%016d", i)); }
 
-	ACTOR Future<Void> incrementClient(Database cx, Increment* self, double delay) {
-		state double lastTime = now();
+	Future<Void> incrementClient(Database cx, Increment* self, double delay) {
+		double lastTime = now();
 		try {
 			loop {
-				wait(poisson(&lastTime, delay));
+				co_await poisson(&lastTime, delay);
 
-				state double tstart = now();
-				state Transaction tr(cx);
+				double tstart = now();
+				Transaction tr(cx);
 				while (true) {
-					try {
-						tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(0, self->nodeCount / 2)),
-						            "\x01"_sr,
-						            MutationRef::AddValue);
-						tr.atomicOp(
-						    intToTestKey(deterministicRandom()->randomInt(self->nodeCount / 2, self->nodeCount)),
-						    "\x01"_sr,
-						    MutationRef::AddValue);
-						wait(tr.commit());
-						break;
-					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_old)
+					{
+						Error err;
+						try {
+							tr.atomicOp(intToTestKey(deterministicRandom()->randomInt(0, self->nodeCount / 2)),
+							            "\x01"_sr,
+							            MutationRef::AddValue);
+							tr.atomicOp(
+							    intToTestKey(deterministicRandom()->randomInt(self->nodeCount / 2, self->nodeCount)),
+							    "\x01"_sr,
+							    MutationRef::AddValue);
+							co_await tr.commit();
+							break;
+						} catch (Error& e) {
+							err = e;
+						}
+						if (err.code() == error_code_transaction_too_old)
 							++self->tooOldRetries;
-						else if (e.code() == error_code_not_committed)
+						else if (err.code() == error_code_not_committed)
 							++self->commitFailedRetries;
-						wait(tr.onError(e));
+						co_await tr.onError(err);
 					}
 					++self->retries;
 				}
@@ -138,7 +142,7 @@ struct Increment : TestWorkload {
 		}
 		return true;
 	}
-	ACTOR Future<bool> incrementCheck(Database cx, Increment* self, bool ok) {
+	Future<bool> incrementCheck(Database cx, Increment* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
@@ -154,24 +158,28 @@ struct Increment : TestWorkload {
 		}
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
-			state Transaction tr(cx);
-			state int retryCount = 0;
+			Transaction tr(cx);
+			int retryCount = 0;
 			loop {
-				try {
-					state Version v = wait(tr.getReadVersion());
-					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
-					                                    firstGreaterOrEqual(intToTestKey(self->nodeCount)),
-					                                    self->nodeCount + 1));
-					ok = self->incrementCheckData(data, v, self) && ok;
-					break;
-				} catch (Error& e) {
+				{
+					Error err;
+					try {
+						Version v = co_await tr.getReadVersion();
+						RangeResult data = co_await tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
+						                                        firstGreaterOrEqual(intToTestKey(self->nodeCount)),
+						                                        self->nodeCount + 1);
+						ok = self->incrementCheckData(data, v, self) && ok;
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
 					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError").error(e);
-					wait(tr.onError(e));
+					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError").error(err);
+					co_await tr.onError(err);
 				}
 			}
 		}
-		return ok;
+		co_return ok;
 	}
 };
 

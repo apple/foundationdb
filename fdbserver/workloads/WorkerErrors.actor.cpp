@@ -36,14 +36,14 @@ struct WorkerErrorsWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<std::vector<TraceEventFields>> latestEventOnWorkers(std::vector<WorkerDetails> workers) {
-		state std::vector<Future<TraceEventFields>> eventTraces;
+	Future<std::vector<TraceEventFields>> latestEventOnWorkers(std::vector<WorkerDetails> workers) {
+		std::vector<Future<TraceEventFields>> eventTraces;
 		eventTraces.reserve(workers.size());
 		for (int c = 0; c < workers.size(); c++) {
 			eventTraces.push_back(workers[c].interf.eventLogRequest.getReply(EventLogRequest()));
 		}
 
-		wait(timeoutError(waitForAll(eventTraces), 2.0));
+		co_await timeoutError(waitForAll(eventTraces), 2.0);
 
 		std::vector<TraceEventFields> results;
 		results.reserve(eventTraces.size());
@@ -51,16 +51,15 @@ struct WorkerErrorsWorkload : TestWorkload {
 			results.push_back(eventTraces[i].get());
 		}
 
-		return results;
+		co_return results;
 	}
 
-	ACTOR Future<Void> _start(Database cx, WorkerErrorsWorkload* self) {
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-		std::vector<TraceEventFields> errors = wait(self->latestEventOnWorkers(workers));
+	Future<Void> _start(Database cx, WorkerErrorsWorkload* self) {
+		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
+		std::vector<TraceEventFields> errors = co_await self->latestEventOnWorkers(workers);
 		for (auto e : errors) {
 			printf("%s\n", e.toString().c_str());
 		}
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

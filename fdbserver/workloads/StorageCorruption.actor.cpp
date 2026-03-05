@@ -44,10 +44,10 @@ struct StorageCorruptionWorkload : TestWorkload {
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
-	ACTOR static Future<Void> _start(Self* self, Database cx) {
-		wait(success(setDDMode(cx, 0)));
+	static Future<Void> _start(Self* self, Database cx) {
+		co_await success(setDDMode(cx, 0));
 		self->bugInjector.enable();
-		wait(delay(self->testDuration));
+		co_await delay(self->testDuration);
 		self->bug->corruptionProbability = 0.0;
 		TraceEvent("CorruptionInjections").detail("NumCorruptions", self->bug->numHits()).log();
 		self->bugInjector.disable();
@@ -57,8 +57,7 @@ struct StorageCorruptionWorkload : TestWorkload {
 				                                  TraceEvent("NegativeTestSuccess");
 			                                  }
 		                                  });
-		wait(success(setDDMode(cx, 1)));
-		return Void();
+		co_await success(setDDMode(cx, 1));
 	}
 
 	Future<Void> start(Database const& cx) override {

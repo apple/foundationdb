@@ -61,61 +61,63 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		return _check(cx, this);
 	}
 
-	ACTOR static Future<Void> _start(Database cx, SimpleAtomicAddWorkload* self) {
+	static Future<Void> _start(Database cx, SimpleAtomicAddWorkload* self) {
 		if (self->initialize) {
-			wait(setInitialValue(cx, self));
+			co_await setInitialValue(cx, self);
 		}
 		for (int i = 0; i < self->iterations; ++i) {
 			self->clients.push_back(timeout(applyAtomicAdd(cx, self), self->testDuration, Void()));
 		}
 		waitForAll(self->clients);
-		return Void();
 	}
 
-	ACTOR static Future<Void> setInitialValue(Database cx, SimpleAtomicAddWorkload* self) {
-		state ReadYourWritesTransaction tr(cx);
-		state Value val = StringRef((const uint8_t*)&self->initialValue, sizeof(self->initialValue));
+	static Future<Void> setInitialValue(Database cx, SimpleAtomicAddWorkload* self) {
+		ReadYourWritesTransaction tr(cx);
+		Value val = StringRef((const uint8_t*)&self->initialValue, sizeof(self->initialValue));
 		loop {
+			Error err;
 			try {
 				TraceEvent("SAASetInitialValue").detail("Key", self->sumKey).detail("Value", val);
 				tr.set(self->sumKey, val);
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				TraceEvent("SAASetInitialValueError").error(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("SAASetInitialValueError").error(err);
+			co_await tr.onError(err);
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> applyAtomicAdd(Database cx, SimpleAtomicAddWorkload* self) {
-		state ReadYourWritesTransaction tr(cx);
-		state Value val = StringRef((const uint8_t*)&self->addValue, sizeof(self->addValue));
+	static Future<Void> applyAtomicAdd(Database cx, SimpleAtomicAddWorkload* self) {
+		ReadYourWritesTransaction tr(cx);
+		Value val = StringRef((const uint8_t*)&self->addValue, sizeof(self->addValue));
 		loop {
+			Error err;
 			try {
 				TraceEvent("SAABegin").detail("Key", self->sumKey).detail("Value", val);
 				tr.atomicOp(self->sumKey, val, MutationRef::AddValue);
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				TraceEvent("SAABeginError").error(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("SAABeginError").error(err);
+			co_await tr.onError(err);
 		}
-		return Void();
 	}
 
-	ACTOR static Future<bool> _check(Database cx, SimpleAtomicAddWorkload* self) {
-		state ReadYourWritesTransaction tr(cx);
-		state uint64_t expectedValue = self->addValue * self->iterations;
+	static Future<bool> _check(Database cx, SimpleAtomicAddWorkload* self) {
+		ReadYourWritesTransaction tr(cx);
+		uint64_t expectedValue = self->addValue * self->iterations;
 		if (self->initialize) {
 			expectedValue += self->initialValue;
 		}
 		loop {
+			Error err;
 			try {
 				TraceEvent("SAACheckKey").log();
-				Optional<Value> actualValue = wait(tr.get(self->sumKey));
+				Optional<Value> actualValue = co_await tr.get(self->sumKey);
 				uint64_t actualValueInt = 0;
 				if (actualValue.present()) {
 					memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());
@@ -123,11 +125,12 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 				TraceEvent("SAACheckEqual")
 				    .detail("ExpectedValue", expectedValue)
 				    .detail("ActualValue", actualValueInt);
-				return (expectedValue == actualValueInt);
+				co_return (expectedValue == actualValueInt);
 			} catch (Error& e) {
-				TraceEvent("SAACheckError").error(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("SAACheckError").error(err);
+			co_await tr.onError(err);
 		}
 	}
 

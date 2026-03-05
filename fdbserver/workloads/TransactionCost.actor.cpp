@@ -63,17 +63,19 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadLargeValueTest : public ITest {
-		ACTOR static Future<Void> setup(TransactionCostWorkload const* workload,
-		                                ReadLargeValueTest* self,
-		                                Database cx) {
-			state Transaction tr(cx);
+		static Future<Void> setup(TransactionCostWorkload const* workload, ReadLargeValueTest* self, Database cx) {
+			Transaction tr(cx);
 			loop {
-				try {
-					tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
-					wait(tr.commit());
-					return Void();
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				{
+					Error err;
+					try {
+						tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
+						co_await tr.commit();
+						co_return;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -151,17 +153,21 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadRangeTest : public ITest {
-		ACTOR static Future<Void> setup(ReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
-			state Transaction tr(cx);
+		static Future<Void> setup(ReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
+			Transaction tr(cx);
 			loop {
-				try {
-					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+				{
+					Error err;
+					try {
+						for (int i = 0; i < 10; ++i) {
+							tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+						}
+						co_await tr.commit();
+						co_return;
+					} catch (Error& e) {
+						err = e;
 					}
-					wait(tr.commit());
-					return Void();
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -182,19 +188,21 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadMultipleValuesTest : public ITest {
-		ACTOR static Future<Void> setup(ReadMultipleValuesTest* self,
-		                                TransactionCostWorkload const* workload,
-		                                Database cx) {
-			state Transaction tr(cx);
+		static Future<Void> setup(ReadMultipleValuesTest* self, TransactionCostWorkload const* workload, Database cx) {
+			Transaction tr(cx);
 			loop {
-				try {
-					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+				{
+					Error err;
+					try {
+						for (int i = 0; i < 10; ++i) {
+							tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+						}
+						co_await tr.commit();
+						co_return;
+					} catch (Error& e) {
+						err = e;
 					}
-					wait(tr.commit());
-					return Void();
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -218,20 +226,22 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class LargeReadRangeTest : public ITest {
-		ACTOR static Future<Void> setup(LargeReadRangeTest* self,
-		                                TransactionCostWorkload const* workload,
-		                                Database cx) {
-			state Transaction tr(cx);
+		static Future<Void> setup(LargeReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
+			Transaction tr(cx);
 			loop {
-				try {
-					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(self->testNumber, i),
-						       workload->getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
+				{
+					Error err;
+					try {
+						for (int i = 0; i < 10; ++i) {
+							tr.set(workload->getKey(self->testNumber, i),
+							       workload->getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
+						}
+						co_await tr.commit();
+						co_return;
+					} catch (Error& e) {
+						err = e;
 					}
-					wait(tr.commit());
-					return Void();
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -274,34 +284,37 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> runTest(TransactionCostWorkload* self, Database cx, ITest* test) {
-		wait(test->setup(*self, cx));
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	static Future<Void> runTest(TransactionCostWorkload* self, Database cx, ITest* test) {
+		co_await test->setup(*self, cx);
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		if (self->debugTransactions) {
 			test->debugTransaction(*tr);
 		}
 		loop {
-			try {
-				wait(test->exec(*self, tr));
-				wait(tr->commit());
-				ASSERT_EQ(tr->getTotalCost(), test->expectedFinalCost());
-				return Void();
-			} catch (Error& e) {
-				wait(tr->onError(e));
+			{
+				Error err;
+				try {
+					co_await test->exec(*self, tr);
+					co_await tr->commit();
+					ASSERT_EQ(tr->getTotalCost(), test->expectedFinalCost());
+					co_return;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
 			}
 		}
 	}
 
-	ACTOR static Future<Void> start(TransactionCostWorkload* self, Database cx) {
-		state uint64_t testNumber = 0;
-		state Future<Void> f;
+	static Future<Void> start(TransactionCostWorkload* self, Database cx) {
+		uint64_t testNumber = 0;
+		Future<Void> f;
 		// Must use shared_ptr because Flow doesn't support perfect forwarding into actors
-		state std::shared_ptr<ITest> test;
+		std::shared_ptr<ITest> test;
 		for (; testNumber < self->iterations; ++testNumber) {
 			test = createRandomTest(testNumber);
-			wait(runTest(self, cx, test.get()));
+			co_await runTest(self, cx, test.get());
 		}
-		return Void();
 	}
 
 public:

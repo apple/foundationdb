@@ -68,31 +68,34 @@ struct IndexScanWorkload : KVWorkload {
 		m.emplace_back("Rows/chunk", chunks == 0 ? 0 : rowsRead / (double)chunks, Averaged::True);
 	}
 
-	ACTOR Future<Void> _start(Database cx, IndexScanWorkload* self) {
+	Future<Void> _start(Database cx, IndexScanWorkload* self) {
 		// Boilerplate: "warm" the location cache so that the location of all keys is known before test starts
-		state double startTime = now();
+		double startTime = now();
 		loop {
-			state Transaction tr(cx);
-			try {
-				wait(tr.warmRange(allKeys));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			Transaction tr(cx);
+			{
+				Error err;
+				try {
+					co_await tr.warmRange(allKeys);
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
 			}
 		}
 
 		// Wait some small amount of time for things to "settle". Maybe this is historical?
-		wait(delay(std::max(0.1, 1.0 - (now() - startTime))));
+		co_await delay(std::max(0.1, 1.0 - (now() - startTime)));
 
-		wait(timeout(serialScans(cx, self), self->testDuration, Void()));
-		return Void();
+		co_await timeout(serialScans(cx, self), self->testDuration, Void());
 	}
 
-	ACTOR static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {
-		state double start = now();
+	static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {
+		double start = now();
 		try {
 			loop {
-				wait(scanDatabase(cx, self));
+				co_await scanDatabase(cx, self);
 			}
 		} catch (...) {
 			self->totalTimeFetching = now() - start;
@@ -100,47 +103,50 @@ struct IndexScanWorkload : KVWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> scanDatabase(Database cx, IndexScanWorkload* self) {
-		state int startNode =
+	static Future<Void> scanDatabase(Database cx, IndexScanWorkload* self) {
+		int startNode =
 		    deterministicRandom()->randomInt(0, self->nodeCount / 2); // start in the first half of the database
-		state KeySelector begin = firstGreaterOrEqual(self->keyForIndex(startNode));
-		state KeySelector end = firstGreaterThan(self->keyForIndex(self->nodeCount));
-		state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, self->bytesPerRead);
+		KeySelector begin = firstGreaterOrEqual(self->keyForIndex(startNode));
+		KeySelector end = firstGreaterThan(self->keyForIndex(self->nodeCount));
+		GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, self->bytesPerRead);
 
-		state int rowsRead;
-		state int chunks;
-		state double startTime;
+		int rowsRead{ 0 };
+		int chunks{ 0 };
+		double startTime{ 0 };
 		loop {
-			state ReadYourWritesTransaction tr(cx);
+			ReadYourWritesTransaction tr(cx);
 			if (!self->readYourWrites)
 				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 			startTime = now();
 			rowsRead = 0;
 			chunks = 0;
 
-			try {
-				loop {
-					RangeResult r = wait(tr.getRange(begin, end, limits));
-					chunks++;
-					rowsRead += r.size();
-					if (!r.size() || !r.more || (now() - startTime) > self->transactionDuration) {
-						break;
+			{
+				Error err;
+				try {
+					loop {
+						RangeResult r = co_await tr.getRange(begin, end, limits);
+						chunks++;
+						rowsRead += r.size();
+						if (!r.size() || !r.more || (now() - startTime) > self->transactionDuration) {
+							break;
+						}
+						begin = firstGreaterThan(r[r.size() - 1].key);
 					}
-					begin = firstGreaterThan(r[r.size() - 1].key);
-				}
 
-				break;
-			} catch (Error& e) {
-				if (e.code() != error_code_actor_cancelled)
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.code() != error_code_actor_cancelled)
 					++self->failedTransactions;
-				wait(tr.onError(e));
+				co_await tr.onError(err);
 			}
 		}
 
 		self->rowsRead += rowsRead;
 		self->chunks += chunks;
 		self->scans++;
-		return Void();
 	}
 };
 

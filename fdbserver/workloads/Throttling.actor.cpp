@@ -35,14 +35,14 @@ struct TokenBucket {
 	double bucketSize;
 	Future<Void> tokenAdderActor;
 
-	ACTOR static Future<Void> tokenAdder(TokenBucket* self) {
+	static Future<Void> tokenAdder(TokenBucket* self) {
 		loop {
 			self->bucketSize = std::min(self->bucketSize + self->transactionRate * addTokensInterval, self->maxBurst);
 			if (deterministicRandom()->randomInt(0, 100) == 0)
 				TraceEvent("AddingTokensx100")
 				    .detail("BucketSize", self->bucketSize)
 				    .detail("TransactionRate", self->transactionRate);
-			wait(delay(addTokensInterval));
+			co_await delay(addTokensInterval);
 		}
 	}
 
@@ -50,16 +50,16 @@ struct TokenBucket {
 		tokenAdderActor = tokenAdder(this);
 	}
 
-	ACTOR static Future<Void> startTransaction(TokenBucket* self) {
-		state double sleepTime = addTokensInterval;
+	static Future<Void> startTransaction(TokenBucket* self) {
+		double sleepTime = addTokensInterval;
 		loop {
 			if (self->bucketSize >= 1.0) {
 				--self->bucketSize;
-				return Void();
+				co_return;
 			}
 			if (deterministicRandom()->randomInt(0, 100) == 0)
 				TraceEvent("ThrottlingTransactionx100").detail("SleepTime", sleepTime);
-			wait(delay(sleepTime));
+			co_await delay(sleepTime);
 			sleepTime = std::min(sleepTime * 2, maxSleepTime);
 		}
 	}
@@ -96,21 +96,20 @@ struct ThrottlingWorkload : KVWorkload {
 		return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
-	ACTOR static Future<Void> clientActor(Database cx, ThrottlingWorkload* self) {
-		state ReadYourWritesTransaction tr(cx);
+	static Future<Void> clientActor(Database cx, ThrottlingWorkload* self) {
+		ReadYourWritesTransaction tr(cx);
 
 		loop {
-			wait(TokenBucket::startTransaction(&self->tokenBucket));
+			co_await TokenBucket::startTransaction(&self->tokenBucket);
 			tr.reset();
 			try {
-				state int i;
-				for (i = 0; i < self->readsPerTransaction; ++i) {
-					state Optional<Value> value = wait(tr.get(self->getRandomKey()));
+				for (int i = 0; i < self->readsPerTransaction; ++i) {
+					Optional<Value> value = co_await tr.get(self->getRandomKey());
 				}
-				for (i = 0; i < self->writesPerTransaction; ++i) {
+				for (int i = 0; i < self->writesPerTransaction; ++i) {
 					tr.set(self->getRandomKey(), getRandomValue());
 				}
-				wait(tr.commit());
+				co_await tr.commit();
 				if (deterministicRandom()->randomInt(0, 1000) == 0)
 					TraceEvent("TransactionCommittedx1000").log();
 				++self->transactionsCommitted;
@@ -122,75 +121,78 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> specialKeysActor(Database cx, ThrottlingWorkload* self) {
-		state ReadYourWritesTransaction tr(cx);
-		state json_spirit::mValue aggregateSchema =
-		    readJSONStrictly(JSONSchemas::aggregateHealthSchema.toString()).get_obj();
-		state json_spirit::mValue storageSchema =
-		    readJSONStrictly(JSONSchemas::storageHealthSchema.toString()).get_obj();
-		state json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
+	static Future<Void> specialKeysActor(Database cx, ThrottlingWorkload* self) {
+		ReadYourWritesTransaction tr(cx);
+		json_spirit::mValue aggregateSchema = readJSONStrictly(JSONSchemas::aggregateHealthSchema.toString()).get_obj();
+		json_spirit::mValue storageSchema = readJSONStrictly(JSONSchemas::storageHealthSchema.toString()).get_obj();
+		json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
 		loop {
-			try {
-				RangeResult result =
-				    wait(tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!result.more);
-				for (const auto& [k, v] : result) {
-					ASSERT(k.startsWith("\xff\xff/metrics/health/"_sr));
-					auto valueObj = readJSONStrictly(v.toString()).get_obj();
-					if (k.removePrefix("\xff\xff/metrics/health/"_sr) == "aggregate"_sr) {
-						CODE_PROBE(true, "Test aggregate health metrics schema");
-						std::string errorStr;
-						if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true)) {
-							TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
-							    .detail("ErrorStr", errorStr.c_str())
-							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-							self->correctSpecialKeys = false;
+			{
+				Error err;
+				try {
+					RangeResult result =
+					    co_await tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY);
+					ASSERT(!result.more);
+					for (const auto& [k, v] : result) {
+						ASSERT(k.startsWith("\xff\xff/metrics/health/"_sr));
+						auto valueObj = readJSONStrictly(v.toString()).get_obj();
+						if (k.removePrefix("\xff\xff/metrics/health/"_sr) == "aggregate"_sr) {
+							CODE_PROBE(true, "Test aggregate health metrics schema");
+							std::string errorStr;
+							if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true)) {
+								TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
+								    .detail("ErrorStr", errorStr.c_str())
+								    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+								self->correctSpecialKeys = false;
+							}
+							auto tpsLimit = valueObj.at("tps_limit").get_real();
+							self->tokenBucket.transactionRate =
+							    tpsLimit * self->throttlingMultiplier / self->clientCount;
+						} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
+							CODE_PROBE(true, "Test storage health metrics schema");
+							UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)
+							                    .toString()); // Will throw if it's not a valid uid
+							std::string errorStr;
+							if (!schemaMatch(storageSchema, valueObj, errorStr, SevError, true)) {
+								TraceEvent(SevError, "StorageHealthSchemaValidationFailed")
+								    .detail("ErrorStr", errorStr.c_str())
+								    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+								self->correctSpecialKeys = false;
+							}
+						} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("log/"_sr)) {
+							CODE_PROBE(true, "Test log health metrics schema");
+							UID::fromString(k.removePrefix("\xff\xff/metrics/health/log/"_sr)
+							                    .toString()); // Will throw if it's not a valid uid
+							std::string errorStr;
+							if (!schemaMatch(logSchema, valueObj, errorStr, SevError, true)) {
+								TraceEvent(SevError, "LogHealthSchemaValidationFailed")
+								    .detail("ErrorStr", errorStr.c_str())
+								    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
+								self->correctSpecialKeys = false;
+							}
+						} else {
+							ASSERT(false); // Unrecognized key
 						}
-						auto tpsLimit = valueObj.at("tps_limit").get_real();
-						self->tokenBucket.transactionRate = tpsLimit * self->throttlingMultiplier / self->clientCount;
-					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
-						CODE_PROBE(true, "Test storage health metrics schema");
-						UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)
-						                    .toString()); // Will throw if it's not a valid uid
-						std::string errorStr;
-						if (!schemaMatch(storageSchema, valueObj, errorStr, SevError, true)) {
-							TraceEvent(SevError, "StorageHealthSchemaValidationFailed")
-							    .detail("ErrorStr", errorStr.c_str())
-							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-							self->correctSpecialKeys = false;
-						}
-					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("log/"_sr)) {
-						CODE_PROBE(true, "Test log health metrics schema");
-						UID::fromString(k.removePrefix("\xff\xff/metrics/health/log/"_sr)
-						                    .toString()); // Will throw if it's not a valid uid
-						std::string errorStr;
-						if (!schemaMatch(logSchema, valueObj, errorStr, SevError, true)) {
-							TraceEvent(SevError, "LogHealthSchemaValidationFailed")
-							    .detail("ErrorStr", errorStr.c_str())
-							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-							self->correctSpecialKeys = false;
-						}
-					} else {
-						ASSERT(false); // Unrecognized key
 					}
+					co_await delayJittered(5);
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(delayJittered(5));
-			} catch (Error& e) {
-				wait(tr.onError(e));
+				if (err.isValid()) {
+					co_await tr.onError(err);
+				}
 			}
 		}
 	}
 
-	ACTOR static Future<Void> _start(Database cx, ThrottlingWorkload* self) {
-		state std::vector<Future<Void>> clientActors;
-		state int actorId;
-		for (actorId = 0; actorId < self->actorsPerClient; ++actorId) {
+	static Future<Void> _start(Database cx, ThrottlingWorkload* self) {
+		std::vector<Future<Void>> clientActors;
+		for (int actorId = 0; actorId < self->actorsPerClient; ++actorId) {
 			clientActors.push_back(timeout(clientActor(cx, self), self->testDuration, Void()));
 		}
 		clientActors.push_back(timeout(specialKeysActor(cx, self), self->testDuration, Void()));
 		clientActors.push_back(timeout(self->tokenBucket.tokenAdderActor, self->testDuration, Void()));
-		wait(delay(self->testDuration));
-		return Void();
+		co_await delay(self->testDuration);
 	}
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }

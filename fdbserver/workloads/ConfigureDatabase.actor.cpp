@@ -50,6 +50,7 @@ static const char* logTypes[] = { "log_engine:=1",
 	                              // downgrade incompatible log version
 	                              "log_version:=7" };
 static const char* redundancies[] = { "single", "double", "triple" };
+static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
 std::string generateRegions() {
 	std::string result;
@@ -276,22 +277,21 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
-	ACTOR Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
-		wait(success(ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true)));
-		return Void();
+	Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
+		co_await success(
+		    ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true));
 	}
 
-	ACTOR Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
 		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			self->storageEngineExcludeTypes.push_back((int)SimulationStorageEngine::SHARDED_ROCKSDB);
 		}
 		if (self->clientId == 0) {
 			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
-			wait(waitForAll(self->clients));
+			co_await waitForAll(self->clients);
 		}
-		return Void();
 	}
 
 	// Returns true iff aggressive migration was triggered.
@@ -299,10 +299,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	// storage servers to the new storage engine. As an example, if the DC has just 1 SS, DD will decide not to do
 	// perpetual wiggle because there's no room. In such cases, we issue aggressive migration which can do in-place
 	// migration.
-	ACTOR Future<bool> issueAggressiveMigrationIfNeeded(Database cx,
-	                                                    DatabaseConfiguration conf,
-	                                                    std::vector<StorageServerInterface> storageServers) {
-		state std::unordered_map<std::string /* dc id */, int /* number of ss in that dc id */> dcIdToSSCount;
+	Future<bool> issueAggressiveMigrationIfNeeded(Database cx,
+	                                              DatabaseConfiguration conf,
+	                                              std::vector<StorageServerInterface> storageServers) {
+		std::unordered_map<std::string /* dc id */, int /* number of ss in that dc id */> dcIdToSSCount;
 		for (const auto& ss : storageServers) {
 			if (ss.locality.dcId().present()) {
 				const auto& dcId = ss.locality.dcId().get().toString();
@@ -315,39 +315,39 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 		for (const auto& [_, ssCount] : dcIdToSSCount) {
 			if (ssCount <= conf.storageTeamSize) {
-				wait(success(IssueConfigurationChange(cx, "storage_migration_type=aggressive", false)));
-				return true;
+				co_await success(IssueConfigurationChange(cx, "storage_migration_type=aggressive", false));
+				co_return true;
 			}
 		}
 
-		return false;
+		co_return false;
 	}
 
-	ACTOR Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
-		wait(delay(30.0));
+	Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
+		co_await delay(30.0);
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
 		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
-			state bool aggressiveMigrationTriggered = false;
+			bool aggressiveMigrationTriggered = false;
 			loop {
 				// There exists a race where the check can start before the last transaction that singleDB issued
 				// finishes, if singleDB gets actor cancelled from a timeout at the end of a test. This means the
 				// configuration needs to be re-read in case it changed since the last loop, since it could
 				// read a stale storage engine type from the configuration initially.
-				state DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+				DatabaseConfiguration conf = co_await getDatabaseConfiguration(cx);
 
-				state std::string wiggleLocalityKeyValue = conf.perpetualStorageWiggleLocality;
-				state std::vector<std::pair<Optional<Value>, Optional<Value>>> wiggleLocalityKeyValues =
+				std::string wiggleLocalityKeyValue = conf.perpetualStorageWiggleLocality;
+				std::vector<std::pair<Optional<Value>, Optional<Value>>> wiggleLocalityKeyValues =
 				    ParsePerpetualStorageWiggleLocality(wiggleLocalityKeyValue);
-				state int i;
+				int i{ 0 };
 
-				state bool pass = true;
-				state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+				bool pass = true;
+				std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
 
 				if (!aggressiveMigrationTriggered) {
-					wait(store(aggressiveMigrationTriggered,
-					           self->issueAggressiveMigrationIfNeeded(cx, conf, storageServers)));
+					co_await store(aggressiveMigrationTriggered,
+					               self->issueAggressiveMigrationIfNeeded(cx, conf, storageServers));
 				}
 
 				for (i = 0; i < storageServers.size(); i++) {
@@ -357,7 +357,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					     localityMatchInList(wiggleLocalityKeyValues, storageServers[i].locality))) {
 						ReplyPromise<KeyValueStoreType> typeReply;
 						ErrorOr<KeyValueStoreType> keyValueStoreType =
-						    wait(storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+						    co_await storageServers[i].getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0);
 						if (keyValueStoreType.present() && keyValueStoreType.get() != conf.storageServerStoreType) {
 							TraceEvent(SevWarn, "ConfigureDatabase_WrongStoreType")
 							    .suppressFor(5.0)
@@ -373,10 +373,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				}
 				if (pass)
 					break;
-				wait(delay(g_network->isSimulated() ? 2.0 : 30.0));
+				co_await delay(g_network->isSimulated() ? 2.0 : 30.0);
 			}
 		}
-		return true;
+		co_return true;
 	}
 
 	static int randomRoleNumber() {
@@ -384,16 +384,16 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return i ? i : -1;
 	}
 
-	ACTOR Future<Void> singleDB(ConfigureDatabaseWorkload* self, Database cx) {
-		state Transaction tr;
+	Future<Void> singleDB(ConfigureDatabaseWorkload* self, Database cx) {
+		Transaction tr;
 		loop {
 			if (g_simulator->speedUpSimulation) {
-				return Void();
+				co_return;
 			}
-			state int randomChoice;
+			int randomChoice{ 0 };
 			if (self->allowTestStorageMigration) {
 				randomChoice = (deterministicRandom()->random01() < 0.375) ? deterministicRandom()->randomInt(0, 3)
-				                                                           : deterministicRandom()->randomInt(4, 8);
+				                                                           : deterministicRandom()->randomInt(4, 9);
 			} else if (self->storageMigrationCompatibleConf) {
 				randomChoice = (deterministicRandom()->random01() < 3.0 / 7) ? deterministicRandom()->randomInt(0, 3)
 				                                                             : deterministicRandom()->randomInt(4, 8);
@@ -401,15 +401,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				randomChoice = deterministicRandom()->randomInt(0, 8);
 			}
 			if (randomChoice == 0) {
-				wait(success(
+				co_await success(
 				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 					    return tr->get("This read is only to ensure that the database recovered"_sr);
-				    })));
-				wait(delay(20 + 10 * deterministicRandom()->random01()));
+				    }));
+				co_await delay(20 + 10 * deterministicRandom()->random01());
 			} else if (randomChoice < 3) {
 				double waitDuration = 3.0 * deterministicRandom()->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
-				wait(delay(waitDuration));
+				co_await delay(waitDuration);
 			} else if (randomChoice == 3) {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("NewConfig", newConfig);
 				int maxRedundancies = sizeof(redundancies) / sizeof(redundancies[0]);
@@ -440,7 +440,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (deterministicRandom()->random01() < 0.5)
 					config += " resolvers=" + format("%d", randomRoleNumber());
 
-				wait(success(IssueConfigurationChange(cx, config, false)));
+				co_await success(IssueConfigurationChange(cx, config, false));
 
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			} else if (randomChoice == 4) {
@@ -454,7 +454,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (deterministicRandom()->randomInt(0, 2))
 					ch = nameQuorumChange(format(desiredClusterName.c_str(), deterministicRandom()->randomInt(0, 100)),
 					                      ch);
-				wait(success(changeQuorum(cx, ch)));
+				co_await success(changeQuorum(cx, ch));
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {
 				int storeType = 0;
@@ -491,7 +491,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				default:
 					ASSERT(false);
 				}
-				wait(success(IssueConfigurationChange(cx, storeTypeStr, true)));
+				co_await success(IssueConfigurationChange(cx, storeTypeStr, true));
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.
 				int length = sizeof(logTypes) / sizeof(logTypes[0]);
@@ -500,16 +500,21 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					length -= 1;
 				}
 
-				wait(success(
-				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false)));
+				co_await success(
+				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false));
 			} else if (randomChoice == 7) {
+				co_await success(IssueConfigurationChange(
+				    cx,
+				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
+				    false));
+			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
 					CODE_PROBE(true, "storage migration type change");
 
 					// randomly configuring perpetual_storage_wiggle_locality
-					state std::string randomPerpetualWiggleLocality;
+					std::string randomPerpetualWiggleLocality;
 					if (deterministicRandom()->random01() < 0.25) {
-						state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+						std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
 						std::string localityFilter;
 						int selectSSCount =
 						    deterministicRandom()->randomInt(1, std::min(4, (int)(storageServers.size() + 1)));
@@ -538,12 +543,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 						}
 					}
 
-					wait(success(IssueConfigurationChange(
+					co_await success(IssueConfigurationChange(
 					    cx,
 					    storageMigrationTypes[deterministicRandom()->randomInt(
 					        0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))] +
 					        randomPerpetualWiggleLocality,
-					    false)));
+					    false));
 				}
 			} else {
 				ASSERT(false);

@@ -34,36 +34,35 @@ struct DDMetricsWorkload : TestWorkload {
 		startDelay = getOption(options, "beginPoll"_sr, 10.0);
 	}
 
-	ACTOR Future<int> getHighPriorityRelocationsInFlight(Database cx, DDMetricsWorkload* self) {
-		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
+	Future<int> getHighPriorityRelocationsInFlight(Database cx, DDMetricsWorkload* self) {
+		WorkerInterface masterWorker = co_await getMasterWorker(cx, self->dbInfo);
 
 		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Stage", "ContactingMaster");
 		TraceEventFields md =
-		    wait(timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0));
+		    co_await timeoutError(masterWorker.eventLogRequest.getReply(EventLogRequest("MovingData"_sr)), 1.0);
 		int relocations;
 		sscanf(md.getValue("UnhealthyRelocations").c_str(), "%d", &relocations);
-		return relocations;
+		co_return relocations;
 	}
 
-	ACTOR Future<Void> work(Database cx, DDMetricsWorkload* self) {
+	Future<Void> work(Database cx, DDMetricsWorkload* self) {
 		try {
 			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
-			wait(delay(self->startDelay));
+			co_await delay(self->startDelay);
 			TraceEvent("DDMetricsStarting").log();
-			state double startTime = now();
+			double startTime = now();
 			loop {
-				wait(delay(2.5));
-				int dif = wait(self->getHighPriorityRelocationsInFlight(cx, self));
+				co_await delay(2.5);
+				int dif = co_await self->getHighPriorityRelocationsInFlight(cx, self);
 				TraceEvent("DDMetricsCheck").detail("DIF", dif);
 				if (dif == 0) {
 					self->ddDone = now() - startTime;
-					return Void();
+					co_return;
 				}
 			}
 		} catch (Error& e) {
 			TraceEvent("DDMetricsError").error(e);
 		}
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { return clientId == 0 ? work(cx, this) : Void(); }

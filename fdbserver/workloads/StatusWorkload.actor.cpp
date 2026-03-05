@@ -127,57 +127,63 @@ struct StatusWorkload : TestWorkload {
 		return result + "]";
 	}
 
-	ACTOR Future<Void> configureLatencyBands(StatusWorkload* self, Database cx) {
+	Future<Void> configureLatencyBands(StatusWorkload* self, Database cx) {
 		loop {
-			state Transaction tr(cx);
+			Transaction tr(cx);
 			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				{
+					Error err;
+					try {
+						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					std::string config =
-					    "{"
-					    "\"get_read_version\":{" +
-					    generateBands() +
-					    "},"
-					    "\"read\":{" +
-					    generateBands() +
-					    format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},",
-					           deterministicRandom()->randomInt(0, 10000),
-					           deterministicRandom()->randomInt(0, 1000000)) +
-					    ""
-					    "\"commit\":{" +
-					    generateBands() +
-					    format(", \"max_commit_bytes\":%d", deterministicRandom()->randomInt(0, 1000000)) +
-					    "}"
-					    "}";
+						std::string config =
+						    "{"
+						    "\"get_read_version\":{" +
+						    generateBands() +
+						    "},"
+						    "\"read\":{" +
+						    generateBands() +
+						    format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},",
+						           deterministicRandom()->randomInt(0, 10000),
+						           deterministicRandom()->randomInt(0, 1000000)) +
+						    ""
+						    "\"commit\":{" +
+						    generateBands() +
+						    format(", \"max_commit_bytes\":%d", deterministicRandom()->randomInt(0, 1000000)) +
+						    "}"
+						    "}";
 
-					tr.set(latencyBandConfigKey, ValueRef(config));
-					wait(tr.commit());
-					tr.reset();
+						tr.set(latencyBandConfigKey, ValueRef(config));
+						co_await tr.commit();
+						tr.reset();
 
-					if (deterministicRandom()->random01() < 0.3) {
-						return Void();
+						if (deterministicRandom()->random01() < 0.3) {
+							co_return;
+						}
+
+						co_await delay(deterministicRandom()->random01() * 120);
+					} catch (Error& e) {
+						err = e;
 					}
-
-					wait(delay(deterministicRandom()->random01() * 120));
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					if (err.isValid()) {
+						co_await tr.onError(err);
+					}
 				}
 			}
 		}
 	}
 
-	ACTOR Future<Void> fetcher(Database cx, StatusWorkload* self) {
-		state double lastTime = now();
+	Future<Void> fetcher(Database cx, StatusWorkload* self) {
+		double lastTime = now();
 
 		loop {
-			wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
+			co_await poisson(&lastTime, 1.0 / self->requestsPerSecond);
 			try {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;
-				state double issued = now();
-				StatusObject result = wait(StatusClient::statusFetcher(cx));
+				double issued = now();
+				StatusObject result = co_await StatusClient::statusFetcher(cx);
 				++self->replies;
 				BinaryWriter br(AssumeVersion(g_network->protocolVersion()));
 				save(br, result);

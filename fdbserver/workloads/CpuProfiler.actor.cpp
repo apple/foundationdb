@@ -52,11 +52,11 @@ struct CpuProfilerWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	// Turns the profiler on or off
-	ACTOR Future<Void> updateProfiler(bool enabled, Database cx, CpuProfilerWorkload* self) {
+	Future<Void> updateProfiler(bool enabled, Database cx, CpuProfilerWorkload* self) {
 		if (self->clientId == 0) {
 			// If we are turning the profiler on, get a list of workers in the system
 			if (enabled) {
-				std::vector<WorkerDetails> _workers = wait(getWorkers(self->dbInfo));
+				std::vector<WorkerDetails> _workers = co_await getWorkers(self->dbInfo);
 				std::vector<WorkerInterface> workers;
 				for (int i = 0; i < _workers.size(); i++) {
 					if (self->roles.empty() ||
@@ -68,8 +68,8 @@ struct CpuProfilerWorkload : TestWorkload {
 				self->profilingWorkers = workers;
 			}
 
-			state std::vector<Future<ErrorOr<Void>>> replies;
-			state int i;
+			std::vector<Future<ErrorOr<Void>>> replies;
+			int i{ 0 };
 			// Send a ProfilerRequest to each worker
 			for (i = 0; i < self->profilingWorkers.size(); i++) {
 				ProfilerRequest req;
@@ -84,7 +84,7 @@ struct CpuProfilerWorkload : TestWorkload {
 				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}
 
-			wait(waitForAll(replies));
+			co_await waitForAll(replies);
 
 			// Check that all workers succeeded if turning the profiler on
 			if (enabled)
@@ -95,39 +95,37 @@ struct CpuProfilerWorkload : TestWorkload {
 			TraceEvent("DoneSignalingProfiler").log();
 		}
 
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
-	ACTOR Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
-		wait(delay(self->initialDelay));
+	Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
+		co_await delay(self->initialDelay);
 		if (self->clientId == 0)
 			TraceEvent("SignalProfilerOn").log();
-		wait(timeoutError(self->updateProfiler(true, cx, self), 60.0));
+		co_await timeoutError(self->updateProfiler(true, cx, self), 60.0);
 
 		// If a duration was given, let the duration elapse and then shut the profiler off
 		if (self->duration > 0) {
-			wait(delay(self->duration));
+			co_await delay(self->duration);
 			if (self->clientId == 0)
 				TraceEvent("SignalProfilerOff").log();
-			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
+			co_await timeoutError(self->updateProfiler(false, cx, self), 60.0);
 		}
 
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
-	ACTOR Future<bool> _check(Database cx, CpuProfilerWorkload* self) {
+	Future<bool> _check(Database cx, CpuProfilerWorkload* self) {
 		// If no duration was given, then shut the profiler off now
 		if (self->duration <= 0) {
 			if (self->clientId == 0)
 				TraceEvent("SignalProfilerOff").log();
-			wait(timeoutError(self->updateProfiler(false, cx, self), 60.0));
+			co_await timeoutError(self->updateProfiler(false, cx, self), 60.0);
 		}
 
-		return self->success;
+		co_return self->success;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

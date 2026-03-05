@@ -51,34 +51,37 @@ struct LockDatabaseWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<RangeResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
-		state Transaction tr(cx);
+	static Future<RangeResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(lockDatabase(&tr, lockID));
-				state RangeResult data = wait(tr.getRange(normalKeys, 50000));
+				co_await lockDatabase(&tr, lockID);
+				RangeResult data = co_await tr.getRange(normalKeys, 50000);
 				ASSERT(!data.more);
-				wait(tr.commit());
-				return data;
+				co_await tr.commit();
+				co_return data;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> unlockAndCheck(Database cx, LockDatabaseWorkload* self, UID lockID, RangeResult data) {
-		state Transaction tr(cx);
+	static Future<Void> unlockAndCheck(Database cx, LockDatabaseWorkload* self, UID lockID, RangeResult data) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(databaseLockedKey));
+				Optional<Value> val = co_await tr.get(databaseLockedKey);
 				if (!val.present())
-					return Void();
+					co_return;
 
-				wait(unlockDatabase(&tr, lockID));
-				state RangeResult data2 = wait(tr.getRange(normalKeys, 50000));
+				co_await unlockDatabase(&tr, lockID);
+				RangeResult data2 = co_await tr.getRange(normalKeys, 50000);
 				if (data.size() != data2.size()) {
 					TraceEvent(SevError, "DataChangedWhileLocked")
 					    .detail("BeforeSize", data.size())
@@ -96,39 +99,41 @@ struct LockDatabaseWorkload : TestWorkload {
 					}
 					self->ok = false;
 				}
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> checkLocked(Database cx, LockDatabaseWorkload* self) {
-		state Transaction tr(cx);
+	static Future<Void> checkLocked(Database cx, LockDatabaseWorkload* self) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
-				Version v = wait(tr.getReadVersion());
+				Version v = co_await tr.getReadVersion();
 				TraceEvent(SevError, "GotVersionWhileLocked").detail("Version", v);
 				self->ok = false;
-				return Void();
+				co_return;
 			} catch (Error& e) {
-				CODE_PROBE(e.code() == error_code_database_locked, "Database confirmed locked");
-				wait(tr.onError(e));
+				err = e;
 			}
+			CODE_PROBE(err.code() == error_code_database_locked, "Database confirmed locked");
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> lockWorker(Database cx, LockDatabaseWorkload* self) {
-		state UID lockID = deterministicRandom()->randomUniqueID();
-		wait(delay(self->lockAfter));
-		state RangeResult data = wait(lockAndSave(cx, self, lockID));
-		state Future<Void> checker = checkLocked(cx, self);
-		wait(delay(self->unlockAfter - self->lockAfter));
+	static Future<Void> lockWorker(Database cx, LockDatabaseWorkload* self) {
+		UID lockID = deterministicRandom()->randomUniqueID();
+		co_await delay(self->lockAfter);
+		RangeResult data = co_await lockAndSave(cx, self, lockID);
+		Future<Void> checker = checkLocked(cx, self);
+		co_await delay(self->unlockAfter - self->lockAfter);
 		checker.cancel();
-		wait(unlockAndCheck(cx, self, lockID, data));
+		co_await unlockAndCheck(cx, self, lockID, data);
 
-		return Void();
 	}
 };
 

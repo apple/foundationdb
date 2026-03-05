@@ -50,23 +50,22 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		return _setup(cx, this);
 	}
 
-	ACTOR static Future<Void> _setup(Database cx, AtomicSwitchoverWorkload* self) {
-		state DatabaseBackupAgent backupAgent(cx);
+	static Future<Void> _setup(Database cx, AtomicSwitchoverWorkload* self) {
+		DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("AS_Submit1").log();
-			wait(backupAgent.submitBackup(self->extraDB,
-			                              BackupAgentBase::getDefaultTag(),
-			                              self->backupRanges,
-			                              StopWhenDone::False,
-			                              StringRef(),
-			                              StringRef(),
-			                              LockDB::True));
+			co_await backupAgent.submitBackup(self->extraDB,
+			                                  BackupAgentBase::getDefaultTag(),
+			                                  self->backupRanges,
+			                                  StopWhenDone::False,
+			                                  StringRef(),
+			                                  StringRef(),
+			                                  LockDB::True);
 			TraceEvent("AS_Submit2").log();
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
 				throw;
 		}
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -79,114 +78,116 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                     StringRef backupPrefix,
-	                                     Database src,
-	                                     Database dest) {
-		state int rangeIndex;
-		for (rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
-			state KeyRangeRef range = ranges[rangeIndex];
-			state Key begin = range.begin;
+	static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges,
+	                               StringRef backupPrefix,
+	                               Database src,
+	                               Database dest) {
+		for (int rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
+			KeyRangeRef range = ranges[rangeIndex];
+			Key begin = range.begin;
 			loop {
-				state Transaction tr(src);
-				state Transaction tr2(dest);
-				try {
-					loop {
-						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
-						state Future<RangeResult> bkpFuture =
-						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
-						wait(success(srcFuture) && success(bkpFuture));
+				Transaction tr(src);
+				Transaction tr2(dest);
+				{
+					Error err;
+					try {
+						loop {
+							Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+							Future<RangeResult> bkpFuture =
+							    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
+							co_await (success(srcFuture) && success(bkpFuture));
 
-						auto src = srcFuture.get().begin();
-						auto bkp = bkpFuture.get().begin();
+							auto src = srcFuture.get().begin();
+							auto bkp = bkpFuture.get().begin();
 
-						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
-							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
-							if (src->key != bkpKey && src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchKeyAndValue")
-								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value))
-								    .detail("BkpKey", printable(bkpKey))
-								    .detail("BkpVal", printable(bkp->value));
-							} else if (src->key != bkpKey) {
-								TraceEvent(SevError, "MismatchKey")
-								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value))
-								    .detail("BkpKey", printable(bkpKey))
-								    .detail("BkpVal", printable(bkp->value));
-							} else if (src->value != bkp->value) {
-								TraceEvent(SevError, "MismatchValue")
-								    .detail("SrcKey", printable(src->key))
-								    .detail("SrcVal", printable(src->value))
-								    .detail("BkpKey", printable(bkpKey))
-								    .detail("BkpVal", printable(bkp->value));
+							while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
+								KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
+								if (src->key != bkpKey && src->value != bkp->value) {
+									TraceEvent(SevError, "MismatchKeyAndValue")
+									    .detail("SrcKey", printable(src->key))
+									    .detail("SrcVal", printable(src->value))
+									    .detail("BkpKey", printable(bkpKey))
+									    .detail("BkpVal", printable(bkp->value));
+								} else if (src->key != bkpKey) {
+									TraceEvent(SevError, "MismatchKey")
+									    .detail("SrcKey", printable(src->key))
+									    .detail("SrcVal", printable(src->value))
+									    .detail("BkpKey", printable(bkpKey))
+									    .detail("BkpVal", printable(bkp->value));
+								} else if (src->value != bkp->value) {
+									TraceEvent(SevError, "MismatchValue")
+									    .detail("SrcKey", printable(src->key))
+									    .detail("SrcVal", printable(src->value))
+									    .detail("BkpKey", printable(bkpKey))
+									    .detail("BkpVal", printable(bkp->value));
+								}
+								begin = std::min(src->key, bkpKey);
+								if (src->key == bkpKey) {
+									++src;
+									++bkp;
+								} else if (src->key < bkpKey) {
+									++src;
+								} else {
+									++bkp;
+								}
 							}
-							begin = std::min(src->key, bkpKey);
-							if (src->key == bkpKey) {
+							while (src != srcFuture.get().end() && !bkpFuture.get().more) {
+								TraceEvent(SevError, "MissingBkpKey")
+								    .detail("SrcKey", printable(src->key))
+								    .detail("SrcVal", printable(src->value));
+								begin = src->key;
 								++src;
-								++bkp;
-							} else if (src->key < bkpKey) {
-								++src;
-							} else {
+							}
+							while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
+								TraceEvent(SevError, "MissingSrcKey")
+								    .detail("BkpKey", printable(bkp->key.substr(backupPrefix.size())))
+								    .detail("BkpVal", printable(bkp->value));
+								begin = bkp->key;
 								++bkp;
 							}
-						}
-						while (src != srcFuture.get().end() && !bkpFuture.get().more) {
-							TraceEvent(SevError, "MissingBkpKey")
-							    .detail("SrcKey", printable(src->key))
-							    .detail("SrcVal", printable(src->value));
-							begin = src->key;
-							++src;
-						}
-						while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
-							TraceEvent(SevError, "MissingSrcKey")
-							    .detail("BkpKey", printable(bkp->key.substr(backupPrefix.size())))
-							    .detail("BkpVal", printable(bkp->value));
-							begin = bkp->key;
-							++bkp;
+
+							if (!srcFuture.get().more && !bkpFuture.get().more) {
+								break;
+							}
+
+							begin = keyAfter(begin);
 						}
 
-						if (!srcFuture.get().more && !bkpFuture.get().more) {
-							break;
-						}
-
-						begin = keyAfter(begin);
+						break;
+					} catch (Error& e) {
+						err = e;
 					}
-
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 				}
 			}
 		}
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
-		state DatabaseBackupAgent backupAgent(cx);
-		state DatabaseBackupAgent restoreTool(self->extraDB);
+	static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
+		DatabaseBackupAgent backupAgent(cx);
+		DatabaseBackupAgent restoreTool(self->extraDB);
 
 		TraceEvent("AS_Wait1").log();
-		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False)));
+		co_await success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False));
 		TraceEvent("AS_Ready1").log();
-		wait(delay(deterministicRandom()->random01() * self->switch1delay));
+		co_await delay(deterministicRandom()->random01() * self->switch1delay);
 		TraceEvent("AS_Switch1").log();
-		wait(backupAgent.atomicSwitchover(
-		    self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
+		co_await backupAgent.atomicSwitchover(
+		    self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef());
 		TraceEvent("AS_Wait2").log();
-		wait(success(restoreTool.waitBackup(cx, BackupAgentBase::getDefaultTag(), StopWhenDone::False)));
+		co_await success(restoreTool.waitBackup(cx, BackupAgentBase::getDefaultTag(), StopWhenDone::False));
 		TraceEvent("AS_Ready2").log();
-		wait(delay(deterministicRandom()->random01() * self->switch2delay));
+		co_await delay(deterministicRandom()->random01() * self->switch2delay);
 		TraceEvent("AS_Switch2").log();
-		wait(restoreTool.atomicSwitchover(
-		    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
+		co_await restoreTool.atomicSwitchover(
+		    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef());
 		TraceEvent("AS_Wait3").log();
-		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False)));
+		co_await success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False));
 		TraceEvent("AS_Ready3").log();
-		wait(delay(deterministicRandom()->random01() * self->stopDelay));
+		co_await delay(deterministicRandom()->random01() * self->stopDelay);
 		TraceEvent("AS_Abort").log();
-		wait(backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
+		co_await backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag());
 		TraceEvent("AS_Done").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
@@ -194,7 +195,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
-		return Void();
 	}
 };
 

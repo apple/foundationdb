@@ -69,31 +69,30 @@ struct ChangeConfigWorkload : TestWorkload {
 		return res;
 	}
 
-	ACTOR static Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
-		wait(delay(5 * deterministicRandom()->random01()));
+	static Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
+		co_await delay(5 * deterministicRandom()->random01());
 		if (self->configMode.size()) {
-			state bool existingDB = false;
+			bool existingDB = false;
 			if (g_simulator->startingDisabledConfiguration != "") {
-				wait(success(
-				    ManagementAPI::changeConfig(db.getReference(), g_simulator->startingDisabledConfiguration, true)));
+				co_await success(
+				    ManagementAPI::changeConfig(db.getReference(), g_simulator->startingDisabledConfiguration, true));
 				TraceEvent("WaitForReplicasExtra").log();
-				wait(waitForFullReplication(db));
+				co_await waitForFullReplication(db);
 				TraceEvent("WaitForReplicasExtraEnd").log();
 				existingDB = true;
 			}
 			std::string mode = self->getConfigMode(self->configMode, existingDB);
-			wait(success(ManagementAPI::changeConfig(db.getReference(), mode, true)));
+			co_await success(ManagementAPI::changeConfig(db.getReference(), mode, true));
 		}
 		if (self->networkAddresses.size()) {
 			if (self->networkAddresses == "auto") {
-				wait(coordinatorsChangeActor(db, self, true));
+				co_await coordinatorsChangeActor(db, self, true);
 			} else {
-				wait(coordinatorsChangeActor(db, self));
+				co_await coordinatorsChangeActor(db, self);
 			}
 		}
 
-		wait(delay(5 * deterministicRandom()->random01()));
-		return Void();
+		co_await delay(5 * deterministicRandom()->random01());
 	}
 
 	Future<Void> configureExtraDatabases(ChangeConfigWorkload* self) {
@@ -107,67 +106,67 @@ struct ChangeConfigWorkload : TestWorkload {
 		return waitForAll(futures);
 	}
 
-	ACTOR static Future<Void> changeConfigClient(Database cx, ChangeConfigWorkload* self) {
-		wait(delay(self->minDelayBeforeChange +
-		           deterministicRandom()->random01() * (self->maxDelayBeforeChange - self->minDelayBeforeChange)));
+	static Future<Void> changeConfigClient(Database cx, ChangeConfigWorkload* self) {
+		co_await delay(self->minDelayBeforeChange +
+		               deterministicRandom()->random01() * (self->maxDelayBeforeChange - self->minDelayBeforeChange));
 
-		state bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
+		bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
 		if (extraConfigureBefore) {
-			wait(self->configureExtraDatabases(self));
+			co_await self->configureExtraDatabases(self);
 		}
 
 		if (self->configMode.size()) {
-			state bool existingDB = false;
+			bool existingDB = false;
 			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
-				wait(success(
-				    ManagementAPI::changeConfig(cx.getReference(), g_simulator->startingDisabledConfiguration, true)));
+				co_await success(
+				    ManagementAPI::changeConfig(cx.getReference(), g_simulator->startingDisabledConfiguration, true));
 				TraceEvent("WaitForReplicas").log();
-				wait(waitForFullReplication(cx));
+				co_await waitForFullReplication(cx);
 				TraceEvent("WaitForReplicasEnd").log();
 				existingDB = true;
 			}
 			std::string mode = self->getConfigMode(self->configMode, existingDB);
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), mode, true)));
+			co_await success(ManagementAPI::changeConfig(cx.getReference(), mode, true));
 		}
 
 		if (self->networkAddresses.size()) {
-			state int i;
-			for (i = 0; i < self->coordinatorChanges; ++i) {
+			for (int i = 0; i < self->coordinatorChanges; ++i) {
 				if (i > 0) {
-					wait(delay(20));
+					co_await delay(20);
 				}
-				wait(coordinatorsChangeActor(cx, self, self->networkAddresses == "auto"));
+				co_await coordinatorsChangeActor(cx, self, self->networkAddresses == "auto");
 			}
 		}
 
 		if (!extraConfigureBefore) {
-			wait(self->configureExtraDatabases(self));
+			co_await self->configureExtraDatabases(self);
 		}
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> coordinatorsChangeActor(Database cx,
-	                                                  ChangeConfigWorkload* self,
-	                                                  bool autoChange = false) {
-		state ReadYourWritesTransaction tr(cx);
-		state int notEnoughMachineResults = 0;
-		state std::string desiredCoordinatorsKey;
+	static Future<Void> coordinatorsChangeActor(Database cx, ChangeConfigWorkload* self, bool autoChange = false) {
+		ReadYourWritesTransaction tr(cx);
+		int notEnoughMachineResults = 0;
+		std::string desiredCoordinatorsKey;
 
 		if (autoChange) {
 			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> newCoordinatorsKey = wait(tr.get("auto_coordinators"_sr.withPrefix(
-					    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
-					ASSERT(newCoordinatorsKey.present());
-					desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
-					tr.reset();
-					break;
-				} catch (Error& e) {
-					if (e.code() == error_code_special_keys_api_failure) {
+				{
+					Error err;
+					try {
+						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+						Optional<Value> newCoordinatorsKey = co_await tr.get("auto_coordinators"_sr.withPrefix(
+						    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin));
+						ASSERT(newCoordinatorsKey.present());
+						desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
+						tr.reset();
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.code() == error_code_special_keys_api_failure) {
 						Optional<Value> errorMsg =
-						    wait(tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+						    co_await tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
 						ASSERT(errorMsg.present());
 						std::string errorStr;
 						auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
@@ -178,15 +177,15 @@ struct ChangeConfigWorkload : TestWorkload {
 						ASSERT(valueObj["command"].get_str() == "auto_coordinators");
 						if (valueObj["retriable"].get_bool() && notEnoughMachineResults < 1) {
 							notEnoughMachineResults++;
-							wait(delay(1.0));
+							co_await delay(1.0);
 							tr.reset();
 						} else {
 							break;
 						}
 					} else {
-						wait(tr.onError(e));
+						co_await tr.onError(err);
 					}
-					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 				}
 			}
 		} else {
@@ -194,20 +193,24 @@ struct ChangeConfigWorkload : TestWorkload {
 		}
 
 		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-				tr.set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
-				       Value(desiredCoordinatorsKey));
-				TraceEvent(SevDebug, "CoordinatorsChangeBeforeCommit")
-				    .detail("Auto", autoChange)
-				    .detail("NewCoordinatorsKey", describe(desiredCoordinatorsKey));
-				wait(tr.commit());
-				ASSERT(false);
-			} catch (Error& e) {
-				state Error err(e);
-				if (e.code() == error_code_special_keys_api_failure) {
+			{
+				Error caughtErr;
+				try {
+					tr.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tr.set("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators")),
+					       Value(desiredCoordinatorsKey));
+					TraceEvent(SevDebug, "CoordinatorsChangeBeforeCommit")
+					    .detail("Auto", autoChange)
+					    .detail("NewCoordinatorsKey", describe(desiredCoordinatorsKey));
+					co_await tr.commit();
+					ASSERT(false);
+				} catch (Error& e) {
+					caughtErr = e;
+				}
+				Error err(caughtErr);
+				if (caughtErr.code() == error_code_special_keys_api_failure) {
 					Optional<Value> errorMsg =
-					    wait(tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
+					    co_await tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin);
 					ASSERT(errorMsg.present());
 					std::string errorStr;
 					auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
@@ -219,12 +222,13 @@ struct ChangeConfigWorkload : TestWorkload {
 					ASSERT(valueObj["command"].get_str() == "coordinators");
 					break;
 				} else {
-					wait(tr.onError(err));
+					if (err.isValid()) {
+						co_await tr.onError(err);
+					}
 				}
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			}
 		}
-		return Void();
 	}
 };
 

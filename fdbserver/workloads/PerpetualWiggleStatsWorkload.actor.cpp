@@ -46,14 +46,14 @@ bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics
 }
 
 namespace {
-ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
+Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
 	printf("Issuing configuration change: %s\n", config.c_str());
-	state ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), config, force));
+	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), config, force);
 	if (res != ConfigurationResult::SUCCESS) {
-		return false;
+		co_return false;
 	}
-	wait(delay(5.0)); // wait for read window
-	return true;
+	co_await delay(5.0); // wait for read window
+	co_return true;
 }
 } // namespace
 
@@ -64,76 +64,72 @@ struct DDTeamCollectionTester : public DDTeamCollection {
 		wigglingId.reset();
 		storageWiggler = makeReference<StorageWiggler>(this);
 	}
-	ACTOR static Future<Void> testRestoreAndResetStats(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
+	static Future<Void> testRestoreAndResetStats(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
 		std::cout << "testRestoreAndResetStats ...\n";
-		wait(self->storageWiggler->restoreStats());
+		co_await self->storageWiggler->restoreStats();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			bool success = co_await IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip());
 			if (!success)
-				return Void();
+				co_return;
 		}
 
 		// restore from FDB
 		metrics.reset();
-		wait(self->storageWiggler->restoreStats());
+		co_await self->storageWiggler->restoreStats();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
-		return Void();
 	}
 
-	ACTOR static Future<Void> switchPerpetualWiggleWhenDDIsDead(DDTeamCollectionTester* self,
-	                                                            StorageWiggleMetrics metrics) {
+	static Future<Void> switchPerpetualWiggleWhenDDIsDead(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
 		std::cout << "switchPerpetualWiggleWhenDDIsDead ...\n";
-		wait(self->storageWiggler->restoreStats());
+		co_await self->storageWiggler->restoreStats();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			bool success = co_await IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip());
 			if (!success)
-				return Void();
+				co_return;
 		}
 		// enable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
+			bool success = co_await IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip());
 			if (!success)
-				return Void();
+				co_return;
 		}
 		// restart
-		wait(self->storageWiggler->restoreStats());
+		co_await self->storageWiggler->restoreStats();
 		metrics.reset();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
-		return Void();
 	}
 
 	// reset stats shouldn't be overwritten when PW is disabled
-	ACTOR static Future<Void> finishWiggleAfterPWDisabled(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
+	static Future<Void> finishWiggleAfterPWDisabled(DDTeamCollectionTester* self, StorageWiggleMetrics metrics) {
 		std::cout << "finishWiggleAfterPWDisabled ...\n";
-		wait(self->storageWiggler->restoreStats());
+		co_await self->storageWiggler->restoreStats();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
 		// disable PW
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip()));
+			bool success = co_await IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=0", deterministicRandom()->coinflip());
 			if (!success)
-				return Void();
+				co_return;
 		}
-		wait(self->storageWiggler->finishWiggle());
+		co_await self->storageWiggler->finishWiggle();
 
 		// restart perpetual wiggle
 		{
-			bool success = wait(IssueConfigurationChange(
-			    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip()));
+			bool success = co_await IssueConfigurationChange(
+			    self->dbContext(), "perpetual_storage_wiggle=1", deterministicRandom()->coinflip());
 			if (!success)
-				return Void();
+				co_return;
 		}
-		wait(self->storageWiggler->restoreStats());
+		co_await self->storageWiggler->restoreStats();
 		metrics.reset();
 		ASSERT(storageWiggleStatsEqual(self->storageWiggler->metrics, metrics));
-		return Void();
 	}
 
 	DDTeamCollectionTester(DDTeamCollectionInitParams const& params) : DDTeamCollection(params) {}
@@ -155,27 +151,25 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 
 	PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
-	ACTOR static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
-		wait(success(setDDMode(cx, 0)));
-		wait(success(takeMoveKeysLock(cx, UID()))); // force current DD to quit
-		bool success = wait(IssueConfigurationChange(cx, "storage_migration_type=disabled", true));
+	static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
+		co_await success(setDDMode(cx, 0));
+		co_await success(takeMoveKeysLock(cx, UID())); // force current DD to quit
+		bool success = co_await IssueConfigurationChange(cx, "storage_migration_type=disabled", true);
 		ASSERT(success);
-		wait(delay(30.0)); // make sure the DD has already quit before the test start
-		return Void();
+		co_await delay(30.0); // make sure the DD has already quit before the test start
 	}
 
-	ACTOR static Future<Void> prepareTestEnv(PerpetualWiggleStatsWorkload* self, Database cx) {
+	static Future<Void> prepareTestEnv(PerpetualWiggleStatsWorkload* self, Database cx) {
 		// enable perpetual wiggle
-		bool change = wait(IssueConfigurationChange(cx, "perpetual_storage_wiggle=1", true));
+		bool change = co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle=1", true);
 		ASSERT(change);
 		// update wiggle metrics
 		self->lastMetrics = getRandomWiggleMetrics();
 		auto& lastMetrics = self->lastMetrics;
-		wait(success(runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		co_await success(runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			StorageWiggleData wiggleData;
 			return wiggleData.updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
-		})));
-		return Void();
+		}));
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -194,45 +188,44 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; };
 
-	ACTOR static Future<Void> _start(PerpetualWiggleStatsWorkload* self, Database cx) {
-		state Reference<IDDTxnProcessor> db = makeReference<DDTxnProcessor>(cx);
-		state DatabaseConfiguration conf;
-		state DDTeamCollectionTester tester({ db,
-		                                      UID(8, 6),
-		                                      MoveKeysLock(),
-		                                      PromiseStream<RelocateShard>(),
-		                                      makeReference<ShardsAffectedByTeamFailure>(),
-		                                      conf,
-		                                      {},
-		                                      {},
-		                                      Future<Void>(Void()),
-		                                      makeReference<AsyncVar<bool>>(true),
-		                                      IsPrimary::True,
-		                                      makeReference<AsyncVar<bool>>(false),
-		                                      makeReference<AsyncVar<bool>>(false),
-		                                      PromiseStream<GetMetricsRequest>(),
-		                                      Promise<UID>(),
-		                                      PromiseStream<Promise<int>>(),
-		                                      PromiseStream<Promise<int64_t>>(),
-		                                      PromiseStream<RebalanceStorageQueueRequest>(),
-		                                      makeReference<BulkLoadTaskCollection>(UID(8, 6)) });
+	static Future<Void> _start(PerpetualWiggleStatsWorkload* self, Database cx) {
+		Reference<IDDTxnProcessor> db = makeReference<DDTxnProcessor>(cx);
+		DatabaseConfiguration conf;
+		DDTeamCollectionTester tester({ db,
+		                                UID(8, 6),
+		                                MoveKeysLock(),
+		                                PromiseStream<RelocateShard>(),
+		                                makeReference<ShardsAffectedByTeamFailure>(),
+		                                conf,
+		                                {},
+		                                {},
+		                                Future<Void>(Void()),
+		                                makeReference<AsyncVar<bool>>(true),
+		                                IsPrimary::True,
+		                                makeReference<AsyncVar<bool>>(false),
+		                                makeReference<AsyncVar<bool>>(false),
+		                                PromiseStream<GetMetricsRequest>(),
+		                                Promise<UID>(),
+		                                PromiseStream<Promise<int>>(),
+		                                PromiseStream<Promise<int64_t>>(),
+		                                PromiseStream<RebalanceStorageQueueRequest>(),
+		                                makeReference<BulkLoadTaskCollection>(UID(8, 6)) });
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 
-		wait(prepareTestEnv(self, cx));
+		co_await prepareTestEnv(self, cx);
 		tester.resetStorageWiggleState();
-		wait(DDTeamCollectionTester::testRestoreAndResetStats(&tester, self->lastMetrics));
+		co_await DDTeamCollectionTester::testRestoreAndResetStats(&tester, self->lastMetrics);
 
-		wait(prepareTestEnv(self, cx));
+		co_await prepareTestEnv(self, cx);
 		tester.resetStorageWiggleState();
-		wait(DDTeamCollectionTester::switchPerpetualWiggleWhenDDIsDead(&tester, self->lastMetrics));
+		co_await DDTeamCollectionTester::switchPerpetualWiggleWhenDDIsDead(&tester, self->lastMetrics);
 
-		wait(prepareTestEnv(self, cx));
+		co_await prepareTestEnv(self, cx);
 		tester.resetStorageWiggleState();
-		wait(DDTeamCollectionTester::finishWiggleAfterPWDisabled(&tester, self->lastMetrics));
+		co_await DDTeamCollectionTester::finishWiggleAfterPWDisabled(&tester, self->lastMetrics);
 
-		wait(success(setDDMode(cx, 1)));
-		return Void();
+		co_await success(setDDMode(cx, 1));
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }

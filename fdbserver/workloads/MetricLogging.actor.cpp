@@ -53,8 +53,8 @@ struct MetricLoggingWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
-	ACTOR Future<Void> _setup(MetricLoggingWorkload* self, Database cx) {
-		wait(delay(2.0));
+	Future<Void> _setup(MetricLoggingWorkload* self, Database cx) {
+		co_await delay(2.0);
 		for (int i = 0; i < self->metricCount; i++) {
 			if (self->testBool) {
 				self->boolMetrics[i]->setConfig(true);
@@ -62,7 +62,6 @@ struct MetricLoggingWorkload : TestWorkload {
 				self->int64Metrics[i]->setConfig(true);
 			}
 		}
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -81,8 +80,8 @@ struct MetricLoggingWorkload : TestWorkload {
 		m.emplace_back("Changes/sec", changes.getValue() / testDuration, Averaged::False);
 	}
 
-	ACTOR Future<Void> MetricLoggingClient(Database cx, MetricLoggingWorkload* self, int clientId, int actorId) {
-		state BinaryWriter writer(Unversioned());
+	Future<Void> MetricLoggingClient(Database cx, MetricLoggingWorkload* self, int clientId, int actorId) {
+		BinaryWriter writer(Unversioned());
 		loop {
 			for (int i = 0; i < 100; i++) {
 				if (self->testBool) {
@@ -92,7 +91,7 @@ struct MetricLoggingWorkload : TestWorkload {
 				}
 				++self->changes;
 			}
-			wait(yield());
+			co_await yield();
 		}
 	}
 };

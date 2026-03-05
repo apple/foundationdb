@@ -71,18 +71,17 @@ struct ClientMetricWorkload : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR Future<Void> _start(ClientMetricWorkload* self, Database cx) {
+	Future<Void> _start(ClientMetricWorkload* self, Database cx) {
 		try {
 			self->clients.push_back(timeout(self->runner(cx, self), self->testDuration, Void()));
-			wait(waitForAll(self->clients));
+			co_await waitForAll(self->clients);
 		} catch (Error& e) {
 			TraceEvent("ClientMetricError::_start").error(e);
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
-		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+	Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
+		co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			Tuple rate = Tuple::makeTuple(sampleProbability);
 			Tuple size = Tuple::makeTuple(sizeLimit);
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -92,74 +91,83 @@ struct ClientMetricWorkload : TestWorkload {
 			          << std::endl;
 
 			return Void();
-		}));
-		return Void();
+		});
 	}
 
-	ACTOR Future<RangeResult> latencyRangeQuery(Database cx, int keysLimit, bool reverse) {
-		state KeySelector begin =
-		    firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
-		state KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		state RangeResult txInfoEntries;
+	Future<RangeResult> latencyRangeQuery(Database cx, int keysLimit, bool reverse) {
+		KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
+		KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		RangeResult txInfoEntries;
 		// wait to make sure client metrics are updated
-		wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+		co_await delay(CLIENT_KNOBS->CSI_STATUS_DELAY);
 		loop {
-			try {
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				std::string sampleRateStr = "default";
-				std::string sizeLimitStr = "default";
-				const double sampleRateDbl =
-				    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
-				if (!std::isinf(sampleRateDbl)) {
-					sampleRateStr = std::to_string(sampleRateDbl);
+			{
+				Error err;
+				try {
+					tr->reset();
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					std::string sampleRateStr = "default";
+					std::string sizeLimitStr = "default";
+					const double sampleRateDbl = cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate,
+					                                                           std::numeric_limits<double>::infinity());
+					if (!std::isinf(sampleRateDbl)) {
+						sampleRateStr = std::to_string(sampleRateDbl);
+					}
+					const int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+					if (sizeLimit != -1) {
+						sizeLimitStr = std::to_string(sizeLimit);
+					}
+					std::cout << "Read from globalconfig: rate=" << sampleRateStr << " size=" << sizeLimitStr
+					          << std::endl;
+					RangeResult kvRange = co_await tr->getRange(
+					    begin, end, keysLimit, Snapshot::False, reverse ? Reverse::True : Reverse::False);
+					if (kvRange.empty()) {
+						co_await delay(1.0);
+						std::cout << "WaitingForLatencyMetricToBePresent" << std::endl;
+						TraceEvent("WaitingForLatencyMetricToBePresent").log();
+						continue;
+					}
+					txInfoEntries.arena().dependsOn(kvRange.arena());
+					txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				const int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
-				if (sizeLimit != -1) {
-					sizeLimitStr = std::to_string(sizeLimit);
-				}
-				std::cout << "Read from globalconfig: rate=" << sampleRateStr << " size=" << sizeLimitStr << std::endl;
-				state RangeResult kvRange = wait(
-				    tr->getRange(begin, end, keysLimit, Snapshot::False, reverse ? Reverse::True : Reverse::False));
-				if (kvRange.empty()) {
-					wait(delay(1.0));
-					std::cout << "WaitingForLatencyMetricToBePresent" << std::endl;
-					TraceEvent("WaitingForLatencyMetricToBePresent").log();
-					continue;
-				}
-				txInfoEntries.arena().dependsOn(kvRange.arena());
-				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+				co_await tr->onError(err);
 			}
 		}
 		for (auto& kv : txInfoEntries) {
 			uint64_t vs = getVersionStamp(kv.key);
 			std::cout << "VersionStamp is " << vs << std::endl;
 		}
-		return txInfoEntries;
+		co_return txInfoEntries;
 	}
 
-	ACTOR Future<Void> writeRandomKeys(Database cx, int total) {
-		state int cnt = 0;
-		state Transaction tr(cx);
+	Future<Void> writeRandomKeys(Database cx, int total) {
+		int cnt = 0;
+		Transaction tr(cx);
 		try {
 			loop {
-				try {
-					wait(delay(0.001));
-					tr.reset();
-					tr.set(Key(deterministicRandom()->randomAlphaNumeric(10)),
-					       Value(Key(deterministicRandom()->randomAlphaNumeric(10))));
-					wait(tr.commit());
-					if (cnt >= total) {
-						break;
+				{
+					Error err;
+					try {
+						co_await delay(0.001);
+						tr.reset();
+						tr.set(Key(deterministicRandom()->randomAlphaNumeric(10)),
+						       Value(Key(deterministicRandom()->randomAlphaNumeric(10))));
+						co_await tr.commit();
+						if (cnt >= total) {
+							break;
+						}
+						++cnt;
+					} catch (Error& e) {
+						err = e;
 					}
-					++cnt;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					if (err.isValid()) {
+						co_await tr.onError(err);
+					}
 				}
 			}
 		} catch (Error& e) {
@@ -167,25 +175,24 @@ struct ClientMetricWorkload : TestWorkload {
 			throw;
 		}
 		std::cout << "writeRandomKeys finish, written=" << cnt << std::endl;
-		return Void();
 	}
 
-	ACTOR Future<uint64_t> writeKeysAndGetLatencyVersion(Database cx,
-	                                                     ClientMetricWorkload* self,
-	                                                     int numKeys,
-	                                                     uint64_t previousVS) {
-		state int retry = 0;
-		state int max_retry = 10;
-		state int keysLimit = 1;
+	Future<uint64_t> writeKeysAndGetLatencyVersion(Database cx,
+	                                               ClientMetricWorkload* self,
+	                                               int numKeys,
+	                                               uint64_t previousVS) {
+		int retry = 0;
+		int max_retry = 10;
+		int keysLimit = 1;
 		loop {
 			if (retry > max_retry) {
 				// this should not happen, it should succeed after a few retry
 				ASSERT(false);
 			}
 			// write random keys to generate some latency metrics
-			wait(self->writeRandomKeys(cx, numKeys));
+			co_await self->writeRandomKeys(cx, numKeys);
 			// get the latest latency metric and parse its version stamp
-			RangeResult r = wait(self->latencyRangeQuery(cx, keysLimit, true));
+			RangeResult r = co_await self->latencyRangeQuery(cx, keysLimit, true);
 			if (r.size() == 0) {
 				// latency metrics might not be present due to transaction batching, retry a few times
 				++retry;
@@ -201,7 +208,7 @@ struct ClientMetricWorkload : TestWorkload {
 				++retry;
 				continue;
 			}
-			return vs;
+			co_return vs;
 		}
 	}
 
@@ -209,24 +216,23 @@ struct ClientMetricWorkload : TestWorkload {
 	//      write some random keys, check the latency metric and the latest version stamp vs1
 	//      write some other random keys, check the latency metric and latest version stamp again vs2
 	//      vs2 should be strictly larger than vs1, to verify new latency metrics are added
-	ACTOR Future<Void> runner(Database cx, ClientMetricWorkload* self) {
+	Future<Void> runner(Database cx, ClientMetricWorkload* self) {
 		try {
-			state int initialWrites = deterministicRandom()->randomInt(100, 200);
-			state int secondWrites = deterministicRandom()->randomInt(100, 200);
+			int initialWrites = deterministicRandom()->randomInt(100, 200);
+			int secondWrites = deterministicRandom()->randomInt(100, 200);
 
-			state uint64_t zeroVS = 0;
-			state uint64_t vs1 = wait(self->writeKeysAndGetLatencyVersion(cx, self, initialWrites, zeroVS));
+			uint64_t zeroVS = 0;
+			uint64_t vs1 = co_await self->writeKeysAndGetLatencyVersion(cx, self, initialWrites, zeroVS);
 			std::cout << "vs1=" << vs1 << std::endl;
 			ASSERT(vs1 > zeroVS);
 
-			state uint64_t vs2 = wait(self->writeKeysAndGetLatencyVersion(cx, self, secondWrites, vs1));
+			uint64_t vs2 = co_await self->writeKeysAndGetLatencyVersion(cx, self, secondWrites, vs1);
 			std::cout << "vs2=" << vs2 << std::endl;
 			ASSERT(vs2 > vs1);
 
 		} catch (Error& e) {
 			TraceEvent("ClientMetricError").error(e);
 		}
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

@@ -41,22 +41,25 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 
 	static constexpr const char* NAME = "RestoreMultiRanges";
 
-	ACTOR static Future<Void> clearDatabase(Database cx) {
-		state Transaction tr(cx);
+	static Future<Void> clearDatabase(Database cx) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.clear(normalKeys);
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> prepareDatabase(Database cx) {
-		state Transaction tr(cx);
+	static Future<Void> prepareDatabase(Database cx) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.reset();
 				tr.set("a"_sr, "a"_sr);
@@ -64,11 +67,12 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 				tr.set("b"_sr, "b"_sr);
 				tr.set("bb"_sr, "bb"_sr);
 				tr.set("bbb"_sr, "bbb"_sr);
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -84,23 +88,24 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<bool> verifyDatabase(Database cx) {
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+	static Future<bool> verifyDatabase(Database cx) {
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 		TraceEvent("RestoreMultiRanges_Verify").detail("UID", randomID);
-		state Transaction tr(cx);
-		state KeyRangeRef range("a"_sr, "z"_sr);
+		Transaction tr(cx);
+		KeyRangeRef range("a"_sr, "z"_sr);
 		loop {
+			Error err;
 			try {
 				tr.reset();
 				tr.debugTransaction(randomID);
-				RangeResult kvs = wait(tr.getRange(range, 10));
+				RangeResult kvs = co_await tr.getRange(range, 10);
 				if (kvs.size() != 4) {
 					logTestData(kvs);
 					TraceEvent(SevError, "TestFailureInfo")
 					    .detail("DataSize", kvs.size())
 					    .detail("Expect", 4)
 					    .detail("Workload", NAME);
-					return false;
+					co_return false;
 				}
 				KeyRef keys[4] = { "a"_sr, "aaaa"_sr, "bb"_sr, "bbb"_sr };
 				for (size_t i = 0; i < 4; ++i) {
@@ -109,78 +114,78 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 						    .detail("ExpectKey", keys[i])
 						    .detail("Got", kvs[i].key)
 						    .detail("Index", i);
-						return false;
+						co_return false;
 					}
 				}
 				TraceEvent("RestoreMultiRanges_VerifyPassed");
-				return true;
+				co_return true;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> _start(RestoreMultiRangesWorkload* self, Database cx) {
+	static Future<Void> _start(RestoreMultiRangesWorkload* self, Database cx) {
 		TraceEvent("RestoreMultiRanges_StartBackup");
-		wait(clearDatabase(cx));
-		wait(prepareDatabase(cx));
+		co_await clearDatabase(cx);
+		co_await prepareDatabase(cx);
 
 		if (self->encryptionKeyFileName.present()) {
-			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
 		}
 
-		state std::string backupContainer = "file://simfdb/backups/";
-		state std::string tagName = "default";
-		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
+		std::string backupContainer = "file://simfdb/backups/";
+		std::string tagName = "default";
+		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef("a"_sr, "z"_sr));
 		TraceEvent("RestoreMultiRanges_SubmitBackup");
 		try {
-			wait(self->backupAgent.submitBackup(cx,
-			                                    StringRef(backupContainer),
-			                                    {},
-			                                    deterministicRandom()->randomInt(0, 60),
-			                                    deterministicRandom()->randomInt(0, 100),
-			                                    tagName,
-			                                    backupRanges,
-			                                    StopWhenDone::True,
-			                                    UsePartitionedLog::False,
-			                                    IncrementalBackupOnly::False,
-			                                    self->encryptionKeyFileName));
+			co_await self->backupAgent.submitBackup(cx,
+			                                        StringRef(backupContainer),
+			                                        {},
+			                                        deterministicRandom()->randomInt(0, 60),
+			                                        deterministicRandom()->randomInt(0, 100),
+			                                        tagName,
+			                                        backupRanges,
+			                                        StopWhenDone::True,
+			                                        UsePartitionedLog::False,
+			                                        IncrementalBackupOnly::False,
+			                                        self->encryptionKeyFileName);
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
 
 		TraceEvent("RestoreMultiRanges_WaitBackup");
-		state Reference<IBackupContainer> container;
-		wait(success(self->backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container)));
+		Reference<IBackupContainer> container;
+		co_await success(self->backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container));
 
 		TraceEvent("RestoreMultiRanges_ClearDatabase");
-		wait(clearDatabase(cx));
+		co_await clearDatabase(cx);
 
 		TraceEvent("RestoreMultiRanges_Restore");
-		state Standalone<VectorRef<KeyRangeRef>> ranges;
+		Standalone<VectorRef<KeyRangeRef>> ranges;
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("a"_sr, "aaaaa"_sr));
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("bb"_sr, "bbbbb"_sr)); // Skip "b"
-		wait(success(self->backupAgent.restore(cx,
-		                                       cx,
-		                                       Key(tagName),
-		                                       Key(container->getURL()),
-		                                       {},
-		                                       ranges,
-		                                       WaitForComplete::True,
-		                                       ::invalidVersion,
-		                                       Verbose::True,
-		                                       Key(),
-		                                       Key(),
-		                                       LockDB::True,
-		                                       UnlockDB::True,
-		                                       OnlyApplyMutationLogs::False,
-		                                       InconsistentSnapshotOnly::False,
-		                                       ::invalidVersion,
-		                                       self->encryptionKeyFileName)));
+		co_await success(self->backupAgent.restore(cx,
+		                                           cx,
+		                                           Key(tagName),
+		                                           Key(container->getURL()),
+		                                           {},
+		                                           ranges,
+		                                           WaitForComplete::True,
+		                                           ::invalidVersion,
+		                                           Verbose::True,
+		                                           Key(),
+		                                           Key(),
+		                                           LockDB::True,
+		                                           UnlockDB::True,
+		                                           OnlyApplyMutationLogs::False,
+		                                           InconsistentSnapshotOnly::False,
+		                                           ::invalidVersion,
+		                                           self->encryptionKeyFileName));
 		TraceEvent("RestoreMultiRanges_Success");
-		return Void();
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

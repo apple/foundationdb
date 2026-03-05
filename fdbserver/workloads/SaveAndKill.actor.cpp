@@ -58,10 +58,10 @@ struct SaveAndKillWorkload : TestWorkload {
 	}
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
-	ACTOR Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
-		state int i;
-		wait(delay(deterministicRandom()->random01() * self->testDuration));
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
+		int i{ 0 };
+		co_await delay(deterministicRandom()->random01() * self->testDuration);
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		CSimpleIni ini;
 		ini.SetUnicode();
@@ -150,12 +150,11 @@ struct SaveAndKillWorkload : TestWorkload {
 		}
 
 		for (i = 0; i < 100; i++) {
-			wait(delay(0.0));
+			co_await delay(0.0);
 		}
 
 		g_simulator->stop();
 
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

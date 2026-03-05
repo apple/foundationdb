@@ -49,12 +49,12 @@ struct GetRangeStream : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(bytesRead.getMetric()); }
 
-	ACTOR static Future<Void> logThroughput(GetRangeStream* self, Key* next) {
+	static Future<Void> logThroughput(GetRangeStream* self, Key* next) {
 		loop {
-			state int64_t last = self->bytesRead.getValue();
-			state double before = g_network->now();
-			wait(delay(1));
-			state double after = g_network->now();
+			int64_t last = self->bytesRead.getValue();
+			double before = g_network->now();
+			co_await delay(1);
+			double after = g_network->now();
 			if (after > before) {
 				printf("throughput: %g bytes/s, next: %s\n",
 				       (self->bytesRead.getValue() - last) / (after - before),
@@ -63,16 +63,17 @@ struct GetRangeStream : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> fdbClientGetRange(Database db, GetRangeStream* self) {
-		state Transaction tx(db);
-		state Key next = self->begin;
-		state Future<Void> logFuture = logThroughput(self, &next);
+	static Future<Void> fdbClientGetRange(Database db, GetRangeStream* self) {
+		Transaction tx(db);
+		Key next = self->begin;
+		Future<Void> logFuture = logThroughput(self, &next);
 		loop {
+			Error err;
 			try {
-				Standalone<RangeResultRef> range = wait(
-				    tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                KeySelector(firstGreaterOrEqual(self->end)),
-				                GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
+				Standalone<RangeResultRef> range = co_await tx.getRange(
+				    KeySelector(firstGreaterOrEqual(next), next.arena()),
+				    KeySelector(firstGreaterOrEqual(self->end)),
+				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 				for (const auto& [k, v] : range) {
 					if (self->printKVPairs) {
 						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
@@ -84,25 +85,28 @@ struct GetRangeStream : TestWorkload {
 				}
 				next = keyAfter(range.back().key);
 			} catch (Error& e) {
-				wait(tx.onError(e));
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tx.onError(err);
 			}
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> fdbClientStream(Database db, GetRangeStream* self) {
-		state Transaction tx(db);
-		state Key next = self->begin;
-		state Future<Void> logFuture = logThroughput(self, &next);
+	static Future<Void> fdbClientStream(Database db, GetRangeStream* self) {
+		Transaction tx(db);
+		Key next = self->begin;
+		Future<Void> logFuture = logThroughput(self, &next);
 		loop {
-			state PromiseStream<Standalone<RangeResultRef>> results;
+			PromiseStream<Standalone<RangeResultRef>> results;
+			Error err;
 			try {
-				state Future<Void> stream = tx.getRangeStream(results,
-				                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                                              KeySelector(firstGreaterOrEqual(self->end)),
-				                                              GetRangeLimits());
+				Future<Void> stream = tx.getRangeStream(results,
+				                                        KeySelector(firstGreaterOrEqual(next), next.arena()),
+				                                        KeySelector(firstGreaterOrEqual(self->end)),
+				                                        GetRangeLimits());
 				loop {
-					Standalone<RangeResultRef> range = waitNext(results.getFuture());
+					Standalone<RangeResultRef> range = co_await results.getFuture();
 					for (const auto& [k, v] : range) {
 						if (self->printKVPairs) {
 							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
@@ -114,13 +118,18 @@ struct GetRangeStream : TestWorkload {
 					}
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_end_of_stream) {
-					break;
-				}
-				wait(tx.onError(e));
+				err = e;
+			}
+			if (!err.isValid()) {
+				continue;
+			}
+			if (err.code() == error_code_end_of_stream) {
+				break;
+			}
+			if (err.isValid()) {
+				co_await tx.onError(err);
 			}
 		}
-		return Void();
 	}
 };
 

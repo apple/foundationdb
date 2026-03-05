@@ -93,42 +93,41 @@ struct RestoreWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
+	static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
-			wait(backupAgent->changePause(cx, true));
+			co_await backupAgent->changePause(cx, true);
 			TraceEvent("RW_AgentPaused").log();
-			wait(delay(30 * deterministicRandom()->random01()));
-			wait(backupAgent->changePause(cx, false));
+			co_await delay(30 * deterministicRandom()->random01());
+			co_await backupAgent->changePause(cx, false);
 			TraceEvent("RW_AgentResumed").log();
-			wait(delay(120 * deterministicRandom()->random01()));
+			co_await delay(120 * deterministicRandom()->random01());
 		}
 	}
 
 	// Resume the backup agent if it is paused
-	ACTOR static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
+	static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
 		TraceEvent("RW_AgentResuming").log();
-		wait(backupAgent->changePause(cx, false));
+		co_await backupAgent->changePause(cx, false);
 		TraceEvent("RW_AgentResumed").log();
-		return Void();
 	}
 
-	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
-		state FileBackupAgent agent;
+	static Future<Void> statusLoop(Database cx, std::string tag) {
+		FileBackupAgent agent;
 		loop {
-			bool active = wait(agent.checkActive(cx));
+			bool active = co_await agent.checkActive(cx);
 			TraceEvent("RW_AgentActivityCheck").detail("IsActive", active);
-			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			std::string status = co_await agent.getStatus(cx, ShowErrors::True, tag);
 			puts(status.c_str());
-			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
+			std::string statusJSON = co_await agent.getStatusJSON(cx, tag);
 			puts(statusJSON.c_str());
-			wait(delay(10.0));
+			co_await delay(10.0);
 		}
 	}
 
-	ACTOR static Future<Void> _start(Database cx, RestoreWorkload* self) {
-		state FileBackupAgent backupAgent;
-		state Future<Void> cp;
-		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	static Future<Void> _start(Database cx, RestoreWorkload* self) {
+		FileBackupAgent backupAgent;
+		Future<Void> cp;
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("RW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("PerformRestore", self->performRestore)
@@ -139,7 +138,7 @@ struct RestoreWorkload : TestWorkload {
 		} else {
 			cp = resumeAgent(cx, &backupAgent);
 		}
-		state Future<Void> status = statusLoop(cx, self->backupTag.toString());
+		Future<Void> status = statusLoop(cx, self->backupTag.toString());
 
 		// Increment the backup agent requests
 		if (self->agentRequest) {
@@ -147,25 +146,25 @@ struct RestoreWorkload : TestWorkload {
 		}
 
 		try {
-			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
-			state UID logUid = uidFlag.first;
-			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx.getReference()));
-			state Reference<IBackupContainer> lastBackupContainer =
-			    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
+			KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+			UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+			UID logUid = uidFlag.first;
+			Key destUidValue = co_await BackupConfig(logUid).destUidValue().getD(cx.getReference());
+			Reference<IBackupContainer> lastBackupContainer =
+			    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
 			if (lastBackupContainer && self->performRestore) {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
 				                                                 lastBackupContainer->getEncryptionKeyFileName());
-				BackupDescription desc = wait(container->describeBackup());
+				BackupDescription desc = co_await container->describeBackup();
 				TraceEvent("RW_Restore", self->randomID)
 				    .setMaxEventLength(12000)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("BackupTag", printable(self->backupTag))
 				    .setMaxFieldLength(10000)
 				    .detail("Description", desc.toString());
-				state Version targetVersion = -1;
+				Version targetVersion = -1;
 				if (desc.maxRestorableVersion.present()) {
 					if (deterministicRandom()->random01() < 0.1) {
 						targetVersion = desc.minRestorableVersion.get();
@@ -178,7 +177,7 @@ struct RestoreWorkload : TestWorkload {
 						                    : desc.maxRestorableVersion.get();
 					}
 				}
-				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					for (auto& kvrange : self->backupRanges) {
 						// version needs to be decided before this transaction otherwise
@@ -186,13 +185,13 @@ struct RestoreWorkload : TestWorkload {
 						tr->clear(kvrange);
 					}
 					return Void();
-				}));
+				});
 
 				TraceEvent("RW_Restore", self->randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
 				    .detail("BackupTag", printable(self->backupTag))
 				    .detail("TargetVersion", targetVersion);
-				state int restoreIndex = 0;
+				int restoreIndex = 0;
 				// make sure system keys are not present in the restoreRanges as they will get restored first separately
 				// from the rest
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
@@ -216,7 +215,7 @@ struct RestoreWorkload : TestWorkload {
 				    .detail("RestoreIndex", restoreIndex)
 				    .detail("RestoreTag", printable(restoreTag))
 				    .detail("RestoreRanges", self->restoreRanges.size());
-				state Future<Version> restore;
+				Future<Version> restore;
 				restore = backupAgent.restore(cx,
 				                              cx,
 				                              restoreTag,
@@ -235,113 +234,118 @@ struct RestoreWorkload : TestWorkload {
 				                              ::invalidVersion,
 				                              lastBackupContainer->getEncryptionKeyFileName());
 
-				wait(success(restore));
+				co_await success(restore);
 				ASSERT(!restore.isError());
 			}
-			state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
-			state Key backupLogValuesKey = destUidValue.withPrefix(backupLogKeys.begin);
-			state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
-			state Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
-			state int displaySystemKeys = 0;
+			Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
+			Key backupLogValuesKey = destUidValue.withPrefix(backupLogKeys.begin);
+			Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
+			Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
+			int displaySystemKeys = 0;
 
 			// Ensure that there is no left over key within the backup subspace
 			loop {
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
 				TraceEvent("RW_CheckLeftoverKeys", self->randomID).detail("BackupTag", printable(self->backupTag));
 
-				try {
-					// Check the left over tasks
-					// We have to wait for the list to empty since an abort and get status
-					// can leave extra tasks in the queue
-					TraceEvent("RW_CheckLeftoverTasks", self->randomID).detail("BackupTag", printable(self->backupTag));
-					state int64_t taskCount = wait(backupAgent.getTaskCount(tr));
-					state int waitCycles = 0;
+				{
+					Error err;
+					try {
+						// Check the left over tasks
+						// We have to wait for the list to empty since an abort and get status
+						// can leave extra tasks in the queue
+						TraceEvent("RW_CheckLeftoverTasks", self->randomID)
+						    .detail("BackupTag", printable(self->backupTag));
+						int64_t taskCount = co_await backupAgent.getTaskCount(tr);
+						int waitCycles = 0;
 
-					while (taskCount > 0) {
-						waitCycles++;
+						while (taskCount > 0) {
+							waitCycles++;
 
-						TraceEvent("RW_NonzeroTaskWait", self->randomID)
-						    .detail("BackupTag", printable(self->backupTag))
-						    .detail("TaskCount", taskCount)
-						    .detail("WaitCycles", waitCycles);
-						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
-						       now(),
-						       self->randomID.toString().c_str(),
-						       waitCycles,
-						       (long long)taskCount);
-
-						wait(delay(5.0));
-
-						tr = makeReference<ReadYourWritesTransaction>(cx);
-						wait(store(taskCount, backupAgent.getTaskCount(tr)));
-					}
-
-					RangeResult agentValues =
-					    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
-
-					// Error if the system keyspace for the backup tag is not empty
-					if (agentValues.size() > 0) {
-						displaySystemKeys++;
-						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
-						       agentValues.size(),
-						       printable(backupAgentKey).c_str());
-						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", self->randomID)
-						    .detail("BackupTag", printable(self->backupTag))
-						    .detail("LeftOverKeys", agentValues.size())
-						    .detail("KeySpace", printable(backupAgentKey));
-						for (auto& s : agentValues) {
-							TraceEvent("RW_LeftOverKey", self->randomID)
-							    .detail("Key", printable(StringRef(s.key.toString())))
-							    .detail("Value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n",
-							       printable(StringRef(s.key.toString())).c_str(),
-							       printable(StringRef(s.value.toString())).c_str());
-						}
-					} else {
-						printf("No left over backup agent configuration keys\n");
-					}
-
-					Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
-					if (latestVersion.present()) {
-						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", self->randomID)
-						    .detail("BackupTag", printable(self->backupTag))
-						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
-						    .detail("DestUidValue", destUidValue.printable());
-					} else {
-						printf("No left over backup version key\n");
-					}
-
-					RangeResult versions = wait(tr->getRange(
-					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
-					if (!self->shareLogRange || !versions.size()) {
-						RangeResult logValues = wait(
-						    tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
-
-						// Error if the log/mutation keyspace for the backup tag  is not empty
-						if (logValues.size() > 0) {
-							displaySystemKeys++;
-							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
-							       logValues.size(),
-							       printable(backupLogValuesKey).c_str());
-							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", self->randomID)
+							TraceEvent("RW_NonzeroTaskWait", self->randomID)
 							    .detail("BackupTag", printable(self->backupTag))
-							    .detail("LeftOverKeys", logValues.size())
-							    .detail("KeySpace", printable(backupLogValuesKey));
-						} else {
-							printf("No left over backup log keys\n");
-						}
-					}
+							    .detail("TaskCount", taskCount)
+							    .detail("WaitCycles", waitCycles);
+							printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
+							       now(),
+							       self->randomID.toString().c_str(),
+							       waitCycles,
+							       (long long)taskCount);
 
-					break;
-				} catch (Error& e) {
-					TraceEvent("RW_CheckException", self->randomID).error(e);
-					wait(tr->onError(e));
+							co_await delay(5.0);
+
+							tr = makeReference<ReadYourWritesTransaction>(cx);
+							co_await store(taskCount, backupAgent.getTaskCount(tr));
+						}
+
+						RangeResult agentValues =
+						    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
+
+						// Error if the system keyspace for the backup tag is not empty
+						if (agentValues.size() > 0) {
+							displaySystemKeys++;
+							printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
+							       agentValues.size(),
+							       printable(backupAgentKey).c_str());
+							TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", self->randomID)
+							    .detail("BackupTag", printable(self->backupTag))
+							    .detail("LeftOverKeys", agentValues.size())
+							    .detail("KeySpace", printable(backupAgentKey));
+							for (auto& s : agentValues) {
+								TraceEvent("RW_LeftOverKey", self->randomID)
+								    .detail("Key", printable(StringRef(s.key.toString())))
+								    .detail("Value", printable(StringRef(s.value.toString())));
+								printf("   Key: %-50s  Value: %s\n",
+								       printable(StringRef(s.key.toString())).c_str(),
+								       printable(StringRef(s.value.toString())).c_str());
+							}
+						} else {
+							printf("No left over backup agent configuration keys\n");
+						}
+
+						Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
+						if (latestVersion.present()) {
+							TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", self->randomID)
+							    .detail("BackupTag", printable(self->backupTag))
+							    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
+							    .detail("DestUidValue", destUidValue.printable());
+						} else {
+							printf("No left over backup version key\n");
+						}
+
+						RangeResult versions = co_await tr->getRange(
+						    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
+						if (!self->shareLogRange || !versions.size()) {
+							RangeResult logValues = co_await tr->getRange(
+							    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
+
+							// Error if the log/mutation keyspace for the backup tag  is not empty
+							if (logValues.size() > 0) {
+								displaySystemKeys++;
+								printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
+								       logValues.size(),
+								       printable(backupLogValuesKey).c_str());
+								TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", self->randomID)
+								    .detail("BackupTag", printable(self->backupTag))
+								    .detail("LeftOverKeys", logValues.size())
+								    .detail("KeySpace", printable(backupLogValuesKey));
+							} else {
+								printf("No left over backup log keys\n");
+							}
+						}
+
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					TraceEvent("RW_CheckException", self->randomID).error(err);
+					co_await tr->onError(err);
 				}
 			}
 
 			if (displaySystemKeys) {
-				wait(TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef()));
+				co_await TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef());
 			}
 
 			TraceEvent("RW_Complete", self->randomID).detail("BackupTag", printable(self->backupTag));
@@ -360,7 +364,6 @@ struct RestoreWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestorePartitionedCorrectness").error(e).GetLastError();
 			throw;
 		}
-		return Void();
 	}
 };
 

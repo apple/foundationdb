@@ -268,7 +268,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		return _setup(cx, this);
 	}
 
-	ACTOR Future<Void> _setup(Database cx, BackupS3BlobCorrectnessWorkload* self) {
+	Future<Void> _setup(Database cx, BackupS3BlobCorrectnessWorkload* self) {
 		// S3-specific: Register MockS3Server or MockS3ServerChaos for blobstore URLs in simulation
 		// Only client 0 registers the server to avoid duplicates
 		// Persistence is automatically enabled in registration
@@ -283,7 +283,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 			if (self->enableChaos) {
 				NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
-				wait(startMockS3ServerChaos(listenAddress));
+				co_await startMockS3ServerChaos(listenAddress);
 
 				// Configure chaos rates
 				auto injector = S3FaultInjector::injector();
@@ -302,7 +302,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				    .detail("CorruptionRate", self->corruptionRate)
 				    .detail("MaxDelay", self->maxDelay);
 			} else {
-				wait(registerMockS3Server("127.0.0.1", "8080"));
+				co_await registerMockS3Server("127.0.0.1", "8080");
 				TraceEvent("BS3BCW_RegisteredMockS3")
 				    .detail("Address", "127.0.0.1:8080")
 				    .detail("ClientId", self->clientId);
@@ -313,7 +313,6 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		self->backupRanges.push_back_deep(self->backupRanges.arena(), normalKeys);
 		self->restoreRanges.push_back_deep(self->restoreRanges.arena(), normalKeys);
 
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -329,43 +328,43 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
+	static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
-			wait(backupAgent->taskBucket->changePause(cx, deterministicRandom()->coinflip()));
-			wait(delay(30 * deterministicRandom()->random01()));
+			co_await backupAgent->taskBucket->changePause(cx, deterministicRandom()->coinflip());
+			co_await delay(30 * deterministicRandom()->random01());
 		}
 	}
 
-	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
-		state FileBackupAgent agent;
+	static Future<Void> statusLoop(Database cx, std::string tag) {
+		FileBackupAgent agent;
 		loop {
-			bool active = wait(agent.checkActive(cx));
+			bool active = co_await agent.checkActive(cx);
 			TraceEvent("BS3BCW_AgentActivityCheck").detail("IsActive", active);
-			std::string statusText = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			std::string statusText = co_await agent.getStatus(cx, ShowErrors::True, tag);
 			// S3-specific: Suppress backup status output during testing to reduce noise
 			// puts(statusText.c_str());
-			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
+			std::string statusJSON = co_await agent.getStatusJSON(cx, tag);
 			// puts(statusJSON.c_str());
-			wait(delay(2.0));
+			co_await delay(2.0);
 		}
 	}
 
 	// Wait for a backup to become restorable, with retries
 	// This handles cases where cluster recoveries delay snapshot completion
-	ACTOR static Future<Void> waitForRestorable(Reference<IBackupContainer> backupContainer, int maxAttempts) {
-		state int restorabilityCheckAttempts = 0;
-		state bool isRestorable = false;
-		state int64_t lastSnapshotBytes = 0;
+	static Future<Void> waitForRestorable(Reference<IBackupContainer> backupContainer, int maxAttempts) {
+		int restorabilityCheckAttempts = 0;
+		bool isRestorable = false;
+		int64_t lastSnapshotBytes = 0;
 
 		while (!isRestorable && restorabilityCheckAttempts < maxAttempts) {
-			BackupDescription desc = wait(backupContainer->describeBackup());
+			BackupDescription desc = co_await backupContainer->describeBackup();
 			isRestorable = desc.maxRestorableVersion.present();
 			lastSnapshotBytes = desc.snapshotBytes;
 			if (!isRestorable) {
 				TraceEvent("BS3BCW_WaitingForRestorable")
 				    .detail("Attempt", restorabilityCheckAttempts)
 				    .detail("SnapshotBytes", lastSnapshotBytes);
-				wait(delay(2.0));
+				co_await delay(2.0);
 				restorabilityCheckAttempts++;
 			}
 		}
@@ -373,7 +372,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// Do one final check after the loop to catch snapshots that completed
 		// between the last check and now
 		if (!isRestorable) {
-			BackupDescription finalDesc = wait(backupContainer->describeBackup());
+			BackupDescription finalDesc = co_await backupContainer->describeBackup();
 			isRestorable = finalDesc.maxRestorableVersion.present();
 			lastSnapshotBytes = finalDesc.snapshotBytes;
 			if (isRestorable) {
@@ -392,27 +391,26 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("AttemptsNeeded", restorabilityCheckAttempts)
 		    .detail("SnapshotBytes", lastSnapshotBytes);
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> doBackup(BackupS3BlobCorrectnessWorkload* self,
-	                                   double startDelay,
-	                                   FileBackupAgent* backupAgent,
-	                                   Database cx,
-	                                   Key tag,
-	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   double stopDifferentialDelay,
-	                                   Promise<Void> submitted) {
+	static Future<Void> doBackup(BackupS3BlobCorrectnessWorkload* self,
+	                             double startDelay,
+	                             FileBackupAgent* backupAgent,
+	                             Database cx,
+	                             Key tag,
+	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                             double stopDifferentialDelay,
+	                             Promise<Void> submitted) {
 
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		// Increment the backup agent requests
 		if (self->agentRequest) {
 			BackupS3BlobCorrectnessWorkload::backupAgentRequests++;
 		}
 
-		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
-		wait(delay(startDelay));
+		Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
+		co_await delay(startDelay);
 
 		// S3-specific: Conditional cleanup matching original BackupCorrectness behavior
 		// Only abort existing backups on first call (startDelay > 0) or randomly (BUGGIFY)
@@ -423,7 +421,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			    .detail("StartDelay", startDelay);
 
 			try {
-				wait(backupAgent->abortBackup(cx, tag.toString()));
+				co_await backupAgent->abortBackup(cx, tag.toString());
 			} catch (Error& e) {
 				TraceEvent("BS3BCW_DoBackupAbortBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded)
@@ -433,9 +431,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		TraceEvent("BS3BCW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
 
-		state EBackupState statusValue;
+		EBackupState statusValue;
 		try {
-			EBackupState _statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::False));
+			EBackupState _statusValue = co_await backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::False);
 			statusValue = _statusValue;
 		} catch (Error& e) {
 			// If backup_unneeded, it means there's no active backup (possibly completed from previous test)
@@ -454,14 +452,14 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		if (statusValue == EBackupState::STATE_COMPLETED) {
 			TraceEvent("BS3BCW_DoBackupDiscontinued", randomID).detail("Tag", printable(tag));
-			return Void();
+			co_return;
 		}
 
 		if (statusValue != EBackupState::STATE_NEVERRAN) {
 			TraceEvent("BS3BCW_DoBackupAbortBackup2", randomID).detail("Tag", printable(tag));
 
 			try {
-				wait(backupAgent->abortBackup(cx, tag.toString()));
+				co_await backupAgent->abortBackup(cx, tag.toString());
 			} catch (Error& e) {
 				TraceEvent("BS3BCW_DoBackupAbortBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded)
@@ -474,24 +472,24 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		// S3-specific: Use configurable backup URL and snapshot intervals
-		state std::string backupContainer = self->backupURL;
-		state Future<Void> status = statusLoop(cx, tag.toString());
+		std::string backupContainer = self->backupURL;
+		Future<Void> status = statusLoop(cx, tag.toString());
 
 		// Testing v1 (non-partitioned) backup approach
 		// This does not require backup workers
 		try {
-			wait(backupAgent->submitBackup(cx,
-			                               StringRef(backupContainer),
-			                               {},
-			                               self->initSnapshotInterval,
-			                               self->snapshotInterval,
-			                               tag.toString(),
-			                               backupRanges,
-			                               StopWhenDone{ !stopDifferentialDelay },
-			                               UsePartitionedLog::False,
-			                               IncrementalBackupOnly::False,
-			                               self->encryptionKeyFileName,
-			                               self->snapshotMode));
+			co_await backupAgent->submitBackup(cx,
+			                                   StringRef(backupContainer),
+			                                   {},
+			                                   self->initSnapshotInterval,
+			                                   self->snapshotInterval,
+			                                   tag.toString(),
+			                                   backupRanges,
+			                                   StopWhenDone{ !stopDifferentialDelay },
+			                                   UsePartitionedLog::False,
+			                                   IncrementalBackupOnly::False,
+			                                   self->encryptionKeyFileName,
+			                                   self->snapshotMode);
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -505,11 +503,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("DifferentialAfter", stopDifferentialDelay);
 
 		try {
-			wait(success(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True)));
+			co_await success(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
 		} catch (Error& e) {
 			if (e.code() == error_code_backup_unneeded) {
 				TraceEvent("BS3BCW_DoBackupWaitToDiscontinueUnneeded", randomID).detail("Tag", printable(tag));
-				return Void();
+				co_return;
 			}
 			throw;
 		}
@@ -517,11 +515,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_DoBackupDiscontinueBackup", randomID).detail("Tag", printable(tag));
 
 		try {
-			wait(backupAgent->discontinueBackup(cx, tag));
+			co_await backupAgent->discontinueBackup(cx, tag);
 		} catch (Error& e) {
 			if (e.code() == error_code_backup_unneeded) {
 				TraceEvent("BS3BCW_DoBackupDiscontinueBackupUnneeded", randomID).detail("Tag", printable(tag));
-				return Void();
+				co_return;
 			}
 			throw;
 		}
@@ -529,23 +527,22 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_DoBackupWaitForDiscontinued", randomID).detail("Tag", printable(tag));
 
 		try {
-			wait(success(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True)));
+			co_await success(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
 		} catch (Error& e) {
 			if (e.code() == error_code_backup_unneeded) {
 				TraceEvent("BS3BCW_DoBackupWaitForDiscontinuedUnneeded", randomID).detail("Tag", printable(tag));
-				return Void();
+				co_return;
 			}
 			throw;
 		}
 
 		TraceEvent("BS3BCW_DoBackupComplete", randomID).detail("Tag", printable(tag));
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, BackupS3BlobCorrectnessWorkload* self) {
-		state FileBackupAgent backupAgent;
-		state Future<Void> stopDifferentialBackup = delay(self->stopDifferentialAfter);
+	static Future<Void> _start(Database cx, BackupS3BlobCorrectnessWorkload* self) {
+		FileBackupAgent backupAgent;
+		Future<Void> stopDifferentialBackup = delay(self->stopDifferentialAfter);
 
 		TraceEvent("BS3BCW_Arguments")
 		    .detail("BackupAfter", self->backupAfter)
@@ -564,7 +561,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		if (self->agentRequest) {
 			TraceEvent("BS3BCW_CleanupOnRestart").detail("Tag", printable(self->backupTag));
 			try {
-				wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
+				co_await backupAgent.abortBackup(cx, self->backupTag.toString());
 			} catch (Error& e) {
 				if (e.code() != error_code_backup_unneeded)
 					throw;
@@ -576,29 +573,29 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// handles cleanup properly on its own.
 
 		if (self->agentRequest) {
-			state Promise<Void> submitted;
-			state Future<Void> b = doBackup(self,
-			                                self->backupAfter,
-			                                &backupAgent,
-			                                cx,
-			                                self->backupTag,
-			                                self->backupRanges,
-			                                self->stopDifferentialAfter,
-			                                submitted);
+			Promise<Void> submitted;
+			Future<Void> b = doBackup(self,
+			                          self->backupAfter,
+			                          &backupAgent,
+			                          cx,
+			                          self->backupTag,
+			                          self->backupRanges,
+			                          self->stopDifferentialAfter,
+			                          submitted);
 
 			if (self->abortAndRestartAfter) {
 				TraceEvent("BS3BCW_AbortAndRestartAfter").detail("AbortAndRestartAfter", self->abortAndRestartAfter);
-				wait(submitted.getFuture());
-				wait(delay(self->abortAndRestartAfter - self->backupAfter));
+				co_await submitted.getFuture();
+				co_await delay(self->abortAndRestartAfter - self->backupAfter);
 				TraceEvent("BS3BCW_AbortBackup").detail("Tag", printable(self->backupTag));
 				try {
-					wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
+					co_await backupAgent.abortBackup(cx, self->backupTag.toString());
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded)
 						throw;
 				}
 				TraceEvent("BS3BCW_AbortComplete").detail("Tag", printable(self->backupTag));
-				wait(b);
+				co_await b;
 				TraceEvent("BS3BCW_RestartBackup").detail("Tag", printable(self->backupTag));
 				b = doBackup(self,
 				             0,
@@ -614,37 +611,37 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				// Adaptive timing: Wait for backup to complete, then wait additional time
 				// This ensures the backup metadata is written before restore starts
 				TraceEvent("BS3BCW_WaitingForBackupCompletion").detail("WaitingForBackup", true);
-				wait(b);
+				co_await b;
 				TraceEvent("BS3BCW_BackupCompleted").detail("BackupFinished", true);
 
 				// Wait additional time after backup completes for metadata to be written
 				if (self->restoreStartAfterBackupFinished > 0) {
 					TraceEvent("BS3BCW_WaitingAfterBackupComplete")
 					    .detail("DelaySeconds", self->restoreStartAfterBackupFinished);
-					wait(delay(self->restoreStartAfterBackupFinished));
+					co_await delay(self->restoreStartAfterBackupFinished);
 				}
 
 				TraceEvent("BS3BCW_StartingRestore").detail("RestoreStarting", true);
 
 				// Get the backup container to restore from
-				state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
-				UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx.getReference()));
-				state UID logUid = uidFlag.first;
-				state Reference<IBackupContainer> lastBackupContainer =
-				    wait(BackupConfig(logUid).backupContainer().getD(cx.getReference()));
+				KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+				UID logUid = uidFlag.first;
+				Reference<IBackupContainer> lastBackupContainer =
+				    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
 				// Wait for backup to become restorable if it's still in progress
 				// Increased timeout for complex multi-region configs
 				if (lastBackupContainer) {
-					wait(waitForRestorable(lastBackupContainer, 150));
+					co_await waitForRestorable(lastBackupContainer, 150);
 
 					// Generate a lock UID for the entire clear+restore operation
-					state UID lockUID = deterministicRandom()->randomUniqueID();
+					UID lockUID = deterministicRandom()->randomUniqueID();
 
 					// Lock the database to prevent other workloads from seeing inconsistent state
 					// during clear+restore. This makes workloads like Cycle get database_locked
 					// errors (retriable) instead of encountering missing keys.
-					wait(lockDatabase(cx, lockUID));
+					co_await lockDatabase(cx, lockUID);
 
 					TraceEvent("BS3BCW_DatabaseLocked")
 					    .detail("LockUID", lockUID)
@@ -657,8 +654,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					// 4. audit_storage validate_restore compares normalKeys vs prefixed data
 
 					// Prefix for validation - restored data goes to system keyspace
-					state Key validationPrefix = "\xff\x02/rlog/"_sr;
-					state Key validationPrefixEnd = "\xff\x02/rlog0"_sr;
+					Key validationPrefix = "\xff\x02/rlog/"_sr;
+					Key validationPrefixEnd = "\xff\x02/rlog0"_sr;
 
 					if (self->performValidation) {
 						// Step 1: Restore with prefix using TRADITIONAL (rangefile) mode
@@ -669,25 +666,25 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						Standalone<StringRef> validationRestoreTag(self->backupTag.toString() + "_validate");
 						try {
 							Version validationVersion =
-							    wait(backupAgent.restore(cx,
-							                             cx,
-							                             validationRestoreTag,
-							                             KeyRef(lastBackupContainer->getURL()),
-							                             lastBackupContainer->getProxy(),
-							                             self->restoreRanges,
-							                             WaitForComplete::True,
-							                             ::invalidVersion,
-							                             Verbose::True,
-							                             validationPrefix, // addPrefix
-							                             Key(), // removePrefix
-							                             LockDB::False, // already locked
-							                             UnlockDB::False, // don't unlock yet
-							                             OnlyApplyMutationLogs::False,
-							                             InconsistentSnapshotOnly::False,
-							                             ::invalidVersion,
-							                             lastBackupContainer->getEncryptionKeyFileName(),
-							                             lockUID,
-							                             true)); // useRangeFileRestore = true (traditional mode)
+							    co_await backupAgent.restore(cx,
+							                                 cx,
+							                                 validationRestoreTag,
+							                                 KeyRef(lastBackupContainer->getURL()),
+							                                 lastBackupContainer->getProxy(),
+							                                 self->restoreRanges,
+							                                 WaitForComplete::True,
+							                                 ::invalidVersion,
+							                                 Verbose::True,
+							                                 validationPrefix, // addPrefix
+							                                 Key(), // removePrefix
+							                                 LockDB::False, // already locked
+							                                 UnlockDB::False, // don't unlock yet
+							                                 OnlyApplyMutationLogs::False,
+							                                 InconsistentSnapshotOnly::False,
+							                                 ::invalidVersion,
+							                                 lastBackupContainer->getEncryptionKeyFileName(),
+							                                 lockUID,
+							                                 true); // useRangeFileRestore = true (traditional mode)
 
 							TraceEvent("BS3BCW_ValidationStep1_Complete")
 							    .detail("ValidationVersion", validationVersion)
@@ -701,13 +698,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					// Step 2: Clear the backup ranges before restoring (unless skipDirtyRestore is true)
 					if (!self->skipDirtyRestore) {
 						TraceEvent("BS3BCW_ClearingNormalKeys");
-						wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 							for (auto& kvrange : self->backupRanges)
 								tr->clear(kvrange);
 							return Void();
-						}));
+						});
 					}
 
 					// Step 3: Perform the restore (with BulkLoad if configured)
@@ -720,25 +717,25 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
 					// Pass lockDB=False since we already locked, unlockDB=True to release when done,
 					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
-					Version v = wait(backupAgent.restore(cx,
-					                                     cx,
-					                                     restoreTag,
-					                                     KeyRef(lastBackupContainer->getURL()),
-					                                     lastBackupContainer->getProxy(),
-					                                     self->restoreRanges,
-					                                     WaitForComplete::True,
-					                                     ::invalidVersion,
-					                                     Verbose::True,
-					                                     Key(),
-					                                     Key(),
-					                                     LockDB::False,
-					                                     UnlockDB::True,
-					                                     OnlyApplyMutationLogs::False,
-					                                     InconsistentSnapshotOnly::False,
-					                                     ::invalidVersion,
-					                                     lastBackupContainer->getEncryptionKeyFileName(),
-					                                     lockUID,
-					                                     self->useRangeFileRestore));
+					Version v = co_await backupAgent.restore(cx,
+					                                         cx,
+					                                         restoreTag,
+					                                         KeyRef(lastBackupContainer->getURL()),
+					                                         lastBackupContainer->getProxy(),
+					                                         self->restoreRanges,
+					                                         WaitForComplete::True,
+					                                         ::invalidVersion,
+					                                         Verbose::True,
+					                                         Key(),
+					                                         Key(),
+					                                         LockDB::False,
+					                                         UnlockDB::True,
+					                                         OnlyApplyMutationLogs::False,
+					                                         InconsistentSnapshotOnly::False,
+					                                         ::invalidVersion,
+					                                         lastBackupContainer->getEncryptionKeyFileName(),
+					                                         lockUID,
+					                                         self->useRangeFileRestore);
 
 					TraceEvent("BS3BCW_RestoreComplete")
 					    .detail("BackupTag", printable(self->backupTag))
@@ -759,24 +756,28 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						TraceEvent("BS3BCW_ValidationStep4_AuditStarting")
 						    .detail("Comparing", "BulkLoad-restored (normalKeys) vs traditional-restored (prefix)");
 
-						state Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
-						state UID auditId;
-						state int auditRetryCount = 0;
-						state int maxAuditRetries = 5;
+						Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
+						UID auditId;
+						int auditRetryCount = 0;
+						int maxAuditRetries = 5;
 
-						state Error auditError;
+						Error auditError;
 						loop {
-							try {
-								UID scheduleResult = wait(timeoutError(auditStorage(clusterFile,
-								                                                    normalKeys,
-								                                                    AuditType::ValidateRestore,
-								                                                    KeyValueStoreType::END,
-								                                                    300.0),
-								                                       60.0));
-								auditId = scheduleResult;
-								break;
-							} catch (Error& e) {
-								auditError = e;
+							{
+								Error err;
+								try {
+									UID scheduleResult = co_await timeoutError(auditStorage(clusterFile,
+									                                                        normalKeys,
+									                                                        AuditType::ValidateRestore,
+									                                                        KeyValueStoreType::END,
+									                                                        300.0),
+									                                           60.0);
+									auditId = scheduleResult;
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								auditError = err;
 								if (auditError.code() == error_code_timed_out ||
 								    auditError.code() == error_code_audit_storage_failed) {
 									auditRetryCount++;
@@ -784,7 +785,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 										TraceEvent(SevWarn, "BS3BCW_ValidationAuditRetry")
 										    .error(auditError)
 										    .detail("RetryCount", auditRetryCount);
-										wait(delay(2.0 * auditRetryCount));
+										co_await delay(2.0 * auditRetryCount);
 										continue;
 									}
 								}
@@ -795,15 +796,15 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						TraceEvent("BS3BCW_ValidationAuditScheduled").detail("AuditID", auditId);
 
 						// Monitor audit progress
-						state double auditStartTime = now();
-						state double maxAuditWaitTime = 300.0;
-						state AuditPhase finalPhase = AuditPhase::Invalid;
+						double auditStartTime = now();
+						double maxAuditWaitTime = 300.0;
+						AuditPhase finalPhase = AuditPhase::Invalid;
 
 						loop {
-							wait(delay(5.0));
+							co_await delay(5.0);
 
 							std::vector<AuditStorageState> auditStates =
-							    wait(getAuditStates(cx, AuditType::ValidateRestore, true));
+							    co_await getAuditStates(cx, AuditType::ValidateRestore, true);
 
 							for (const auto& auditState : auditStates) {
 								if (auditState.id == auditId) {
@@ -841,12 +842,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						    .detail("Result", "BulkLoad produces identical results to traditional restore");
 
 						// Step 5: Clean up validation data from system keyspace
-						wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 							tr->clear(KeyRangeRef(validationPrefix, validationPrefixEnd));
 							return Void();
-						}));
+						});
 
 						TraceEvent("BS3BCW_ValidationComplete")
 						    .detail("BackupTag", printable(self->backupTag))
@@ -865,10 +866,9 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				ASSERT(bulkDumpCount > 0);
 			}
 
-			wait(b);
+			co_await b;
 		}
 
-		return Void();
 	}
 };
 

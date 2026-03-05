@@ -54,47 +54,52 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 
 	Key keyForIndex(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 
-	ACTOR static Future<Void> ddRWClient(Database cx, DataDistributionMetricsWorkload* self) {
+	static Future<Void> ddRWClient(Database cx, DataDistributionMetricsWorkload* self) {
 		loop {
-			state ReadYourWritesTransaction tr(cx);
-			state int i;
+			ReadYourWritesTransaction tr(cx);
+			int i{ 0 };
+			Error err;
 			try {
 				for (i = 0; i < self->readPerTx; ++i)
-					wait(success(
-					    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount))))); // read
+					co_await success(
+					    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)))); // read
 				for (i = 0; i < self->writePerTx; ++i)
 					tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)),
 					       getRandomValue()); // write
-				wait(tr.commit());
+				co_await tr.commit();
 				++self->commits;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::TIMEOUT,
 			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
+			Error err;
 			try {
-				wait(delay(self->delayPerLoop));
+				co_await delay(self->delayPerLoop);
 				int startIndex = deterministicRandom()->randomInt(0, self->nodeCount - 1);
 				int endIndex = deterministicRandom()->randomInt(startIndex + 1, self->nodeCount);
-				state Key startKey = self->keyForIndex(startIndex);
-				state Key endKey = self->keyForIndex(endIndex);
-				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the starting
-				// point, this key selector will never do cross_module_range_read. In addition, the first key in the
-				// result will be the last one <= startKey (Condition #1)
-				state KeySelector begin =
+				Key startKey = self->keyForIndex(startIndex);
+				Key endKey = self->keyForIndex(endIndex);
+				// Find the last key <= startKey and use as the begin of the range. Since "Key()" is always the
+				// starting point, this key selector will never do cross_module_range_read. In addition, the first
+				// key in the result will be the last one <= startKey (Condition #1)
+				KeySelector begin =
 				    KeySelectorRef(startKey.withPrefix(ddStatsRange.begin, startKey.arena()), true, 0);
-				// Find the last key less than endKey, move forward 2 keys, and use this key as the (exclusive) end of
-				// the range. If we didn't read through the end of the range, then the second last key
-				// in the result will be the last key less than endKey. (Condition #2)
-				state KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
-				RangeResult result = wait(tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+				// Find the last key less than endKey, move forward 2 keys, and use this key as the (exclusive) end
+				// of the range. If we didn't read through the end of the range, then the second last key in the
+				// result will be the last key less than endKey. (Condition #2)
+				KeySelector end = KeySelectorRef(endKey.withPrefix(ddStatsRange.begin, endKey.arena()), false, 2);
+				RangeResult result = co_await tr->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
 				// Condition #1 and #2 can be broken if multiple rpc calls happened in one getRange
 				if (result.size() > 1) {
 					if (result[0].key > begin.getKey() || result[1].key <= begin.getKey()) {
@@ -129,37 +134,42 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 					// 	    .detail("EndKeySelector", end);
 				}
 			} catch (Error& e) {
-				// Ignore timed_out error and cross_module_read, the end key selector may read through the end
-				if (e.code() == error_code_timed_out || e.code() == error_code_transaction_timed_out) {
-					tr->reset();
-					continue;
-				}
-				wait(tr->onError(e));
+				err = e;
+			}
+			// Ignore timed_out error and cross_module_read, the end key selector may read through the end
+			if (err.isValid() &&
+			    (err.code() == error_code_timed_out || err.code() == error_code_transaction_timed_out)) {
+				tr->reset();
+				continue;
+			}
+			if (err.isValid()) {
+				co_await tr->onError(err);
 			}
 		}
 	}
 
-	ACTOR static Future<bool> _check(Database cx, DataDistributionMetricsWorkload* self) {
+	static Future<bool> _check(Database cx, DataDistributionMetricsWorkload* self) {
 		if (self->errors.getValue() > 0) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "GetRange Results Inconsistent");
-			return false;
+			co_return false;
 		}
 		// TODO : find why this not work
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		state int i;
-		state int retries = 0;
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		int i{ 0 };
+		int retries = 0;
 		loop {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::TIMEOUT,
 			              StringRef((uint8_t*)&self->transactionTimeLimit, sizeof(int64_t)));
+			Error err;
 			try {
-				state RangeResult result = wait(tr->getRange(ddStatsRange, CLIENT_KNOBS->TOO_MANY));
+				RangeResult result = co_await tr->getRange(ddStatsRange, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!result.more);
 				self->numShards = result.size();
 				// There's no guarantee that #shards <= CLIENT_KNOBS->SHARD_COUNT_LIMIT all the time
 				ASSERT(self->numShards >= 1);
-				state int64_t totalBytes = 0;
+				int64_t totalBytes = 0;
 				auto schema = readJSONStrictly(JSONSchemas::dataDistributionStatsSchema.toString()).get_obj();
 				for (i = 0; i < result.size(); ++i) {
 					ASSERT(result[i].key.startsWith(ddStatsRange.begin));
@@ -169,35 +179,36 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 					if (!schemaMatch(schema, valueObj, errorStr, SevError, true)) {
 						TraceEvent(SevError, "DataDistributionStatsSchemaValidationFailed")
 						    .detail("ErrorStr", errorStr.c_str())
-						    .detail("JSON", json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
-						return false;
+						    .detail("JSON",
+						            json_spirit::write_string(json_spirit::mValue(result[i].value.toString())));
+						co_return false;
 					}
 					totalBytes += valueObj["shard_bytes"].get_int64();
 				}
 				self->avgBytes = totalBytes / self->numShards;
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_timed_out || e.code() == error_code_transaction_timed_out) {
-					tr->reset();
-					// The RPC call may in some corner cases get no response
-					if (++retries > 10)
-						break;
-					continue;
-				}
-				wait(tr->onError(e));
+				err = e;
 			}
+			if (err.code() == error_code_timed_out || err.code() == error_code_transaction_timed_out) {
+				tr->reset();
+				// The RPC call may in some corner cases get no response
+				if (++retries > 10)
+					break;
+				continue;
+			}
+			co_await tr->onError(err);
 		}
-		return true;
+		co_return true;
 	}
 
-	ACTOR Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
+	Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
 		std::vector<Future<Void>> clients;
 		clients.push_back(self->resultConsistencyCheckClient(cx, self));
 		for (int i = 0; i < self->actorCount; ++i)
 			clients.push_back(self->ddRWClient(cx, self));
-		wait(timeout(waitForAll(clients), self->testDuration, Void()));
-		wait(delay(5.0));
-		return Void();
+		co_await timeout(waitForAll(clients), self->testDuration, Void());
+		co_await delay(5.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

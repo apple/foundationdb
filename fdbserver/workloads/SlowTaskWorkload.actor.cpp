@@ -40,8 +40,8 @@ struct SlowTaskWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> go() {
-		wait(delay(1));
+	static Future<Void> go() {
+		co_await delay(1);
 		int64_t phc = dl_iterate_phdr_calls;
 		int64_t startProfilesDisabled = getNumProfilesDisabled();
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
@@ -64,7 +64,6 @@ struct SlowTaskWorkload : TestWorkload {
 		           getNumProfilesOverflowed() - startProfilesOverflowed,
 		           getNumProfilesCaptured() - startProfilesCaptured);
 
-		return Void();
 	}
 
 	static void do_slow_exception_thing(int64_t* exc_count) {

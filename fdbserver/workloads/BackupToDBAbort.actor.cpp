@@ -50,23 +50,22 @@ struct BackupToDBAbort : TestWorkload {
 		return _setup(this, cx);
 	}
 
-	ACTOR static Future<Void> _setup(BackupToDBAbort* self, Database cx) {
-		state DatabaseBackupAgent backupAgent(cx);
+	static Future<Void> _setup(BackupToDBAbort* self, Database cx) {
+		DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("BDBA_Submit1").log();
-			wait(backupAgent.submitBackup(self->extraDB,
-			                              BackupAgentBase::getDefaultTag(),
-			                              self->backupRanges,
-			                              StopWhenDone::False,
-			                              StringRef(),
-			                              StringRef(),
-			                              LockDB::True));
+			co_await backupAgent.submitBackup(self->extraDB,
+			                                  BackupAgentBase::getDefaultTag(),
+			                                  self->backupRanges,
+			                                  StopWhenDone::False,
+			                                  StringRef(),
+			                                  StringRef(),
+			                                  LockDB::True);
 			TraceEvent("BDBA_Submit2").log();
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_duplicate)
 				throw;
 		}
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -75,19 +74,19 @@ struct BackupToDBAbort : TestWorkload {
 		return _start(this, cx);
 	}
 
-	ACTOR static Future<Void> _start(BackupToDBAbort* self, Database cx) {
-		state DatabaseBackupAgent backupAgent(cx);
+	static Future<Void> _start(BackupToDBAbort* self, Database cx) {
+		DatabaseBackupAgent backupAgent(cx);
 
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
-		wait(delay(self->abortDelay));
+		co_await delay(self->abortDelay);
 		TraceEvent("BDBA_Wait").log();
-		wait(success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False)));
+		co_await success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False));
 		TraceEvent("BDBA_Lock").log();
-		wait(lockDatabase(cx, self->lockid));
+		co_await lockDatabase(cx, self->lockid);
 		TraceEvent("BDBA_Abort").log();
-		wait(backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
+		co_await backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag());
 		TraceEvent("BDBA_Unlock").log();
-		wait(backupAgent.unlockBackup(self->extraDB, BackupAgentBase::getDefaultTag()));
+		co_await backupAgent.unlockBackup(self->extraDB, BackupAgentBase::getDefaultTag());
 		TraceEvent("BDBA_End").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
@@ -95,15 +94,14 @@ struct BackupToDBAbort : TestWorkload {
 			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
-		return Void();
 	}
 
-	ACTOR static Future<bool> _check(BackupToDBAbort* self, Database cx) {
+	static Future<bool> _check(BackupToDBAbort* self, Database cx) {
 		TraceEvent("BDBA_UnlockPrimary").log();
 		// Too much of the tester framework expects the primary database to be unlocked, so we unlock it
 		// once all of the workloads have finished.
-		wait(unlockDatabase(cx, self->lockid));
-		return true;
+		co_await unlockDatabase(cx, self->lockid);
+		co_return true;
 	}
 
 	Future<bool> check(const Database& cx) override { return _check(this, cx); }

@@ -75,44 +75,48 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 
 	// for each boundary except the last one in boundaries, found the first existed key generated from keyForIndex as
 	// beginIdx, found the last existed key generated from keyForIndex the endIdx.
-	ACTOR static Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx,
-	                                                                  SkewedReadWriteWorkload* self,
-	                                                                  Standalone<VectorRef<KeyRef>> boundaries) {
-		state IndexRangeVec res;
-		state int i = 0;
+	static Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx,
+	                                                            SkewedReadWriteWorkload* self,
+	                                                            Standalone<VectorRef<KeyRef>> boundaries) {
+		IndexRangeVec res;
+		int i = 0;
 		for (; i < boundaries.size() - 1; ++i) {
 			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i + 1]);
 			// std::cout << currentShard.toString() << "\n";
-			std::vector<RangeResult> ranges = wait(runRYWTransaction(
+			std::vector<RangeResult> ranges = co_await runRYWTransaction(
 			    cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeResult>> {
 				    std::vector<Future<RangeResult>> f;
 				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::False));
 				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::True));
 				    return getAll(f);
-			    }));
+			    });
 			ASSERT(ranges[0].size() == 1 && ranges[1].size() == 1);
 			res.emplace_back(self->indexForKey(ranges[0][0].key), self->indexForKey(ranges[1][0].key));
 		}
 
 		ASSERT(res.size() == boundaries.size() - 1);
-		return res;
+		co_return res;
 	}
 
-	ACTOR static Future<Void> updateServerShards(Database cx, SkewedReadWriteWorkload* self) {
-		state RangeResult serverList;
-		state RangeResult range;
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	static Future<Void> updateServerShards(Database cx, SkewedReadWriteWorkload* self) {
+		RangeResult serverList;
+		RangeResult range;
+		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		loop {
 			// read in transaction to ensure two key ranges are transactionally consistent
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
-				wait(store(serverList, serverListF));
-				wait(store(range, rangeF));
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+			{
+				Error err;
+				try {
+					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+					Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
+					co_await store(serverList, serverListF);
+					co_await store(range, rangeF);
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr->onError(err);
 			}
 		}
 		// decode server interfaces
@@ -129,7 +133,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		Key leftEdge(allKeys.begin);
 		std::vector<UID> leftServer; // left server owns the range [leftEdge, workloadBegin)
 		KeyRangeRef workloadRange(workloadBegin, workloadEnd);
-		state std::map<Key, std::vector<UID>> beginServers; // begin index to server ID
+		std::map<Key, std::vector<UID>> beginServers; // begin index to server ID
 
 		for (auto kv = range.begin(); kv != range.end(); kv++) {
 			if (serverHasKey(kv->value)) {
@@ -159,7 +163,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		// deep count because wait below will destruct workloadEnd
 		keyBegins.push_back_deep(keyBegins.arena(), workloadEnd);
 
-		IndexRangeVec indexShards = wait(convertKeyBoundaryToIndexShard(cx, self, keyBegins));
+		IndexRangeVec indexShards = co_await convertKeyBoundaryToIndexShard(cx, self, keyBegins);
 		ASSERT(beginServers.size() == indexShards.size());
 		// sort shard begin idx
 		// build self->serverShards, starting from the left shard
@@ -178,13 +182,12 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		//		if (self->clientId == 0) {
 		//			self->debugPrintServerShards();
 		//		}
-		return Void();
 	}
 
-	ACTOR template <class Trans>
+	template <class Trans>
 	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, SkewedReadWriteWorkload* self, bool shouldRecord) {
 		if (!keys.size())
-			return Void();
+			co_return;
 
 		std::vector<Future<Void>> readers;
 		for (int op = 0; op < keys.size(); op++) {
@@ -192,8 +195,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			readers.push_back(self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord));
 		}
 
-		wait(waitForAll(readers));
-		return Void();
+		co_await waitForAll(readers);
 	}
 
 	void startReadWriteClients(Database cx, std::vector<Future<Void>>& clients) {
@@ -209,22 +211,21 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	ACTOR static Future<Void> _start(Database cx, SkewedReadWriteWorkload* self) {
-		state std::vector<Future<Void>> clients;
+	static Future<Void> _start(Database cx, SkewedReadWriteWorkload* self) {
+		std::vector<Future<Void>> clients;
 		if (self->enableReadLatencyLogging)
 			clients.push_back(self->tracePeriodically());
 
-		wait(updateServerShards(cx, self));
+		co_await updateServerShards(cx, self);
 		for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
 			self->setHotServers();
 			self->startReadWriteClients(cx, clients);
-			wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
+			co_await timeout(waitForAll(clients), self->testDuration / self->skewRound, Void());
 			clients.clear();
-			wait(delay(5.0));
-			wait(updateServerShards(cx, self));
+			co_await delay(5.0);
+			co_await updateServerShards(cx, self);
 		}
 
-		return Void();
 	}
 
 	// calculate hot server count
@@ -264,23 +265,23 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		return deterministicRandom()->randomInt64(0, nodeCount);
 	}
 
-	ACTOR template <class Trans>
+	template <class Trans>
 	Future<Void> randomReadWriteClient(Database cx, SkewedReadWriteWorkload* self, double delay, int clientIndex) {
-		state double lastTime = now();
-		state double GRVStartTime;
-		state UID debugID;
+		double lastTime = now();
+		double GRVStartTime{ 0 };
+		UID debugID;
 
 		loop {
-			wait(poisson(&lastTime, delay));
+			co_await poisson(&lastTime, delay);
 
-			state double tstart = now();
-			state bool aTransaction = deterministicRandom()->random01() > self->alpha;
+			double tstart = now();
+			bool aTransaction = deterministicRandom()->random01() > self->alpha;
 
-			state std::vector<int64_t> keys;
-			state std::vector<Value> values;
-			state std::vector<KeyRange> extra_ranges;
+			std::vector<int64_t> keys;
+			std::vector<Value> values;
+			std::vector<KeyRange> extra_ranges;
 			int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
-			state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
+			int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
 			for (int op = 0; op < reads; op++)
 				keys.push_back(self->getRandomKey(self->nodeCount));
 
@@ -288,7 +289,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			for (int op = 0; op < writes; op++)
 				values.push_back(self->randomValue());
 
-			state Trans tr(cx);
+			Trans tr(cx);
 
 			if (tstart - self->clientBegin > self->debugTime &&
 			    tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
@@ -303,43 +304,47 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			self->transactionSuccessMetric->commitLatency = -1;
 
 			loop {
-				try {
-					GRVStartTime = now();
-					self->transactionFailureMetric->startLatency = -1;
+				{
+					Error err;
+					try {
+						GRVStartTime = now();
+						self->transactionFailureMetric->startLatency = -1;
 
-					double grvLatency = now() - GRVStartTime;
-					self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
-					self->transactionFailureMetric->startLatency = grvLatency * 1e9;
-					if (self->shouldRecord())
-						self->GRVLatencies.addSample(grvLatency);
+						double grvLatency = now() - GRVStartTime;
+						self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
+						self->transactionFailureMetric->startLatency = grvLatency * 1e9;
+						if (self->shouldRecord())
+							self->GRVLatencies.addSample(grvLatency);
 
-					state double readStart = now();
-					wait(self->readOp(&tr, keys, self, self->shouldRecord()));
+						double readStart = now();
+						co_await self->readOp(&tr, keys, self, self->shouldRecord());
 
-					double readLatency = now() - readStart;
-					if (self->shouldRecord())
-						self->fullReadLatencies.addSample(readLatency);
+						double readLatency = now() - readStart;
+						if (self->shouldRecord())
+							self->fullReadLatencies.addSample(readLatency);
 
-					if (!writes)
+						if (!writes)
+							break;
+
+						for (int op = 0; op < writes; op++)
+							tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
+
+						double commitStart = now();
+						co_await tr.commit();
+
+						double commitLatency = now() - commitStart;
+						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
+						if (self->shouldRecord())
+							self->commitLatencies.addSample(commitLatency);
+
 						break;
-
-					for (int op = 0; op < writes; op++)
-						tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
-
-					state double commitStart = now();
-					wait(tr.commit());
-
-					double commitLatency = now() - commitStart;
-					self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
-					if (self->shouldRecord())
-						self->commitLatencies.addSample(commitLatency);
-
-					break;
-				} catch (Error& e) {
-					self->transactionFailureMetric->errorCode = e.code();
+					} catch (Error& e) {
+						err = e;
+					}
+					self->transactionFailureMetric->errorCode = err.code();
 					self->transactionFailureMetric->log();
 
-					wait(tr.onError(e));
+					co_await tr.onError(err);
 
 					++self->transactionSuccessMetric->retries;
 					++self->totalRetriesMetric;

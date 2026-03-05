@@ -42,16 +42,17 @@ struct SuspendProcessesWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	ACTOR Future<Void> _start(Database cx, SuspendProcessesWorkload* self) {
-		wait(delay(self->waitTimeDuration));
-		state ReadYourWritesTransaction tr(cx);
+	Future<Void> _start(Database cx, SuspendProcessesWorkload* self) {
+		co_await delay(self->waitTimeDuration);
+		ReadYourWritesTransaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				RangeResult kvs =
-				    wait(tr.getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
-				                     CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs = co_await tr.getRange(
+				    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+				    CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!kvs.more);
 				std::vector<Standalone<StringRef>> suspendProcessInterfaces;
 				for (auto it : kvs) {
@@ -68,10 +69,11 @@ struct SuspendProcessesWorkload : TestWorkload {
 					BinaryReader::fromStringRef<ClientWorkerInterface>(interf, IncludeVersion())
 					    .reboot.send(RebootRequest(false, false, self->suspendTimeDuration));
 				}
-				return Void();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 

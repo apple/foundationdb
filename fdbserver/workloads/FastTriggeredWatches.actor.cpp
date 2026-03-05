@@ -54,22 +54,23 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(Database cx, FastTriggeredWatchesWorkload* self) {
-		state Transaction tr(cx);
+	Future<Void> _setup(Database cx, FastTriggeredWatchesWorkload* self) {
+		Transaction tr(cx);
 
 		loop {
+			Error err;
 			try {
 				for (int i = 0; i < self->nodes; i += 2)
 					tr.set(self->keyForIndex(i), self->defaultValue);
 
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -78,74 +79,80 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Version> setter(Database cx, Key key, Optional<Value> value) {
-		state ReadYourWritesTransaction tr(cx);
+	Future<Version> setter(Database cx, Key key, Optional<Value> value) {
+		ReadYourWritesTransaction tr(cx);
 		// set the value of key and return the commit version
-		wait(delay(deterministicRandom()->random01()));
+		co_await delay(deterministicRandom()->random01());
 		loop {
+			Error err;
 			try {
 				if (value.present())
 					tr.set(key, value.get());
 				else
 					tr.clear(key);
 				//TraceEvent("FTWSetBegin").detail("Key", printable(key)).detail("Value", printable(value));
-				wait(tr.commit());
+				co_await tr.commit();
 				//TraceEvent("FTWSetEnd").detail("Key", printable(key)).detail("Value", printable(value)).detail("Ver", tr.getCommittedVersion());
-				return tr.getCommittedVersion();
+				co_return tr.getCommittedVersion();
 			} catch (Error& e) {
-				//TraceEvent("FTWSetError").error(e).detail("Key", printable(key)).detail("Value", printable(value));
-				wait(tr.onError(e));
+				err = e;
 			}
+			//TraceEvent("FTWSetError").error(e).detail("Key", printable(key)).detail("Value", printable(value));
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> _start(Database cx, FastTriggeredWatchesWorkload* self) {
-		state double testStart = now();
-		state Version lastReadVersion = 0;
+	static Future<Void> _start(Database cx, FastTriggeredWatchesWorkload* self) {
+		double testStart = now();
+		Version lastReadVersion = 0;
 		try {
 			loop {
-				state double getDuration = 0;
-				state double watchEnd = 0;
-				state bool watchCommitted = false;
-				state Key setKey = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes));
-				state Optional<Value> setValue;
+				double getDuration = 0;
+				double watchEnd = 0;
+				bool watchCommitted = false;
+				Key setKey = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes));
+				Optional<Value> setValue;
 				if (deterministicRandom()->random01() > 0.5)
 					setValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
 				// Set the value at setKey to something random
-				state Future<Version> setFuture = self->setter(cx, setKey, setValue);
-				wait(delay(deterministicRandom()->random01()));
-				state Version watchCommitVersion = 0;
+				Future<Version> setFuture = self->setter(cx, setKey, setValue);
+				co_await delay(deterministicRandom()->random01());
+				Version watchCommitVersion = 0;
 				loop {
-					state ReadYourWritesTransaction tr(cx);
+					ReadYourWritesTransaction tr(cx);
 
+					Error err;
 					try {
-						Optional<Value> val = wait(tr.get(setKey));
+						Optional<Value> val = co_await tr.get(setKey);
 						if (watchCommitted) {
 							getDuration = now() - watchEnd;
 						}
 						lastReadVersion = tr.getReadVersion().get();
 						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
-						// if the value is already setValue then there is no point setting a watch so break out of the
-						// loop
+						// if the value is already setValue then there is no point setting a watch so break out of
+						// the loop
 						if (val == setValue)
 							break;
 						ASSERT(!watchCommitted);
 						tr.addWriteConflictRange(singleKeyRange(""_sr));
 						// set a watch and wait for it to be triggered (i.e for self->setter to set the value)
-						state Future<Void> watchFuture = tr.watch(setKey);
-						wait(tr.commit());
+						Future<Void> watchFuture = tr.watch(setKey);
+						co_await tr.commit();
 						watchCommitVersion = tr.getCommittedVersion();
 
 						//TraceEvent("FTWStartWatch").detail("Key", printable(setKey));
-						wait(watchFuture);
+						co_await watchFuture;
 						watchEnd = now();
 						watchCommitted = true;
 					} catch (Error& e) {
-						//TraceEvent("FTWWatchError").error(e).detail("Key", printable(setKey));
-						wait(tr.onError(e));
+						err = e;
+					}
+					//TraceEvent("FTWWatchError").error(e).detail("Key", printable(setKey));
+					if (err.isValid()) {
+						co_await tr.onError(err);
 					}
 				}
-				Version keySetVersion = wait(setFuture);
+				Version keySetVersion = co_await setFuture;
 				int64_t versionDelta = lastReadVersion - std::max(keySetVersion, watchCommitVersion);
 				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
 				// Assert that the time from setting the key to triggering the watch is no greater than 25s
@@ -155,7 +162,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				if (now() - testStart > self->testDuration)
 					break;
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			TraceEvent(SevError, "FastWatchError").errorUnsuppressed(e);
 			throw;

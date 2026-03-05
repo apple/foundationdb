@@ -50,10 +50,10 @@ struct LogMetricsWorkload : TestWorkload {
 		return _start(cx, this);
 	}
 
-	ACTOR Future<Void> setSystemRate(LogMetricsWorkload* self, Database cx, uint32_t rate) {
+	Future<Void> setSystemRate(LogMetricsWorkload* self, Database cx, uint32_t rate) {
 		// set worker interval and ss interval
-		state BinaryWriter br(Unversioned());
-		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		BinaryWriter br(Unversioned());
+		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 		// std::vector<Future<Void>> replies;
 		TraceEvent("RateChangeTrigger").log();
 		SetMetricsLogRateRequest req(rate);
@@ -64,31 +64,33 @@ struct LogMetricsWorkload : TestWorkload {
 
 		br << rate;
 		loop {
-			state Transaction tr(cx);
-			try {
-				wait(success(tr.getReadVersion()));
-				tr.set(fastLoggingEnabled, br.toValue());
-				tr.makeSelfConflicting();
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			Transaction tr(cx);
+			{
+				Error err;
+				try {
+					co_await success(tr.getReadVersion());
+					tr.set(fastLoggingEnabled, br.toValue());
+					tr.makeSelfConflicting();
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				co_await tr.onError(err);
 			}
 		}
 
-		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, LogMetricsWorkload* self) {
-		wait(delay(self->logAt));
+	Future<Void> _start(Database cx, LogMetricsWorkload* self) {
+		co_await delay(self->logAt);
 
-		wait(self->setSystemRate(self, cx, self->logsPerSecond));
-		wait(timeout(recurring(&systemMonitor, 1.0 / self->logsPerSecond), self->logDuration, Void()));
+		co_await self->setSystemRate(self, cx, self->logsPerSecond);
+		co_await timeout(recurring(&systemMonitor, 1.0 / self->logsPerSecond), self->logDuration, Void());
 
 		// We're done, set everything back
-		wait(self->setSystemRate(self, cx, 1.0));
+		co_await self->setSystemRate(self, cx, 1.0);
 
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

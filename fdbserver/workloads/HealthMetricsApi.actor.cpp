@@ -64,20 +64,18 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		maxAllowedStaleness = getOption(options, "maxAllowedStaleness"_sr, 60.0);
 	}
 
-	ACTOR static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
+	static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
 		if (!self->sendDetailedHealthMetrics) {
 			// Internally cached health metrics time out after this knob.  Wait
 			// an extra second to avoid any off-by-1 ">" vs ">=" type issues.
-			wait(delay(1 + CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS));
+			co_await delay(1 + CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS);
 			cx->healthMetrics.storageStats.clear();
 			cx->healthMetrics.tLogQueue.clear();
 		}
-		return Void();
 	}
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	ACTOR static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
-		wait(timeout(healthMetricsChecker(cx, self), self->testDuration, Void()));
-		return Void();
+	static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
+		co_await timeout(healthMetricsChecker(cx, self), self->testDuration, Void());
 	}
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -139,12 +137,12 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		m.emplace_back("DetailedWorstDiskUsage", detailedWorstDiskUsage, Averaged::True);
 	}
 
-	ACTOR static Future<Void> healthMetricsChecker(Database cx, HealthMetricsApiWorkload* self) {
-		state int repeated = 0;
-		state HealthMetrics healthMetrics;
+	static Future<Void> healthMetricsChecker(Database cx, HealthMetricsApiWorkload* self) {
+		int repeated = 0;
+		HealthMetrics healthMetrics;
 		loop {
-			wait(delay(self->healthMetricsCheckInterval));
-			HealthMetrics newHealthMetrics = wait(cx->getHealthMetrics(self->sendDetailedHealthMetrics));
+			co_await delay(self->healthMetricsCheckInterval);
+			HealthMetrics newHealthMetrics = co_await cx->getHealthMetrics(self->sendDetailedHealthMetrics);
 			if (healthMetrics == newHealthMetrics) {
 				if (++repeated > self->maxAllowedStaleness / self->healthMetricsCheckInterval)
 					self->healthMetricsStoppedUpdating = true;

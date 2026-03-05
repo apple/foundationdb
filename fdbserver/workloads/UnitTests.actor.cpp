@@ -157,8 +157,8 @@ struct UnitTestWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Void> runUnitTests(UnitTestWorkload* self) {
-		state std::vector<UnitTest*> tests;
+	static Future<Void> runUnitTests(UnitTestWorkload* self) {
+		std::vector<UnitTest*> tests;
 
 		for (auto test = g_unittests.tests; test != nullptr; test = test->next) {
 			if (self->testMatched(test->name)) {
@@ -178,16 +178,16 @@ struct UnitTestWorkload : TestWorkload {
 			    .detail("TestPattern", self->testPattern)
 			    .detail("TestsIgnored", self->testsIgnored);
 			++self->testsFailed;
-			return Void();
+			co_return;
 		}
 
 		deterministicRandom()->randomShuffle(tests);
 		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit)
 			tests.resize(self->testRunLimit);
 
-		state std::vector<UnitTest*>::iterator t;
+		std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {
-			state UnitTest* test = *t;
+			UnitTest* test = *t;
 			printf("Testing %s\n", test->name);
 
 			TraceEvent(SevInfo, "RunningUnitTest")
@@ -196,13 +196,13 @@ struct UnitTestWorkload : TestWorkload {
 			    .detail("Line", test->line)
 			    .detail("Rand", deterministicRandom()->randomInt(0, 100001));
 
-			state Error result = success();
-			state double start_now = now();
-			state double start_timer = timer();
+			Error result = success();
+			double start_now = now();
+			double start_timer = timer();
 
 			platform::createDirectory(self->testParams.getDataDir());
 			try {
-				wait(test->func(self->testParams));
+				co_await test->func(self->testParams);
 			} catch (Error& e) {
 				++self->testsFailed;
 				result = e;
@@ -225,7 +225,6 @@ struct UnitTestWorkload : TestWorkload {
 			    .detail("FlowTime", simTime);
 		}
 
-		return Void();
 	}
 };
 

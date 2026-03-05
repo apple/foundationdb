@@ -76,18 +76,16 @@ struct ResolverBugWorkload : TestWorkload {
 		return IWorkloadFactory::create("Cycle", wcx);
 	}
 
-	ACTOR static Future<Void> waitForPhase(std::shared_ptr<ResolverBug> bug, int phase) {
+	static Future<Void> waitForPhase(std::shared_ptr<ResolverBug> bug, int phase) {
 		while (bug->currentPhase != phase) {
-			wait(delay(0.5));
+			co_await delay(0.5);
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> waitForPhaseDone(std::shared_ptr<ResolverBug> bug, int phase, int clientCount) {
+	static Future<Void> waitForPhaseDone(std::shared_ptr<ResolverBug> bug, int phase, int clientCount) {
 		while (std::count(bug->cycleState.begin(), bug->cycleState.end(), phase) != clientCount) {
-			wait(delay(0.5));
+			co_await delay(0.5);
 		}
-		return Void();
 	}
 
 	struct ReportTraces {
@@ -107,46 +105,46 @@ struct ResolverBugWorkload : TestWorkload {
 		}
 	};
 
-	ACTOR static Future<Void> driveWorkload(std::shared_ptr<ResolverBug> bug, int clientCount) {
-		state ReportTraces _;
-		state OnTestFailure onTestFailure(bug);
-		state ProcessEvents::Event ev("TraceEvent::TestFailure"_sr, onTestFailure);
+	static Future<Void> driveWorkload(std::shared_ptr<ResolverBug> bug, int clientCount) {
+		ReportTraces _;
+		OnTestFailure onTestFailure(bug);
+		ProcessEvents::Event ev("TraceEvent::TestFailure"_sr, onTestFailure);
 		loop {
 			bug->currentPhase = 1;
-			wait(waitForPhaseDone(bug, 1, clientCount));
+			co_await waitForPhaseDone(bug, 1, clientCount);
 			SimBugInjector().enable();
 			bug->currentPhase = 2;
-			wait(waitForPhaseDone(bug, 2, clientCount));
+			co_await waitForPhaseDone(bug, 2, clientCount);
 			SimBugInjector().disable();
 			bug->currentPhase = 3;
-			wait(waitForPhaseDone(bug, 3, clientCount));
+			co_await waitForPhaseDone(bug, 3, clientCount);
 		}
 	}
 
-	ACTOR static Future<Void> _start(ResolverBugWorkload* self, Database cx) {
-		state Reference<TestWorkload> cycle;
-		state std::shared_ptr<ResolverBug> bug = SimBugInjector().get<ResolverBug>(ResolverBugID(), true);
+	static Future<Void> _start(ResolverBugWorkload* self, Database cx) {
+		Reference<TestWorkload> cycle;
+		std::shared_ptr<ResolverBug> bug = SimBugInjector().get<ResolverBug>(ResolverBugID(), true);
 		loop {
-			wait(waitForPhase(bug, 1));
+			co_await waitForPhase(bug, 1);
 			cycle = self->createCycle();
-			wait(cycle->setup(cx));
+			co_await cycle->setup(cx);
 			bug->cycleState[self->clientId] = 1;
-			wait(waitForPhase(bug, 2));
-			wait(cycle->start(cx));
+			co_await waitForPhase(bug, 2);
+			co_await cycle->start(cx);
 			bug->cycleState[self->clientId] = 2;
-			wait(waitForPhase(bug, 3));
-			wait(success(cycle->check(cx)));
+			co_await waitForPhase(bug, 3);
+			co_await success(cycle->check(cx));
 			bug->cycleState[self->clientId] = 3;
 		}
 	}
 
-	ACTOR static Future<Void> onBug(std::shared_ptr<ResolverBug> bug) {
+	static Future<Void> onBug(std::shared_ptr<ResolverBug> bug) {
 		loop {
 			if (bug->bugFound) {
 				TraceEvent("NegativeTestSuccess").log();
-				return Void();
+				co_return;
 			}
-			wait(delay(0.5));
+			co_await delay(0.5);
 		}
 	}
 

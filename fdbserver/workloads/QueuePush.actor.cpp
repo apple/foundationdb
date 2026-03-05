@@ -94,35 +94,35 @@ struct QueuePushWorkload : TestWorkload {
 			throw client_invalid_operation();
 	}
 
-	ACTOR Future<Void> _start(Database cx, QueuePushWorkload* self) {
+	Future<Void> _start(Database cx, QueuePushWorkload* self) {
 		for (int i = 0; i < self->actorCount; i++) {
 			self->clients.push_back(self->writeClient(cx, self));
 		}
 
-		wait(timeout(waitForAll(self->clients), self->testDuration, Void()));
+		co_await timeout(waitForAll(self->clients), self->testDuration, Void());
 		self->clients.clear();
-		return Void();
 	}
 
-	ACTOR Future<Void> writeClient(Database cx, QueuePushWorkload* self) {
+	Future<Void> writeClient(Database cx, QueuePushWorkload* self) {
 		loop {
-			state Transaction tr(cx);
+			Transaction tr(cx);
 			loop {
+				Error err;
 				try {
-					state double start = now();
-					wait(success(tr.getReadVersion()));
+					double start = now();
+					co_await success(tr.getReadVersion());
 					self->GRVLatencies.addSample(now() - start);
 
 					// Get the last key in the database with a snapshot read
-					state Key lastKey;
+					Key lastKey;
 
 					if (self->forward) {
-						Key _lastKey = wait(tr.getKey(lastLessThan(self->endingKey), Snapshot::True));
+						Key _lastKey = co_await tr.getKey(lastLessThan(self->endingKey), Snapshot::True);
 						lastKey = _lastKey;
 						if (lastKey == StringRef())
 							lastKey = self->startingKey;
 					} else {
-						Key _lastKey = wait(tr.getKey(firstGreaterThan(self->startingKey), Snapshot::True));
+						Key _lastKey = co_await tr.getKey(firstGreaterThan(self->startingKey), Snapshot::True);
 						lastKey = _lastKey;
 						if (!normalKeys.contains(lastKey))
 							lastKey = self->endingKey;
@@ -131,20 +131,23 @@ struct QueuePushWorkload : TestWorkload {
 					std::pair<int, int> unpacked = valuesForKey(lastKey);
 
 					if (self->forward)
-						tr.set(keyForIndex(unpacked.first + unpacked.second, deterministicRandom()->randomInt(1, 1000)),
+						tr.set(keyForIndex(unpacked.first + unpacked.second,
+						                   deterministicRandom()->randomInt(1, 1000)),
 						       StringRef(self->valueString));
 					else
-						tr.set(keyForIndex(unpacked.first - unpacked.second, deterministicRandom()->randomInt(1, 1000)),
+						tr.set(keyForIndex(unpacked.first - unpacked.second,
+						                   deterministicRandom()->randomInt(1, 1000)),
 						       StringRef(self->valueString));
 
 					start = now();
-					wait(tr.commit());
+					co_await tr.commit();
 					self->commitLatencies.addSample(now() - start);
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
-					++self->retries;
+					err = e;
 				}
+				co_await tr.onError(err);
+				++self->retries;
 			}
 			++self->transactions;
 		}

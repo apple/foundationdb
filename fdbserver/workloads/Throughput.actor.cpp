@@ -97,16 +97,16 @@ struct RWTransactor : ITransactor {
 		return rwTransaction(db, Reference<RWTransactor>::addRef(this), stats);
 	}
 
-	ACTOR static Future<Optional<Value>> getLatency(Future<Optional<Value>> f, double* t) {
-		Optional<Value> v = wait(f);
+	static Future<Optional<Value>> getLatency(Future<Optional<Value>> f, double* t) {
+		Optional<Value> v = co_await f;
 		*t += now();
-		return v;
+		co_return v;
 	}
 
-	ACTOR static Future<Void> rwTransaction(Database db, Reference<RWTransactor> self, Stats* stats) {
-		state std::vector<Key> keys;
-		state std::vector<Value> values;
-		state Transaction tr(db);
+	static Future<Void> rwTransaction(Database db, Reference<RWTransactor> self, Stats* stats) {
+		std::vector<Key> keys;
+		std::vector<Value> values;
+		Transaction tr(db);
 
 		for (int op = 0; op < self->reads || op < self->writes; op++)
 			keys.push_back(self->randomKey());
@@ -115,21 +115,22 @@ struct RWTransactor : ITransactor {
 			values.push_back(self->randomValue());
 
 		loop {
+			Error err;
 			try {
-				state double t_start = now();
-				wait(success(tr.getReadVersion()));
-				state double t_rv = now();
-				state double rrLatency = -t_rv * self->reads;
+				double t_start = now();
+				co_await success(tr.getReadVersion());
+				double t_rv = now();
+				double rrLatency = -t_rv * self->reads;
 
-				state std::vector<Future<Optional<Value>>> reads;
+				std::vector<Future<Optional<Value>>> reads;
 				reads.reserve(self->reads);
 				for (int i = 0; i < self->reads; i++)
 					reads.push_back(getLatency(tr.get(keys[i]), &rrLatency));
-				wait(waitForAll(reads));
+				co_await waitForAll(reads);
 				for (int i = 0; i < self->writes; i++)
 					tr.set(keys[i], values[i]);
-				state double t_beforeCommit = now();
-				wait(tr.commit());
+				double t_beforeCommit = now();
+				co_await tr.commit();
 
 				stats->transactions++;
 				stats->reads += self->reads;
@@ -139,12 +140,12 @@ struct RWTransactor : ITransactor {
 				stats->rowReadLatency += rrLatency / self->reads;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
-				stats->retries++;
+				err = e;
 			}
+			co_await tr.onError(err);
+			stats->retries++;
 		}
 
-		return Void();
 	}
 };
 
@@ -281,12 +282,12 @@ struct MeasurePeriodically : IMeasurer {
 		msp.start();
 	}
 
-	ACTOR static Future<Void> periodicActor(MeasurePeriodically* self) {
-		state double startT = now();
-		state double elapsed = 0;
+	static Future<Void> periodicActor(MeasurePeriodically* self) {
+		double startT = now();
+		double elapsed = 0;
 		loop {
 			elapsed += self->period;
-			wait(delayUntil(startT + elapsed));
+			co_await delayUntil(startT + elapsed);
 			self->nextPeriod(elapsed);
 		}
 	}
@@ -392,13 +393,13 @@ struct ThroughputWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	ACTOR static Future<Void> throughputActor(Database db, ThroughputWorkload* self, PromiseStream<Future<Void>> add) {
-		state double before = now();
-		state ITransactor::Stats stats;
-		wait(self->op->doTransaction(db, &stats));
-		state double after = now();
+	static Future<Void> throughputActor(Database db, ThroughputWorkload* self, PromiseStream<Future<Void>> add) {
+		double before = now();
+		ITransactor::Stats stats;
+		co_await self->op->doTransaction(db, &stats);
+		double after = now();
 
-		wait(delay(0.0));
+		co_await delay(0.0);
 		stats.totalLatency = after - before;
 		self->measurer->addTransaction(&stats, after);
 
@@ -428,7 +429,6 @@ struct ThroughputWorkload : TestWorkload {
 			successors = 1;
 		for (int s = 0; s < successors; s++)
 			add.send(throughputActor(db, self, add));
-		return Void();
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { measurer->getMetrics(m); }

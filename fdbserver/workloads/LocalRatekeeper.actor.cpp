@@ -25,21 +25,27 @@
 
 namespace {
 
-ACTOR Future<StorageServerInterface> getRandomStorage(Database cx) {
-	state Transaction tr(cx);
+Future<StorageServerInterface> getRandomStorage(Database cx) {
+	Transaction tr(cx);
 	loop {
-		try {
-			tr.reset();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			RangeResult range = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
-			if (range.size() > 0) {
-				auto idx = deterministicRandom()->randomInt(0, range.size());
-				return decodeServerListValue(range[idx].value);
-			} else {
-				wait(delay(1.0));
+		{
+			Error err;
+			try {
+				tr.reset();
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				RangeResult range = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				if (range.size() > 0) {
+					auto idx = deterministicRandom()->randomInt(0, range.size());
+					co_return decodeServerListValue(range[idx].value);
+				} else {
+					co_await delay(1.0);
+				}
+			} catch (Error& e) {
+				err = e;
 			}
-		} catch (Error& e) {
-			wait(tr.onError(e));
+			if (err.isValid()) {
+				co_await tr.onError(err);
+			}
 		}
 	}
 }
@@ -57,13 +63,13 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		    options, "blockWritesFor"_sr, double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
 
-	ACTOR static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
-		state Transaction tr(cx);
-		state std::vector<Future<GetValueReply>> requests;
+	static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
+		Transaction tr(cx);
+		std::vector<Future<GetValueReply>> requests;
 		requests.reserve(100);
 		loop {
-			state StorageQueuingMetricsReply metrics =
-			    wait(brokenPromiseToNever(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{})));
+			StorageQueuingMetricsReply metrics =
+			    co_await brokenPromiseToNever(ssi.getQueuingMetrics.getReply(StorageQueuingMetricsRequest{}));
 			auto durabilityLag = metrics.version - metrics.durableVersion;
 			double expectedRateLimit = 1.0;
 			if (durabilityLag >= SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) {
@@ -82,14 +88,18 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				    .detail("Actual", metrics.localRateLimit);
 			}
 			tr.reset();
-			state Version readVersion = invalidVersion;
+			Version readVersion = invalidVersion;
 			loop {
-				try {
-					Version v = wait(tr.getReadVersion());
-					readVersion = v;
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+				{
+					Error err;
+					try {
+						Version v = co_await tr.getReadVersion();
+						readVersion = v;
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					co_await tr.onError(err);
 				}
 			}
 			requests.clear();
@@ -101,7 +111,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				req.key = "/lkfs"_sr;
 				requests.emplace_back(brokenPromiseToNever(ssi.getValue.getReply(req)));
 			}
-			wait(waitForAllReady(requests));
+			co_await waitForAllReady(requests);
 			int failedRequests = 0;
 			int errors = 0;
 			for (const auto& resp : requests) {
@@ -118,21 +128,20 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			}
 			TraceEvent("RejectedVersions").detail("NumRejected", failedRequests);
 			if (self->testFailed) {
-				return Void();
+				co_return;
 			}
-			wait(delay(5.0));
+			co_await delay(5.0);
 		}
 	}
 
-	ACTOR static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
-		wait(delay(self->startAfter));
-		state StorageServerInterface ssi = wait(getRandomStorage(cx));
+	static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
+		co_await delay(self->startAfter);
+		StorageServerInterface ssi = co_await getRandomStorage(cx);
 		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
-		state Future<Void> done = delay(self->blockWritesFor);
+		Future<Void> done = delay(self->blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
-		wait(delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6)));
-		wait(testStorage(self, cx, ssi) || done);
-		return Void();
+		co_await delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6));
+		co_await (testStorage(self, cx, ssi) || done);
 	}
 
 	Future<Void> start(Database const& cx) override {

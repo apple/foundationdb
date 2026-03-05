@@ -45,41 +45,30 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	ACTOR static Future<Void> runAllocationTransaction(Database cx, HighContentionPrefixAllocatorWorkload* self) {
-		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
+	static Future<Void> runAllocationTransaction(Database cx, HighContentionPrefixAllocatorWorkload* self) {
+		Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 
-		state int numAllocations = deterministicRandom()->randomInt(1, self->maxAllocationsPerTransaction + 1);
+		int numAllocations = deterministicRandom()->randomInt(1, self->maxAllocationsPerTransaction + 1);
 		self->expectedPrefixes += numAllocations;
 
 		loop {
-			try {
-				state std::vector<Future<Key>> futures;
-				for (int i = 0; i < numAllocations; ++i) {
-					futures.push_back(self->allocator.allocate(tr));
-				}
-
-				wait(waitForAll(futures));
-				wait(tr->commit());
-
-				for (auto f : futures) {
-					Key prefix = f.get();
-
-					// There should be no previously allocated prefix that is prefixed by our newly allocated one
-					auto itr = self->allocatedPrefixes.lower_bound(prefix);
-					if (itr != self->allocatedPrefixes.end() && itr->startsWith(prefix)) {
-						TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
-						    .detail("Reason", "Prefix collision")
-						    .detail("AllocatedPrefix", prefix)
-						    .detail("PreviousPrefix", *itr);
-
-						ASSERT(false);
+			{
+				Error err;
+				try {
+					std::vector<Future<Key>> futures;
+					for (int i = 0; i < numAllocations; ++i) {
+						futures.push_back(self->allocator.allocate(tr));
 					}
 
-					// There should be no previously allocated prefix that is a prefix of our newly allocated one
-					if (itr != self->allocatedPrefixes.begin()) {
-						--itr;
+					co_await waitForAll(futures);
+					co_await tr->commit();
 
-						if (prefix.startsWith(*itr)) {
+					for (auto f : futures) {
+						Key prefix = f.get();
+
+						// There should be no previously allocated prefix that is prefixed by our newly allocated one
+						auto itr = self->allocatedPrefixes.lower_bound(prefix);
+						if (itr != self->allocatedPrefixes.end() && itr->startsWith(prefix)) {
 							TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 							    .detail("Reason", "Prefix collision")
 							    .detail("AllocatedPrefix", prefix)
@@ -87,23 +76,37 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 							ASSERT(false);
 						}
+
+						// There should be no previously allocated prefix that is a prefix of our newly allocated one
+						if (itr != self->allocatedPrefixes.begin()) {
+							--itr;
+
+							if (prefix.startsWith(*itr)) {
+								TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
+								    .detail("Reason", "Prefix collision")
+								    .detail("AllocatedPrefix", prefix)
+								    .detail("PreviousPrefix", *itr);
+
+								ASSERT(false);
+							}
+						}
+
+						// This is technically redundant, but the prefix should not have been allocated previously
+						ASSERT(self->allocatedPrefixes.insert(f.get()).second);
 					}
 
-					// This is technically redundant, but the prefix should not have been allocated previously
-					ASSERT(self->allocatedPrefixes.insert(f.get()).second);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+				co_await tr->onError(err);
 			}
 		}
 
-		return Void();
 	}
 
-	ACTOR static Future<Void> runTest(Database cx, HighContentionPrefixAllocatorWorkload* self) {
-		state int roundNum = 0;
+	static Future<Void> runTest(Database cx, HighContentionPrefixAllocatorWorkload* self) {
+		int roundNum = 0;
 		for (; roundNum < self->numRounds; ++roundNum) {
 			std::vector<Future<Void>> futures;
 			int numTransactions = deterministicRandom()->randomInt(1, self->maxTransactionsPerRound + 1);
@@ -111,44 +114,48 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 				futures.push_back(runAllocationTransaction(cx, self));
 			}
 
-			wait(waitForAll(futures));
+			co_await waitForAll(futures);
 		}
 
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { return runTest(cx, this); }
 
-	ACTOR static Future<bool> _check(Database cx, HighContentionPrefixAllocatorWorkload* self) {
+	static Future<bool> _check(Database cx, HighContentionPrefixAllocatorWorkload* self) {
 		if (self->expectedPrefixes != self->allocatedPrefixes.size()) {
 			TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 			    .detail("Reason", "Incorrect Number of Prefixes Allocated")
 			    .detail("NumAllocated", self->allocatedPrefixes.size())
 			    .detail("Expected", self->expectedPrefixes);
 
-			return false;
+			co_return false;
 		}
 
-		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
+		Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 		loop {
-			try {
-				state Key k1 = wait(tr->getKey(firstGreaterOrEqual(""_sr)));
-				Key k2 = wait(tr->getKey(lastLessThan("\xff"_sr)));
-				if (!k1.startsWith(self->allocatorSubspace.key()) || !k2.startsWith(self->allocatorSubspace.key())) {
-					TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
-					    .detail("Reason", "Keys written outside allocator subspace")
-					    .detail("MinKey", k1)
-					    .detail("MaxKey", k2);
+			{
+				Error err;
+				try {
+					Key k1 = co_await tr->getKey(firstGreaterOrEqual(""_sr));
+					Key k2 = co_await tr->getKey(lastLessThan("\xff"_sr));
+					if (!k1.startsWith(self->allocatorSubspace.key()) ||
+					    !k2.startsWith(self->allocatorSubspace.key())) {
+						TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
+						    .detail("Reason", "Keys written outside allocator subspace")
+						    .detail("MinKey", k1)
+						    .detail("MaxKey", k2);
 
-					return false;
+						co_return false;
+					}
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
+				co_await tr->onError(err);
 			}
 		}
 
-		return true;
+		co_return true;
 	}
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 

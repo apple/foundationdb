@@ -28,11 +28,11 @@
 // If the log->storage propagation delay is longer than 1 second, then it's likely that our read
 // will see a `future_version` error from the storage server.  We need to retry the read until
 // a value is returned, or a different error is thrown.
-ACTOR Future<double> latencyOfRead(Transaction* tr, Key k) {
-	state double start = timer();
+Future<double> latencyOfRead(Transaction* tr, Key k) {
+	double start = timer();
 	loop {
 		try {
-			wait(success(tr->get(k)));
+			co_await success(tr->get(k));
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_future_version) {
@@ -41,7 +41,7 @@ ACTOR Future<double> latencyOfRead(Transaction* tr, Key k) {
 			throw;
 		}
 	}
-	return timer() - start;
+	co_return timer() - start;
 }
 
 // Measure the latency of a storage server making a committed value available for reading.
@@ -57,55 +57,59 @@ struct ReadAfterWriteWorkload : KVWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	ACTOR static Future<Void> benchmark(Database cx, ReadAfterWriteWorkload* self) {
+	static Future<Void> benchmark(Database cx, ReadAfterWriteWorkload* self) {
 		loop {
-			state Key key = self->getRandomKey();
-			state Transaction writeTr(cx);
-			state Transaction baselineReadTr(cx);
-			state Transaction afterWriteTr(cx);
+			Key key = self->getRandomKey();
+			Transaction writeTr(cx);
+			Transaction baselineReadTr(cx);
+			Transaction afterWriteTr(cx);
 
+			Error err;
 			try {
-				state Version readVersion = wait(writeTr.getReadVersion());
+				Version readVersion = co_await writeTr.getReadVersion();
 
 				// We do a read in this writeTransaction only to enforce that `readVersion` is already on a storage
-				// server after we commit.  Its existence or non-existence is irrelevant.  We write back the exact same
-				// value (or clear the key, if empty) so that the database state is not mutated.  This means this
-				// workload can be paired with any other workload, and it won't affect any results.
-				Optional<Value> value = wait(writeTr.get(key));
+				// server after we commit.  Its existence or non-existence is irrelevant.  We write back the exact
+				// same value (or clear the key, if empty) so that the database state is not mutated.  This means
+				// this workload can be paired with any other workload, and it won't affect any results.
+				Optional<Value> value = co_await writeTr.get(key);
 				if (value.present()) {
 					writeTr.set(key, value.get());
 				} else {
 					writeTr.clear(key);
 				}
 
-				wait(writeTr.commit());
+				co_await writeTr.commit();
 
 				Version commitVersion = writeTr.getCommittedVersion();
 
 				baselineReadTr.setVersion(readVersion);
 				afterWriteTr.setVersion(commitVersion);
 
-				state double baselineLatency = 0;
-				state double afterWriteLatency = 0;
+				double baselineLatency = 0;
+				double afterWriteLatency = 0;
 
-				wait(store(baselineLatency, latencyOfRead(&baselineReadTr, key)) &&
-				     store(afterWriteLatency, latencyOfRead(&afterWriteTr, key)));
+				co_await (store(baselineLatency, latencyOfRead(&baselineReadTr, key)) &&
+				          store(afterWriteLatency, latencyOfRead(&afterWriteTr, key)));
 
-				// By reading the same key at two different versions, we should be able to measure the latency of the
-				// network, the storage server overhead, and the propagation delay, and then with our baseline read,
-				// subtract out the network and the storage server overhead, leaving only the propagation delay.
+				// By reading the same key at two different versions, we should be able to measure the latency of
+				// the network, the storage server overhead, and the propagation delay, and then with our baseline
+				// read, subtract out the network and the storage server overhead, leaving only the propagation
+				// delay.
 				self->propagationLatency.addSample(std::max<double>(afterWriteLatency - baselineLatency, 0));
 			} catch (Error& e) {
-				wait(writeTr.onError(e));
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await writeTr.onError(err);
 			}
 		}
 	}
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-	ACTOR Future<Void> _start(Database cx, ReadAfterWriteWorkload* self) {
-		state Future<Void> lifetime = benchmark(cx, self);
-		wait(delay(self->testDuration));
-		return Void();
+	Future<Void> _start(Database cx, ReadAfterWriteWorkload* self) {
+		Future<Void> lifetime = benchmark(cx, self);
+		co_await delay(self->testDuration);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
