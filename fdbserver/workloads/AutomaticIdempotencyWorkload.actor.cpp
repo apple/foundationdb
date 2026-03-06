@@ -31,10 +31,11 @@ struct ValueType {
 
 	Value idempotencyId;
 	int64_t createdTime;
+	bool automatic;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, idempotencyId, createdTime);
+		serializer(ar, idempotencyId, createdTime, automatic);
 	}
 };
 } // namespace
@@ -122,7 +123,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    // If we don't set AUTOMATIC_IDEMPOTENCY the idempotency id won't automatically get cleaned up, so
 				    // it should create work for the cleaner.
 				    tr->setOption(FDBTransactionOptions::IDEMPOTENCY_ID, idempotencyId);
-				    if (deterministicRandom()->random01() < self->automaticPercentage) {
+					bool useAutomatic = deterministicRandom()->random01() < self->automaticPercentage;
+				    if (useAutomatic) {
 					    // We also want to exercise the automatic idempotency code path.
 					    tr->setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
 				    }
@@ -131,7 +133,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    memset(mutateString(suffix), 0, 10);
 				    memcpy(mutateString(suffix) + 10, &index, 4);
 				    tr->atomicOp(self->keyPrefix.withSuffix(suffix),
-				                 ObjectWriter::toValue(ValueType{ idempotencyId, int64_t(now()) }, Unversioned()),
+				                 ObjectWriter::toValue(ValueType{ idempotencyId, int64_t(now()), useAutomatic }, Unversioned()),
 				                 MutationRef::SetVersionstampedKey);
 				    return Future<Void>(Void());
 			    }));
@@ -297,39 +299,51 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 	}
 
+	// Only non-automatic IDs are deleted exclusively by the cleaner, so use them to track cleaner progress.
 	ACTOR static Future<int64_t> getOldestCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
 		state ReadYourWritesTransaction tr(db);
-		state Key key;
 		state Version commitVersion;
-
-		state RangeResult result = wait(runRYWTransaction(db, [](Reference<ReadYourWritesTransaction> tr) {
+		state int64_t timestamp;
+		state RangeResult idmp = wait(runRYWTransaction(db, [](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->getRange(idempotencyIdKeys, 1);
+			return tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
 		}));
 
-		if (result.empty()) {
+		if (idmp.empty()) {
 			TraceEvent("AutomaticIdempotencyNoIdsLeft").log();
 			return -1;
 		}
 
-		int64_t timestamp;
-		key = self->idempotencyKeyValueToTestKeys(result[0], &commitVersion, &timestamp)[0];
+		state int i = 0;
+		state int j = 0;
+		state std::vector<Key> keys;
 
-		// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
-		// be using a tenant.
-		Optional<Value> entry =
-		    wait(runRYWTransaction(db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
+		for (i = 0; i < idmp.size(); ++i) {
+			keys = self->idempotencyKeyValueToTestKeys(idmp[i], &commitVersion, &timestamp);
 
-		if (!entry.present()) {
-			TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
-			    .detail("Key", key)
-			    .detail("CommitVersion", commitVersion)
-			    .detail("ReadVersion", tr.getReadVersion().get());
+			for (j = 0; j < keys.size(); ++j) {
+				state Key key = keys[j];
+				state Optional<Value> entry =
+				    wait(runRYWTransaction(db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
+
+				if (!entry.present()) {
+					Version rv = wait(tr.getReadVersion());
+					TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
+						.detail("Key", key)
+						.detail("CommitVersion", commitVersion)
+						.detail("ReadVersion", rv);
+					ASSERT(entry.present());
+					continue;
+				}
+
+				auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
+				if (!e.automatic) {
+					return e.createdTime;
+				}
+			}
 		}
-		ASSERT(entry.present());
 
-		auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
-		return e.createdTime;
+		return -1;
 	}
 
 	ACTOR static Future<bool> testCleanerOneIteration(AutomaticIdempotencyWorkload* self,
@@ -410,9 +424,13 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
 		std::vector<int64_t> createdTimes;
+
+		// Only non-automatic IDs reflect cleaner progress; auto IDs can be deleted immediately.
 		for (const auto& [k, v] : result) {
 			auto e = ObjectReader::fromStringRef<ValueType>(v, Unversioned());
-			createdTimes.emplace_back(e.createdTime);
+			if (!e.automatic) {
+				createdTimes.emplace_back(e.createdTime);
+			}
 		}
 		std::sort(createdTimes.begin(), createdTimes.end());
 		return createdTimes;
