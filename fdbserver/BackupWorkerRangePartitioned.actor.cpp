@@ -24,6 +24,7 @@
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
+#include "fdbserver/BackupPartitionMap.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/WaitFailure.h"
@@ -44,19 +45,6 @@ struct RangePartitionedVersionedMessage {
 	size_t getEstimatedSize() const { return message.size() + TagsAndMessage::getHeaderSize(6); }
 };
 
-struct PartitionInfo {
-	int partitionId;
-	KeyRange ranges;
-
-	PartitionInfo() : partitionId(-1) {}
-	PartitionInfo(int id, KeyRange r) : partitionId(id), ranges(r) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, partitionId, ranges);
-	}
-};
-
 struct BackupRangePartitionedData {
 	const UID myId;
 	const Tag tag; // tag for this backup worker
@@ -68,6 +56,7 @@ struct BackupRangePartitionedData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
+	Version logFolderBaseVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
@@ -75,7 +64,7 @@ struct BackupRangePartitionedData {
 	Database cx;
 	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
-	KeyRangeMap<int> keyRangeToPartition;
+	KeyRangeMap<int> keyRangeToPartitionId;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -103,7 +92,8 @@ struct BackupRangePartitionedData {
 	                                    const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0), paused(false),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0),
+	    logFolderBaseVersion(invalidVersion), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)) {
 		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
@@ -132,25 +122,6 @@ struct BackupRangePartitionedData {
 		logSystem.get()->pop(savedVersion, tag);
 	}
 };
-
-std::string serializePartitionMapJSON(const std::unordered_map<Tag, std::vector<PartitionInfo>>& partitionMap) {
-	JsonBuilderObject root;
-	JsonBuilderArray partitionsArray;
-	for (const auto& [tag, partitions] : partitionMap) {
-		for (const auto& partition : partitions) {
-			JsonBuilderObject partitionObj;
-			partitionObj["tagId"] = tag.id;
-			partitionObj["partitionId"] = partition.partitionId;
-			partitionObj["beginKey"] = partition.ranges.begin.printable();
-			partitionObj["endKey"] = partition.ranges.end.printable();
-			partitionsArray.push_back(partitionObj);
-		}
-	}
-	root["partitions"] = partitionsArray;
-	root["totalTags"] = partitionMap.size();
-	root["totalPartitions"] = partitionsArray.size();
-	return root.getJson();
-}
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                                 LogEpoch recoveryCount,
@@ -221,8 +192,7 @@ ACTOR Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 	return Void();
 }
 
-ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self,
-                                               std::unordered_map<Tag, std::vector<PartitionInfo>>* outPartitionMap) {
+ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
 	state Reference<ILogSystem::IPeekCursor> cursor;
 	state Version partitionMapVersion = invalidVersion;
 	state Future<Void> logSystemChange = Void();
@@ -284,13 +254,11 @@ ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self,
 	}
 }
 
-ACTOR Future<Void> uploadPartitionMap(BackupRangePartitionedData* self,
-                                      Version partitionMapVersion,
-                                      std::unordered_map<Tag, std::vector<PartitionInfo>> partitionMap) {
+ACTOR Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
 	state std::vector<Future<Void>> fileFutures;
 	state std::unordered_map<UID, BackupRangePartitionedData::PerBackupInfo>::iterator it = self->backups.begin();
 
-	state std::string jsonContent = serializePartitionMapJSON(partitionMap);
+	state std::string jsonContent = serializePartitionListJSON(partitionMap);
 
 	for (; it != self->backups.end();) {
 		if (it->second.stopped || !it->second.container.get().present()) {
@@ -299,18 +267,15 @@ ACTOR Future<Void> uploadPartitionMap(BackupRangePartitionedData* self,
 			continue;
 		}
 		state Reference<IBackupContainer> container = it->second.container.get().get();
-		fileFutures.push_back(container->writePartitionMapFile(partitionMapVersion + 1, jsonContent));
+		fileFutures.push_back(container->writePartitionListFile(self->logFolderBaseVersion, jsonContent));
 		it++;
 	}
 	if (fileFutures.empty()) {
-		TraceEvent("BWRangePartitionedNoContainers", self->myId).detail("Version", partitionMapVersion);
+		TraceEvent("BWRangePartitionedNoContainers", self->myId);
 		return Void();
 	}
 
 	wait(waitForAll(fileFutures));
-	TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
-	    .detail("Version", partitionMapVersion)
-	    .detail("NumBackups", self->backups.size());
 	return Void();
 }
 
@@ -323,9 +288,10 @@ ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) 
 	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
 	    .detail("StartVersion", self->startVersion);
-	state std::unordered_map<Tag, std::vector<PartitionInfo>> partitionMap;
+	state PartitionMap partitionMap;
 
 	state Version partitionMapVersion = wait(pullPartitionMapFromTLog(self, &partitionMap));
+	self->logFolderBaseVersion = partitionMapVersion + 1;
 
 	ASSERT(partitionMap.find(self->tag) != partitionMap.end());
 	TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
@@ -334,10 +300,10 @@ ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) 
 	    .detail("Tag", self->tag.toString())
 	    .detail("NumPartitions", partitionMap[self->tag].size());
 
-	self->keyRangeToPartition.clear();
+	self->keyRangeToPartitionId.clear();
 	ASSERT_GT(partitionMap[self->tag].size(), 0);
 	for (auto& partition : partitionMap[self->tag]) {
-		self->keyRangeToPartition.insert(partition.ranges, partition.partitionId);
+		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
 	}
 
 	state Key doneKey = backupRangePartitionedMapUploadedKeyFor(partitionMapVersion);
@@ -345,8 +311,12 @@ ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) 
 
 	// TODO akanksha: Check what will be the tag id once tags are implemented for backup workers and update the
 	// condition accordingly.
+	// Also add background actor to clean up the done key at regular
 	if (self->tag.id == 0) {
-		wait(uploadPartitionMap(self, partitionMapVersion, partitionMap));
+		wait(uploadPartitionList(self, partitionMap));
+		TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumBackups", self->backups.size());
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -381,26 +351,6 @@ ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) 
 	self->pulledVersion.set(partitionMapVersion);
 	self->savedVersion = partitionMapVersion;
 	self->pop();
-
-	if (self->tag.id == 0) {
-		// Wait to give other workers time to read the key
-		wait(delay(5.0));
-		loop {
-			try {
-				tr.reset();
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.clear(doneKey);
-				wait(tr.commit());
-				TraceEvent("BWRangePartitionedMapUploadedKeyCleared", self->myId)
-				    .detail("Version", partitionMapVersion);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	return Void();
 }
 

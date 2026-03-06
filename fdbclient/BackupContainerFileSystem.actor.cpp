@@ -132,7 +132,6 @@ public:
 	// Backup log types
 	static constexpr Version NON_PARTITIONED_MUTATION_LOG = 0;
 	static constexpr Version PARTITIONED_MUTATION_LOG = 1;
-	static constexpr Version BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL = 100000000000LL;
 
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
 	// failing to find those, the whole string.
@@ -1290,9 +1289,10 @@ public:
 		return format("%s/%s/", (partitioned ? "plogs" : "logs"), versionFolderString(v, 11).c_str());
 	}
 
-	static std::string logVersionFolderStringForRangePartitioned(Version v) {
+	static std::string logVersionFolderStringForRangePartitioned(Version v, Version baseVersion) {
 		Version directoryVersion =
-		    (v / BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL) * BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+		    baseVersion + ((v - baseVersion) / CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL) *
+		                      CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
 		std::string vFixed = format("%019lld", directoryVersion);
 		return format("rlogs/%s/", vFixed.c_str());
 	}
@@ -1469,8 +1469,8 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version
 	                 format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
 }
 
-Future<Void> BackupContainerFileSystem::writePartitionMapFile(Version v, std::string contents) {
-	return writeEntireFile(BackupContainerFileSystemImpl::logVersionFolderStringForRangePartitioned(v) +
+Future<Void> BackupContainerFileSystem::writePartitionListFile(Version v, std::string contents) {
+	return writeEntireFile(BackupContainerFileSystemImpl::logVersionFolderStringForRangePartitioned(v, v) +
 	                           "partitionId_keyRange_map",
 	                       contents);
 }
