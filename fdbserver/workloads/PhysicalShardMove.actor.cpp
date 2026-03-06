@@ -572,15 +572,15 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	// Move keys to a random selected team consisting of a single SS, this requires DD is disabled to prevent shards
 	// being moved by DD automatically. Returns the address of the single SS of the new team.
-	Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
-	                                   Database cx,
-	                                   UID dataMoveId,
-	                                   KeyRange keys,
-	                                   int teamSize,
-	                                   std::unordered_set<UID> includes,
-	                                   std::unordered_set<UID> excludes) {
+	ACTOR Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
+	                                         Database cx,
+	                                         UID dataMoveId,
+	                                         KeyRange keys,
+	                                         int teamSize,
+	                                         std::unordered_set<UID> includes,
+	                                         std::unordered_set<UID> excludes) {
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
-		std::vector<StorageServerInterface> interfs = co_await getStorageServers(cx);
+		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 		ASSERT(interfs.size() > teamSize - includes.size());
 		while (includes.size() < teamSize) {
 			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
@@ -589,28 +589,27 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 		}
 
-		std::vector<UID> dests(includes.begin(), includes.end());
-		UID owner = deterministicRandom()->randomUniqueID();
-		DDEnabledState ddEnabledState;
+		state std::vector<UID> dests(includes.begin(), includes.end());
+		state UID owner = deterministicRandom()->randomUniqueID();
+		state DDEnabledState ddEnabledState;
 
-		Transaction tr(cx);
+		state Transaction tr(cx);
 
 		loop {
-			Error err;
 			try {
 				TraceEvent("TestMoveShard").detail("Range", keys.toString());
-				MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
+				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
 
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				RangeResult dataMoves = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
-				Version readVersion = co_await tr.getReadVersion();
+				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				Version readVersion = wait(tr.getReadVersion());
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
-				int i = 0;
+				state int i = 0;
 				for (; i < dataMoves.size(); ++i) {
 					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
-					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
+					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);
 					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
 					if (dataMove.ranges.empty()) {
@@ -621,45 +620,44 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 						TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
 						continue;
 					}
-					co_await cleanUpDataMove(cx,
-					                         dataMoveId,
-					                         moveKeysLock,
-					                         &self->cleanUpDataMoveParallelismLock,
-					                         dataMove.ranges.front(),
-					                         &ddEnabledState);
+					wait(cleanUpDataMove(cx,
+					                     dataMoveId,
+					                     moveKeysLock,
+					                     &self->cleanUpDataMoveParallelismLock,
+					                     dataMove.ranges.front(),
+					                     &ddEnabledState));
 					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
 
 				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
-				co_await moveKeys(cx,
-				                  MoveKeysParams(dataMoveId,
-				                                 std::vector<KeyRange>{ keys },
-				                                 dests,
-				                                 dests,
-				                                 moveKeysLock,
-				                                 Promise<Void>(),
-				                                 &self->startMoveKeysParallelismLock,
-				                                 &self->finishMoveKeysParallelismLock,
-				                                 false,
-				                                 deterministicRandom()->randomUniqueID(), // for logging only
-				                                 &ddEnabledState,
-				                                 CancelConflictingDataMoves::False,
-				                                 Optional<BulkLoadTaskState>()));
+				wait(moveKeys(cx,
+				              MoveKeysParams(dataMoveId,
+				                             std::vector<KeyRange>{ keys },
+				                             dests,
+				                             dests,
+				                             moveKeysLock,
+				                             Promise<Void>(),
+				                             &self->startMoveKeysParallelismLock,
+				                             &self->finishMoveKeysParallelismLock,
+				                             false,
+				                             deterministicRandom()->randomUniqueID(), // for logging only
+				                             &ddEnabledState,
+				                             CancelConflictingDataMoves::False,
+				                             Optional<BulkLoadTaskState>())));
 				break;
 			} catch (Error& e) {
-				err = e;
-			}
-			if (err.code() == error_code_movekeys_conflict) {
-				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
-				tr.reset();
-			} else {
-				co_await tr.onError(err);
+				if (e.code() == error_code_movekeys_conflict) {
+					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+					tr.reset();
+				} else {
+					wait(tr.onError(e));
+				}
 			}
 		}
 
 		TraceEvent("TestMoveShardComplete").detail("Range", keys.toString()).detail("NewTeam", describe(dests));
 
-		co_return dests;
+		return dests;
 	}
 
 	Future<std::vector<StorageServerShard>> getStorageServerShards(Database cx, UID ssId, KeyRange range) {
