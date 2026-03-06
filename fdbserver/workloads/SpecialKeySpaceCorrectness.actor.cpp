@@ -1170,23 +1170,22 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				co_await tx->onError(err);
 			}
 		}
-}
-
-Future<Void> metricsApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
-	Database cx = cx_->clone();
-	Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-	tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	{
-		Optional<Value> metrics = co_await tx->get("fault_tolerance_metrics_json"_sr.withPrefix(
-		    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METRICS).begin));
-		ASSERT(metrics.present());
-		auto metricsObj = readJSONStrictly(metrics.get().toString()).get_obj();
-		auto schema = readJSONStrictly(JSONSchemas::faultToleranceStatusSchema.toString()).get_obj();
-		std::string errorStr;
-		ASSERT(schemaMatch(schema, metricsObj, errorStr, SevError, true));
 	}
-}
-}
-;
+
+	Future<Void> metricsApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
+		Database cx = cx_->clone();
+		Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		{
+			Optional<Value> metrics = co_await tx->get("fault_tolerance_metrics_json"_sr.withPrefix(
+			    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::METRICS).begin));
+			ASSERT(metrics.present());
+			auto metricsObj = readJSONStrictly(metrics.get().toString()).get_obj();
+			auto schema = readJSONStrictly(JSONSchemas::faultToleranceStatusSchema.toString()).get_obj();
+			std::string errorStr;
+			ASSERT(schemaMatch(schema, metricsObj, errorStr, SevError, true));
+		}
+	}
+};
 
 WorkloadFactory<SpecialKeySpaceCorrectnessWorkload> SpecialKeySpaceCorrectnessFactory;
