@@ -518,7 +518,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version minKnownCommittedVersion;
 	Version queuePoppedVersion; // The disk queue has been popped up until the location which represents this version.
 	Version minPoppedTagVersion;
-	Tag minPoppedTag; // The tag that makes tLog hold its data and cause tLog's disk queue increasing.
+	Tag minPoppedTag; // The tag (locality >= 0) that makes tLog hold its data and cause tLog's disk queue increasing.
+	Version minSysPopTagVersion;
+	Tag minSysPopTag; // The system locality tag (locality < 0) with the minimum popped version.
 
 	// For each version above knownCommittedVersion, track:
 	// <Version, PrevVersion (that the sequencer provided), TLogs that the version has been sent to (the tLogs
@@ -660,8 +662,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 std::string context)
 	  : initialized(false), queueCommittingVersion(0), knownCommittedVersion(0), durableKnownCommittedVersion(0),
 	    minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0), minPoppedTag(invalidTag),
-	    unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc),
-	    tagMessageCount("tagMessageCount", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
+	    minSysPopTagVersion(0), minSysPopTag(invalidTag), unpoppedRecoveredTagCount(0),
+	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), tagMessageCount("tagMessageCount", cc),
+	    bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
 	    nonEmptyPeeks("NonEmptyPeeks", cc), persistentDataUpdateBatches("PersistentDataUpdateBatches", cc),
 	    dirtyTagsProcessed("DirtyTagsProcessed", cc), logId(interf.id()), protocolVersion(protocolVersion),
@@ -695,6 +698,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		// for why the TLog thinks it can't throw away data.
 		specialCounter(cc, "MinPoppedTagLocality", [this]() { return this->minPoppedTag.locality; });
 		specialCounter(cc, "MinPoppedTagId", [this]() { return this->minPoppedTag.id; });
+		specialCounter(cc, "MinSysPopTagVersion", [this]() { return this->minSysPopTagVersion; });
+		specialCounter(cc, "MinSysPopTagLocality", [this]() { return this->minSysPopTag.locality; });
+		specialCounter(cc, "MinSysPopTagId", [this]() { return this->minSysPopTag.id; });
 		specialCounter(cc, "SharedBytesInput", [tLogData]() { return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData]() { return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData]() { return tLogData->overheadBytesInput; });
@@ -980,6 +986,7 @@ ACTOR Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 		minVersion = locationIter->key;
 	}
 	logData->minPoppedTagVersion = std::numeric_limits<Version>::max();
+	logData->minSysPopTagVersion = std::numeric_limits<Version>::max();
 
 	for (int tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for (int tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
@@ -989,10 +996,18 @@ ACTOR Future<Void> popDiskQueue(TLogData* self, Reference<LogData> logData) {
 					minLocation = std::min(minLocation, tagData->poppedLocation);
 					minVersion = std::min(minVersion, tagData->popped);
 				}
-				if ((!tagData->nothingPersistent || tagData->versionMessages.size()) &&
-				    tagData->popped < logData->minPoppedTagVersion) {
-					logData->minPoppedTagVersion = tagData->popped;
-					logData->minPoppedTag = tagData->tag;
+				if ((!tagData->nothingPersistent || tagData->versionMessages.size())) {
+					if (tagData->tag.locality >= 0) {
+						if (tagData->popped < logData->minPoppedTagVersion) {
+							logData->minPoppedTagVersion = tagData->popped;
+							logData->minPoppedTag = tagData->tag;
+						}
+					} else {
+						if (tagData->popped < logData->minSysPopTagVersion) {
+							logData->minSysPopTagVersion = tagData->popped;
+							logData->minSysPopTag = tagData->tag;
+						}
+					}
 				}
 			}
 		}
