@@ -115,6 +115,11 @@ public:
 	                                                  uint16_t tagId,
 	                                                  int totalTags) final;
 
+	Future<Reference<IBackupFile>> writeRangePartitionedLogFile(Version beginVersion,
+	                                                            Version endVersion,
+	                                                            int32_t partitionId,
+	                                                            int blockSize) final;
+
 	Future<Reference<IBackupFile>> writeRangeFile(Version snapshotBeginVersion,
 	                                              int snapshotFileCount,
 	                                              Version fileVersion,
@@ -128,6 +133,8 @@ public:
 	                                       int64_t totalBytes,
 	                                       IncludeKeyRangeMap IncludeKeyRangeMap,
 	                                       Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) final;
+
+	Future<Void> writePartitionMapFile(Version v, std::string contents) override;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
