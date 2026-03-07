@@ -662,9 +662,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	                 std::string context)
 	  : initialized(false), queueCommittingVersion(0), knownCommittedVersion(0), durableKnownCommittedVersion(0),
 	    minKnownCommittedVersion(0), queuePoppedVersion(0), minPoppedTagVersion(0), minPoppedTag(invalidTag),
-	    minSysPopTagVersion(0), minSysPopTag(invalidTag),
-	    unpoppedRecoveredTagCount(0), cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc),
-	    tagMessageCount("tagMessageCount", cc), bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
+	    minSysPopTagVersion(0), minSysPopTag(invalidTag), unpoppedRecoveredTagCount(0),
+	    cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), tagMessageCount("tagMessageCount", cc),
+	    bytesDurable("BytesDurable", cc), blockingPeeks("BlockingPeeks", cc),
 	    blockingPeekTimeouts("BlockingPeekTimeouts", cc), emptyPeeks("EmptyPeeks", cc),
 	    nonEmptyPeeks("NonEmptyPeeks", cc), persistentDataUpdateBatches("PersistentDataUpdateBatches", cc),
 	    dirtyTagsProcessed("DirtyTagsProcessed", cc), logId(interf.id()), protocolVersion(protocolVersion),
