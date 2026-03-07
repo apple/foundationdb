@@ -196,6 +196,7 @@ if(WITH_PYTHON)
 
   add_fdb_test(TEST_FILES fast/PerpetualWiggleStats.toml)
   add_fdb_test(TEST_FILES fast/PrivateEndpoints.toml)
+  add_fdb_test(TEST_FILES fast/PrometheusMetrics.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
   add_fdb_test(TEST_FILES fast/RandomSelector.toml)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
