@@ -95,7 +95,7 @@ struct BulkLoadWorkload : TestWorkload {
 						txnBytes += key.size() + self->value.size();
 					}
 					tr.makeSelfConflicting();
-					co_await success(tr.getReadVersion());
+					co_await tr.getReadVersion();
 					co_await tr.commit();
 					totalBytes += txnBytes;
 					break;

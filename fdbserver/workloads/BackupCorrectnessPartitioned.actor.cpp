@@ -453,23 +453,23 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		});
 		Standalone<StringRef> restoreTag(self->backupTag.toString() + "_system");
 		printf("BackupCorrectness, backupAgent.restore is called for tag:%s\n", restoreTag.toString().c_str());
-		co_await success(backupAgent->restore(cx,
-		                                      cx,
-		                                      restoreTag,
-		                                      KeyRef(lastBackupContainer->getURL()),
-		                                      lastBackupContainer->getProxy(),
-		                                      systemRestoreRanges,
-		                                      WaitForComplete::True,
-		                                      targetVersion,
-		                                      Verbose::True,
-		                                      Key(),
-		                                      Key(),
-		                                      self->locked,
-		                                      UnlockDB::True,
-		                                      OnlyApplyMutationLogs::False,
-		                                      InconsistentSnapshotOnly::False,
-		                                      ::invalidVersion,
-		                                      self->encryptionKeyFileName));
+		co_await backupAgent->restore(cx,
+		                              cx,
+		                              restoreTag,
+		                              KeyRef(lastBackupContainer->getURL()),
+		                              lastBackupContainer->getProxy(),
+		                              systemRestoreRanges,
+		                              WaitForComplete::True,
+		                              targetVersion,
+		                              Verbose::True,
+		                              Key(),
+		                              Key(),
+		                              self->locked,
+		                              UnlockDB::True,
+		                              OnlyApplyMutationLogs::False,
+		                              InconsistentSnapshotOnly::False,
+		                              ::invalidVersion,
+		                              self->encryptionKeyFileName);
 		printf("BackupCorrectness, backupAgent.restore finished for tag:%s\n", restoreTag.toString().c_str());
 	}
 

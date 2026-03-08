@@ -233,7 +233,7 @@ struct RestoreWorkload : TestWorkload {
 				                              ::invalidVersion,
 				                              lastBackupContainer->getEncryptionKeyFileName());
 
-				co_await success(restore);
+				co_await restore;
 				ASSERT(!restore.isError());
 			}
 			Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);

@@ -664,7 +664,7 @@ struct MakoWorkload : TestWorkload {
 	template <class T>
 	static Future<Void> logLatency(Future<T> f, DDSketch<double>* opLatencies) {
 		double opBegin = timer();
-		co_await success(f);
+		co_await f;
 		opLatencies->addSample(timer() - opBegin);
 	}
 

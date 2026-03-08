@@ -79,7 +79,7 @@ struct BackupToDBAbort : TestWorkload {
 		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		co_await delay(self->abortDelay);
 		TraceEvent("BDBA_Wait").log();
-		co_await success(backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False));
+		co_await backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False);
 		TraceEvent("BDBA_Lock").log();
 		co_await lockDatabase(cx, self->lockid);
 		TraceEvent("BDBA_Abort").log();

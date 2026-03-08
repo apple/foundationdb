@@ -88,7 +88,7 @@ struct LowLatencyWorkload : TestWorkload {
 							TraceEvent("LowLatencyTransactionCommitFinish");
 						} else {
 							TraceEvent("LowLatencyTransactionGRVStart");
-							co_await success(tr.getReadVersion());
+							co_await tr.getReadVersion();
 							TraceEvent("LowLatencyTransactionGRVFinish");
 						}
 						break;

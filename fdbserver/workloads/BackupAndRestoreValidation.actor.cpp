@@ -114,23 +114,23 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		// Don't clear keys - we want to keep original data for validation comparison
 		// The restore will put data at the addPrefix location
 
-		co_await success(backupAgent->restore(cx,
-		                                      cx,
-		                                      restoreTag,
-		                                      KeyRef(backupContainer->getURL()),
-		                                      backupContainer->getProxy(),
-		                                      restoreRanges,
-		                                      WaitForComplete::True,
-		                                      ::invalidVersion,
-		                                      Verbose::True,
-		                                      self->addPrefix,
-		                                      Key(), // removePrefix
-		                                      LockDB{ false },
-		                                      UnlockDB::True,
-		                                      OnlyApplyMutationLogs::False,
-		                                      InconsistentSnapshotOnly::False,
-		                                      ::invalidVersion,
-		                                      backupContainer->getEncryptionKeyFileName()));
+		co_await backupAgent->restore(cx,
+		                              cx,
+		                              restoreTag,
+		                              KeyRef(backupContainer->getURL()),
+		                              backupContainer->getProxy(),
+		                              restoreRanges,
+		                              WaitForComplete::True,
+		                              ::invalidVersion,
+		                              Verbose::True,
+		                              self->addPrefix,
+		                              Key(), // removePrefix
+		                              LockDB{ false },
+		                              UnlockDB::True,
+		                              OnlyApplyMutationLogs::False,
+		                              InconsistentSnapshotOnly::False,
+		                              ::invalidVersion,
+		                              backupContainer->getEncryptionKeyFileName());
 
 		TraceEvent("BARV_RestoreComplete")
 		    .detail("Tag", printable(restoreTag))

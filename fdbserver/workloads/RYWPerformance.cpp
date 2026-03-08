@@ -94,29 +94,24 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 4) {
-			co_await success(
-			    tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
+			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
 		} else if (type == 5) {
-			co_await success(
-			    tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
+			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
 			for (i = 0; i < self->nodes; i++) {
 				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 6) {
-			co_await success(
-			    tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
+			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
 			for (i = 0; i < self->nodes; i += 2) {
 				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 7) {
-			co_await success(
-			    tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
+			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
 			for (i = 0; i < self->nodes; i++) {
 				tr->clear(self->keyForIndex(i));
 			}
 		} else if (type == 8) {
-			co_await success(
-			    tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
+			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
 			for (i = 0; i < self->nodes; i += 2) {
 				tr->clear(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 1)));
 			}
@@ -177,7 +172,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				double startTime = timer();
 
 				for (i = 0; i < self->nodes; i++) {
-					co_await success(tr.get(self->keyForIndex(self->nodes / 2)));
+					co_await tr.get(self->keyForIndex(self->nodes / 2));
 				}
 
 				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
@@ -202,7 +197,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				double startTime = timer();
 
 				for (i = 0; i < self->nodes; i++) {
-					co_await success(tr.get(self->keyForIndex(i)));
+					co_await tr.get(self->keyForIndex(i));
 				}
 
 				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
@@ -227,8 +222,8 @@ struct RYWPerformanceWorkload : TestWorkload {
 				double startTime = timer();
 
 				for (i = 0; i < self->ranges; i++) {
-					co_await success(
-					    tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes));
+					co_await tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)),
+					                     self->nodes);
 				}
 
 				fprintf(stderr, "%f", self->ranges / (timer() - startTime));
@@ -255,7 +250,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				double startTime = timer();
 
 				for (i = 0; i < self->nodes; i++) {
-					co_await success(tr.get(self->keyForIndex(self->nodes / 2)));
+					co_await tr.get(self->keyForIndex(self->nodes / 2));
 					tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(i));
 				}
 

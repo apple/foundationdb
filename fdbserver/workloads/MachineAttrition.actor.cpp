@@ -43,7 +43,7 @@ static std::set<int> const& normalAttritionErrors() {
 Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	// duration doesn't matter since this won't timeout
 	TraceEvent("IgnoreSSFailureStart").log();
-	co_await success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0));
+	co_await setHealthyZone(cx, ignoreSSFailuresZoneString, 0);
 	TraceEvent("IgnoreSSFailureWait").log();
 	co_await delay(duration);
 	TraceEvent("IgnoreSSFailureClear").log();
@@ -300,7 +300,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						try {
 							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							co_await success(tr.getReadVersion());
+							co_await tr.getReadVersion();
 							break;
 						} catch (Error& e) {
 							err = e;
@@ -399,7 +399,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 							try {
 								tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 								tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-								co_await success(tr.getReadVersion());
+								co_await tr.getReadVersion();
 								break;
 							} catch (Error& e) {
 								err = e;
@@ -412,8 +412,8 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 					LocalityData targetMachine = self->machines.back();
 					if (BUGGIFY_WITH_PROB(0.01)) {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
-						co_await success(
-						    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
+						co_await setHealthyZone(
+						    cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20);
 					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
 						// don't do this in restarting test, since test could exit before it is unset, and restarted
 						// test would never unset it
