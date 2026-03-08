@@ -181,17 +181,17 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, ThrottlingWorkload* self) {
+	Future<Void> _start(Database cx) {
 		std::vector<Future<Void>> clientActors;
-		for (int actorId = 0; actorId < self->actorsPerClient; ++actorId) {
-			clientActors.push_back(timeout(clientActor(cx, self), self->testDuration, Void()));
+		for (int actorId = 0; actorId < actorsPerClient; ++actorId) {
+			clientActors.push_back(timeout(clientActor(cx, this), testDuration, Void()));
 		}
-		clientActors.push_back(timeout(specialKeysActor(cx, self), self->testDuration, Void()));
-		clientActors.push_back(timeout(self->tokenBucket.tokenAdderActor, self->testDuration, Void()));
-		co_await delay(self->testDuration);
+		clientActors.push_back(timeout(specialKeysActor(cx, this), testDuration, Void()));
+		clientActors.push_back(timeout(tokenBucket.tokenAdderActor, testDuration, Void()));
+		co_await delay(testDuration);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return correctSpecialKeys; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {

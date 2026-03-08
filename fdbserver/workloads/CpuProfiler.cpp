@@ -95,20 +95,20 @@ struct CpuProfilerWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
-	Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
-		co_await delay(self->initialDelay);
-		if (self->clientId == 0)
+	Future<Void> _start(Database cx) {
+		co_await delay(initialDelay);
+		if (clientId == 0)
 			TraceEvent("SignalProfilerOn").log();
-		co_await timeoutError(self->updateProfiler(true, cx, self), 60.0);
+		co_await timeoutError(updateProfiler(true, cx, this), 60.0);
 
 		// If a duration was given, let the duration elapse and then shut the profiler off
-		if (self->duration > 0) {
-			co_await delay(self->duration);
-			if (self->clientId == 0)
+		if (duration > 0) {
+			co_await delay(duration);
+			if (clientId == 0)
 				TraceEvent("SignalProfilerOff").log();
-			co_await timeoutError(self->updateProfiler(false, cx, self), 60.0);
+			co_await timeoutError(updateProfiler(false, cx, this), 60.0);
 		}
 	}
 

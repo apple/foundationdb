@@ -212,22 +212,22 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
-			return _start(this);
+			return _start();
 
 		return Void();
 	}
 
-	Future<Void> _start(AsyncFileReadWorkload* self) {
+	Future<Void> _start() {
 		StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		co_await timeout(self->runReadTest(self), self->testDuration, Void());
+		co_await timeout(runReadTest(this), testDuration, Void());
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
-		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
+		averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		// Try to let the IO operations finish so we can clean up after them
-		co_await timeout(waitForAll(self->readFutures), 10, Void());
+		co_await timeout(waitForAll(readFutures), 10, Void());
 	}
 
 	static Future<Void> readLoop(AsyncFileReadWorkload* self, int bufferIndex, double fixedRate) {

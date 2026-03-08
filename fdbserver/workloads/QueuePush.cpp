@@ -54,7 +54,7 @@ struct QueuePushWorkload : TestWorkload {
 		startingKey = "0000000000000001"_sr;
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
@@ -93,13 +93,13 @@ struct QueuePushWorkload : TestWorkload {
 			throw client_invalid_operation();
 	}
 
-	Future<Void> _start(Database cx, QueuePushWorkload* self) {
-		for (int i = 0; i < self->actorCount; i++) {
-			self->clients.push_back(self->writeClient(cx, self));
+	Future<Void> _start(Database cx) {
+		for (int i = 0; i < actorCount; i++) {
+			clients.push_back(writeClient(cx, this));
 		}
 
-		co_await timeout(waitForAll(self->clients), self->testDuration, Void());
-		self->clients.clear();
+		co_await timeout(waitForAll(clients), testDuration, Void());
+		clients.clear();
 	}
 
 	Future<Void> writeClient(Database cx, QueuePushWorkload* self) {

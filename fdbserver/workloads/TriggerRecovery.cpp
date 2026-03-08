@@ -135,34 +135,34 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx, TriggerRecoveryLoopWorkload* self) {
-		co_await delay(self->startTime);
+	Future<Void> _start(Database cx) {
+		co_await delay(startTime);
 		int numRecoveriesDone = 0;
 		try {
 			while (true) {
-				if (deterministicRandom()->random01() < self->killAllProportion) {
-					co_await self->killAll(cx);
+				if (deterministicRandom()->random01() < killAllProportion) {
+					co_await killAll(cx);
 				} else {
-					co_await self->changeResolverConfig(cx, self);
+					co_await changeResolverConfig(cx, this);
 				}
 				numRecoveriesDone++;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedRecovery").detail("RecoveryNum", numRecoveriesDone);
-				if (numRecoveriesDone == self->numRecoveries) {
+				if (numRecoveriesDone == numRecoveries) {
 					break;
 				}
-				co_await delay(self->delayBetweenRecoveries);
-				co_await self->returnIfClusterRecovered(cx);
+				co_await delay(delayBetweenRecoveries);
+				co_await returnIfClusterRecovered(cx);
 			}
 		} catch (Error& e) {
 			// Dummy catch here to give a chance to reset number of resolvers to its original value
 		}
-		co_await self->changeResolverConfig(cx, self, true);
+		co_await changeResolverConfig(cx, this, true);
 	}
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

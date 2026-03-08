@@ -60,7 +60,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) && skewRound > 0);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	void debugPrintServerShards() const {
 		std::cout << std::hex;
@@ -209,19 +209,19 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	static Future<Void> _start(Database cx, SkewedReadWriteWorkload* self) {
+	Future<Void> _start(Database cx) {
 		std::vector<Future<Void>> clients;
-		if (self->enableReadLatencyLogging)
-			clients.push_back(self->tracePeriodically());
+		if (enableReadLatencyLogging)
+			clients.push_back(tracePeriodically());
 
-		co_await updateServerShards(cx, self);
-		for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
-			self->setHotServers();
-			self->startReadWriteClients(cx, clients);
-			co_await timeout(waitForAll(clients), self->testDuration / self->skewRound, Void());
+		co_await updateServerShards(cx, this);
+		for (currentHotRound = 0; currentHotRound < skewRound; ++currentHotRound) {
+			setHotServers();
+			startReadWriteClients(cx, clients);
+			co_await timeout(waitForAll(clients), testDuration / skewRound, Void());
 			clients.clear();
 			co_await delay(5.0);
-			co_await updateServerShards(cx, self);
+			co_await updateServerShards(cx, this);
 		}
 	}
 

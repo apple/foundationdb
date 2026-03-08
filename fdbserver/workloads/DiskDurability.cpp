@@ -129,7 +129,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
-			return _start(this);
+			return _start();
 
 		return Void();
 	}
@@ -160,18 +160,18 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		}
 	}
 
-	Future<Void> _start(DiskDurabilityWorkload* self) {
-		self->blocks.reserve(self->filePages);
-		for (int i = 0; i < self->filePages; ++i)
-			self->blocks.push_back(FileBlock(i));
+	Future<Void> _start() {
+		blocks.reserve(filePages);
+		for (int i = 0; i < filePages; ++i)
+			blocks.push_back(FileBlock(i));
 
 		std::vector<Future<Void>> tasks;
-		tasks.push_back(syncLoop(self));
+		tasks.push_back(syncLoop(this));
 
-		for (int i = 0; i < self->writers; ++i)
-			tasks.push_back(worker(self));
+		for (int i = 0; i < writers; ++i)
+			tasks.push_back(worker(this));
 
-		co_await timeout(waitForAll(tasks), self->testDuration, Void());
+		co_await timeout(waitForAll(tasks), testDuration, Void());
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

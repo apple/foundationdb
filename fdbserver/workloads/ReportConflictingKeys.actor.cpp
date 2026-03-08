@@ -65,11 +65,9 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(const Database& cx) override { return _start(cx->clone(), this); }
+	Future<Void> start(const Database& cx) override { return _start(cx->clone()); }
 
-	Future<Void> _start(Database cx, ReportConflictingKeysWorkload* self) {
-		co_await timeout(self->conflictingClient(cx, self), self->testDuration, Void());
-	}
+	Future<Void> _start(Database cx) { co_await timeout(conflictingClient(cx, this), testDuration, Void()); }
 
 	Future<bool> check(Database const& cx) override { return invalidReports.getValue() == 0; }
 

@@ -82,7 +82,7 @@ struct BulkLoading : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
@@ -736,8 +736,8 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
 	}
 
-	Future<Void> _start(BulkLoading* self, Database cx) {
-		if (self->clientId != 0) {
+	Future<Void> _start(Database cx) {
+		if (clientId != 0) {
 			co_return;
 		}
 
@@ -748,16 +748,16 @@ struct BulkLoading : TestWorkload {
 			disableConnectionFailures("BulkLoading");
 		}
 
-		if (self->initializeBulkLoadMetadata) {
-			co_await self->clearAllBulkLoadTask(cx);
+		if (initializeBulkLoadMetadata) {
+			co_await clearAllBulkLoadTask(cx);
 		}
 
 		// Run background traffic
-		if (self->backgroundTrafficEnabled) {
+		if (backgroundTrafficEnabled) {
 			std::vector<Future<Void>> trafficActors;
 			int actorCount = deterministicRandom()->randomInt(1, 10);
 			for (int i = 0; i < actorCount; i++) {
-				trafficActors.push_back(self->backgroundWriteTraffic(self, cx));
+				trafficActors.push_back(backgroundWriteTraffic(this, cx));
 			}
 		}
 
@@ -769,10 +769,10 @@ struct BulkLoading : TestWorkload {
 		// Run test
 		if (deterministicRandom()->coinflip()) {
 			// Inject data to three non-overlapping ranges
-			co_await self->simpleTest(self, cx);
+			co_await simpleTest(this, cx);
 		} else {
 			// Inject data to many ranges and those ranges can be overlapping
-			co_await self->complexTest(self, cx);
+			co_await complexTest(this, cx);
 		}
 
 		co_await removeRangeLockOwner(cx, rangeLockNameForBulkLoad);

@@ -80,7 +80,7 @@ struct VersionStampWorkload : TestWorkload {
 
 		cx->apiVersion = ApiVersion(apiVersion);
 		if (clientId == 0)
-			return _start(cx, this, 1 / transactionsPerSecond);
+			return _start(cx, 1 / transactionsPerSecond);
 		return Void();
 	}
 
@@ -313,7 +313,7 @@ struct VersionStampWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
+	Future<Void> _start(Database cx, double delay) {
 		double startTime = now();
 		double lastTime = now();
 		Database extraDB;
@@ -330,13 +330,12 @@ struct VersionStampWorkload : TestWorkload {
 
 			bool cx_is_primary = true;
 			ReadYourWritesTransaction tr(cx);
-			Key key = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount));
+			Key key = keyForIndex(deterministicRandom()->randomInt(0, nodeCount));
 			Value value(std::string(deterministicRandom()->randomInt(10, 100), 'x'));
-			Key versionStampKey =
-			    self->versionStampKeyForIndex(deterministicRandom()->randomInt(0, self->nodeCount), oldVSFormat);
-			StringRef prefix = versionStampKey.substr(0, 20 + self->vsKeyPrefix.size());
-			Key endOfRange = self->endOfRange(prefix);
-			KeyRangeRef range(prefix, endOfRange);
+			Key versionStampKey = versionStampKeyForIndex(deterministicRandom()->randomInt(0, nodeCount), oldVSFormat);
+			StringRef prefix = versionStampKey.substr(0, 20 + vsKeyPrefix.size());
+			Key end = endOfRange(prefix);
+			KeyRangeRef range(prefix, end);
 			Standalone<StringRef> committedVersionStamp;
 			Version committedVersion{ 0 };
 
@@ -412,9 +411,8 @@ struct VersionStampWorkload : TestWorkload {
 									const Version value_version = versionFromValue(vs_value.get()).first;
 									//TraceEvent("VST_CommitUnknownRead").detail("VsValue", vs_value.present() ? printable(vs_value.get()) : "did not exist");
 									const auto& value_ts =
-									    self->key_commit[key == metadataVersionKey
-									                         ? metadataVersionKey
-									                         : key.removePrefix(self->vsValuePrefix)];
+									    key_commit[key == metadataVersionKey ? metadataVersionKey
+									                                         : key.removePrefix(vsValuePrefix)];
 									const auto& iter = std::find_if(
 									    value_ts.cbegin(),
 									    value_ts.cend(),
@@ -457,19 +455,19 @@ struct VersionStampWorkload : TestWorkload {
 					continue;
 				}
 
-				const Standalone<StringRef> vsKeyKey = versionStampKey.removePrefix(self->vsKeyPrefix).substr(4, 16);
+				const Standalone<StringRef> vsKeyKey = versionStampKey.removePrefix(vsKeyPrefix).substr(4, 16);
 				const auto& committedVersionPair = std::make_pair(committedVersion, committedVersionStamp);
 				//TraceEvent("VST_CommitSuccess").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("VsKeyKey", printable(vsKeyKey)).detail("Clear", printable(range)).detail("Version", tr.getCommittedVersion()).detail("VsValue", printable(committedVersionPair.second));
-				self->key_commit[key == metadataVersionKey ? metadataVersionKey : key.removePrefix(self->vsValuePrefix)]
-				    .push_back(committedVersionPair);
-				self->versionStampKey_commit[vsKeyKey].push_back(committedVersionPair);
+				key_commit[key == metadataVersionKey ? metadataVersionKey : key.removePrefix(vsValuePrefix)].push_back(
+				    committedVersionPair);
+				versionStampKey_commit[vsKeyKey].push_back(committedVersionPair);
 				break;
 			}
 
-			if (now() - startTime > self->testDuration)
+			if (now() - startTime > testDuration)
 				break;
 		}
-		//TraceEvent("VST_Start").detail("Count", count).detail("NodeCount", self->nodeCount);
+		//TraceEvent("VST_Start").detail("Count", count).detail("NodeCount", nodeCount);
 	}
 };
 

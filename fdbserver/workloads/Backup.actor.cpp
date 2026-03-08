@@ -97,7 +97,7 @@ struct BackupWorkload : TestWorkload {
 		    .detail("StopDifferentialAfter", stopDifferentialAfter)
 		    .detail("Encrypted", encryptionKeyFileName.present());
 
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -296,40 +296,39 @@ struct BackupWorkload : TestWorkload {
 		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
 	}
 
-	static Future<Void> _start(Database cx, BackupWorkload* self) {
+	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 		Future<Void> cp;
 		TraceEvent("BW_Arguments")
-		    .detail("BackupTag", printable(self->backupTag))
-		    .detail("BackupAfter", self->backupAfter)
-		    .detail("RestoreAfter", self->restoreAfter)
-		    .detail("AbortAndRestartAfter", self->abortAndRestartAfter)
-		    .detail("DifferentialAfter", self->stopDifferentialAfter);
+		    .detail("BackupTag", printable(backupTag))
+		    .detail("BackupAfter", backupAfter)
+		    .detail("RestoreAfter", restoreAfter)
+		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
+		    .detail("DifferentialAfter", stopDifferentialAfter);
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
-		if (self->allowPauses && BUGGIFY) {
+		if (allowPauses && BUGGIFY) {
 			cp = changePaused(cx, &backupAgent);
 		} else {
 			cp = resumeAgent(cx, &backupAgent);
 		}
 
-		if (self->encryptionKeyFileName.present()) {
-			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
+		if (encryptionKeyFileName.present()) {
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get());
 		}
 
 		try {
-			Future<Void> startRestore = delay(self->restoreAfter);
+			Future<Void> startRestore = delay(restoreAfter);
 
 			// backup
-			co_await delay(self->backupAfter);
+			co_await delay(backupAfter);
 
-			TraceEvent("BW_DoBackup1", randomID).detail("Tag", printable(self->backupTag));
-			Future<Void> b =
-			    doBackup(self, 0, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter);
+			TraceEvent("BW_DoBackup1", randomID).detail("Tag", printable(backupTag));
+			Future<Void> b = doBackup(this, 0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter);
 
 			TraceEvent("BW_DoBackupWait", randomID)
-			    .detail("BackupTag", printable(self->backupTag))
-			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
+			    .detail("BackupTag", printable(backupTag))
+			    .detail("AbortAndRestartAfter", abortAndRestartAfter);
 			try {
 				co_await b;
 			} catch (Error& e) {
@@ -338,8 +337,8 @@ struct BackupWorkload : TestWorkload {
 				co_return;
 			}
 			TraceEvent("BW_DoBackupDone", randomID)
-			    .detail("BackupTag", printable(self->backupTag))
-			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
+			    .detail("BackupTag", printable(backupTag))
+			    .detail("AbortAndRestartAfter", abortAndRestartAfter);
 
 			co_await startRestore;
 

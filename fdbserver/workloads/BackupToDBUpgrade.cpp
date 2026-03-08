@@ -100,7 +100,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -385,27 +385,27 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, BackupToDBUpgradeWorkload* self) {
+	Future<Void> _start(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
-		DatabaseBackupAgent restoreTool(self->extraDB);
+		DatabaseBackupAgent restoreTool(extraDB);
 		Standalone<VectorRef<KeyRangeRef>> prevBackupRanges;
 		UID logUid;
 		Version commitVersion{ 0 };
 
-		Future<Void> stopDifferential = delay(self->stopDifferentialAfter);
-		Future<Void> waitUpgrade = backupAgent.waitUpgradeToLatestDrVersion(self->extraDB, self->backupTag);
+		Future<Void> stopDifferential = delay(stopDifferentialAfter);
+		Future<Void> waitUpgrade = backupAgent.waitUpgradeToLatestDrVersion(extraDB, backupTag);
 		co_await (success(stopDifferential) && success(waitUpgrade));
-		TraceEvent("DRU_WaitDifferentialEnd").detail("Tag", printable(self->backupTag));
+		TraceEvent("DRU_WaitDifferentialEnd").detail("Tag", printable(backupTag));
 
 		try {
 			// Get restore ranges before aborting
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->extraDB));
+			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(extraDB));
 			while (true) {
 				Error err;
 				try {
 					// Get backup ranges
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					UID _logUid = co_await backupAgent.getLogUid(tr, self->backupTag);
+					UID _logUid = co_await backupAgent.getLogUid(tr, backupTag);
 					logUid = _logUid;
 
 					Optional<Key> backupKeysPacked =
@@ -431,7 +431,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent("DRU_Locked").detail("LockedVersion", commitVersion);
 
 			// Wait for the destination to apply mutations up to the lock commit before switching over.
-			ReadYourWritesTransaction versionCheckTr(self->extraDB);
+			ReadYourWritesTransaction versionCheckTr(extraDB);
 			while (true) {
 				Error err;
 				try {
@@ -461,15 +461,15 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 
 			TraceEvent("DRU_DiffRanges").log();
-			co_await diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB);
+			co_await diffRanges(prevBackupRanges, backupPrefix, cx, extraDB);
 
 			// abort backup
-			TraceEvent("DRU_AbortBackup").detail("Tag", printable(self->backupTag));
-			co_await backupAgent.abortBackup(self->extraDB, self->backupTag);
-			co_await unlockDatabase(self->extraDB, logUid);
+			TraceEvent("DRU_AbortBackup").detail("Tag", printable(backupTag));
+			co_await backupAgent.abortBackup(extraDB, backupTag);
+			co_await unlockDatabase(extraDB, logUid);
 
 			// restore database
-			TraceEvent("DRU_PrepareRestore").detail("RestoreTag", printable(self->restoreTag));
+			TraceEvent("DRU_PrepareRestore").detail("RestoreTag", printable(restoreTag));
 			Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
 			while (true) {
 				Error err;
@@ -496,28 +496,28 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			for (auto r : prevBackupRanges) {
 				restoreRanges.push_back_deep(
 				    restoreRanges.arena(),
-				    KeyRangeRef(r.begin.withPrefix(self->backupPrefix), r.end.withPrefix(self->backupPrefix)));
+				    KeyRangeRef(r.begin.withPrefix(backupPrefix), r.end.withPrefix(backupPrefix)));
 			}
 
 			// start restoring db
 			try {
-				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(self->restoreTag));
+				TraceEvent("DRU_RestoreDb").detail("RestoreTag", printable(restoreTag));
 				co_await restoreTool.submitBackup(
-				    cx, self->restoreTag, restoreRanges, StopWhenDone::True, StringRef(), self->backupPrefix);
+				    cx, restoreTag, restoreRanges, StopWhenDone::True, StringRef(), backupPrefix);
 			} catch (Error& e) {
-				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
+				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(restoreTag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}
 
-			co_await restoreTool.waitBackup(cx, self->restoreTag);
-			co_await restoreTool.unlockBackup(cx, self->restoreTag);
-			co_await checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent);
+			co_await restoreTool.waitBackup(cx, restoreTag);
+			co_await restoreTool.unlockBackup(cx, restoreTag);
+			co_await checkData(extraDB, logUid, logUid, backupTag, &backupAgent);
 
-			UID restoreUid = co_await restoreTool.getLogUid(cx, self->restoreTag);
-			co_await checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreTool);
+			UID restoreUid = co_await restoreTool.getLogUid(cx, restoreTag);
+			co_await checkData(cx, restoreUid, restoreUid, restoreTag, &restoreTool);
 
-			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
+			TraceEvent("DRU_Complete").detail("BackupTag", printable(backupTag));
 
 			if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
 				g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;

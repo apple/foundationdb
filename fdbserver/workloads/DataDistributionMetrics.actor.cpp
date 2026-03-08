@@ -199,17 +199,17 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		co_return true;
 	}
 
-	Future<Void> _start(Database cx, DataDistributionMetricsWorkload* self) {
+	Future<Void> _start(Database cx) {
 		std::vector<Future<Void>> clients;
-		clients.push_back(self->resultConsistencyCheckClient(cx, self));
-		for (int i = 0; i < self->actorCount; ++i)
-			clients.push_back(self->ddRWClient(cx, self));
-		co_await timeout(waitForAll(clients), self->testDuration, Void());
+		clients.push_back(resultConsistencyCheckClient(cx, this));
+		for (int i = 0; i < actorCount; ++i)
+			clients.push_back(ddRWClient(cx, this));
+		co_await timeout(waitForAll(clients), testDuration, Void());
 		co_await delay(5.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0)

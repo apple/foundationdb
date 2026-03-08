@@ -73,7 +73,7 @@ struct RestoreValidationWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return _start(this, cx);
+			return _start(cx);
 		}
 		return Void();
 	}
@@ -82,15 +82,15 @@ struct RestoreValidationWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> _start(RestoreValidationWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		// Only run on client 0 to avoid conflicts (backup/restore runs on client 0)
-		if (self->clientId != 0) {
+		if (clientId != 0) {
 			co_return;
 		}
 
 		// Wait for the specified time before starting validation
-		TraceEvent("RestoreValidationWorkloadWaiting").detail("WaitTime", self->validateAfter);
-		co_await delay(self->validateAfter);
+		TraceEvent("RestoreValidationWorkloadWaiting").detail("WaitTime", validateAfter);
+		co_await delay(validateAfter);
 
 		// Wait for restore completion marker
 		// BackupAndRestoreValidation sets this key when restore is fully complete
@@ -147,7 +147,7 @@ struct RestoreValidationWorkload : TestWorkload {
 			}
 		}
 
-		TraceEvent("RestoreValidationWorkloadStarting").detail("Range", self->validationRange);
+		TraceEvent("RestoreValidationWorkloadStarting").detail("Range", validationRange);
 
 		int auditRetryCount = 0;
 		int maxAuditRetries = 5;
@@ -161,7 +161,7 @@ struct RestoreValidationWorkload : TestWorkload {
 
 				TraceEvent("RestoreValidationTriggeringAudit")
 				    .detail("AuditType", (int)auditType)
-				    .detail("Range", self->validationRange)
+				    .detail("Range", validationRange)
 				    .detail("RetryCount", auditRetryCount);
 
 				// Trigger the audit using ManagementAPI with timeout
@@ -169,8 +169,7 @@ struct RestoreValidationWorkload : TestWorkload {
 				UID auditId;
 				try {
 					UID scheduleResult = co_await timeoutError(
-					    auditStorage(
-					        clusterFile, self->validationRange, auditType, KeyValueStoreType::END, self->maxWaitTime),
+					    auditStorage(clusterFile, validationRange, auditType, KeyValueStoreType::END, maxWaitTime),
 					    60.0);
 					auditId = scheduleResult;
 				} catch (Error& e) {
@@ -199,7 +198,7 @@ struct RestoreValidationWorkload : TestWorkload {
 				std::string errorMessage;
 
 				loop {
-					co_await delay(self->checkInterval);
+					co_await delay(checkInterval);
 
 					// Get audit status (newFirst=true to get latest states first)
 					// Add timeout to handle cluster recovery/instability
@@ -211,11 +210,11 @@ struct RestoreValidationWorkload : TestWorkload {
 					} catch (Error& e) {
 						if (e.code() == error_code_timed_out) {
 							// Cluster is likely recovering - check overall timeout and continue
-							if (now() - startTime > self->maxWaitTime) {
+							if (now() - startTime > maxWaitTime) {
 								TraceEvent(SevError, "RestoreValidationTimeout")
 								    .detail("AuditID", auditId)
 								    .detail("ElapsedTime", now() - startTime)
-								    .detail("MaxWaitTime", self->maxWaitTime)
+								    .detail("MaxWaitTime", maxWaitTime)
 								    .detail("Reason", "getAuditStates timed out");
 								throw timed_out();
 							}
@@ -272,11 +271,11 @@ struct RestoreValidationWorkload : TestWorkload {
 					}
 
 					// Check timeout
-					if (now() - startTime > self->maxWaitTime) {
+					if (now() - startTime > maxWaitTime) {
 						TraceEvent(SevError, "RestoreValidationTimeout")
 						    .detail("AuditID", auditId)
 						    .detail("ElapsedTime", now() - startTime)
-						    .detail("MaxWaitTime", self->maxWaitTime);
+						    .detail("MaxWaitTime", maxWaitTime);
 						throw timed_out();
 					}
 				}
@@ -285,17 +284,17 @@ struct RestoreValidationWorkload : TestWorkload {
 				TraceEvent("RestoreValidationComplete")
 				    .detail("AuditID", auditId)
 				    .detail("FinalPhase", (int)finalPhase)
-				    .detail("ExpectedPhase", self->expectedPhase)
+				    .detail("ExpectedPhase", expectedPhase)
 				    .detail("ErrorMessage", errorMessage)
 				    .detail("ElapsedTime", now() - startTime);
 
-				if (self->expectSuccess) {
+				if (expectSuccess) {
 					if (finalPhase != AuditPhase::Complete) {
 						// Log as warning since we may retry - only becomes error if all retries fail
 						TraceEvent(SevWarn, "RestoreValidationUnexpectedPhase")
 						    .detail("AuditID", auditId)
 						    .detail("FinalPhase", (int)finalPhase)
-						    .detail("ExpectedPhase", self->expectedPhase)
+						    .detail("ExpectedPhase", expectedPhase)
 						    .detail("ErrorMessage", errorMessage);
 						throw audit_storage_failed();
 					}
@@ -309,7 +308,7 @@ struct RestoreValidationWorkload : TestWorkload {
 					if (finalPhase == AuditPhase::Complete) {
 						TraceEvent(SevError, "RestoreValidationUnexpectedSuccess")
 						    .detail("AuditID", auditId)
-						    .detail("ExpectedPhase", self->expectedPhase);
+						    .detail("ExpectedPhase", expectedPhase);
 						throw audit_storage_task_outdated();
 					}
 				}

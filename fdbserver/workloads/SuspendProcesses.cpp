@@ -41,8 +41,8 @@ struct SuspendProcessesWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> _start(Database cx, SuspendProcessesWorkload* self) {
-		co_await delay(self->waitTimeDuration);
+	Future<Void> _start(Database cx) {
+		co_await delay(waitTimeDuration);
 		ReadYourWritesTransaction tr(cx);
 		while (true) {
 			Error err;
@@ -57,7 +57,7 @@ struct SuspendProcessesWorkload : TestWorkload {
 				for (auto it : kvs) {
 					auto ip_port = (it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key)
 					                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
-					for (auto& killProcess : self->prefixSuspendProcesses) {
+					for (auto& killProcess : prefixSuspendProcesses) {
 						if (boost::starts_with(ip_port.toString().c_str(), killProcess.c_str())) {
 							suspendProcessInterfaces.push_back(it.value);
 							TraceEvent("SuspendProcessSelectedProcess").detail("IpPort", printable(ip_port));
@@ -66,7 +66,7 @@ struct SuspendProcessesWorkload : TestWorkload {
 				}
 				for (auto& interf : suspendProcessInterfaces) {
 					BinaryReader::fromStringRef<ClientWorkerInterface>(interf, IncludeVersion())
-					    .reboot.send(RebootRequest(false, false, self->suspendTimeDuration));
+					    .reboot.send(RebootRequest(false, false, suspendTimeDuration));
 				}
 				co_return;
 			} catch (Error& e) {
@@ -79,7 +79,7 @@ struct SuspendProcessesWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

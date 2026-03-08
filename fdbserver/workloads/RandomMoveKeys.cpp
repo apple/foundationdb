@@ -50,7 +50,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	bool shouldInject(DeterministicRandom& random,
 	                  const WorkloadRequest& work,
@@ -58,8 +58,8 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		return alreadyAdded < 1 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 	}
 
-	Future<Void> _start(Database cx, MoveKeysWorkload* self) {
-		if (self->enabled) {
+	Future<Void> _start(Database cx) {
+		if (enabled) {
 			// Get the database configuration so as to use proper team size
 			Transaction tr(cx);
 			while (true) {
@@ -70,7 +70,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 					RangeResult res = co_await tr.getRange(configKeys, 1000);
 					ASSERT(res.size() < 1000);
 					for (int i = 0; i < res.size(); i++)
-						self->configuration.set(res[i].key, res[i].value);
+						configuration.set(res[i].key, res[i].value);
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -80,8 +80,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 
 			int oldMode = co_await setDDMode(cx, 0);
 			TraceEvent("RMKStartModeSetting").log();
-			co_await timeout(
-			    reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration, Void());
+			co_await timeout(reportErrors(worker(cx, this), "MoveKeysWorkloadWorkerError"), testDuration, Void());
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving").log();
 			co_await setDDMode(cx, oldMode);

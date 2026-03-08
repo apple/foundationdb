@@ -46,7 +46,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
@@ -87,13 +87,13 @@ struct WriteBandwidthWorkload : KVWorkload {
 		self->loadTime = loadTime.getFuture().get();
 	}
 
-	Future<Void> _start(Database cx, WriteBandwidthWorkload* self) {
-		for (int i = 0; i < self->actorCount; i++) {
-			self->clients.push_back(self->writeClient(cx, self));
+	Future<Void> _start(Database cx) {
+		for (int i = 0; i < actorCount; i++) {
+			clients.push_back(writeClient(cx, this));
 		}
 
-		co_await timeout(waitForAll(self->clients), self->testDuration, Void());
-		self->clients.clear();
+		co_await timeout(waitForAll(clients), testDuration, Void());
+		clients.clear();
 	}
 
 	Future<Void> writeClient(Database cx, WriteBandwidthWorkload* self) {

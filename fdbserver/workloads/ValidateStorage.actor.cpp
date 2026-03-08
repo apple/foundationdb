@@ -99,7 +99,7 @@ struct ValidateStorage : TestWorkload {
 		if (!enabled) {
 			return Void();
 		}
-		return _start(this, cx);
+		return _start(cx);
 	}
 
 	Future<UID> triggerAuditStorageForType(Database cx,
@@ -279,7 +279,7 @@ struct ValidateStorage : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(ValidateStorage* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		TraceEvent("ValidateStorageTestBegin");
 		std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                           { "TestKeyB"_sr, "TestValueB"_sr },
@@ -288,7 +288,7 @@ struct ValidateStorage : TestWorkload {
 		                           { "TestKeyE"_sr, "TestValueE"_sr },
 		                           { "TestKeyF"_sr, "TestValueF"_sr } });
 
-		Version ver = co_await self->populateData(self, cx, &kvs);
+		Version ver = co_await populateData(this, cx, &kvs);
 
 		TraceEvent("TestValueWritten").detail("AtVersion", ver);
 
@@ -297,34 +297,34 @@ struct ValidateStorage : TestWorkload {
 			disableConnectionFailures("AuditStorage");
 		}
 
-		self->testStringToAuditPhaseFunctionality();
+		testStringToAuditPhaseFunctionality();
 		TraceEvent("TestAuditStorageStringToAuditPhaseFuncionalityDone");
 
-		co_await self->testSSUserDataValidation(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr));
+		co_await testSSUserDataValidation(this, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr));
 		TraceEvent("TestAuditStorageValidateValueDone");
 
-		co_await self->testAuditStorageFunctionality(self, cx);
+		co_await testAuditStorageFunctionality(this, cx);
 		TraceEvent("TestAuditStorageFunctionalityDone");
 
-		co_await self->testAuditStorageIDGenerator(self, cx);
+		co_await testAuditStorageIDGenerator(this, cx);
 		TraceEvent("TestAuditStorageIDGeneratorDone");
 
-		co_await self->testAuditStorageConcurrentRunForDifferentType(self, cx);
+		co_await testAuditStorageConcurrentRunForDifferentType(this, cx);
 		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
 
-		co_await self->testAuditStorageConcurrentRunForSameType(self, cx);
+		co_await testAuditStorageConcurrentRunForSameType(this, cx);
 		TraceEvent("TestAuditStorageConcurrentRunForSameTypeDone");
 
-		co_await self->testAuditStorageCancellation(self, cx);
+		co_await testAuditStorageCancellation(this, cx);
 		TraceEvent("TestAuditStorageCancellationDone");
 
-		co_await self->testAuditStorageProgress(self, cx);
+		co_await testAuditStorageProgress(this, cx);
 		TraceEvent("TestAuditStorageProgressDone");
 
-		co_await self->testAuditStorageWhenDDSecurityMode(self, cx);
+		co_await testAuditStorageWhenDDSecurityMode(this, cx);
 		TraceEvent("TestAuditStorageWhenDDSecurityModeDone");
 
-		co_await self->testAuditStorageWhenDDBackToNormalMode(self, cx);
+		co_await testAuditStorageWhenDDBackToNormalMode(this, cx);
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeDone");
 	}
 

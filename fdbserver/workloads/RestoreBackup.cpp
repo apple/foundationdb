@@ -127,32 +127,32 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
-		co_await delay(self->delayFor);
-		co_await waitOnBackup(self, cx);
+		co_await delay(delayFor);
+		co_await waitOnBackup(this, cx);
 		co_await clearDatabase(cx);
 
-		co_await self->backupAgent.restore(cx,
-		                                   cx,
-		                                   self->tag,
-		                                   Key(self->backupContainer->getURL()),
-		                                   self->backupContainer->getProxy(),
-		                                   WaitForComplete::True,
-		                                   ::invalidVersion,
-		                                   Verbose::True,
-		                                   KeyRange(),
-		                                   Key(),
-		                                   Key(),
-		                                   LockDB::True,
-		                                   OnlyApplyMutationLogs::False,
-		                                   InconsistentSnapshotOnly::False,
-		                                   ::invalidVersion,
-		                                   self->encryptionKeyFileName);
+		co_await backupAgent.restore(cx,
+		                             cx,
+		                             tag,
+		                             Key(backupContainer->getURL()),
+		                             backupContainer->getProxy(),
+		                             WaitForComplete::True,
+		                             ::invalidVersion,
+		                             Verbose::True,
+		                             KeyRange(),
+		                             Key(),
+		                             Key(),
+		                             LockDB::True,
+		                             OnlyApplyMutationLogs::False,
+		                             InconsistentSnapshotOnly::False,
+		                             ::invalidVersion,
+		                             encryptionKeyFileName);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

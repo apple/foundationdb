@@ -59,7 +59,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return _start(cx, this);
+			return _start(cx);
 		return Void();
 	}
 
@@ -264,11 +264,11 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, RYWPerformanceWorkload* self) {
+	Future<Void> _start(Database cx) {
 		int i{ 0 };
 		fprintf(stderr, "test_get_single, ");
 		for (i = 0; i < 14; i++) {
-			co_await self->test_get_single(cx, self, i);
+			co_await test_get_single(cx, this, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else
@@ -276,7 +276,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 		fprintf(stderr, "test_get_many_sequential, ");
 		for (i = 0; i < 14; i++) {
-			co_await self->test_get_many_sequential(cx, self, i);
+			co_await test_get_many_sequential(cx, this, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else
@@ -284,7 +284,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 		fprintf(stderr, "test_get_range_basic, ");
 		for (i = 4; i < 14; i++) {
-			co_await self->test_get_range_basic(cx, self, i);
+			co_await test_get_range_basic(cx, this, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else
@@ -292,7 +292,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 		fprintf(stderr, "test_interleaved_sets_gets, ");
 		for (i = 0; i < 14; i++) {
-			co_await self->test_interleaved_sets_gets(cx, self, i);
+			co_await test_interleaved_sets_gets(cx, this, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else

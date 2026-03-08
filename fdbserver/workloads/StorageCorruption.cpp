@@ -42,13 +42,13 @@ struct StorageCorruptionWorkload : TestWorkload {
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
-	static Future<Void> _start(Self* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		co_await setDDMode(cx, 0);
-		self->bugInjector.enable();
-		co_await delay(self->testDuration);
-		self->bug->corruptionProbability = 0.0;
-		TraceEvent("CorruptionInjections").detail("NumCorruptions", self->bug->numHits()).log();
-		self->bugInjector.disable();
+		bugInjector.enable();
+		co_await delay(testDuration);
+		bug->corruptionProbability = 0.0;
+		TraceEvent("CorruptionInjections").detail("NumCorruptions", bug->numHits()).log();
+		bugInjector.disable();
 		ProcessEvents::uncancellableEvent("ConsistencyCheckFailure"_sr,
 		                                  [](StringRef, std::any const& data, Error const&) {
 			                                  if (std::any_cast<BaseTraceEvent*>(data)->getSeverity() == SevError) {
@@ -62,7 +62,7 @@ struct StorageCorruptionWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		return _start(this, cx->clone());
+		return _start(cx->clone());
 	}
 	Future<bool> check(Database const& cx) override { return true; }
 

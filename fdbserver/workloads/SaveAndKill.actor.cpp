@@ -56,18 +56,18 @@ struct SaveAndKillWorkload : TestWorkload {
 		g_simulator->disableSwapsToAll();
 		return Void();
 	}
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
-	Future<Void> _start(SaveAndKillWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		int i{ 0 };
-		co_await delay(deterministicRandom()->random01() * self->testDuration);
+		co_await delay(deterministicRandom()->random01() * testDuration);
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 
 		CSimpleIni ini;
 		ini.SetUnicode();
-		ini.LoadFile(self->restartInfo.c_str());
+		ini.LoadFile(restartInfo.c_str());
 
-		ini.SetValue("RESTORE", "isRestoring", format("%d", self->isRestoring).c_str());
+		ini.SetValue("RESTORE", "isRestoring", format("%d", isRestoring).c_str());
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator->processesPerMachine).c_str());
 		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
 		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator->desiredCoordinators).c_str());
@@ -143,7 +143,7 @@ struct SaveAndKillWorkload : TestWorkload {
 		}
 
 		ini.SetValue("META", "machineCount", format("%d", machines.size()).c_str());
-		ini.SaveFile(self->restartInfo.c_str());
+		ini.SaveFile(restartInfo.c_str());
 
 		for (auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {
 			g_simulator->killProcess(process->second, ISimulator::KillType::Reboot);

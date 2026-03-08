@@ -37,11 +37,11 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload* self) {
+	Future<Void> _start(Database cx) {
 		TraceEvent(SevInfo, "TKCorrectness_Start").log();
 
 		double start = now();
-		while (now() - start > self->testDuration) {
+		while (now() - start > testDuration) {
 			Transaction tr(cx);
 
 			while (true) {
@@ -49,7 +49,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				try {
 					int64_t curTime = now();
 					Version v = co_await tr.getReadVersion();
-					self->inMemTimeKeeper[curTime] = v;
+					inMemTimeKeeper[curTime] = v;
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -64,7 +64,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "TKCorrectness_Completed").log();
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	static Future<bool> _check(Database cx, TimeKeeperCorrectnessWorkload* self) {
 		KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);

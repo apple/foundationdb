@@ -256,7 +256,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return _check(this, cx); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
@@ -280,15 +280,15 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		co_await ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true);
 	}
 
-	Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("ConfigureDatabase_Config").detail("Config", config.toString());
 		if (!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-			self->storageEngineExcludeTypes.push_back((int)SimulationStorageEngine::SHARDED_ROCKSDB);
+			storageEngineExcludeTypes.push_back((int)SimulationStorageEngine::SHARDED_ROCKSDB);
 		}
-		if (self->clientId == 0) {
-			self->clients.push_back(timeout(self->singleDB(self, cx), self->testDuration, Void()));
-			co_await waitForAll(self->clients);
+		if (clientId == 0) {
+			clients.push_back(timeout(singleDB(this, cx), testDuration, Void()));
+			co_await waitForAll(clients);
 		}
 	}
 

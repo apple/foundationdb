@@ -57,7 +57,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Key keyForIndex(uint64_t index) const {
 		Key result = makeString(keyBytes);
@@ -85,22 +85,22 @@ struct WatchAndWaitWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	Future<Void> _start(Database cx, WatchAndWaitWorkload* self) {
+	Future<Void> _start(Database cx) {
 		std::vector<Future<Void>> watches;
-		uint64_t endNode = (self->nodeCount * (self->clientId + 1)) / self->clientCount;
-		uint64_t startNode = (self->nodeCount * self->clientId) / self->clientCount;
-		uint64_t NodesPerWatch = self->nodeCount / self->watchCount;
+		uint64_t endNode = (nodeCount * (clientId + 1)) / clientCount;
+		uint64_t startNode = (nodeCount * clientId) / clientCount;
+		uint64_t NodesPerWatch = nodeCount / watchCount;
 		TraceEvent("WatchAndWaitExpect")
-		    .detail("Duration", self->testDuration)
+		    .detail("Duration", testDuration)
 		    .detail("ExpectedCount", (endNode - startNode) / NodesPerWatch)
 		    .detail("End", endNode)
 		    .detail("Start", startNode)
 		    .detail("Npw", NodesPerWatch);
 		for (uint64_t i = startNode; i < endNode; i += NodesPerWatch) {
-			watches.push_back(self->watchAndWait(cx, self, i));
+			watches.push_back(watchAndWait(cx, this, i));
 		}
-		co_await delay(self->testDuration); // || waitForAll( watches )
-		TraceEvent("WatchAndWaitEnd").detail("Duration", self->testDuration);
+		co_await delay(testDuration); // || waitForAll( watches )
+		TraceEvent("WatchAndWaitEnd").detail("Duration", testDuration);
 	}
 
 	Future<Void> watchAndWait(Database cx, WatchAndWaitWorkload* self, int index) {

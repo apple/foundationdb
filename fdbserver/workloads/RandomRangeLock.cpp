@@ -52,7 +52,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -166,8 +166,8 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {
-		if (self->enabled) {
+	Future<Void> _start(Database cx) {
+		if (enabled) {
 			// Run lockActorCount number of actor concurrently.
 			// Each actor conducts (1) locking a range for a while and (2) unlocking the range.
 			// Each actor randomly generate a uniqueId as the lock owner.
@@ -177,16 +177,16 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			// The rangeLock mechanism should approperiately handled those conflict.
 			// When all actors complete, it is expected that all locks are removed,
 			// and this injected workload should not block other workloads.
-			std::string rangeLockOwnerNamePrefix = "Owner" + std::to_string(self->clientId);
+			std::string rangeLockOwnerNamePrefix = "Owner" + std::to_string(clientId);
 			std::vector<Future<Void>> actors;
-			for (int i = 0; i < self->lockActorCount; i++) {
-				actors.push_back(self->lockActor(cx, self, rangeLockOwnerNamePrefix));
+			for (int i = 0; i < lockActorCount; i++) {
+				actors.push_back(lockActor(cx, this, rangeLockOwnerNamePrefix));
 			}
 			co_await waitForAll(actors);
 
 			// Make sure all ranges locked by the workload client are unlocked
 			int j = 0;
-			for (; j < self->lockActorCount; j++) {
+			for (; j < lockActorCount; j++) {
 				std::vector<std::pair<KeyRange, RangeLockState>> res = co_await findExclusiveReadLockOnRange(
 				    cx, normalKeys, rangeLockOwnerNamePrefix + "-" + std::to_string(j));
 				ASSERT(res.empty());

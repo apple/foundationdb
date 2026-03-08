@@ -50,7 +50,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		if (clientId) {
 			return Void();
 		}
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -60,14 +60,14 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		return _check(cx, this);
 	}
 
-	static Future<Void> _start(Database cx, SimpleAtomicAddWorkload* self) {
-		if (self->initialize) {
-			co_await setInitialValue(cx, self);
+	Future<Void> _start(Database cx) {
+		if (initialize) {
+			co_await setInitialValue(cx, this);
 		}
-		for (int i = 0; i < self->iterations; ++i) {
-			self->clients.push_back(timeout(applyAtomicAdd(cx, self), self->testDuration, Void()));
+		for (int i = 0; i < iterations; ++i) {
+			clients.push_back(timeout(applyAtomicAdd(cx, this), testDuration, Void()));
 		}
-		waitForAll(self->clients);
+		waitForAll(clients);
 	}
 
 	static Future<Void> setInitialValue(Database cx, SimpleAtomicAddWorkload* self) {

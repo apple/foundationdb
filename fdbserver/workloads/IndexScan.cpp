@@ -49,7 +49,7 @@ struct IndexScanWorkload : KVWorkload {
 		if (singleProcess && clientId != 0) {
 			return Void();
 		}
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(const Database&) override { return true; }
@@ -67,7 +67,7 @@ struct IndexScanWorkload : KVWorkload {
 		m.emplace_back("Rows/chunk", chunks == 0 ? 0 : rowsRead / (double)chunks, Averaged::True);
 	}
 
-	Future<Void> _start(Database cx, IndexScanWorkload* self) {
+	Future<Void> _start(Database cx) {
 		// Boilerplate: "warm" the location cache so that the location of all keys is known before test starts
 		double startTime = now();
 		while (true) {
@@ -85,7 +85,7 @@ struct IndexScanWorkload : KVWorkload {
 		// Wait some small amount of time for things to "settle". Maybe this is historical?
 		co_await delay(std::max(0.1, 1.0 - (now() - startTime)));
 
-		co_await timeout(serialScans(cx, self), self->testDuration, Void());
+		co_await timeout(serialScans(cx, this), testDuration, Void());
 	}
 
 	static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {

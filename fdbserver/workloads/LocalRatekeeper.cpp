@@ -129,14 +129,14 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
-		co_await delay(self->startAfter);
+	Future<Void> _start(Database cx) {
+		co_await delay(startAfter);
 		StorageServerInterface ssi = co_await getRandomStorage(cx);
-		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
-		Future<Void> done = delay(self->blockWritesFor);
+		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + blockWritesFor);
+		Future<Void> done = delay(blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
 		co_await delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6));
-		co_await (testStorage(self, cx, ssi) || done);
+		co_await (testStorage(this, cx, ssi) || done);
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -144,7 +144,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		if (clientId != 0 || !g_network->isSimulated()) {
 			return Void();
 		}
-		return _start(this, cx);
+		return _start(cx);
 	}
 	Future<bool> check(Database const& cx) override { return !testFailed; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}

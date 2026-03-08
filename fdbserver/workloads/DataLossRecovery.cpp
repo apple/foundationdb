@@ -71,41 +71,41 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		if (!enabled) {
 			return Void();
 		}
-		return _start(this, cx);
+		return _start(cx);
 	}
 
-	Future<Void> _start(DataLossRecoveryWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		Key key = "TestKey"_sr;
 		Key endKey = "TestKey0"_sr;
 		Value oldValue = "TestValue"_sr;
 		Value newValue = "TestNewValue"_sr;
 
 		TraceEvent("DataLossRecovery").detail("Phase", "Starting");
-		co_await self->writeAndVerify(self, cx, key, oldValue);
+		co_await writeAndVerify(this, cx, key, oldValue);
 
 		TraceEvent("DataLossRecovery").detail("Phase", "InitialWrites");
 		// Move [key, endKey) to team: {address}.
-		NetworkAddress address = co_await self->disableDDAndMoveShard(self, cx, KeyRangeRef(key, endKey));
+		NetworkAddress address = co_await disableDDAndMoveShard(this, cx, KeyRangeRef(key, endKey));
 		TraceEvent("DataLossRecovery").detail("Phase", "Moved");
-		co_await self->readAndVerify(self, cx, key, oldValue);
+		co_await readAndVerify(this, cx, key, oldValue);
 		TraceEvent("DataLossRecovery").detail("Phase", "ReadAfterMove");
 
 		// Kill team {address}, and expect read to timeout.
-		self->killProcess(self, address);
+		killProcess(this, address);
 		TraceEvent("DataLossRecovery").detail("Phase", "KilledProcess");
-		co_await self->readAndVerify(self, cx, key, timed_out());
+		co_await readAndVerify(this, cx, key, timed_out());
 		TraceEvent("DataLossRecovery").detail("Phase", "VerifiedReadTimeout");
 
 		// Reenable DD and exclude address as fail, so that [key, endKey) will be dropped and moved to a new team.
 		// Expect read to return 'value not found'.
 		co_await setDDMode(cx, 1);
-		co_await self->exclude(cx, address);
+		co_await exclude(cx, address);
 		TraceEvent("DataLossRecovery").detail("Phase", "Excluded");
-		co_await self->readAndVerify(self, cx, key, Optional<Value>());
+		co_await readAndVerify(this, cx, key, Optional<Value>());
 		TraceEvent("DataLossRecovery").detail("Phase", "VerifiedDataDropped");
 
 		// Write will scceed.
-		co_await self->writeAndVerify(self, cx, key, newValue);
+		co_await writeAndVerify(this, cx, key, newValue);
 	}
 
 	Future<Void> readAndVerify(DataLossRecoveryWorkload* self,

@@ -107,22 +107,22 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		}
 		return _setup(cx, this);
 	}
-	static Future<Void> _start(Database cx, WriteTagThrottlingWorkload* self) {
+	Future<Void> _start(Database cx) {
 		std::vector<Future<Void>> clientActors;
 		int actorId;
-		for (actorId = 0; actorId < self->goodActorPerClient; ++actorId) {
-			clientActors.push_back(clientActor(false, actorId, 0, cx, self));
+		for (actorId = 0; actorId < goodActorPerClient; ++actorId) {
+			clientActors.push_back(clientActor(false, actorId, 0, cx, this));
 		}
-		for (actorId = 0; actorId < self->badActorPerClient; ++actorId) {
-			clientActors.push_back(clientActor(true, actorId, self->badOpRate, cx, self));
+		for (actorId = 0; actorId < badActorPerClient; ++actorId) {
+			clientActors.push_back(clientActor(true, actorId, badOpRate, cx, this));
 		}
-		clientActors.push_back(throttledTagUpdater(cx, self));
-		co_await timeout(waitForAll(clientActors), self->testDuration, Void());
+		clientActors.push_back(throttledTagUpdater(cx, this));
+		co_await timeout(waitForAll(clientActors), testDuration, Void());
 	}
 	Future<Void> start(Database const& cx) override {
 		if (fastSuccess)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 	Future<bool> check(Database const& cx) override {
 		if (fastSuccess)

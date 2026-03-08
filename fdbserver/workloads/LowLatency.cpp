@@ -61,29 +61,29 @@ struct LowLatencyWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return _start(cx, this);
+			return _start(cx);
 		return Void();
 	}
 
-	static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
+	Future<Void> _start(Database cx) {
 		double testStart = now();
 		try {
 			while (true) {
-				co_await delay(self->checkDelay);
+				co_await delay(checkDelay);
 				Transaction tr(cx);
 				double operationStart = now();
-				bool doCommit = self->testWrites && deterministicRandom()->coinflip();
-				double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
-				++self->operations;
+				bool doCommit = testWrites && deterministicRandom()->coinflip();
+				double maxLatency = doCommit ? maxCommitLatency : maxGRVLatency;
+				++operations;
 				while (true) {
 					Error err;
 					try {
-						TraceEvent("LowLatencyTransactionStart").detail("Retries", self->retries.getValue());
+						TraceEvent("LowLatencyTransactionStart").detail("Retries", retries.getValue());
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
 							TraceEvent("LowLatencyTransactionCommitStart");
-							tr.set(self->testKey, ""_sr);
+							tr.set(testKey, ""_sr);
 							co_await tr.commit();
 							TraceEvent("LowLatencyTransactionCommitFinish");
 						} else {
@@ -97,16 +97,16 @@ struct LowLatencyWorkload : TestWorkload {
 					}
 					TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(err);
 					co_await tr.onError(err);
-					++self->retries;
+					++retries;
 				}
 				if (now() - operationStart > maxLatency) {
 					TraceEvent(SevError, "LatencyTooLarge")
 					    .detail("MaxLatency", maxLatency)
 					    .detail("ObservedLatency", now() - operationStart)
 					    .detail("IsCommit", doCommit);
-					self->ok = false;
+					ok = false;
 				}
-				if (now() - testStart > self->testDuration)
+				if (now() - testStart > testDuration)
 					break;
 			}
 			co_return;

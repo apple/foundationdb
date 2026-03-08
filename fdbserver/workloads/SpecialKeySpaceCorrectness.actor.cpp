@@ -62,7 +62,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
@@ -117,16 +117,16 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 		return Void();
 	}
-	Future<Void> _start(Database cx, SpecialKeySpaceCorrectnessWorkload* self) {
+	Future<Void> _start(Database cx) {
 		testRywLifetime(cx);
-		co_await timeout(self->testSpecialKeySpaceErrors(cx, self) && self->getRangeCallActor(cx, self) &&
-		                     testConflictRanges(cx, /*read*/ true, self) &&
-		                     testConflictRanges(cx, /*read*/ false, self) && self->metricsApiCorrectnessActor(cx, self),
-		                 self->testDuration,
+		co_await timeout(testSpecialKeySpaceErrors(cx, this) && getRangeCallActor(cx, this) &&
+		                     testConflictRanges(cx, /*read*/ true, this) &&
+		                     testConflictRanges(cx, /*read*/ false, this) && metricsApiCorrectnessActor(cx, this),
+		                 testDuration,
 		                 Void());
 		// Only use one client to avoid potential conflicts on changing cluster configuration
-		if (self->clientId == 0)
-			co_await self->managementApiCorrectnessActor(cx, self);
+		if (clientId == 0)
+			co_await managementApiCorrectnessActor(cx, this);
 	}
 
 	// This would be a unit test except we need a Database to create an ryw transaction

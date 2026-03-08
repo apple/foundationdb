@@ -73,10 +73,8 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		}
 	}
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
-		co_await timeout(healthMetricsChecker(cx, self), self->testDuration, Void());
-	}
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
+	Future<Void> _start(Database cx) { co_await timeout(healthMetricsChecker(cx, this), testDuration, Void()); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override {
 		if (!gotMetrics) {

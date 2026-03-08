@@ -86,7 +86,7 @@ struct RangeLocking : TestWorkload {
 		return registerRangeLockOwner(cx, rangeLockOwnerName, rangeLockOwnerName);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
@@ -610,12 +610,12 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(RangeLocking* self, Database cx) {
-		if (self->clientId != 0) {
+	Future<Void> _start(Database cx) {
+		if (clientId != 0) {
 			co_return;
 		}
-		co_await self->complexTest(self, cx);
-		co_await self->testUnlockByUser(self, cx);
+		co_await complexTest(this, cx);
+		co_await testUnlockByUser(this, cx);
 	}
 };
 
