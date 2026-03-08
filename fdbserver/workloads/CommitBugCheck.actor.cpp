@@ -33,122 +33,133 @@ struct CommitBugWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override { return timeout(bug1(cx, this) && bug2(cx, this), 60, Void()); }
 
-	ACTOR Future<Void> bug1(Database cx, CommitBugWorkload* self) {
-		state Key key = StringRef(format("B1Key%d", self->clientId));
-		state Value val1 = "Value1"_sr;
-		state Value val2 = "Value2"_sr;
+	Future<Void> bug1(Database cx, CommitBugWorkload* self) {
+		Key key = StringRef(format("B1Key%d", self->clientId));
+		Value val1 = "Value1"_sr;
+		Value val2 = "Value2"_sr;
 
 		loop {
-			state Transaction tr(cx);
+			Transaction tr(cx);
 			loop {
+				Error err;
 				try {
 					tr.set(key, val1);
-					wait(tr.commit());
+					co_await tr.commit();
 					tr.reset();
 					break;
 				} catch (Error& e) {
-					TraceEvent("CommitBugSetVal1Error").error(e);
-					CODE_PROBE(e.code() == error_code_commit_unknown_result, "Commit unknown result");
-					wait(tr.onError(e));
+					err = e;
 				}
+				TraceEvent("CommitBugSetVal1Error").error(err);
+				CODE_PROBE(err.code() == error_code_commit_unknown_result, "Commit unknown result");
+				co_await tr.onError(err);
 			}
 
 			loop {
+				Error err;
 				try {
 					tr.set(key, val2);
-					wait(tr.commit());
+					co_await tr.commit();
 					tr.reset();
 					break;
 				} catch (Error& e) {
-					TraceEvent("CommitBugSetVal2Error").error(e);
-					wait(tr.onError(e));
+					err = e;
 				}
+				TraceEvent("CommitBugSetVal2Error").error(err);
+				co_await tr.onError(err);
 			}
 
 			loop {
+				Error err;
 				try {
-					Optional<Value> v = wait(tr.get(key));
+					Optional<Value> v = co_await tr.get(key);
 					if (!v.present() || v.get() != val2) {
 						TraceEvent(SevError, "CommitBugFailed")
 						    .detail("Value", v.present() ? printable(v.get()) : "Not present");
 						self->success = false;
-						return Void();
+						co_return;
 					}
 
 					break;
 				} catch (Error& e) {
-					TraceEvent("CommitBugGetValError").error(e);
-					wait(tr.onError(e));
+					err = e;
 				}
+				TraceEvent("CommitBugGetValError").error(err);
+				co_await tr.onError(err);
 			}
 
 			loop {
+				Error err;
 				try {
 					tr.clear(key);
-					wait(tr.commit());
+					co_await tr.commit();
 					tr.reset();
 					break;
 				} catch (Error& e) {
-					TraceEvent("CommitBugClearValError").error(e);
-					wait(tr.onError(e));
+					err = e;
 				}
+				TraceEvent("CommitBugClearValError").error(err);
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR Future<Void> bug2(Database cx, CommitBugWorkload* self) {
-		state Key key = StringRef(format("B2Key%d", self->clientId));
+	Future<Void> bug2(Database cx, CommitBugWorkload* self) {
+		Key key = StringRef(format("B2Key%d", self->clientId));
 
-		state int i;
-		for (i = 0; i < 1000; ++i) {
-			state Transaction tr(cx);
+		for (int i = 0; i < 1000; ++i) {
+			Transaction tr(cx);
 
 			loop {
+				Error caughtErr;
 				try {
-					Optional<Value> val = wait(tr.get(key));
-					state int num = 0;
+					Optional<Value> val = co_await tr.get(key);
+					int num = 0;
 					if (val.present()) {
 						num = atoi(val.get().toString().c_str());
 						if (num != i) {
 							TraceEvent(SevError, "CommitBug2Failed").detail("Value", num).detail("Expected", i);
 							self->success = false;
-							return Void();
+							co_return;
 						}
 					}
 
 					TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
 					tr.set(key, StringRef(format("%d", i + 1)));
-					wait(tr.commit());
+					co_await tr.commit();
 					TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
 					break;
 				} catch (Error& error) {
-					state Error e = error;
-					if (e.code() != error_code_not_committed && e.code() != error_code_transaction_too_old) {
-						tr.reset();
-						loop {
+					caughtErr = error;
+				}
+				Error e = caughtErr;
+				if (e.code() != error_code_not_committed && e.code() != error_code_transaction_too_old) {
+					tr.reset();
+					loop {
+						{
+							Error caughtErr;
 							try {
 								TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
 								tr.set(key, StringRef(format("%d", i + 1)));
 								TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
-								wait(tr.commit());
+								co_await tr.commit();
 								break;
 							} catch (Error& err) {
-								wait(tr.onError(err));
+								caughtErr = err;
 							}
+							co_await tr.onError(caughtErr);
 						}
-
-						break;
-					} else {
-						CODE_PROBE(true, "Commit conflict");
-
-						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
-						wait(tr.onError(e));
 					}
+
+					break;
+				} else {
+					CODE_PROBE(true, "Commit conflict");
+
+					TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
+					co_await tr.onError(e);
 				}
 			}
 		}
-
-		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return success; }

@@ -91,51 +91,51 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	bool hasPrefix() const { return addPrefix != ""_sr || removePrefix != ""_sr; }
 
-	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
-		state FileBackupAgent backupAgent;
+	static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
+		FileBackupAgent backupAgent;
 
-		wait(delay(self->startAfter * deterministicRandom()->random01()));
+		co_await delay(self->startAfter * deterministicRandom()->random01());
 		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
 
-		state std::string backupContainer = "file://simfdb/backups/";
+		std::string backupContainer = "file://simfdb/backups/";
 		try {
-			wait(backupAgent.submitBackup(cx,
-			                              StringRef(backupContainer),
-			                              {},
-			                              deterministicRandom()->randomInt(0, 60),
-			                              deterministicRandom()->randomInt(0, 100),
-			                              BackupAgentBase::getDefaultTagName(),
-			                              self->backupRanges,
-			                              StopWhenDone::False,
-			                              self->usePartitionedLogs,
-			                              IncrementalBackupOnly::False,
-			                              {}));
+			co_await backupAgent.submitBackup(cx,
+			                                  StringRef(backupContainer),
+			                                  {},
+			                                  deterministicRandom()->randomInt(0, 60),
+			                                  deterministicRandom()->randomInt(0, 100),
+			                                  BackupAgentBase::getDefaultTagName(),
+			                                  self->backupRanges,
+			                                  StopWhenDone::False,
+			                                  self->usePartitionedLogs,
+			                                  IncrementalBackupOnly::False,
+			                                  {});
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
 
 		TraceEvent("AtomicRestore_Wait").log();
-		wait(success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False)));
+		co_await success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False));
 		TraceEvent("AtomicRestore_BackupStart").log();
-		wait(delay(self->restoreAfter * deterministicRandom()->random01()));
+		co_await delay(self->restoreAfter * deterministicRandom()->random01());
 		TraceEvent("AtomicRestore_RestoreStart").log();
 
 		if (self->fastRestore) { // New fast parallel restore
 			TraceEvent(SevInfo, "AtomicParallelRestore").log();
-			wait(backupAgent.atomicParallelRestore(
-			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix));
+			co_await backupAgent.atomicParallelRestore(
+			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix);
 		} else { // Old style restore
 			loop {
 				try {
-					wait(success(backupAgent.atomicRestore(
-					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef())));
+					co_await success(backupAgent.atomicRestore(
+					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
 					break;
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			}
 		}
 
@@ -145,7 +145,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Done").log();
-		return Void();
 	}
 };
 

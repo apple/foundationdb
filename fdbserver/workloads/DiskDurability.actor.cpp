@@ -34,22 +34,22 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		int64_t lastData;
 		Reference<FlowLock> lock;
 
-		ACTOR static Future<Void> test_impl(FileBlock* self,
-		                                    Reference<AsyncFileHandle> file,
-		                                    int pages,
-		                                    Reference<AsyncFileBuffer> buffer) {
-			wait(self->lock->take());
+		static Future<Void> test_impl(FileBlock* self,
+		                              Reference<AsyncFileHandle> file,
+		                              int pages,
+		                              Reference<AsyncFileBuffer> buffer) {
+			co_await self->lock->take();
 
-			state int64_t offset = (int64_t)self->blockNum * pages * _PAGE_SIZE;
-			state int size = pages * _PAGE_SIZE;
+			int64_t offset = (int64_t)self->blockNum * pages * _PAGE_SIZE;
+			int size = pages * _PAGE_SIZE;
 
-			state int64_t newData = 0;
+			int64_t newData = 0;
 			if (self->lastData == 0)
 				newData = deterministicRandom()->randomInt64(std::numeric_limits<int64_t>::min(),
 				                                             std::numeric_limits<int64_t>::max());
 			else {
 				++newData;
-				int readBytes = wait(file->file->read(buffer->buffer, size, offset));
+				int readBytes = co_await file->file->read(buffer->buffer, size, offset);
 				ASSERT(readBytes == size);
 			}
 
@@ -70,10 +70,9 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 				arr[i] = newData;
 			}
 
-			wait(file->file->write(buffer->buffer, size, offset));
+			co_await file->file->write(buffer->buffer, size, offset);
 			self->lock->release(1);
 			self->lastData = newData;
-			return Void();
 		}
 
 		Future<Void> test(Reference<AsyncFileHandle> file, int pages, Reference<AsyncFileBuffer> buffer) {
@@ -107,7 +106,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(DiskDurabilityWorkload* self) {
+	Future<Void> _setup(DiskDurabilityWorkload* self) {
 		ASSERT(!self->path.empty());
 
 		int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
@@ -118,7 +117,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			flags |= IAsyncFile::OPEN_UNCACHED;
 
 		try {
-			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
+			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(self->path, flags, 0666);
 			if (self->fileHandle.getPtr() == nullptr)
 				self->fileHandle = makeReference<AsyncFileHandle>(file, self->path, false);
 			else
@@ -127,8 +126,6 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Could not open file");
 			throw;
 		}
-
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -145,39 +142,37 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		return x;
 	}
 
-	ACTOR static Future<Void> worker(DiskDurabilityWorkload* self) {
-		state Reference<AsyncFileBuffer> buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
-		state int logfp = (int)ceil(log2(self->filePages));
+	static Future<Void> worker(DiskDurabilityWorkload* self) {
+		Reference<AsyncFileBuffer> buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
+		int logfp = (int)ceil(log2(self->filePages));
 		loop {
 			int block = intHash(std::min<int>(
 			                deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(0, logfp)),
 			                self->filePages - 1)) %
 			            self->filePages;
-			wait(self->blocks[block].test(self->fileHandle, self->pagesPerWrite, buffer));
+			co_await self->blocks[block].test(self->fileHandle, self->pagesPerWrite, buffer);
 		}
 	}
 
-	ACTOR static Future<Void> syncLoop(DiskDurabilityWorkload* self) {
+	static Future<Void> syncLoop(DiskDurabilityWorkload* self) {
 		loop {
-			wait(delay(deterministicRandom()->random01() * self->syncInterval));
-			wait(self->fileHandle->file->sync());
+			co_await delay(deterministicRandom()->random01() * self->syncInterval);
+			co_await self->fileHandle->file->sync();
 		}
 	}
 
-	ACTOR Future<Void> _start(DiskDurabilityWorkload* self) {
+	Future<Void> _start(DiskDurabilityWorkload* self) {
 		self->blocks.reserve(self->filePages);
 		for (int i = 0; i < self->filePages; ++i)
 			self->blocks.push_back(FileBlock(i));
 
-		state std::vector<Future<Void>> tasks;
+		std::vector<Future<Void>> tasks;
 		tasks.push_back(syncLoop(self));
 
 		for (int i = 0; i < self->writers; ++i)
 			tasks.push_back(worker(self));
 
-		wait(timeout(waitForAll(tasks), self->testDuration, Void()));
-
-		return Void();
+		co_await timeout(waitForAll(tasks), self->testDuration, Void());
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

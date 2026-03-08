@@ -80,10 +80,9 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
-	ACTOR static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state int64_t size = wait(getSize(self, cx));
+	static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
+		int64_t size = co_await getSize(self, cx);
 		ASSERT(sizeIsAsExpected(self, size));
-		return Void();
 	}
 
 	static bool sizeIsAsExpected(GetEstimatedRangeSizeWorkload* self, int64_t size) {
@@ -93,23 +92,27 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		return size > self->nodeCount * nodeSize / 2 && size < self->nodeCount * nodeSize * 5;
 	}
 
-	ACTOR static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		state ReadYourWritesTransaction tr(cx);
-		state double totalDelay = 0.0;
+	static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
+		ReadYourWritesTransaction tr(cx);
+		double totalDelay = 0.0;
 
 		loop {
+			Error err;
 			try {
-				state int64_t size = wait(tr.getEstimatedRangeSizeBytes(normalKeys));
+				int64_t size = co_await tr.getEstimatedRangeSizeBytes(normalKeys);
 				TraceEvent(SevDebug, "GetSizeResult").detail("Size", size);
 				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
-					wait(delay(5.0));
+					co_await delay(5.0);
 				} else {
-					return size;
+					co_return size;
 				}
 			} catch (Error& e) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				err = e;
+			}
+			if (err.isValid()) {
+				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
+				co_await tr.onError(err);
 			}
 		}
 	}

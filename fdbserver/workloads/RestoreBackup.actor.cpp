@@ -60,27 +60,29 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	static constexpr auto NAME = "RestoreBackup";
 
-	ACTOR static Future<Void> waitOnBackup(RestoreBackupWorkload* self, Database cx) {
-		state Version waitForVersion;
-		state UID backupUID;
-		state Transaction tr(cx);
+	static Future<Void> waitOnBackup(RestoreBackupWorkload* self, Database cx) {
+		Version waitForVersion{ 0 };
+		UID backupUID;
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
-				Version v = wait(tr.getReadVersion());
+				Version v = co_await tr.getReadVersion();
 				waitForVersion = v;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
-		EBackupState backupState = wait(self->backupAgent.waitBackup(
-		    cx, self->tag.toString(), self->stopWhenDone, &self->backupContainer, &backupUID));
+		EBackupState backupState = co_await self->backupAgent.waitBackup(
+		    cx, self->tag.toString(), self->stopWhenDone, &self->backupContainer, &backupUID);
 		if (backupState == EBackupState::STATE_COMPLETED) {
-			return Void();
+			co_return;
 		} else if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
 			ASSERT(!self->stopWhenDone);
 			loop {
-				BackupDescription desc = wait(self->backupContainer->describeBackup(true));
+				BackupDescription desc = co_await self->backupContainer->describeBackup(true);
 				TraceEvent("BackupVersionGate")
 				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
 				    .detail("ContiguousLogEndVersion",
@@ -89,64 +91,65 @@ struct RestoreBackupWorkload : TestWorkload {
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
 					try {
 						TraceEvent("DiscontinuingBackup").log();
-						wait(self->backupAgent.discontinueBackup(cx, self->tag));
+						co_await self->backupAgent.discontinueBackup(cx, self->tag);
 					} catch (Error& e) {
 						TraceEvent("ErrorDiscontinuingBackup").error(e);
 						if (e.code() != error_code_backup_unneeded) {
 							throw;
 						}
 					}
-					return Void();
+					co_return;
 				}
-				wait(delay(5.0));
+				co_await delay(5.0);
 			}
 		} else {
 			TraceEvent(SevError, "BadBackupState").detail("BackupState", BackupAgentBase::getStateText(backupState));
 			ASSERT(false);
-			return Void();
+			co_return;
 		}
 	}
 
-	ACTOR static Future<Void> clearDatabase(Database cx) {
-		state Transaction tr(cx);
+	static Future<Void> clearDatabase(Database cx) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.clear(normalKeys);
 				for (auto& r : getSystemBackupRanges()) {
 					tr.clear(r);
 				}
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
-		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
-		wait(delay(self->delayFor));
-		wait(waitOnBackup(self, cx));
-		wait(clearDatabase(cx));
+	static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
+		co_await delay(self->delayFor);
+		co_await waitOnBackup(self, cx);
+		co_await clearDatabase(cx);
 
-		wait(success(self->backupAgent.restore(cx,
-		                                       cx,
-		                                       self->tag,
-		                                       Key(self->backupContainer->getURL()),
-		                                       self->backupContainer->getProxy(),
-		                                       WaitForComplete::True,
-		                                       ::invalidVersion,
-		                                       Verbose::True,
-		                                       KeyRange(),
-		                                       Key(),
-		                                       Key(),
-		                                       LockDB::True,
-		                                       OnlyApplyMutationLogs::False,
-		                                       InconsistentSnapshotOnly::False,
-		                                       ::invalidVersion,
-		                                       self->encryptionKeyFileName)));
-		return Void();
+		co_await success(self->backupAgent.restore(cx,
+		                                           cx,
+		                                           self->tag,
+		                                           Key(self->backupContainer->getURL()),
+		                                           self->backupContainer->getProxy(),
+		                                           WaitForComplete::True,
+		                                           ::invalidVersion,
+		                                           Verbose::True,
+		                                           KeyRange(),
+		                                           Key(),
+		                                           Key(),
+		                                           LockDB::True,
+		                                           OnlyApplyMutationLogs::False,
+		                                           InconsistentSnapshotOnly::False,
+		                                           ::invalidVersion,
+		                                           self->encryptionKeyFileName));
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

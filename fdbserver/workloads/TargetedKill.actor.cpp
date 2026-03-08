@@ -93,16 +93,16 @@ struct TargetedKillWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> assassin(Database cx, TargetedKillWorkload* self) {
-		wait(delay(self->killAt));
-		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+	Future<Void> assassin(Database cx, TargetedKillWorkload* self) {
+		co_await delay(self->killAt);
+		std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
+		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 
-		state NetworkAddress machine;
-		state NetworkAddress ccAddr;
-		state int killed = 0;
-		state int s = 0;
-		state int j = 0;
+		NetworkAddress machine;
+		NetworkAddress ccAddr;
+		int killed = 0;
+		int s = 0;
+		int j = 0;
 		if (self->machineToKill == "master") {
 			machine = self->dbInfo->get().master.address();
 		} else if (self->machineToKill == "commitproxy") {
@@ -144,10 +144,10 @@ struct TargetedKillWorkload : TestWorkload {
 				machine = ssi.address();
 				if (machine != ccAddr) {
 					TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
-					wait(self->killEndpoint(workers, machine, cx, self));
+					co_await self->killEndpoint(workers, machine, cx, self);
 					killed++;
 					if (killed == self->numKillStorages)
-						return Void();
+						co_return;
 				}
 				s = ++s % storageServers.size();
 			}
@@ -157,9 +157,7 @@ struct TargetedKillWorkload : TestWorkload {
 
 		TraceEvent("IsolatedMark").detail("TargetedMachine", machine).detail("Role", self->machineToKill);
 
-		wait(self->killEndpoint(workers, machine, cx, self));
-
-		return Void();
+		co_await self->killEndpoint(workers, machine, cx, self);
 	}
 };
 

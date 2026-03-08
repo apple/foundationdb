@@ -47,9 +47,9 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		return Standalone<StringRef>(format("Value/%080d", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
-	ACTOR static Future<double> getMovingDataAmount(Database cx, DDMetricsExcludeWorkload* self) {
+	static Future<double> getMovingDataAmount(Database cx, DDMetricsExcludeWorkload* self) {
 		try {
-			StatusObject statusObj = wait(StatusClient::statusFetcher(cx));
+			StatusObject statusObj = co_await StatusClient::statusFetcher(cx);
 			StatusObjectReader statusObjCluster;
 			((StatusObjectReader)statusObj).get("cluster", statusObjCluster);
 			StatusObjectReader statusObjData;
@@ -60,36 +60,35 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 				if (movingData.get("in_queue_bytes", dataInQueue) && movingData.get("in_flight_bytes", dataInFlight)) {
 					self->peakInQueue = std::max(self->peakInQueue, dataInQueue);
 					self->peakInFlight = std::max(self->peakInFlight, dataInFlight);
-					return dataInQueue + dataInFlight;
+					co_return dataInQueue + dataInFlight;
 				}
 			}
 		} catch (Error& e) {
 			TraceEvent("DDMetricsExcludeGetMovingDataError").error(e);
 			throw;
 		}
-		return -1.0;
+		co_return -1.0;
 	}
 
-	ACTOR static Future<Void> _start(Database cx, DDMetricsExcludeWorkload* self) {
+	static Future<Void> _start(Database cx, DDMetricsExcludeWorkload* self) {
 		try {
-			state std::vector<AddressExclusion> excluded;
+			std::vector<AddressExclusion> excluded;
 			excluded.push_back(AddressExclusion(IPAddress::parse(self->excludeIp.toString()).get(), self->excludePort));
-			wait(excludeServers(cx, excluded));
-			state double startTime = now();
+			co_await excludeServers(cx, excluded);
+			double startTime = now();
 			loop {
-				wait(delay(2.5));
-				double movingData = wait(self->getMovingDataAmount(cx, self));
+				co_await delay(2.5);
+				double movingData = co_await self->getMovingDataAmount(cx, self);
 				self->peakMovingData = std::max(self->peakMovingData, movingData);
 				TraceEvent("DDMetricsExcludeCheck").detail("MovingData", movingData);
 				if (movingData == 0.0) {
 					self->ddDone = now() - startTime;
-					return Void();
+					co_return;
 				}
 			}
 		} catch (Error& e) {
 			TraceEvent("DDMetricsExcludeError").error(e);
 		}
-		return Void();
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

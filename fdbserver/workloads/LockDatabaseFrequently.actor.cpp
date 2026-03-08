@@ -48,27 +48,26 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> worker(LockDatabaseFrequentlyWorkload* self, Database cx) {
-		state Future<Void> end = delay(self->testDuration);
-		state double lastLock = g_network->now();
-		state double lastUnlock = g_network->now() + self->delayBetweenLocks / 2;
+	static Future<Void> worker(LockDatabaseFrequentlyWorkload* self, Database cx) {
+		Future<Void> end = delay(self->testDuration);
+		double lastLock = g_network->now();
+		double lastUnlock = g_network->now() + self->delayBetweenLocks / 2;
 		loop {
-			wait(lockAndUnlock(self, cx, &lastLock, &lastUnlock));
+			co_await lockAndUnlock(self, cx, &lastLock, &lastUnlock);
 			++self->lockCount;
 			if (end.isReady()) {
-				return Void();
+				co_return;
 			}
 		}
 	}
 
-	ACTOR static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self,
-	                                        Database cx,
-	                                        double* lastLock,
-	                                        double* lastUnlock) {
-		state UID uid = deterministicRandom()->randomUniqueID();
-		wait(lockDatabase(cx, uid) && poisson(lastLock, self->delayBetweenLocks));
-		wait(unlockDatabase(cx, uid) && poisson(lastUnlock, self->delayBetweenLocks));
-		return Void();
+	static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self,
+	                                  Database cx,
+	                                  double* lastLock,
+	                                  double* lastUnlock) {
+		UID uid = deterministicRandom()->randomUniqueID();
+		co_await (lockDatabase(cx, uid) && poisson(lastLock, self->delayBetweenLocks));
+		co_await (unlockDatabase(cx, uid) && poisson(lastUnlock, self->delayBetweenLocks));
 	}
 };
 

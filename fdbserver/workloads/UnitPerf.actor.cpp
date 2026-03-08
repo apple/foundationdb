@@ -23,29 +23,28 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<Void> sleepyActor(double interval, int* counter) {
+Future<Void> sleepyActor(double interval, int* counter) {
 	loop {
-		wait(delay(interval));
+		co_await delay(interval);
 		++*counter;
 	}
 }
 
-ACTOR Future<Void> unitPerfTest() {
+Future<Void> unitPerfTest() {
 	printf("\n");
 
-	state int counter = 0;
-	state std::vector<Future<Void>> sleepy;
+	int counter = 0;
+	std::vector<Future<Void>> sleepy;
 	sleepy.reserve(100000);
 	for (int i = 0; i < 100000; i++)
 		sleepy.push_back(sleepyActor(.1, &counter));
 
-	wait(delay(10));
+	co_await delay(10);
 	sleepy.clear();
 	TraceEvent("Completed").detail("Count", counter);
 	printf("Completed: %d\n", counter);
 
 	printf("\n");
-	return Void();
 }
 
 struct UnitPerfWorkload : TestWorkload {

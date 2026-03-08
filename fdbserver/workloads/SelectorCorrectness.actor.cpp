@@ -62,24 +62,27 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	ACTOR Future<Void> SelectorCorrectnessSetup(Database cx, SelectorCorrectnessWorkload* self) {
-		state Value myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
-		state Transaction tr(cx);
+	Future<Void> SelectorCorrectnessSetup(Database cx, SelectorCorrectnessWorkload* self) {
+		Value myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
+		Transaction tr(cx);
 
 		if (!self->testReadYourWrites) {
 			loop {
+				Error err;
 				try {
 					for (int i = 0; i < self->maxKeySpace; i += 2)
 						tr.set(StringRef(format("%010d", i)), myValue);
 
-					wait(tr.commit());
+					co_await tr.commit();
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		} else {
 			loop {
+				Error err;
 				try {
 					for (int i = 0; i < self->maxKeySpace; i += 4)
 						tr.set(StringRef(format("%010d", i)), myValue);
@@ -87,36 +90,35 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						if (deterministicRandom()->random01() > 0.5)
 							tr.set(StringRef(format("%010d", i)), myValue);
 
-					wait(tr.commit());
+					co_await tr.commit();
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> SelectorCorrectnessClient(Database cx, SelectorCorrectnessWorkload* self) {
-		state int i;
-		state int j;
-		state std::string myKeyA;
-		state std::string myKeyB;
-		state Value myValue;
-		state bool onEqualA;
-		state bool onEqualB;
-		state int offsetA;
-		state int offsetB;
-		state Standalone<StringRef> maxKey;
-		state Reverse reverse = Reverse::False;
+	Future<Void> SelectorCorrectnessClient(Database cx, SelectorCorrectnessWorkload* self) {
+		int i{ 0 };
+		int j{ 0 };
+		std::string myKeyA;
+		std::string myKeyB;
+		Value myValue;
+		bool onEqualA{ false };
+		bool onEqualB{ false };
+		int offsetA{ 0 };
+		int offsetB{ 0 };
+		Standalone<StringRef> maxKey;
+		Reverse reverse = Reverse::False;
 
 		maxKey = Standalone<StringRef>(format("%010d", self->maxKeySpace + 1));
 
 		loop {
 
-			state Transaction tr(cx);
-			state ReadYourWritesTransaction trRYOW(cx);
+			Transaction tr(cx);
+			ReadYourWritesTransaction trRYOW(cx);
 
 			if (self->testReadYourWrites) {
 				myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
@@ -127,17 +129,18 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						trRYOW.set(StringRef(format("%010d", i)), myValue);
 			}
 
+			Error err;
 			try {
 				for (i = 0; i < deterministicRandom()->randomInt(self->minOperationsPerTransaction,
 				                                                 self->maxOperationsPerTransaction + 1);
 				     i++) {
 					j = deterministicRandom()->randomInt(0, 2);
 					if (j < 1) {
-						state int searchInt = deterministicRandom()->randomInt(0, self->maxKeySpace);
+						int searchInt = deterministicRandom()->randomInt(0, self->maxKeySpace);
 						myKeyA = format("%010d", searchInt);
 
 						if (self->testReadYourWrites) {
-							Optional<Value> getTest = wait(trRYOW.get(StringRef(myKeyA)));
+							Optional<Value> getTest = co_await trRYOW.get(StringRef(myKeyA));
 							if ((searchInt % 2 == 0 && !getTest.present()) ||
 							    (searchInt % 2 == 1 && getTest.present())) {
 								TraceEvent(SevError, "RanSelTestFailure")
@@ -145,7 +148,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 								    .detail("KeyA", myKeyA);
 							}
 						} else {
-							Optional<Value> getTest = wait(tr.get(StringRef(myKeyA)));
+							Optional<Value> getTest = co_await tr.get(StringRef(myKeyA));
 							if ((searchInt % 2 == 0 && !getTest.present()) ||
 							    (searchInt % 2 == 1 && getTest.present())) {
 								TraceEvent(SevError, "RanSelTestFailure")
@@ -167,7 +170,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						reverse.set(deterministicRandom()->coinflip());
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("Direction",direction);
-						state int expectedSize =
+						int expectedSize =
 						    (std::min(abmax + 2 * offsetB - (abmax % 2 == 1 ? 1 : (onEqualB ? 0 : 2)),
 						              self->maxKeySpace) -
 						     (std::max(abmin + 2 * offsetA - (abmin % 2 == 1 ? 1 : (onEqualA ? 0 : 2)), 0))) /
@@ -175,11 +178,11 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 
 						if (self->testReadYourWrites) {
 							RangeResult getRangeTest =
-							    wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-							                         2 * (self->maxKeySpace + self->maxOffset),
-							                         Snapshot::False,
-							                         reverse));
+							    co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+							                             KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+							                             2 * (self->maxKeySpace + self->maxOffset),
+							                             Snapshot::False,
+							                             reverse);
 
 							int trueSize = 0;
 							while (trueSize < getRangeTest.size() &&
@@ -203,11 +206,11 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 							}
 						} else {
 							RangeResult getRangeTest =
-							    wait(tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-							                     KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-							                     2 * (self->maxKeySpace + self->maxOffset),
-							                     Snapshot::False,
-							                     reverse));
+							    co_await tr.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+							                         KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+							                         2 * (self->maxKeySpace + self->maxOffset),
+							                         Snapshot::False,
+							                         reverse);
 
 							int trueSize = 0;
 							while (trueSize < getRangeTest.size() &&
@@ -237,10 +240,13 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				trRYOW.reset();
 				++self->transactions;
 			} catch (Error& e) {
-				wait(trRYOW.onError(e));
-				trRYOW.reset();
-				++self->retries;
+				err = e;
 			}
+			if (err.isValid()) {
+				co_await trRYOW.onError(err);
+			}
+			trRYOW.reset();
+			++self->retries;
 		}
 	}
 };

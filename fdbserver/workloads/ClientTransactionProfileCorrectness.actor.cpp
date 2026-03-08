@@ -287,9 +287,9 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
+	Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
 
-		wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -298,37 +298,36 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 			return Void();
-		}));
-		return Void();
+		});
 	}
 
-	ACTOR Future<bool> _check(Database cx, ClientTransactionProfileCorrectnessWorkload* self) {
-		wait(self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0)); // Disable sampling
+	Future<bool> _check(Database cx, ClientTransactionProfileCorrectnessWorkload* self) {
+		co_await self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0); // Disable sampling
 		// FIXME: Better way to ensure that all client profile data has been flushed to the database
-		wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+		co_await delay(CLIENT_KNOBS->CSI_STATUS_DELAY);
 
-		state Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
-		state int64_t counter;
-		state RangeResult txInfoEntries;
+		Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+		int64_t counter{ 0 };
+		RangeResult txInfoEntries;
 		Optional<Value> ctrValue =
-		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+		    co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			    return tr->get(clientLatencyAtomicCtr);
-		    }));
+		    });
 		counter = ctrValue.present() ? BinaryReader::fromStringRef<int64_t>(ctrValue.get(), Unversioned()) : 0;
-		state Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+		Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 
-		state KeySelector begin =
-		    firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
-		state KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
-		state int keysLimit = 10;
-		state Transaction tr(cx);
+		KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
+		KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
+		int keysLimit = 10;
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state RangeResult kvRange = wait(tr.getRange(begin, end, keysLimit));
+				RangeResult kvRange = co_await tr.getRange(begin, end, keysLimit);
 				if (kvRange.empty())
 					break;
 				txInfoEntries.arena().dependsOn(kvRange.arena());
@@ -336,9 +335,12 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 				begin = firstGreaterThan(kvRange.back().key);
 				tr.reset();
 			} catch (Error& e) {
-				if (e.code() == error_code_transaction_too_old)
-					keysLimit = std::max(1, keysLimit / 2);
-				wait(tr.onError(e));
+				err = e;
+			}
+			if (err.isValid() && err.code() == error_code_transaction_too_old)
+				keysLimit = std::max(1, keysLimit / 2);
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 
@@ -356,7 +358,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "ClientTransactionProfilingContentsSize").detail("ContentsSize", contentsSize);
 
 		// Check if the data format is as expected
-		return self->checkTxInfoEntriesFormat(txInfoEntries);
+		co_return self->checkTxInfoEntriesFormat(txInfoEntries);
 	}
 
 	Future<bool> check(Database const& cx) override {

@@ -33,9 +33,10 @@ class ThroughputQuotaWorkload : public TestWorkload {
 
 	int64_t getTotalQuota() const { return totalQuotaInPages * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 
-	ACTOR static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
+			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
@@ -43,13 +44,14 @@ class ThroughputQuotaWorkload : public TestWorkload {
 				    .detail("ReservedQuota", self->getReservedQuota())
 				    .detail("TotalQuota", self->getTotalQuota());
 				ThrottleApi::setTagQuota(tr, self->transactionTag, self->getReservedQuota(), self->getTotalQuota());
-				wait(tr->commit());
-				return Void();
+				co_await tr->commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("ThroughputQuotaWorkload_SetupError").error(e);
-				wait(tr->onError(e));
+				err = e;
 			}
-		};
+			TraceEvent("ThroughputQuotaWorkload_SetupError").error(err);
+			co_await tr->onError(err);
+		}
 	}
 
 public:

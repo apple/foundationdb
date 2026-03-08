@@ -127,10 +127,11 @@ struct StatusWorkload : TestWorkload {
 		return result + "]";
 	}
 
-	ACTOR Future<Void> configureLatencyBands(StatusWorkload* self, Database cx) {
+	Future<Void> configureLatencyBands(StatusWorkload* self, Database cx) {
 		loop {
-			state Transaction tr(cx);
+			Transaction tr(cx);
 			loop {
+				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -153,31 +154,34 @@ struct StatusWorkload : TestWorkload {
 					    "}";
 
 					tr.set(latencyBandConfigKey, ValueRef(config));
-					wait(tr.commit());
+					co_await tr.commit();
 					tr.reset();
 
 					if (deterministicRandom()->random01() < 0.3) {
-						return Void();
+						co_return;
 					}
 
-					wait(delay(deterministicRandom()->random01() * 120));
+					co_await delay(deterministicRandom()->random01() * 120);
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		}
 	}
 
-	ACTOR Future<Void> fetcher(Database cx, StatusWorkload* self) {
-		state double lastTime = now();
+	Future<Void> fetcher(Database cx, StatusWorkload* self) {
+		double lastTime = now();
 
 		loop {
-			wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
+			co_await poisson(&lastTime, 1.0 / self->requestsPerSecond);
 			try {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;
-				state double issued = now();
-				StatusObject result = wait(StatusClient::statusFetcher(cx));
+				double issued = now();
+				StatusObject result = co_await StatusClient::statusFetcher(cx);
 				++self->replies;
 				BinaryWriter br(AssumeVersion(g_network->protocolVersion()));
 				save(br, result);

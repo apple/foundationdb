@@ -66,25 +66,25 @@ struct RollbackWorkload : FailureInjectionWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> simulateFailure(Database cx, RollbackWorkload* self) {
-		state ServerDBInfo system = self->dbInfo->get();
+	Future<Void> simulateFailure(Database cx, RollbackWorkload* self) {
+		ServerDBInfo system = self->dbInfo->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
 
 		if (tlogs.empty() || system.client.commitProxies.empty()) {
 			TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "No tlogs in System Map");
-			return Void();
+			co_return;
 		}
 
-		state CommitProxyInterface proxy = deterministicRandom()->randomChoice(system.client.commitProxies);
+		CommitProxyInterface proxy = deterministicRandom()->randomChoice(system.client.commitProxies);
 
 		int utIndex = deterministicRandom()->randomInt(0, tlogs.size());
-		state NetworkAddress uncloggedTLog = tlogs[utIndex].address();
+		NetworkAddress uncloggedTLog = tlogs[utIndex].address();
 
 		for (int t = 0; t < tlogs.size(); t++)
 			if (t != utIndex)
 				if (tlogs[t].address().ip == proxy.address().ip) {
 					TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "proxy-clogged tLog shared IPs");
-					return Void();
+					co_return;
 				}
 
 		TraceEvent("AttemptingToTriggerRollback")
@@ -100,7 +100,7 @@ struct RollbackWorkload : FailureInjectionWorkload {
 		}
 
 		// While the clogged machines are still clogged...
-		wait(delay(self->clogDuration / 3));
+		co_await delay(self->clogDuration / 3);
 		system = self->dbInfo->get();
 
 		if (self->enableFailures) {
@@ -112,23 +112,21 @@ struct RollbackWorkload : FailureInjectionWorkload {
 			g_simulator->clogInterface(proxy.address().ip, self->clogDuration, ClogAll);
 			g_simulator->clogInterface(uncloggedTLog.ip, self->clogDuration, ClogAll);
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> rollbackFailureWorker(Database cx, RollbackWorkload* self, double delay) {
-		state PromiseStream<Void> events;
+	Future<Void> rollbackFailureWorker(Database cx, RollbackWorkload* self, double delay) {
+		PromiseStream<Void> events;
 		if (self->multiple) {
-			state double lastTime = now();
+			double lastTime = now();
 			loop {
-				wait(poisson(&lastTime, delay));
-				wait(self->simulateFailure(cx, self));
+				co_await poisson(&lastTime, delay);
+				co_await self->simulateFailure(cx, self);
 			}
 		} else {
-			wait(::delay(deterministicRandom()->random01() *
-			             std::max(0.0, self->testDuration - self->clogDuration * 13.0)));
-			wait(self->simulateFailure(cx, self));
+			co_await ::delay(deterministicRandom()->random01() *
+			                 std::max(0.0, self->testDuration - self->clogDuration * 13.0));
+			co_await self->simulateFailure(cx, self);
 		}
-		return Void();
 	}
 };
 

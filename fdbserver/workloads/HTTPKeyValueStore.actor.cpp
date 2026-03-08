@@ -101,10 +101,10 @@ void httpKVProcessGet(Reference<SimHTTPKVStore> kvStore,
 }
 
 // key header always exists for both put and get
-ACTOR Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
-                                         Reference<HTTP::IncomingRequest> req,
-                                         Reference<HTTP::OutgoingResponse> response) {
-	wait(delay(0));
+Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
+                                   Reference<HTTP::IncomingRequest> req,
+                                   Reference<HTTP::OutgoingResponse> response) {
+	co_await delay(0);
 
 	ASSERT(req->verb == HTTP::HTTP_VERB_PUT || req->verb == HTTP::HTTP_VERB_GET);
 	ASSERT_EQ(req->resource, "/kv");
@@ -142,8 +142,6 @@ ACTOR Future<Void> httpKVRequestCallback(Reference<SimHTTPKVStore> kvStore,
 	} else {
 		httpKVProcessGet(kvStore, key, req, response);
 	}
-
-	return Void();
 }
 
 static Reference<SimHTTPKVStore> globalKVStore = Reference<SimHTTPKVStore>();
@@ -220,45 +218,47 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 	}
 
 	// handles retrying on timeout and reinitializing connection like other users of HTTP (S3BlobStore, RestClient)
-	ACTOR Future<Reference<HTTP::IncomingResponse>> doKVRequest(HTTPKeyValueStoreWorkload* self,
-	                                                            std::string key,
-	                                                            Optional<std::string> value) {
-		state UnsentPacketQueue content;
-		state int seqNo = self->nextSeqNo;
+	Future<Reference<HTTP::IncomingResponse>> doKVRequest(HTTPKeyValueStoreWorkload* self,
+	                                                      std::string key,
+	                                                      Optional<std::string> value) {
+		UnsentPacketQueue content;
+		int seqNo = self->nextSeqNo;
 		++self->nextSeqNo;
 		loop {
+			Error err;
 			try {
 				while (!self->conn) {
-					// sometimes do resolve and connect directly, other times simulate what rest kms connector does and
-					// resolve endpoints themself and then connect to one directly
+					// sometimes do resolve and connect directly, other times simulate what rest kms connector does
+					// and resolve endpoints themself and then connect to one directly
 					if (self->manualResolve) {
-						state std::vector<NetworkAddress> addrs =
-						    wait(INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service));
+						std::vector<NetworkAddress> addrs =
+						    co_await INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service);
 						ASSERT(!addrs.empty());
 						int idx = deterministicRandom()->randomInt(0, addrs.size());
-						wait(store(self->conn,
-						           timeoutError(INetworkConnections::net()->connect(
-						                            addrs[idx].ip.toString(), std::to_string(addrs[idx].port), false),
-						                        FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT)));
+						co_await store(self->conn,
+						               timeoutError(INetworkConnections::net()->connect(addrs[idx].ip.toString(),
+						                                                                std::to_string(addrs[idx].port),
+						                                                                false),
+						                            FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 
 					} else {
-						wait(store(
+						co_await store(
 						    self->conn,
 						    timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
-						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT)));
+						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
 					}
 					if (self->conn.isValid()) {
-						wait(self->conn->connectHandshake());
+						co_await self->conn->connectHandshake();
 						++self->connectCount;
 					} else {
-						wait(delay(0.1));
+						co_await delay(0.1);
 						++self->failedConnectCount;
 					}
 				}
 
 				content.discardAll();
-				state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
-				state UID requestID = deterministicRandom()->randomUniqueID();
+				Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+				UID requestID = deterministicRandom()->randomUniqueID();
 				req->data.content = &content;
 				req->data.contentLen = 0;
 				req->resource = "/kv";
@@ -278,10 +278,10 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 					req->verb = HTTP::HTTP_VERB_GET;
 				}
 
-				state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-				state int64_t bytes_sent = 0;
-				Reference<HTTP::IncomingResponse> response = wait(
-				    timeoutError(HTTP::doRequest(self->conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 5.0));
+				Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+				int64_t bytes_sent = 0;
+				Reference<HTTP::IncomingResponse> response = co_await timeoutError(
+				    HTTP::doRequest(self->conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 5.0);
 
 				// sometimes randomly close connection anyway
 				if (BUGGIFY_WITH_PROB(0.1)) {
@@ -298,31 +298,32 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 				ASSERT(response->data.headers.contains("UID"));
 				ASSERT_EQ(response->data.headers["UID"], requestID.toString());
 
-				return response;
+				co_return response;
 			} catch (Error& e) {
-				if (e.code() == error_code_operation_cancelled) {
-					throw e;
-				}
-				if (DEBUG_HTTPKV) {
-					fmt::print("REQ: ERROR: {0}\n", e.name());
-				}
-				if (self->conn) {
-					self->conn->close();
-					self->conn.clear();
-				}
-				if (e.code() != error_code_timed_out && e.code() != error_code_connection_failed &&
-				    e.code() != error_code_lookup_failed) {
-					throw e;
-				}
-
-				// request got timed out or connection could not be established, close conn and try again
-
-				wait(delay(0.1));
+				err = e;
 			}
+			if (err.code() == error_code_operation_cancelled) {
+				throw err;
+			}
+			if (DEBUG_HTTPKV) {
+				fmt::print("REQ: ERROR: {0}\n", err.name());
+			}
+			if (self->conn) {
+				self->conn->close();
+				self->conn.clear();
+			}
+			if (err.code() != error_code_timed_out && err.code() != error_code_connection_failed &&
+			    err.code() != error_code_lookup_failed) {
+				throw err;
+			}
+
+			// request got timed out or connection could not be established, close conn and try again
+
+			co_await delay(0.1);
 		}
 	}
 
-	ACTOR Future<Void> put(HTTPKeyValueStoreWorkload* self, std::string key, std::string value) {
+	Future<Void> put(HTTPKeyValueStoreWorkload* self, std::string key, std::string value) {
 		// TODO do http request
 		std::pair<std::string, std::string> active = { key, value };
 		self->activePut = active;
@@ -331,7 +332,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			fmt::print("CL:put {0}:{1} = {2}\n", self->clientId, key, value);
 		}
 
-		Reference<HTTP::IncomingResponse> response = wait(self->doKVRequest(self, key, value));
+		Reference<HTTP::IncomingResponse> response = co_await self->doKVRequest(self, key, value);
 
 		if (DEBUG_HTTPKV) {
 			fmt::print("CL:put {0}:{1} = {2} DONE\n", self->clientId, key, value);
@@ -341,17 +342,15 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		self->activePut.reset();
 		self->myData[key] = value;
 		++self->putCount;
-
-		return Void();
 	}
 
-	ACTOR Future<Void> get(HTTPKeyValueStoreWorkload* self, std::string key, bool checkActive) {
+	Future<Void> get(HTTPKeyValueStoreWorkload* self, std::string key, bool checkActive) {
 
 		if (DEBUG_HTTPKV) {
 			fmt::print("CL:get {0}:{1}\n", self->clientId, key);
 		}
 
-		Reference<HTTP::IncomingResponse> response = wait(self->doKVRequest(self, key, {}));
+		Reference<HTTP::IncomingResponse> response = co_await self->doKVRequest(self, key, {});
 
 		if (DEBUG_HTTPKV) {
 			fmt::print("CL:get {0}:{1} = {2} DONE\n", self->clientId, key, response->data.content);
@@ -366,21 +365,19 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			ASSERT(contentCorrect || inFlightCorrect);
 		}
 		++self->getCount;
-
-		return Void();
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this); }
 
-	ACTOR Future<Void> _setup(HTTPKeyValueStoreWorkload* self) {
+	Future<Void> _setup(HTTPKeyValueStoreWorkload* self) {
 		ASSERT(g_network->isSimulated());
 		if (self->clientId == 0) {
 			TraceEvent("SimHTTPKeyValueStoreRegistering");
 			if (DEBUG_HTTPKV) {
 				fmt::print("Registering sim http kv server\n");
 			}
-			wait(g_simulator->registerSimHTTPServer(
-			    self->hostname, self->service, makeReference<KeyValueRequestHandler>()));
+			co_await g_simulator->registerSimHTTPServer(
+			    self->hostname, self->service, makeReference<KeyValueRequestHandler>());
 			if (DEBUG_HTTPKV) {
 				fmt::print("Registered sim http kv server\n");
 			}
@@ -389,14 +386,11 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 
 		TraceEvent("SimHTTPKeyValueStoreLoading");
 
-		state int i;
-		for (i = 0; i < self->nodeCount; i++) {
-			wait(self->put(self, self->getKey(i), self->randomValue()));
+		for (int i = 0; i < self->nodeCount; i++) {
+			co_await self->put(self, self->getKey(i), self->randomValue());
 		}
 
 		TraceEvent("SimHTTPKeyValueStoreLoaded");
-
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -410,7 +404,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		return _check(this);
 	}
 
-	ACTOR Future<bool> _check(HTTPKeyValueStoreWorkload* self) {
+	Future<bool> _check(HTTPKeyValueStoreWorkload* self) {
 		// reset conn since it could have been cancelled during part of initialization
 		if (self->conn) {
 			self->conn->close();
@@ -418,9 +412,8 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("SimHTTPKeyValueStoreWorkloadChecking");
-		state int i;
-		for (i = 0; i < self->nodeCount; i++) {
-			wait(self->get(self, self->getKey(i), true));
+		for (int i = 0; i < self->nodeCount; i++) {
+			co_await self->get(self, self->getKey(i), true);
 		}
 
 		TraceEvent("SimHTTPKeyValueStoreWorkloadChecked");
@@ -430,7 +423,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 			self->conn.clear();
 		}
 
-		return true;
+		co_return true;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -440,21 +433,21 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		m.push_back(failedConnectCount.getMetric());
 	}
 
-	ACTOR Future<Void> httpKeyValueClient(HTTPKeyValueStoreWorkload* self) {
+	Future<Void> httpKeyValueClient(HTTPKeyValueStoreWorkload* self) {
 		TraceEvent("SimHTTPKeyValueStoreWorkloadStarting");
-		state double last = now();
+		double last = now();
 		loop {
-			state Future<Void> waitNextOp = poisson(&last, 1.0 / self->opsPerSecond);
+			Future<Void> waitNextOp = poisson(&last, 1.0 / self->opsPerSecond);
 
 			int key = deterministicRandom()->randomInt(0, self->nodeCount);
 
 			if (deterministicRandom()->coinflip()) {
-				wait(self->put(self, self->getKey(key), self->randomValue()));
+				co_await self->put(self, self->getKey(key), self->randomValue());
 			} else {
-				wait(self->get(self, self->getKey(key), false));
+				co_await self->get(self, self->getKey(key), false);
 			}
 
-			wait(waitNextOp);
+			co_await waitNextOp;
 		}
 	}
 };

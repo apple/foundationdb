@@ -44,10 +44,10 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 
-	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
-	                                  Reference<TaskBucket> taskBucket,
-	                                  Reference<FutureBucket> futureBucket,
-	                                  Reference<Task> task) {
+	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
+	                            Reference<TaskBucket> taskBucket,
+	                            Reference<FutureBucket> futureBucket,
+	                            Reference<Task> task) {
 		// check task version
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > SayHelloTaskFunc::version) {
@@ -58,14 +58,14 @@ struct SayHelloTaskFunc : TaskFuncBase {
 			    .detail("FuncVersion", v);
 		}
 
-		state Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-		wait(taskBucket->finish(tr, task));
+		Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+		co_await taskBucket->finish(tr, task);
 
 		if (BUGGIFY)
-			wait(delay(10));
+			co_await delay(10);
 
-		state Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
-		state Key value;
+		Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
+		Key value;
 		auto itor = task->params.find("name"_sr);
 		if (itor != task->params.end()) {
 			value = itor->value;
@@ -75,7 +75,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		}
 
 		if (!task->params["chained"_sr].compare("false"_sr)) {
-			wait(done->set(tr, taskBucket));
+			co_await done->set(tr, taskBucket);
 		} else {
 			int subtaskCount = atoi(task->params["subtaskCount"_sr].toString().c_str());
 			int currTaskNumber = atoi(value.removePrefix("task_"_sr).toString().c_str());
@@ -84,7 +84,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 			    .detail("CurrTaskNumber", currTaskNumber);
 
 			if (currTaskNumber < subtaskCount - 1) {
-				state std::vector<Reference<TaskFuture>> vectorFuture;
+				std::vector<Reference<TaskFuture>> vectorFuture;
 				auto new_task = makeReference<Task>(SayHelloTaskFunc::name,
 				                                    SayHelloTaskFunc::version,
 				                                    StringRef(),
@@ -96,15 +96,13 @@ struct SayHelloTaskFunc : TaskFuncBase {
 				new_task->params[Task::reservedTaskParamKeyDone] = taskDone->key;
 				taskBucket->addTask(tr, new_task);
 				vectorFuture.push_back(taskDone);
-				wait(done->join(tr, taskBucket, vectorFuture));
+				co_await done->join(tr, taskBucket, vectorFuture);
 			} else {
-				wait(done->set(tr, taskBucket));
+				co_await done->set(tr, taskBucket);
 			}
 		}
 
 		tr->set(key, value);
-
-		return Void();
 	}
 };
 StringRef SayHelloTaskFunc::name = "SayHello"_sr;
@@ -128,12 +126,12 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 
-	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
-	                                  Reference<TaskBucket> taskBucket,
-	                                  Reference<FutureBucket> futureBucket,
-	                                  Reference<Task> task) {
+	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
+	                            Reference<TaskBucket> taskBucket,
+	                            Reference<FutureBucket> futureBucket,
+	                            Reference<Task> task) {
 		Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-		state std::vector<Reference<TaskFuture>> vectorFuture;
+		std::vector<Reference<TaskFuture>> vectorFuture;
 
 		int subtaskCount = 1;
 		if (!task->params["chained"_sr].compare("false"_sr)) {
@@ -151,15 +149,13 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 			vectorFuture.push_back(taskDone);
 		}
 
-		wait(done->join(tr, taskBucket, vectorFuture));
-		wait(taskBucket->finish(tr, task));
+		co_await done->join(tr, taskBucket, vectorFuture);
+		co_await taskBucket->finish(tr, task);
 
 		Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
 		Value value = "Hello, Everyone!"_sr;
 		TraceEvent("TaskBucketCorrectnessSayHello").detail("SayHelloToEveryoneTaskFunc", printable(value));
 		tr->set(key, value);
-
-		return Void();
 	}
 };
 StringRef SayHelloToEveryoneTaskFunc::name = "SayHelloToEveryone"_sr;
@@ -183,18 +179,16 @@ struct SaidHelloTaskFunc : TaskFuncBase {
 		return _finish(tr, tb, fb, task);
 	};
 
-	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
-	                                  Reference<TaskBucket> taskBucket,
-	                                  Reference<FutureBucket> futureBucket,
-	                                  Reference<Task> task) {
-		wait(taskBucket->finish(tr, task));
+	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
+	                            Reference<TaskBucket> taskBucket,
+	                            Reference<FutureBucket> futureBucket,
+	                            Reference<Task> task) {
+		co_await taskBucket->finish(tr, task);
 
 		Key key = StringRef("Hello_" + deterministicRandom()->randomUniqueID().toString());
 		Value value = "Said hello to everyone!"_sr;
 		TraceEvent("TaskBucketCorrectnessSayHello").detail("SaidHelloTaskFunc", printable(value));
 		tr->set(key, value);
-
-		return Void();
 	}
 };
 StringRef SaidHelloTaskFunc::name = "SaidHello"_sr;
@@ -218,15 +212,15 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr,
-	                                Reference<TaskBucket> taskBucket,
-	                                Reference<FutureBucket> futureBucket,
-	                                bool chained,
-	                                int subtaskCount) {
-		state Key addedInitKey("addedInitTasks"_sr);
-		Optional<Standalone<StringRef>> res = wait(tr->get(addedInitKey));
+	Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr,
+	                          Reference<TaskBucket> taskBucket,
+	                          Reference<FutureBucket> futureBucket,
+	                          bool chained,
+	                          int subtaskCount) {
+		Key addedInitKey("addedInitTasks"_sr);
+		Optional<Standalone<StringRef>> res = co_await tr->get(addedInitKey);
 		if (res.present())
-			return Void();
+			co_return;
 		tr->set(addedInitKey, "true"_sr);
 
 		Reference<TaskFuture> allDone = futureBucket->future(tr);
@@ -240,81 +234,89 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		taskBucket->addTask(tr, task);
 		auto taskDone = makeReference<Task>(
 		    SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
-		wait(allDone->onSetAddTask(tr, taskBucket, taskDone));
-		return Void();
+		co_await allDone->onSetAddTask(tr, taskBucket, taskDone);
 	}
 
-	ACTOR Future<Void> _start(Database cx, TaskBucketCorrectnessWorkload* self) {
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		state Subspace taskSubspace("backup-agent"_sr);
-		state Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));
-		state Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get("futures"_sr)));
+	Future<Void> _start(Database cx, TaskBucketCorrectnessWorkload* self) {
+		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		Subspace taskSubspace("backup-agent"_sr);
+		Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));
+		Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get("futures"_sr)));
 
+		Error err;
 		try {
 			if (self->clientId == 0) {
 				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
-				wait(taskBucket->clear(cx));
+				co_await taskBucket->clear(cx);
 
 				TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
-				wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 					return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount);
-				}));
+				});
 
 				TraceEvent("TaskBucketCorrectness").detail("RunningTasks", "...");
 			}
 
 			loop {
-				try {
-					bool oneTaskDone = wait(taskBucket->doOne(cx, futureBucket));
-					if (!oneTaskDone) {
-						bool isEmpty = wait(taskBucket->isEmpty(cx));
-						if (isEmpty) {
-							wait(delay(5.0));
-							state bool isFutureEmpty = wait(futureBucket->isEmpty(cx));
-							if (isFutureEmpty)
-								break;
-							else {
-								wait(TaskBucket::debugPrintRange(
-								    cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId))));
-								TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
+				{
+					Error err;
+					try {
+						bool oneTaskDone = co_await taskBucket->doOne(cx, futureBucket);
+						if (!oneTaskDone) {
+							bool isEmpty = co_await taskBucket->isEmpty(cx);
+							if (isEmpty) {
+								co_await delay(5.0);
+								bool isFutureEmpty = co_await futureBucket->isEmpty(cx);
+								if (isFutureEmpty)
+									break;
+								else {
+									co_await TaskBucket::debugPrintRange(
+									    cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId)));
+									TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
+								}
+							} else {
+								co_await delay(1.0);
 							}
-						} else {
-							wait(delay(1.0));
 						}
+					} catch (Error& e) {
+						err = e;
 					}
-				} catch (Error& e) {
-					if (e.code() == error_code_timed_out)
-						TraceEvent(SevWarn, "TaskBucketCorrectness").error(e);
-					else
-						wait(tr->onError(e));
+					if (err.isValid()) {
+						if (err.code() == error_code_timed_out)
+							TraceEvent(SevWarn, "TaskBucketCorrectness").error(err);
+						else
+							co_await tr->onError(err);
+					}
 				}
 			}
 
 			if (self->clientId == 0) {
 				TraceEvent("TaskBucketCorrectness").detail("NotTasksRemain", "...");
-				wait(TaskBucket::debugPrintRange(cx, StringRef(), StringRef()));
+				co_await TaskBucket::debugPrintRange(cx, StringRef(), StringRef());
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "TaskBucketCorrectness").error(e);
-			wait(tr->onError(e));
+			err = e;
 		}
-
-		return Void();
+		if (err.isValid()) {
+			TraceEvent(SevError, "TaskBucketCorrectness").error(err);
+			co_await tr->onError(err);
+		}
 	}
 
-	ACTOR Future<bool> _check(Database cx, TaskBucketCorrectnessWorkload* self) {
-		bool ret = wait(runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return self->checkSayHello(tr, self->subtaskCount); }));
-		return ret;
+	Future<bool> _check(Database cx, TaskBucketCorrectnessWorkload* self) {
+		bool ret = co_await runRYWTransaction(
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return self->checkSayHello(tr, self->subtaskCount); });
+		co_return ret;
 	}
 
-	ACTOR Future<bool> checkSayHello(Reference<ReadYourWritesTransaction> tr, int subTaskCount) {
-		state std::set<std::string> data = { "Hello, Everyone!", "Said hello to everyone!" };
+	Future<bool> checkSayHello(Reference<ReadYourWritesTransaction> tr, int subTaskCount) {
+		std::set<std::string> data = { "Hello, Everyone!", "Said hello to everyone!" };
 		for (int i = 0; i < subTaskCount; i++) {
 			data.insert(format("task_%d", i));
 		}
 
-		RangeResult values = wait(tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY));
+		RangeResult values =
+		    co_await tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY);
 		if (values.size() != data.size()) {
 			TraceEvent(SevError, "CheckSayHello")
 			    .detail("CountNotMatchIs", values.size())
@@ -322,7 +324,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			for (auto& s : values) {
 				TraceEvent("CheckSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
 			}
-			return false;
+			co_return false;
 		}
 
 		for (auto& s : values) {
@@ -331,10 +333,10 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		}
 		if (data.size() != 0) {
 			TraceEvent(SevError, "CheckSayHello").detail("DataNotMatch", data.size());
-			return false;
+			co_return false;
 		}
 
-		return true;
+		co_return true;
 	}
 };
 

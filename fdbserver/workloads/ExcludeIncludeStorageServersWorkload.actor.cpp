@@ -74,24 +74,25 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>&) override {}
 
-	ACTOR static Future<Void> workloadMain(ExcludeIncludeStorageServersWorkload* self, Database cx) {
-		state int round = deterministicRandom()->randomInt(10, 80);
-		state std::set<AddressExclusion> servers;
-		state std::set<AddressExclusion>::iterator it;
-		state Transaction tr(cx);
-		state double timeout = 100.0;
-		state int timeoutCnt = 0;
-		state int maxTimeout = std::min(30, round);
+	static Future<Void> workloadMain(ExcludeIncludeStorageServersWorkload* self, Database cx) {
+		int round = deterministicRandom()->randomInt(10, 80);
+		std::set<AddressExclusion> servers;
+		std::set<AddressExclusion>::iterator it;
+		Transaction tr(cx);
+		double timeout = 100.0;
+		int timeoutCnt = 0;
+		int maxTimeout = std::min(30, round);
 		TraceEvent("WorkloadStart").detail("Round", round).log();
 		loop {
 			if (timeoutCnt > maxTimeout) {
 				TraceEvent("QuitEarlyNotCompleteServerExclude").log();
 				break;
 			}
+			Error err;
 			try {
 				servers.clear();
 				// including an invalid address means include everything(clear all exclude prefix)
-				wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+				co_await includeServers(cx, std::vector<AddressExclusion>(1));
 
 				tr = Transaction(cx);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -100,7 +101,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 
 				// get all storage servers
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
+				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
 				for (auto& [ssi, p] : results) {
 					if (!g_simulator->protectedAddresses.contains(ssi.address())) {
 						servers.insert(AddressExclusion(ssi.address().ip, ssi.address().port));
@@ -108,7 +109,7 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				}
 
 				// get all TLogs and remove from SS candidate set
-				Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
+				Optional<Standalone<StringRef>> value = co_await tr.get(logsKey);
 				ASSERT(value.present());
 				auto logs = decodeLogsValue(value.get());
 				for (auto const& log : logs.first) {
@@ -134,28 +135,30 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 
 				// find a SS and exclude it
 				it = std::next(servers.begin(), deterministicRandom()->randomInt(0, servers.size()));
-				wait(excludeServers(cx, std::vector<AddressExclusion>{ *it }));
+				co_await excludeServers(cx, std::vector<AddressExclusion>{ *it });
 				// timeoutError() is needed because sometimes excluding process can take forever
-				std::set<NetworkAddress> inProgress = wait(
-				    timeoutError(checkForExcludingServers(cx, std::vector<AddressExclusion>{ *it }, true), timeout));
+				std::set<NetworkAddress> inProgress = co_await timeoutError(
+				    checkForExcludingServers(cx, std::vector<AddressExclusion>{ *it }, true), timeout);
 				ASSERT(inProgress.empty());
 				if (--round <= 0) {
 					break;
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_timed_out) {
-					// it might never be excluded from serverList
-					timeoutCnt++;
-					continue;
-				}
-				wait(tr.onError(e));
+				err = e;
+			}
+			if (err.isValid() && err.code() == error_code_timed_out) {
+				// it might never be excluded from serverList
+				timeoutCnt++;
+				continue;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 		// if it is still in the middle of a exclude, then DD cannot finish and test would timeout
-		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+		co_await includeServers(cx, std::vector<AddressExclusion>(1));
 
 		TraceEvent("WorkloadFinish").detail("QuitEarly", round > 0).detail("TimeoutCount", timeoutCnt).log();
-		return Void();
 	}
 };
 

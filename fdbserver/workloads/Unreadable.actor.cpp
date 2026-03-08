@@ -292,26 +292,26 @@ struct UnreadableWorkload : TestWorkload {
 		           .present());
 	}
 
-	ACTOR Future<Void> _start(Database cx, UnreadableWorkload* self) {
-		state int testCount = 0;
-		state Reverse reverse = Reverse::False;
-		state Snapshot snapshot = Snapshot::False;
+	Future<Void> _start(Database cx, UnreadableWorkload* self) {
+		int testCount = 0;
+		Reverse reverse = Reverse::False;
+		Snapshot snapshot = Snapshot::False;
 		for (; testCount < 100; testCount++) {
 			//TraceEvent("RYWT_Start").detail("TestCount", testCount);
-			state ReadYourWritesTransaction tr(cx);
-			state Arena arena;
+			ReadYourWritesTransaction tr(cx);
+			Arena arena;
 
-			state std::map<KeyRef, ValueRef> setMap;
-			state KeyRangeMap<bool> unreadableMap;
+			std::map<KeyRef, ValueRef> setMap;
+			KeyRangeMap<bool> unreadableMap;
 
-			state int opCount = 0;
-			state KeyRangeRef range;
-			state KeyRef key;
-			state ValueRef value;
-			state int limit;
-			state KeySelectorRef begin;
-			state KeySelectorRef end;
-			state bool bypassUnreadable = deterministicRandom()->coinflip();
+			int opCount = 0;
+			KeyRangeRef range;
+			KeyRef key;
+			ValueRef value;
+			int limit{ 0 };
+			KeySelectorRef begin;
+			KeySelectorRef end;
+			bool bypassUnreadable = deterministicRandom()->coinflip();
 			if (bypassUnreadable) {
 				tr.setOption(FDBTransactionOptions::BYPASS_UNREADABLE);
 			}
@@ -363,7 +363,7 @@ struct UnreadableWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					ErrorOr<RangeResult> value =
-					    wait(errorOr(tr.getRange(range, CLIENT_KNOBS->TOO_MANY, snapshot, reverse)));
+					    co_await errorOr(tr.getRange(range, CLIENT_KNOBS->TOO_MANY, snapshot, reverse));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
@@ -398,7 +398,7 @@ struct UnreadableWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
 					//TraceEvent("RYWT_GetRangeBefore").detail("Reverse", reverse).detail("Begin", begin.toString()).detail("End", end.toString()).detail("Limit", limit);
-					ErrorOr<RangeResult> value = wait(errorOr(tr.getRange(begin, end, limit, snapshot, reverse)));
+					ErrorOr<RangeResult> value = co_await errorOr(tr.getRange(begin, end, limit, snapshot, reverse));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
@@ -441,7 +441,7 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
-					ErrorOr<Optional<Value>> value = wait(errorOr(tr.get(key, snapshot)));
+					ErrorOr<Optional<Value>> value = co_await errorOr(tr.get(key, snapshot));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);
@@ -469,8 +469,6 @@ struct UnreadableWorkload : TestWorkload {
 				}
 			}
 		}
-
-		return Void();
 	}
 };
 

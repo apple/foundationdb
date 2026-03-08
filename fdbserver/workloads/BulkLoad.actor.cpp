@@ -76,14 +76,15 @@ struct BulkLoadWorkload : TestWorkload {
 		m.emplace_back("98% Latency (ms, averaged)", 1000 * latencies.percentile(0.98), Averaged::True);
 	}
 
-	ACTOR Future<Void> bulkLoadClient(Database cx, BulkLoadWorkload* self, int clientId, int actorId) {
-		state uint64_t totalBytes = 0;
-		state int idx = 0;
+	Future<Void> bulkLoadClient(Database cx, BulkLoadWorkload* self, int clientId, int actorId) {
+		uint64_t totalBytes = 0;
+		int idx = 0;
 		loop {
-			state double tstart = now();
-			state Transaction tr(cx);
+			double tstart = now();
+			Transaction tr(cx);
 			loop {
-				state uint64_t txnBytes = 0;
+				uint64_t txnBytes = 0;
+				Error err;
 				try {
 					for (int i = 0; i < self->writesPerTransaction; i++) {
 						std::string key = format("%s/bulkload/%04x/%04x/%08x",
@@ -95,20 +96,21 @@ struct BulkLoadWorkload : TestWorkload {
 						txnBytes += key.size() + self->value.size();
 					}
 					tr.makeSelfConflicting();
-					wait(success(tr.getReadVersion()));
-					wait(tr.commit());
+					co_await success(tr.getReadVersion());
+					co_await tr.commit();
 					totalBytes += txnBytes;
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
-					++self->retries;
+					err = e;
 				}
+				co_await tr.onError(err);
+				++self->retries;
 			}
 			self->latencies.addSample(now() - tstart);
 			++self->transactions;
 			idx += self->writesPerTransaction;
 			if (totalBytes > self->targetBytes / self->clientCount / self->actorCount)
-				return Void();
+				co_return;
 		}
 	}
 };

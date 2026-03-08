@@ -82,31 +82,32 @@ struct RestoreValidationWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> _start(RestoreValidationWorkload* self, Database cx) {
+	static Future<Void> _start(RestoreValidationWorkload* self, Database cx) {
 		// Only run on client 0 to avoid conflicts (backup/restore runs on client 0)
 		if (self->clientId != 0) {
-			return Void();
+			co_return;
 		}
 
 		// Wait for the specified time before starting validation
 		TraceEvent("RestoreValidationWorkloadWaiting").detail("WaitTime", self->validateAfter);
-		wait(delay(self->validateAfter));
+		co_await delay(self->validateAfter);
 
 		// Wait for restore completion marker
 		// BackupAndRestoreValidation sets this key when restore is fully complete
-		state Key completionMarker = "\xff\x02/restoreValidationComplete"_sr;
-		state int checkAttempts = 0;
+		Key completionMarker = "\xff\x02/restoreValidationComplete"_sr;
+		int checkAttempts = 0;
 
 		TraceEvent("RestoreValidationWaitingForRestoreCompletion")
 		    .detail("CompletionMarker", printable(completionMarker));
 
 		loop {
+			Error err;
 			try {
-				state Transaction tr(cx);
+				Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> markerValue = wait(tr.get(completionMarker));
+				Optional<Value> markerValue = co_await tr.get(completionMarker);
 				if (markerValue.present()) {
 					TraceEvent("RestoreValidationRestoreComplete").detail("CheckAttempts", checkAttempts);
 					break;
@@ -120,38 +121,43 @@ struct RestoreValidationWorkload : TestWorkload {
 					    .detail("CheckAttempts", checkAttempts)
 					    .detail("WaitTimeSeconds", checkAttempts * 5);
 				}
-				wait(delay(5.0));
+				co_await delay(5.0);
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
-				}
-				// Retry on transient errors from buggify chaos injection
-				if (e.code() == error_code_grv_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_commit_proxy_memory_limit_exceeded ||
-				    e.code() == error_code_database_locked || e.code() == error_code_transaction_too_old ||
-				    e.code() == error_code_future_version || e.code() == error_code_audit_storage_failed ||
-				    e.code() == error_code_tag_throttled) {
-					TraceEvent(SevWarn, "RestoreValidationRetryableError")
-					    .error(e)
-					    .detail("CheckAttempts", checkAttempts);
-					wait(delay(1.0)); // Backoff before retry
-					// Loop will retry
-				} else {
-					throw;
-				}
+				err = e;
+			}
+			if (!err.isValid()) {
+				continue;
+			}
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			// Retry on transient errors from buggify chaos injection
+			if (err.code() == error_code_grv_proxy_memory_limit_exceeded ||
+			    err.code() == error_code_commit_proxy_memory_limit_exceeded ||
+			    err.code() == error_code_database_locked || err.code() == error_code_transaction_too_old ||
+			    err.code() == error_code_future_version || err.code() == error_code_audit_storage_failed ||
+			    err.code() == error_code_tag_throttled) {
+				TraceEvent(SevWarn, "RestoreValidationRetryableError")
+				    .error(err)
+				    .detail("CheckAttempts", checkAttempts);
+				co_await delay(1.0); // Backoff before retry
+				// Loop will retry
+			} else {
+				throw err;
 			}
 		}
 
 		TraceEvent("RestoreValidationWorkloadStarting").detail("Range", self->validationRange);
 
-		state int auditRetryCount = 0;
-		state int maxAuditRetries = 5;
+		int auditRetryCount = 0;
+		int maxAuditRetries = 5;
 
 		loop {
+			Error err;
 			try {
 				// Trigger the audit_storage validate_restore command
-				state AuditType auditType = AuditType::ValidateRestore;
-				state Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
+				AuditType auditType = AuditType::ValidateRestore;
+				Reference<IClusterConnectionRecord> clusterFile = cx->getConnectionRecord();
 
 				TraceEvent("RestoreValidationTriggeringAudit")
 				    .detail("AuditType", (int)auditType)
@@ -160,12 +166,12 @@ struct RestoreValidationWorkload : TestWorkload {
 
 				// Trigger the audit using ManagementAPI with timeout
 				// Use shorter timeout for scheduling (60s) to detect cluster issues early
-				state UID auditId;
+				UID auditId;
 				try {
-					UID scheduleResult = wait(timeoutError(
+					UID scheduleResult = co_await timeoutError(
 					    auditStorage(
 					        clusterFile, self->validationRange, auditType, KeyValueStoreType::END, self->maxWaitTime),
-					    60.0));
+					    60.0);
 					auditId = scheduleResult;
 				} catch (Error& e) {
 					if (e.code() == error_code_timed_out) {
@@ -187,20 +193,20 @@ struct RestoreValidationWorkload : TestWorkload {
 				    .detail("RetryCount", auditRetryCount);
 
 				// Monitor audit progress
-				state double startTime = now();
-				state double lastReportTime = startTime;
-				state AuditPhase finalPhase = AuditPhase::Invalid;
-				state std::string errorMessage;
+				double startTime = now();
+				double lastReportTime = startTime;
+				AuditPhase finalPhase = AuditPhase::Invalid;
+				std::string errorMessage;
 
 				loop {
-					wait(delay(self->checkInterval));
+					co_await delay(self->checkInterval);
 
 					// Get audit status (newFirst=true to get latest states first)
 					// Add timeout to handle cluster recovery/instability
-					state std::vector<AuditStorageState> auditStates;
+					std::vector<AuditStorageState> auditStates;
 					try {
 						std::vector<AuditStorageState> states =
-						    wait(timeoutError(getAuditStates(cx, auditType, true), 60.0));
+						    co_await timeoutError(getAuditStates(cx, auditType, true), 60.0);
 						auditStates = states;
 					} catch (Error& e) {
 						if (e.code() == error_code_timed_out) {
@@ -219,9 +225,9 @@ struct RestoreValidationWorkload : TestWorkload {
 					}
 
 					// Filter for our audit ID
-					state bool foundOurAudit = false;
-					state bool allComplete = true;
-					state bool anyError = false;
+					bool foundOurAudit = false;
+					bool allComplete = true;
+					bool anyError = false;
 
 					for (const auto& auditState : auditStates) {
 						if (auditState.id == auditId) {
@@ -312,30 +318,29 @@ struct RestoreValidationWorkload : TestWorkload {
 				break; // Success!
 
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw;
-				}
-				// Retry audit on failures caused by cluster instability during buggify
-				if (e.code() == error_code_audit_storage_failed && auditRetryCount < maxAuditRetries) {
-					auditRetryCount++;
-					double backoff = std::min(10.0, 2.0 * auditRetryCount);
-					TraceEvent(SevWarn, "RestoreValidationAuditRetry")
-					    .error(e)
-					    .detail("RetryCount", auditRetryCount)
-					    .detail("MaxRetries", maxAuditRetries)
-					    .detail("BackoffSeconds", backoff);
-					wait(delay(backoff));
-					// Loop will retry the entire audit
-				} else {
-					TraceEvent(SevError, "RestoreValidationError")
-					    .errorUnsuppressed(e)
-					    .detail("RetryCount", auditRetryCount);
-					throw;
-				}
+				err = e;
+			}
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
+			}
+			// Retry audit on failures caused by cluster instability during buggify
+			if (err.code() == error_code_audit_storage_failed && auditRetryCount < maxAuditRetries) {
+				auditRetryCount++;
+				double backoff = std::min(10.0, 2.0 * auditRetryCount);
+				TraceEvent(SevWarn, "RestoreValidationAuditRetry")
+				    .error(err)
+				    .detail("RetryCount", auditRetryCount)
+				    .detail("MaxRetries", maxAuditRetries)
+				    .detail("BackoffSeconds", backoff);
+				co_await delay(backoff);
+				// Loop will retry the entire audit
+			} else {
+				TraceEvent(SevError, "RestoreValidationError")
+				    .errorUnsuppressed(err)
+				    .detail("RetryCount", auditRetryCount);
+				throw err;
 			}
 		}
-
-		return Void();
 	}
 };
 

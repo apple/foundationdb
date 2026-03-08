@@ -115,44 +115,45 @@ struct CycleWorkload : TestWorkload, Arena {
 		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
-	ACTOR Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
-		state double lastTime = now();
+	Future<Void> cycleClient(Database cx, CycleWorkload* self, double delay) {
+		double lastTime = now();
 		TraceEvent("CycleClientStart").log();
 		try {
 			loop {
-				wait(poisson(&lastTime, delay));
+				co_await poisson(&lastTime, delay);
 
-				state double tstart = now();
-				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
-				state Transaction tr(cx);
+				double tstart = now();
+				int r = deterministicRandom()->randomInt(0, self->nodeCount);
+				Transaction tr(cx);
 				if (deterministicRandom()->random01() <= self->traceParentProbability) {
-					state Span span("CycleClient"_loc);
+					Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
 					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
+					Error err;
 					try {
 						// Reverse next and next^2 node
-						Optional<Value> v = wait(tr.get(self->key(r)));
+						Optional<Value> v = co_await tr.get(self->key(r));
 						if (!v.present()) {
 							self->badRead("KeyR", r, tr);
 						}
-						state int r2 = self->fromValue(v.get());
-						Optional<Value> v2 = wait(tr.get(self->key(r2)));
+						int r2 = self->fromValue(v.get());
+						Optional<Value> v2 = co_await tr.get(self->key(r2));
 						if (!v2.present())
 							self->badRead("KeyR2", r2, tr);
-						state int r3 = self->fromValue(v2.get());
-						Optional<Value> v3 = wait(tr.get(self->key(r3)));
+						int r3 = self->fromValue(v2.get());
+						Optional<Value> v3 = co_await tr.get(self->key(r3));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
-						state int r4 = self->fromValue(v3.get());
+						int r4 = self->fromValue(v3.get());
 
-						// Single key clear range op will be converted to point delete inside storage engine. Generating
-						// a larger range here to increase test coverage.
-						tr.clear(
-						    self->keyRange(r),
-						    AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong ordering
+						// Single key clear range op will be converted to point delete inside storage engine.
+						// Generating a larger range here to increase test coverage.
+						tr.clear(self->keyRange(r),
+						         AddConflictRange::True); //< Shouldn't have an effect, but will break with wrong
+						                                  // ordering
 						tr.set(self->key(r), self->value(r3));
 						tr.set(self->key(r2), self->value(r4));
 						tr.set(self->key(r3), self->value(r2));
@@ -160,7 +161,7 @@ struct CycleWorkload : TestWorkload, Arena {
 						// TraceEvent("CyclicTest2").detail("RawKey", r2).detail("RawValue", r4).detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString()).log();
 						// TraceEvent("CyclicTest3").detail("RawKey", r3).detail("RawValue", r2).detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString()).log();
 
-						wait(tr.commit());
+						co_await tr.commit();
 						// TraceEvent("CyclicTestCommit")
 						// 	.detail("R1", r)
 						// 	.detail("R2", r2)
@@ -169,12 +170,13 @@ struct CycleWorkload : TestWorkload, Arena {
 						// 	.log();
 						break;
 					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_old)
-							++self->tooOldRetries;
-						else if (e.code() == error_code_not_committed)
-							++self->commitFailedRetries;
-						wait(tr.onError(e));
+						err = e;
 					}
+					if (err.code() == error_code_transaction_too_old)
+						++self->tooOldRetries;
+					else if (err.code() == error_code_not_committed)
+						++self->commitFailedRetries;
+					co_await tr.onError(err);
 					++self->retries;
 				}
 				++self->transactions;
@@ -263,7 +265,7 @@ struct CycleWorkload : TestWorkload, Arena {
 		return true;
 	}
 
-	ACTOR Future<bool> cycleCheck(Database cx, CycleWorkload* self, bool ok) {
+	Future<bool> cycleCheck(Database cx, CycleWorkload* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
@@ -279,32 +281,34 @@ struct CycleWorkload : TestWorkload, Arena {
 		}
 		if (!self->clientId) {
 			// One client checks the validity of the cycle
-			state Transaction tr(cx);
-			state int retryCount = 0;
+			Transaction tr(cx);
+			int retryCount = 0;
 			loop {
+				Error err;
 				try {
-					state Version v = wait(tr.getReadVersion());
-					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
-					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
-					                                    self->nodeCount + 1));
+					Version v = co_await tr.getReadVersion();
+					RangeResult data = co_await tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                                        firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                                        self->nodeCount + 1);
 					ok = self->cycleCheckData(data, v) && ok;
 					break;
 				} catch (Error& e) {
-					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
-					if (g_network->isSimulated() && retryCount > 50) {
-						CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
-						// try to make the read window back to normal size (5 * version_per_sec)
-						g_simulator->speedUpSimulation = true;
-					}
-					wait(tr.onError(e));
+					err = e;
 				}
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(err);
+				if (g_network->isSimulated() && retryCount > 50) {
+					CODE_PROBE(true, "Cycle check enable speedUpSimulation because too many transaction_too_old()");
+					// try to make the read window back to normal size (5 * version_per_sec)
+					g_simulator->speedUpSimulation = true;
+				}
+				co_await tr.onError(err);
 			}
 		}
 		if (!self->unseedCheck) {
 			ASSERT(noUnseed);
 		}
-		return ok;
+		co_return ok;
 	}
 };
 

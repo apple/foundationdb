@@ -86,8 +86,8 @@ struct WatchAndWaitWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	ACTOR Future<Void> _start(Database cx, WatchAndWaitWorkload* self) {
-		state std::vector<Future<Void>> watches;
+	Future<Void> _start(Database cx, WatchAndWaitWorkload* self) {
+		std::vector<Future<Void>> watches;
 		uint64_t endNode = (self->nodeCount * (self->clientId + 1)) / self->clientCount;
 		uint64_t startNode = (self->nodeCount * self->clientId) / self->clientCount;
 		uint64_t NodesPerWatch = self->nodeCount / self->watchCount;
@@ -100,24 +100,27 @@ struct WatchAndWaitWorkload : TestWorkload {
 		for (uint64_t i = startNode; i < endNode; i += NodesPerWatch) {
 			watches.push_back(self->watchAndWait(cx, self, i));
 		}
-		wait(delay(self->testDuration)); // || waitForAll( watches )
+		co_await delay(self->testDuration); // || waitForAll( watches )
 		TraceEvent("WatchAndWaitEnd").detail("Duration", self->testDuration);
-		return Void();
 	}
 
-	ACTOR Future<Void> watchAndWait(Database cx, WatchAndWaitWorkload* self, int index) {
+	Future<Void> watchAndWait(Database cx, WatchAndWaitWorkload* self, int index) {
 		try {
-			state ReadYourWritesTransaction tr(cx);
+			ReadYourWritesTransaction tr(cx);
 			loop {
 				cx->maxOutstandingWatches = 1e6;
+				Error err;
 				try {
-					state Future<Void> watch = tr.watch(self->keyForIndex(index));
-					wait(tr.commit());
-					wait(watch);
+					Future<Void> watch = tr.watch(self->keyForIndex(index));
+					co_await tr.commit();
+					co_await watch;
 					++self->triggers;
 				} catch (Error& e) {
-					++self->retries;
-					wait(tr.onError(e));
+					err = e;
+				}
+				++self->retries;
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		} catch (Error& e) {

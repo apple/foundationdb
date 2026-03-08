@@ -185,72 +185,67 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			}
 		}
 
-		RangeResult kvRange = wait(kvStore->readRange(testRange));
+		state RangeResult kvRange = wait(kvStore->readRange(testRange));
 		ASSERT(res.size() == kvRange.size());
 		for (int i = 0; i < res.size(); ++i) {
 			ASSERT(res[i] == kvRange[i]);
 		}
 
-		Future<Void> close = kvStore->onClosed();
+		state Future<Void> close = kvStore->onClosed();
 		kvStore->dispose();
 		wait(close);
-
-		{
-			int ignore = wait(setDDMode(cx, 1));
-			(void)ignore;
-		}
+		wait(success(setDDMode(cx, 1)));
 		return Void();
 	}
 
-	ACTOR Future<Void> readAndVerify(SSCheckpointRestoreWorkload* self,
-	                                 Database cx,
-	                                 Key key,
-	                                 ErrorOr<Optional<Value>> expectedValue) {
-		state Transaction tr(cx);
+	Future<Void> readAndVerify(SSCheckpointRestoreWorkload* self,
+	                           Database cx,
+	                           Key key,
+	                           ErrorOr<Optional<Value>> expectedValue) {
+		Transaction tr(cx);
 
 		loop {
+			Error err;
 			try {
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
 				break;
 			} catch (Error& e) {
-				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
-					break;
-				}
-				wait(tr.onError(e));
+				err = e;
 			}
+			if (expectedValue.isError() && expectedValue.getError().code() == err.code()) {
+				break;
+			}
+			co_await tr.onError(err);
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self,
-	                                     Database cx,
-	                                     Key key,
-	                                     Optional<Value> value) {
-		state Transaction tr(cx);
-		state Version version;
+	Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self, Database cx, Key key, Optional<Value> value) {
+		Transaction tr(cx);
+		Version version{ 0 };
 		loop {
+			Error err;
 			try {
 				if (value.present()) {
 					tr.set(key, value.get());
 				} else {
 					tr.clear(key);
 				}
-				wait(timeoutError(tr.commit(), 30.0));
+				co_await timeoutError(tr.commit(), 30.0);
 				version = tr.getCommittedVersion();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
-		wait(self->readAndVerify(self, cx, key, value));
+		co_await self->readAndVerify(self, cx, key, value);
 
-		return version;
+		co_return version;
 	}
 
 	Future<bool> check(Database const& cx) override { return pass; }

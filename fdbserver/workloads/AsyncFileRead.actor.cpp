@@ -193,7 +193,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(AsyncFileReadWorkload* self) {
+	Future<Void> _setup(AsyncFileReadWorkload* self) {
 		// Allow only 4K aligned reads if doing unbuffered IO
 		if (self->unbufferedIO && self->readSize % AsyncFileWorkload::_PAGE_SIZE != 0)
 			self->readSize = std::max(AsyncFileWorkload::_PAGE_SIZE,
@@ -203,13 +203,11 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		for (int i = 0; i < self->numParallelReads; i++)
 			self->readBuffers.push_back(self->allocateBuffer(self->readSize));
 
-		wait(self->openFile(
-		    self, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0666, self->fileSize, self->fileSize != 0));
+		co_await self->openFile(
+		    self, IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0666, self->fileSize, self->fileSize != 0);
 
-		int64_t fileSize = wait(self->fileHandle->file->size());
+		int64_t fileSize = co_await self->fileHandle->file->size();
 		self->fileSize = fileSize;
-
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -219,28 +217,26 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(AsyncFileReadWorkload* self) {
-		state StatisticsState statState;
+	Future<Void> _start(AsyncFileReadWorkload* self) {
+		StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		wait(timeout(self->runReadTest(self), self->testDuration, Void()));
+		co_await timeout(self->runReadTest(self), self->testDuration, Void());
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
 		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		// Try to let the IO operations finish so we can clean up after them
-		wait(timeout(waitForAll(self->readFutures), 10, Void()));
-
-		return Void();
+		co_await timeout(waitForAll(self->readFutures), 10, Void());
 	}
 
-	ACTOR static Future<Void> readLoop(AsyncFileReadWorkload* self, int bufferIndex, double fixedRate) {
-		state bool writeFlag = false;
-		state double begin = 0.0;
-		state double lastTime = now();
+	static Future<Void> readLoop(AsyncFileReadWorkload* self, int bufferIndex, double fixedRate) {
+		bool writeFlag = false;
+		double begin = 0.0;
+		double lastTime = now();
 		loop {
 			if (fixedRate)
-				wait(poisson(&lastTime, 1.0 / fixedRate));
+				co_await poisson(&lastTime, 1.0 / fixedRate);
 
 			// state Future<Void> d = delay( 1/25. * (.75 + 0.5*deterministicRandom()->random01()) );
 			int64_t offset;
@@ -263,7 +259,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 			begin = now();
 			if (self->ioLog)
 				self->ioLog->logIOIssue(writeFlag, begin);
-			wait(success(uncancellable(holdWhile(self->fileHandle, holdWhile(self->readBuffers[bufferIndex], r)))));
+			co_await success(uncancellable(holdWhile(self->fileHandle, holdWhile(self->readBuffers[bufferIndex], r))));
 			if (self->ioLog)
 				self->ioLog->logIOCompletion(writeFlag, begin, now());
 			self->bytesRead += self->readSize;
@@ -271,7 +267,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		}
 	}
 
-	ACTOR Future<Void> runReadTest(AsyncFileReadWorkload* self) {
+	Future<Void> runReadTest(AsyncFileReadWorkload* self) {
 		if (self->unbatched) {
 			self->ioLog = new IOLog();
 
@@ -280,13 +276,13 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 			readers.reserve(self->numParallelReads);
 			for (int i = 0; i < self->numParallelReads; i++)
 				readers.push_back(readLoop(self, i, self->fixedRate / self->numParallelReads));
-			wait(waitForAll(readers));
+			co_await waitForAll(readers);
 
 			delete self->ioLog;
-			return Void();
+			co_return;
 		}
 
-		state int64_t offset = self->fileSize;
+		int64_t offset = self->fileSize;
 		loop {
 			// Read consecutive chunks of the file using different actors
 			for (int i = 0; i < self->numParallelReads; i++) {
@@ -311,12 +307,12 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 				              self->fileHandle->file->read(self->readBuffers[i]->buffer, self->readSize, offset)))));
 			}
 
-			wait(waitForAll(self->readFutures));
+			co_await waitForAll(self->readFutures);
 			self->bytesRead += self->readSize * self->numParallelReads;
 
 			self->readFutures.clear();
 
-			wait(delay(0));
+			co_await delay(0);
 		}
 	}
 

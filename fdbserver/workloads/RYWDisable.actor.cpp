@@ -45,16 +45,17 @@ struct RYWDisableWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, RYWDisableWorkload* self) {
-		state double testStart = now();
+	static Future<Void> _start(Database cx, RYWDisableWorkload* self) {
+		double testStart = now();
 
 		loop {
-			state ReadYourWritesTransaction tr(cx);
+			ReadYourWritesTransaction tr(cx);
 			loop {
+				Error err;
 				try {
 					// do some operations
-					state int opType = deterministicRandom()->randomInt(0, 4);
-					state bool shouldError = true;
+					int opType = deterministicRandom()->randomInt(0, 4);
+					bool shouldError = true;
 
 					if (opType == 0) {
 						//TraceEvent("RYWSetting");
@@ -65,7 +66,7 @@ struct RYWDisableWorkload : TestWorkload {
 						    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
 					} else if (opType == 2) {
 						//TraceEvent("RYWGetAndWait");
-						wait(success(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)))));
+						co_await success(tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes))));
 					} else {
 						//TraceEvent("RYWNoOp");
 						shouldError = false;
@@ -82,17 +83,20 @@ struct RYWDisableWorkload : TestWorkload {
 						ASSERT(e.code() == error_code_client_invalid_operation);
 					}
 
-					wait(delay(0.1));
+					co_await delay(0.1);
 
 					if (now() - testStart > self->testDuration)
-						return Void();
+						co_return;
 
 					if (deterministicRandom()->random01() < 0.5)
 						break;
 
 					tr.reset();
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		}

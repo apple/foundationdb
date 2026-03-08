@@ -96,24 +96,24 @@ struct StreamingReadWorkload : TestWorkload {
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(keyForIndex(n), constantValue); }
 
-	ACTOR Future<Void> streamingReadClient(Database cx, StreamingReadWorkload* self, int clientId, int actorId) {
-		state int minIndex = actorId * self->nodeCount / self->actorCount;
-		state int maxIndex = std::min((actorId + 1) * self->nodeCount / self->actorCount, self->nodeCount);
-		state int currentIndex = minIndex;
+	Future<Void> streamingReadClient(Database cx, StreamingReadWorkload* self, int clientId, int actorId) {
+		int minIndex = actorId * self->nodeCount / self->actorCount;
+		int maxIndex = std::min((actorId + 1) * self->nodeCount / self->actorCount, self->nodeCount);
+		int currentIndex = minIndex;
 
 		loop {
-			state double tstart = now();
-			state Transaction tr(cx);
-			state int rangeSize = (double)self->readsPerTransaction / self->rangesPerTransaction + 0.5;
-			state int range = 0;
+			double tstart = now();
+			Transaction tr(cx);
+			int rangeSize = (double)self->readsPerTransaction / self->rangesPerTransaction + 0.5;
+			int range = 0;
 			loop {
-				state int thisRangeSize =
-				    (range < self->rangesPerTransaction - 1)
-				        ? rangeSize
-				        : self->readsPerTransaction - (self->rangesPerTransaction - 1) * rangeSize;
+				int thisRangeSize = (range < self->rangesPerTransaction - 1)
+				                        ? rangeSize
+				                        : self->readsPerTransaction - (self->rangesPerTransaction - 1) * rangeSize;
 				if (self->readSequentially && thisRangeSize > maxIndex - minIndex)
 					thisRangeSize = maxIndex - minIndex;
 				loop {
+					Error err;
 					try {
 						if (!self->readSequentially)
 							currentIndex = deterministicRandom()->randomInt(0, self->nodeCount - thisRangeSize);
@@ -121,9 +121,9 @@ struct StreamingReadWorkload : TestWorkload {
 							currentIndex = minIndex;
 
 						RangeResult values =
-						    wait(tr.getRange(firstGreaterOrEqual(self->keyForIndex(currentIndex)),
-						                     firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
-						                     thisRangeSize));
+						    co_await tr.getRange(firstGreaterOrEqual(self->keyForIndex(currentIndex)),
+						                         firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
+						                         thisRangeSize);
 
 						for (int i = 0; i < values.size(); i++)
 							self->readValueBytes += values[i].value.size();
@@ -134,8 +134,9 @@ struct StreamingReadWorkload : TestWorkload {
 						self->readKeys += values.size();
 						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						err = e;
 					}
+					co_await tr.onError(err);
 				}
 
 				if (now() - tstart > 3)

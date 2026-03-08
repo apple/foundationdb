@@ -153,50 +153,55 @@ struct VersionStampWorkload : TestWorkload {
 		return { bigEndian64(parsedVersion), parsedVersionstamp };
 	}
 
-	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
+	Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		if (self->validateExtraDB) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
 			cx = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		}
-		state ReadYourWritesTransaction tr(cx);
+		ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smallest read version that we can get and maintain it, to
 		// have the strictest check we can on versionstamps monotonically increasing.
-		state Version readVersion;
+		Version readVersion{ 0 };
 		loop {
+			Error err;
 			try {
-				Version _readVersion = wait(tr.getReadVersion());
+				Version _readVersion = co_await tr.getReadVersion();
 				readVersion = _readVersion;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
 		if (BUGGIFY) {
 			if (deterministicRandom()->random01() < 0.5) {
 				loop {
+					Error err;
 					try {
 						tr.makeSelfConflicting();
-						wait(tr.commit());
+						co_await tr.commit();
 						readVersion = tr.getCommittedVersion() - 1;
 						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						err = e;
 					}
+					co_await tr.onError(err);
 				}
 			}
 			tr.reset();
 			tr.setVersion(readVersion);
 		}
 
-		state RangeResult result;
+		RangeResult result;
 		loop {
+			Error err;
 			try {
-				RangeResult result_ = wait(tr.getRange(
-				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
+				RangeResult result_ = co_await tr.getRange(
+				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1);
 				result = result_;
 				if (self->allowMetadataVersionKey && self->key_commit.contains(metadataVersionKey)) {
-					Optional<Value> mVal = wait(tr.get(metadataVersionKey));
+					Optional<Value> mVal = co_await tr.get(metadataVersionKey);
 					if (mVal.present()) {
 						result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey, mVal.get()));
 					}
@@ -253,8 +258,8 @@ struct VersionStampWorkload : TestWorkload {
 					}
 				}
 
-				RangeResult result__ = wait(
-				    tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
+				RangeResult result__ = co_await tr.getRange(
+				    KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1);
 				result = result__;
 				ASSERT(result.size() <= self->nodeCount);
 				if (self->failIfDataLost) {
@@ -298,43 +303,44 @@ struct VersionStampWorkload : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 		TraceEvent("VST_CheckEnd").log();
-		return true;
+		co_return true;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
-		state double startTime = now();
-		state double lastTime = now();
-		state Database extraDB;
+	Future<Void> _start(Database cx, VersionStampWorkload* self, double delay) {
+		double startTime = now();
+		double lastTime = now();
+		Database extraDB;
 
 		if (!g_simulator->extraDatabases.empty()) {
 			ASSERT(g_simulator->extraDatabases.size() == 1);
 			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		}
 
-		state Future<Void> metadataWatch = Void();
+		Future<Void> metadataWatch = Void();
 		loop {
-			wait(poisson(&lastTime, delay));
+			co_await poisson(&lastTime, delay);
 			bool oldVSFormat = !cx->apiVersionAtLeast(520);
 
-			state bool cx_is_primary = true;
-			state ReadYourWritesTransaction tr(cx);
-			state Key key = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount));
-			state Value value(std::string(deterministicRandom()->randomInt(10, 100), 'x'));
-			state Key versionStampKey =
+			bool cx_is_primary = true;
+			ReadYourWritesTransaction tr(cx);
+			Key key = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount));
+			Value value(std::string(deterministicRandom()->randomInt(10, 100), 'x'));
+			Key versionStampKey =
 			    self->versionStampKeyForIndex(deterministicRandom()->randomInt(0, self->nodeCount), oldVSFormat);
-			state StringRef prefix = versionStampKey.substr(0, 20 + self->vsKeyPrefix.size());
-			state Key endOfRange = self->endOfRange(prefix);
-			state KeyRangeRef range(prefix, endOfRange);
-			state Standalone<StringRef> committedVersionStamp;
-			state Version committedVersion;
+			StringRef prefix = versionStampKey.substr(0, 20 + self->vsKeyPrefix.size());
+			Key endOfRange = self->endOfRange(prefix);
+			KeyRangeRef range(prefix, endOfRange);
+			Standalone<StringRef> committedVersionStamp;
+			Version committedVersion{ 0 };
 
-			state Value versionStampValue;
+			Value versionStampValue;
 
 			if (key == metadataVersionKey) {
 				value = metadataVersionRequiredValue;
@@ -345,92 +351,109 @@ struct VersionStampWorkload : TestWorkload {
 				versionStampValue = value.withSuffix("\x00\x00\x00\x00"_sr);
 			}
 
-			state bool ryw = deterministicRandom()->coinflip();
+			bool ryw = deterministicRandom()->coinflip();
 			loop {
 				if (!ryw) {
 					tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 				}
-				state bool error = false;
-				state Error err;
+				bool error = false;
+				Optional<Error> err;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
-				state Key testKey;
-				state Future<Void> nextMetadataWatch;
-				try {
-					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
-					if (key == metadataVersionKey) {
-						testKey = "testKey" + deterministicRandom()->randomUniqueID().toString();
-						tr.atomicOp(testKey, versionStampValue, MutationRef::SetVersionstampedValue);
-					}
-					tr.clear(range);
-					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
-					if (key == metadataVersionKey) {
-						nextMetadataWatch = tr.watch(versionStampKey);
-					}
-					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
-					wait(tr.commit());
-
-					committedVersion = tr.getCommittedVersion();
-					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
-					committedVersionStamp = committedVersionStamp_;
-
-					if (key == metadataVersionKey) {
-						wait(timeoutError(metadataWatch, 30));
-						nextMetadataWatch = metadataWatch;
-					}
-
-				} catch (Error& e) {
-					err = e;
-					if (err.code() == error_code_database_locked && !g_simulator->extraDatabases.empty()) {
-						//TraceEvent("VST_CommitDatabaseLocked");
-						cx_is_primary = !cx_is_primary;
-						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);
-						break;
-					} else if (err.code() == error_code_commit_unknown_result) {
-						//TraceEvent("VST_CommitUnknownResult").error(e).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
-						loop {
-							state ReadYourWritesTransaction cur_tr(cx_is_primary ? cx : extraDB);
-							cur_tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							try {
-								Optional<Value> vs_value = wait(cur_tr.get(key == metadataVersionKey ? testKey : key));
-								if (!vs_value.present()) {
-									error = true;
-									break;
-								}
-								const Version value_version = versionFromValue(vs_value.get()).first;
-								//TraceEvent("VST_CommitUnknownRead").detail("VsValue", vs_value.present() ? printable(vs_value.get()) : "did not exist");
-								const auto& value_ts =
-								    self->key_commit[key == metadataVersionKey ? metadataVersionKey
-								                                               : key.removePrefix(self->vsValuePrefix)];
-								const auto& iter = std::find_if(
-								    value_ts.cbegin(),
-								    value_ts.cend(),
-								    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
-									    return value_version == pair.first;
-								    });
-								if (iter == value_ts.cend()) {
-									// The commit was successful, and thus we need to record the new data.
-									committedVersion = value_version;
-									committedVersionStamp = vs_value.get().substr(0, 10);
-								} else {
-									error = true;
-									break;
-								}
-								break;
-							} catch (Error& e) {
-								wait(cur_tr.onError(e));
-							}
+				Key testKey;
+				Future<Void> nextMetadataWatch;
+				{
+					Optional<Error> caughtErr;
+					try {
+						tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
+						if (key == metadataVersionKey) {
+							testKey = "testKey" + deterministicRandom()->randomUniqueID().toString();
+							tr.atomicOp(testKey, versionStampValue, MutationRef::SetVersionstampedValue);
 						}
-					} else {
-						error = true;
+						tr.clear(range);
+						tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
+						if (key == metadataVersionKey) {
+							nextMetadataWatch = tr.watch(versionStampKey);
+						}
+						Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
+						co_await tr.commit();
+
+						committedVersion = tr.getCommittedVersion();
+						Standalone<StringRef> committedVersionStamp_ = co_await fTrVs;
+						committedVersionStamp = committedVersionStamp_;
+
+						if (key == metadataVersionKey) {
+							co_await timeoutError(metadataWatch, 30);
+							nextMetadataWatch = metadataWatch;
+						}
+
+					} catch (Error& e) {
+						caughtErr = e;
+					}
+					if (caughtErr.present()) {
+						err = caughtErr.get();
+						if (err.get().code() == error_code_database_locked && !g_simulator->extraDatabases.empty()) {
+							//TraceEvent("VST_CommitDatabaseLocked");
+							cx_is_primary = !cx_is_primary;
+							tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);
+							break;
+						} else if (err.get().code() == error_code_commit_unknown_result) {
+							//TraceEvent("VST_CommitUnknownResult").error(e).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
+							loop {
+								ReadYourWritesTransaction cur_tr(cx_is_primary ? cx : extraDB);
+								cur_tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+								Error err;
+								try {
+									Optional<Value> vs_value =
+									    co_await cur_tr.get(key == metadataVersionKey ? testKey : key);
+									if (!vs_value.present()) {
+										error = true;
+										break;
+									}
+									const Version value_version = versionFromValue(vs_value.get()).first;
+									//TraceEvent("VST_CommitUnknownRead").detail("VsValue", vs_value.present() ? printable(vs_value.get()) : "did not exist");
+									const auto& value_ts =
+									    self->key_commit[key == metadataVersionKey
+									                         ? metadataVersionKey
+									                         : key.removePrefix(self->vsValuePrefix)];
+									const auto& iter = std::find_if(
+									    value_ts.cbegin(),
+									    value_ts.cend(),
+									    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
+										    return value_version == pair.first;
+									    });
+									if (iter == value_ts.cend()) {
+										// The commit was successful, and thus we need to record the new data.
+										committedVersion = value_version;
+										committedVersionStamp = vs_value.get().substr(0, 10);
+									} else {
+										error = true;
+										break;
+									}
+									break;
+								} catch (Error& caughtErr) {
+									err = caughtErr;
+								}
+								if (err.isValid()) {
+									co_await cur_tr.onError(err);
+								}
+							}
+						} else {
+							error = true;
+						}
 					}
 				}
 
 				if (error) {
-					TraceEvent("VST_CommitFailed")
-					    .error(err)
-					    .detail("Key", printable(key))
-					    .detail("VsKey", printable(versionStampKey));
-					wait(tr.onError(err));
+					TraceEvent event("VST_CommitFailed");
+					if (err.present()) {
+						event.error(err.get());
+					}
+					event.detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
+					if (err.present()) {
+						co_await tr.onError(err.get());
+					} else {
+						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);
+					}
 					continue;
 				}
 
@@ -447,7 +470,6 @@ struct VersionStampWorkload : TestWorkload {
 				break;
 		}
 		//TraceEvent("VST_Start").detail("Count", count).detail("NodeCount", self->nodeCount);
-		return Void();
 	}
 };
 

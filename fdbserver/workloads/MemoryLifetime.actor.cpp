@@ -50,42 +50,41 @@ struct MemoryLifetime : KVWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR Future<Void> _setup(Database cx, MemoryLifetime* self) {
-		state Promise<double> loadTime;
-		wait(bulkSetup(cx, self, self->nodeCount, loadTime));
-		return Void();
+	Future<Void> _setup(Database cx, MemoryLifetime* self) {
+		Promise<double> loadTime;
+		co_await bulkSetup(cx, self, self->nodeCount, loadTime);
 	}
 
-	ACTOR Future<Void> _start(Database cx, MemoryLifetime* self) {
-		state double startTime = now();
-		state ReadYourWritesTransaction tr(cx);
-		state Reverse reverse = Reverse::False;
-		state Snapshot snapshot = Snapshot::False;
+	Future<Void> _start(Database cx, MemoryLifetime* self) {
+		double startTime = now();
+		ReadYourWritesTransaction tr(cx);
+		Reverse reverse = Reverse::False;
+		Snapshot snapshot = Snapshot::False;
 		loop {
+			Error err;
 			try {
 				tr = ReadYourWritesTransaction(cx);
 				int op = deterministicRandom()->randomInt(0, 4);
 				if (op == 0) {
 					reverse.set(deterministicRandom()->coinflip());
-					state Key getRange_startKey = self->getRandomKey();
-					state KeyRange getRange_queryRange =
-					    reverse ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
-					            : KeyRangeRef(getRange_startKey, normalKeys.end);
-					state bool getRange_randomStart = deterministicRandom()->random01();
-					state Value getRange_newValue = self->randomValue();
+					Key getRange_startKey = self->getRandomKey();
+					KeyRange getRange_queryRange = reverse ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
+					                                       : KeyRangeRef(getRange_startKey, normalKeys.end);
+					bool getRange_randomStart = deterministicRandom()->random01();
+					Value getRange_newValue = self->randomValue();
 					snapshot.set(deterministicRandom()->coinflip());
 
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", reverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", snapshot);
 					if (getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
-					state RangeResult getRange_res1 =
-					    wait(tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse));
+					RangeResult getRange_res1 =
+					    co_await tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse);
 					tr = ReadYourWritesTransaction(cx);
-					wait(delay(0.01));
+					co_await delay(0.01);
 					if (getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
 					RangeResult getRange_res2 =
-					    wait(tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse));
+					    co_await tr.getRange(getRange_queryRange, GetRangeLimits(4000), snapshot, reverse);
 					ASSERT(getRange_res1.size() == getRange_res2.size());
 					for (int i = 0; i < getRange_res1.size(); i++) {
 						if (getRange_res1[i].key != getRange_res2[i].key) {
@@ -110,51 +109,54 @@ struct MemoryLifetime : KVWorkload {
 						}
 					}
 				} else if (op == 1) {
-					state Key get_startKey = self->getRandomKey();
-					state bool get_randomStart = deterministicRandom()->random01();
-					state Value get_newValue = self->randomValue();
+					Key get_startKey = self->getRandomKey();
+					bool get_randomStart = deterministicRandom()->random01();
+					Value get_newValue = self->randomValue();
 					snapshot.set(deterministicRandom()->coinflip());
 
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
-					state Optional<Value> get_res1 = wait(tr.get(get_startKey, snapshot));
+					Optional<Value> get_res1 = co_await tr.get(get_startKey, snapshot);
 					tr = ReadYourWritesTransaction(cx);
-					wait(delay(0.01));
+					co_await delay(0.01);
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
-					Optional<Value> get_res2 = wait(tr.get(get_startKey, snapshot));
+					Optional<Value> get_res2 = co_await tr.get(get_startKey, snapshot);
 					ASSERT(get_res1 == get_res2);
 				} else if (op == 2) {
-					state KeySelector getKey_selector = self->getRandomKeySelector();
-					state bool getKey_randomStart = deterministicRandom()->random01();
-					state Value getKey_newValue = self->randomValue();
+					KeySelector getKey_selector = self->getRandomKeySelector();
+					bool getKey_randomStart = deterministicRandom()->random01();
+					Value getKey_newValue = self->randomValue();
 					snapshot.set(deterministicRandom()->coinflip());
 
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
-					state Key getKey_res1 = wait(tr.getKey(getKey_selector, snapshot));
+					Key getKey_res1 = co_await tr.getKey(getKey_selector, snapshot);
 					tr = ReadYourWritesTransaction(cx);
-					wait(delay(0.01));
+					co_await delay(0.01);
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
-					Key getKey_res2 = wait(tr.getKey(getKey_selector, snapshot));
+					Key getKey_res2 = co_await tr.getKey(getKey_selector, snapshot);
 					ASSERT(getKey_res1 == getKey_res2);
 				} else if (op == 3) {
-					state Key getAddress_startKey = self->getRandomKey();
-					state Standalone<VectorRef<const char*>> getAddress_res1 =
-					    wait(tr.getAddressesForKey(getAddress_startKey));
+					Key getAddress_startKey = self->getRandomKey();
+					Standalone<VectorRef<const char*>> getAddress_res1 =
+					    co_await tr.getAddressesForKey(getAddress_startKey);
 					tr = ReadYourWritesTransaction(cx);
-					wait(delay(0.01));
-					// we cannot check the contents like other operations so just touch all the values to make sure we
-					// dont crash
+					co_await delay(0.01);
+					// we cannot check the contents like other operations so just touch all the values to make sure
+					// we dont crash
 					for (int i = 0; i < getAddress_res1.size(); i++) {
 						ASSERT(NetworkAddress::parseOptional(getAddress_res1[i]).present());
 					}
 				}
 				if (now() - startTime > self->testDuration)
-					return Void();
+					co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}

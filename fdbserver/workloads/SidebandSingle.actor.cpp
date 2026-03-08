@@ -80,44 +80,48 @@ struct SidebandSingleWorkload : TestWorkload {
 		m.push_back(keysUnexpectedlyPresent.getMetric());
 	}
 
-	ACTOR Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
-		state double lastTime = now();
-		state Version commitVersion;
-		state bool unknown = false;
+	Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
+		double lastTime = now();
+		Version commitVersion{ 0 };
+		bool unknown = false;
 
 		loop {
-			wait(poisson(&lastTime, 1.0 / self->operationsPerSecond));
-			state Transaction tr0(cx);
-			state Transaction tr(cx);
-			state uint64_t key = deterministicRandom()->randomUniqueID().hash();
+			co_await poisson(&lastTime, 1.0 / self->operationsPerSecond);
+			Transaction tr0(cx);
+			Transaction tr(cx);
+			uint64_t key = deterministicRandom()->randomUniqueID().hash();
 
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
+			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
 			// first set, this is the "old" value, always retry
 			loop {
+				Error err;
 				try {
 					tr0.set(messageKey, "oldbeef"_sr);
-					wait(tr0.commit());
+					co_await tr0.commit();
 					break;
 				} catch (Error& e) {
-					wait(tr0.onError(e));
+					err = e;
 				}
+				co_await tr0.onError(err);
 			}
 			// second set, the checker should see this, no retries on unknown result
 			loop {
+				Error err;
 				try {
 					tr.set(messageKey, "deadbeef"_sr);
-					wait(tr.commit());
+					co_await tr.commit();
 					commitVersion = tr.getCommittedVersion();
 					break;
 				} catch (Error& e) {
-					if (e.code() == error_code_commit_unknown_result) {
-						unknown = true;
-						++self->messages;
-						self->interf.send(std::pair(key, invalidVersion));
-						break;
-					}
-					wait(tr.onError(e));
+					err = e;
 				}
+				if (err.code() == error_code_commit_unknown_result) {
+					unknown = true;
+					++self->messages;
+					self->interf.send(std::pair(key, invalidVersion));
+					break;
+				}
+				co_await tr.onError(err);
 			}
 			if (unknown) {
 				unknown = false;
@@ -128,7 +132,7 @@ struct SidebandSingleWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
+	Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
 		// Required for GRV Cache to work in simulation.
 		// Normally, MVC would set the shared state and it is verified upon setting the
 		// transaction option for GRV Cache.
@@ -136,13 +140,14 @@ struct SidebandSingleWorkload : TestWorkload {
 		cx->initSharedState();
 		loop {
 			// Pair represents <Key, commitVersion>
-			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
-			state Transaction tr(cx);
+			std::pair<uint64_t, Version> message = co_await self->interf.getFuture();
+			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
+			Transaction tr(cx);
 			loop {
+				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
-					state Optional<Value> val = wait(tr.get(messageKey));
+					Optional<Value> val = co_await tr.get(messageKey);
 					if (!val.present()) {
 						TraceEvent(SevError, "CausalConsistencyError1")
 						    .detail("MessageKey", messageKey.toString().c_str())
@@ -160,16 +165,18 @@ struct SidebandSingleWorkload : TestWorkload {
 							break;
 						}
 						// check again without cache, and if it's the same, that's expected
-						state Transaction tr2(cx);
-						state Optional<Value> val2;
+						Transaction tr2(cx);
+						Optional<Value> val2;
 						loop {
+							Error err;
 							try {
-								wait(store(val2, tr2.get(messageKey)));
+								co_await store(val2, tr2.get(messageKey));
 								break;
 							} catch (Error& e) {
-								TraceEvent("DebugSidebandNoCacheError").errorUnsuppressed(e);
-								wait(tr2.onError(e));
+								err = e;
 							}
+							TraceEvent("DebugSidebandNoCacheError").errorUnsuppressed(err);
+							co_await tr2.onError(err);
 						}
 						if (val != val2) {
 							TraceEvent(SevError, "CausalConsistencyError3")
@@ -184,9 +191,10 @@ struct SidebandSingleWorkload : TestWorkload {
 					}
 					break;
 				} catch (Error& e) {
-					TraceEvent("DebugSidebandCheckError").errorUnsuppressed(e);
-					wait(tr.onError(e));
+					err = e;
 				}
+				TraceEvent("DebugSidebandCheckError").errorUnsuppressed(err);
+				co_await tr.onError(err);
 			}
 		}
 	}

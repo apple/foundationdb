@@ -157,11 +157,11 @@ private:
 		}
 	}
 
-	ACTOR Future<Void> _start(S3ClientWorkload* self, Database cx) {
+	Future<Void> _start(S3ClientWorkload* self, Database cx) {
 		if (self->clientId != 0) {
 			// Our simulation test can trigger multiple same workloads at the same time
 			// Only run one time workload in the simulation
-			return Void();
+			co_return;
 		}
 		if (g_network->isSimulated()) {
 			// Network partition between CC and DD can cause DD no longer existing,
@@ -171,7 +171,7 @@ private:
 		}
 
 		// --- BEGIN PRE-TEST CLEANUP ---
-		state std::string download_path_to_clean = "downloaded_credentials";
+		std::string download_path_to_clean = "downloaded_credentials";
 		try {
 			// Attempt to delete the credentials file if it exists
 			if (fileExists(self->credentials)) {
@@ -194,7 +194,7 @@ private:
 		// Create a unique directory for this workload instance inside simfdb
 		// This keeps test artifacts in the simulation directory like other workloads
 		// Use deterministic directory name instead of random UID to ensure deterministic behavior
-		state std::string uniqueRunDir =
+		std::string uniqueRunDir =
 		    joinPath(self->simfdbDir,
 		             format("s3_workload_run_%08x_%08x", self->clientId, deterministicRandom()->randomInt(0, 1000000)));
 		try {
@@ -208,7 +208,7 @@ private:
 
 		// Modify paths to be within the unique directory
 		self->credentials = joinPath(uniqueRunDir, "S3ClientWorkload.blob-credentials.json");
-		state std::string download = joinPath(uniqueRunDir, "downloaded_credentials");
+		std::string download = joinPath(uniqueRunDir, "downloaded_credentials");
 
 		// Setup the credentials file inside the unique directory.
 		self->setupCredentialsFile();
@@ -220,30 +220,34 @@ private:
 		// This ensures identical behavior across determinism check runs
 		std::string deterministicId = format("%08x_%08x", self->clientId, deterministicRandom()->randomInt(0, 1000000));
 		std::string uniqueObjectKey = baseFilename + "_" + deterministicId;
-		state std::string file_url = self->addFileToUrl(uniqueObjectKey, self->s3Url);
-		state bool uploaded = false; // Track if upload started/succeeded
-		state Optional<Error> errorToThrow; // State variable to hold error
+		std::string file_url = self->addFileToUrl(uniqueObjectKey, self->s3Url);
+		bool uploaded = false; // Track if upload started/succeeded
+		Optional<Error> errorToThrow; // State variable to hold error
 
+		Error err;
 		try {
 			// Use original local path (now inside unique dir) for source, unique URL for destination
-			wait(copyUpFile(self->credentials, file_url));
+			co_await copyUpFile(self->credentials, file_url);
 			uploaded = true; // Mark as uploaded only after wait() succeeds
-			wait(copyDownFile(file_url, download));
-			wait(deleteResource(file_url)); // Attempt deletion on success path
+			co_await copyDownFile(file_url, download);
+			co_await deleteResource(file_url); // Attempt deletion on success path
 		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
 			TraceEvent(SevError, "S3ClientWorkloadError") // Log original error
-			    .error(e)
+			    .error(err)
 			    .detail("S3URL", file_url)
 			    .detail("Path", self->credentials)
 			    .detail("Download", download);
 
 			// Store the original error BEFORE attempting cleanup
-			errorToThrow = e;
+			errorToThrow = err;
 
 			// --- Attempt S3 cleanup even on failure ---
 			if (uploaded) { // Only try to delete if we think it was uploaded
 				try {
-					wait(deleteResource(file_url));
+					co_await deleteResource(file_url);
 					TraceEvent(SevWarn, "S3ClientWorkloadCleanedS3AfterError").detail("S3URL", file_url);
 				} catch (Error& cleanup_e) {
 					// Log cleanup error but don't overwrite original error
@@ -252,7 +256,6 @@ private:
 					    .detail("S3URL", file_url);
 				}
 			}
-			// --- End S3 cleanup attempt ---
 		}
 
 		// Check if an error occurred and throw it now
@@ -302,11 +305,9 @@ private:
 			    .detail("Dir", uniqueRunDir)
 			    .detail("Reason", "Non-fatal in simulation");
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> _setup(S3ClientWorkload* self, Database cx) {
+	Future<Void> _setup(S3ClientWorkload* self, Database cx) {
 		// Only client 0 registers the MockS3Server to avoid unnecessary duplicate trace events
 		// Note: Both startMockS3ServerChaos() and registerSimHTTPServer() have internal duplicate detection
 		if (self->clientId == 0) {
@@ -333,7 +334,7 @@ private:
 
 					// Start MockS3ServerChaos - has internal duplicate detection
 					NetworkAddress listenAddress(IPAddress(0x7f000001), 8080);
-					wait(startMockS3ServerChaos(listenAddress));
+					co_await startMockS3ServerChaos(listenAddress);
 
 					TraceEvent("S3ClientWorkload")
 					    .detail("Phase", "MockS3ServerChaos Started")
@@ -345,7 +346,7 @@ private:
 
 					// Register regular MockS3Server using the proper registration function
 					// which automatically enables persistence
-					wait(registerMockS3Server("127.0.0.1", "8080"));
+					co_await registerMockS3Server("127.0.0.1", "8080");
 
 					TraceEvent("S3ClientWorkload")
 					    .detail("Phase", "MockS3Server Registered")
@@ -372,8 +373,6 @@ private:
 			    .detail("DelayRate", self->delayRate)
 			    .detail("CorruptionRate", self->corruptionRate);
 		}
-
-		return Void();
 	}
 };
 

@@ -104,50 +104,49 @@ struct BackupWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
+	static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
 		loop {
-			wait(backupAgent->changePause(cx, true));
+			co_await backupAgent->changePause(cx, true);
 			TraceEvent("BW_AgentPaused").log();
-			wait(delay(30 * deterministicRandom()->random01()));
-			wait(backupAgent->changePause(cx, false));
+			co_await delay(30 * deterministicRandom()->random01());
+			co_await backupAgent->changePause(cx, false);
 			TraceEvent("BW_AgentResumed").log();
-			wait(delay(120 * deterministicRandom()->random01()));
+			co_await delay(120 * deterministicRandom()->random01());
 		}
 	}
 
 	// Resume the backup agent if it is paused
-	ACTOR static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
+	static Future<Void> resumeAgent(Database cx, FileBackupAgent* backupAgent) {
 		TraceEvent("BW_AgentResuming").log();
-		wait(backupAgent->changePause(cx, false));
+		co_await backupAgent->changePause(cx, false);
 		TraceEvent("BW_AgentResumed").log();
-		return Void();
 	}
 
-	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
-		state FileBackupAgent agent;
+	static Future<Void> statusLoop(Database cx, std::string tag) {
+		FileBackupAgent agent;
 		loop {
-			bool active = wait(agent.checkActive(cx));
+			bool active = co_await agent.checkActive(cx);
 			TraceEvent("BW_AgentActivityCheck").detail("IsActive", active);
-			std::string status = wait(agent.getStatus(cx, ShowErrors::True, tag));
+			std::string status = co_await agent.getStatus(cx, ShowErrors::True, tag);
 			puts(status.c_str());
-			std::string statusJSON = wait(agent.getStatusJSON(cx, tag));
+			std::string statusJSON = co_await agent.getStatusJSON(cx, tag);
 			puts(statusJSON.c_str());
-			wait(delay(2.0));
+			co_await delay(2.0);
 		}
 	}
 
-	ACTOR static Future<Void> doBackup(BackupWorkload* self,
-	                                   double startDelay,
-	                                   FileBackupAgent* backupAgent,
-	                                   Database cx,
-	                                   Key tag,
-	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                                   double stopDifferentialDelay) {
+	static Future<Void> doBackup(BackupWorkload* self,
+	                             double startDelay,
+	                             FileBackupAgent* backupAgent,
+	                             Database cx,
+	                             Key tag,
+	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                             double stopDifferentialDelay) {
 
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 
-		state Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
-		wait(delay(startDelay));
+		Future<Void> stopDifferentialFuture = delay(stopDifferentialDelay);
+		co_await delay(startDelay);
 
 		if (startDelay || BUGGIFY) {
 			TraceEvent("BW_DoBackupAbortBackup1", randomID)
@@ -155,7 +154,7 @@ struct BackupWorkload : TestWorkload {
 			    .detail("StartDelay", startDelay);
 
 			try {
-				wait(backupAgent->abortBackup(cx, tag.toString()));
+				co_await backupAgent->abortBackup(cx, tag.toString());
 			} catch (Error& e) {
 				TraceEvent("BW_DoBackupAbortBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded)
@@ -167,20 +166,20 @@ struct BackupWorkload : TestWorkload {
 		    .detail("Tag", printable(tag))
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
-		state std::string backupContainer = "file://simfdb/backups/";
-		state Future<Void> status = statusLoop(cx, tag.toString());
+		std::string backupContainer = "file://simfdb/backups/";
+		Future<Void> status = statusLoop(cx, tag.toString());
 		try {
-			wait(backupAgent->submitBackup(cx,
-			                               StringRef(backupContainer),
-			                               {},
-			                               deterministicRandom()->randomInt(0, 60),
-			                               deterministicRandom()->randomInt(0, 2000),
-			                               tag.toString(),
-			                               backupRanges,
-			                               StopWhenDone{ !stopDifferentialDelay },
-			                               self->usePartitionedLog,
-			                               IncrementalBackupOnly::False,
-			                               self->encryptionKeyFileName));
+			co_await backupAgent->submitBackup(cx,
+			                                   StringRef(backupContainer),
+			                                   {},
+			                                   deterministicRandom()->randomInt(0, 60),
+			                                   deterministicRandom()->randomInt(0, 2000),
+			                                   tag.toString(),
+			                                   backupRanges,
+			                                   StopWhenDone{ !stopDifferentialDelay },
+			                                   self->usePartitionedLog,
+			                                   IncrementalBackupOnly::False,
+			                                   self->encryptionKeyFileName);
 		} catch (Error& e) {
 			TraceEvent("BW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -191,34 +190,34 @@ struct BackupWorkload : TestWorkload {
 		if (stopDifferentialDelay) {
 			CODE_PROBE(!stopDifferentialFuture.isReady(),
 			           "Restore starts at specified time - stopDifferential not ready");
-			wait(stopDifferentialFuture);
+			co_await stopDifferentialFuture;
 			TraceEvent("BW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
 			    .detail("DifferentialAfter", stopDifferentialDelay);
 
 			try {
 				if (BUGGIFY) {
-					state KeyBackedTag backupTag = makeBackupTag(tag.toString());
+					KeyBackedTag backupTag = makeBackupTag(tag.toString());
 					TraceEvent("BW_DoBackupWaitForRestorable", randomID).detail("Tag", backupTag.tagName);
 
 					// Wait until the backup is in a restorable state and get the status, URL, and UID atomically
-					state Reference<IBackupContainer> lastBackupContainer;
-					state UID lastBackupUID;
-					state EBackupState resultWait = wait(backupAgent->waitBackup(
-					    cx, backupTag.tagName, StopWhenDone::False, &lastBackupContainer, &lastBackupUID));
+					Reference<IBackupContainer> lastBackupContainer;
+					UID lastBackupUID;
+					EBackupState resultWait = co_await backupAgent->waitBackup(
+					    cx, backupTag.tagName, StopWhenDone::False, &lastBackupContainer, &lastBackupUID);
 
 					TraceEvent("BW_DoBackupWaitForRestorable", randomID)
 					    .detail("Tag", backupTag.tagName)
 					    .detail("Result", BackupAgentBase::getStateText(resultWait));
 
-					state bool restorable = false;
+					bool restorable = false;
 					if (lastBackupContainer) {
-						state Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
-						wait(ready(fdesc));
+						Future<BackupDescription> fdesc = lastBackupContainer->describeBackup();
+						co_await ready(fdesc);
 
 						if (!fdesc.isError()) {
-							state BackupDescription desc = fdesc.get();
-							wait(desc.resolveVersionTimes(cx));
+							BackupDescription desc = fdesc.get();
+							co_await desc.resolveVersionTimes(cx);
 							printf("BackupDescription:\n%s\n", desc.toString().c_str());
 							restorable = desc.maxRestorableVersion.present();
 						}
@@ -262,12 +261,12 @@ struct BackupWorkload : TestWorkload {
 						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait))
 						    .detail("LastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
 						    .detail("Restorable", restorable);
-						wait(backupAgent->abortBackup(cx, tag.toString()));
+						co_await backupAgent->abortBackup(cx, tag.toString());
 					} else {
 						TraceEvent("BW_DoBackupDiscontinueBackup", randomID)
 						    .detail("Tag", printable(tag))
 						    .detail("DifferentialAfter", stopDifferentialDelay);
-						wait(backupAgent->discontinueBackup(cx, tag));
+						co_await backupAgent->discontinueBackup(cx, tag);
 					}
 				}
 
@@ -275,7 +274,7 @@ struct BackupWorkload : TestWorkload {
 					TraceEvent("BW_DoBackupDiscontinueBackup", randomID)
 					    .detail("Tag", printable(tag))
 					    .detail("DifferentialAfter", stopDifferentialDelay);
-					wait(backupAgent->discontinueBackup(cx, tag));
+					co_await backupAgent->discontinueBackup(cx, tag);
 				}
 			} catch (Error& e) {
 				TraceEvent("BW_DoBackupDiscontinueBackupException", randomID).error(e).detail("Tag", printable(tag));
@@ -286,22 +285,20 @@ struct BackupWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BW_DoBackupWaitBackup", randomID).detail("Tag", printable(tag));
-		state EBackupState statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
+		EBackupState statusValue = co_await backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True);
 
-		std::string statusText = wait(backupAgent->getStatus(cx, ShowErrors::True, tag.toString()));
+		std::string statusText = co_await backupAgent->getStatus(cx, ShowErrors::True, tag.toString());
 		// Can we validate anything about status?
 
 		TraceEvent("BW_DoBackupComplete", randomID)
 		    .detail("Tag", printable(tag))
 		    .detail("Status", statusText)
 		    .detail("StatusValue", BackupAgentBase::getStateText(statusValue));
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, BackupWorkload* self) {
-		state FileBackupAgent backupAgent;
-		state Future<Void> cp;
+	static Future<Void> _start(Database cx, BackupWorkload* self) {
+		FileBackupAgent backupAgent;
+		Future<Void> cp;
 		TraceEvent("BW_Arguments")
 		    .detail("BackupTag", printable(self->backupTag))
 		    .detail("BackupAfter", self->backupAfter)
@@ -309,7 +306,7 @@ struct BackupWorkload : TestWorkload {
 		    .detail("AbortAndRestartAfter", self->abortAndRestartAfter)
 		    .detail("DifferentialAfter", self->stopDifferentialAfter);
 
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 		if (self->allowPauses && BUGGIFY) {
 			cp = changePaused(cx, &backupAgent);
 		} else {
@@ -317,34 +314,34 @@ struct BackupWorkload : TestWorkload {
 		}
 
 		if (self->encryptionKeyFileName.present()) {
-			wait(BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get()));
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
 		}
 
 		try {
-			state Future<Void> startRestore = delay(self->restoreAfter);
+			Future<Void> startRestore = delay(self->restoreAfter);
 
 			// backup
-			wait(delay(self->backupAfter));
+			co_await delay(self->backupAfter);
 
 			TraceEvent("BW_DoBackup1", randomID).detail("Tag", printable(self->backupTag));
-			state Future<Void> b =
+			Future<Void> b =
 			    doBackup(self, 0, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter);
 
 			TraceEvent("BW_DoBackupWait", randomID)
 			    .detail("BackupTag", printable(self->backupTag))
 			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 			try {
-				wait(b);
+				co_await b;
 			} catch (Error& e) {
 				if (e.code() != error_code_database_locked)
 					throw;
-				return Void();
+				co_return;
 			}
 			TraceEvent("BW_DoBackupDone", randomID)
 			    .detail("BackupTag", printable(self->backupTag))
 			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
 
-			wait(startRestore);
+			co_await startRestore;
 
 			// We can't remove after backup agents since the restore also needs them.
 			// I.e., g_simulator->backupAgents = ISimulator::BackupAgentType::NoBackupAgents
@@ -352,7 +349,6 @@ struct BackupWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupCorrectness").error(e).GetLastError();
 			throw;
 		}
-		return Void();
 	}
 };
 

@@ -147,8 +147,8 @@ public:
 		m.emplace_back("Number of Random Operations Performed", numRandomOperations.getValue(), Averaged::False);
 	}
 
-	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload* self) {
-		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
+	Future<Void> performSetup(Database cx, ApiCorrectnessWorkload* self) {
+		DatabaseConfiguration dbConfig = co_await getDatabaseConfiguration(cx);
 		// Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe, MultiVersion)
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);
@@ -156,37 +156,33 @@ public:
 		types.push_back(THREAD_SAFE);
 		types.push_back(MULTI_VERSION);
 
-		wait(self->chooseTransactionFactory(cx, types));
-
-		return Void();
+		co_await self->chooseTransactionFactory(cx, types);
 	}
 
 	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
 
-	ACTOR Future<Void> performTest(Database cx, Standalone<VectorRef<KeyValueRef>> data, ApiCorrectnessWorkload* self) {
+	Future<Void> performTest(Database cx, Standalone<VectorRef<KeyValueRef>> data, ApiCorrectnessWorkload* self) {
 		// Run the scripted test for a maximum of 10 minutes
-		wait(timeout(self->runScriptedTest(self, data), 600, Void()));
+		co_await timeout(self->runScriptedTest(self, data), 600, Void());
 
 		if (!self->hasFailed()) {
 			// Return database to original state (for a maximum of resetDBTimeout seconds)
 			try {
-				wait(timeoutError(::success(self->runSet(data, self)), self->resetDBTimeout));
+				co_await timeoutError(::success(self->runSet(data, self)), self->resetDBTimeout);
 			} catch (Error& e) {
 				if (e.code() == error_code_timed_out) {
 					if (!self->hasFailed())
 						self->testFailure("Timeout during database reset");
 
-					return Void();
+					co_return;
 				}
 
 				throw;
 			}
 
 			// Run the random test for the user-specified duration
-			wait(timeout(self->runRandomTest(self, data), self->randomTestDuration, Void()));
+			co_await timeout(self->runRandomTest(self, data), self->randomTestDuration, Void());
 		}
-
-		return Void();
 	}
 
 	Future<Void> performTest(Database const& cx, Standalone<VectorRef<KeyValueRef>> const& data) override {
@@ -194,51 +190,48 @@ public:
 	}
 
 	// Run a scripted set of API operations
-	ACTOR Future<Void> runScriptedTest(ApiCorrectnessWorkload* self, VectorRef<KeyValueRef> data) {
+	Future<Void> runScriptedTest(ApiCorrectnessWorkload* self, VectorRef<KeyValueRef> data) {
 		// Test the set function
-		bool setResult = wait(self->runSet(data, self));
+		bool setResult = co_await self->runSet(data, self);
 		if (!setResult)
-			return Void();
+			co_return;
 
 		// Test the get function
-		wait(::success(self->runGet(data, self->numGets, self)));
+		co_await ::success(self->runGet(data, self->numGets, self));
 
 		// Test the getRange function
-		state int i;
-		for (i = 0; i < self->numGetRanges; i++)
-			wait(::success(self->runGetRange(data, self)));
+		for (int i = 0; i < self->numGetRanges; i++)
+			co_await ::success(self->runGetRange(data, self));
 
 		// Test the getRange function using key selectors
-		for (i = 0; i < self->numGetRangeSelectors; i++)
-			wait(::success(self->runGetRangeSelector(data, self)));
+		for (int i = 0; i < self->numGetRangeSelectors; i++)
+			co_await ::success(self->runGetRangeSelector(data, self));
 
 		// Test the getKey function
-		wait(::success(self->runGetKey(data, self->numGetKeys, self)));
+		co_await ::success(self->runGetKey(data, self->numGetKeys, self));
 
 		// Test the clear function
-		bool clearResult = wait(self->runClear(data, self->numClears, self));
+		bool clearResult = co_await self->runClear(data, self->numClears, self);
 		if (!clearResult)
-			return Void();
+			co_return;
 
 		// Test the clear function using keyRanges
-		for (i = 0; i < self->numClearRanges; i++) {
+		for (int i = 0; i < self->numClearRanges; i++) {
 			// Alternate restoring the database to its original state and clearing a single range
 			if (self->store.size() < self->minSizeAfterClear) {
-				bool resetResult = wait(self->runSet(data, self));
+				bool resetResult = co_await self->runSet(data, self);
 				if (!resetResult)
-					return Void();
+					co_return;
 			}
 
-			bool clearRangeResults = wait(self->runClearRange(data, self));
+			bool clearRangeResults = co_await self->runClearRange(data, self);
 			if (!clearRangeResults)
-				return Void();
+				co_return;
 		}
-
-		return Void();
 	}
 
 	// Generate and execute a sequence of random operations
-	ACTOR Future<Void> runRandomTest(ApiCorrectnessWorkload* self, Standalone<VectorRef<KeyValueRef>> data) {
+	Future<Void> runRandomTest(ApiCorrectnessWorkload* self, Standalone<VectorRef<KeyValueRef>> data) {
 		loop {
 			double setProbability = 1 - ((double)self->store.size()) / self->maxRandomTestKeys;
 			int pdfArray[] = { 0,
@@ -278,7 +271,7 @@ public:
 				int minKeyLength = useShortKeys ? self->minShortKeyLength : self->minLongKeyLength;
 				int maxKeyLength = useShortKeys ? self->maxShortKeyLength : self->maxLongKeyLength;
 
-				state Standalone<VectorRef<KeyValueRef>> newData =
+				Standalone<VectorRef<KeyValueRef>> newData =
 				    self->generateData(std::min((uint64_t)100, self->maxRandomTestKeys - self->store.size()),
 				                       minKeyLength,
 				                       maxKeyLength,
@@ -289,66 +282,67 @@ public:
 
 				data.append_deep(data.arena(), newData.begin(), newData.size());
 
-				bool result = wait(self->runSet(newData, self));
+				bool result = co_await self->runSet(newData, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 
 			// Test the get operation
 			else if (operation == GET) {
-				bool result = wait(self->runGet(data, 10, self));
+				bool result = co_await self->runGet(data, 10, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 
 			// Test the getRange operation
 			else if (operation == GET_RANGE) {
-				bool result = wait(self->runGetRange(data, self));
+				bool result = co_await self->runGetRange(data, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 
 			// Test the getRange operation with key selectors
 			else if (operation == GET_RANGE_SELECTOR) {
-				bool result = wait(self->runGetRangeSelector(data, self));
+				bool result = co_await self->runGetRangeSelector(data, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 
 			// Test the getKey operation
 			else if (operation == GET_KEY) {
-				bool result = wait(self->runGetKey(data, 10, self));
+				bool result = co_await self->runGetKey(data, 10, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 
 			// Test the clear operation
 			else if (operation == CLEAR) {
-				bool result = wait(self->runClear(data, 10, self));
+				bool result = co_await self->runClear(data, 10, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 
 			// Test the clear operation (using key range)
 			else if (operation == CLEAR_RANGE) {
-				bool result = wait(self->runClearRange(data, self));
+				bool result = co_await self->runClearRange(data, self);
 				if (!result)
-					return Void();
+					co_return;
 			}
 		}
 	}
 
 	// Adds the key-value pairs in data to the database and memory store
-	ACTOR Future<bool> runSet(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state int currentIndex = 0;
+	Future<bool> runSet(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
+		int currentIndex = 0;
 		while (currentIndex < data.size()) {
-			state Reference<TransactionWrapper> transaction = self->createTransaction();
+			Reference<TransactionWrapper> transaction = self->createTransaction();
 
 			// Set keys in the database
 			loop {
+				Error err;
 				try {
 					// For now, make this transaction self-conflicting to avoid commit errors
-					Optional<Value> value = wait(transaction->get(data[currentIndex].key));
+					Optional<Value> value = co_await transaction->get(data[currentIndex].key);
 
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
 					     i++) {
@@ -356,7 +350,7 @@ public:
 						transaction->set(data[i].key, data[i].value);
 					}
 
-					wait(transaction->commit());
+					co_await transaction->commit();
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
 					     i++)
 						DEBUG_MUTATION("ApiCorrectnessSet",
@@ -366,8 +360,9 @@ public:
 					currentIndex += self->maxKeysPerTransaction;
 					break;
 				} catch (Error& e) {
-					wait(transaction->onError(e));
+					err = e;
 				}
+				co_await transaction->onError(err);
 			}
 		}
 
@@ -378,36 +373,37 @@ public:
 		}
 
 		// Check that the database and memory store are the same
-		bool result = wait(self->compareDatabaseToMemory());
+		bool result = co_await self->compareDatabaseToMemory();
 		if (!result)
 			self->testFailure("Set resulted in incorrect database");
 
-		return result;
+		co_return result;
 	}
 
 	// Gets a specified number of values from the database and memory store and compares them, returning true if all
 	// results were the same
-	ACTOR Future<bool> runGet(VectorRef<KeyValueRef> data, int numReads, ApiCorrectnessWorkload* self) {
+	Future<bool> runGet(VectorRef<KeyValueRef> data, int numReads, ApiCorrectnessWorkload* self) {
 		// Generate a set of random keys to get
-		state Standalone<VectorRef<KeyRef>> keys;
+		Standalone<VectorRef<KeyRef>> keys;
 		for (int i = 0; i < numReads; i++)
 			keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
-		state std::vector<Optional<Value>> values;
+		std::vector<Optional<Value>> values;
 
-		state int currentIndex = 0;
+		int currentIndex = 0;
 		while (currentIndex < keys.size()) {
-			state Reference<TransactionWrapper> transaction = self->createTransaction();
+			Reference<TransactionWrapper> transaction = self->createTransaction();
 
 			// Get the values from the database
 			loop {
+				Error err;
 				try {
-					state std::vector<Future<Optional<Value>>> dbValueFutures;
+					std::vector<Future<Optional<Value>>> dbValueFutures;
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						dbValueFutures.push_back(transaction->get(keys[i]));
 
-					wait(waitForAll(dbValueFutures));
+					co_await waitForAll(dbValueFutures);
 
 					for (int i = 0; i < dbValueFutures.size(); i++)
 						values.push_back(dbValueFutures[i].get());
@@ -416,8 +412,9 @@ public:
 
 					break;
 				} catch (Error& e) {
-					wait(transaction->onError(e));
+					err = e;
 				}
+				co_await transaction->onError(err);
 			}
 		}
 
@@ -434,45 +431,47 @@ public:
 		if (!result)
 			self->testFailure("Get returned incorrect results");
 
-		return result;
+		co_return result;
 	}
 
 	// Gets a single range of values from the database and memory stores and compares them, returning true if the
 	// results were the same
-	ACTOR Future<bool> runGetRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse(deterministicRandom()->coinflip());
+	Future<bool> runGetRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
+		Reverse reverse(deterministicRandom()->coinflip());
 
 		// Generate a random range
 		Key key = self->selectRandomKey(data, 0.5);
 		Key key2 = self->selectRandomKey(data, 0.5);
 
-		state Key start = std::min(key, key2);
-		state Key end = std::max(key, key2);
+		Key start = std::min(key, key2);
+		Key end = std::max(key, key2);
 
 		// Generate a random maximum number of results
-		state int limit = deterministicRandom()->randomInt(0, 101);
+		int limit = deterministicRandom()->randomInt(0, 101);
 
 		// Get the range from memory
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
+		RangeResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
 
 		// Get the range from the database
-		state RangeResult dbResults;
-		state Version readVersion;
+		RangeResult dbResults;
+		Version readVersion{ 0 };
 
-		state Reference<TransactionWrapper> transaction = self->createTransaction();
+		Reference<TransactionWrapper> transaction = self->createTransaction();
 
 		loop {
+			Error err;
 			try {
-				Version version = wait(transaction->getReadVersion());
+				Version version = co_await transaction->getReadVersion();
 				readVersion = version;
 
 				KeyRangeRef range(start, end);
-				RangeResult rangeResults = wait(transaction->getRange(range, limit, reverse));
+				RangeResult rangeResults = co_await transaction->getRange(range, limit, reverse);
 				dbResults = rangeResults;
 				break;
 			} catch (Error& e) {
-				wait(transaction->onError(e));
+				err = e;
 			}
+			co_await transaction->onError(err);
 		}
 
 		// Compare the ranges
@@ -480,13 +479,13 @@ public:
 		if (!result)
 			self->testFailure("GetRange returned incorrect results");
 
-		return result;
+		co_return result;
 	}
 
 	// Gets a single range of values using key selectors from the database and memory store and compares them, returning
 	// true if the results were the same
-	ACTOR Future<bool> runGetRangeSelector(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse(deterministicRandom()->coinflip());
+	Future<bool> runGetRangeSelector(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
+		Reverse reverse(deterministicRandom()->coinflip());
 
 		KeySelector selectors[2];
 		Key keys[2];
@@ -513,15 +512,15 @@ public:
 
 				// Don't loop forever trying to generate valid key selectors if there are no keys in the store
 				if (++currentSelectorAttempts == maxSelectorAttempts)
-					return true;
+					co_return true;
 			}
 		}
 
-		state KeySelector startSelector;
-		state KeySelector endSelector;
+		KeySelector startSelector;
+		KeySelector endSelector;
 
-		state Key startKey;
-		state Key endKey;
+		Key startKey;
+		Key endKey;
 
 		// Make sure startKey is less than endKey
 		if (keys[0] < keys[1]) {
@@ -537,23 +536,24 @@ public:
 		}
 
 		// Choose a random maximum number of results
-		state int limit = deterministicRandom()->randomInt(0, 101);
+		int limit = deterministicRandom()->randomInt(0, 101);
 
 		// Get the range from the memory store
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
+		RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
 
 		// Get the range from the database
-		state RangeResult dbResults;
+		RangeResult dbResults;
 
-		state Reference<TransactionWrapper> transaction = self->createTransaction();
-		state Version readVersion;
+		Reference<TransactionWrapper> transaction = self->createTransaction();
+		Version readVersion{ 0 };
 
 		loop {
+			Error err;
 			try {
-				Version version = wait(transaction->getReadVersion());
+				Version version = co_await transaction->getReadVersion();
 				readVersion = version;
 
-				RangeResult range = wait(transaction->getRange(startSelector, endSelector, limit, reverse));
+				RangeResult range = co_await transaction->getRange(startSelector, endSelector, limit, reverse);
 
 				if (endKey == self->store.endKey()) {
 					for (int i = 0; i < range.size(); i++) {
@@ -569,8 +569,9 @@ public:
 
 				break;
 			} catch (Error& e) {
-				wait(transaction->onError(e));
+				err = e;
 			}
+			co_await transaction->onError(err);
 		}
 
 		// Compare the results
@@ -579,33 +580,34 @@ public:
 		if (!result)
 			self->testFailure("GetRange (KeySelector) returned incorrect results");
 
-		return result;
+		co_return result;
 	}
 
 	// Gets a specified number of keys from the database and memory store and compares them, returning true if all
 	// results were the same
-	ACTOR Future<bool> runGetKey(VectorRef<KeyValueRef> data, int numGetKeys, ApiCorrectnessWorkload* self) {
+	Future<bool> runGetKey(VectorRef<KeyValueRef> data, int numGetKeys, ApiCorrectnessWorkload* self) {
 		// Generate a set of random key selectors
-		state Standalone<VectorRef<KeySelectorRef>> selectors;
+		Standalone<VectorRef<KeySelectorRef>> selectors;
 		for (int i = 0; i < numGetKeys; i++)
 			selectors.push_back_deep(selectors.arena(), self->generateKeySelector(data, 100));
 
-		state Standalone<VectorRef<KeyRef>> keys;
+		Standalone<VectorRef<KeyRef>> keys;
 
-		state int currentIndex = 0;
+		int currentIndex = 0;
 		while (currentIndex < selectors.size()) {
 			// Get the keys from the database
-			state Reference<TransactionWrapper> transaction = self->createTransaction();
+			Reference<TransactionWrapper> transaction = self->createTransaction();
 
 			loop {
+				Error err;
 				try {
-					state std::vector<Future<Standalone<KeyRef>>> dbKeyFutures;
+					std::vector<Future<Standalone<KeyRef>>> dbKeyFutures;
 					for (int i = currentIndex;
 					     i < std::min(currentIndex + self->maxKeysPerTransaction, selectors.size());
 					     i++)
 						dbKeyFutures.push_back(transaction->getKey(selectors[i]));
 
-					wait(waitForAll(dbKeyFutures));
+					co_await waitForAll(dbKeyFutures);
 
 					for (int i = 0; i < dbKeyFutures.size(); i++)
 						keys.push_back_deep(keys.arena(), dbKeyFutures[i].get());
@@ -614,16 +616,16 @@ public:
 
 					break;
 				} catch (Error& e) {
-					wait(transaction->onError(e));
+					err = e;
 				}
+				co_await transaction->onError(err);
 			}
 		}
 
-		state bool result = true;
+		bool result = true;
 
 		// Get the keys from the memory store and compare them
-		state int i;
-		for (i = 0; i < selectors.size(); i++) {
+		for (int i = 0; i < selectors.size(); i++) {
 			Key key = self->store.getKey(selectors[i]);
 			if (keys[i].startsWith(StringRef(self->clientPrefix)) && keys[i] != key)
 				result = false;
@@ -638,23 +640,24 @@ public:
 				       selectors[i].toString().c_str(),
 				       printable(keys[i]).c_str(),
 				       printable(key).c_str());
-				state int dir = selectors[i].offset > 0 ? 1 : -1;
-				state int j;
-				for (j = 0; j <= abs(selectors[i].offset); j++) {
-					state KeySelector sel = KeySelectorRef(selectors[i].getKey(), selectors[i].orEqual, j * dir);
-					state Key storeKey = self->store.getKey(sel);
+				int dir = selectors[i].offset > 0 ? 1 : -1;
+				for (int j = 0; j <= abs(selectors[i].offset); j++) {
+					KeySelector sel = KeySelectorRef(selectors[i].getKey(), selectors[i].orEqual, j * dir);
+					Key storeKey = self->store.getKey(sel);
 
-					state Reference<TransactionWrapper> tr = self->createTransaction();
+					Reference<TransactionWrapper> tr = self->createTransaction();
 
-					state Key dbKey;
+					Key dbKey;
 					loop {
+						Error err;
 						try {
-							Key key = wait(tr->getKey(sel));
+							Key key = co_await tr->getKey(sel);
 							dbKey = key;
 							break;
 						} catch (Error& e) {
-							wait(tr->onError(e));
+							err = e;
 						}
+						co_await tr->onError(err);
 					}
 
 					if (!(storeKey == self->store.startKey() && dbKey < StringRef(self->clientPrefix)) &&
@@ -672,24 +675,25 @@ public:
 		if (!result)
 			self->testFailure("GetKey returned incorrect results");
 
-		return result;
+		co_return result;
 	}
 
 	// Clears a specified number of keys from the database and memory store
-	ACTOR Future<bool> runClear(VectorRef<KeyValueRef> data, int numClears, ApiCorrectnessWorkload* self) {
+	Future<bool> runClear(VectorRef<KeyValueRef> data, int numClears, ApiCorrectnessWorkload* self) {
 		// Generate a random set of keys to clear
-		state Standalone<VectorRef<KeyRef>> keys;
+		Standalone<VectorRef<KeyRef>> keys;
 		for (int i = 0; i < numClears; i++)
 			keys.push_back_deep(keys.arena(), self->selectRandomKey(data, 0.9));
 
-		state int currentIndex = 0;
+		int currentIndex = 0;
 		while (currentIndex < keys.size()) {
 			// Clear the keys from the database
-			state Reference<TransactionWrapper> transaction = self->createTransaction();
+			Reference<TransactionWrapper> transaction = self->createTransaction();
 			loop {
+				Error err;
 				try {
 					// For now, make this transaction self-conflicting to avoid commit errors
-					Optional<Value> value = wait(transaction->get(keys[0]));
+					Optional<Value> value = co_await transaction->get(keys[0]);
 
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++) {
@@ -697,7 +701,7 @@ public:
 						transaction->clear(keys[i]);
 					}
 
-					wait(transaction->commit());
+					co_await transaction->commit();
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						DEBUG_MUTATION("ApiCorrectnessClear",
@@ -707,8 +711,9 @@ public:
 					currentIndex += self->maxKeysPerTransaction;
 					break;
 				} catch (Error& e) {
-					wait(transaction->onError(e));
+					err = e;
 				}
+				co_await transaction->onError(err);
 			}
 		}
 
@@ -719,54 +724,56 @@ public:
 		}
 
 		// Check that the database and memory store are the same
-		bool result = wait(self->compareDatabaseToMemory());
+		bool result = co_await self->compareDatabaseToMemory();
 		if (!result)
 			self->testFailure("Clear resulted in incorrect database");
 
-		return result;
+		co_return result;
 	}
 
 	// Clears a single range of keys from the database and memory store
-	ACTOR Future<bool> runClearRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
+	Future<bool> runClearRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
 		// Generate a random range to clear
 		Key key = self->selectRandomKey(data, 0.5);
 		Key key2 = self->selectRandomKey(data, 0.5);
 
-		state Key start = std::min(key, key2);
-		state Key end = std::max(key, key2);
+		Key start = std::min(key, key2);
+		Key end = std::max(key, key2);
 
 		// Clear the range in memory
 		self->store.clear(KeyRangeRef(start, end));
 
 		// Clear the range in the database
-		state Reference<TransactionWrapper> transaction = self->createTransaction();
+		Reference<TransactionWrapper> transaction = self->createTransaction();
 
 		loop {
+			Error err;
 			try {
 				// For now, make this transaction self-conflicting to avoid commit errors
-				Optional<Value> value = wait(transaction->get(start));
+				Optional<Value> value = co_await transaction->get(start);
 
-				state KeyRangeRef range(start, end);
+				KeyRangeRef range(start, end);
 				if (!range.empty()) {
 					transaction->addReadConflictRange(range);
 				}
 				transaction->clear(range);
-				wait(transaction->commit());
+				co_await transaction->commit();
 				DEBUG_KEY_RANGE("ApiCorrectnessClear", transaction->getCommittedVersion(), range);
 				break;
 			} catch (Error& e) {
-				wait(transaction->onError(e));
+				err = e;
 			}
+			co_await transaction->onError(err);
 		}
 
 		self->debugKey(KeyRangeRef(start, end), "ClearRange");
 
 		// Check that the database and memory store are the same
-		bool result = wait(self->compareDatabaseToMemory());
+		bool result = co_await self->compareDatabaseToMemory();
 		if (!result)
 			self->testFailure("Clear (range) resulted in incorrect database");
 
-		return result;
+		co_return result;
 	}
 };
 

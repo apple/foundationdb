@@ -65,53 +65,54 @@ struct RandomSelectorWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	ACTOR Future<Void> randomSelectorSetup(Database cx, RandomSelectorWorkload* self) {
-		state Value myValue = StringRef(format("%d", deterministicRandom()->randomInt(0, 10000000)));
-		state Transaction tr(cx);
-		state std::string clientID;
+	Future<Void> randomSelectorSetup(Database cx, RandomSelectorWorkload* self) {
+		Value myValue = StringRef(format("%d", deterministicRandom()->randomInt(0, 10000000)));
+		Transaction tr(cx);
+		std::string clientID;
 
 		clientID = format("%08d", self->clientId);
 		loop {
+			Error err;
 			try {
 				for (int i = 0; i < self->maxOffset; i++) {
 					tr.set(StringRef(clientID + "a/" + format("%010d", i)), myValue);
 					tr.set(StringRef(clientID + "c/" + format("%010d", i)), myValue);
 					tr.set(StringRef(clientID + "e/" + format("%010d", i)), myValue);
 				}
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
-				tr.reset();
+				err = e;
 			}
+			co_await tr.onError(err);
+			tr.reset();
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> randomSelectorClient(Database cx, RandomSelectorWorkload* self) {
-		state int i;
-		state int j;
-		state std::string clientID;
-		state std::string myKeyA;
-		state std::string myKeyB;
-		state std::string myValue;
-		state std::string myRandomIDKey;
-		state bool onEqualA;
-		state bool onEqualB;
-		state int offsetA;
-		state int offsetB;
-		state int randomLimit;
-		state int randomByteLimit;
-		state Reverse reverse = Reverse::False;
-		state Error error;
+	Future<Void> randomSelectorClient(Database cx, RandomSelectorWorkload* self) {
+		int i{ 0 };
+		int j{ 0 };
+		std::string clientID;
+		std::string myKeyA;
+		std::string myKeyB;
+		std::string myValue;
+		std::string myRandomIDKey;
+		bool onEqualA{ false };
+		bool onEqualB{ false };
+		int offsetA{ 0 };
+		int offsetB{ 0 };
+		int randomLimit{ 0 };
+		int randomByteLimit{ 0 };
+		Reverse reverse = Reverse::False;
+		Error error;
 
 		clientID = format("%08d", self->clientId);
 
 		loop {
-			state Transaction tr(cx);
+			Transaction tr(cx);
 
 			loop {
+				Error err;
 				try {
 					tr.clear(KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")));
 					tr.clear(KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")));
@@ -124,16 +125,18 @@ struct RandomSelectorWorkload : TestWorkload {
 						tr.set(StringRef(clientID + "d/" + myKeyA), myValue);
 						//TraceEvent("RYOWInit").detail("Key",myKeyA).detail("Value",myValue);
 					}
-					wait(tr.commit());
+					co_await tr.commit();
 					tr.reset();
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 
-			state ReadYourWritesTransaction trRYOW(cx);
+			ReadYourWritesTransaction trRYOW(cx);
 
+			Error err;
 			try {
 				for (i = 0; i < deterministicRandom()->randomInt(self->minOperationsPerTransaction,
 				                                                 self->maxOperationsPerTransaction + 1);
@@ -147,14 +150,16 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.set(StringRef(clientID + "b/" + myKeyA), myValue);
 
 						loop {
+							Error err;
 							try {
 								tr.set(StringRef(clientID + "d/" + myKeyA), myValue);
-								wait(tr.commit());
+								co_await tr.commit();
 								tr.reset();
 								break;
 							} catch (Error& e) {
-								wait(tr.onError(e));
+								err = e;
 							}
+							co_await tr.onError(err);
 						}
 					} else if (j < 4) {
 						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
@@ -162,14 +167,16 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.clear(StringRef(clientID + "b/" + myKeyA));
 
 						loop {
+							Error err;
 							try {
 								tr.clear(StringRef(clientID + "d/" + myKeyA));
-								wait(tr.commit());
+								co_await tr.commit();
 								tr.reset();
 								break;
 							} catch (Error& e) {
-								wait(tr.onError(e));
+								err = e;
 							}
+							co_await tr.onError(err);
 						}
 
 					} else if (j < 5) {
@@ -183,43 +190,51 @@ struct RandomSelectorWorkload : TestWorkload {
 						    KeyRangeRef(StringRef(clientID + "b/" + myKeyA), StringRef(clientID + "b/" + myKeyB)));
 
 						loop {
+							Error err;
 							try {
 								tr.clear(KeyRangeRef(StringRef(clientID + "d/" + myKeyA),
 								                     StringRef(clientID + "d/" + myKeyB)));
-								wait(tr.commit());
+								co_await tr.commit();
 								tr.reset();
 								break;
 							} catch (Error& e) {
-								wait(tr.onError(e));
+								err = e;
 							}
+							co_await tr.onError(err);
 						}
 					} else if (j < 6) {
 						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
 
-						state Optional<Value> getTest1;
+						Optional<Value> getTest1;
 
-						Optional<Value> getTest = wait(trRYOW.get(StringRef(clientID + "b/" + myKeyA)));
+						Optional<Value> getTest = co_await trRYOW.get(StringRef(clientID + "b/" + myKeyA));
 						getTest1 = getTest;
 
 						loop {
-							try {
-								Optional<Value> getTest2 = wait(tr.get(StringRef(clientID + "d/" + myKeyA)));
+							{
+								Error err;
+								try {
+									Optional<Value> getTest2 = co_await tr.get(StringRef(clientID + "d/" + myKeyA));
 
-								if ((getTest1.present() && (!getTest2.present() || getTest1.get() != getTest2.get())) ||
-								    (!getTest1.present() && getTest2.present())) {
-									TraceEvent(SevError, "RanSelTestFailure")
-									    .detail("Reason", "The get results did not match")
-									    .detail("KeyA", myKeyA)
-									    .detail("RYOW", getTest1.present() ? printable(getTest1.get()) : "Not Present")
-									    .detail("Regular",
-									            getTest2.present() ? printable(getTest2.get()) : "Not Present");
-									self->fail = true;
+									if ((getTest1.present() &&
+									     (!getTest2.present() || getTest1.get() != getTest2.get())) ||
+									    (!getTest1.present() && getTest2.present())) {
+										TraceEvent(SevError, "RanSelTestFailure")
+										    .detail("Reason", "The get results did not match")
+										    .detail("KeyA", myKeyA)
+										    .detail("RYOW",
+										            getTest1.present() ? printable(getTest1.get()) : "Not Present")
+										    .detail("Regular",
+										            getTest2.present() ? printable(getTest2.get()) : "Not Present");
+										self->fail = true;
+									}
+
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
 								}
-
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								wait(tr.onError(e));
+								co_await tr.onError(err);
 								tr.reset();
 							}
 						}
@@ -231,17 +246,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AddValue);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -255,17 +274,22 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AppendIfFits);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(
+									    StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -279,17 +303,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::And);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::And);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::And);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -303,17 +331,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Or);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Or);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Or);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -327,17 +359,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Xor);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Xor);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Xor);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -351,17 +387,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Max);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Max);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Max);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -375,17 +415,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Min);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Min);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Min);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -399,17 +443,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMin);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMin);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMin);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -423,17 +471,21 @@ struct RandomSelectorWorkload : TestWorkload {
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMax);
 
 						loop {
-							try {
-								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMax);
-								wait(tr.commit());
-								tr.reset();
-								break;
-							} catch (Error& e) {
-								error = e;
-								wait(tr.onError(e));
+							{
+								Error err;
+								try {
+									tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+									tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMax);
+									co_await tr.commit();
+									tr.reset();
+									break;
+								} catch (Error& e) {
+									err = e;
+								}
+								error = err;
+								co_await tr.onError(err);
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									Optional<Value> thing = co_await tr.get(StringRef(clientID + "z/" + myRandomIDKey));
 									if (thing.present())
 										break;
 								}
@@ -455,23 +507,24 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB).detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("RandomByteLimit", randomByteLimit).detail("Reverse", reverse);
 
-						state RangeResult getRangeTest1;
-						RangeResult getRangeTest =
-						    wait(trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
-						                         KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
-						                         randomLimit,
-						                         Snapshot::False,
-						                         reverse));
+						RangeResult getRangeTest1;
+						RangeResult getRangeTest = co_await trRYOW.getRange(
+						    KeySelectorRef(StringRef(clientID + "b/" + myKeyA), onEqualA, offsetA),
+						    KeySelectorRef(StringRef(clientID + "b/" + myKeyB), onEqualB, offsetB),
+						    randomLimit,
+						    Snapshot::False,
+						    reverse);
 						getRangeTest1 = getRangeTest;
 
 						loop {
+							Error err;
 							try {
-								RangeResult getRangeTest2 = wait(
-								    tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
-								                KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
-								                randomLimit,
-								                Snapshot::False,
-								                reverse));
+								RangeResult getRangeTest2 = co_await tr.getRange(
+								    KeySelectorRef(StringRef(clientID + "d/" + myKeyA), onEqualA, offsetA),
+								    KeySelectorRef(StringRef(clientID + "d/" + myKeyB), onEqualB, offsetB),
+								    randomLimit,
+								    Snapshot::False,
+								    reverse);
 
 								bool fail = false;
 								if (getRangeTest1.size() != getRangeTest2.size()) {
@@ -523,24 +576,26 @@ struct RandomSelectorWorkload : TestWorkload {
 								tr.reset();
 								break;
 							} catch (Error& e) {
-								wait(tr.onError(e));
+								err = e;
 							}
+							co_await tr.onError(err);
 						}
 					}
 				}
 
-				wait(trRYOW.commit());
+				co_await trRYOW.commit();
 
 				++self->transactions;
 
-				state Transaction finalTransaction(cx);
+				Transaction finalTransaction(cx);
 
 				loop {
+					Error err;
 					try {
-						state RangeResult finalTest1 = wait(finalTransaction.getRange(
-						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")), self->maxKeySpace));
-						RangeResult finalTest2 = wait(finalTransaction.getRange(
-						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")), self->maxKeySpace));
+						RangeResult finalTest1 = co_await finalTransaction.getRange(
+						    KeyRangeRef(StringRef(clientID + "b/"), StringRef(clientID + "c/")), self->maxKeySpace);
+						RangeResult finalTest2 = co_await finalTransaction.getRange(
+						    KeyRangeRef(StringRef(clientID + "d/"), StringRef(clientID + "e/")), self->maxKeySpace);
 
 						if (finalTest1.size() != finalTest2.size()) {
 							TraceEvent(SevError, "RanSelTestFailure")
@@ -560,13 +615,17 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						break;
 					} catch (Error& e) {
-						wait(finalTransaction.onError(e));
+						err = e;
 					}
+					co_await finalTransaction.onError(err);
 				}
 			} catch (Error& e) {
-				wait(trRYOW.onError(e));
-				++self->retries;
+				err = e;
 			}
+			if (err.isValid()) {
+				co_await trRYOW.onError(err);
+			}
+			++self->retries;
 		}
 	}
 };

@@ -83,26 +83,26 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	ACTOR Future<Void> lockActor(Database cx, RandomRangeLockWorkload* self, std::string rangeLockOwnerNamePrefix) {
-		state double testDuration = deterministicRandom()->random01() * self->maxLockDuration;
-		state double testStartDelay = deterministicRandom()->random01() * self->maxStartDelay;
-		state std::string rangeLockOwnerName =
+	Future<Void> lockActor(Database cx, RandomRangeLockWorkload* self, std::string rangeLockOwnerNamePrefix) {
+		double testDuration = deterministicRandom()->random01() * self->maxLockDuration;
+		double testStartDelay = deterministicRandom()->random01() * self->maxStartDelay;
+		std::string rangeLockOwnerName =
 		    rangeLockOwnerNamePrefix + "-" + std::to_string(deterministicRandom()->randomInt(0, self->lockActorCount));
 		// Here we intentionally introduced duplicated owner name between different lockActor
 		std::string lockOwnerDescription = rangeLockOwnerName + ":" + self->getRandomStringRef().toString();
-		wait(registerRangeLockOwner(cx, rangeLockOwnerName, lockOwnerDescription));
-		wait(delay(testStartDelay));
-		state KeyRange range = self->getRandomRange(self);
+		co_await registerRangeLockOwner(cx, rangeLockOwnerName, lockOwnerDescription);
+		co_await delay(testStartDelay);
+		KeyRange range = self->getRandomRange(self);
 		TraceEvent(SevWarnAlways, "InjectRangeLockSubmit")
 		    .detail("RangeLockOwnerName", rangeLockOwnerName)
 		    .detail("Range", range)
 		    .detail("LockStartDelayTime", testStartDelay)
 		    .detail("LockTime", testDuration);
 		try {
-			Optional<RangeLockOwner> owner = wait(getRangeLockOwner(cx, rangeLockOwnerName));
+			Optional<RangeLockOwner> owner = co_await getRangeLockOwner(cx, rangeLockOwnerName);
 			ASSERT(owner.present());
 			ASSERT(owner.get().getOwnerUniqueId() == rangeLockOwnerName);
-			wait(takeExclusiveReadLockOnRange(cx, range, rangeLockOwnerName));
+			co_await takeExclusiveReadLockOnRange(cx, range, rangeLockOwnerName);
 			TraceEvent(SevWarnAlways, "InjectRangeLocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range)
@@ -130,7 +130,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 				throw e;
 			}
 		}
-		wait(delay(testDuration));
+		co_await delay(testDuration);
 
 		TraceEvent(SevWarnAlways, "InjectRangeUnlockSubmit")
 		    .detail("RangeLockOwnerName", rangeLockOwnerName)
@@ -138,7 +138,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		    .detail("LockStartDelayTime", testStartDelay)
 		    .detail("LockTime", testDuration);
 		try {
-			wait(releaseExclusiveReadLockOnRange(cx, range, rangeLockOwnerName));
+			co_await releaseExclusiveReadLockOnRange(cx, range, rangeLockOwnerName);
 			TraceEvent(SevWarnAlways, "InjectRangeUnlocked")
 			    .detail("RangeLockOwnerName", rangeLockOwnerName)
 			    .detail("Range", range);
@@ -165,11 +165,9 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 				throw e;
 			}
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {
+	Future<Void> _start(Database cx, RandomRangeLockWorkload* self) {
 		if (self->enabled) {
 			// Run lockActorCount number of actor concurrently.
 			// Each actor conducts (1) locking a range for a while and (2) unlocking the range.
@@ -180,24 +178,23 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			// The rangeLock mechanism should approperiately handled those conflict.
 			// When all actors complete, it is expected that all locks are removed,
 			// and this injected workload should not block other workloads.
-			state std::string rangeLockOwnerNamePrefix = "Owner" + std::to_string(self->clientId);
+			std::string rangeLockOwnerNamePrefix = "Owner" + std::to_string(self->clientId);
 			std::vector<Future<Void>> actors;
 			for (int i = 0; i < self->lockActorCount; i++) {
 				actors.push_back(self->lockActor(cx, self, rangeLockOwnerNamePrefix));
 			}
-			wait(waitForAll(actors));
+			co_await waitForAll(actors);
 
 			// Make sure all ranges locked by the workload client are unlocked
-			state int j = 0;
+			int j = 0;
 			for (; j < self->lockActorCount; j++) {
-				std::vector<std::pair<KeyRange, RangeLockState>> res = wait(
-				    findExclusiveReadLockOnRange(cx, normalKeys, rangeLockOwnerNamePrefix + "-" + std::to_string(j)));
+				std::vector<std::pair<KeyRange, RangeLockState>> res = co_await findExclusiveReadLockOnRange(
+				    cx, normalKeys, rangeLockOwnerNamePrefix + "-" + std::to_string(j));
 				ASSERT(res.empty());
 			}
 
 			TraceEvent("RandomRangeLockWorkloadEnd").detail("OwnerPrefix", rangeLockOwnerNamePrefix);
 		}
-		return Void();
 	}
 };
 

@@ -68,46 +68,46 @@ struct ConflictRangeWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	ACTOR Future<Void> _start(Database cx, ConflictRangeWorkload* self) {
+	Future<Void> _start(Database cx, ConflictRangeWorkload* self) {
 		if (self->clientId == 0)
-			wait(timeout(self->conflictRangeClient(cx, self), self->testDuration, Void()));
-		return Void();
+			co_await timeout(self->conflictRangeClient(cx, self), self->testDuration, Void());
 	}
 
-	ACTOR Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload* self) {
-		state std::string clientID;
-		state std::string myKeyA;
-		state std::string myKeyB;
-		state std::string myValue;
-		state bool onEqualA;
-		state bool onEqualB;
-		state int offsetA;
-		state int offsetB;
-		state int randomLimit;
-		state Reverse reverse = Reverse::False;
-		state bool randomSets = false;
-		state std::set<int> insertedSet;
-		state RangeResult originalResults;
-		state Standalone<StringRef> firstElement;
+	Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload* self) {
+		std::string clientID;
+		std::string myKeyA;
+		std::string myKeyB;
+		std::string myValue;
+		bool onEqualA{ false };
+		bool onEqualB{ false };
+		int offsetA{ 0 };
+		int offsetB{ 0 };
+		int randomLimit{ 0 };
+		Reverse reverse = Reverse::False;
+		bool randomSets = false;
+		std::set<int> insertedSet;
+		RangeResult originalResults;
+		Standalone<StringRef> firstElement;
 
-		state std::set<int> clearedSet;
-		state int clearedBegin;
-		state int clearedEnd;
+		std::set<int> clearedSet;
+		int clearedBegin{ 0 };
+		int clearedEnd{ 0 };
 
 		if (g_network->isSimulated()) {
-			wait(timeKeeperSetDisable(cx));
+			co_await timeKeeperSetDisable(cx);
 		}
 
 		// Set one key after the end of the tested range. If this key is included in the result, then
 		// we may have drifted into the system key-space and cannot evaluate the result.
-		state Key sentinelKey = StringRef(format("%010d", self->maxKeySpace));
+		Key sentinelKey = StringRef(format("%010d", self->maxKeySpace));
 
 		loop {
 			randomSets = !randomSets;
 
 			// Initialize the database with random values.
 			loop {
-				state Transaction tr0(cx);
+				Transaction tr0(cx);
+				Error err;
 				try {
 					TraceEvent("ConflictRangeReset").log();
 					insertedSet.clear();
@@ -138,21 +138,23 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					tr0.set(sentinelKey, deterministicRandom()->randomUniqueID().toString());
 
-					wait(tr0.commit());
+					co_await tr0.commit();
 					break;
 				} catch (Error& e) {
-					wait(tr0.onError(e));
+					err = e;
 				}
+				co_await tr0.onError(err);
 			}
 
 			firstElement = Key(StringRef(format("%010d", *(insertedSet.begin()))));
 
-			state Transaction tr1(cx);
-			state Transaction tr2(cx);
-			state Transaction tr3(cx);
-			state Transaction tr4(cx);
-			state ReadYourWritesTransaction trRYOW(cx);
+			Transaction tr1(cx);
+			Transaction tr2(cx);
+			Transaction tr3(cx);
+			Transaction tr4(cx);
+			ReadYourWritesTransaction trRYOW(cx);
 
+			Error err;
 			try {
 				// Generate a random getRange operation and execute it, if it produces results, save them, otherwise
 				// retry.
@@ -166,11 +168,11 @@ struct ConflictRangeWorkload : TestWorkload {
 					randomLimit = deterministicRandom()->randomInt(1, self->maxKeySpace);
 					reverse.set(deterministicRandom()->coinflip());
 
-					RangeResult res = wait(tr1.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                    randomLimit,
-					                                    Snapshot::False,
-					                                    reverse));
+					RangeResult res = co_await tr1.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                                        randomLimit,
+					                                        Snapshot::False,
+					                                        reverse);
 					if (res.size()) {
 						originalResults = res;
 						break;
@@ -182,12 +184,12 @@ struct ConflictRangeWorkload : TestWorkload {
 					for (auto iter = clearedSet.begin(); iter != clearedSet.end(); ++iter)
 						tr1.set(StringRef(format("%010d", (*iter))),
 						        deterministicRandom()->randomUniqueID().toString());
-					wait(tr1.commit());
+					co_await tr1.commit();
 					tr1 = Transaction(cx);
 				}
 
 				// Create two transactions with the same read version
-				Version readVersion = wait(tr2.getReadVersion());
+				Version readVersion = co_await tr2.getReadVersion();
 
 				if (self->testReadYourWrites) {
 					trRYOW.setVersion(readVersion);
@@ -223,28 +225,28 @@ struct ConflictRangeWorkload : TestWorkload {
 					}
 				}
 
-				wait(tr2.commit());
+				co_await tr2.commit();
 
-				state bool foundConflict = false;
+				bool foundConflict = false;
 				try {
 					// Do the generated getRange in the other transaction and commit.
 					if (self->testReadYourWrites) {
 						trRYOW.clear(KeyRangeRef(StringRef(format("%010d", clearedBegin)),
 						                         StringRef(format("%010d", clearedEnd))));
-						RangeResult res = wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                                       KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-						                                       randomLimit,
-						                                       Snapshot::False,
-						                                       reverse));
-						wait(trRYOW.commit());
+						RangeResult res = co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+						                                           KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                                           randomLimit,
+						                                           Snapshot::False,
+						                                           reverse);
+						co_await trRYOW.commit();
 					} else {
 						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
-						RangeResult res = wait(tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-						                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-						                                    randomLimit,
-						                                    Snapshot::False,
-						                                    reverse));
-						wait(tr3.commit());
+						RangeResult res = co_await tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+						                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+						                                        randomLimit,
+						                                        Snapshot::False,
+						                                        reverse);
+						co_await tr3.commit();
 					}
 				} catch (Error& e) {
 					if (e.code() != error_code_not_committed)
@@ -258,15 +260,15 @@ struct ConflictRangeWorkload : TestWorkload {
 					if (self->testReadYourWrites) {
 						tr1.clear(KeyRangeRef(StringRef(format("%010d", clearedBegin)),
 						                      StringRef(format("%010d", clearedEnd))));
-						wait(tr1.commit());
+						co_await tr1.commit();
 						tr1 = Transaction(cx);
 					}
 
-					RangeResult res = wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                    randomLimit,
-					                                    Snapshot::False,
-					                                    reverse));
+					RangeResult res = co_await tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                                        randomLimit,
+					                                        Snapshot::False,
+					                                        reverse);
 					++self->withConflicts;
 
 					if (res.size() == originalResults.size()) {
@@ -277,8 +279,8 @@ struct ConflictRangeWorkload : TestWorkload {
 						// Discard known cases where conflicts do not change the results
 						if (originalResults.size() == randomLimit &&
 						    ((offsetB <= 0 && !reverse) || (offsetA > 1 && reverse))) {
-							// Hit limit but end offset goes into the range, so changes could effect results even though
-							// in this instance they did not
+							// Hit limit but end offset goes into the range, so changes could effect results even
+							// though in this instance they did not
 							throw not_committed();
 						}
 
@@ -289,23 +291,23 @@ struct ConflictRangeWorkload : TestWorkload {
 						}
 
 						if (largestResult >= sentinelKey) {
-							// Results go into server keyspace, so if a key selector does not fully resolve offset, a
-							// change won't effect results
+							// Results go into server keyspace, so if a key selector does not fully resolve offset,
+							// a change won't effect results
 							throw not_committed();
 						}
 
 						if ((smallestResult == firstElement ||
 						     smallestResult == StringRef(format("%010d", *(insertedSet.begin())))) &&
 						    offsetA < 0) {
-							// Results return the first element, and the begin offset is negative, so if a key selector
-							// does not fully resolve the offset, a change won't effect results
+							// Results return the first element, and the begin offset is negative, so if a key
+							// selector does not fully resolve the offset, a change won't effect results
 							throw not_committed();
 						}
 
 						if ((myKeyA > myKeyB || (myKeyA == myKeyB && onEqualA && !onEqualB)) &&
 						    originalResults.size() == randomLimit) {
-							// The begin key is less than the end key, so changes in this range only effect the end key
-							// selector, but because we hit the limit this does not change the results
+							// The begin key is less than the end key, so changes in this range only effect the end
+							// key selector, but because we hit the limit this does not change the results
 							throw not_committed();
 						}
 
@@ -335,9 +337,9 @@ struct ConflictRangeWorkload : TestWorkload {
 						    .detail("Original", keyStr2);
 
 						tr4 = Transaction(cx);
-						RangeResult res = wait(tr4.getRange(
+						RangeResult res = co_await tr4.getRange(
 						    KeyRangeRef(StringRef(format("%010d", 0)), StringRef(format("%010d", self->maxKeySpace))),
-						    200));
+						    200);
 						std::string allKeyEntries = "";
 						for (int i = 0; i < res.size(); i++) {
 							allKeyEntries += printable(res[i].key) + " ";
@@ -348,11 +350,11 @@ struct ConflictRangeWorkload : TestWorkload {
 					throw not_committed();
 				} else {
 					// If the commit is successful, check that the result matches the first execution.
-					RangeResult res = wait(tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                    KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                    randomLimit,
-					                                    Snapshot::False,
-					                                    reverse));
+					RangeResult res = co_await tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+					                                        randomLimit,
+					                                        Snapshot::False,
+					                                        reverse);
 					++self->withoutConflicts;
 
 					if (res.size() == originalResults.size()) {
@@ -397,16 +399,19 @@ struct ConflictRangeWorkload : TestWorkload {
 					}
 				}
 			} catch (Error& e) {
-				state Error e2 = e;
-				if (e2.code() != error_code_not_committed)
-					++self->retries;
-
-				wait(tr1.onError(e2));
-				wait(tr2.onError(e2));
-				wait(tr3.onError(e2));
-				wait(tr4.onError(e2));
-				wait(trRYOW.onError(e2));
+				err = e;
 			}
+			if (!err.isValid()) {
+				continue;
+			}
+			if (err.code() != error_code_not_committed)
+				++self->retries;
+
+			co_await tr1.onError(err);
+			co_await tr2.onError(err);
+			co_await tr3.onError(err);
+			co_await tr4.onError(err);
+			co_await trRYOW.onError(err);
 		}
 	}
 };

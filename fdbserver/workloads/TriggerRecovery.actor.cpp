@@ -48,10 +48,9 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		    .detail("DelayBetweenRecoveries", delayBetweenRecoveries);
 	}
 
-	ACTOR Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
-		DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+	Future<Void> setOriginalNumOfResolvers(Database cx, TriggerRecoveryLoopWorkload* self) {
+		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		self->originalNumOfResolvers = self->currentNumOfResolvers = config.getDesiredResolvers();
-		return Void();
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -61,28 +60,27 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> returnIfClusterRecovered(Database cx) {
+	Future<Void> returnIfClusterRecovered(Database cx) {
 		loop {
-			state ReadYourWritesTransaction tr(cx);
+			ReadYourWritesTransaction tr(cx);
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Version v = wait(tr.getReadVersion());
+				Version v = co_await tr.getReadVersion();
 				tr.makeSelfConflicting();
-				wait(tr.commit());
+				co_await tr.commit();
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_ClusterVersion").detail("Version", v);
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> changeResolverConfig(Database cx,
-	                                        TriggerRecoveryLoopWorkload* self,
-	                                        bool setToOriginal = false) {
-		state int32_t numResolversToSet;
+	Future<Void> changeResolverConfig(Database cx, TriggerRecoveryLoopWorkload* self, bool setToOriginal = false) {
+		int32_t numResolversToSet{ 0 };
 		if (setToOriginal) {
 			numResolversToSet = self->originalNumOfResolvers.get();
 		} else {
@@ -90,10 +88,10 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			                        ? self->originalNumOfResolvers.get() + 1
 			                        : self->originalNumOfResolvers.get();
 		}
-		state StringRef configStr(format("resolvers=%d", numResolversToSet));
+		StringRef configStr(format("resolvers=%d", numResolversToSet));
 		loop {
 			Optional<ConfigureAutoResult> conf;
-			ConfigurationResult r = wait(ManagementAPI::changeConfig(cx.getReference(), { configStr }, conf, true));
+			ConfigurationResult r = co_await ManagementAPI::changeConfig(cx.getReference(), { configStr }, conf, true);
 			if (r == ConfigurationResult::SUCCESS) {
 				self->currentNumOfResolvers = numResolversToSet;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_ChangeResolverConfigSuccess")
@@ -101,20 +99,20 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 				break;
 			}
 			TraceEvent(SevWarn, "TriggerRecoveryLoop_ChangeResolverConfigFailed").detail("Result", r);
-			wait(delay(1.0));
+			co_await delay(1.0);
 		}
-		return Void();
 	}
 
-	ACTOR Future<Void> killAll(Database cx) {
-		state ReadYourWritesTransaction tr(cx);
+	Future<Void> killAll(Database cx) {
+		ReadYourWritesTransaction tr(cx);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				RangeResult kvs =
-				    wait(tr.getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
-				                     CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs = co_await tr.getRange(
+				    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+				    CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!kvs.more);
 				std::map<Key, Value> address_interface;
 				for (auto it : kvs) {
@@ -130,36 +128,36 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 						tr.set("\xff\xff/reboot_worker"_sr, it.second);
 				}
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedKillAll").log();
-				return Void();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR Future<Void> _start(Database cx, TriggerRecoveryLoopWorkload* self) {
-		wait(delay(self->startTime));
-		state int numRecoveriesDone = 0;
+	Future<Void> _start(Database cx, TriggerRecoveryLoopWorkload* self) {
+		co_await delay(self->startTime);
+		int numRecoveriesDone = 0;
 		try {
 			loop {
 				if (deterministicRandom()->random01() < self->killAllProportion) {
-					wait(self->killAll(cx));
+					co_await self->killAll(cx);
 				} else {
-					wait(self->changeResolverConfig(cx, self));
+					co_await self->changeResolverConfig(cx, self);
 				}
 				numRecoveriesDone++;
 				TraceEvent(SevInfo, "TriggerRecoveryLoop_AttempedRecovery").detail("RecoveryNum", numRecoveriesDone);
 				if (numRecoveriesDone == self->numRecoveries) {
 					break;
 				}
-				wait(delay(self->delayBetweenRecoveries));
-				wait(self->returnIfClusterRecovered(cx));
+				co_await delay(self->delayBetweenRecoveries);
+				co_await self->returnIfClusterRecovered(cx);
 			}
 		} catch (Error& e) {
 			// Dummy catch here to give a chance to reset number of resolvers to its original value
 		}
-		wait(self->changeResolverConfig(cx, self, true));
-		return Void();
+		co_await self->changeResolverConfig(cx, self, true);
 	}
 
 	Future<Void> start(Database const& cx) override {

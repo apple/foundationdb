@@ -98,37 +98,38 @@ struct PingWorkload : TestWorkload {
 		m.push_back(maxMessageLatency.getMetric());
 	}
 
-	ACTOR Future<Void> persistInterface(PingWorkload* self, Database cx) {
-		state Transaction tr(cx);
+	Future<Void> persistInterface(PingWorkload* self, Database cx) {
+		Transaction tr(cx);
 		BinaryWriter wr(IncludeVersion());
 		wr << self->interf;
-		state Standalone<StringRef> serializedInterface = wr.toValue();
+		Standalone<StringRef> serializedInterface = wr.toValue();
 		loop {
+			Error err;
 			try {
-				Optional<Value> val = wait(tr.get(StringRef(format("Ping/Client/%d", self->clientId))));
+				Optional<Value> val = co_await tr.get(StringRef(format("Ping/Client/%d", self->clientId)));
 				if (val.present()) {
 					if (val.get() != serializedInterface)
 						throw operation_failed();
 					break;
 				}
 				tr.set(format("Ping/Client/%d", self->clientId), serializedInterface);
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
-		return Void();
 	}
 
-	ACTOR Future<std::vector<PingWorkloadInterface>> fetchInterfaces(PingWorkload* self, Database cx) {
-		state Transaction tr(cx);
+	Future<std::vector<PingWorkloadInterface>> fetchInterfaces(PingWorkload* self, Database cx) {
+		Transaction tr(cx);
 		loop {
+			Error err;
 			try {
-				state std::vector<PingWorkloadInterface> result;
-				state int i;
-				for (i = 0; i < self->clientCount; i++) {
-					Optional<Value> val = wait(tr.get(StringRef(format("Ping/Client/%d", i))));
+				std::vector<PingWorkloadInterface> result;
+				for (int i = 0; i < self->clientCount; i++) {
+					Optional<Value> val = co_await tr.get(StringRef(format("Ping/Client/%d", i)));
 					if (!val.present()) {
 						throw operation_failed();
 					}
@@ -137,27 +138,28 @@ struct PingWorkload : TestWorkload {
 					br >> interf;
 					result.push_back(interf);
 				}
-				return result;
+				co_return result;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR Future<Void> pinger(PingWorkload* self, std::vector<RequestStream<LoadedPingRequest>> peers) {
-		state double lastTime = now();
+	Future<Void> pinger(PingWorkload* self, std::vector<RequestStream<LoadedPingRequest>> peers) {
+		double lastTime = now();
 
 		loop {
-			wait(poisson(&lastTime, self->actorCount / self->operationsPerSecond));
+			co_await poisson(&lastTime, self->actorCount / self->operationsPerSecond);
 			auto& peer = deterministicRandom()->randomChoice(peers);
-			state NetworkAddress addr = peer.getEndpoint().getPrimaryAddress();
-			state double before = now();
+			NetworkAddress addr = peer.getEndpoint().getPrimaryAddress();
+			double before = now();
 
 			LoadedPingRequest req;
 			req.id = deterministicRandom()->randomUniqueID();
 			req.payload = self->usePayload ? self->payloadOut : ""_sr;
 			req.loadReply = self->usePayload;
-			LoadedReply rep = wait(peer.getReply(req));
+			LoadedReply rep = co_await peer.getReply(req);
 
 			double elapsed = now() - before;
 			self->totalMessageLatency += elapsed;
@@ -168,8 +170,8 @@ struct PingWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> pinger(PingWorkload* self, Database cx) {
-		std::vector<PingWorkloadInterface> testers = wait(self->fetchInterfaces(self, cx));
+	Future<Void> pinger(PingWorkload* self, Database cx) {
+		std::vector<PingWorkloadInterface> testers = co_await self->fetchInterfaces(self, cx);
 		std::vector<RequestStream<LoadedPingRequest>> peers;
 		peers.reserve(testers.size());
 		for (int i = 0; i < testers.size(); i++)
@@ -178,12 +180,11 @@ struct PingWorkload : TestWorkload {
 		pingers.reserve(self->actorCount);
 		for (int i = 0; i < self->actorCount; i++)
 			pingers.push_back(self->pinger(self, peers));
-		wait(waitForAll(pingers));
-		return Void();
+		co_await waitForAll(pingers);
 	}
 
-	ACTOR Future<Void> workerPinger(PingWorkload* self) {
-		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+	Future<Void> workerPinger(PingWorkload* self) {
+		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 		std::vector<RequestStream<LoadedPingRequest>> peers;
 		peers.reserve(workers.size());
 		for (int i = 0; i < workers.size(); i++)
@@ -192,8 +193,7 @@ struct PingWorkload : TestWorkload {
 		pingers.reserve(self->actorCount);
 		for (int i = 0; i < self->actorCount; i++)
 			pingers.push_back(self->pinger(self, peers));
-		wait(waitForAll(pingers));
-		return Void();
+		co_await waitForAll(pingers);
 	}
 
 	// ACTOR Future<Void> poisson_spin( double *last, double meanInterval ) {
@@ -206,25 +206,25 @@ struct PingWorkload : TestWorkload {
 	// 	return Void();
 	// }
 
-	ACTOR Future<Void> payloadSender(PingWorkload* self, Database cx) {
-		state std::vector<RequestStream<LoadedPingRequest>> endpoints;
-		state double lastTime = timer();
-		state PromiseStream<Future<Void>> addActor;
-		state Future<Void> collection = actorCollection(addActor.getFuture());
+	Future<Void> payloadSender(PingWorkload* self, Database cx) {
+		std::vector<RequestStream<LoadedPingRequest>> endpoints;
+		double lastTime = timer();
+		PromiseStream<Future<Void>> addActor;
+		Future<Void> collection = actorCollection(addActor.getFuture());
 
 		if (self->workerBroadcast) {
-			std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+			std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 			for (int i = 0; i < workers.size(); i++)
 				endpoints.push_back(workers[i].interf.debugPing);
 		} else {
-			std::vector<PingWorkloadInterface> peers = wait(self->fetchInterfaces(self, cx));
+			std::vector<PingWorkloadInterface> peers = co_await self->fetchInterfaces(self, cx);
 			for (int i = 0; i < peers.size(); i++)
 				endpoints.push_back(peers[i].payloadPing);
 		}
 
 		// std::random_shuffle( peers.begin(), peers.end() );
 		loop {
-			wait(poisson(&lastTime, 1.0 / 6.0));
+			co_await poisson(&lastTime, 1.0 / 6.0);
 			addActor.send(self->payloadPinger(self, cx, endpoints));
 		}
 	}
@@ -242,14 +242,12 @@ struct PingWorkload : TestWorkload {
 	// 	return Void();
 	// }
 
-	ACTOR Future<Void> payloadPinger(PingWorkload* self,
-	                                 Database cx,
-	                                 std::vector<RequestStream<LoadedPingRequest>> peers) {
+	Future<Void> payloadPinger(PingWorkload* self, Database cx, std::vector<RequestStream<LoadedPingRequest>> peers) {
 		// state std::vector<PingWorkloadInterface> peers = wait( self->fetchInterfaces( self, cx ) );
 
 		// loop {
-		state double start = now();
-		state UID pingId(deterministicRandom()->randomUniqueID());
+		double start = now();
+		UID pingId(deterministicRandom()->randomUniqueID());
 		std::vector<Future<Void>> replies;
 		for (int i = 0; i < peers.size(); i++) {
 			LoadedPingRequest req;
@@ -262,12 +260,11 @@ struct PingWorkload : TestWorkload {
 			// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 		}
 		TraceEvent("PayloadPingSent", pingId).log();
-		wait(waitForAll(replies));
+		co_await waitForAll(replies);
 		double elapsed = now() - start;
 		TraceEvent("PayloadPingDone", pingId).detail("Elapsed", elapsed);
 		// 	wait( delay( deterministicRandom()->random01() / 100 ) );
 		// }
-		return Void();
 	}
 
 	// ACTOR Future<Void> packetPonger( PingWorkload* self, LoadedPingRequest req ) {
@@ -281,12 +278,12 @@ struct PingWorkload : TestWorkload {
 	// 	return Void();
 	// }
 
-	ACTOR Future<Void> ponger(PingWorkload* self) {
+	Future<Void> ponger(PingWorkload* self) {
 		// state PromiseStream<Future<Void>> addActor;
 		// state Future<Void> pongCollection = actorCollection( addActor.getFuture() );
 
 		loop {
-			LoadedPingRequest req = waitNext(self->interf.payloadPing.getFuture());
+			LoadedPingRequest req = co_await self->interf.payloadPing.getFuture();
 			// double end = timer() + (deterministicRandom()->random01() / 200);
 			// while( timer() < end )
 			// 	_mm_pause();

@@ -139,18 +139,18 @@ struct ClogRemoteTLog : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Optional<double>> measureMaxSSLag(ClogRemoteTLog* self, Database db) {
-		StatusObject status = wait(StatusClient::statusFetcher(db));
+	static Future<Optional<double>> measureMaxSSLag(ClogRemoteTLog* self, Database db) {
+		StatusObject status = co_await StatusClient::statusFetcher(db);
 		StatusObjectReader reader(status);
 		StatusObjectReader cluster;
 		StatusObjectReader processMap;
 		if (!reader.get("cluster", cluster)) {
 			TraceEvent("NoCluster");
-			return Optional<double>();
+			co_return Optional<double>();
 		}
 		if (!cluster.get("processes", processMap)) {
 			TraceEvent("NoProcesses");
-			return Optional<double>();
+			co_return Optional<double>();
 		}
 		double maxSSLag{ -1 };
 		for (auto p : processMap.obj()) {
@@ -178,9 +178,9 @@ struct ClogRemoteTLog : TestWorkload {
 		    .detail("SecondLag", maxSSLag == -1 ? "none" : std::to_string(maxSSLag))
 		    .detail("SecondThreshold", self->lagThreshold);
 		if (maxSSLag == -1) {
-			return Optional<double>();
+			co_return Optional<double>();
 		} else {
-			return maxSSLag;
+			co_return maxSSLag;
 		}
 	}
 
@@ -219,14 +219,14 @@ struct ClogRemoteTLog : TestWorkload {
 		return false;
 	}
 
-	ACTOR static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
-		StatusObject status = wait(StatusClient::statusFetcher(db));
+	static Future<bool> grayFailureStatusCheck(Database db, NetworkAddress cloggedRemoteTLog) {
+		StatusObject status = co_await StatusClient::statusFetcher(db);
 		StatusObjectReader reader(status);
 
 		if (statusError(reader)) {
 			// If there is some error to get the status (e.g. network issue), we let gray failure status check pass
 			// since that's not what we are testing for here.
-			return true;
+			co_return true;
 		}
 
 		StatusObjectReader cluster;
@@ -234,7 +234,7 @@ struct ClogRemoteTLog : TestWorkload {
 		StatusObjectReader grayFailure;
 		if (!cluster.get("gray_failure", grayFailure)) {
 			TraceEvent("NoGrayFailure");
-			return false;
+			co_return false;
 		}
 		ASSERT(grayFailure.has("excluded_servers"));
 		StatusArray excludedProcesses = grayFailure["excluded_servers"].get_array();
@@ -245,32 +245,34 @@ struct ClogRemoteTLog : TestWorkload {
 			    .detail("Address", process["address"].get_str())
 			    .detail("Ts", process["time"].get_real());
 		}
-		return true;
+		co_return true;
 	}
 
-	ACTOR static Future<std::vector<IPAddress>> getRemoteSSIPs(Database db) {
-		state std::vector<IPAddress> ret;
-		state Transaction tr(db);
+	static Future<std::vector<IPAddress>> getRemoteSSIPs(Database db) {
+		std::vector<IPAddress> ret;
+		Transaction tr(db);
 		loop {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    wait(NativeAPI::getServerListAndProcessClasses(&tr));
+				    co_await NativeAPI::getServerListAndProcessClasses(&tr);
 				for (auto& [ssi, p] : results) {
 					if (ssi.locality.dcId().present() && g_simulator->remoteDcId.present() &&
 					    ssi.locality.dcId().get() == g_simulator->remoteDcId.get()) {
 						ret.push_back(ssi.address().ip);
 					}
 				}
-				return ret;
+				co_return ret;
 			} catch (Error& e) {
-				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent("GetRemoteSSIPsError").error(e);
-				}
-				wait(tr.onError(e));
+				err = e;
 			}
+			if (err.code() != error_code_actor_cancelled) {
+				TraceEvent("GetRemoteSSIPsError").error(err);
+			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -287,20 +289,20 @@ struct ClogRemoteTLog : TestWorkload {
 		return remoteTLogIPs;
 	}
 
-	ACTOR static Future<Void> clogRemoteTLog(ClogRemoteTLog* self, Database db) {
-		wait(delay(self->clogInitDelay));
+	static Future<Void> clogRemoteTLog(ClogRemoteTLog* self, Database db) {
+		co_await delay(self->clogInitDelay);
 
 		// Ensure db is ready
 		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait(self->dbInfo->onChange());
+			co_await self->dbInfo->onChange();
 		}
 
 		// Then, get all remote TLog IPs
-		state std::vector<NetworkAddress> remoteTLogs = getRemoteTLogs(self);
+		std::vector<NetworkAddress> remoteTLogs = getRemoteTLogs(self);
 		ASSERT(!remoteTLogs.empty());
 
 		// Then, get all remote SS IPs
-		std::vector<IPAddress> remoteSSIPs = wait(getRemoteSSIPs(db));
+		std::vector<IPAddress> remoteSSIPs = co_await getRemoteSSIPs(db);
 		ASSERT(!remoteSSIPs.empty());
 
 		// Then, attempt to find a remote tlog that is not on the same machine as a remote SS
@@ -322,7 +324,7 @@ struct ClogRemoteTLog : TestWorkload {
 
 		// Then, find all processes that the remote tlog will have degraded connection with
 		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
-		state std::vector<IPAddress> processes;
+		std::vector<IPAddress> processes;
 		for (const auto& process : g_simulator->getAllProcesses()) {
 			const auto& ip = process->address.ip;
 			if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
@@ -351,8 +353,7 @@ struct ClogRemoteTLog : TestWorkload {
 			self->doCheck = true;
 		}
 
-		wait(Never());
-		return Void();
+		co_await Future<Void>(Never());
 	}
 
 	// Returns true if and only if the provided remote tlog `addr` is not in dbInfo
@@ -370,21 +371,20 @@ struct ClogRemoteTLog : TestWorkload {
 		return true;
 	}
 
-	ACTOR Future<Void> workload(ClogRemoteTLog* self, Database db) {
-		state Future<Void> clog = self->clogRemoteTLog(self, db);
-		state TestState testState = TestState::TEST_INIT;
+	Future<Void> workload(ClogRemoteTLog* self, Database db) {
+		Future<Void> clog = self->clogRemoteTLog(self, db);
+		TestState testState = TestState::TEST_INIT;
 		self->actualStatePath.push_back(testState);
-		state bool statusCheckPassed = false;
+		bool statusCheckPassed = false;
 		loop {
-			wait(delay(self->lagMeasurementFrequency));
-			Optional<double> ssLag = wait(measureMaxSSLag(self, db));
+			co_await delay(self->lagMeasurementFrequency);
+			Optional<double> ssLag = co_await measureMaxSSLag(self, db);
 			if (!ssLag.present()) {
 				continue;
 			}
 			// See if ss lag state changed
-			state TestState localState =
-			    ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
-			state bool stateTransition = localState != testState;
+			TestState localState = ssLag.get() < self->lagThreshold ? TestState::SS_LAG_NORMAL : TestState::SS_LAG_HIGH;
+			bool stateTransition = localState != testState;
 			// If ss lag state did not change, see if clogged remote tlog got excluded
 			if (!stateTransition) {
 				const bool acceptingCommits = self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS;
@@ -402,7 +402,7 @@ struct ClogRemoteTLog : TestWorkload {
 				    remoteTLogNotInDbInfo(self->cloggedRemoteTLog.get(), self->dbInfo->get())) {
 					localState = TestState::CLOGGED_REMOTE_TLOG_EXCLUDED;
 					if (!statusCheckPassed) {
-						wait(store(statusCheckPassed, grayFailureStatusCheck(db, self->cloggedRemoteTLog.get())));
+						co_await store(statusCheckPassed, grayFailureStatusCheck(db, self->cloggedRemoteTLog.get()));
 						ASSERT(statusCheckPassed);
 					}
 					stateTransition = localState != testState;

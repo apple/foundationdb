@@ -66,17 +66,18 @@ struct LowLatencyWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
-		state double testStart = now();
+	static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
+		double testStart = now();
 		try {
 			loop {
-				wait(delay(self->checkDelay));
-				state Transaction tr(cx);
-				state double operationStart = now();
-				state bool doCommit = self->testWrites && deterministicRandom()->coinflip();
-				state double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
+				co_await delay(self->checkDelay);
+				Transaction tr(cx);
+				double operationStart = now();
+				bool doCommit = self->testWrites && deterministicRandom()->coinflip();
+				double maxLatency = doCommit ? self->maxCommitLatency : self->maxGRVLatency;
 				++self->operations;
 				loop {
+					Error err;
 					try {
 						TraceEvent("LowLatencyTransactionStart").detail("Retries", self->retries.getValue());
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -84,19 +85,20 @@ struct LowLatencyWorkload : TestWorkload {
 						if (doCommit) {
 							TraceEvent("LowLatencyTransactionCommitStart");
 							tr.set(self->testKey, ""_sr);
-							wait(tr.commit());
+							co_await tr.commit();
 							TraceEvent("LowLatencyTransactionCommitFinish");
 						} else {
 							TraceEvent("LowLatencyTransactionGRVStart");
-							wait(success(tr.getReadVersion()));
+							co_await success(tr.getReadVersion());
 							TraceEvent("LowLatencyTransactionGRVFinish");
 						}
 						break;
 					} catch (Error& e) {
-						TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(e);
-						wait(tr.onError(e));
-						++self->retries;
+						err = e;
 					}
+					TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(err);
+					co_await tr.onError(err);
+					++self->retries;
 				}
 				if (now() - operationStart > maxLatency) {
 					TraceEvent(SevError, "LatencyTooLarge")
@@ -108,7 +110,7 @@ struct LowLatencyWorkload : TestWorkload {
 				if (now() - testStart > self->testDuration)
 					break;
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			TraceEvent(SevError, "LowLatencyError").errorUnsuppressed(e);
 			throw;

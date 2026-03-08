@@ -142,17 +142,17 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		out.insert({ "RandomMoveKeys", "Attrition" });
 	}
 
-	ACTOR static Future<Void> readRealInitialDataDistribution(IDDTxnProcessorApiWorkload* self) {
+	static Future<Void> readRealInitialDataDistribution(IDDTxnProcessorApiWorkload* self) {
 		loop {
-			wait(store(self->ddContext.lock, ::readMoveKeysLock(self->real->context())));
+			co_await store(self->ddContext.lock, ::readMoveKeysLock(self->real->context()));
 			// read real InitialDataDistribution
 			try {
-				wait(store(self->realInitDD,
-				           self->real->getInitialDataDistribution(self->ddContext.id(),
-				                                                  self->ddContext.lock,
-				                                                  {},
-				                                                  self->ddContext.ddEnabledState.get(),
-				                                                  SkipDDModeCheck::True)));
+				co_await store(self->realInitDD,
+				               self->real->getInitialDataDistribution(self->ddContext.id(),
+				                                                      self->ddContext.lock,
+				                                                      {},
+				                                                      self->ddContext.ddEnabledState.get(),
+				                                                      SkipDDModeCheck::True));
 				std::cout << "Finish read real InitialDataDistribution: server size "
 				          << self->realInitDD->allServers.size() << ", shard size: " << self->realInitDD->shards.size()
 				          << std::endl;
@@ -163,7 +163,6 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			}
 		}
 		self->updateBoundaries();
-		return Void();
 	}
 
 	// according to boundaries, generate valid ranges for moveKeys operation
@@ -217,21 +216,20 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		boundaries = std::vector<Key>(tempBoundaries.begin(), tempBoundaries.end());
 	}
 
-	ACTOR Future<Void> _setup(Database cx, IDDTxnProcessorApiWorkload* self) {
-		int oldMode = wait(setDDMode(cx, 0));
+	Future<Void> _setup(Database cx, IDDTxnProcessorApiWorkload* self) {
+		int oldMode = co_await setDDMode(cx, 0);
 		TraceEvent("IDDTxnApiTestStartModeSetting").detail("OldValue", oldMode).log();
 
 		self->real = std::make_shared<DDTxnProcessorTester>(cx);
 		// Get the database configuration so as to use proper team size
-		wait(store(self->ddContext.configuration, self->real->getDatabaseConfiguration()));
+		co_await store(self->ddContext.configuration, self->real->getDatabaseConfiguration());
 		ASSERT(self->ddContext.configuration.storageTeamSize > 0);
 		// FIXME: add support for generating random teams across DCs
 		ASSERT_EQ(self->ddContext.usableRegions(), 1);
-		wait(readRealInitialDataDistribution(self));
-		return Void();
+		co_await readRealInitialDataDistribution(self);
 	}
 
-	ACTOR Future<Void> _start(Database cx, IDDTxnProcessorApiWorkload* self) {
+	Future<Void> _start(Database cx, IDDTxnProcessorApiWorkload* self) {
 
 		self->mgs = std::make_shared<MockGlobalState>();
 		self->mgs->configuration = self->ddContext.configuration;
@@ -251,13 +249,13 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 
-		wait(timeout(reportErrors(self->worker(cx, self), "IDDTxnProcessorApiWorkload"), self->testDuration, Void()));
+		co_await timeout(
+		    reportErrors(self->worker(cx, self), "IDDTxnProcessorApiWorkload"), self->testDuration, Void());
 
 		// Always set the DD mode back, even if we die with an error
 		TraceEvent("IDDTxnApiTestDoneMoving").log();
-		int oldValue = wait(setDDMode(cx, 1));
+		int oldValue = co_await setDDMode(cx, 1);
 		TraceEvent("IDDTxnApiTestDoneModeSetting").detail("OldValue", oldValue);
-		return Void();
 	}
 
 	void verifyServerKeyDest(MoveKeysParams& params) const {
@@ -277,13 +275,13 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			ASSERT(mgs->serverIsDestForShard(id, keys));
 		}
 	}
-	ACTOR static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
-		state TraceInterval relocateShardInterval("RelocateShard_TestRawMovementApi");
-		state FlowLock fl1(1);
-		state FlowLock fl2(1);
-		state std::map<UID, StorageServerInterface> emptyTssMapping;
-		state Reference<InitialDataDistribution> mockInitData;
-		state MoveKeysParams realParams = wait(generateMoveKeysParams(self));
+	static Future<Void> testRawMovementApi(IDDTxnProcessorApiWorkload* self) {
+		TraceInterval relocateShardInterval("RelocateShard_TestRawMovementApi");
+		FlowLock fl1(1);
+		FlowLock fl2(1);
+		std::map<UID, StorageServerInterface> emptyTssMapping;
+		Reference<InitialDataDistribution> mockInitData;
+		MoveKeysParams realParams = co_await generateMoveKeysParams(self);
 		realParams.startMoveKeysParallelismLock = &fl1;
 		realParams.finishMoveKeysParallelismLock = &fl2;
 		realParams.relocationIntervalId = relocateShardInterval.pairID;
@@ -291,18 +289,19 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		    .detail("Key", realParams.keys)
 		    .detail("Dest", realParams.destinationTeam);
 
-		state MoveKeysParams mockParams = realParams;
+		MoveKeysParams mockParams = realParams;
 		mockParams.dataMovementComplete = Promise<Void>();
 
 		loop {
 			realParams.dataMovementComplete.reset();
 			mockParams.dataMovementComplete.reset();
 
-			wait(store(realParams.lock, self->real->takeMoveKeysLock(UID())));
+			co_await store(realParams.lock, self->real->takeMoveKeysLock(UID()));
+			Error err;
 			try {
 				// test start
-				wait(self->mock->testRawStartMovement(mockParams, emptyTssMapping));
-				wait(self->real->testRawStartMovement(realParams, emptyTssMapping));
+				co_await self->mock->testRawStartMovement(mockParams, emptyTssMapping);
+				co_await self->real->testRawStartMovement(realParams, emptyTssMapping);
 
 				self->verifyServerKeyDest(realParams);
 				// test finish or started but cancelled movement
@@ -313,20 +312,21 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 				}
 
 				// The real transaction should finish first because mock transaction will always success.
-				wait(self->real->testRawFinishMovement(realParams, emptyTssMapping));
-				wait(self->mock->testRawFinishMovement(mockParams, emptyTssMapping));
+				co_await self->real->testRawFinishMovement(realParams, emptyTssMapping);
+				co_await self->mock->testRawFinishMovement(mockParams, emptyTssMapping);
 				self->testRawFinish++;
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict)
-					throw;
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				// Keep trying to get the moveKeysLock
+				err = e;
 			}
+			if (err.code() != error_code_movekeys_conflict)
+				throw err;
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			// Keep trying to get the moveKeysLock
 		}
 
 		// read initial data again
-		wait(readRealInitialDataDistribution(self));
+		co_await readRealInitialDataDistribution(self);
 		mockInitData = self->mock
 		                   ->getInitialDataDistribution(self->ddContext.id(),
 		                                                self->ddContext.lock,
@@ -341,11 +341,10 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		// new storage server join the cluster, there's no way for mock DD to know the new storage server without
 		// calling setupMockGlobalState again.
 		self->mock->setupMockGlobalState(self->realInitDD);
-		return Void();
 	}
 
-	ACTOR static Future<MoveKeysParams> generateMoveKeysParams(IDDTxnProcessorApiWorkload* self) { // always empty
-		state MoveKeysLock lock = wait(takeMoveKeysLock(self->real->context(), UID()));
+	static Future<MoveKeysParams> generateMoveKeysParams(IDDTxnProcessorApiWorkload* self) { // always empty
+		MoveKeysLock lock = co_await takeMoveKeysLock(self->real->context(), UID());
 
 		KeyRange keys = self->getRandomKeys();
 		std::vector<UID> destTeam = self->getRandomTeam();
@@ -356,43 +355,43 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		                                     DataMovementReason::INVALID,
 		                                     UnassignShard(false));
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
-			return MoveKeysParams(dataMoveId,
-			                      std::vector<KeyRange>{ keys },
-			                      destTeam,
-			                      destTeam,
-			                      lock,
-			                      Promise<Void>(),
-			                      nullptr,
-			                      nullptr,
-			                      false,
-			                      UID(),
-			                      self->ddContext.ddEnabledState.get(),
-			                      CancelConflictingDataMoves::True,
-			                      Optional<BulkLoadTaskState>());
+			co_return MoveKeysParams(dataMoveId,
+			                         std::vector<KeyRange>{ keys },
+			                         destTeam,
+			                         destTeam,
+			                         lock,
+			                         Promise<Void>(),
+			                         nullptr,
+			                         nullptr,
+			                         false,
+			                         UID(),
+			                         self->ddContext.ddEnabledState.get(),
+			                         CancelConflictingDataMoves::True,
+			                         Optional<BulkLoadTaskState>());
 		} else {
-			return MoveKeysParams(dataMoveId,
-			                      keys,
-			                      destTeam,
-			                      destTeam,
-			                      lock,
-			                      Promise<Void>(),
-			                      nullptr,
-			                      nullptr,
-			                      false,
-			                      UID(),
-			                      self->ddContext.ddEnabledState.get(),
-			                      CancelConflictingDataMoves::True,
-			                      Optional<BulkLoadTaskState>());
+			co_return MoveKeysParams(dataMoveId,
+			                         keys,
+			                         destTeam,
+			                         destTeam,
+			                         lock,
+			                         Promise<Void>(),
+			                         nullptr,
+			                         nullptr,
+			                         false,
+			                         UID(),
+			                         self->ddContext.ddEnabledState.get(),
+			                         CancelConflictingDataMoves::True,
+			                         Optional<BulkLoadTaskState>());
 		}
 	}
 
-	ACTOR static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {
-		state TraceInterval relocateShardInterval("RelocateShard_TestMoveKeys");
-		state FlowLock fl1(1);
-		state FlowLock fl2(1);
-		state std::map<UID, StorageServerInterface> emptyTssMapping;
-		state Reference<InitialDataDistribution> mockInitData;
-		state MoveKeysParams realParams = wait(generateMoveKeysParams(self));
+	static Future<Void> testMoveKeys(IDDTxnProcessorApiWorkload* self) {
+		TraceInterval relocateShardInterval("RelocateShard_TestMoveKeys");
+		FlowLock fl1(1);
+		FlowLock fl2(1);
+		std::map<UID, StorageServerInterface> emptyTssMapping;
+		Reference<InitialDataDistribution> mockInitData;
+		MoveKeysParams realParams = co_await generateMoveKeysParams(self);
 		realParams.startMoveKeysParallelismLock = &fl1;
 		realParams.finishMoveKeysParallelismLock = &fl2;
 		realParams.relocationIntervalId = relocateShardInterval.pairID;
@@ -400,28 +399,30 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		    .detail("Key", realParams.keys)
 		    .detail("Dest", realParams.destinationTeam);
 
-		state MoveKeysParams mockParams = realParams;
+		MoveKeysParams mockParams = realParams;
 		mockParams.dataMovementComplete = Promise<Void>();
 
 		loop {
 			realParams.dataMovementComplete.reset();
 			mockParams.dataMovementComplete.reset();
-			wait(store(realParams.lock, self->real->takeMoveKeysLock(UID())));
+			co_await store(realParams.lock, self->real->takeMoveKeysLock(UID()));
+			Error err;
 			try {
-				wait(self->mock->moveKeys(mockParams));
-				wait(self->real->moveKeys(realParams));
+				co_await self->mock->moveKeys(mockParams);
+				co_await self->real->moveKeys(realParams);
 				self->testAll++;
 				break;
 			} catch (Error& e) {
-				if (e.code() != error_code_movekeys_conflict)
-					throw;
-				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				// Keep trying to get the moveKeysLock
+				err = e;
 			}
+			if (err.code() != error_code_movekeys_conflict)
+				throw err;
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			// Keep trying to get the moveKeysLock
 		}
 
 		// read initial data again
-		wait(readRealInitialDataDistribution(self));
+		co_await readRealInitialDataDistribution(self);
 		mockInitData = self->mock
 		                   ->getInitialDataDistribution(self->ddContext.id(),
 		                                                self->ddContext.lock,
@@ -433,22 +434,21 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		verifyInitDataEqual(self->realInitDD, mockInitData);
 		TraceEvent(SevDebug, relocateShardInterval.end(), relocateShardInterval.pairID);
 		self->mock->setupMockGlobalState(self->realInitDD); // in case SS remove or recruit
-		return Void();
 	}
 
-	ACTOR Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
-		state int choice = 0;
-		state int maxChoice = self->testStartOnly ? 1 : 2;
+	Future<Void> worker(Database cx, IDDTxnProcessorApiWorkload* self) {
+		int choice = 0;
+		int maxChoice = self->testStartOnly ? 1 : 2;
 		loop {
 			choice = deterministicRandom()->randomInt(0, maxChoice);
 			if (choice == 0) { // test rawStartMovement and rawFinishMovement separately
-				wait(testRawMovementApi(self));
+				co_await testRawMovementApi(self);
 			} else if (choice == 1) { // test moveKeys
-				wait(testMoveKeys(self));
+				co_await testMoveKeys(self);
 			} else {
 				ASSERT(false);
 			}
-			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 		}
 	}
 

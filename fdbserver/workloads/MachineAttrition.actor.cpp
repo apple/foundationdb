@@ -40,25 +40,27 @@ static std::set<int> const& normalAttritionErrors() {
 	return s;
 }
 
-ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
+Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	// duration doesn't matter since this won't timeout
 	TraceEvent("IgnoreSSFailureStart").log();
-	wait(success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0)));
+	co_await success(setHealthyZone(cx, ignoreSSFailuresZoneString, 0));
 	TraceEvent("IgnoreSSFailureWait").log();
-	wait(delay(duration));
+	co_await delay(duration);
 	TraceEvent("IgnoreSSFailureClear").log();
-	state Transaction tr(cx);
+	Transaction tr(cx);
 	loop {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.clear(healthyZoneKey);
-			wait(tr.commit());
+			co_await tr.commit();
 			TraceEvent("IgnoreSSFailureComplete").log();
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -226,19 +228,19 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload* self, Database cx) {
+	static Future<Void> noSimMachineKillWorker(MachineAttritionWorkload* self, Database cx) {
 		ASSERT(!g_network->isSimulated());
-		state int killedWorkers = 0;
-		state std::vector<WorkerDetails> allWorkers =
-		    wait(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest()));
+		int killedWorkers = 0;
+		std::vector<WorkerDetails> allWorkers =
+		    co_await self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest());
 		// Can reuse reboot request to send to each interface since no reply promise needed
-		state RebootRequest rbReq;
+		RebootRequest rbReq;
 		if (self->reboot) {
 			rbReq.waitForDuration = self->suspendDuration;
 		} else {
 			rbReq.waitForDuration = std::numeric_limits<uint32_t>::max();
 		}
-		state std::vector<WorkerDetails> workers;
+		std::vector<WorkerDetails> workers;
 		// Pre-processing step: remove all testers from list of workers
 		for (const auto& worker : allWorkers) {
 			if (noSimIsViableKill(worker)) {
@@ -246,7 +248,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 			}
 		}
 		deterministicRandom()->randomShuffle(workers);
-		wait(delay(self->liveDuration));
+		co_await delay(self->liveDuration);
 		// if a specific kill is requested, it must be accompanied by a set of target IDs otherwise no kills will
 		// occur
 		if (self->killDc) {
@@ -292,20 +294,22 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				    .detail("WorkersToLeave", self->workersToLeave)
 				    .detail("Workers", workers.size());
 				if (self->waitForVersion) {
-					state Transaction tr(cx);
+					Transaction tr(cx);
 					loop {
+						Error err;
 						try {
 							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-							wait(success(tr.getReadVersion()));
+							co_await success(tr.getReadVersion());
 							break;
 						} catch (Error& e) {
-							wait(tr.onError(e));
+							err = e;
 						}
+						co_await tr.onError(err);
 					}
 				}
 				// Pick a worker to kill
-				state WorkerDetails targetWorker;
+				WorkerDetails targetWorker;
 				targetWorker = workers.back();
 				TraceEvent("Assassination")
 				    .detail("TargetWorker", targetWorker.interf.locality.toString())
@@ -319,19 +323,18 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				workers.pop_back();
 			}
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> machineKillWorker(MachineAttritionWorkload* self, double meanDelay, Database cx) {
+	static Future<Void> machineKillWorker(MachineAttritionWorkload* self, double meanDelay, Database cx) {
 		ASSERT(g_network->isSimulated());
-		state double delayBeforeKill;
-		state double suspendDuration = self->suspendDuration;
-		state double startTime = now();
+		double delayBeforeKill{ 0 };
+		double suspendDuration = self->suspendDuration;
+		double startTime = now();
 
 		loop {
 			if (self->killDc) {
 				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-				wait(delay(delayBeforeKill));
+				co_await delay(delayBeforeKill);
 
 				// decide on a machine to kill
 				ASSERT(self->machines.size());
@@ -357,7 +360,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 				g_simulator->killDataCenter(target, kt);
 			} else if (self->killDatahall) {
 				delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-				wait(delay(delayBeforeKill));
+				co_await delay(delayBeforeKill);
 
 				// It only makes sense to kill a single data hall.
 				ASSERT(self->targetIds.size() == 1);
@@ -368,15 +371,15 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 
 				g_simulator->killDataHall(target, kt);
 			} else if (self->killAll) {
-				state ISimulator::KillType kt = ISimulator::KillType::RebootProcessAndSwitch;
+				ISimulator::KillType kt = ISimulator::KillType::RebootProcessAndSwitch;
 				TraceEvent("Assassination").detail("KillType", kt);
 				g_simulator->killAll(kt, true);
 				g_simulator->toggleGlobalSwitchCluster();
-				wait(delay(self->testDuration / 2));
+				co_await delay(self->testDuration / 2);
 				g_simulator->killAll(kt, true);
 				g_simulator->toggleGlobalSwitchCluster();
 			} else {
-				state int killedMachines = 0;
+				int killedMachines = 0;
 				while (killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
 					TraceEvent("WorkerKillBegin")
 					    .detail("KilledMachines", killedMachines)
@@ -386,29 +389,31 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 					CODE_PROBE(true, "Killing a machine");
 
 					delayBeforeKill = deterministicRandom()->random01() * meanDelay;
-					wait(delay(delayBeforeKill));
+					co_await delay(delayBeforeKill);
 					TraceEvent("WorkerKillAfterDelay").log();
 
 					if (self->waitForVersion) {
-						state Transaction tr(cx);
+						Transaction tr(cx);
 						loop {
+							Error err;
 							try {
 								tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 								tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-								wait(success(tr.getReadVersion()));
+								co_await success(tr.getReadVersion());
 								break;
 							} catch (Error& e) {
-								wait(tr.onError(e));
+								err = e;
 							}
+							co_await tr.onError(err);
 						}
 					}
 
 					// decide on a machine to kill
-					state LocalityData targetMachine = self->machines.back();
+					LocalityData targetMachine = self->machines.back();
 					if (BUGGIFY_WITH_PROB(0.01)) {
 						CODE_PROBE(true, "Marked a zone for maintenance before killing it");
-						wait(success(
-						    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20)));
+						co_await success(
+						    setHealthyZone(cx, targetMachine.zoneId().get(), deterministicRandom()->random01() * 20));
 					} else if (!g_simulator->willRestart && BUGGIFY_WITH_PROB(0.005)) {
 						// don't do this in restarting test, since test could exit before it is unset, and restarted
 						// test would never unset it
@@ -468,7 +473,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 						self->machines.pop_back();
 					}
 
-					wait(delay(meanDelay - delayBeforeKill) && success(self->ignoreSSFailures));
+					co_await (delay(meanDelay - delayBeforeKill) && success(self->ignoreSSFailures));
 
 					delayBeforeKill = deterministicRandom()->random01() * meanDelay;
 					TraceEvent("WorkerKillAfterMeanDelay").detail("DelayBeforeKill", delayBeforeKill);
@@ -477,14 +482,13 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 			if (!self->iterate || now() - startTime > self->maxRunDuration) {
 				break;
 			} else {
-				wait(delay(suspendDuration));
+				co_await delay(suspendDuration);
 				suspendDuration *= self->backoff;
 			}
 		}
 
 		if (self->killSelf)
 			throw please_reboot();
-		return Void();
 	}
 };
 
