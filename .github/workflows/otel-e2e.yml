@@ -224,8 +224,9 @@ jobs:
       - name: Install dependencies
         run: |
           brew install cmake ninja openssl@3 toml11
-          brew uninstall boost || true
+          brew unlink boost 2>/dev/null || true
           brew install boost@1.85
+          brew link boost@1.85 --force 2>/dev/null || true
 
       - name: Build FDB
         run: |
