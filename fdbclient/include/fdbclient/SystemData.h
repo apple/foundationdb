@@ -426,6 +426,11 @@ const Value backupProgressValue(const WorkerBackupStatus& status);
 UID decodeBackupProgressKey(const KeyRef& key);
 WorkerBackupStatus decodeBackupProgressValue(const ValueRef& value);
 
+// The key to signal when partition map has been uploaded for a given version.
+//    "\xff\x02/backupRangePartitionedMapUploaded/<version>" := "1"
+extern const KeyRef backupRangePartitionedMapUploadedPrefix;
+const Key backupRangePartitionedMapUploadedKeyFor(Version v);
+
 // The key to signal backup workers a new backup job is submitted.
 //    "\xff\x02/backupStarted" := "[[vector<UID,Version1>]]"
 extern const KeyRef backupStartedKey;

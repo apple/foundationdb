@@ -18,11 +18,16 @@
  * limitations under the License.
  */
 
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/LogSystem.h"
+#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/Knobs.h"
+#include "fdbclient/JsonBuilder.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
+#include "fdbserver/BackupPartitionMap.actor.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/WaitFailure.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
@@ -51,25 +56,46 @@ struct BackupRangePartitionedData {
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
+	Version logFolderBaseVersion;
 	AsyncVar<Reference<ILogSystem>> logSystem;
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
+	Database cx;
 	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
-	KeyRangeMap<uint64_t> keyRangeToPartition;
+	KeyRangeMap<int> keyRangeToPartitionId;
+
+	struct PerBackupInfo {
+		PerBackupInfo() = default;
+		PerBackupInfo(BackupRangePartitionedData* data, UID uid, Version v) : self(data), startVersion(v) {
+			// Open the container and get the key ranges.
+			BackupConfig config(uid);
+			container = config.backupContainer().get(data->cx.getReference());
+			ranges = config.backupRanges().get(data->cx.getReference());
+			TraceEvent("BWRangePartitionedAddBackup", data->myId).detail("BackupID", uid).detail("Version", v);
+		}
+
+		BackupRangePartitionedData* self = nullptr;
+		Future<Optional<std::vector<KeyRange>>> ranges; // Key ranges of this backup
+		Future<Optional<Reference<IBackupContainer>>> container;
+		// Backup request's commit version. Mutations are logged at some version after this.
+		Version startVersion = invalidVersion;
+		bool stopped = false;
+	};
+
+	// TODO akanksha: Add backups in this map when backup worker receives backup request.
+	std::unordered_map<UID, PerBackupInfo> backups; // Backup UID to infos
 
 	explicit BackupRangePartitionedData(UID id,
 	                                    Reference<AsyncVar<ServerDBInfo> const> db,
 	                                    const InitializeBackupRequest& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
-	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0), paused(false),
+	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0),
+	    logFolderBaseVersion(invalidVersion), paused(false),
 	    lock(new FlowLock(SERVER_KNOBS->BACKUP_WORKER_LOCK_BYTES)) {
-
-		// TODO akanksha: Initialize keyRangeToPartition map. Each backworker will receive a partition map
-		// which is BackupTag ->  list<Partition> mapping and Partition contains partition Id and key range. We can
-		// construct the keyRangeToPartition map from that.
+		cx = openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
 
 	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }
@@ -87,6 +113,13 @@ struct BackupRangePartitionedData {
 				break;
 			}
 		}
+	}
+
+	void pop() {
+		if (!logSystem.get()) {
+			return;
+		}
+		logSystem.get()->pop(savedVersion, tag);
 	}
 };
 
@@ -159,7 +192,169 @@ ACTOR Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 	return Void();
 }
 
-// Pulls data from TLog servers.
+ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
+	state Reference<ILogSystem::IPeekCursor> cursor;
+	state Version partitionMapVersion = invalidVersion;
+	state Future<Void> logSystemChange = Void();
+
+	loop {
+		loop choose {
+			when(wait(cursor ? cursor->getMore() : Never())) {
+				break;
+			}
+			when(wait(logSystemChange)) {
+				if (self->logSystem.get()) {
+					cursor = self->logSystem.get()->peekSingle(self->myId, self->startVersion, self->tag);
+				} else {
+					cursor = Reference<ILogSystem::IPeekCursor>();
+				}
+				logSystemChange = self->logSystem.onChange();
+			}
+		}
+		wait(cursor->getMore());
+		if (!cursor->hasMessage()) {
+			continue;
+		}
+		for (; cursor->hasMessage(); cursor->nextMessage()) {
+			state Version msgVersion = cursor->version().version;
+			state StringRef message = cursor->getMessage();
+			state VectorRef<Tag> tags = cursor->getTags();
+			state Arena arena = cursor->arena();
+			ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
+			if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
+				cursor->nextMessage();
+				continue;
+			}
+			if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+				cursor->nextMessage();
+				continue;
+			}
+			// TODO akanksha: Uncomment once PartitionMapMessage is implemented.
+			// bool isPartitionMap = PartitionMapMessage::isNextIn(reader);
+			bool isPartitionMap = true;
+			if (!isPartitionMap) {
+				TraceEvent(SevError, "BWRangeParitionedPartitionMapNotReceived", self->myId)
+				    .detail("Version", msgVersion)
+				    .detail("Tag", self->tag.toString())
+				    .detail("MessageSize", message.size());
+				throw worker_removed();
+			}
+
+			// TODO akanksha: 1. std::unordered_map is not supported by ArenaReader right now, need to implement custom
+			// deserialization logic for it. Or we can switch to std::map which is supported by ArenaReader.
+			// 2. Uncomment and update the code once the deserialization logic is implemented.
+			/*
+			PartitionMapMessage pmMsg;
+			reader >> pmMsg;
+			*outPartitionMap  = pmMsg.partitionMap;
+			*/
+			partitionMapVersion = msgVersion;
+			return partitionMapVersion;
+		}
+	}
+}
+
+ACTOR Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
+	state std::vector<Future<Void>> fileFutures;
+	state std::unordered_map<UID, BackupRangePartitionedData::PerBackupInfo>::iterator it = self->backups.begin();
+
+	state std::string jsonContent = serializePartitionListJSON(partitionMap);
+
+	for (; it != self->backups.end();) {
+		if (it->second.stopped || !it->second.container.get().present()) {
+			TraceEvent("BWRangePartitionedRemoveContainer", self->myId).detail("BackupId", it->first);
+			it = self->backups.erase(it);
+			continue;
+		}
+		state Reference<IBackupContainer> container = it->second.container.get().get();
+		fileFutures.push_back(container->writePartitionListFile(self->logFolderBaseVersion, jsonContent));
+		it++;
+	}
+	if (fileFutures.empty()) {
+		TraceEvent("BWRangePartitionedNoContainers", self->myId);
+		return Void();
+	}
+
+	wait(waitForAll(fileFutures));
+	return Void();
+}
+
+// TODO akanksha -> Need to figure out if
+// 1. For new requests -> PartitionMap in TLOG will be same for all containers
+// 2. For older epochs with different containers is PartitionMap specific to container or same for all.
+// Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
+// older epochs and newer epochs.
+ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
+	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
+	    .detail("Tag", self->tag.toString())
+	    .detail("StartVersion", self->startVersion);
+	state PartitionMap partitionMap;
+
+	state Version partitionMapVersion = wait(pullPartitionMapFromTLog(self, &partitionMap));
+	self->logFolderBaseVersion = partitionMapVersion + 1;
+
+	ASSERT(partitionMap.find(self->tag) != partitionMap.end());
+	TraceEvent("BWRangeParitionedPulledPartitionMap", self->myId)
+	    .detail("Version", partitionMapVersion)
+	    .detail("NumTags", partitionMap.size())
+	    .detail("Tag", self->tag.toString())
+	    .detail("NumPartitions", partitionMap[self->tag].size());
+
+	self->keyRangeToPartitionId.clear();
+	ASSERT_GT(partitionMap[self->tag].size(), 0);
+	for (auto& partition : partitionMap[self->tag]) {
+		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
+	}
+
+	state Key doneKey = backupRangePartitionedMapUploadedKeyFor(partitionMapVersion);
+	state ReadYourWritesTransaction tr(self->cx);
+
+	// TODO akanksha: Check what will be the tag id once tags are implemented for backup workers and update the
+	// condition accordingly.
+	// Also add background actor to clean up the done key at regular
+	if (self->tag.id == 0) {
+		wait(uploadPartitionList(self, partitionMap));
+		TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
+		    .detail("Version", partitionMapVersion)
+		    .detail("NumBackups", self->backups.size());
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.set(doneKey, "1"_sr);
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	} else {
+		// All other backup workers waits for done key to be set by the worker with tag id 0, then start pulling
+		// mutations. This is to make sure partition map is uploaded before any worker starts pulling mutations.
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE); // More efficient for reads
+				Optional<Value> v = wait(tr.get(doneKey));
+				if (v.present()) {
+					break;
+				}
+				state Future<Void> watchFuture = tr.watch(doneKey);
+				wait(tr.commit());
+				wait(watchFuture);
+				tr.reset();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+	self->pulledVersion.set(partitionMapVersion);
+	self->savedVersion = partitionMapVersion;
+	self->pop();
+	return Void();
+}
+
+// Pulls mutations from TLog servers.
 ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 	state Future<Void> logSystemChange = Void();
 	state Reference<ILogSystem::IPeekCursor> cursor;
