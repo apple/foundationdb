@@ -359,8 +359,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 				defaultTx1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
 				defaultTx2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
-				co_await success(defaultTx1->getReadVersion());
-				co_await success(defaultTx2->getReadVersion());
+				co_await defaultTx1->getReadVersion();
+				co_await defaultTx2->getReadVersion();
 				defaultTx1->addReadConflictRange(singleKeyRange("foo"_sr));
 				defaultTx1->addWriteConflictRange(singleKeyRange("foo"_sr));
 				defaultTx2->addWriteConflictRange(singleKeyRange("foo"_sr));
@@ -411,8 +411,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// begin key outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			co_await success(tx->getRange(KeyRangeRef("\xff\xff/transactio"_sr, "\xff\xff/transaction0"_sr),
-			                              CLIENT_KNOBS->TOO_MANY));
+			co_await tx->getRange(KeyRangeRef("\xff\xff/transactio"_sr, "\xff\xff/transaction0"_sr),
+			                      CLIENT_KNOBS->TOO_MANY);
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -423,8 +423,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// end key outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			co_await success(tx->getRange(KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction1"_sr),
-			                              CLIENT_KNOBS->TOO_MANY));
+			co_await tx->getRange(KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction1"_sr),
+			                      CLIENT_KNOBS->TOO_MANY);
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -435,8 +435,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// both begin and end outside module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			co_await success(tx->getRange(KeyRangeRef("\xff\xff/transaction"_sr, "\xff\xff/transaction1"_sr),
-			                              CLIENT_KNOBS->TOO_MANY));
+			co_await tx->getRange(KeyRangeRef("\xff\xff/transaction"_sr, "\xff\xff/transaction1"_sr),
+			                      CLIENT_KNOBS->TOO_MANY);
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -447,8 +447,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// legal range read using the module range
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			co_await success(tx->getRange(KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction0"_sr),
-			                              CLIENT_KNOBS->TOO_MANY));
+			co_await tx->getRange(KeyRangeRef("\xff\xff/transaction/"_sr, "\xff\xff/transaction0"_sr),
+			                      CLIENT_KNOBS->TOO_MANY);
 			CODE_PROBE(true, "read transaction special keyrange");
 			tx->reset();
 		} catch (Error& e) {
@@ -474,7 +474,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->addReadConflictRange(singleKeyRange("testKey"_sr));
 			KeySelector begin = KeySelectorRef(readConflictRangeKeysRange.begin, false, 1);
 			KeySelector end = KeySelectorRef("\xff\xff/transaction0"_sr, false, 0);
-			co_await success(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			co_await tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
 			CODE_PROBE(true, "end key selector inside module range");
 			tx->reset();
 		} catch (Error& e) {
@@ -483,9 +483,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// No module found error case with keys
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			co_await success(tx->getRange(
+			co_await tx->getRange(
 			    KeyRangeRef("\xff\xff/A_no_module_related_prefix"_sr, "\xff\xff/I_am_also_not_in_any_module"_sr),
-			    CLIENT_KNOBS->TOO_MANY));
+			    CLIENT_KNOBS->TOO_MANY);
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -498,7 +498,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			KeySelector begin = KeySelectorRef("\xff\xff/zzz_i_am_not_a_module"_sr, false, 1);
 			KeySelector end = KeySelectorRef("\xff\xff/zzz_to_be_the_final_one"_sr, false, 2);
-			co_await success(tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY));
+			co_await tx->getRange(begin, end, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -664,7 +664,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			CODE_PROBE(true, "Read write conflict range of committed transaction");
 		}
 		try {
-			co_await success(tx->get("\xff\xff/1314109/i_hope_this_isn't_registered"_sr));
+			co_await tx->get("\xff\xff/1314109/i_hope_this_isn't_registered"_sr);
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)

@@ -144,7 +144,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		co_await success(backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::False));
+		co_await backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::False);
 	}
 
 	static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag, DatabaseBackupAgent* backupAgent) {
@@ -511,7 +511,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					throw;
 			}
 
-			co_await success(restoreTool.waitBackup(cx, self->restoreTag));
+			co_await restoreTool.waitBackup(cx, self->restoreTag);
 			co_await restoreTool.unlockBackup(cx, self->restoreTag);
 			co_await checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent);
 

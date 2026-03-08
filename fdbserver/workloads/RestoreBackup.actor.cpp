@@ -134,22 +134,22 @@ struct RestoreBackupWorkload : TestWorkload {
 		co_await waitOnBackup(self, cx);
 		co_await clearDatabase(cx);
 
-		co_await success(self->backupAgent.restore(cx,
-		                                           cx,
-		                                           self->tag,
-		                                           Key(self->backupContainer->getURL()),
-		                                           self->backupContainer->getProxy(),
-		                                           WaitForComplete::True,
-		                                           ::invalidVersion,
-		                                           Verbose::True,
-		                                           KeyRange(),
-		                                           Key(),
-		                                           Key(),
-		                                           LockDB::True,
-		                                           OnlyApplyMutationLogs::False,
-		                                           InconsistentSnapshotOnly::False,
-		                                           ::invalidVersion,
-		                                           self->encryptionKeyFileName));
+		co_await self->backupAgent.restore(cx,
+		                                   cx,
+		                                   self->tag,
+		                                   Key(self->backupContainer->getURL()),
+		                                   self->backupContainer->getProxy(),
+		                                   WaitForComplete::True,
+		                                   ::invalidVersion,
+		                                   Verbose::True,
+		                                   KeyRange(),
+		                                   Key(),
+		                                   Key(),
+		                                   LockDB::True,
+		                                   OnlyApplyMutationLogs::False,
+		                                   InconsistentSnapshotOnly::False,
+		                                   ::invalidVersion,
+		                                   self->encryptionKeyFileName);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }

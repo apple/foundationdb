@@ -621,8 +621,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					co_await tr1->commit();
 					// randomly read the moveKeysLockOwnerKey/moveKeysLockWriteKey
 					// both of them should be grabbed when changing dd mode
-					co_await success(
-					    tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey));
+					co_await tr2->get(deterministicRandom()->coinflip() ? moveKeysLockOwnerKey : moveKeysLockWriteKey);
 					// tr2 should never succeed, just write to a key to make it not a read-only transaction
 					tr2->addWriteConflictRange(singleKeyRange(""_sr));
 					co_await tr2->commit();

@@ -133,7 +133,7 @@ struct ResolverBugWorkload : TestWorkload {
 			co_await cycle->start(cx);
 			bug->cycleState[self->clientId] = 2;
 			co_await waitForPhase(bug, 3);
-			co_await success(cycle->check(cx));
+			co_await cycle->check(cx);
 			bug->cycleState[self->clientId] = 3;
 		}
 	}

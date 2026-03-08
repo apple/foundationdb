@@ -152,8 +152,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
-		co_await success(setDDMode(cx, 0));
-		co_await success(takeMoveKeysLock(cx, UID())); // force current DD to quit
+		co_await setDDMode(cx, 0);
+		co_await takeMoveKeysLock(cx, UID()); // force current DD to quit
 		bool success = co_await IssueConfigurationChange(cx, "storage_migration_type=disabled", true);
 		ASSERT(success);
 		co_await delay(30.0); // make sure the DD has already quit before the test start
@@ -166,10 +166,10 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		// update wiggle metrics
 		self->lastMetrics = getRandomWiggleMetrics();
 		auto& lastMetrics = self->lastMetrics;
-		co_await success(runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		co_await runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			StorageWiggleData wiggleData;
 			return wiggleData.updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
-		}));
+		});
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -225,7 +225,7 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		tester.resetStorageWiggleState();
 		co_await DDTeamCollectionTester::finishWiggleAfterPWDisabled(&tester, self->lastMetrics);
 
-		co_await success(setDDMode(cx, 1));
+		co_await setDDMode(cx, 1);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }
