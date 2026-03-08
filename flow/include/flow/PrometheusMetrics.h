@@ -24,26 +24,124 @@
 
 #include <string>
 #include <sstream>
+#include <algorithm>
+#include <variant>
 #include "flow/SimpleCounter.h"
+#include "flow/TDMetric.actor.h"
+#include "flow/OTELMetrics.h"
 
 // Defined in SimpleCounter.cpp
 std::string hierarchicalToPrometheus(const std::string& input);
 bool isValidPrometheusMetricName(std::string_view name);
 
-// Formats all SimpleCounter metrics in Prometheus text exposition format.
+// Sanitize a metric name for Prometheus compatibility.
+// Replaces characters that are not [a-zA-Z0-9_:] with underscores,
+// and ensures the name doesn't start with a digit.
+inline std::string sanitizePrometheusName(const std::string& name) {
+	std::string result;
+	result.reserve(name.size());
+	for (size_t i = 0; i < name.size(); ++i) {
+		char c = name[i];
+		if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':' ||
+		    (c >= '0' && c <= '9' && i > 0)) {
+			result += c;
+		} else if (c == '.' || c == '-' || c == '/' || c == ' ') {
+			result += '_';
+		} else if (c >= '0' && c <= '9' && i == 0) {
+			result += '_';
+			result += c;
+		} else {
+			result += '_';
+		}
+	}
+	return result;
+}
+
+// Format OTEL attributes as Prometheus labels string: {key1="val1",key2="val2"}
+inline std::string formatLabels(const std::vector<OTEL::Attribute>& attributes) {
+	if (attributes.empty())
+		return "";
+	std::ostringstream oss;
+	oss << "{";
+	for (size_t i = 0; i < attributes.size(); ++i) {
+		if (i > 0)
+			oss << ",";
+		oss << attributes[i].key << "=\"" << attributes[i].value << "\"";
+	}
+	oss << "}";
+	return oss.str();
+}
+
+// Formats all available metrics in Prometheus text exposition format.
+// Includes: SimpleCounter metrics, OTEL Sums (counters), OTEL Gauges, and OTEL Histograms.
 inline std::string formatPrometheusMetrics() {
 	std::ostringstream output;
 
+	// --- SimpleCounter metrics (int64_t) ---
 	std::vector<SimpleCounter<int64_t>*> intCounters = SimpleCounter<int64_t>::getCounters();
 	for (auto* counter : intCounters) {
 		std::string name = hierarchicalToPrometheus(counter->name());
+		output << "# TYPE " << name << " counter\n";
 		output << name << " " << counter->get() << "\n";
 	}
 
+	// --- SimpleCounter metrics (double) ---
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
 	for (auto* counter : doubleCounters) {
 		std::string name = hierarchicalToPrometheus(counter->name());
+		output << "# TYPE " << name << " counter\n";
 		output << name << " " << counter->get() << "\n";
+	}
+
+	// --- OTEL metrics from MetricCollection ---
+	MetricCollection* metrics = MetricCollection::getMetricCollection();
+	if (metrics != nullptr) {
+		// OTEL Sums -> Prometheus counters
+		for (const auto& [uid, sum] : metrics->sumMap) {
+			std::string name = sanitizePrometheusName(sum.name);
+			if (name.empty())
+				continue;
+			output << "# TYPE " << name << " counter\n";
+			for (const auto& point : sum.points) {
+				std::string labels = formatLabels(point.attributes);
+				if (std::holds_alternative<int64_t>(point.val)) {
+					output << name << labels << " " << std::get<int64_t>(point.val) << "\n";
+				} else {
+					output << name << labels << " " << std::get<double>(point.val) << "\n";
+				}
+			}
+		}
+
+		// OTEL Gauges -> Prometheus gauges
+		for (const auto& [uid, gauge] : metrics->gaugeMap) {
+			std::string name = sanitizePrometheusName(gauge.name);
+			if (name.empty())
+				continue;
+			output << "# TYPE " << name << " gauge\n";
+			for (const auto& point : gauge.points) {
+				std::string labels = formatLabels(point.attributes);
+				if (std::holds_alternative<int64_t>(point.val)) {
+					output << name << labels << " " << std::get<int64_t>(point.val) << "\n";
+				} else {
+					output << name << labels << " " << std::get<double>(point.val) << "\n";
+				}
+			}
+		}
+
+		// OTEL Histograms -> Prometheus summary (count, sum, min, max)
+		for (const auto& [uid, hist] : metrics->histMap) {
+			std::string name = sanitizePrometheusName(hist.name);
+			if (name.empty())
+				continue;
+			output << "# TYPE " << name << " summary\n";
+			for (const auto& point : hist.points) {
+				std::string labels = formatLabels(point.attributes);
+				output << name << "_count" << labels << " " << point.count << "\n";
+				output << name << "_sum" << labels << " " << point.sum << "\n";
+				output << name << "_min" << labels << " " << point.min << "\n";
+				output << name << "_max" << labels << " " << point.max << "\n";
+			}
+		}
 	}
 
 	return output.str();

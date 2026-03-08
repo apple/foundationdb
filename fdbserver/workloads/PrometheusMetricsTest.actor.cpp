@@ -21,7 +21,9 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/Knobs.h"
 #include "flow/PrometheusMetrics.h"
+#include "fdbrpc/Stats.h"
 #include <fstream>
 #include "fdbrpc/HTTP.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -40,7 +42,13 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 
 	PerfIntCounter requestCount;
 
-	PrometheusMetricsTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), requestCount("RequestCount") {
+	// CounterCollection used to create OTEL Sum metrics
+	CounterCollection cc;
+	Counter testOtelCounter;
+
+	PrometheusMetricsTestWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), requestCount("RequestCount"), cc("TestCC", wcx.dbId.toString()),
+	    testOtelCounter("TestOtelCounter", cc) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
 
@@ -51,8 +59,7 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 
 		if (self->clientId == 0) {
 			TraceEvent("PrometheusMetricsTestRegistering");
-			wait(g_simulator->registerSimHTTPServer(
-			    self->hostname, self->service, makePrometheusMetricsHandler()));
+			wait(g_simulator->registerSimHTTPServer(self->hostname, self->service, makePrometheusMetricsHandler()));
 			TraceEvent("PrometheusMetricsTestRegistered");
 		}
 
@@ -64,9 +71,12 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 	ACTOR Future<Void> _start(PrometheusMetricsTestWorkload* self) {
 		state double startTime = now();
 
-		static SimpleCounter<int64_t>* testCounter =
-		    SimpleCounter<int64_t>::makeCounter("/test/prometheus/requests");
-		testCounter->increment(1);
+		// Create a SimpleCounter metric
+		static SimpleCounter<int64_t>* testCounter = SimpleCounter<int64_t>::makeCounter("/test/prometheus/requests");
+		testCounter->increment(42);
+
+		// Increment OTEL counter (creates an OTELSum in MetricCollection)
+		self->testOtelCounter += 100;
 
 		wait(delay(0.5));
 
@@ -116,10 +126,17 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 		std::string body = response->data.content;
 		TraceEvent("PrometheusMetricsTestResponse")
 		    .detail("ContentLength", body.size())
-		    .detail("SampleContent", body.substr(0, std::min(body.size(), size_t(200))));
+		    .detail("SampleContent", body.substr(0, std::min(body.size(), size_t(500))));
 
+		// Basic validations
 		ASSERT(body.size() > 0);
 		ASSERT(body.find(" ") != std::string::npos);
+
+		// Verify # TYPE annotations are present (Prometheus spec compliance)
+		ASSERT(body.find("# TYPE") != std::string::npos);
+
+		// Verify SimpleCounter metric is present
+		ASSERT(body.find("test_prometheus_requests") != std::string::npos);
 
 		// Write body to file for CI reporting
 		std::ofstream out("prometheus_output.txt");

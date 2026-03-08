@@ -5,3 +5,7 @@ timeout = 120
     [[test.workload]]
     testName = 'PrometheusMetricsTest'
     testDuration = 10.0
+
+[[knobs]]
+prometheus_metrics_enabled = true
+metrics_data_model = "otel"
