@@ -229,13 +229,14 @@ jobs:
 
       - name: Build FDB
         run: |
-          mkdir build && cd build
+          mkdir -p build
+          cd build
           cmake -G Ninja \
             -DOLD_FDB_alloc_instrumentation=ON \
             -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3) \
             -DBOOST_ROOT=$(brew --prefix boost@1.85) \
             ..
-          ninja -j$(sysctl -n hw.ncpu) fdbserver
+          ninja -j2 fdbserver
 
       - name: Test Prometheus /metrics endpoint
         run: |
