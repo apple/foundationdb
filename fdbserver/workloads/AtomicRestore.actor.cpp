@@ -116,7 +116,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		}
 
 		TraceEvent("AtomicRestore_Wait").log();
-		co_await success(backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False));
+		co_await backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False);
 		TraceEvent("AtomicRestore_BackupStart").log();
 		co_await delay(self->restoreAfter * deterministicRandom()->random01());
 		TraceEvent("AtomicRestore_RestoreStart").log();
@@ -128,8 +128,8 @@ struct AtomicRestoreWorkload : TestWorkload {
 		} else { // Old style restore
 			loop {
 				try {
-					co_await success(backupAgent.atomicRestore(
-					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()));
+					co_await backupAgent.atomicRestore(
+					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef());
 					break;
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)

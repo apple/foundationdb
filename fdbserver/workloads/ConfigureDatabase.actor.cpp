@@ -278,8 +278,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
-		co_await success(
-		    ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true));
+		co_await ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true);
 	}
 
 	Future<Void> _start(ConfigureDatabaseWorkload* self, Database cx) {
@@ -315,7 +314,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 		for (const auto& [_, ssCount] : dcIdToSSCount) {
 			if (ssCount <= conf.storageTeamSize) {
-				co_await success(IssueConfigurationChange(cx, "storage_migration_type=aggressive", false));
+				co_await IssueConfigurationChange(cx, "storage_migration_type=aggressive", false);
 				co_return true;
 			}
 		}
@@ -401,10 +400,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				randomChoice = deterministicRandom()->randomInt(0, 8);
 			}
 			if (randomChoice == 0) {
-				co_await success(
-				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-					    return tr->get("This read is only to ensure that the database recovered"_sr);
-				    }));
+				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+					return tr->get("This read is only to ensure that the database recovered"_sr);
+				});
 				co_await delay(20 + 10 * deterministicRandom()->random01());
 			} else if (randomChoice < 3) {
 				double waitDuration = 3.0 * deterministicRandom()->random01();
@@ -440,7 +438,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (deterministicRandom()->random01() < 0.5)
 					config += " resolvers=" + format("%d", randomRoleNumber());
 
-				co_await success(IssueConfigurationChange(cx, config, false));
+				co_await IssueConfigurationChange(cx, config, false);
 
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewConfig", newConfig);
 			} else if (randomChoice == 4) {
@@ -454,7 +452,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				if (deterministicRandom()->randomInt(0, 2))
 					ch = nameQuorumChange(format(desiredClusterName.c_str(), deterministicRandom()->randomInt(0, 100)),
 					                      ch);
-				co_await success(changeQuorum(cx, ch));
+				co_await changeQuorum(cx, ch);
 				//TraceEvent("ConfigureTestConfigureEnd").detail("NewQuorum", s);
 			} else if (randomChoice == 5) {
 				int storeType = 0;
@@ -491,7 +489,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				default:
 					ASSERT(false);
 				}
-				co_await success(IssueConfigurationChange(cx, storeTypeStr, true));
+				co_await IssueConfigurationChange(cx, storeTypeStr, true);
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.
 				int length = sizeof(logTypes) / sizeof(logTypes[0]);
@@ -500,13 +498,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 					length -= 1;
 				}
 
-				co_await success(
-				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false));
+				co_await IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false);
 			} else if (randomChoice == 7) {
-				co_await success(IssueConfigurationChange(
+				co_await IssueConfigurationChange(
 				    cx,
 				    backupTypes[deterministicRandom()->randomInt(0, sizeof(backupTypes) / sizeof(backupTypes[0]))],
-				    false));
+				    false);
 			} else if (randomChoice == 8) {
 				if (self->allowTestStorageMigration) {
 					CODE_PROBE(true, "storage migration type change");
@@ -543,12 +540,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 						}
 					}
 
-					co_await success(IssueConfigurationChange(
+					co_await IssueConfigurationChange(
 					    cx,
 					    storageMigrationTypes[deterministicRandom()->randomInt(
 					        0, sizeof(storageMigrationTypes) / sizeof(storageMigrationTypes[0]))] +
 					        randomPerpetualWiggleLocality,
-					    false));
+					    false);
 				}
 			} else {
 				ASSERT(false);

@@ -61,8 +61,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 			Error err;
 			try {
 				for (i = 0; i < self->readPerTx; ++i)
-					co_await success(
-					    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)))); // read
+					co_await tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount))); // read
 				for (i = 0; i < self->writePerTx; ++i)
 					tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodeCount)),
 					       getRandomValue()); // write

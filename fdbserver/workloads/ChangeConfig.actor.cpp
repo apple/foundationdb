@@ -74,15 +74,15 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (self->configMode.size()) {
 			bool existingDB = false;
 			if (g_simulator->startingDisabledConfiguration != "") {
-				co_await success(
-				    ManagementAPI::changeConfig(db.getReference(), g_simulator->startingDisabledConfiguration, true));
+				co_await ManagementAPI::changeConfig(
+				    db.getReference(), g_simulator->startingDisabledConfiguration, true);
 				TraceEvent("WaitForReplicasExtra").log();
 				co_await waitForFullReplication(db);
 				TraceEvent("WaitForReplicasExtraEnd").log();
 				existingDB = true;
 			}
 			std::string mode = self->getConfigMode(self->configMode, existingDB);
-			co_await success(ManagementAPI::changeConfig(db.getReference(), mode, true));
+			co_await ManagementAPI::changeConfig(db.getReference(), mode, true);
 		}
 		if (self->networkAddresses.size()) {
 			if (self->networkAddresses == "auto") {
@@ -118,15 +118,15 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (self->configMode.size()) {
 			bool existingDB = false;
 			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
-				co_await success(
-				    ManagementAPI::changeConfig(cx.getReference(), g_simulator->startingDisabledConfiguration, true));
+				co_await ManagementAPI::changeConfig(
+				    cx.getReference(), g_simulator->startingDisabledConfiguration, true);
 				TraceEvent("WaitForReplicas").log();
 				co_await waitForFullReplication(cx);
 				TraceEvent("WaitForReplicasEnd").log();
 				existingDB = true;
 			}
 			std::string mode = self->getConfigMode(self->configMode, existingDB);
-			co_await success(ManagementAPI::changeConfig(cx.getReference(), mode, true));
+			co_await ManagementAPI::changeConfig(cx.getReference(), mode, true);
 		}
 
 		if (self->networkAddresses.size()) {

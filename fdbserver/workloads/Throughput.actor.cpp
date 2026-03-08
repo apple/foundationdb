@@ -118,7 +118,7 @@ struct RWTransactor : ITransactor {
 			Error err;
 			try {
 				double t_start = now();
-				co_await success(tr.getReadVersion());
+				co_await tr.getReadVersion();
 				double t_rv = now();
 				double rrLatency = -t_rv * self->reads;
 

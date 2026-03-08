@@ -85,7 +85,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 			    reportErrors(self->worker(cx, self), "MoveKeysWorkloadWorkerError"), self->testDuration, Void());
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving").log();
-			co_await success(setDDMode(cx, oldMode));
+			co_await setDDMode(cx, oldMode);
 			TraceEvent("RMKDoneModeSetting").log();
 		}
 	}

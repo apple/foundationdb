@@ -225,8 +225,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 			co_await ThrottleApi::enableAuto(db, true);
 			self->autoThrottleEnabled = true;
 			if (deterministicRandom()->coinflip()) {
-				co_await success(
-				    ThrottleApi::unthrottleAll(db, TagThrottleType::AUTO, Optional<TransactionPriority>()));
+				co_await ThrottleApi::unthrottleAll(db, TagThrottleType::AUTO, Optional<TransactionPriority>());
 			}
 		} else {
 			co_await ThrottleApi::enableAuto(db, false);

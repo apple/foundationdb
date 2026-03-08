@@ -501,7 +501,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("DifferentialAfter", stopDifferentialDelay);
 
 		try {
-			co_await success(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
+			co_await backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True);
 		} catch (Error& e) {
 			if (e.code() == error_code_backup_unneeded) {
 				TraceEvent("BS3BCW_DoBackupWaitToDiscontinueUnneeded", randomID).detail("Tag", printable(tag));
@@ -525,7 +525,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_DoBackupWaitForDiscontinued", randomID).detail("Tag", printable(tag));
 
 		try {
-			co_await success(backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True));
+			co_await backupAgent->waitBackup(cx, tag.toString(), StopWhenDone::True);
 		} catch (Error& e) {
 			if (e.code() == error_code_backup_unneeded) {
 				TraceEvent("BS3BCW_DoBackupWaitForDiscontinuedUnneeded", randomID).detail("Tag", printable(tag));
