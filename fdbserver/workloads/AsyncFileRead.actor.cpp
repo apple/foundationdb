@@ -259,7 +259,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 			begin = now();
 			if (self->ioLog)
 				self->ioLog->logIOIssue(writeFlag, begin);
-			co_await success(uncancellable(holdWhile(self->fileHandle, holdWhile(self->readBuffers[bufferIndex], r))));
+			co_await uncancellable(holdWhile(self->fileHandle, holdWhile(self->readBuffers[bufferIndex], r)));
 			if (self->ioLog)
 				self->ioLog->logIOCompletion(writeFlag, begin, now());
 			self->bytesRead += self->readSize;

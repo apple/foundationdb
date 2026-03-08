@@ -77,7 +77,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	}
 
 	Future<Void> _start(PhysicalShardMoveWorkLoad* self, Database cx) {
-		co_await success(setDDMode(cx, 0));
+		co_await setDDMode(cx, 0);
 		std::vector<UID> teamA;
 		std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
 		                           { "TestKeyAB"_sr, "TestValueAB"_sr },
@@ -89,7 +89,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                           { "TestKeyE"_sr, "TestValueE"_sr },
 		                           { "TestKeyF"_sr, "TestValueF"_sr } });
 
-		co_await success(self->populateData(self, cx, &kvs));
+		co_await self->populateData(self, cx, &kvs);
 
 		TraceEvent("TestValueWritten").log();
 

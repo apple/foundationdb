@@ -738,7 +738,7 @@ struct ValidateStorage : TestWorkload {
 
 	Future<Void> testAuditStorageWhenDDSecurityMode(ValidateStorage* self, Database cx) {
 		TraceEvent("TestAuditStorageWhenDDSecurityModeBegin");
-		co_await success(setDDMode(cx, 2));
+		co_await setDDMode(cx, 2);
 		UID auditIdA =
 		    co_await self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDSecurityMode");
 		TraceEvent("TestFunctionalityHADoneWhenDDSecurityMode", auditIdA);
@@ -756,7 +756,7 @@ struct ValidateStorage : TestWorkload {
 
 	Future<Void> testAuditStorageWhenDDBackToNormalMode(ValidateStorage* self, Database cx) {
 		TraceEvent("TestAuditStorageWhenDDBackToNormalModeBegin");
-		co_await success(setDDMode(cx, 1));
+		co_await setDDMode(cx, 1);
 		UID auditIdA = co_await self->auditStorageForType(
 		    self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDBackToNormalMode");
 		TraceEvent("TestFunctionalityHADoneWhenDDBackToNormalMode", auditIdA);

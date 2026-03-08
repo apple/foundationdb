@@ -384,22 +384,22 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			try {
 				// TODO: Change to my restore agent code
 				TraceEvent(SevError, "MXFastRestore").detail("RestoreFunction", "ShouldChangeToMyOwnRestoreLogic");
-				co_await success(backupAgent->restore(cx,
-				                                      cx,
-				                                      self->backupTag,
-				                                      KeyRef(lastBackupContainer),
-				                                      {},
-				                                      WaitForComplete::True,
-				                                      ::invalidVersion,
-				                                      Verbose::True,
-				                                      normalKeys,
-				                                      Key(),
-				                                      Key(),
-				                                      self->locked,
-				                                      OnlyApplyMutationLogs::False,
-				                                      InconsistentSnapshotOnly::False,
-				                                      ::invalidVersion,
-				                                      self->encryptionKeyFileName));
+				co_await backupAgent->restore(cx,
+				                              cx,
+				                              self->backupTag,
+				                              KeyRef(lastBackupContainer),
+				                              {},
+				                              WaitForComplete::True,
+				                              ::invalidVersion,
+				                              Verbose::True,
+				                              normalKeys,
+				                              Key(),
+				                              Key(),
+				                              self->locked,
+				                              OnlyApplyMutationLogs::False,
+				                              InconsistentSnapshotOnly::False,
+				                              ::invalidVersion,
+				                              self->encryptionKeyFileName);
 				TraceEvent(SevError, "BARW_RestoreAllowedOverwrittingDatabase", randomID).log();
 				ASSERT(false);
 			} catch (Error& e) {
@@ -527,7 +527,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// We must ensure no backup workers are running, otherwise the clear DB
 				// below can be picked up by backup workers and applied during restore.
-				co_await success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true));
+				co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true);
 
 				// Clear DB before restore
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {

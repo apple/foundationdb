@@ -699,7 +699,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 							throw;
 					}
-					co_await success(restoreTool.waitBackup(cx, systemRestoreTag));
+					co_await restoreTool.waitBackup(cx, systemRestoreTag);
 					co_await restoreTool.unlockBackup(cx, systemRestoreTag);
 				}
 
@@ -720,7 +720,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						throw;
 				}
 
-				co_await success(restoreTool.waitBackup(cx, self->restoreTag));
+				co_await restoreTool.waitBackup(cx, self->restoreTag);
 				co_await restoreTool.unlockBackup(cx, self->restoreTag);
 
 				// Make sure no more data is written to the restored range

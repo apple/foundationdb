@@ -32,7 +32,7 @@ Future<double> latencyOfRead(Transaction* tr, Key k) {
 	double start = timer();
 	loop {
 		try {
-			co_await success(tr->get(k));
+			co_await tr->get(k);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_future_version) {

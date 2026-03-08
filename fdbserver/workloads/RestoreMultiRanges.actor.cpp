@@ -159,7 +159,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 
 		TraceEvent("RestoreMultiRanges_WaitBackup");
 		Reference<IBackupContainer> container;
-		co_await success(self->backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container));
+		co_await self->backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container);
 
 		TraceEvent("RestoreMultiRanges_ClearDatabase");
 		co_await clearDatabase(cx);
@@ -168,23 +168,23 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		Standalone<VectorRef<KeyRangeRef>> ranges;
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("a"_sr, "aaaaa"_sr));
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("bb"_sr, "bbbbb"_sr)); // Skip "b"
-		co_await success(self->backupAgent.restore(cx,
-		                                           cx,
-		                                           Key(tagName),
-		                                           Key(container->getURL()),
-		                                           {},
-		                                           ranges,
-		                                           WaitForComplete::True,
-		                                           ::invalidVersion,
-		                                           Verbose::True,
-		                                           Key(),
-		                                           Key(),
-		                                           LockDB::True,
-		                                           UnlockDB::True,
-		                                           OnlyApplyMutationLogs::False,
-		                                           InconsistentSnapshotOnly::False,
-		                                           ::invalidVersion,
-		                                           self->encryptionKeyFileName));
+		co_await self->backupAgent.restore(cx,
+		                                   cx,
+		                                   Key(tagName),
+		                                   Key(container->getURL()),
+		                                   {},
+		                                   ranges,
+		                                   WaitForComplete::True,
+		                                   ::invalidVersion,
+		                                   Verbose::True,
+		                                   Key(),
+		                                   Key(),
+		                                   LockDB::True,
+		                                   UnlockDB::True,
+		                                   OnlyApplyMutationLogs::False,
+		                                   InconsistentSnapshotOnly::False,
+		                                   ::invalidVersion,
+		                                   self->encryptionKeyFileName);
 		TraceEvent("RestoreMultiRanges_Success");
 	}
 
