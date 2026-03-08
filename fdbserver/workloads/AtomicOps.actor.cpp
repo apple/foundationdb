@@ -165,8 +165,7 @@ struct AtomicOpsWorkload : TestWorkload {
 			co_await tr1.onError(err);
 		}
 
-		int g = 0;
-		for (; g < 100; g++) {
+		for (int g = 0; g < 100; g++) {
 			ReadYourWritesTransaction tr(cx);
 			loop {
 				Error err;
