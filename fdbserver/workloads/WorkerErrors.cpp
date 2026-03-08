@@ -32,7 +32,6 @@ struct WorkerErrorsWorkload : TestWorkload {
 	WorkerErrorsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Future<std::vector<TraceEventFields>> latestEventOnWorkers(std::vector<WorkerDetails> workers) {
@@ -53,7 +52,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 		co_return results;
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 		std::vector<TraceEventFields> errors = co_await latestEventOnWorkers(workers);
 		for (auto e : errors) {

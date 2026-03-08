@@ -55,9 +55,7 @@ struct DDBalanceWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return ddbalanceSetup(cx, this); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < moversPerClient; c++)
 			clients.push_back(timeout(ddBalanceMover(cx, this, c), testDuration, Void()));
 		co_await waitForAll(clients);

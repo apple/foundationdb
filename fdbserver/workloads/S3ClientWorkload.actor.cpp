@@ -90,8 +90,6 @@ struct S3ClientWorkload : TestWorkload {
 		return _setup(this, cx);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -157,7 +155,7 @@ private:
 		}
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			// Our simulation test can trigger multiple same workloads at the same time
 			// Only run one time workload in the simulation

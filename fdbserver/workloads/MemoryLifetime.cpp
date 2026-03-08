@@ -43,8 +43,6 @@ struct MemoryLifetime : KVWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -54,7 +52,7 @@ struct MemoryLifetime : KVWorkload {
 		co_await bulkSetup(cx, self, self->nodeCount, loadTime);
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		double startTime = now();
 		ReadYourWritesTransaction tr(cx);
 		Reverse reverse = Reverse::False;

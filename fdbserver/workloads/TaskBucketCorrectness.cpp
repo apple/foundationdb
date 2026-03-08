@@ -205,8 +205,6 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		subtaskCount = getOption(options, "subtaskCount"_sr, 20);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -236,7 +234,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		co_await allDone->onSetAddTask(tr, taskBucket, taskDone);
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		Subspace taskSubspace("backup-agent"_sr);
 		Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));

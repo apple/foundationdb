@@ -62,7 +62,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return wrongResults.getValue() == 0; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 	// disable the default timeout setting
@@ -117,7 +116,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 		return Void();
 	}
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		testRywLifetime(cx);
 		co_await timeout(testSpecialKeySpaceErrors(cx, this) && getRangeCallActor(cx, this) &&
 		                     testConflictRanges(cx, /*read*/ true, this) &&

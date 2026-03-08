@@ -50,7 +50,6 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	bool shouldInject(DeterministicRandom& random,
 	                  const WorkloadRequest& work,
@@ -58,7 +57,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		return alreadyAdded < 1 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			// Get the database configuration so as to use proper team size
 			Transaction tr(cx);

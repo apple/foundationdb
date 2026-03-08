@@ -82,8 +82,6 @@ struct BulkLoading : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -736,7 +734,7 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadComplexTestComplete");
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}

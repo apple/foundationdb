@@ -57,8 +57,6 @@ struct WatchAndWaitWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Key keyForIndex(uint64_t index) const {
 		Key result = makeString(keyBytes);
 		uint8_t* data = mutateString(result);
@@ -85,7 +83,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> watches;
 		uint64_t endNode = (nodeCount * (clientId + 1)) / clientCount;
 		uint64_t startNode = (nodeCount * clientId) / clientCount;

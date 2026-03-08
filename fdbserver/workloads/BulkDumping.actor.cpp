@@ -96,8 +96,6 @@ struct BulkDumping : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -455,7 +453,7 @@ struct BulkDumping : TestWorkload {
 	// (9) Validate the loaded data in DB is same as the data in DB before dumping within the bulkdump job range and
 	// bulkload job range. Note that the bulkload job can be unretriable error. In this case, we ignore the error range;
 	// (10) Validate the bulk load job history.
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (clientId != 0) {
 			co_return;
 		}

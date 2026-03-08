@@ -181,7 +181,7 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> clientActors;
 		for (int actorId = 0; actorId < actorsPerClient; ++actorId) {
 			clientActors.push_back(timeout(clientActor(cx, this), testDuration, Void()));
@@ -191,7 +191,6 @@ struct ThrottlingWorkload : KVWorkload {
 		co_await delay(testDuration);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return correctSpecialKeys; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {

@@ -69,7 +69,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		co_return -1.0;
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		try {
 			std::vector<AddressExclusion> excluded;
 			excluded.push_back(AddressExclusion(IPAddress::parse(excludeIp.toString()).get(), excludePort));
@@ -91,7 +91,6 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override {
 		movingDataPerSec = peakMovingData / ddDone;
 		return true;

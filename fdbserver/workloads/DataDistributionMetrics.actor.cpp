@@ -199,7 +199,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		co_return true;
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> clients;
 		clients.push_back(resultConsistencyCheckClient(cx, this));
 		for (int i = 0; i < actorCount; ++i)
@@ -209,7 +209,6 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<bool> check(Database const& cx) override {
 		if (clientId == 0)

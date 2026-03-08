@@ -54,8 +54,6 @@ struct QueuePushWorkload : TestWorkload {
 		startingKey = "0000000000000001"_sr;
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -93,7 +91,7 @@ struct QueuePushWorkload : TestWorkload {
 			throw client_invalid_operation();
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		for (int i = 0; i < actorCount; i++) {
 			clients.push_back(writeClient(cx, this));
 		}

@@ -52,7 +52,6 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -166,7 +165,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			// Run lockActorCount number of actor concurrently.
 			// Each actor conducts (1) locking a range for a while and (2) unlocking the range.

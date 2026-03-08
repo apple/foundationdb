@@ -95,9 +95,7 @@ struct CpuProfilerWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx); }
-
-	Future<Void> _start(Database cx) {
+	Future<Void> start(Database const& cx) override {
 		co_await delay(initialDelay);
 		if (clientId == 0)
 			TraceEvent("SignalProfilerOn").log();
