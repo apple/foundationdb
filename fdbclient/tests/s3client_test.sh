@@ -538,7 +538,7 @@ function test_list_with_files {
   local output
   local status
   output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-    --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>&1)
+    --knob_blobstore_list_max_keys_per_page=100 ls --recursive "${url}" 2>/dev/null)
   status=$?
 
   local missing=0
@@ -580,7 +580,7 @@ function test_list_with_files {
   
   while [[ $non_recursive_attempt -lt $non_recursive_attempts ]]; do
     output=$(run_s3client "${s3client}" "${credentials}" "${logsdir}" "false" \
-      --knob_blobstore_list_max_keys_per_page=10 ls "${url}" 2>&1)
+      --knob_blobstore_list_max_keys_per_page=10 ls "${url}" 2>/dev/null)
     status=$?
     
     # Reset missing flag for this attempt
