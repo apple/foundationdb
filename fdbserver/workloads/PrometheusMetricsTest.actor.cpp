@@ -47,7 +47,7 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 	Counter testOtelCounter;
 
 	PrometheusMetricsTestWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), requestCount("RequestCount"), cc("TestCC", wcx.dbId.toString()),
+	  : TestWorkload(wcx), requestCount("RequestCount"), cc("TestCC", std::to_string(wcx.clientId)),
 	    testOtelCounter("TestOtelCounter", cc) {
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
 	}
