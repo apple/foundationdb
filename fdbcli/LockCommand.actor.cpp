@@ -44,13 +44,13 @@ Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 			co_return true;
 		} catch (Error& e) {
 			err = e;
-			if (err.code() == error_code_database_locked)
-				throw err;
-			else if (err.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-				fprintf(stderr, "%s\n", errorMsgStr.c_str());
-				co_return false;
-			}
+		}
+		if (err.code() == error_code_database_locked)
+			throw err;
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			fprintf(stderr, "%s\n", errorMsgStr.c_str());
+			co_return false;
 		}
 		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
@@ -97,11 +97,11 @@ Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 			co_return true;
 		} catch (Error& e) {
 			err = e;
-			if (err.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-				fprintf(stderr, "%s\n", errorMsgStr.c_str());
-				co_return false;
-			}
+		}
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			fprintf(stderr, "%s\n", errorMsgStr.c_str());
+			co_return false;
 		}
 		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
