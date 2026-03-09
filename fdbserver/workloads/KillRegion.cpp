@@ -44,47 +44,45 @@ struct KillRegionWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled) {
-			return _setup(this, cx);
+			return _setup(cx);
 		}
 		return Void();
 	}
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			return killRegion(this, cx);
+			return killRegion(cx);
 		}
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
+	Future<Void> _setup(Database cx) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();
-		co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true));
+		co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true);
 		TraceEvent("ForceRecovery_WaitForRemote").log();
 		co_await waitForPrimaryDC(cx, "1"_sr);
 		TraceEvent("ForceRecovery_DisablePrimaryComplete").log();
-		co_return;
 	}
 
-	static Future<Void> waitForStorageRecovered(KillRegionWorkload* self) {
-		while (self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
-			co_await self->dbInfo->onChange();
+	Future<Void> waitForStorageRecovered() {
+		while (dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
+			co_await dbInfo->onChange();
 		}
-		co_return;
 	}
 
-	static Future<Void> killRegion(KillRegionWorkload* self, Database cx) {
+	Future<Void> killRegion(Database cx) {
 		ASSERT(g_network->isSimulated());
 		if (deterministicRandom()->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin").log();
-			co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disableRemote, true));
+			co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->disableRemote, true);
 			TraceEvent("ForceRecovery_WaitForPrimary").log();
 			co_await waitForPrimaryDC(cx, "0"_sr);
 			TraceEvent("ForceRecovery_DisableRemoteComplete").log();
-			co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->originalRegions, true));
+			co_await ManagementAPI::changeConfig(cx.getReference(), g_simulator->originalRegions, true);
 		}
 		TraceEvent("ForceRecovery_Wait").log();
-		co_await delay(deterministicRandom()->random01() * self->testDuration);
+		co_await delay(deterministicRandom()->random01() * testDuration);
 
 		// FIXME: killDataCenter breaks simulation if forceKill=false, since some processes can survive and
 		// partially complete a recovery
@@ -115,21 +113,19 @@ struct KillRegionWorkload : TestWorkload {
 		    .detail("Conf", conf.toString());
 
 		if (conf.usableRegions > 1) {
-			loop {
+			while (true) {
 				// only needed if force recovery was unnecessary and we killed the secondary
-				co_await success(ManagementAPI::changeConfig(
-				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true)));
-				auto result = co_await race(waitForStorageRecovered(self), delay(300.0));
+				co_await ManagementAPI::changeConfig(
+				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true);
+				auto result = co_await race(waitForStorageRecovered(), delay(300.0));
 				if (result.index() == 0) {
 					break;
 				}
 			}
-			co_await success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true));
+			co_await ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true);
 		}
 
 		TraceEvent("ForceRecovery_Complete").log();
-
-		co_return;
 	}
 };
 
