@@ -103,8 +103,10 @@ jobs:
             sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-scl.repo &&
             sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl.repo &&
             yum clean all &&
-            yum install -y cmake3 ninja-build &&
+            yum install -y cmake3 ninja-build rh-python38 &&
             ln -sf /usr/bin/cmake3 /usr/bin/cmake &&
+            source /opt/rh/rh-python38/enable &&
+            pip3 install Jinja2 &&
 
             # Ensure clean build from source
             rm -rf build &&
