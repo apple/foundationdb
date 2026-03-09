@@ -50,15 +50,13 @@ struct MetricLoggingWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
-
-	Future<Void> _setup(MetricLoggingWorkload* self, Database cx) {
+	Future<Void> setup(Database const& cx) override {
 		co_await delay(2.0);
-		for (int i = 0; i < self->metricCount; i++) {
-			if (self->testBool) {
-				self->boolMetrics[i]->setConfig(true);
+		for (int i = 0; i < metricCount; i++) {
+			if (testBool) {
+				boolMetrics[i]->setConfig(true);
 			} else {
-				self->int64Metrics[i]->setConfig(true);
+				int64Metrics[i]->setConfig(true);
 			}
 		}
 	}

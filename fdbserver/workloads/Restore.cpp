@@ -85,7 +85,7 @@ struct RestoreWorkload : TestWorkload {
 		    .detail("BackupTag", printable(backupTag).c_str())
 		    .detail("AgentRequest", agentRequest);
 
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -123,44 +123,44 @@ struct RestoreWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, RestoreWorkload* self) {
+	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 		Future<Void> cp;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		TraceEvent("RW_Arguments")
-		    .detail("BackupTag", printable(self->backupTag))
-		    .detail("PerformRestore", self->performRestore)
-		    .detail("AllowPauses", self->allowPauses);
+		    .detail("BackupTag", printable(backupTag))
+		    .detail("PerformRestore", performRestore)
+		    .detail("AllowPauses", allowPauses);
 
-		if (self->allowPauses && BUGGIFY) {
+		if (allowPauses && BUGGIFY) {
 			cp = changePaused(cx, &backupAgent);
 		} else {
 			cp = resumeAgent(cx, &backupAgent);
 		}
-		Future<Void> status = statusLoop(cx, self->backupTag.toString());
+		Future<Void> status = statusLoop(cx, backupTag.toString());
 
 		// Increment the backup agent requests
-		if (self->agentRequest) {
+		if (agentRequest) {
 			RestoreWorkload::backupAgentRequests++;
 		}
 
 		try {
-			KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+			KeyBackedTag keyBackedTag = makeBackupTag(backupTag.toString());
 			UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
 			UID logUid = uidFlag.first;
 			Key destUidValue = co_await BackupConfig(logUid).destUidValue().getD(cx.getReference());
 			Reference<IBackupContainer> lastBackupContainer =
 			    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
-			if (lastBackupContainer && self->performRestore) {
+			if (lastBackupContainer && performRestore) {
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
 				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = co_await container->describeBackup();
-				TraceEvent("RW_Restore", self->randomID)
+				TraceEvent("RW_Restore", randomID)
 				    .setMaxEventLength(12000)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("BackupTag", printable(self->backupTag))
+				    .detail("BackupTag", printable(backupTag))
 				    .setMaxFieldLength(10000)
 				    .detail("Description", desc.toString());
 				Version targetVersion = -1;
@@ -178,7 +178,7 @@ struct RestoreWorkload : TestWorkload {
 				}
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					for (auto& kvrange : self->backupRanges) {
+					for (auto& kvrange : backupRanges) {
 						// version needs to be decided before this transaction otherwise
 						// this clear mutation might be backup as well
 						tr->clear(kvrange);
@@ -186,47 +186,47 @@ struct RestoreWorkload : TestWorkload {
 					return Void();
 				});
 
-				TraceEvent("RW_Restore", self->randomID)
+				TraceEvent("RW_Restore", randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("BackupTag", printable(self->backupTag))
+				    .detail("BackupTag", printable(backupTag))
 				    .detail("TargetVersion", targetVersion);
 				int restoreIndex = 0;
 				// make sure system keys are not present in the restoreRanges as they will get restored first separately
 				// from the rest
 				Standalone<VectorRef<KeyRangeRef>> modifiedRestoreRanges;
-				for (int i = 0; i < self->restoreRanges.size(); ++i) {
-					if (!self->restoreRanges[i].intersects(getSystemBackupRanges())) {
-						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), self->restoreRanges[i]);
+				for (int i = 0; i < restoreRanges.size(); ++i) {
+					if (!restoreRanges[i].intersects(getSystemBackupRanges())) {
+						modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), restoreRanges[i]);
 					} else {
-						KeyRangeRef normalKeyRange = self->restoreRanges[i] & normalKeys;
+						KeyRangeRef normalKeyRange = restoreRanges[i] & normalKeys;
 						if (!normalKeyRange.empty()) {
 							modifiedRestoreRanges.push_back_deep(modifiedRestoreRanges.arena(), normalKeyRange);
 						}
 					}
 				}
-				self->restoreRanges = modifiedRestoreRanges;
+				restoreRanges = modifiedRestoreRanges;
 
-				Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+				Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
 				       restoreIndex,
 				       restoreTag.toString().c_str());
-				TraceEvent("RW_RestoreRanges", self->randomID)
+				TraceEvent("RW_RestoreRanges", randomID)
 				    .detail("RestoreIndex", restoreIndex)
 				    .detail("RestoreTag", printable(restoreTag))
-				    .detail("RestoreRanges", self->restoreRanges.size());
+				    .detail("RestoreRanges", restoreRanges.size());
 				Future<Version> restore;
 				restore = backupAgent.restore(cx,
 				                              cx,
 				                              restoreTag,
 				                              KeyRef(lastBackupContainer->getURL()),
 				                              lastBackupContainer->getProxy(),
-				                              self->restoreRanges,
+				                              restoreRanges,
 				                              WaitForComplete::True,
 				                              targetVersion,
 				                              Verbose::True,
 				                              Key(),
 				                              Key(),
-				                              self->locked,
+				                              locked,
 				                              UnlockDB::True,
 				                              OnlyApplyMutationLogs::False,
 				                              InconsistentSnapshotOnly::False,
@@ -246,27 +246,27 @@ struct RestoreWorkload : TestWorkload {
 			while (true) {
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-				TraceEvent("RW_CheckLeftoverKeys", self->randomID).detail("BackupTag", printable(self->backupTag));
+				TraceEvent("RW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(backupTag));
 
 				Error err;
 				try {
 					// Check the left over tasks
 					// We have to wait for the list to empty since an abort and get status
 					// can leave extra tasks in the queue
-					TraceEvent("RW_CheckLeftoverTasks", self->randomID).detail("BackupTag", printable(self->backupTag));
+					TraceEvent("RW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(backupTag));
 					int64_t taskCount = co_await backupAgent.getTaskCount(tr);
 					int waitCycles = 0;
 
 					while (taskCount > 0) {
 						waitCycles++;
 
-						TraceEvent("RW_NonzeroTaskWait", self->randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						TraceEvent("RW_NonzeroTaskWait", randomID)
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
 						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
 						       now(),
-						       self->randomID.toString().c_str(),
+						       randomID.toString().c_str(),
 						       waitCycles,
 						       (long long)taskCount);
 
@@ -285,12 +285,12 @@ struct RestoreWorkload : TestWorkload {
 						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
 						       agentValues.size(),
 						       printable(backupAgentKey).c_str());
-						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", self->randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("LeftOverKeys", agentValues.size())
 						    .detail("KeySpace", printable(backupAgentKey));
 						for (auto& s : agentValues) {
-							TraceEvent("RW_LeftOverKey", self->randomID)
+							TraceEvent("RW_LeftOverKey", randomID)
 							    .detail("Key", printable(StringRef(s.key.toString())))
 							    .detail("Value", printable(StringRef(s.value.toString())));
 							printf("   Key: %-50s  Value: %s\n",
@@ -303,8 +303,8 @@ struct RestoreWorkload : TestWorkload {
 
 					Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
 					if (latestVersion.present()) {
-						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", self->randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
 						    .detail("DestUidValue", destUidValue.printable());
 					} else {
@@ -313,7 +313,7 @@ struct RestoreWorkload : TestWorkload {
 
 					RangeResult versions = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-					if (!self->shareLogRange || !versions.size()) {
+					if (!shareLogRange || !versions.size()) {
 						RangeResult logValues = co_await tr->getRange(
 						    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
@@ -323,8 +323,8 @@ struct RestoreWorkload : TestWorkload {
 							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
 							       logValues.size(),
 							       printable(backupLogValuesKey).c_str());
-							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", self->randomID)
-							    .detail("BackupTag", printable(self->backupTag))
+							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
+							    .detail("BackupTag", printable(backupTag))
 							    .detail("LeftOverKeys", logValues.size())
 							    .detail("KeySpace", printable(backupLogValuesKey));
 						} else {
@@ -336,7 +336,7 @@ struct RestoreWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				TraceEvent("RW_CheckException", self->randomID).error(err);
+				TraceEvent("RW_CheckException", randomID).error(err);
 				co_await tr->onError(err);
 			}
 
@@ -344,10 +344,10 @@ struct RestoreWorkload : TestWorkload {
 				co_await TaskBucket::debugPrintRange(cx, normalKeys.end, StringRef());
 			}
 
-			TraceEvent("RW_Complete", self->randomID).detail("BackupTag", printable(self->backupTag));
+			TraceEvent("RW_Complete", randomID).detail("BackupTag", printable(backupTag));
 
 			// Decrement the backup agent requets
-			if (self->agentRequest) {
+			if (agentRequest) {
 				RestoreWorkload::backupAgentRequests--;
 			}
 

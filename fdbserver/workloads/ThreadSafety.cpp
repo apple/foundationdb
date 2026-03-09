@@ -137,38 +137,36 @@ struct ThreadSafetyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
-	Future<Void> _start(Database cx, ThreadSafetyWorkload* self) {
+	Future<Void> start(Database const& cx) override {
 		std::vector<ThreadInfo*> threadInfo;
 
 		Reference<IDatabase> dbRef =
 		    co_await unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx));
-		self->db = dbRef;
+		db = dbRef;
 
 		if (deterministicRandom()->coinflip()) {
 			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-			self->db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
+			db = MultiVersionDatabase::debugCreateFromExistingDatabase(dbRef);
 		}
 
-		for (int i = 0; i < self->threadsPerClient; ++i) {
-			threadInfo.push_back(new ThreadInfo(i, self));
-			g_network->startThread(self->threadStart, threadInfo[i]);
+		for (int i = 0; i < threadsPerClient; ++i) {
+			threadInfo.push_back(new ThreadInfo(i, this));
+			g_network->startThread(threadStart, threadInfo[i]);
 		}
 
-		co_await delay(self->threadDuration);
+		co_await delay(threadDuration);
 
 		// Signals the threads to stop
-		self->mutex.enter();
-		self->stopped = true;
-		self->mutex.leave();
+		mutex.enter();
+		stopped = true;
+		mutex.leave();
 
 		for (int i = 0; i < threadInfo.size(); ++i) {
 			try {
 				co_await threadInfo[i]->done.getFuture();
 			} catch (Error& e) {
-				self->success = false;
-				printf("Thread %d.%d failed: %s\n", self->clientId, i, e.name());
+				success = false;
+				printf("Thread %d.%d failed: %s\n", clientId, i, e.name());
 				TraceEvent(SevError, "ThreadSafety_ThreadFailed").error(e);
 			}
 

@@ -82,22 +82,22 @@ struct AsyncFileWriteWorkload : public AsyncFileWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
-			return _start(this);
+			return _start();
 
 		return Void();
 	}
 
-	Future<Void> _start(AsyncFileWriteWorkload* self) {
+	Future<Void> _start() {
 		StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		co_await timeout(self->runWriteTest(self), self->testDuration, Void());
+		co_await timeout(runWriteTest(this), testDuration, Void());
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
-		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
+		averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		// Try to let the IO complete so we can clean up after them
-		co_await timeout(waitForAll(self->writeFutures), 10, Void());
+		co_await timeout(waitForAll(writeFutures), 10, Void());
 	}
 
 	Future<Void> runWriteTest(AsyncFileWriteWorkload* self) {

@@ -49,7 +49,7 @@ struct IndexScanWorkload : KVWorkload {
 		if (singleProcess && clientId != 0) {
 			return Void();
 		}
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(const Database&) override { return true; }
@@ -67,7 +67,7 @@ struct IndexScanWorkload : KVWorkload {
 		m.emplace_back("Rows/chunk", chunks == 0 ? 0 : rowsRead / (double)chunks, Averaged::True);
 	}
 
-	Future<Void> _start(Database cx, IndexScanWorkload* self) {
+	Future<Void> _start(Database cx) {
 		// Boilerplate: "warm" the location cache so that the location of all keys is known before test starts
 		double startTime = now();
 		while (true) {
@@ -85,34 +85,33 @@ struct IndexScanWorkload : KVWorkload {
 		// Wait some small amount of time for things to "settle". Maybe this is historical?
 		co_await delay(std::max(0.1, 1.0 - (now() - startTime)));
 
-		co_await timeout(serialScans(cx, self), self->testDuration, Void());
+		co_await timeout(serialScans(cx), testDuration, Void());
 	}
 
-	static Future<Void> serialScans(Database cx, IndexScanWorkload* self) {
+	Future<Void> serialScans(Database cx) {
 		double start = now();
 		try {
 			while (true) {
-				co_await scanDatabase(cx, self);
+				co_await scanDatabase(cx);
 			}
 		} catch (...) {
-			self->totalTimeFetching = now() - start;
+			totalTimeFetching = now() - start;
 			throw;
 		}
 	}
 
-	static Future<Void> scanDatabase(Database cx, IndexScanWorkload* self) {
-		int startNode =
-		    deterministicRandom()->randomInt(0, self->nodeCount / 2); // start in the first half of the database
-		KeySelector begin = firstGreaterOrEqual(self->keyForIndex(startNode));
-		KeySelector end = firstGreaterThan(self->keyForIndex(self->nodeCount));
-		GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, self->bytesPerRead);
+	Future<Void> scanDatabase(Database cx) {
+		int startNode = deterministicRandom()->randomInt(0, nodeCount / 2); // start in the first half of the database
+		KeySelector begin = firstGreaterOrEqual(keyForIndex(startNode));
+		KeySelector end = firstGreaterThan(keyForIndex(nodeCount));
+		GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, bytesPerRead);
 
 		int rowsRead{ 0 };
 		int chunks{ 0 };
 		double startTime{ 0 };
 		while (true) {
 			ReadYourWritesTransaction tr(cx);
-			if (!self->readYourWrites)
+			if (!readYourWrites)
 				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 			startTime = now();
 			rowsRead = 0;
@@ -124,7 +123,7 @@ struct IndexScanWorkload : KVWorkload {
 					RangeResult r = co_await tr.getRange(begin, end, limits);
 					chunks++;
 					rowsRead += r.size();
-					if (!r.size() || !r.more || (now() - startTime) > self->transactionDuration) {
+					if (!r.size() || !r.more || (now() - startTime) > transactionDuration) {
 						break;
 					}
 					begin = firstGreaterThan(r[r.size() - 1].key);
@@ -135,13 +134,13 @@ struct IndexScanWorkload : KVWorkload {
 				err = e;
 			}
 			if (err.code() != error_code_actor_cancelled)
-				++self->failedTransactions;
+				++failedTransactions;
 			co_await tr.onError(err);
 		}
 
-		self->rowsRead += rowsRead;
-		self->chunks += chunks;
-		self->scans++;
+		this->rowsRead += rowsRead;
+		this->chunks += chunks;
+		this->scans++;
 	}
 };
 

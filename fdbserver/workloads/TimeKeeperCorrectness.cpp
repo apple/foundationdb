@@ -37,11 +37,11 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload* self) {
+	Future<Void> start(Database const& cx) override {
 		TraceEvent(SevInfo, "TKCorrectness_Start").log();
 
 		double start = now();
-		while (now() - start > self->testDuration) {
+		while (now() - start > testDuration) {
 			Transaction tr(cx);
 
 			while (true) {
@@ -49,7 +49,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				try {
 					int64_t curTime = now();
 					Version v = co_await tr.getReadVersion();
-					self->inMemTimeKeeper[curTime] = v;
+					inMemTimeKeeper[curTime] = v;
 					break;
 				} catch (Error& e) {
 					err = e;
@@ -64,9 +64,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "TKCorrectness_Completed").log();
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
-	static Future<bool> _check(Database cx, TimeKeeperCorrectnessWorkload* self) {
+	Future<bool> check(Database const& cx) override {
 		KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
@@ -81,7 +79,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				KeyBackedRangeResult<std::pair<int64_t, Version>> allItems =
-				    co_await dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2);
+				    co_await dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), inMemTimeKeeper.size() + 2);
 
 				if (allItems.results.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
 					TraceEvent(SevError, "TKCorrectness_TooManyEntries")
@@ -90,15 +88,15 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					co_return false;
 				}
 
-				if (allItems.results.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
+				if (allItems.results.size() < testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
 					TraceEvent(SevWarnAlways, "TKCorrectness_TooFewEntries")
-					    .detail("Expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
+					    .detail("Expected", testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
 					    .detail("Found", allItems.results.size());
 				}
 
 				for (auto item : allItems.results) {
-					auto it = self->inMemTimeKeeper.lower_bound(item.first);
-					if (it == self->inMemTimeKeeper.end()) {
+					auto it = inMemTimeKeeper.lower_bound(item.first);
+					if (it == inMemTimeKeeper.end()) {
 						continue;
 					}
 
@@ -120,8 +118,6 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 			co_await tr->onError(err);
 		}
 	}
-
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 };
 
 WorkloadFactory<TimeKeeperCorrectnessWorkload> TimeKeeperCorrectnessWorkloadFactory;

@@ -31,17 +31,17 @@ class ThroughputQuotaWorkload : public TestWorkload {
 
 	int64_t getTotalQuota() const { return totalQuotaInPages * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE; }
 
-	static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
+	Future<Void> setupImpl(Database cx) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			Error err;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
-				    .detail("Tag", printable(self->transactionTag))
-				    .detail("ReservedQuota", self->getReservedQuota())
-				    .detail("TotalQuota", self->getTotalQuota());
-				ThrottleApi::setTagQuota(tr, self->transactionTag, self->getReservedQuota(), self->getTotalQuota());
+				    .detail("Tag", printable(transactionTag))
+				    .detail("ReservedQuota", getReservedQuota())
+				    .detail("TotalQuota", getTotalQuota());
+				ThrottleApi::setTagQuota(tr, transactionTag, getReservedQuota(), getTotalQuota());
 				co_await tr->commit();
 				co_return;
 			} catch (Error& e) {
@@ -60,7 +60,7 @@ public:
 		totalQuotaInPages = getOption(options, "totalQuotaInPages"_sr, 0);
 	}
 
-	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
+	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setupImpl(cx); }
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}

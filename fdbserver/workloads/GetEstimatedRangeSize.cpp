@@ -66,7 +66,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 		if (clientId > 0) {
 			return Void();
 		}
-		return checkSize(this, cx);
+		return checkSize(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -79,19 +79,19 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
-	static Future<Void> checkSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
-		int64_t size = co_await getSize(self, cx);
-		ASSERT(sizeIsAsExpected(self, size));
+	Future<Void> checkSize(Database cx) {
+		int64_t size = co_await getSize(cx);
+		ASSERT(sizeIsAsExpected(size));
 	}
 
-	static bool sizeIsAsExpected(GetEstimatedRangeSizeWorkload* self, int64_t size) {
-		int nodeSize = self->key(0).size() + self->value(0).size();
+	bool sizeIsAsExpected(int64_t size) {
+		int nodeSize = key(0).size() + value(0).size();
 		// We use a wide range to avoid flakiness because the underlying function
 		// is making an estimation.
-		return size > self->nodeCount * nodeSize / 2 && size < self->nodeCount * nodeSize * 5;
+		return size > nodeCount * nodeSize / 2 && size < nodeCount * nodeSize * 5;
 	}
 
-	static Future<int64_t> getSize(GetEstimatedRangeSizeWorkload* self, Database cx) {
+	Future<int64_t> getSize(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 		double totalDelay = 0.0;
 
@@ -100,7 +100,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 			try {
 				int64_t size = co_await tr.getEstimatedRangeSizeBytes(normalKeys);
 				TraceEvent(SevDebug, "GetSizeResult").detail("Size", size);
-				if (!sizeIsAsExpected(self, size) && totalDelay < 300.0) {
+				if (!sizeIsAsExpected(size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					co_await delay(5.0);
 				} else {

@@ -44,18 +44,18 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	static Future<Void> runAllocationTransaction(Database cx, HighContentionPrefixAllocatorWorkload* self) {
+	Future<Void> runAllocationTransaction(Database cx) {
 		Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 
-		int numAllocations = deterministicRandom()->randomInt(1, self->maxAllocationsPerTransaction + 1);
-		self->expectedPrefixes += numAllocations;
+		int numAllocations = deterministicRandom()->randomInt(1, maxAllocationsPerTransaction + 1);
+		expectedPrefixes += numAllocations;
 
 		while (true) {
 			Error err;
 			try {
 				std::vector<Future<Key>> futures;
 				for (int i = 0; i < numAllocations; ++i) {
-					futures.push_back(self->allocator.allocate(tr));
+					futures.push_back(allocator.allocate(tr));
 				}
 
 				co_await waitForAll(futures);
@@ -65,8 +65,8 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 					Key prefix = f.get();
 
 					// There should be no previously allocated prefix that is prefixed by our newly allocated one
-					auto itr = self->allocatedPrefixes.lower_bound(prefix);
-					if (itr != self->allocatedPrefixes.end() && itr->startsWith(prefix)) {
+					auto itr = allocatedPrefixes.lower_bound(prefix);
+					if (itr != allocatedPrefixes.end() && itr->startsWith(prefix)) {
 						TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 						    .detail("Reason", "Prefix collision")
 						    .detail("AllocatedPrefix", prefix)
@@ -76,7 +76,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 					}
 
 					// There should be no previously allocated prefix that is a prefix of our newly allocated one
-					if (itr != self->allocatedPrefixes.begin()) {
+					if (itr != allocatedPrefixes.begin()) {
 						--itr;
 
 						if (prefix.startsWith(*itr)) {
@@ -90,7 +90,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 					}
 
 					// This is technically redundant, but the prefix should not have been allocated previously
-					ASSERT(self->allocatedPrefixes.insert(f.get()).second);
+					ASSERT(allocatedPrefixes.insert(f.get()).second);
 				}
 
 				break;
@@ -101,27 +101,27 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> runTest(Database cx, HighContentionPrefixAllocatorWorkload* self) {
+	Future<Void> runTest(Database cx) {
 		int roundNum = 0;
-		for (; roundNum < self->numRounds; ++roundNum) {
+		for (; roundNum < numRounds; ++roundNum) {
 			std::vector<Future<Void>> futures;
-			int numTransactions = deterministicRandom()->randomInt(1, self->maxTransactionsPerRound + 1);
+			int numTransactions = deterministicRandom()->randomInt(1, maxTransactionsPerRound + 1);
 			for (int i = 0; i < numTransactions; ++i) {
-				futures.push_back(runAllocationTransaction(cx, self));
+				futures.push_back(runAllocationTransaction(cx));
 			}
 
 			co_await waitForAll(futures);
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return runTest(cx, this); }
+	Future<Void> start(Database const& cx) override { return runTest(cx); }
 
-	static Future<bool> _check(Database cx, HighContentionPrefixAllocatorWorkload* self) {
-		if (self->expectedPrefixes != self->allocatedPrefixes.size()) {
+	Future<bool> check(Database const& cx) override {
+		if (expectedPrefixes != allocatedPrefixes.size()) {
 			TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 			    .detail("Reason", "Incorrect Number of Prefixes Allocated")
-			    .detail("NumAllocated", self->allocatedPrefixes.size())
-			    .detail("Expected", self->expectedPrefixes);
+			    .detail("NumAllocated", allocatedPrefixes.size())
+			    .detail("Expected", expectedPrefixes);
 
 			co_return false;
 		}
@@ -132,7 +132,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 			try {
 				Key k1 = co_await tr->getKey(firstGreaterOrEqual(""_sr));
 				Key k2 = co_await tr->getKey(lastLessThan("\xff"_sr));
-				if (!k1.startsWith(self->allocatorSubspace.key()) || !k2.startsWith(self->allocatorSubspace.key())) {
+				if (!k1.startsWith(allocatorSubspace.key()) || !k2.startsWith(allocatorSubspace.key())) {
 					TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 					    .detail("Reason", "Keys written outside allocator subspace")
 					    .detail("MinKey", k1)
@@ -149,7 +149,6 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 
 		co_return true;
 	}
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

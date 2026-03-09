@@ -54,8 +54,6 @@ struct ConflictRangeWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
 	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
@@ -67,9 +65,9 @@ struct ConflictRangeWorkload : TestWorkload {
 		m.push_back(retries.getMetric());
 	}
 
-	Future<Void> _start(Database cx, ConflictRangeWorkload* self) {
-		if (self->clientId == 0)
-			co_await timeout(self->conflictRangeClient(cx, self), self->testDuration, Void());
+	Future<Void> start(Database const& cx) override {
+		if (clientId == 0)
+			co_await timeout(conflictRangeClient(cx, this), testDuration, Void());
 	}
 
 	Future<Void> conflictRangeClient(Database cx, ConflictRangeWorkload* self) {

@@ -67,13 +67,13 @@ struct ClientMetricWorkload : TestWorkload {
 		if (this->clientId != 0) {
 			return Void();
 		}
-		return _start(this, cx);
+		return _start(cx);
 	}
 
-	Future<Void> _start(ClientMetricWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		try {
-			self->clients.push_back(timeout(self->runner(cx, self), self->testDuration, Void()));
-			co_await waitForAll(self->clients);
+			clients.push_back(timeout(runner(cx, this), testDuration, Void()));
+			co_await waitForAll(clients);
 		} catch (Error& e) {
 			TraceEvent("ClientMetricError::_start").error(e);
 		}

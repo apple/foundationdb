@@ -59,7 +59,7 @@ struct RestoreBackupWorkload : TestWorkload {
 
 	static constexpr auto NAME = "RestoreBackup";
 
-	static Future<Void> waitOnBackup(RestoreBackupWorkload* self, Database cx) {
+	Future<Void> waitOnBackup(Database cx) {
 		Version waitForVersion{ 0 };
 		UID backupUID;
 		Transaction tr(cx);
@@ -74,14 +74,14 @@ struct RestoreBackupWorkload : TestWorkload {
 			}
 			co_await tr.onError(err);
 		}
-		EBackupState backupState = co_await self->backupAgent.waitBackup(
-		    cx, self->tag.toString(), self->stopWhenDone, &self->backupContainer, &backupUID);
+		EBackupState backupState =
+		    co_await backupAgent.waitBackup(cx, tag.toString(), stopWhenDone, &backupContainer, &backupUID);
 		if (backupState == EBackupState::STATE_COMPLETED) {
 			co_return;
 		} else if (backupState == EBackupState::STATE_RUNNING_DIFFERENTIAL) {
-			ASSERT(!self->stopWhenDone);
+			ASSERT(!stopWhenDone);
 			while (true) {
-				BackupDescription desc = co_await self->backupContainer->describeBackup(true);
+				BackupDescription desc = co_await backupContainer->describeBackup(true);
 				TraceEvent("BackupVersionGate")
 				    .detail("MaxLogEndVersion", desc.maxLogEnd.present() ? desc.maxLogEnd.get() : invalidVersion)
 				    .detail("ContiguousLogEndVersion",
@@ -90,7 +90,7 @@ struct RestoreBackupWorkload : TestWorkload {
 				if (desc.contiguousLogEnd.present() && desc.contiguousLogEnd.get() >= waitForVersion) {
 					try {
 						TraceEvent("DiscontinuingBackup").log();
-						co_await self->backupAgent.discontinueBackup(cx, self->tag);
+						co_await backupAgent.discontinueBackup(cx, tag);
 					} catch (Error& e) {
 						TraceEvent("ErrorDiscontinuingBackup").error(e);
 						if (e.code() != error_code_backup_unneeded) {
@@ -127,32 +127,32 @@ struct RestoreBackupWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(RestoreBackupWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
-		co_await delay(self->delayFor);
-		co_await waitOnBackup(self, cx);
+		co_await delay(delayFor);
+		co_await waitOnBackup(cx);
 		co_await clearDatabase(cx);
 
-		co_await self->backupAgent.restore(cx,
-		                                   cx,
-		                                   self->tag,
-		                                   Key(self->backupContainer->getURL()),
-		                                   self->backupContainer->getProxy(),
-		                                   WaitForComplete::True,
-		                                   ::invalidVersion,
-		                                   Verbose::True,
-		                                   KeyRange(),
-		                                   Key(),
-		                                   Key(),
-		                                   LockDB::True,
-		                                   OnlyApplyMutationLogs::False,
-		                                   InconsistentSnapshotOnly::False,
-		                                   ::invalidVersion,
-		                                   self->encryptionKeyFileName);
+		co_await backupAgent.restore(cx,
+		                             cx,
+		                             tag,
+		                             Key(backupContainer->getURL()),
+		                             backupContainer->getProxy(),
+		                             WaitForComplete::True,
+		                             ::invalidVersion,
+		                             Verbose::True,
+		                             KeyRange(),
+		                             Key(),
+		                             Key(),
+		                             LockDB::True,
+		                             OnlyApplyMutationLogs::False,
+		                             InconsistentSnapshotOnly::False,
+		                             ::invalidVersion,
+		                             encryptionKeyFileName);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

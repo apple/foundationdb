@@ -46,7 +46,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		return Standalone<StringRef>(format("Value/%080d", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
-	static Future<double> getMovingDataAmount(Database cx, DDMetricsExcludeWorkload* self) {
+	Future<double> getMovingDataAmount(Database cx) {
 		try {
 			StatusObject statusObj = co_await StatusClient::statusFetcher(cx);
 			StatusObjectReader statusObjCluster;
@@ -57,8 +57,8 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 				StatusObjectReader movingData = statusObjData.last();
 				double dataInQueue, dataInFlight;
 				if (movingData.get("in_queue_bytes", dataInQueue) && movingData.get("in_flight_bytes", dataInFlight)) {
-					self->peakInQueue = std::max(self->peakInQueue, dataInQueue);
-					self->peakInFlight = std::max(self->peakInFlight, dataInFlight);
+					peakInQueue = std::max(peakInQueue, dataInQueue);
+					peakInFlight = std::max(peakInFlight, dataInFlight);
 					co_return dataInQueue + dataInFlight;
 				}
 			}
@@ -69,19 +69,19 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 		co_return -1.0;
 	}
 
-	static Future<Void> _start(Database cx, DDMetricsExcludeWorkload* self) {
+	Future<Void> start(Database const& cx) override {
 		try {
 			std::vector<AddressExclusion> excluded;
-			excluded.push_back(AddressExclusion(IPAddress::parse(self->excludeIp.toString()).get(), self->excludePort));
+			excluded.push_back(AddressExclusion(IPAddress::parse(excludeIp.toString()).get(), excludePort));
 			co_await excludeServers(cx, excluded);
 			double startTime = now();
 			while (true) {
 				co_await delay(2.5);
-				double movingData = co_await self->getMovingDataAmount(cx, self);
-				self->peakMovingData = std::max(self->peakMovingData, movingData);
+				double movingData = co_await getMovingDataAmount(cx);
+				peakMovingData = std::max(peakMovingData, movingData);
 				TraceEvent("DDMetricsExcludeCheck").detail("MovingData", movingData);
 				if (movingData == 0.0) {
-					self->ddDone = now() - startTime;
+					ddDone = now() - startTime;
 					co_return;
 				}
 			}
@@ -91,7 +91,6 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override {
 		movingDataPerSec = peakMovingData / ddDone;
 		return true;

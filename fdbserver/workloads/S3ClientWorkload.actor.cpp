@@ -90,8 +90,6 @@ struct S3ClientWorkload : TestWorkload {
 		return _setup(this, cx);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
@@ -157,8 +155,8 @@ private:
 		}
 	}
 
-	Future<Void> _start(S3ClientWorkload* self, Database cx) {
-		if (self->clientId != 0) {
+	Future<Void> start(Database const& cx) override {
+		if (clientId != 0) {
 			// Our simulation test can trigger multiple same workloads at the same time
 			// Only run one time workload in the simulation
 			co_return;
@@ -174,9 +172,9 @@ private:
 		std::string download_path_to_clean = "downloaded_credentials";
 		try {
 			// Attempt to delete the credentials file if it exists
-			if (fileExists(self->credentials)) {
-				deleteFile(self->credentials);
-				TraceEvent(SevDebug, "S3ClientWorkloadCleanedPreExistingFile").detail("File", self->credentials);
+			if (fileExists(credentials)) {
+				deleteFile(credentials);
+				TraceEvent(SevDebug, "S3ClientWorkloadCleanedPreExistingFile").detail("File", credentials);
 			}
 			// Attempt to delete the download target as a directory or file unconditionally
 			// Use eraseDirectoryRecursive as it might exist as a directory
@@ -194,9 +192,8 @@ private:
 		// Create a unique directory for this workload instance inside simfdb
 		// This keeps test artifacts in the simulation directory like other workloads
 		// Use deterministic directory name instead of random UID to ensure deterministic behavior
-		std::string uniqueRunDir =
-		    joinPath(self->simfdbDir,
-		             format("s3_workload_run_%08x_%08x", self->clientId, deterministicRandom()->randomInt(0, 1000000)));
+		std::string uniqueRunDir = joinPath(
+		    simfdbDir, format("s3_workload_run_%08x_%08x", clientId, deterministicRandom()->randomInt(0, 1000000)));
 		try {
 			platform::createDirectory(uniqueRunDir);
 			TraceEvent(SevDebug, "S3ClientWorkloadCreatedRunDir").detail("Dir", uniqueRunDir);
@@ -207,27 +204,27 @@ private:
 		// --- END PER-RUN ISOLATION & CLEANUP ---
 
 		// Modify paths to be within the unique directory
-		self->credentials = joinPath(uniqueRunDir, "S3ClientWorkload.blob-credentials.json");
+		credentials = joinPath(uniqueRunDir, "S3ClientWorkload.blob-credentials.json");
 		std::string download = joinPath(uniqueRunDir, "downloaded_credentials");
 
 		// Setup the credentials file inside the unique directory.
-		self->setupCredentialsFile();
+		setupCredentialsFile();
 
 		// Create a unique object key for S3 (using only the base filename)
 		std::string baseFilename =
-		    ::basename(const_cast<char*>(self->credentials.c_str())); // Gets filename from the *new* path
+		    ::basename(const_cast<char*>(credentials.c_str())); // Gets filename from the *new* path
 		// Use deterministic ID based on client ID and test context instead of random UID
 		// This ensures identical behavior across determinism check runs
-		std::string deterministicId = format("%08x_%08x", self->clientId, deterministicRandom()->randomInt(0, 1000000));
+		std::string deterministicId = format("%08x_%08x", clientId, deterministicRandom()->randomInt(0, 1000000));
 		std::string uniqueObjectKey = baseFilename + "_" + deterministicId;
-		std::string file_url = self->addFileToUrl(uniqueObjectKey, self->s3Url);
+		std::string file_url = addFileToUrl(uniqueObjectKey, s3Url);
 		bool uploaded = false; // Track if upload started/succeeded
 		Optional<Error> errorToThrow; // State variable to hold error
 
 		Error err;
 		try {
 			// Use original local path (now inside unique dir) for source, unique URL for destination
-			co_await copyUpFile(self->credentials, file_url);
+			co_await copyUpFile(credentials, file_url);
 			uploaded = true; // Mark as uploaded only after wait() succeeds
 			co_await copyDownFile(file_url, download);
 			co_await deleteResource(file_url); // Attempt deletion on success path
@@ -238,7 +235,7 @@ private:
 			TraceEvent(SevError, "S3ClientWorkloadError") // Log original error
 			    .error(err)
 			    .detail("S3URL", file_url)
-			    .detail("Path", self->credentials)
+			    .detail("Path", credentials)
 			    .detail("Download", download);
 
 			// Store the original error BEFORE attempting cleanup
@@ -265,7 +262,7 @@ private:
 
 		// Compare the contents of the original and downloaded files
 		// Paths are now inside uniqueRunDir
-		std::string originalContent = readFileBytes(self->credentials, 1024 * 1024); // 1MB max size
+		std::string originalContent = readFileBytes(credentials, 1024 * 1024); // 1MB max size
 		std::string downloadedContent = readFileBytes(download, 1024 * 1024); // 1MB max size
 		if (originalContent != downloadedContent) {
 			TraceEvent(SevError, "S3ClientWorkloadContentMismatch")
@@ -277,12 +274,12 @@ private:
 		// Cleanup local files - each operation handles its own errors non-fatally
 		// Delete credentials file
 		try {
-			if (fileExists(self->credentials)) {
-				deleteFile(self->credentials);
-				TraceEvent(SevDebug, "S3ClientWorkloadDeletedCredentials").detail("File", self->credentials);
+			if (fileExists(credentials)) {
+				deleteFile(credentials);
+				TraceEvent(SevDebug, "S3ClientWorkloadDeletedCredentials").detail("File", credentials);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "S3ClientWorkloadCredentialsCleanupFailed").error(e).detail("File", self->credentials);
+			TraceEvent(SevWarn, "S3ClientWorkloadCredentialsCleanupFailed").error(e).detail("File", credentials);
 		}
 
 		// Delete download file

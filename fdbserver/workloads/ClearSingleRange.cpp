@@ -37,23 +37,23 @@ struct ClearSingleRange : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return clientId != 0 ? Void() : fdbClientClearRange(cx, this); }
+	Future<Void> start(Database const& cx) override { return clientId != 0 ? Void() : fdbClientClearRange(cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> fdbClientClearRange(Database db, ClearSingleRange* self) {
+	Future<Void> fdbClientClearRange(Database db) {
 		Transaction tr(db);
 		Error err;
 		try {
 			TraceEvent("ClearSingleRange")
-			    .detail("Begin", printable(self->begin))
-			    .detail("End", printable(self->end))
-			    .detail("StartDelay", self->startDelay);
+			    .detail("Begin", printable(begin))
+			    .detail("End", printable(end))
+			    .detail("StartDelay", startDelay);
 			tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-			co_await delay(self->startDelay);
-			tr.clear(KeyRangeRef(self->begin, self->end));
+			co_await delay(startDelay);
+			tr.clear(KeyRangeRef(begin, end));
 			co_await tr.commit();
 		} catch (Error& e) {
 			err = e;

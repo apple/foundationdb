@@ -59,123 +59,123 @@ struct RYWPerformanceWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return _start(cx, this);
+			return _start(cx);
 		return Void();
 	}
 
-	static Future<Void> fillCache(ReadYourWritesTransaction* tr, RYWPerformanceWorkload* self, int type) {
+	Future<Void> fillCache(ReadYourWritesTransaction* tr, int type) {
 		int i{ 0 };
 		if (type == 0) {
-			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			for (i = 0; i < nodes; i++) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 1) {
 			std::vector<Future<Optional<Value>>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->get(self->keyForIndex(i)));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->get(keyForIndex(i)));
 			}
 			co_await waitForAll(gets);
 		} else if (type == 2) {
 			std::vector<Future<Optional<Value>>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->get(self->keyForIndex(i)));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->get(keyForIndex(i)));
 			}
 			co_await waitForAll(gets);
-			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			for (i = 0; i < nodes; i++) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 3) {
 			std::vector<Future<Optional<Value>>> gets;
-			for (i = 0; i < self->nodes; i += 2) {
-				gets.push_back(tr->get(self->keyForIndex(i)));
+			for (i = 0; i < nodes; i += 2) {
+				gets.push_back(tr->get(keyForIndex(i)));
 			}
 			co_await waitForAll(gets);
-			for (i = 1; i < self->nodes; i += 2) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			for (i = 1; i < nodes; i += 2) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 4) {
-			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
+			co_await tr->getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
 		} else if (type == 5) {
-			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
-			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			co_await tr->getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
+			for (i = 0; i < nodes; i++) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 6) {
-			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
-			for (i = 0; i < self->nodes; i += 2) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			co_await tr->getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
+			for (i = 0; i < nodes; i += 2) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 7) {
-			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
-			for (i = 0; i < self->nodes; i++) {
-				tr->clear(self->keyForIndex(i));
+			co_await tr->getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
+			for (i = 0; i < nodes; i++) {
+				tr->clear(keyForIndex(i));
 			}
 		} else if (type == 8) {
-			co_await tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes);
-			for (i = 0; i < self->nodes; i += 2) {
-				tr->clear(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 1)));
+			co_await tr->getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
+			for (i = 0; i < nodes; i += 2) {
+				tr->clear(KeyRangeRef(keyForIndex(i), keyForIndex(i + 1)));
 			}
 		} else if (type == 9) {
 			std::vector<Future<RangeResult>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->getRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 2)), nodes));
 			}
 			co_await waitForAll(gets);
 		} else if (type == 10) {
 			std::vector<Future<RangeResult>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->getRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 2)), nodes));
 			}
 			co_await waitForAll(gets);
-			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			for (i = 0; i < nodes; i++) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 11) {
 			std::vector<Future<RangeResult>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->getRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 2)), nodes));
 			}
 			co_await waitForAll(gets);
-			for (i = 0; i < self->nodes; i += 2) {
-				tr->set(self->keyForIndex(i), "foo"_sr);
+			for (i = 0; i < nodes; i += 2) {
+				tr->set(keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 12) {
 			std::vector<Future<RangeResult>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->getRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 2)), nodes));
 			}
 			co_await waitForAll(gets);
-			for (i = 0; i < self->nodes; i++) {
-				tr->clear(self->keyForIndex(i));
+			for (i = 0; i < nodes; i++) {
+				tr->clear(keyForIndex(i));
 			}
 		} else if (type == 13) {
 			std::vector<Future<RangeResult>> gets;
-			for (i = 0; i < self->nodes; i++) {
-				gets.push_back(tr->getRange(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 2)), self->nodes));
+			for (i = 0; i < nodes; i++) {
+				gets.push_back(tr->getRange(KeyRangeRef(keyForIndex(i), keyForIndex(i + 2)), nodes));
 			}
 			co_await waitForAll(gets);
-			for (i = 0; i < self->nodes; i += 2) {
-				tr->clear(KeyRangeRef(self->keyForIndex(i), self->keyForIndex(i + 1)));
+			for (i = 0; i < nodes; i += 2) {
+				tr->clear(KeyRangeRef(keyForIndex(i), keyForIndex(i + 1)));
 			}
 		}
 	}
 
-	static Future<Void> test_get_single(Database cx, RYWPerformanceWorkload* self, int cacheType) {
+	Future<Void> test_get_single(Database cx, int cacheType) {
 		int i{ 0 };
 		ReadYourWritesTransaction tr(cx);
 
 		while (true) {
 			Error err;
 			try {
-				co_await self->fillCache(&tr, self, cacheType);
+				co_await fillCache(&tr, cacheType);
 
 				double startTime = timer();
 
-				for (i = 0; i < self->nodes; i++) {
-					co_await tr.get(self->keyForIndex(self->nodes / 2));
+				for (i = 0; i < nodes; i++) {
+					co_await tr.get(keyForIndex(nodes / 2));
 				}
 
-				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
+				fprintf(stderr, "%f", nodes / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -185,22 +185,22 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> test_get_many_sequential(Database cx, RYWPerformanceWorkload* self, int cacheType) {
+	Future<Void> test_get_many_sequential(Database cx, int cacheType) {
 		int i{ 0 };
 		ReadYourWritesTransaction tr(cx);
 
 		while (true) {
 			Error err;
 			try {
-				co_await self->fillCache(&tr, self, cacheType);
+				co_await fillCache(&tr, cacheType);
 
 				double startTime = timer();
 
-				for (i = 0; i < self->nodes; i++) {
-					co_await tr.get(self->keyForIndex(i));
+				for (i = 0; i < nodes; i++) {
+					co_await tr.get(keyForIndex(i));
 				}
 
-				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
+				fprintf(stderr, "%f", nodes / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -210,23 +210,22 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> test_get_range_basic(Database cx, RYWPerformanceWorkload* self, int cacheType) {
+	Future<Void> test_get_range_basic(Database cx, int cacheType) {
 		int i{ 0 };
 		ReadYourWritesTransaction tr(cx);
 
 		while (true) {
 			Error err;
 			try {
-				co_await self->fillCache(&tr, self, cacheType);
+				co_await fillCache(&tr, cacheType);
 
 				double startTime = timer();
 
-				for (i = 0; i < self->ranges; i++) {
-					co_await tr.getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)),
-					                     self->nodes);
+				for (i = 0; i < ranges; i++) {
+					co_await tr.getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
 				}
 
-				fprintf(stderr, "%f", self->ranges / (timer() - startTime));
+				fprintf(stderr, "%f", ranges / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -236,25 +235,25 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> test_interleaved_sets_gets(Database cx, RYWPerformanceWorkload* self, int cacheType) {
+	Future<Void> test_interleaved_sets_gets(Database cx, int cacheType) {
 		int i{ 0 };
 		ReadYourWritesTransaction tr(cx);
 
 		while (true) {
 			Error err;
 			try {
-				co_await self->fillCache(&tr, self, cacheType);
+				co_await fillCache(&tr, cacheType);
 
-				tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(self->nodes));
+				tr.set(keyForIndex(nodes / 2), keyForIndex(nodes));
 
 				double startTime = timer();
 
-				for (i = 0; i < self->nodes; i++) {
-					co_await tr.get(self->keyForIndex(self->nodes / 2));
-					tr.set(self->keyForIndex(self->nodes / 2), self->keyForIndex(i));
+				for (i = 0; i < nodes; i++) {
+					co_await tr.get(keyForIndex(nodes / 2));
+					tr.set(keyForIndex(nodes / 2), keyForIndex(i));
 				}
 
-				fprintf(stderr, "%f", self->nodes / (timer() - startTime));
+				fprintf(stderr, "%f", nodes / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -264,11 +263,11 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, RYWPerformanceWorkload* self) {
+	Future<Void> _start(Database cx) {
 		int i{ 0 };
 		fprintf(stderr, "test_get_single, ");
 		for (i = 0; i < 14; i++) {
-			co_await self->test_get_single(cx, self, i);
+			co_await test_get_single(cx, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else
@@ -276,7 +275,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 		fprintf(stderr, "test_get_many_sequential, ");
 		for (i = 0; i < 14; i++) {
-			co_await self->test_get_many_sequential(cx, self, i);
+			co_await test_get_many_sequential(cx, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else
@@ -284,7 +283,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 		fprintf(stderr, "test_get_range_basic, ");
 		for (i = 4; i < 14; i++) {
-			co_await self->test_get_range_basic(cx, self, i);
+			co_await test_get_range_basic(cx, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else
@@ -292,7 +291,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		}
 		fprintf(stderr, "test_interleaved_sets_gets, ");
 		for (i = 0; i < 14; i++) {
-			co_await self->test_interleaved_sets_gets(cx, self, i);
+			co_await test_interleaved_sets_gets(cx, i);
 			if (i == 13)
 				fprintf(stderr, "\n");
 			else

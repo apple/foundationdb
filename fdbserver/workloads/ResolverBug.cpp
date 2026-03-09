@@ -119,20 +119,20 @@ struct ResolverBugWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(ResolverBugWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		Reference<TestWorkload> cycle;
 		std::shared_ptr<ResolverBug> bug = SimBugInjector().get<ResolverBug>(ResolverBugID(), true);
 		while (true) {
 			co_await waitForPhase(bug, 1);
-			cycle = self->createCycle();
+			cycle = createCycle();
 			co_await cycle->setup(cx);
-			bug->cycleState[self->clientId] = 1;
+			bug->cycleState[clientId] = 1;
 			co_await waitForPhase(bug, 2);
 			co_await cycle->start(cx);
-			bug->cycleState[self->clientId] = 2;
+			bug->cycleState[clientId] = 2;
 			co_await waitForPhase(bug, 3);
 			co_await cycle->check(cx);
-			bug->cycleState[self->clientId] = 3;
+			bug->cycleState[clientId] = 3;
 		}
 	}
 
@@ -152,7 +152,7 @@ struct ResolverBugWorkload : TestWorkload {
 		if (clientId == 0) {
 			futures.push_back(driveWorkload(bug, clientCount));
 		}
-		futures.push_back(_start(this, cx->clone()));
+		futures.push_back(_start(cx->clone()));
 		return onBug(bug) || waitForAll(futures);
 	}
 	Future<bool> check(Database const& cx) override { return true; };

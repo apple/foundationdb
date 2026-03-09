@@ -604,35 +604,35 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx, ConsistencyCheckUrgentWorkload* self) {
+	Future<Void> _start(Database cx) {
 		try {
 			TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterStart")
-			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-			    .detail("ClientCount", self->clientCount)
-			    .detail("ClientId", self->clientId);
-			if (self->rangesToCheck.size() == 0) {
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("ClientCount", clientCount)
+			    .detail("ClientId", clientId);
+			if (rangesToCheck.size() == 0) {
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterExit")
 				    .detail("Reason", "AssignedEmptyRangeToCheck")
-				    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-				    .detail("ClientCount", self->clientCount)
-				    .detail("ClientId", self->clientId);
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("ClientCount", clientCount)
+				    .detail("ClientId", clientId);
 				co_return;
 			}
 			if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterMimicFailure")
-				    .detail("ClientCount", self->clientCount)
-				    .detail("ClientId", self->clientId);
+				    .detail("ClientCount", clientCount)
+				    .detail("ClientId", clientId);
 				throw operation_failed(); // mimic tester failure
 			}
-			co_await self->checkDataConsistencyUrgent(cx,
-			                                          self->rangesToCheck,
-			                                          self,
-			                                          /*consistencyCheckEpoch=*/0);
+			co_await checkDataConsistencyUrgent(cx,
+			                                    rangesToCheck,
+			                                    this,
+			                                    /*consistencyCheckEpoch=*/0);
 			TraceEvent(SevInfo, "ConsistencyCheckUrgent_TesterExit")
 			    .detail("Reason", "CompleteCheck")
-			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-			    .detail("ClientCount", self->clientCount)
-			    .detail("ClientId", self->clientId);
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("ClientCount", clientCount)
+			    .detail("ClientId", clientId);
 		} catch (Error& e) {
 			std::string reason;
 			Severity sev = SevInfo;
@@ -649,9 +649,9 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			TraceEvent(sev, "ConsistencyCheckUrgent_TesterExit")
 			    .error(e)
 			    .detail("Reason", reason)
-			    .detail("ConsistencyCheckerId", self->consistencyCheckerId)
-			    .detail("ClientCount", self->clientCount)
-			    .detail("ClientId", self->clientId);
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("ClientCount", clientCount)
+			    .detail("ClientId", clientId);
 			throw consistency_check_urgent_task_failed();
 		}
 	}
@@ -660,7 +660,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		TraceEvent("ConsistencyCheckUrgent_EnterWorkload").detail("ConsistencyCheckerId", consistencyCheckerId);
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

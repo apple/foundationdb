@@ -166,7 +166,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent(SevInfo, "BARW_Param").detail("AgentRequest", agentRequest);
 		TraceEvent(SevInfo, "BARW_Param").detail("Encrypted", encryptionKeyFileName.present());
 
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	bool hasPrefix() const { return addPrefix != ""_sr || removePrefix != ""_sr; }
@@ -410,7 +410,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, BackupAndParallelRestoreCorrectnessWorkload* self) {
+	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 		Future<Void> extraBackup;
 		UID randomID = nondeterministicRandom()->randomUniqueID();
@@ -418,69 +418,69 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		ReadYourWritesTransaction tr2(cx);
 
 		TraceEvent("BARW_Arguments")
-		    .detail("BackupTag", printable(self->backupTag))
-		    .detail("PerformRestore", self->performRestore)
-		    .detail("BackupAfter", self->backupAfter)
-		    .detail("RestoreAfter", self->restoreAfter)
-		    .detail("AbortAndRestartAfter", self->abortAndRestartAfter)
-		    .detail("DifferentialAfter", self->stopDifferentialAfter);
+		    .detail("BackupTag", printable(backupTag))
+		    .detail("PerformRestore", performRestore)
+		    .detail("BackupAfter", backupAfter)
+		    .detail("RestoreAfter", restoreAfter)
+		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
+		    .detail("DifferentialAfter", stopDifferentialAfter);
 
-		if (self->allowPauses && BUGGIFY) {
+		if (allowPauses && BUGGIFY) {
 			Future<Void> cp = changePaused(cx, &backupAgent);
 		}
 
 		// Increment the backup agent requests
-		if (self->agentRequest) {
+		if (agentRequest) {
 			BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests++;
 		}
 
-		if (self->encryptionKeyFileName.present()) {
-			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
+		if (encryptionKeyFileName.present()) {
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get());
 		}
 
 		try {
-			Future<Void> startRestore = delay(self->restoreAfter);
+			Future<Void> startRestore = delay(restoreAfter);
 
 			// backup
-			co_await delay(self->backupAfter);
+			co_await delay(backupAfter);
 
-			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(self->backupTag));
+			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(backupTag));
 			Promise<Void> submitted;
-			Future<Void> b = doBackup(
-			    self, 0, &backupAgent, cx, self->backupTag, self->backupRanges, self->stopDifferentialAfter, submitted);
+			Future<Void> b =
+			    doBackup(this, 0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
-			if (self->abortAndRestartAfter) {
+			if (abortAndRestartAfter) {
 				TraceEvent("BARW_DoBackup2", randomID)
-				    .detail("Tag", printable(self->backupTag))
-				    .detail("AbortWait", self->abortAndRestartAfter);
+				    .detail("Tag", printable(backupTag))
+				    .detail("AbortWait", abortAndRestartAfter);
 				co_await submitted.getFuture();
-				b = b && doBackup(self,
-				                  self->abortAndRestartAfter,
+				b = b && doBackup(this,
+				                  abortAndRestartAfter,
 				                  &backupAgent,
 				                  cx,
-				                  self->backupTag,
-				                  self->backupRanges,
-				                  self->stopDifferentialAfter,
+				                  backupTag,
+				                  backupRanges,
+				                  stopDifferentialAfter,
 				                  Promise<Void>());
 			}
 
 			TraceEvent("BARW_DoBackupWait", randomID)
-			    .detail("BackupTag", printable(self->backupTag))
-			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
+			    .detail("BackupTag", printable(backupTag))
+			    .detail("AbortAndRestartAfter", abortAndRestartAfter);
 			try {
 				co_await b;
 			} catch (Error& e) {
 				if (e.code() != error_code_database_locked)
 					throw;
-				if (self->performRestore)
+				if (performRestore)
 					throw;
 				co_return;
 			}
 			TraceEvent("BARW_DoBackupDone", randomID)
-			    .detail("BackupTag", printable(self->backupTag))
-			    .detail("AbortAndRestartAfter", self->abortAndRestartAfter);
+			    .detail("BackupTag", printable(backupTag))
+			    .detail("AbortAndRestartAfter", abortAndRestartAfter);
 
-			KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+			KeyBackedTag keyBackedTag = makeBackupTag(backupTag.toString());
 			UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
 			UID logUid = uidFlag.first;
 			Key destUidValue = co_await BackupConfig(logUid).destUidValue().getD(cx.getReference());
@@ -488,8 +488,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
 			// Occasionally start yet another backup that might still be running when we restore
-			if (!self->locked && BUGGIFY) {
-				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(self->backupTag));
+			if (!locked && BUGGIFY) {
+				TraceEvent("BARW_SubmitBackup2", randomID).detail("Tag", printable(backupTag));
 				try {
 					// Note the "partitionedLog" must be false, because we change
 					// the configuration to disable backup workers before restore.
@@ -498,16 +498,16 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					                                       {},
 					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
-					                                       self->backupTag.toString(),
-					                                       self->backupRanges,
+					                                       backupTag.toString(),
+					                                       backupRanges,
 					                                       StopWhenDone::True,
 					                                       UsePartitionedLog::False,
 					                                       IncrementalBackupOnly::False,
-					                                       self->encryptionKeyFileName);
+					                                       encryptionKeyFileName);
 				} catch (Error& e) {
 					TraceEvent("BARW_SubmitBackup2Exception", randomID)
 					    .error(e)
-					    .detail("BackupTag", printable(self->backupTag));
+					    .detail("BackupTag", printable(backupTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
@@ -516,12 +516,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
 			co_await startRestore;
 
-			if (lastBackupContainer && self->performRestore) {
+			if (lastBackupContainer && performRestore) {
 				if (deterministicRandom()->random01() < 0.5) {
 					printf("TODO: Check if restore can succeed if dirty restore is performed first\n");
 					// TODO: To support restore even after we attempt dirty restore. Not implemented in the 1st version
 					// fast restore
-					// wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
+					// wait(attemptDirtyRestore(this, cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
 					// randomID));
 				}
 
@@ -531,7 +531,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Clear DB before restore
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-					for (auto& kvrange : self->backupRanges)
+					for (auto& kvrange : backupRanges)
 						tr->clear(kvrange);
 					return Void();
 				});
@@ -539,15 +539,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// restore database
 				TraceEvent("BAFRW_Restore", randomID)
 				    .detail("LastBackupContainer", lastBackupContainer->getURL())
-				    .detail("RestoreAfter", self->restoreAfter)
-				    .detail("BackupTag", printable(self->backupTag));
+				    .detail("RestoreAfter", restoreAfter)
+				    .detail("BackupTag", printable(backupTag));
 				// start restoring
 
 				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL(),
 				                                                 lastBackupContainer->getProxy(),
 				                                                 lastBackupContainer->getEncryptionKeyFileName());
 				BackupDescription desc = co_await container->describeBackup();
-				ASSERT(self->usePartitionedLogs == desc.partitioned);
+				ASSERT(usePartitionedLogs == desc.partitioned);
 				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
 
 				Version targetVersion = -1;
@@ -576,19 +576,19 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 				// Submit parallel restore requests
 				TraceEvent("BackupAndParallelRestoreWorkload")
-				    .detail("PrepareRestores", self->backupRanges.size())
-				    .detail("AddPrefix", self->addPrefix)
-				    .detail("RemovePrefix", self->removePrefix);
+				    .detail("PrepareRestores", backupRanges.size())
+				    .detail("AddPrefix", addPrefix)
+				    .detail("RemovePrefix", removePrefix);
 				co_await backupAgent.submitParallelRestore(cx,
-				                                           self->backupTag,
-				                                           self->backupRanges,
+				                                           backupTag,
+				                                           backupRanges,
 				                                           KeyRef(lastBackupContainer->getURL()),
 				                                           lastBackupContainer->getProxy(),
 				                                           targetVersion,
-				                                           self->locked,
+				                                           locked,
 				                                           randomID,
-				                                           self->addPrefix,
-				                                           self->removePrefix);
+				                                           addPrefix,
+				                                           removePrefix);
 				TraceEvent("BackupAndParallelRestoreWorkload")
 				    .detail("TriggerRestore", "Setting up restoreRequestTriggerKey");
 
@@ -607,13 +607,13 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						if (rs == FileBackupAgent::ERestoreState::ABORTED) {
 							co_await runRYWTransaction(cx,
 							                           [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-								                           tr->clear(self->backupRanges[restoreIndex]);
+								                           tr->clear(backupRanges[restoreIndex]);
 								                           return Void();
 							                           });
 							// TODO: Not Implemented yet
 							// restores[restoreIndex] = backupAgent.restore(cx, restoreTags[restoreIndex],
-							// KeyRef(lastBackupContainer->getURL()), true, -1, true, self->backupRanges[restoreIndex],
-							// Key(), Key(), self->locked);
+							// KeyRef(lastBackupContainer->getURL()), true, -1, true, backupRanges[restoreIndex],
+							// Key(), Key(), locked);
 						}
 					}
 				}
@@ -621,7 +621,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				// Wait for parallel restore to finish before we can proceed
 				TraceEvent("FastRestoreWorkload").detail("WaitForRestoreToFinish", randomID);
 				// Do not unlock DB when restore finish because we need to transformDatabaseContents
-				co_await backupAgent.parallelRestoreFinish(cx, randomID, UnlockDB{ !self->hasPrefix() });
+				co_await backupAgent.parallelRestoreFinish(cx, randomID, UnlockDB{ !hasPrefix() });
 				TraceEvent("FastRestoreWorkload").detail("RestoreFinished", randomID);
 
 				for (auto& restore : restores) {
@@ -629,28 +629,28 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 
 				// If addPrefix or removePrefix set, we want to transform the effect by copying data
-				if (self->hasPrefix()) {
-					co_await transformRestoredDatabase(cx, self->backupRanges, self->addPrefix, self->removePrefix);
+				if (hasPrefix()) {
+					co_await transformRestoredDatabase(cx, backupRanges, addPrefix, removePrefix);
 					co_await unlockDatabase(cx, randomID);
 				}
 			}
 
 			// Q: What is the extra backup and why do we need to care about it?
 			if (extraBackup.isValid()) { // SOMEDAY: Handle this case
-				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(self->backupTag));
+				TraceEvent("BARW_WaitExtraBackup", randomID).detail("BackupTag", printable(backupTag));
 				try {
 					co_await extraBackup;
 				} catch (Error& e) {
 					TraceEvent("BARW_ExtraBackupException", randomID)
 					    .error(e)
-					    .detail("BackupTag", printable(self->backupTag));
+					    .detail("BackupTag", printable(backupTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
 
-				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(self->backupTag));
+				TraceEvent("BARW_AbortBackupExtra", randomID).detail("BackupTag", printable(backupTag));
 				try {
-					co_await backupAgent.abortBackup(cx, self->backupTag.toString());
+					co_await backupAgent.abortBackup(cx, backupTag.toString());
 				} catch (Error& e) {
 					TraceEvent("BARW_AbortBackupExtraException", randomID).error(e);
 					if (e.code() != error_code_backup_unneeded)
@@ -668,7 +668,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 			loop {
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
+				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(backupTag));
 
 				Error err;
 				try {
@@ -678,7 +678,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// Check the left over tasks
 					// We have to wait for the list to empty since an abort and get status
 					// can leave extra tasks in the queue
-					TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(self->backupTag));
+					TraceEvent("BARW_CheckLeftoverTasks", randomID).detail("BackupTag", printable(backupTag));
 					int64_t taskCount = co_await backupAgent.getTaskCount(tr);
 					int waitCycles = 0;
 
@@ -686,7 +686,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						waitCycles++;
 
 						TraceEvent("BARW_NonzeroTaskWait", randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
 						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
@@ -709,7 +709,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					if (taskCount) {
 						displaySystemKeys++;
 						TraceEvent(SevError, "BARW_NonzeroTaskCount", randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
 						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
@@ -725,7 +725,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						       agentValues.size(),
 						       printable(backupAgentKey).c_str());
 						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("LeftOverKeys", agentValues.size())
 						    .detail("KeySpace", printable(backupAgentKey));
 						for (auto& s : agentValues) {
@@ -743,7 +743,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
 					if (latestVersion.present()) {
 						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
-						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
 						    .detail("DestUidValue", destUidValue.printable());
 					} else {
@@ -752,7 +752,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 					RangeResult versions = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-					if (!self->shareLogRange || !versions.size()) {
+					if (!shareLogRange || !versions.size()) {
 						RangeResult logValues = co_await tr->getRange(
 						    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
@@ -763,7 +763,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 							       logValues.size(),
 							       printable(backupLogValuesKey).c_str());
 							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
-							    .detail("BackupTag", printable(self->backupTag))
+							    .detail("BackupTag", printable(backupTag))
 							    .detail("LeftOverKeys", logValues.size())
 							    .detail("KeySpace", printable(backupLogValuesKey));
 						} else {
@@ -783,10 +783,10 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				co_await TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef());
 			}
 
-			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(self->backupTag));
+			TraceEvent("BARW_Complete", randomID).detail("BackupTag", printable(backupTag));
 
 			// Decrement the backup agent requests
-			if (self->agentRequest) {
+			if (agentRequest) {
 				BackupAndParallelRestoreCorrectnessWorkload::backupAgentRequests--;
 			}
 

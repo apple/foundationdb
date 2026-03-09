@@ -56,27 +56,27 @@ struct SubmitBackupWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(SubmitBackupWorkload* self, Database cx) {
-		co_await delay(self->delayFor);
+	Future<Void> _start(Database cx) {
+		co_await delay(delayFor);
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		addDefaultBackupRanges(backupRanges);
 
-		if (self->encryptionKeyFileName.present()) {
-			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
+		if (encryptionKeyFileName.present()) {
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get());
 		}
 
 		try {
-			co_await self->backupAgent.submitBackup(cx,
-			                                        self->backupDir,
-			                                        {},
-			                                        self->initSnapshotInterval,
-			                                        self->snapshotInterval,
-			                                        self->tag.toString(),
-			                                        backupRanges,
-			                                        self->stopWhenDone,
-			                                        UsePartitionedLog::False,
-			                                        self->incremental,
-			                                        self->encryptionKeyFileName);
+			co_await backupAgent.submitBackup(cx,
+			                                  backupDir,
+			                                  {},
+			                                  initSnapshotInterval,
+			                                  snapshotInterval,
+			                                  tag.toString(),
+			                                  backupRanges,
+			                                  stopWhenDone,
+			                                  UsePartitionedLog::False,
+			                                  incremental,
+			                                  encryptionKeyFileName);
 		} catch (Error& e) {
 			TraceEvent("BackupSubmitError").error(e);
 			if (e.code() != error_code_backup_duplicate) {
@@ -86,7 +86,7 @@ struct SubmitBackupWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

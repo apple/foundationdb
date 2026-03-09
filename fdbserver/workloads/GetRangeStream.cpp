@@ -41,43 +41,43 @@ struct GetRangeStream : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
-		return clientId != 0 ? Void() : useGetRange ? fdbClientGetRange(cx, this) : fdbClientStream(cx, this);
+		return clientId != 0 ? Void() : useGetRange ? fdbClientGetRange(cx) : fdbClientStream(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(bytesRead.getMetric()); }
 
-	static Future<Void> logThroughput(GetRangeStream* self, Key* next) {
+	Future<Void> logThroughput(Key* next) {
 		while (true) {
-			int64_t last = self->bytesRead.getValue();
+			int64_t last = bytesRead.getValue();
 			double before = g_network->now();
 			co_await delay(1);
 			double after = g_network->now();
 			if (after > before) {
 				printf("throughput: %g bytes/s, next: %s\n",
-				       (self->bytesRead.getValue() - last) / (after - before),
+				       (bytesRead.getValue() - last) / (after - before),
 				       printable(*next).c_str());
 			}
 		}
 	}
 
-	static Future<Void> fdbClientGetRange(Database db, GetRangeStream* self) {
+	Future<Void> fdbClientGetRange(Database db) {
 		Transaction tx(db);
-		Key next = self->begin;
-		Future<Void> logFuture = logThroughput(self, &next);
+		Key next = begin;
+		Future<Void> logFuture = logThroughput(&next);
 		while (true) {
 			Error err;
 			try {
 				Standalone<RangeResultRef> range = co_await tx.getRange(
 				    KeySelector(firstGreaterOrEqual(next), next.arena()),
-				    KeySelector(firstGreaterOrEqual(self->end)),
+				    KeySelector(firstGreaterOrEqual(end)),
 				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 				for (const auto& [k, v] : range) {
-					if (self->printKVPairs) {
+					if (printKVPairs) {
 						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 					}
-					self->bytesRead += k.size() + v.size();
+					bytesRead += k.size() + v.size();
 				}
 				if (!range.more) {
 					break;
@@ -92,25 +92,25 @@ struct GetRangeStream : TestWorkload {
 		}
 	}
 
-	static Future<Void> fdbClientStream(Database db, GetRangeStream* self) {
+	Future<Void> fdbClientStream(Database db) {
 		Transaction tx(db);
-		Key next = self->begin;
-		Future<Void> logFuture = logThroughput(self, &next);
+		Key next = begin;
+		Future<Void> logFuture = logThroughput(&next);
 		while (true) {
 			PromiseStream<Standalone<RangeResultRef>> results;
 			Error err;
 			try {
 				Future<Void> stream = tx.getRangeStream(results,
 				                                        KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                                        KeySelector(firstGreaterOrEqual(self->end)),
+				                                        KeySelector(firstGreaterOrEqual(end)),
 				                                        GetRangeLimits());
 				while (true) {
 					Standalone<RangeResultRef> range = co_await results.getFuture();
 					for (const auto& [k, v] : range) {
-						if (self->printKVPairs) {
+						if (printKVPairs) {
 							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 						}
-						self->bytesRead += k.size() + v.size();
+						bytesRead += k.size() + v.size();
 					}
 					if (range.size()) {
 						next = keyAfter(range.back().key);

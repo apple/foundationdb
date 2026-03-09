@@ -40,11 +40,11 @@ struct RYWDisableWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return _start(cx, this);
+			return _start(cx);
 		return Void();
 	}
 
-	static Future<Void> _start(Database cx, RYWDisableWorkload* self) {
+	Future<Void> _start(Database cx) {
 		double testStart = now();
 
 		while (true) {
@@ -58,14 +58,13 @@ struct RYWDisableWorkload : TestWorkload {
 
 					if (opType == 0) {
 						//TraceEvent("RYWSetting");
-						tr.set(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)), StringRef());
+						tr.set(keyForIndex(deterministicRandom()->randomInt(0, nodes)), StringRef());
 					} else if (opType == 1) {
 						//TraceEvent("RYWGetNoWait");
-						Future<Optional<Value>> _ =
-						    tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
+						Future<Optional<Value>> _ = tr.get(keyForIndex(deterministicRandom()->randomInt(0, nodes)));
 					} else if (opType == 2) {
 						//TraceEvent("RYWGetAndWait");
-						co_await tr.get(self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes)));
+						co_await tr.get(keyForIndex(deterministicRandom()->randomInt(0, nodes)));
 					} else {
 						//TraceEvent("RYWNoOp");
 						shouldError = false;
@@ -84,7 +83,7 @@ struct RYWDisableWorkload : TestWorkload {
 
 					co_await delay(0.1);
 
-					if (now() - testStart > self->testDuration)
+					if (now() - testStart > testDuration)
 						co_return;
 
 					if (deterministicRandom()->random01() < 0.5)

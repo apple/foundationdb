@@ -83,21 +83,21 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (clientId) {
 			return Void();
 		}
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override {
 		if (clientId) {
 			return true;
 		}
-		return _check(cx, this);
+		return _check(cx);
 	}
 
-	static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
-		if (self->waitForBackup) {
+	Future<bool> _check(Database cx) {
+		if (waitForBackup) {
 			// Undergoing recovery with the snapshot system keys set will pause the backup agent
 			// Pre-emptively unpause any backup agents before attempting to wait to avoid getting stuck
-			co_await self->backupAgent.changePause(cx, false);
+			co_await backupAgent.changePause(cx, false);
 			Reference<IBackupContainer> backupContainer;
 			UID backupUID;
 			Version v{ 0 };
@@ -115,18 +115,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 			while (true) {
 				// Wait for backup container to be created and avoid race condition
 				TraceEvent("IBackupWaitContainer").log();
-				co_await self->backupAgent.waitBackup(
-				    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID);
+				co_await backupAgent.waitBackup(cx, tag.toString(), StopWhenDone::False, &backupContainer, &backupUID);
 
 				Optional<std::string> restoreEncryptionKeyFileName;
-				if (self->encryptionKeyFileName.present() && fileExists(self->encryptionKeyFileName.get())) {
-					restoreEncryptionKeyFileName = self->encryptionKeyFileName.get();
+				if (encryptionKeyFileName.present() && fileExists(encryptionKeyFileName.get())) {
+					restoreEncryptionKeyFileName = encryptionKeyFileName.get();
 				}
 
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt").log();
 					std::vector<std::string> containers =
-					    co_await IBackupContainer::listContainers(self->backupDir.toString(), {});
+					    co_await IBackupContainer::listContainers(backupDir.toString(), {});
 					TraceEvent("IBackupCheckListContainersSuccess")
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
@@ -156,16 +155,16 @@ struct IncrementalBackupWorkload : TestWorkload {
 				}
 				if (desc.contiguousLogEnd.get() >= v)
 					break;
-				if (self->waitRetries != -1 && tries > self->waitRetries)
+				if (waitRetries != -1 && tries > waitRetries)
 					break;
 				// Avoid spamming requests with a delay
 				co_await delay(5.0);
 			}
 		}
-		if (self->stopBackup) {
+		if (stopBackup) {
 			try {
 				TraceEvent("IBackupDiscontinueBackup").log();
-				co_await self->backupAgent.discontinueBackup(cx, self->tag);
+				co_await backupAgent.discontinueBackup(cx, tag);
 			} catch (Error& e) {
 				TraceEvent("IBackupDiscontinueBackupException").error(e);
 				if (e.code() != error_code_backup_unneeded) {
@@ -176,33 +175,33 @@ struct IncrementalBackupWorkload : TestWorkload {
 		co_return true;
 	}
 
-	static Future<Void> _start(Database cx, IncrementalBackupWorkload* self) {
+	Future<Void> _start(Database cx) {
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		addDefaultBackupRanges(backupRanges);
 
-		if (self->submitOnly) {
-			if (self->encryptionKeyFileName.present()) {
-				co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
+		if (submitOnly) {
+			if (encryptionKeyFileName.present()) {
+				co_await BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get());
 			}
 
 			TraceEvent("IBackupSubmitAttempt").log();
 			try {
 				Optional<std::string> blobManifestUrl;
-				if (!self->blobManifestUrl.empty()) {
-					blobManifestUrl = self->blobManifestUrl.toString();
+				if (!this->blobManifestUrl.empty()) {
+					blobManifestUrl = this->blobManifestUrl.toString();
 				}
-				co_await self->backupAgent.submitBackup(cx,
-				                                        self->backupDir,
-				                                        {},
-				                                        0,
-				                                        1e8,
-				                                        self->tag.toString(),
-				                                        backupRanges,
-				                                        StopWhenDone::False,
-				                                        UsePartitionedLog::False,
-				                                        IncrementalBackupOnly::True,
-				                                        self->encryptionKeyFileName);
+				co_await backupAgent.submitBackup(cx,
+				                                  backupDir,
+				                                  {},
+				                                  0,
+				                                  1e8,
+				                                  tag.toString(),
+				                                  backupRanges,
+				                                  StopWhenDone::False,
+				                                  UsePartitionedLog::False,
+				                                  IncrementalBackupOnly::True,
+				                                  encryptionKeyFileName);
 			} catch (Error& e) {
 				TraceEvent("IBackupSubmitError").error(e);
 				if (e.code() != error_code_backup_duplicate) {
@@ -211,8 +210,8 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 			TraceEvent("IBackupSubmitSuccess").log();
 		}
-		if (self->restoreOnly) {
-			if (self->clearBackupAgentKeys) {
+		if (restoreOnly) {
+			if (clearBackupAgentKeys) {
 				Transaction clearTr(cx);
 				// Clear Relevant System Keys
 				while (true) {
@@ -232,15 +231,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 			Reference<IBackupContainer> backupContainer;
 			UID backupUID;
 			Version beginVersion = invalidVersion;
-			co_await self->backupAgent.waitBackup(
-			    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID);
+			co_await backupAgent.waitBackup(cx, tag.toString(), StopWhenDone::False, &backupContainer, &backupUID);
 
 			Optional<std::string> restoreEncryptionKeyFileName;
-			if (self->encryptionKeyFileName.present() && fileExists(self->encryptionKeyFileName.get())) {
-				restoreEncryptionKeyFileName = self->encryptionKeyFileName.get();
+			if (encryptionKeyFileName.present() && fileExists(encryptionKeyFileName.get())) {
+				restoreEncryptionKeyFileName = encryptionKeyFileName.get();
 			}
 
-			if (self->checkBeginVersion) {
+			if (checkBeginVersion) {
 				TraceEvent("IBackupReadSystemKeys").log();
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				while (true) {
@@ -272,8 +270,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 				}
 			}
 			TraceEvent("IBackupStartListContainersAttempt").log();
-			std::vector<std::string> containers =
-			    co_await IBackupContainer::listContainers(self->backupDir.toString(), {});
+			std::vector<std::string> containers = co_await IBackupContainer::listContainers(backupDir.toString(), {});
 			TraceEvent("IBackupStartListContainersSuccess")
 			    .detail("Size", containers.size())
 			    .detail("First", containers.front());
@@ -297,42 +294,42 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 			if (!systemRestoreRange.empty()) {
 				TraceEvent("IBackupSystemRestoreAttempt").detail("BeginVersion", beginVersion);
-				co_await self->backupAgent.restore(cx,
-				                                   cx,
-				                                   "system_restore"_sr,
-				                                   backupURL,
-				                                   {},
-				                                   systemRestoreRange,
-				                                   WaitForComplete::True,
-				                                   invalidVersion,
-				                                   Verbose::True,
-				                                   Key(),
-				                                   Key(),
-				                                   LockDB::True,
-				                                   UnlockDB::True,
-				                                   OnlyApplyMutationLogs::True,
-				                                   InconsistentSnapshotOnly::False,
-				                                   beginVersion,
-				                                   restoreEncryptionKeyFileName);
+				co_await backupAgent.restore(cx,
+				                             cx,
+				                             "system_restore"_sr,
+				                             backupURL,
+				                             {},
+				                             systemRestoreRange,
+				                             WaitForComplete::True,
+				                             invalidVersion,
+				                             Verbose::True,
+				                             Key(),
+				                             Key(),
+				                             LockDB::True,
+				                             UnlockDB::True,
+				                             OnlyApplyMutationLogs::True,
+				                             InconsistentSnapshotOnly::False,
+				                             beginVersion,
+				                             restoreEncryptionKeyFileName);
 			}
 			TraceEvent("IBackupRestoreAttempt").detail("BeginVersion", beginVersion);
-			co_await self->backupAgent.restore(cx,
-			                                   cx,
-			                                   Key(self->tag.toString()),
-			                                   backupURL,
-			                                   {},
-			                                   restoreRange,
-			                                   WaitForComplete::True,
-			                                   invalidVersion,
-			                                   Verbose::True,
-			                                   Key(),
-			                                   Key(),
-			                                   LockDB::True,
-			                                   UnlockDB::True,
-			                                   OnlyApplyMutationLogs::True,
-			                                   InconsistentSnapshotOnly::False,
-			                                   beginVersion,
-			                                   restoreEncryptionKeyFileName);
+			co_await backupAgent.restore(cx,
+			                             cx,
+			                             Key(tag.toString()),
+			                             backupURL,
+			                             {},
+			                             restoreRange,
+			                             WaitForComplete::True,
+			                             invalidVersion,
+			                             Verbose::True,
+			                             Key(),
+			                             Key(),
+			                             LockDB::True,
+			                             UnlockDB::True,
+			                             OnlyApplyMutationLogs::True,
+			                             InconsistentSnapshotOnly::False,
+			                             beginVersion,
+			                             restoreEncryptionKeyFileName);
 			TraceEvent("IBackupRestoreSuccess").log();
 		}
 	}

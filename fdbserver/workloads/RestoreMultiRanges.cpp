@@ -125,13 +125,13 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(RestoreMultiRangesWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		TraceEvent("RestoreMultiRanges_StartBackup");
 		co_await clearDatabase(cx);
 		co_await prepareDatabase(cx);
 
-		if (self->encryptionKeyFileName.present()) {
-			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(self->encryptionKeyFileName.get());
+		if (encryptionKeyFileName.present()) {
+			co_await BackupContainerFileSystem::createTestEncryptionKeyFile(encryptionKeyFileName.get());
 		}
 
 		std::string backupContainer = "file://simfdb/backups/";
@@ -140,17 +140,17 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef("a"_sr, "z"_sr));
 		TraceEvent("RestoreMultiRanges_SubmitBackup");
 		try {
-			co_await self->backupAgent.submitBackup(cx,
-			                                        StringRef(backupContainer),
-			                                        {},
-			                                        deterministicRandom()->randomInt(0, 60),
-			                                        deterministicRandom()->randomInt(0, 100),
-			                                        tagName,
-			                                        backupRanges,
-			                                        StopWhenDone::True,
-			                                        UsePartitionedLog::False,
-			                                        IncrementalBackupOnly::False,
-			                                        self->encryptionKeyFileName);
+			co_await backupAgent.submitBackup(cx,
+			                                  StringRef(backupContainer),
+			                                  {},
+			                                  deterministicRandom()->randomInt(0, 60),
+			                                  deterministicRandom()->randomInt(0, 100),
+			                                  tagName,
+			                                  backupRanges,
+			                                  StopWhenDone::True,
+			                                  UsePartitionedLog::False,
+			                                  IncrementalBackupOnly::False,
+			                                  encryptionKeyFileName);
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
@@ -158,7 +158,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 
 		TraceEvent("RestoreMultiRanges_WaitBackup");
 		Reference<IBackupContainer> container;
-		co_await self->backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container);
+		co_await backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container);
 
 		TraceEvent("RestoreMultiRanges_ClearDatabase");
 		co_await clearDatabase(cx);
@@ -167,28 +167,28 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		Standalone<VectorRef<KeyRangeRef>> ranges;
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("a"_sr, "aaaaa"_sr));
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("bb"_sr, "bbbbb"_sr)); // Skip "b"
-		co_await self->backupAgent.restore(cx,
-		                                   cx,
-		                                   Key(tagName),
-		                                   Key(container->getURL()),
-		                                   {},
-		                                   ranges,
-		                                   WaitForComplete::True,
-		                                   ::invalidVersion,
-		                                   Verbose::True,
-		                                   Key(),
-		                                   Key(),
-		                                   LockDB::True,
-		                                   UnlockDB::True,
-		                                   OnlyApplyMutationLogs::False,
-		                                   InconsistentSnapshotOnly::False,
-		                                   ::invalidVersion,
-		                                   self->encryptionKeyFileName);
+		co_await backupAgent.restore(cx,
+		                             cx,
+		                             Key(tagName),
+		                             Key(container->getURL()),
+		                             {},
+		                             ranges,
+		                             WaitForComplete::True,
+		                             ::invalidVersion,
+		                             Verbose::True,
+		                             Key(),
+		                             Key(),
+		                             LockDB::True,
+		                             UnlockDB::True,
+		                             OnlyApplyMutationLogs::False,
+		                             InconsistentSnapshotOnly::False,
+		                             ::invalidVersion,
+		                             encryptionKeyFileName);
 		TraceEvent("RestoreMultiRanges_Success");
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
-	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : _start(cx); }
 	Future<bool> check(Database const& cx) override { return verifyDatabase(cx); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

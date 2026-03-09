@@ -73,7 +73,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return _start(cx, this);
+			return _start(cx);
 		return Void();
 	}
 
@@ -100,7 +100,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, FastTriggeredWatchesWorkload* self) {
+	Future<Void> _start(Database cx) {
 		double testStart = now();
 		Version lastReadVersion = 0;
 		try {
@@ -108,12 +108,12 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				double getDuration = 0;
 				double watchEnd = 0;
 				bool watchCommitted = false;
-				Key setKey = self->keyForIndex(deterministicRandom()->randomInt(0, self->nodes));
+				Key setKey = keyForIndex(deterministicRandom()->randomInt(0, nodes));
 				Optional<Value> setValue;
 				if (deterministicRandom()->random01() > 0.5)
 					setValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
 				// Set the value at setKey to something random
-				Future<Version> setFuture = self->setter(cx, setKey, setValue);
+				Future<Version> setFuture = setter(cx, setKey, setValue);
 				co_await delay(deterministicRandom()->random01());
 				Version watchCommitVersion = 0;
 				while (true) {
@@ -133,7 +133,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 							break;
 						ASSERT(!watchCommitted);
 						tr.addWriteConflictRange(singleKeyRange(""_sr));
-						// set a watch and wait for it to be triggered (i.e for self->setter to set the value)
+						// set a watch and wait for it to be triggered (i.e for setter to set the value)
 						Future<Void> watchFuture = tr.watch(setKey);
 						co_await tr.commit();
 						watchCommitVersion = tr.getCommittedVersion();
@@ -157,7 +157,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				ASSERT(!watchCommitted || versionDelta >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT ||
 				       versionDelta < SERVER_KNOBS->VERSIONS_PER_SECOND * (25 + getDuration));
 
-				if (now() - testStart > self->testDuration)
+				if (now() - testStart > testDuration)
 					break;
 			}
 			co_return;

@@ -39,7 +39,7 @@ struct UnreadableWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return _start(cx, this);
+			return _start(cx);
 		return Void();
 	}
 
@@ -291,7 +291,7 @@ struct UnreadableWorkload : TestWorkload {
 		           .present());
 	}
 
-	Future<Void> _start(Database cx, UnreadableWorkload* self) {
+	Future<Void> _start(Database cx) {
 		int testCount = 0;
 		Reverse reverse = Reverse::False;
 		Snapshot snapshot = Snapshot::False;

@@ -45,7 +45,33 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+	Future<Void> setup(Database const& cx) override {
+		Standalone<StringRef> largeValue;
+		Standalone<StringRef> smallValue;
+		largeValue = randomString(largeValue.arena(), 100000);
+		smallValue = randomString(smallValue.arena(), 100);
+		ReadYourWritesTransaction tr(cx);
+		while (true) {
+			Error err;
+			try {
+				for (int i = 0; i < keyCount; i++) {
+					Standalone<StringRef> key = StringRef(format("testkey%08x", i));
+					if (key == readKey) {
+						tr.set(key, largeValue);
+					} else {
+						tr.set(key, deterministicRandom()->random01() > 0.8 ? largeValue : smallValue);
+					}
+				}
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+		wholeRange = KeyRangeRef(""_sr, "\xff"_sr);
+		// TraceEvent("RHDLog").detail("Phase", "DoneSetup");
+	}
 
 	Future<Void> start(Database const& cx) override {
 		for (int c = 0; c < actorCount; c++) {
@@ -63,34 +89,6 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		if (clientId != 0)
 			return true;
 		return passed;
-	}
-
-	Future<Void> _setup(Database cx, ReadHotDetectionWorkload* self) {
-		Standalone<StringRef> largeValue;
-		Standalone<StringRef> smallValue;
-		largeValue = self->randomString(largeValue.arena(), 100000);
-		smallValue = self->randomString(smallValue.arena(), 100);
-		ReadYourWritesTransaction tr(cx);
-		while (true) {
-			Error err;
-			try {
-				for (int i = 0; i < self->keyCount; i++) {
-					Standalone<StringRef> key = StringRef(format("testkey%08x", i));
-					if (key == self->readKey) {
-						tr.set(key, largeValue);
-					} else {
-						tr.set(key, deterministicRandom()->random01() > 0.8 ? largeValue : smallValue);
-					}
-				}
-				co_await tr.commit();
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
-		}
-		self->wholeRange = KeyRangeRef(""_sr, "\xff"_sr);
-		// TraceEvent("RHDLog").detail("Phase", "DoneSetup");
 	}
 
 	Future<Void> _check(Database cx, ReadHotDetectionWorkload* self) {

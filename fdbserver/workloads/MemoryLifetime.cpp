@@ -41,20 +41,16 @@ struct MemoryLifetime : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	Future<Void> _setup(Database cx, MemoryLifetime* self) {
+	Future<Void> setup(Database const& cx) override {
 		Promise<double> loadTime;
-		co_await bulkSetup(cx, self, self->nodeCount, loadTime);
+		co_await bulkSetup(cx, this, nodeCount, loadTime);
 	}
 
-	Future<Void> _start(Database cx, MemoryLifetime* self) {
+	Future<Void> start(Database const& cx) override {
 		double startTime = now();
 		ReadYourWritesTransaction tr(cx);
 		Reverse reverse = Reverse::False;
@@ -66,11 +62,11 @@ struct MemoryLifetime : KVWorkload {
 				int op = deterministicRandom()->randomInt(0, 4);
 				if (op == 0) {
 					reverse.set(deterministicRandom()->coinflip());
-					Key getRange_startKey = self->getRandomKey();
+					Key getRange_startKey = getRandomKey();
 					KeyRange getRange_queryRange = reverse ? KeyRangeRef(normalKeys.begin, keyAfter(getRange_startKey))
 					                                       : KeyRangeRef(getRange_startKey, normalKeys.end);
 					bool getRange_randomStart = deterministicRandom()->random01();
-					Value getRange_newValue = self->randomValue();
+					Value getRange_newValue = randomValue();
 					snapshot.set(deterministicRandom()->coinflip());
 
 					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", reverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", snapshot);
@@ -108,9 +104,9 @@ struct MemoryLifetime : KVWorkload {
 						}
 					}
 				} else if (op == 1) {
-					Key get_startKey = self->getRandomKey();
+					Key get_startKey = getRandomKey();
 					bool get_randomStart = deterministicRandom()->random01();
-					Value get_newValue = self->randomValue();
+					Value get_newValue = randomValue();
 					snapshot.set(deterministicRandom()->coinflip());
 
 					if (get_randomStart)
@@ -123,9 +119,9 @@ struct MemoryLifetime : KVWorkload {
 					Optional<Value> get_res2 = co_await tr.get(get_startKey, snapshot);
 					ASSERT(get_res1 == get_res2);
 				} else if (op == 2) {
-					KeySelector getKey_selector = self->getRandomKeySelector();
+					KeySelector getKey_selector = getRandomKeySelector();
 					bool getKey_randomStart = deterministicRandom()->random01();
-					Value getKey_newValue = self->randomValue();
+					Value getKey_newValue = randomValue();
 					snapshot.set(deterministicRandom()->coinflip());
 
 					if (getKey_randomStart)
@@ -138,7 +134,7 @@ struct MemoryLifetime : KVWorkload {
 					Key getKey_res2 = co_await tr.getKey(getKey_selector, snapshot);
 					ASSERT(getKey_res1 == getKey_res2);
 				} else if (op == 3) {
-					Key getAddress_startKey = self->getRandomKey();
+					Key getAddress_startKey = getRandomKey();
 					Standalone<VectorRef<const char*>> getAddress_res1 =
 					    co_await tr.getAddressesForKey(getAddress_startKey);
 					tr = ReadYourWritesTransaction(cx);
@@ -149,7 +145,7 @@ struct MemoryLifetime : KVWorkload {
 						ASSERT(NetworkAddress::parseOptional(getAddress_res1[i]).present());
 					}
 				}
-				if (now() - startTime > self->testDuration)
+				if (now() - startTime > testDuration)
 					co_return;
 			} catch (Error& e) {
 				err = e;

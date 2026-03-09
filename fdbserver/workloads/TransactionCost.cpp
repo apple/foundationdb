@@ -62,12 +62,12 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadLargeValueTest : public ITest {
-		static Future<Void> setup(TransactionCostWorkload const* workload, ReadLargeValueTest* self, Database cx) {
+		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
 				Error err;
 				try {
-					tr.set(workload->getKey(self->testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
+					tr.set(workload.getKey(testNumber), getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
 					co_await tr.commit();
 					co_return;
 				} catch (Error& e) {
@@ -81,7 +81,7 @@ class TransactionCostWorkload : public TestWorkload {
 		explicit ReadLargeValueTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
-			return setup(&workload, this, cx);
+			return setupImpl(workload, cx);
 		}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
@@ -150,13 +150,13 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadRangeTest : public ITest {
-		static Future<Void> setup(ReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
+		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
 				Error err;
 				try {
 					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+						tr.set(workload.getKey(testNumber, i), workload.getValue(20));
 					}
 					co_await tr.commit();
 					co_return;
@@ -171,7 +171,7 @@ class TransactionCostWorkload : public TestWorkload {
 		explicit ReadRangeTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
-			return setup(this, &workload, cx);
+			return setupImpl(workload, cx);
 		}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
@@ -183,13 +183,13 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class ReadMultipleValuesTest : public ITest {
-		static Future<Void> setup(ReadMultipleValuesTest* self, TransactionCostWorkload const* workload, Database cx) {
+		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
 				Error err;
 				try {
 					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(self->testNumber, i), workload->getValue(20));
+						tr.set(workload.getKey(testNumber, i), workload.getValue(20));
 					}
 					co_await tr.commit();
 					co_return;
@@ -204,7 +204,7 @@ class TransactionCostWorkload : public TestWorkload {
 		explicit ReadMultipleValuesTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
-			return setup(this, &workload, cx);
+			return setupImpl(workload, cx);
 		}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
@@ -219,14 +219,14 @@ class TransactionCostWorkload : public TestWorkload {
 	};
 
 	class LargeReadRangeTest : public ITest {
-		static Future<Void> setup(LargeReadRangeTest* self, TransactionCostWorkload const* workload, Database cx) {
+		Future<Void> setupImpl(TransactionCostWorkload const& workload, Database cx) {
 			Transaction tr(cx);
 			while (true) {
 				Error err;
 				try {
 					for (int i = 0; i < 10; ++i) {
-						tr.set(workload->getKey(self->testNumber, i),
-						       workload->getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
+						tr.set(workload.getKey(testNumber, i),
+						       workload.getValue(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE));
 					}
 					co_await tr.commit();
 					co_return;
@@ -241,7 +241,7 @@ class TransactionCostWorkload : public TestWorkload {
 		explicit LargeReadRangeTest(int64_t testNumber) : ITest(testNumber) {}
 
 		Future<Void> setup(TransactionCostWorkload const& workload, Database const& cx) override {
-			return setup(this, &workload, cx);
+			return setupImpl(workload, cx);
 		}
 
 		Future<Void> exec(TransactionCostWorkload const& workload, Reference<ReadYourWritesTransaction> tr) override {
@@ -275,16 +275,16 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 	}
 
-	static Future<Void> runTest(TransactionCostWorkload* self, Database cx, ITest* test) {
-		co_await test->setup(*self, cx);
+	Future<Void> runTest(Database cx, ITest* test) {
+		co_await test->setup(*this, cx);
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		if (self->debugTransactions) {
+		if (debugTransactions) {
 			test->debugTransaction(*tr);
 		}
 		while (true) {
 			Error err;
 			try {
-				co_await test->exec(*self, tr);
+				co_await test->exec(*this, tr);
 				co_await tr->commit();
 				ASSERT_EQ(tr->getTotalCost(), test->expectedFinalCost());
 				co_return;
@@ -295,14 +295,14 @@ class TransactionCostWorkload : public TestWorkload {
 		}
 	}
 
-	static Future<Void> start(TransactionCostWorkload* self, Database cx) {
+	Future<Void> runTests(Database cx) {
 		uint64_t testNumber = 0;
 		Future<Void> f;
 		// Must use shared_ptr because Flow doesn't support perfect forwarding into actors
 		std::shared_ptr<ITest> test;
-		for (; testNumber < self->iterations; ++testNumber) {
+		for (; testNumber < iterations; ++testNumber) {
 			test = createRandomTest(testNumber);
-			co_await runTest(self, cx, test.get());
+			co_await runTest(cx, test.get());
 		}
 	}
 
@@ -317,7 +317,7 @@ public:
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return clientId ? Void() : start(this, cx); }
+	Future<Void> start(Database const& cx) override { return clientId ? Void() : runTests(cx); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 

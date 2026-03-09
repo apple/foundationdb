@@ -77,7 +77,7 @@ public: // workload functions
 	Future<Void> start(Database const& cx) override {
 		TraceEvent("SnapTestWorkloadStart").log();
 		if (clientId == 0) {
-			return _start(cx, this);
+			return _start(cx);
 		}
 		return Void();
 	}
@@ -146,32 +146,32 @@ public: // workload functions
 		}
 	}
 
-	Future<Void> _start(Database cx, SnapTestWorkload* self) {
+	Future<Void> _start(Database cx) {
 		Transaction tr(cx);
 		bool snapFailed = false;
 		Future<Void> duplicateSnapStatus;
 
-		if (self->testID == 0) {
+		if (testID == 0) {
 			// create even keys before the snapshot
-			co_await self->_create_keys(cx, "snapKey");
-		} else if (self->testID == 1) {
+			co_await _create_keys(cx, "snapKey");
+		} else if (testID == 1) {
 			// create a snapshot
-			double toDelay = fmod(deterministicRandom()->randomUInt32(), self->maxSnapDelay);
+			double toDelay = fmod(deterministicRandom()->randomUInt32(), maxSnapDelay);
 			TraceEvent("ToDelay").detail("Value", toDelay);
-			ASSERT(toDelay < self->maxSnapDelay);
+			ASSERT(toDelay < maxSnapDelay);
 			co_await delay(toDelay);
 
 			int retry = 0;
 			while (true) {
-				self->snapUID = deterministicRandom()->randomUniqueID();
+				snapUID = deterministicRandom()->randomUniqueID();
 				Error err;
 				try {
 					StringRef snapCmdRef = "/bin/snap_create.sh"_sr;
 
-					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
-					if (self->attemptDuplicateSnapshot) {
+					Future<Void> status = snapCreate(cx, snapCmdRef, snapUID);
+					if (attemptDuplicateSnapshot) {
 						co_await delay(deterministicRandom()->random01());
-						duplicateSnapStatus = snapCreate(cx, snapCmdRef, self->snapUID);
+						duplicateSnapStatus = snapCreate(cx, snapCmdRef, snapUID);
 					}
 					ErrorOr<Void> statusErr = co_await errorOr(status);
 					if (statusErr.isError() && statusErr.getError().code() != error_code_duplicate_snapshot_request) {
@@ -179,7 +179,7 @@ public: // workload functions
 						// Any other errors should be thrown
 						throw statusErr.getError();
 					}
-					if (self->attemptDuplicateSnapshot) {
+					if (attemptDuplicateSnapshot) {
 						// If duplicate, the first request is discarded, wait for the latest one
 						co_await duplicateSnapStatus;
 					}
@@ -189,11 +189,11 @@ public: // workload functions
 				}
 				TraceEvent("SnapTestCreateError")
 				    .error(err)
-				    .detail("SnapUID", self->snapUID)
-				    .detail("Duplicate", self->attemptDuplicateSnapshot);
+				    .detail("SnapUID", snapUID)
+				    .detail("Duplicate", attemptDuplicateSnapshot);
 				++retry;
 				// snap v2 can fail for many reasons, so retry until specified times and then fail it
-				if (self->retryLimit != -1 && retry > self->retryLimit) {
+				if (retryLimit != -1 && retry > retryLimit) {
 					snapFailed = true;
 					break;
 				}
@@ -202,22 +202,22 @@ public: // workload functions
 			}
 			CSimpleIni ini;
 			ini.SetUnicode();
-			ini.LoadFile(self->restartInfoLocation.c_str());
-			std::string uidStr = self->snapUID.toString();
+			ini.LoadFile(restartInfoLocation.c_str());
+			std::string uidStr = snapUID.toString();
 			ini.SetValue("RESTORE", "RestoreSnapUID", uidStr.c_str());
 			ini.SetValue("RESTORE", "BackupFailed", format("%d", snapFailed).c_str());
-			ini.SaveFile(self->restartInfoLocation.c_str());
+			ini.SaveFile(restartInfoLocation.c_str());
 			// write the snapUID to a file
 			auto const severity = snapFailed ? SevError : SevInfo;
 			TraceEvent(severity, "SnapshotCreateStatus").detail("Status", !snapFailed ? "Success" : "Failure");
-			self->snapSucceeded = !snapFailed;
-		} else if (self->testID == 2) {
+			snapSucceeded = !snapFailed;
+		} else if (testID == 2) {
 			// create odd keys after the snapshot
-			co_await self->_create_keys(cx, "snapKey", false /*even*/);
-		} else if (self->testID == 3) {
+			co_await _create_keys(cx, "snapKey", false /*even*/);
+		} else if (testID == 3) {
 			CSimpleIni ini;
 			ini.SetUnicode();
-			ini.LoadFile(self->restartInfoLocation.c_str());
+			ini.LoadFile(restartInfoLocation.c_str());
 			bool backupFailed = atoi(ini.GetValue("RESTORE", "BackupFailed"));
 			if (backupFailed) {
 				// since backup failed, skip the restore checking
@@ -268,16 +268,16 @@ public: // workload functions
 				TraceEvent(SevError, "SnapTestVerifyCntValue").detail("Value", cnt);
 				throw operation_failed();
 			}
-		} else if (self->testID == 4) {
+		} else if (testID == 4) {
 			// create a snapshot with a non whitelisted binary path and operation
 			// should fail
 			bool testedFailure = false;
 			snapFailed = false;
 			while (true) {
-				self->snapUID = deterministicRandom()->randomUniqueID();
+				snapUID = deterministicRandom()->randomUniqueID();
 				try {
 					StringRef snapCmdRef = "/bin/snap_create1.sh"_sr;
-					Future<Void> status = snapCreate(cx, snapCmdRef, self->snapUID);
+					Future<Void> status = snapCreate(cx, snapCmdRef, snapUID);
 					co_await status;
 					break;
 				} catch (Error& e) {

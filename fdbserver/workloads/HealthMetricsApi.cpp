@@ -63,8 +63,8 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		maxAllowedStaleness = getOption(options, "maxAllowedStaleness"_sr, 60.0);
 	}
 
-	static Future<Void> _setup(Database cx, HealthMetricsApiWorkload* self) {
-		if (!self->sendDetailedHealthMetrics) {
+	Future<Void> setup(Database const& cx) override {
+		if (!sendDetailedHealthMetrics) {
 			// Internally cached health metrics time out after this knob.  Wait
 			// an extra second to avoid any off-by-1 ">" vs ">=" type issues.
 			co_await delay(1 + CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS);
@@ -72,11 +72,9 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			cx->healthMetrics.tLogQueue.clear();
 		}
 	}
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	static Future<Void> _start(Database cx, HealthMetricsApiWorkload* self) {
-		co_await timeout(healthMetricsChecker(cx, self), self->testDuration, Void());
+	Future<Void> start(Database const& cx) override {
+		co_await timeout(healthMetricsChecker(cx), testDuration, Void());
 	}
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	Future<bool> check(Database const& cx) override {
 		if (!gotMetrics) {
@@ -136,27 +134,25 @@ struct HealthMetricsApiWorkload : TestWorkload {
 		m.emplace_back("DetailedWorstDiskUsage", detailedWorstDiskUsage, Averaged::True);
 	}
 
-	static Future<Void> healthMetricsChecker(Database cx, HealthMetricsApiWorkload* self) {
+	Future<Void> healthMetricsChecker(Database cx) {
 		int repeated = 0;
 		HealthMetrics healthMetrics;
 		while (true) {
-			co_await delay(self->healthMetricsCheckInterval);
-			HealthMetrics newHealthMetrics = co_await cx->getHealthMetrics(self->sendDetailedHealthMetrics);
+			co_await delay(healthMetricsCheckInterval);
+			HealthMetrics newHealthMetrics = co_await cx->getHealthMetrics(sendDetailedHealthMetrics);
 			if (healthMetrics == newHealthMetrics) {
-				if (++repeated > self->maxAllowedStaleness / self->healthMetricsCheckInterval)
-					self->healthMetricsStoppedUpdating = true;
+				if (++repeated > maxAllowedStaleness / healthMetricsCheckInterval)
+					healthMetricsStoppedUpdating = true;
 			} else
 				repeated = 0;
 			healthMetrics = newHealthMetrics;
 
-			self->worstStorageQueue = std::max(self->worstStorageQueue, healthMetrics.worstStorageQueue);
-			self->worstLimitingStorageQueue =
-			    std::max(self->worstLimitingStorageQueue, healthMetrics.limitingStorageQueue);
-			self->worstStorageDurabilityLag =
-			    std::max(self->worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
-			self->worstLimitingStorageDurabilityLag =
-			    std::max(self->worstLimitingStorageDurabilityLag, healthMetrics.limitingStorageDurabilityLag);
-			self->worstTLogQueue = std::max(self->worstTLogQueue, healthMetrics.worstTLogQueue);
+			worstStorageQueue = std::max(worstStorageQueue, healthMetrics.worstStorageQueue);
+			worstLimitingStorageQueue = std::max(worstLimitingStorageQueue, healthMetrics.limitingStorageQueue);
+			worstStorageDurabilityLag = std::max(worstStorageDurabilityLag, healthMetrics.worstStorageDurabilityLag);
+			worstLimitingStorageDurabilityLag =
+			    std::max(worstLimitingStorageDurabilityLag, healthMetrics.limitingStorageDurabilityLag);
+			worstTLogQueue = std::max(worstTLogQueue, healthMetrics.worstTLogQueue);
 
 			TraceEvent("HealthMetrics")
 			    .detail("WorstStorageQueue", healthMetrics.worstStorageQueue)
@@ -175,15 +171,15 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			for (const auto& ss : healthMetrics.storageStats) {
 				gotStorageStats = true;
 				auto storageStats = ss.second;
-				self->detailedWorstStorageQueue = std::max(self->detailedWorstStorageQueue, storageStats.storageQueue);
+				detailedWorstStorageQueue = std::max(detailedWorstStorageQueue, storageStats.storageQueue);
 				traceStorageQueue.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.storageQueue);
-				self->detailedWorstStorageDurabilityLag =
-				    std::max(self->detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
+				detailedWorstStorageDurabilityLag =
+				    std::max(detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
 				traceStorageDurabilityLag.detail(format("Storage-%s", ss.first.toString().c_str()),
 				                                 storageStats.storageDurabilityLag);
-				self->detailedWorstCpuUsage = std::max(self->detailedWorstCpuUsage, storageStats.cpuUsage);
+				detailedWorstCpuUsage = std::max(detailedWorstCpuUsage, storageStats.cpuUsage);
 				traceCpuUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.cpuUsage);
-				self->detailedWorstDiskUsage = std::max(self->detailedWorstDiskUsage, storageStats.diskUsage);
+				detailedWorstDiskUsage = std::max(detailedWorstDiskUsage, storageStats.diskUsage);
 				traceDiskUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.diskUsage);
 			}
 			TraceEvent traceTLogQueue("TLogQueue");
@@ -191,12 +187,12 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			bool gotTLogQueue = false;
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				gotTLogQueue = true;
-				self->detailedWorstTLogQueue = std::max(self->detailedWorstTLogQueue, ss.second);
+				detailedWorstTLogQueue = std::max(detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
 			}
-			if (!self->gotMetrics && gotStorageStats && gotTLogQueue) {
+			if (!gotMetrics && gotStorageStats && gotTLogQueue) {
 				TraceEvent("HealthMetricsGotFullResult");
-				self->gotMetrics = true;
+				gotMetrics = true;
 			}
 		};
 	}

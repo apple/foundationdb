@@ -41,7 +41,7 @@ struct DiskDurabilityTest : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
-			return durabilityTest(this, cx);
+			return durabilityTest(cx);
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
@@ -72,9 +72,9 @@ struct DiskDurabilityTest : TestWorkload {
 		return ipage[0];
 	}
 
-	static Future<Void> durabilityTest(DiskDurabilityTest* self, Database db) {
+	Future<Void> durabilityTest(Database db) {
 		Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
-		    self->filename,
+		    filename,
 		    IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNBUFFERED |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_LOCK,
 		    0600);
@@ -90,16 +90,16 @@ struct DiskDurabilityTest : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				RangeResult r = co_await tr.getRange(self->range, GetRangeLimits(1000000));
+				RangeResult r = co_await tr.getRange(range, GetRangeLimits(1000000));
 				verifyPages = r.size();
 				for (int i = 0; i < r.size(); i++) {
-					int bytesRead = co_await file->read(page, 4096, self->decodeKey(r[i].key) * 4096);
-					if (bytesRead != 4096 || self->decodePage(page) != self->decodeValue(r[i].value)) {
+					int bytesRead = co_await file->read(page, 4096, decodeKey(r[i].key) * 4096);
+					if (bytesRead != 4096 || decodePage(page) != decodeValue(r[i].value)) {
 						printf("ValidationError\n");
 						TraceEvent(SevError, "ValidationError")
-						    .detail("At", self->decodeKey(r[i].key))
-						    .detail("Expected", self->decodeValue(r[i].value))
-						    .detail("Found", self->decodePage(page))
+						    .detail("At", decodeKey(r[i].key))
+						    .detail("Expected", decodeValue(r[i].value))
+						    .detail("Found", decodePage(page))
 						    .detail("Read", bytesRead);
 						failed = true;
 					}
@@ -140,13 +140,13 @@ struct DiskDurabilityTest : TestWorkload {
 				Error err;
 				try {
 					for (int i = 0; i < targetPages.size(); i++)
-						tr.clear(self->encodeKey(targetPages[i]));
+						tr.clear(encodeKey(targetPages[i]));
 
 					if (!first) {
-						Optional<Value> v = co_await tr.get("syncs"_sr.withPrefix(self->metrics.begin));
-						int64_t count = v.present() ? self->decodeValue(v.get()) : 0;
+						Optional<Value> v = co_await tr.get("syncs"_sr.withPrefix(metrics.begin));
+						int64_t count = v.present() ? decodeValue(v.get()) : 0;
 						count++;
-						tr.set("syncs"_sr.withPrefix(self->metrics.begin), self->encodeValue(count));
+						tr.set("syncs"_sr.withPrefix(metrics.begin), encodeValue(count));
 					}
 
 					co_await tr.commit();
@@ -163,7 +163,7 @@ struct DiskDurabilityTest : TestWorkload {
 
 			for (int i = 0; i < targetPages.size(); i++) {
 				uint8_t* p = page + 4096 * i;
-				self->encodePage(p, targetValues[i]);
+				encodePage(p, targetValues[i]);
 				fresults.push_back(file->write(p, 4096, targetPages[i] * 4096));
 			}
 
@@ -175,7 +175,7 @@ struct DiskDurabilityTest : TestWorkload {
 				Error err;
 				try {
 					for (int i = 0; i < targetPages.size(); i++)
-						tr.set(self->encodeKey(targetPages[i]), self->encodeValue(targetValues[i]));
+						tr.set(encodeKey(targetPages[i]), encodeValue(targetValues[i]));
 					co_await tr.commit();
 					break;
 				} catch (Error& e) {

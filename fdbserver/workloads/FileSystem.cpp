@@ -63,8 +63,6 @@ struct FileSystemWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return nodeSetup(cx, this); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
 	Future<bool> check(Database const& cx) override {
 		clients.clear();
 		return true;
@@ -163,28 +161,26 @@ struct FileSystemWorkload : TestWorkload {
 		    .detail("FilesToSetUp", nodesToSetUp);
 	}
 
-	Future<Void> _start(Database cx, FileSystemWorkload* self) {
+	Future<Void> start(Database const& cx) override {
 		FileSystemOp* operation;
-		if (self->operationName == "deletionQuery")
+		if (operationName == "deletionQuery")
 			operation = new ServerDeletionCountQuery();
 		else
 			operation = new RecentModificationQuery();
-		co_await timeout(self->operationClient(cx, self, operation, 0.01), 1.0, Void());
-		self->queries.clear();
-		self->writes.clear();
+		co_await timeout(operationClient(cx, this, operation, 0.01), 1.0, Void());
+		queries.clear();
+		writes.clear();
 
-		if (self->performingWrites) {
-			for (int c = 0; c < self->writeActorCount; c++) {
-				self->clients.push_back(timeout(self->writeClient(cx, self), self->testDuration, Void()));
+		if (performingWrites) {
+			for (int c = 0; c < writeActorCount; c++) {
+				clients.push_back(timeout(writeClient(cx, this), testDuration, Void()));
 			}
 		}
-		for (int c = 0; c < self->actorCount; c++) {
-			self->clients.push_back(
-			    timeout(self->operationClient(cx, self, operation, self->actorCount / self->transactionsPerSecond),
-			            self->testDuration,
-			            Void()));
+		for (int c = 0; c < actorCount; c++) {
+			clients.push_back(timeout(
+			    operationClient(cx, this, operation, actorCount / transactionsPerSecond), testDuration, Void()));
 		}
-		co_await waitForAll(self->clients);
+		co_await waitForAll(clients);
 
 		co_await delay(0.01); // Make sure the deletion happens after actor cancellation
 		delete operation;

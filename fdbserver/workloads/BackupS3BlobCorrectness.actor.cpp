@@ -320,7 +320,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -537,16 +537,16 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		TraceEvent("BS3BCW_DoBackupComplete", randomID).detail("Tag", printable(tag));
 	}
 
-	static Future<Void> _start(Database cx, BackupS3BlobCorrectnessWorkload* self) {
+	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
-		Future<Void> stopDifferentialBackup = delay(self->stopDifferentialAfter);
+		Future<Void> stopDifferentialBackup = delay(stopDifferentialAfter);
 
 		TraceEvent("BS3BCW_Arguments")
-		    .detail("BackupAfter", self->backupAfter)
-		    .detail("RestoreAfter", self->restoreAfter)
-		    .detail("RestoreStartAfterBackupFinished", self->restoreStartAfterBackupFinished)
-		    .detail("AbortAndRestartAfter", self->abortAndRestartAfter)
-		    .detail("DifferentialAfter", self->stopDifferentialAfter);
+		    .detail("BackupAfter", backupAfter)
+		    .detail("RestoreAfter", restoreAfter)
+		    .detail("RestoreStartAfterBackupFinished", restoreStartAfterBackupFinished)
+		    .detail("AbortAndRestartAfter", abortAndRestartAfter)
+		    .detail("DifferentialAfter", stopDifferentialAfter);
 
 		// S3-specific: Clean up state on every test restart to prevent restore_invalid_version errors
 		// The test harness restarts tests multiple times. Without cleanup, FDB metadata points to
@@ -555,10 +555,10 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// 1. Abort any existing backup (clears FDB metadata)
 		// 2. Clear MockS3 storage (removes old backup data)
 		// This ensures FDB and S3 are always in sync at the start of each test run.
-		if (self->agentRequest) {
-			TraceEvent("BS3BCW_CleanupOnRestart").detail("Tag", printable(self->backupTag));
+		if (agentRequest) {
+			TraceEvent("BS3BCW_CleanupOnRestart").detail("Tag", printable(backupTag));
 			try {
-				co_await backupAgent.abortBackup(cx, self->backupTag.toString());
+				co_await backupAgent.abortBackup(cx, backupTag.toString());
 			} catch (Error& e) {
 				if (e.code() != error_code_backup_unneeded)
 					throw;
@@ -569,42 +569,36 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		// metadata that was just initialized when the server was registered. The persistence system
 		// handles cleanup properly on its own.
 
-		if (self->agentRequest) {
+		if (agentRequest) {
 			Promise<Void> submitted;
-			Future<Void> b = doBackup(self,
-			                          self->backupAfter,
-			                          &backupAgent,
-			                          cx,
-			                          self->backupTag,
-			                          self->backupRanges,
-			                          self->stopDifferentialAfter,
-			                          submitted);
+			Future<Void> b = doBackup(
+			    this, backupAfter, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
-			if (self->abortAndRestartAfter) {
-				TraceEvent("BS3BCW_AbortAndRestartAfter").detail("AbortAndRestartAfter", self->abortAndRestartAfter);
+			if (abortAndRestartAfter) {
+				TraceEvent("BS3BCW_AbortAndRestartAfter").detail("AbortAndRestartAfter", abortAndRestartAfter);
 				co_await submitted.getFuture();
-				co_await delay(self->abortAndRestartAfter - self->backupAfter);
-				TraceEvent("BS3BCW_AbortBackup").detail("Tag", printable(self->backupTag));
+				co_await delay(abortAndRestartAfter - backupAfter);
+				TraceEvent("BS3BCW_AbortBackup").detail("Tag", printable(backupTag));
 				try {
-					co_await backupAgent.abortBackup(cx, self->backupTag.toString());
+					co_await backupAgent.abortBackup(cx, backupTag.toString());
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded)
 						throw;
 				}
-				TraceEvent("BS3BCW_AbortComplete").detail("Tag", printable(self->backupTag));
+				TraceEvent("BS3BCW_AbortComplete").detail("Tag", printable(backupTag));
 				co_await b;
-				TraceEvent("BS3BCW_RestartBackup").detail("Tag", printable(self->backupTag));
-				b = doBackup(self,
+				TraceEvent("BS3BCW_RestartBackup").detail("Tag", printable(backupTag));
+				b = doBackup(this,
 				             0,
 				             &backupAgent,
 				             cx,
-				             self->backupTag,
-				             self->backupRanges,
-				             self->stopDifferentialAfter - self->abortAndRestartAfter,
+				             backupTag,
+				             backupRanges,
+				             stopDifferentialAfter - abortAndRestartAfter,
 				             Promise<Void>());
 			}
 
-			if (self->performRestore) {
+			if (performRestore) {
 				// Adaptive timing: Wait for backup to complete, then wait additional time
 				// This ensures the backup metadata is written before restore starts
 				TraceEvent("BS3BCW_WaitingForBackupCompletion").detail("WaitingForBackup", true);
@@ -612,16 +606,16 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				TraceEvent("BS3BCW_BackupCompleted").detail("BackupFinished", true);
 
 				// Wait additional time after backup completes for metadata to be written
-				if (self->restoreStartAfterBackupFinished > 0) {
+				if (restoreStartAfterBackupFinished > 0) {
 					TraceEvent("BS3BCW_WaitingAfterBackupComplete")
-					    .detail("DelaySeconds", self->restoreStartAfterBackupFinished);
-					co_await delay(self->restoreStartAfterBackupFinished);
+					    .detail("DelaySeconds", restoreStartAfterBackupFinished);
+					co_await delay(restoreStartAfterBackupFinished);
 				}
 
 				TraceEvent("BS3BCW_StartingRestore").detail("RestoreStarting", true);
 
 				// Get the backup container to restore from
-				KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+				KeyBackedTag keyBackedTag = makeBackupTag(backupTag.toString());
 				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
 				UID logUid = uidFlag.first;
 				Reference<IBackupContainer> lastBackupContainer =
@@ -642,7 +636,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 					TraceEvent("BS3BCW_DatabaseLocked")
 					    .detail("LockUID", lockUID)
-					    .detail("BackupTag", printable(self->backupTag));
+					    .detail("BackupTag", printable(backupTag));
 
 					// BulkLoad validation: compare BulkLoad restore vs traditional restore
 					// 1. Traditional restore with addPrefix to system keyspace (\xff\x02/rlog/)
@@ -654,13 +648,13 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					Key validationPrefix = "\xff\x02/rlog/"_sr;
 					Key validationPrefixEnd = "\xff\x02/rlog0"_sr;
 
-					if (self->performValidation) {
+					if (performValidation) {
 						// Step 1: Restore with prefix using TRADITIONAL (rangefile) mode
 						TraceEvent("BS3BCW_ValidationStep1_TraditionalRestore")
-						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("ValidationPrefix", printable(validationPrefix));
 
-						Standalone<StringRef> validationRestoreTag(self->backupTag.toString() + "_validate");
+						Standalone<StringRef> validationRestoreTag(backupTag.toString() + "_validate");
 						try {
 							Version validationVersion =
 							    co_await backupAgent.restore(cx,
@@ -668,7 +662,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 							                                 validationRestoreTag,
 							                                 KeyRef(lastBackupContainer->getURL()),
 							                                 lastBackupContainer->getProxy(),
-							                                 self->restoreRanges,
+							                                 restoreRanges,
 							                                 WaitForComplete::True,
 							                                 ::invalidVersion,
 							                                 Verbose::True,
@@ -693,12 +687,12 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					}
 
 					// Step 2: Clear the backup ranges before restoring (unless skipDirtyRestore is true)
-					if (!self->skipDirtyRestore) {
+					if (!skipDirtyRestore) {
 						TraceEvent("BS3BCW_ClearingNormalKeys");
 						co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-							for (auto& kvrange : self->backupRanges)
+							for (auto& kvrange : backupRanges)
 								tr->clear(kvrange);
 							return Void();
 						});
@@ -707,11 +701,11 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					// Step 3: Perform the restore (with BulkLoad if configured)
 					TraceEvent("BS3BCW_Restore")
 					    .detail("LastBackupContainer", lastBackupContainer->getURL())
-					    .detail("BackupTag", printable(self->backupTag))
+					    .detail("BackupTag", printable(backupTag))
 					    .detail("LockUID", lockUID)
-					    .detail("SkipDirtyRestore", self->skipDirtyRestore);
+					    .detail("SkipDirtyRestore", skipDirtyRestore);
 
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
+					Standalone<StringRef> restoreTag(backupTag.toString() + "_restore");
 					// Pass lockDB=False since we already locked, unlockDB=True to release when done,
 					// and our lockUID so restore uses the same lock for checkDatabaseLock calls
 					Version v = co_await backupAgent.restore(cx,
@@ -719,7 +713,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                         restoreTag,
 					                                         KeyRef(lastBackupContainer->getURL()),
 					                                         lastBackupContainer->getProxy(),
-					                                         self->restoreRanges,
+					                                         restoreRanges,
 					                                         WaitForComplete::True,
 					                                         ::invalidVersion,
 					                                         Verbose::True,
@@ -732,24 +726,24 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 					                                         ::invalidVersion,
 					                                         lastBackupContainer->getEncryptionKeyFileName(),
 					                                         lockUID,
-					                                         self->useRangeFileRestore);
+					                                         useRangeFileRestore);
 
 					TraceEvent("BS3BCW_RestoreComplete")
-					    .detail("BackupTag", printable(self->backupTag))
+					    .detail("BackupTag", printable(backupTag))
 					    .detail("RestoreVersion", v);
 
 					// ASSERT: When useRangeFileRestore=false, BulkLoad MUST have been used
-					if (!self->useRangeFileRestore) {
+					if (!useRangeFileRestore) {
 						int bulkLoadCount = g_bulkLoadRestoreTaskCompleteCount.load();
 						TraceEvent("BS3BCW_AssertBulkLoadUsed")
-						    .detail("UseRangeFileRestore", self->useRangeFileRestore)
+						    .detail("UseRangeFileRestore", useRangeFileRestore)
 						    .detail("BulkLoadRestoreTaskCompleteCount", bulkLoadCount);
 						// FAIL if BulkLoad didn't run
 						ASSERT(bulkLoadCount > 0);
 					}
 
 					// Step 4: Run audit to compare BulkLoad-restored vs traditional-restored
-					if (self->performValidation) {
+					if (performValidation) {
 						TraceEvent("BS3BCW_ValidationStep4_AuditStarting")
 						    .detail("Comparing", "BulkLoad-restored (normalKeys) vs traditional-restored (prefix)");
 
@@ -845,17 +839,17 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 						});
 
 						TraceEvent("BS3BCW_ValidationComplete")
-						    .detail("BackupTag", printable(self->backupTag))
+						    .detail("BackupTag", printable(backupTag))
 						    .detail("AuditID", auditId);
 					}
 				}
 			}
 
 			// ASSERT: Verify BulkDump was used when snapshotMode=1 (BULKDUMP) or 2 (BOTH)
-			if (self->snapshotMode == 1 || self->snapshotMode == 2) {
+			if (snapshotMode == 1 || snapshotMode == 2) {
 				int bulkDumpCount = g_bulkDumpTaskCompleteCount.load();
 				TraceEvent("BS3BCW_AssertBulkDumpUsed")
-				    .detail("SnapshotMode", self->snapshotMode)
+				    .detail("SnapshotMode", snapshotMode)
 				    .detail("BulkDumpTaskCompleteCount", bulkDumpCount);
 				// FAIL if BulkDump didn't run
 				ASSERT(bulkDumpCount > 0);

@@ -34,16 +34,15 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 	SpecialKeySpaceRobustnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Future<Void> _setup(Database cx, SpecialKeySpaceRobustnessWorkload* self) { return Void(); }
 
-	Future<Void> _start(Database cx, SpecialKeySpaceRobustnessWorkload* self) {
+	Future<Void> start(Database const& cx) override {
 		// Only use one client to avoid potential conflicts on changing cluster configuration
-		if (self->clientId == 0)
-			co_await self->managementApiCorrectnessActor(cx, self);
+		if (clientId == 0)
+			co_await managementApiCorrectnessActor(cx, this);
 	}
 
 	bool getRangeResultInOrder(const RangeResult& result) {

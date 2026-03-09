@@ -205,10 +205,6 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		subtaskCount = getOption(options, "subtaskCount"_sr, 20);
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
-
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr,
@@ -236,7 +232,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		co_await allDone->onSetAddTask(tr, taskBucket, taskDone);
 	}
 
-	Future<Void> _start(Database cx, TaskBucketCorrectnessWorkload* self) {
+	Future<Void> start(Database const& cx) override {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		Subspace taskSubspace("backup-agent"_sr);
 		Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get("tasks"_sr)));
@@ -244,13 +240,13 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 		Error err;
 		try {
-			if (self->clientId == 0) {
+			if (clientId == 0) {
 				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
 				co_await taskBucket->clear(cx);
 
 				TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
 				co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-					return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount);
+					return addInitTasks(tr, taskBucket, futureBucket, chained, subtaskCount);
 				});
 
 				TraceEvent("TaskBucketCorrectness").detail("RunningTasks", "...");
@@ -270,7 +266,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 									break;
 								else {
 									co_await TaskBucket::debugPrintRange(
-									    cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId)));
+									    cx, taskSubspace.key(), StringRef(format("client_%d", clientId)));
 									TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
 								}
 							} else {
@@ -289,7 +285,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			if (self->clientId == 0) {
+			if (clientId == 0) {
 				TraceEvent("TaskBucketCorrectness").detail("NotTasksRemain", "...");
 				co_await TaskBucket::debugPrintRange(cx, StringRef(), StringRef());
 			}
@@ -302,9 +298,9 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	Future<bool> _check(Database cx, TaskBucketCorrectnessWorkload* self) {
+	Future<bool> check(Database const& cx) override {
 		bool ret = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return self->checkSayHello(tr, self->subtaskCount); });
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return checkSayHello(tr, subtaskCount); });
 		co_return ret;
 	}
 

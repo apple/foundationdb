@@ -80,7 +80,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -89,11 +89,11 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	bool hasPrefix() const { return addPrefix != ""_sr || removePrefix != ""_sr; }
 
-	static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
+	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;
 
-		co_await delay(self->startAfter * deterministicRandom()->random01());
-		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", self->usePartitionedLogs);
+		co_await delay(startAfter * deterministicRandom()->random01());
+		TraceEvent("AtomicRestore_Start").detail("UsePartitionedLog", usePartitionedLogs);
 
 		std::string backupContainer = "file://simfdb/backups/";
 		try {
@@ -103,9 +103,9 @@ struct AtomicRestoreWorkload : TestWorkload {
 			                                  deterministicRandom()->randomInt(0, 60),
 			                                  deterministicRandom()->randomInt(0, 100),
 			                                  BackupAgentBase::getDefaultTagName(),
-			                                  self->backupRanges,
+			                                  backupRanges,
 			                                  StopWhenDone::False,
-			                                  self->usePartitionedLogs,
+			                                  usePartitionedLogs,
 			                                  IncrementalBackupOnly::False,
 			                                  {});
 		} catch (Error& e) {
@@ -116,18 +116,18 @@ struct AtomicRestoreWorkload : TestWorkload {
 		TraceEvent("AtomicRestore_Wait").log();
 		co_await backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), StopWhenDone::False);
 		TraceEvent("AtomicRestore_BackupStart").log();
-		co_await delay(self->restoreAfter * deterministicRandom()->random01());
+		co_await delay(restoreAfter * deterministicRandom()->random01());
 		TraceEvent("AtomicRestore_RestoreStart").log();
 
-		if (self->fastRestore) { // New fast parallel restore
+		if (fastRestore) { // New fast parallel restore
 			TraceEvent(SevInfo, "AtomicParallelRestore").log();
 			co_await backupAgent.atomicParallelRestore(
-			    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, self->addPrefix, self->removePrefix);
+			    cx, BackupAgentBase::getDefaultTag(), backupRanges, addPrefix, removePrefix);
 		} else { // Old style restore
 			while (true) {
 				try {
 					co_await backupAgent.atomicRestore(
-					    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef());
+					    cx, BackupAgentBase::getDefaultTag(), backupRanges, StringRef(), StringRef());
 					break;
 				} catch (Error& e) {
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)

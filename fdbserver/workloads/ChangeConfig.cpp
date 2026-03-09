@@ -50,7 +50,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (this->clientId != 0) {
 			return Void();
 		}
-		return changeConfigClient(cx->clone(), this);
+		return changeConfigClient(cx->clone());
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -68,9 +68,9 @@ struct ChangeConfigWorkload : TestWorkload {
 		return res;
 	}
 
-	static Future<Void> configureExtraDatabase(ChangeConfigWorkload* self, Database db) {
+	Future<Void> configureExtraDatabase(Database db) {
 		co_await delay(5 * deterministicRandom()->random01());
-		if (self->configMode.size()) {
+		if (configMode.size()) {
 			bool existingDB = false;
 			if (g_simulator->startingDisabledConfiguration != "") {
 				co_await ManagementAPI::changeConfig(
@@ -80,41 +80,41 @@ struct ChangeConfigWorkload : TestWorkload {
 				TraceEvent("WaitForReplicasExtraEnd").log();
 				existingDB = true;
 			}
-			std::string mode = self->getConfigMode(self->configMode, existingDB);
+			std::string mode = getConfigMode(configMode, existingDB);
 			co_await ManagementAPI::changeConfig(db.getReference(), mode, true);
 		}
-		if (self->networkAddresses.size()) {
-			if (self->networkAddresses == "auto") {
-				co_await coordinatorsChangeActor(db, self, true);
+		if (networkAddresses.size()) {
+			if (networkAddresses == "auto") {
+				co_await coordinatorsChangeActor(db, true);
 			} else {
-				co_await coordinatorsChangeActor(db, self);
+				co_await coordinatorsChangeActor(db);
 			}
 		}
 
 		co_await delay(5 * deterministicRandom()->random01());
 	}
 
-	Future<Void> configureExtraDatabases(ChangeConfigWorkload* self) {
+	Future<Void> configureExtraDatabases() {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
 			for (auto extraDatabase : g_simulator->extraDatabases) {
 				Database db = Database::createSimulatedExtraDatabase(extraDatabase);
-				futures.push_back(configureExtraDatabase(self, db));
+				futures.push_back(configureExtraDatabase(db));
 			}
 		}
 		return waitForAll(futures);
 	}
 
-	static Future<Void> changeConfigClient(Database cx, ChangeConfigWorkload* self) {
-		co_await delay(self->minDelayBeforeChange +
-		               deterministicRandom()->random01() * (self->maxDelayBeforeChange - self->minDelayBeforeChange));
+	Future<Void> changeConfigClient(Database cx) {
+		co_await delay(minDelayBeforeChange +
+		               deterministicRandom()->random01() * (maxDelayBeforeChange - minDelayBeforeChange));
 
 		bool extraConfigureBefore = deterministicRandom()->random01() < 0.5;
 		if (extraConfigureBefore) {
-			co_await self->configureExtraDatabases(self);
+			co_await configureExtraDatabases();
 		}
 
-		if (self->configMode.size()) {
+		if (configMode.size()) {
 			bool existingDB = false;
 			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
 				co_await ManagementAPI::changeConfig(
@@ -124,25 +124,25 @@ struct ChangeConfigWorkload : TestWorkload {
 				TraceEvent("WaitForReplicasEnd").log();
 				existingDB = true;
 			}
-			std::string mode = self->getConfigMode(self->configMode, existingDB);
+			std::string mode = getConfigMode(configMode, existingDB);
 			co_await ManagementAPI::changeConfig(cx.getReference(), mode, true);
 		}
 
-		if (self->networkAddresses.size()) {
-			for (int i = 0; i < self->coordinatorChanges; ++i) {
+		if (networkAddresses.size()) {
+			for (int i = 0; i < coordinatorChanges; ++i) {
 				if (i > 0) {
 					co_await delay(20);
 				}
-				co_await coordinatorsChangeActor(cx, self, self->networkAddresses == "auto");
+				co_await coordinatorsChangeActor(cx, networkAddresses == "auto");
 			}
 		}
 
 		if (!extraConfigureBefore) {
-			co_await self->configureExtraDatabases(self);
+			co_await configureExtraDatabases();
 		}
 	}
 
-	static Future<Void> coordinatorsChangeActor(Database cx, ChangeConfigWorkload* self, bool autoChange = false) {
+	Future<Void> coordinatorsChangeActor(Database cx, bool autoChange = false) {
 		ReadYourWritesTransaction tr(cx);
 		int notEnoughMachineResults = 0;
 		std::string desiredCoordinatorsKey;
@@ -185,7 +185,7 @@ struct ChangeConfigWorkload : TestWorkload {
 				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 			}
 		} else {
-			desiredCoordinatorsKey = self->networkAddresses;
+			desiredCoordinatorsKey = networkAddresses;
 		}
 
 		while (true) {

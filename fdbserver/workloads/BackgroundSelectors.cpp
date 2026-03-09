@@ -49,12 +49,10 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
-	Future<Void> _start(Database cx, BackgroundSelectorWorkload* self) {
-		for (int c = 0; c < self->actorsPerClient; c++)
-			self->clients.push_back(timeout(self->backgroundSelectorWorker(cx, self), self->testDuration, Void()));
-		co_await waitForAll(self->clients);
+	Future<Void> start(Database const& cx) override {
+		for (int c = 0; c < actorsPerClient; c++)
+			clients.push_back(timeout(backgroundSelectorWorker(cx, this), testDuration, Void()));
+		co_await waitForAll(clients);
 	}
 
 	Future<bool> check(Database const& cx) override {

@@ -46,16 +46,16 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _setup(cx, this);
+		return _setup(cx);
 	}
 
-	static Future<Void> _setup(Database cx, AtomicSwitchoverWorkload* self) {
+	Future<Void> _setup(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("AS_Submit1").log();
-			co_await backupAgent.submitBackup(self->extraDB,
+			co_await backupAgent.submitBackup(extraDB,
 			                                  BackupAgentBase::getDefaultTag(),
-			                                  self->backupRanges,
+			                                  backupRanges,
 			                                  StopWhenDone::False,
 			                                  StringRef(),
 			                                  StringRef(),
@@ -70,7 +70,7 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -160,30 +160,30 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
+	Future<Void> _start(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
-		DatabaseBackupAgent restoreTool(self->extraDB);
+		DatabaseBackupAgent restoreTool(extraDB);
 
 		TraceEvent("AS_Wait1").log();
-		co_await backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False);
+		co_await backupAgent.waitBackup(extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False);
 		TraceEvent("AS_Ready1").log();
-		co_await delay(deterministicRandom()->random01() * self->switch1delay);
+		co_await delay(deterministicRandom()->random01() * switch1delay);
 		TraceEvent("AS_Switch1").log();
 		co_await backupAgent.atomicSwitchover(
-		    self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef());
+		    extraDB, BackupAgentBase::getDefaultTag(), backupRanges, StringRef(), StringRef());
 		TraceEvent("AS_Wait2").log();
 		co_await restoreTool.waitBackup(cx, BackupAgentBase::getDefaultTag(), StopWhenDone::False);
 		TraceEvent("AS_Ready2").log();
-		co_await delay(deterministicRandom()->random01() * self->switch2delay);
+		co_await delay(deterministicRandom()->random01() * switch2delay);
 		TraceEvent("AS_Switch2").log();
 		co_await restoreTool.atomicSwitchover(
-		    cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef());
+		    cx, BackupAgentBase::getDefaultTag(), backupRanges, StringRef(), StringRef());
 		TraceEvent("AS_Wait3").log();
-		co_await backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False);
+		co_await backupAgent.waitBackup(extraDB, BackupAgentBase::getDefaultTag(), StopWhenDone::False);
 		TraceEvent("AS_Ready3").log();
-		co_await delay(deterministicRandom()->random01() * self->stopDelay);
+		co_await delay(deterministicRandom()->random01() * stopDelay);
 		TraceEvent("AS_Abort").log();
-		co_await backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag());
+		co_await backupAgent.abortBackup(extraDB, BackupAgentBase::getDefaultTag());
 		TraceEvent("AS_Done").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently

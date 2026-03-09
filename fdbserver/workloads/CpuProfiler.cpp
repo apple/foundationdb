@@ -95,34 +95,30 @@ struct CpuProfilerWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-
-	Future<Void> _start(Database cx, CpuProfilerWorkload* self) {
-		co_await delay(self->initialDelay);
-		if (self->clientId == 0)
+	Future<Void> start(Database const& cx) override {
+		co_await delay(initialDelay);
+		if (clientId == 0)
 			TraceEvent("SignalProfilerOn").log();
-		co_await timeoutError(self->updateProfiler(true, cx, self), 60.0);
+		co_await timeoutError(updateProfiler(true, cx, this), 60.0);
 
 		// If a duration was given, let the duration elapse and then shut the profiler off
-		if (self->duration > 0) {
-			co_await delay(self->duration);
-			if (self->clientId == 0)
+		if (duration > 0) {
+			co_await delay(duration);
+			if (clientId == 0)
 				TraceEvent("SignalProfilerOff").log();
-			co_await timeoutError(self->updateProfiler(false, cx, self), 60.0);
+			co_await timeoutError(updateProfiler(false, cx, this), 60.0);
 		}
 	}
 
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
-
-	Future<bool> _check(Database cx, CpuProfilerWorkload* self) {
+	Future<bool> check(Database const& cx) override {
 		// If no duration was given, then shut the profiler off now
-		if (self->duration <= 0) {
-			if (self->clientId == 0)
+		if (duration <= 0) {
+			if (clientId == 0)
 				TraceEvent("SignalProfilerOff").log();
-			co_await timeoutError(self->updateProfiler(false, cx, self), 60.0);
+			co_await timeoutError(updateProfiler(false, cx, this), 60.0);
 		}
 
-		co_return self->success;
+		co_return success;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

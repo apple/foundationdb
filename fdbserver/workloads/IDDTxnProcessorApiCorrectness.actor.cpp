@@ -133,7 +133,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override { return enabled ? _setup(cx, this) : Void(); }
-	Future<Void> start(Database const& cx) override { return enabled ? _start(cx, this) : Void(); }
+	Future<Void> start(Database const& cx) override { return enabled ? _start(cx) : Void(); }
 
 	// This workload is not compatible with RandomMoveKeys workload because they will race in changing the DD mode.
 	// Other workload injections may make no sense because this workload only use the DB at beginning to reading the
@@ -229,28 +229,23 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		co_await readRealInitialDataDistribution(self);
 	}
 
-	Future<Void> _start(Database cx, IDDTxnProcessorApiWorkload* self) {
+	Future<Void> _start(Database cx) {
 
-		self->mgs = std::make_shared<MockGlobalState>();
-		self->mgs->configuration = self->ddContext.configuration;
-		self->mgs->restrictSize = false; // no need to check the validity of shard size
+		mgs = std::make_shared<MockGlobalState>();
+		mgs->configuration = ddContext.configuration;
+		mgs->restrictSize = false; // no need to check the validity of shard size
 
-		self->mock = std::make_shared<DDMockTxnProcessorTester>(self->mgs);
-		self->mock->setupMockGlobalState(self->realInitDD);
+		mock = std::make_shared<DDMockTxnProcessorTester>(mgs);
+		mock->setupMockGlobalState(realInitDD);
 
 		Reference<InitialDataDistribution> mockInitData =
-		    self->mock
-		        ->getInitialDataDistribution(self->ddContext.id(),
-		                                     self->ddContext.lock,
-		                                     {},
-		                                     self->ddContext.ddEnabledState.get(),
-		                                     SkipDDModeCheck::True)
+		    mock->getInitialDataDistribution(
+		            ddContext.id(), ddContext.lock, {}, ddContext.ddEnabledState.get(), SkipDDModeCheck::True)
 		        .get();
 
-		verifyInitDataEqual(self->realInitDD, mockInitData);
+		verifyInitDataEqual(realInitDD, mockInitData);
 
-		co_await timeout(
-		    reportErrors(self->worker(cx, self), "IDDTxnProcessorApiWorkload"), self->testDuration, Void());
+		co_await timeout(reportErrors(worker(cx, this), "IDDTxnProcessorApiWorkload"), testDuration, Void());
 
 		// Always set the DD mode back, even if we die with an error
 		TraceEvent("IDDTxnApiTestDoneMoving").log();
