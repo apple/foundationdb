@@ -34,6 +34,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This workload tests a gray failure scenario: a satellite TLog is have network issue
@@ -117,40 +118,40 @@ struct DcLagWorkload : TestWorkload {
 		cloggedPairs.clear();
 	}
 
-	ACTOR static Future<Optional<double>> fetchDatacenterLag(Database cx) {
-		StatusObject result = wait(StatusClient::statusFetcher(cx));
+	static Future<Optional<double>> fetchDatacenterLag(Database cx) {
+		StatusObject result = co_await StatusClient::statusFetcher(cx);
 		StatusObjectReader statusObj(result);
 		StatusObjectReader statusObjCluster;
 		if (!statusObj.get("cluster", statusObjCluster)) {
 			TraceEvent("DcLagNoCluster");
-			return Optional<double>();
+			co_return Optional<double>();
 		}
 
 		StatusObjectReader dcLag;
 		if (!statusObjCluster.get("datacenter_lag", dcLag)) {
 			TraceEvent("DcLagNoLagData");
-			return Optional<double>();
+			co_return Optional<double>();
 		}
 
 		Version versions = 0;
 		double seconds = 0;
 		if (!dcLag.get("versions", versions)) {
 			TraceEvent("DcLagNoVersions");
-			return Optional<double>();
+			co_return Optional<double>();
 		}
 		if (!dcLag.get("seconds", seconds)) {
 			TraceEvent("DcLagNoSeconds");
-			return Optional<double>();
+			co_return Optional<double>();
 		}
 		TraceEvent("DcLag").detail("Versions", versions).detail("Seconds", seconds);
-		return seconds;
+		co_return seconds;
 	}
 
-	ACTOR Future<Void> clogClient(DcLagWorkload* self, Database cx) {
-		wait(delay(self->startDelay));
+	Future<Void> clogClient(DcLagWorkload* self, Database cx) {
+		co_await delay(self->startDelay);
 
 		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait(self->dbInfo->onChange());
+			co_await self->dbInfo->onChange();
 		}
 
 		double startTime = now();
@@ -159,17 +160,20 @@ struct DcLagWorkload : TestWorkload {
 
 		// Clog and wait for recovery to happen
 		if (!self->clogTlog(self->testDuration)) {
-			return Void(); // skip the test if no satellite found
+			co_return; // skip the test if no satellite found
 		}
 
-		state Future<Optional<double>> status = Never();
-		state bool lagged = false;
-		loop choose {
-			when(wait(delay(5.0))) {
+		Future<Optional<double>> status = Never();
+		bool lagged = false;
+		loop {
+			auto choice = co_await race(delay(5.0), status);
+			if (choice.index() == 0) {
+
 				// Fetch DC lag every 5s
 				status = fetchDatacenterLag(cx);
-			}
-			when(Optional<double> lag = wait(status)) {
+			} else if (choice.index() == 1) {
+				Optional<double> lag = std::get<1>(std::move(choice));
+
 				if (lag.present() && lag.get() >= SERVER_KNOBS->LOG_ROUTER_PEEK_SWITCH_DC_TIME - 10.0) {
 					// Detect DC Lag happened before Log router switch DC reactions
 					lagged = true;
@@ -178,9 +182,11 @@ struct DcLagWorkload : TestWorkload {
 				if (lagged && lag.present() && lag.get() < 5.0) {
 					TraceEvent("DcLagRecovered");
 					self->unclogAll();
-					return Void();
+					co_return;
 				}
 				status = Never();
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}

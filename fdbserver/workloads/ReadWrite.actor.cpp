@@ -32,28 +32,33 @@
 #include "fdbserver/workloads/ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ReadWriteCommonImpl {
 	// trace methods
-	ACTOR static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
+	static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
 		try {
 			loop {
-				choose {
-					when(wait(db->onChange())) {}
+				{
+					auto choice = co_await race(db->onChange(),
+					                            db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()));
+					if (choice.index() == 0) {
+					} else if (choice.index() == 1) {
+						ErrorOr<std::vector<WorkerDetails>> workerList = std::get<1>(std::move(choice));
 
-					when(ErrorOr<std::vector<WorkerDetails>> workerList =
-					         wait(db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()))) {
 						if (workerList.present()) {
 							std::vector<Future<ErrorOr<Void>>> dumpRequests;
 							dumpRequests.reserve(workerList.get().size());
 							for (int i = 0; i < workerList.get().size(); i++)
 								dumpRequests.push_back(workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply(
 								    TraceBatchDumpRequest()));
-							wait(waitForAll(dumpRequests));
-							return true;
+							co_await waitForAll(dumpRequests);
+							co_return true;
 						}
-						wait(delay(1.0));
+						co_await delay(1.0);
+					} else {
+						UNREACHABLE();
 					}
 				}
 			}
@@ -63,14 +68,14 @@ struct ReadWriteCommonImpl {
 		}
 	}
 
-	ACTOR static Future<Void> tracePeriodically(ReadWriteCommon* self) {
-		state double start = now();
-		state double elapsed = 0.0;
-		state int64_t last_ops = 0;
+	static Future<Void> tracePeriodically(ReadWriteCommon* self) {
+		double start = now();
+		double elapsed = 0.0;
+		int64_t last_ops = 0;
 
 		loop {
 			elapsed += self->periodicLoggingInterval;
-			wait(delayUntil(start + elapsed));
+			co_await delayUntil(start + elapsed);
 
 			TraceEvent((self->description() + "_RowReadLatency").c_str())
 			    .detail("Mean", self->readLatencies.mean())
@@ -199,14 +204,14 @@ struct ReadWriteCommonImpl {
 			self->readLatencyCount = 0;
 		}
 	}
-	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
-	                                     DDSketch<double>* latencies,
-	                                     double* totalLatency,
-	                                     int* latencyCount,
-	                                     EventMetricHandle<ReadMetric> readMetric,
-	                                     bool shouldRecord) {
-		state double readBegin = now();
-		Optional<Value> value = wait(f);
+	static Future<Void> logLatency(Future<Optional<Value>> f,
+	                               DDSketch<double>* latencies,
+	                               double* totalLatency,
+	                               int* latencyCount,
+	                               EventMetricHandle<ReadMetric> readMetric,
+	                               bool shouldRecord) {
+		double readBegin = now();
+		Optional<Value> value = co_await f;
 
 		double latency = now() - readBegin;
 		readMetric->readLatency = latency * 1e9;
@@ -217,16 +222,16 @@ struct ReadWriteCommonImpl {
 			++*latencyCount;
 			latencies->addSample(latency);
 		}
-		return Void();
+		co_return;
 	}
-	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
-	                                     DDSketch<double>* latencies,
-	                                     double* totalLatency,
-	                                     int* latencyCount,
-	                                     EventMetricHandle<ReadMetric> readMetric,
-	                                     bool shouldRecord) {
-		state double readBegin = now();
-		RangeResult value = wait(f);
+	static Future<Void> logLatency(Future<RangeResult> f,
+	                               DDSketch<double>* latencies,
+	                               double* totalLatency,
+	                               int* latencyCount,
+	                               EventMetricHandle<ReadMetric> readMetric,
+	                               bool shouldRecord) {
+		double readBegin = now();
+		RangeResult value = co_await f;
 
 		double latency = now() - readBegin;
 		readMetric->readLatency = latency * 1e9;
@@ -237,30 +242,30 @@ struct ReadWriteCommonImpl {
 			++*latencyCount;
 			latencies->addSample(latency);
 		}
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> setup(Database cx, ReadWriteCommon* self) {
+	static Future<Void> setup(Database cx, ReadWriteCommon* self) {
 		if (!self->doSetup)
-			return Void();
+			co_return;
 
-		state Promise<double> loadTime;
-		state Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
+		Promise<double> loadTime;
+		Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
-		wait(bulkSetup(cx,
-		               self,
-		               self->nodeCount,
-		               loadTime,
-		               self->insertionCountsToMeasure.empty(),
-		               self->warmingDelay,
-		               self->maxInsertRate,
-		               self->insertionCountsToMeasure,
-		               ratesAtKeyCounts));
+		co_await bulkSetup(cx,
+		                   self,
+		                   self->nodeCount,
+		                   loadTime,
+		                   self->insertionCountsToMeasure.empty(),
+		                   self->warmingDelay,
+		                   self->maxInsertRate,
+		                   self->insertionCountsToMeasure,
+		                   ratesAtKeyCounts);
 
 		self->loadTime = loadTime.getFuture().get();
 		self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
 
-		return Void();
+		co_return;
 	}
 };
 
@@ -335,14 +340,22 @@ bool ReadWriteCommon::shouldRecord(double checkTime) {
 static Future<Version> nextRV;
 static Version lastRV = invalidVersion;
 
-ACTOR static Future<Version> getNextRV(Database db) {
-	state Transaction tr(db);
+static Future<Version> getNextRV(Database db) {
+	Transaction tr(db);
 	loop {
-		try {
-			Version v = wait(tr.getReadVersion());
-			return v;
-		} catch (Error& e) {
-			wait(tr.onError(e));
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				Version v = co_await tr.getReadVersion();
+				co_return v;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
+			}
 		}
 	}
 }
@@ -486,10 +499,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
 
-	ACTOR template <class Trans>
+	template <class Trans>
 	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {
 		if (!keys.size())
-			return Void();
+			co_return;
 		if (!self->dependentReads) {
 			std::vector<Future<Void>> readers;
 			if (self->rangeReads) {
@@ -506,38 +519,46 @@ struct ReadWriteWorkload : ReadWriteCommon {
 					readers.push_back(self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord));
 				}
 			}
-			wait(waitForAll(readers));
+			co_await waitForAll(readers);
 		} else {
-			state int op;
+			int op{ 0 };
 			for (op = 0; op < keys.size(); op++) {
 				++self->totalReadsMetric;
-				wait(self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord));
+				co_await self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord);
 			}
 		}
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> _start(Database cx, ReadWriteWorkload* self) {
+	static Future<Void> _start(Database cx, ReadWriteWorkload* self) {
 		// Read one record from the database to warm the cache of keyServers
-		state std::vector<int64_t> keys;
+		std::vector<int64_t> keys;
 		keys.push_back(deterministicRandom()->randomInt64(0, self->nodeCount));
-		state double startTime = now();
+		double startTime = now();
 		loop {
-			state Transaction tr(cx);
-			try {
-				self->setupTransaction(tr);
-				wait(self->readOp(&tr, keys, self, false));
-				wait(tr.warmRange(allKeys));
-				break;
-			} catch (Error& e) {
-				if (e.code() == error_code_tag_throttled) {
-					++self->transactionsTagThrottled;
+			Transaction tr(cx);
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					self->setupTransaction(tr);
+					co_await self->readOp(&tr, keys, self, false);
+					co_await tr.warmRange(allKeys);
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
 				}
-				wait(tr.onError(e));
+				if (hasErr) {
+					if (err.code() == error_code_tag_throttled) {
+						++self->transactionsTagThrottled;
+					}
+					co_await tr.onError(err);
+				}
 			}
 		}
 
-		wait(delay(std::max(0.1, 1.0 - (now() - startTime))));
+		co_await delay(std::max(0.1, 1.0 - (now() - startTime)));
 
 		std::vector<Future<Void>> clients;
 		if (self->enableReadLatencyLogging)
@@ -558,9 +579,9 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (!self->cancelWorkersAtDuration)
 			self->clients = clients; // Don't cancel them until check()
 
-		wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
-		                                   : delay(self->testDuration));
-		return Void();
+		co_await (self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
+		                                        : delay(self->testDuration));
+		co_return;
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount) {
@@ -581,17 +602,17 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		return alpha;
 	}
 
-	ACTOR template <class Trans>
+	template <class Trans>
 	Future<Void> randomReadWriteClient(Database cx, ReadWriteWorkload* self, double delay, int clientIndex) {
-		state double startTime = now();
-		state double lastTime = now();
-		state double GRVStartTime;
-		state UID debugID;
+		double startTime = now();
+		double lastTime = now();
+		double GRVStartTime{ 0 };
+		UID debugID;
 
 		if (self->rampUpConcurrency) {
-			wait(::delay(self->testDuration / 2 *
-			             (double(clientIndex) / self->actorCount +
-			              double(self->clientId) / self->clientCount / self->actorCount)));
+			co_await ::delay(self->testDuration / 2 *
+			                 (double(clientIndex) / self->actorCount +
+			                  double(self->clientId) / self->clientCount / self->actorCount));
 			TraceEvent("ClientStarting")
 			    .detail("ActorIndex", clientIndex)
 			    .detail("ClientIndex", self->clientId)
@@ -599,7 +620,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 
 		loop {
-			wait(poisson(&lastTime, delay));
+			co_await poisson(&lastTime, delay);
 
 			if (self->rampUpConcurrency) {
 				if (now() - startTime >= self->testDuration / 2 *
@@ -609,22 +630,22 @@ struct ReadWriteWorkload : ReadWriteCommon {
 					    .detail("ActorIndex", clientIndex)
 					    .detail("ClientIndex", self->clientId)
 					    .detail("NumActors", clientIndex * self->clientCount + self->clientId);
-					wait(Never());
+					co_await Future<Void>(Never());
 				}
 			}
 
 			if (!self->rampUpLoad || deterministicRandom()->random01() < self->sweepAlpha(startTime)) {
-				state double tstart = now();
-				state bool aTransaction = deterministicRandom()->random01() >
-				                          (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
+				double tstart = now();
+				bool aTransaction = deterministicRandom()->random01() >
+				                    (self->rampTransactionType ? self->sweepAlpha(startTime) : self->alpha);
 
-				state std::vector<int64_t> keys;
-				state std::vector<Value> values;
-				state std::vector<KeyRange> extra_ranges;
+				std::vector<int64_t> keys;
+				std::vector<Value> values;
+				std::vector<KeyRange> extra_ranges;
 				int reads = aTransaction ? self->readsPerTransactionA : self->readsPerTransactionB;
-				state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
-				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
-				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
+				int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
+				int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
+				int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
 				if (!self->adjacentReads) {
 					for (int op = 0; op < reads; op++)
 						keys.push_back(self->getRandomKey(self->nodeCount));
@@ -642,7 +663,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				for (int op = 0; op < extra_read_conflict_ranges + extra_write_conflict_ranges; op++)
 					extra_ranges.push_back(singleKeyRange(deterministicRandom()->randomUniqueID().toString()));
 
-				state Trans tr(cx);
+				Trans tr(cx);
 
 				if (tstart - self->clientBegin > self->debugTime &&
 				    tstart - self->clientBegin <= self->debugTime + self->debugInterval) {
@@ -658,70 +679,78 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				self->transactionSuccessMetric->commitLatency = -1;
 
 				loop {
-					try {
-						self->setupTransaction(tr);
+					{
+						Error err;
+						bool hasErr = false;
+						try {
+							self->setupTransaction(tr);
 
-						GRVStartTime = now();
-						self->transactionFailureMetric->startLatency = -1;
+							GRVStartTime = now();
+							self->transactionFailureMetric->startLatency = -1;
 
-						Version v =
-						    wait(self->inconsistentReads ? getInconsistentReadVersion(cx) : tr.getReadVersion());
-						if (self->inconsistentReads)
-							tr.setVersion(v);
+							Version v = co_await (self->inconsistentReads ? getInconsistentReadVersion(cx)
+							                                              : tr.getReadVersion());
+							if (self->inconsistentReads)
+								tr.setVersion(v);
 
-						double grvLatency = now() - GRVStartTime;
-						self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
-						self->transactionFailureMetric->startLatency = grvLatency * 1e9;
-						if (self->shouldRecord())
-							self->GRVLatencies.addSample(grvLatency);
+							double grvLatency = now() - GRVStartTime;
+							self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
+							self->transactionFailureMetric->startLatency = grvLatency * 1e9;
+							if (self->shouldRecord())
+								self->GRVLatencies.addSample(grvLatency);
 
-						state double readStart = now();
-						wait(self->readOp(&tr, keys, self, self->shouldRecord()));
+							double readStart = now();
+							co_await self->readOp(&tr, keys, self, self->shouldRecord());
 
-						double readLatency = now() - readStart;
-						if (self->shouldRecord())
-							self->fullReadLatencies.addSample(readLatency);
+							double readLatency = now() - readStart;
+							if (self->shouldRecord())
+								self->fullReadLatencies.addSample(readLatency);
 
-						if (!writes)
+							if (!writes)
+								break;
+
+							if (self->adjacentWrites) {
+								int64_t startKey = self->getRandomKey(self->nodeCount - writes);
+								for (int op = 0; op < writes; op++)
+									tr.set(self->keyForIndex(startKey + op, false), values[op]);
+							} else {
+								for (int op = 0; op < writes; op++)
+									tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
+							}
+							for (int op = 0; op < extra_read_conflict_ranges; op++)
+								tr.addReadConflictRange(extra_ranges[op]);
+							for (int op = 0; op < extra_write_conflict_ranges; op++)
+								tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
+
+							double commitStart = now();
+							co_await tr.commit();
+
+							double commitLatency = now() - commitStart;
+							self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
+							if (self->shouldRecord())
+								self->commitLatencies.addSample(commitLatency);
+
 							break;
-
-						if (self->adjacentWrites) {
-							int64_t startKey = self->getRandomKey(self->nodeCount - writes);
-							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(startKey + op, false), values[op]);
-						} else {
-							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
+						} catch (Error& e) {
+							err = e;
+							hasErr = true;
 						}
-						for (int op = 0; op < extra_read_conflict_ranges; op++)
-							tr.addReadConflictRange(extra_ranges[op]);
-						for (int op = 0; op < extra_write_conflict_ranges; op++)
-							tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
+						if (hasErr) {
+							if (err.code() == error_code_tag_throttled) {
+								++self->transactionsTagThrottled;
+							}
 
-						state double commitStart = now();
-						wait(tr.commit());
+							self->transactionFailureMetric->errorCode = err.code();
+							self->transactionFailureMetric->log();
 
-						double commitLatency = now() - commitStart;
-						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
-						if (self->shouldRecord())
-							self->commitLatencies.addSample(commitLatency);
+							co_await tr.onError(err);
 
-						break;
-					} catch (Error& e) {
-						if (e.code() == error_code_tag_throttled) {
-							++self->transactionsTagThrottled;
+							++self->transactionSuccessMetric->retries;
+							++self->totalRetriesMetric;
+
+							if (self->shouldRecord())
+								++self->retries;
 						}
-
-						self->transactionFailureMetric->errorCode = e.code();
-						self->transactionFailureMetric->log();
-
-						wait(tr.onError(e));
-
-						++self->transactionSuccessMetric->retries;
-						++self->totalRetriesMetric;
-
-						if (self->shouldRecord())
-							++self->retries;
 					}
 				}
 
@@ -747,50 +776,58 @@ struct ReadWriteWorkload : ReadWriteCommon {
 	}
 };
 
-ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx,
-                                                                           std::vector<uint64_t> countsOfInterest,
-                                                                           double checkInterval) {
-	state KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
-	state KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
-	state Transaction tr(cx);
-	state uint64_t lastInsertionCount = 0;
-	state int currentCountIndex = 0;
+Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx,
+                                                                     std::vector<uint64_t> countsOfInterest,
+                                                                     double checkInterval) {
+	KeyRange keyPrefix = KeyRangeRef(std::string("keycount"), std::string("keycount") + char(255));
+	KeyRange bytesPrefix = KeyRangeRef(std::string("bytesstored"), std::string("bytesstored") + char(255));
+	Transaction tr(cx);
+	uint64_t lastInsertionCount = 0;
+	int currentCountIndex = 0;
 
-	state std::vector<std::pair<uint64_t, double>> countInsertionRates;
+	std::vector<std::pair<uint64_t, double>> countInsertionRates;
 
-	state double startTime = now();
+	double startTime = now();
 
 	while (currentCountIndex < countsOfInterest.size()) {
-		try {
-			state Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
-			state Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
-			wait(success(countFuture) && success(bytesFuture));
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
+				Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
+				co_await (success(countFuture) && success(bytesFuture));
 
-			RangeResult counts = countFuture.get();
-			RangeResult bytes = bytesFuture.get();
+				RangeResult counts = countFuture.get();
+				RangeResult bytes = bytesFuture.get();
 
-			uint64_t numInserted = 0;
-			for (int i = 0; i < counts.size(); i++)
-				numInserted += *(uint64_t*)counts[i].value.begin();
+				uint64_t numInserted = 0;
+				for (int i = 0; i < counts.size(); i++)
+					numInserted += *(uint64_t*)counts[i].value.begin();
 
-			uint64_t bytesInserted = 0;
-			for (int i = 0; i < bytes.size(); i++)
-				bytesInserted += *(uint64_t*)bytes[i].value.begin();
+				uint64_t bytesInserted = 0;
+				for (int i = 0; i < bytes.size(); i++)
+					bytesInserted += *(uint64_t*)bytes[i].value.begin();
 
-			while (currentCountIndex < countsOfInterest.size() &&
-			       countsOfInterest[currentCountIndex] > lastInsertionCount &&
-			       countsOfInterest[currentCountIndex] <= numInserted)
-				countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++],
-				                                 bytesInserted / (now() - startTime));
+				while (currentCountIndex < countsOfInterest.size() &&
+				       countsOfInterest[currentCountIndex] > lastInsertionCount &&
+				       countsOfInterest[currentCountIndex] <= numInserted)
+					countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++],
+					                                 bytesInserted / (now() - startTime));
 
-			lastInsertionCount = numInserted;
-			wait(delay(checkInterval));
-		} catch (Error& e) {
-			wait(tr.onError(e));
+				lastInsertionCount = numInserted;
+				co_await delay(checkInterval);
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
+			}
 		}
 	}
 
-	return countInsertionRates;
+	co_return countInsertionRates;
 }
 
 WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory;

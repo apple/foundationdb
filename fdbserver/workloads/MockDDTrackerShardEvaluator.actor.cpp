@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/workloads/MockDDTest.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
@@ -67,19 +68,32 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
-	                                                FutureStream<RelocateShard> input) {
+	static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
+	                                          FutureStream<RelocateShard> input) {
 		loop {
-			try {
-				choose {
-					when(RelocateShard rs = waitNext(input)) {
-						++self->rsReasonCounts[rs.reason];
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					{
+						auto choice = co_await race(input);
+						if (choice.index() == 0) {
+							RelocateShard rs = std::get<0>(std::move(choice));
+
+							++self->rsReasonCounts[rs.reason];
+						} else {
+							UNREACHABLE();
+						}
 					}
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
 				}
-			} catch (Error& e) {
-				if (e.code() != error_code_wrong_shard_server)
-					throw e;
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+				if (hasErr) {
+					if (err.code() != error_code_wrong_shard_server)
+						throw err;
+					co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
+				}
 			}
 		}
 	}

@@ -50,7 +50,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 	Value recordValue(int index) {
 		Version v = recordVersion(index);
-		return StringRef(format("%" PRId64 " (%" PRIx64 ")", v, v));
+		return StringRef(format("%lld (%llx)", static_cast<long long>(v), static_cast<long long>(v)));
 	}
 
 	MutationLogReaderCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -75,46 +75,54 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, MutationLogReaderCorrectnessWorkload* self) {
-		state Transaction tr(cx);
-		state int iStart = 0;
-		state int batchSize = 1000;
+	Future<Void> _start(Database cx, MutationLogReaderCorrectnessWorkload* self) {
+		Transaction tr(cx);
+		int iStart = 0;
+		int batchSize = 1000;
 		fmt::print("Records: {}\n", self->records);
 		fmt::print("BeginVersion: {}\n", self->beginVersion);
 		fmt::print("EndVersion: {}\n", self->endVersion);
 
 		while (iStart < self->records) {
 			loop {
-				try {
-					tr.reset();
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				{
+					Error err;
+					bool hasErr = false;
+					try {
+						tr.reset();
+						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					int i = iStart;
-					state int iEnd = std::min(iStart + batchSize, self->records);
+						int i = iStart;
+						int iEnd = std::min(iStart + batchSize, self->records);
 
-					for (; i < iEnd; ++i) {
-						Key key = self->recordKey(i);
-						Value value = self->recordValue(i);
-						tr.set(key, value);
+						for (; i < iEnd; ++i) {
+							Key key = self->recordKey(i);
+							Value value = self->recordValue(i);
+							tr.set(key, value);
+						}
+
+						co_await tr.commit();
+						iStart = iEnd;
+						break;
+					} catch (Error& e) {
+						err = e;
+						hasErr = true;
 					}
-
-					wait(tr.commit());
-					iStart = iEnd;
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
+					if (hasErr) {
+						co_await tr.onError(err);
+					}
 				}
 			}
 		}
 
-		state Reference<MutationLogReader> reader = wait(MutationLogReader::Create(
-		    cx, self->beginVersion, self->endVersion, self->uid, backupLogKeys.begin, /*pipelineDepth=*/1));
+		Reference<MutationLogReader> reader = co_await MutationLogReader::Create(
+		    cx, self->beginVersion, self->endVersion, self->uid, backupLogKeys.begin, /*pipelineDepth=*/1);
 
-		state int nextExpectedRecord = 0;
+		int nextExpectedRecord = 0;
 
 		try {
 			loop {
-				state Standalone<RangeResultRef> results = wait(reader->getNext());
+				Standalone<RangeResultRef> results = co_await reader->getNext();
 
 				for (const auto& rec : results) {
 					Key expectedKey = self->recordKey(nextExpectedRecord);
@@ -150,7 +158,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 		ASSERT_EQ(nextExpectedRecord, self->records);
 
-		return Void();
+		co_return;
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

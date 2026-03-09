@@ -26,6 +26,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 extern IKeyValueStore* makeDummyKeyValueStore();
@@ -155,12 +156,12 @@ struct KVTest {
 	}
 };
 
-ACTOR Future<Void> testKVRead(KVTest* test, Key key, TestHistogram<float>* latency, PerfIntCounter* count) {
+Future<Void> testKVRead(KVTest* test, Key key, TestHistogram<float>* latency, PerfIntCounter* count) {
 	// state Version s1 = test->lastCommit;
-	state Version s2 = test->lastDurable;
+	Version s2 = test->lastDurable;
 
-	state double begin = timer();
-	Optional<Value> val = wait(test->store->readValue(key));
+	double begin = timer();
+	Optional<Value> val = co_await test->store->readValue(key);
 	latency->addSample(timer() - begin);
 	++*count;
 	Version v = val.present() ? BinaryReader::fromStringRef<Version>(val.get(), Unversioned()) : test->startVersion;
@@ -171,31 +172,31 @@ ACTOR Future<Void> testKVRead(KVTest* test, Key key, TestHistogram<float>* laten
 	ASSERT(s2 <= v || test->get(key, s2) == v); // Causal consistency
 	ASSERT(v <= test->lastCommit); // read committed
 	// ASSERT( v <= test->lastSet );  // read uncommitted
-	return Void();
+	co_return;
 }
 
-ACTOR Future<Void> testKVReadSaturation(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
+Future<Void> testKVReadSaturation(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
 	while (true) {
-		state double begin = timer();
-		Optional<Value> val = wait(test->store->readValue(test->randomKey()));
+		double begin = timer();
+		Optional<Value> val = co_await test->store->readValue(test->randomKey());
 		latency->addSample(timer() - begin);
 		++*count;
-		wait(delay(0));
+		co_await delay(0);
 	}
 }
 
-ACTOR Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
-	state Version v = test->lastSet;
+Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
+	Version v = test->lastSet;
 	test->lastCommit = v;
-	state double begin = timer();
-	wait(test->store->commit());
+	double begin = timer();
+	co_await test->store->commit();
 	++*count;
 	latency->addSample(timer() - begin);
 	test->lastDurable = std::max(test->lastDurable, v);
-	return Void();
+	co_return;
 }
 
-Future<Void> testKVStore(struct KVStoreTestWorkload* const&);
+Future<Void> testKVStore(struct KVStoreTestWorkload* workload);
 
 struct KVStoreTestWorkload : TestWorkload {
 	static constexpr auto NAME = "KVStoreTest";
@@ -255,25 +256,25 @@ struct KVStoreTestWorkload : TestWorkload {
 
 WorkloadFactory<KVStoreTestWorkload> KVStoreTestWorkloadFactory;
 
-ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
-	state KVTest& test = *ptest;
-	state ActorCollectionNoErrors ac;
-	state std::deque<Future<Void>> reads;
-	state BinaryWriter wr(Unversioned());
-	state int64_t commitsStarted = 0;
+Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
+	KVTest& test = *ptest;
+	ActorCollectionNoErrors ac;
+	std::deque<Future<Void>> reads;
+	BinaryWriter wr(Unversioned());
+	int64_t commitsStarted = 0;
 	// test.store = makeDummyKeyValueStore();
-	state int extraBytes = workload->valueBytes - sizeof(test.lastSet);
-	state int i;
+	int extraBytes = workload->valueBytes - sizeof(test.lastSet);
+	int i{ 0 };
 	ASSERT(extraBytes >= 0);
-	state char* extraValue = new char[extraBytes];
+	char* extraValue = new char[extraBytes];
 	memset(extraValue, '.', extraBytes);
 
 	if (workload->doCount) {
-		state int64_t count = 0;
-		state Key k;
-		state double cst = timer();
+		int64_t count = 0;
+		Key k;
+		double cst = timer();
 		while (true) {
-			RangeResult kv = wait(test.store->readRange(KeyRangeRef(k, "\xff\xff\xff\xff"_sr), 1000));
+			RangeResult kv = co_await test.store->readRange(KeyRangeRef(k, "\xff\xff\xff\xff"_sr), 1000);
 			count += kv.size();
 			if (kv.size() < 1000)
 				break;
@@ -289,23 +290,23 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 		wr.serializeBytes(extraValue, extraBytes);
 
 		printf("Building %d nodes: ", workload->nodeCount);
-		state double setupBegin = timer();
-		state Future<Void> lastCommit = Void();
+		double setupBegin = timer();
+		Future<Void> lastCommit = Void();
 		for (i = 0; i < workload->nodeCount; i++) {
 			test.store->set(KeyValueRef(test.makeKey(i), wr.toValue()));
 			if (!((i + 1) % 10000) || i + 1 == workload->nodeCount) {
-				wait(lastCommit);
+				co_await lastCommit;
 				lastCommit = test.store->commit();
 				printf("ETA: %f seconds\n", (timer() - setupBegin) / i * (workload->nodeCount - i));
 			}
 		}
-		wait(lastCommit);
+		co_await lastCommit;
 		workload->setupTook = timer() - setupBegin;
 		TraceEvent("KVStoreSetup").detail("Count", workload->nodeCount).detail("Took", workload->setupTook);
 	}
 
-	state double t = now();
-	state double stopAt = t + workload->testDuration;
+	double t = now();
+	double stopAt = t + workload->testDuration;
 	if (workload->saturation) {
 		if (workload->commitFraction) {
 			while (now() < stopAt) {
@@ -318,14 +319,14 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 					++workload->sets;
 				}
 				++commitsStarted;
-				wait(testKVCommit(&test, &workload->commitLatency, &workload->commits));
+				co_await testKVCommit(&test, &workload->commitLatency, &workload->commits);
 			}
 		} else {
 			std::vector<Future<Void>> actors;
 			actors.reserve(100);
 			for (int a = 0; a < 100; a++)
 				actors.push_back(testKVReadSaturation(&test, &workload->readLatency, &workload->reads));
-			wait(timeout(waitForAll(actors), workload->testDuration, Void()));
+			co_await timeout(waitForAll(actors), workload->testDuration, Void());
 		}
 	} else {
 		while (t < stopAt) {
@@ -354,26 +355,26 @@ ACTOR Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest)
 				if (t >= end)
 					break;
 			}
-			wait(delayUntil(t));
+			co_await delayUntil(t);
 		}
 	}
 
 	if (workload->doClear) {
-		state int chunk = 1000000;
+		int chunk = 1000000;
 		t = timer();
 		for (i = 0; i < workload->nodeCount; i += chunk) {
 			test.store->clear(KeyRangeRef(test.makeKey(i), test.makeKey(i + chunk)));
-			wait(test.store->commit());
+			co_await test.store->commit();
 		}
 		TraceEvent("KVStoreClear").detail("Took", timer() - t);
 	}
 
-	return Void();
+	co_return;
 }
 
-ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
-	state KVTest test(workload->nodeCount, !workload->filename.size(), workload->keyBytes);
-	state Error err;
+Future<Void> testKVStore(KVStoreTestWorkload* workload) {
+	KVTest test(workload->nodeCount, !workload->filename.size(), workload->keyBytes);
+	Error err;
 
 	// wait( delay(1) );
 	TraceEvent("GO").log();
@@ -399,14 +400,18 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		ASSERT(false);
 	}
 
-	wait(test.store->init());
+	co_await test.store->init();
 
-	state Future<Void> main = testKVStoreMain(workload, &test);
+	Future<Void> main = testKVStoreMain(workload, &test);
 	try {
-		choose {
-			when(wait(main)) {}
-			when(wait(test.store->getError())) {
+		{
+			auto choice = co_await race(main, test.store->getError());
+			if (choice.index() == 0) {
+			} else if (choice.index() == 1) {
+
 				ASSERT(false);
+			} else {
+				UNREACHABLE();
 			}
 		}
 	} catch (Error& e) {
@@ -416,8 +421,8 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 
 	Future<Void> c = test.store->onClosed();
 	test.close();
-	wait(c);
+	co_await c;
 	if (err.code() != invalid_error_code)
 		throw err;
-	return Void();
+	co_return;
 }

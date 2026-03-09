@@ -34,6 +34,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This workload tests a gray failure scenario: a single TLog is network-partitioned from
@@ -128,50 +129,54 @@ struct ClogTlogWorkload : TestWorkload {
 		cloggedPairs.clear();
 	}
 
-	ACTOR static Future<Void> excludeFailedLog(ClogTlogWorkload* self, Database cx) {
-		loop choose {
-			when(wait(self->dbInfo->onChange())) {
+	static Future<Void> excludeFailedLog(ClogTlogWorkload* self, Database cx) {
+		loop {
+			auto choice = co_await race(self->dbInfo->onChange(), delay(30));
+			if (choice.index() == 0) {
+
 				if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					return Void();
+					co_return;
 				}
-			}
-			when(wait(delay(30))) {
+			} else if (choice.index() == 1) {
+
 				// recovery state hasn't changed in 30s, exclude the failed tlog
 				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")
 				    .detail("TLog", self->tlog.get())
 				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
 				std::string modes = "exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port);
-				ConfigurationResult r = wait(ManagementAPI::changeConfig(cx.getReference(), modes, /*force=*/true));
+				ConfigurationResult r = co_await ManagementAPI::changeConfig(cx.getReference(), modes, /*force=*/true);
 				TraceEvent("ExcludeFailedLog").detail("Result", r);
-				return Void();
+				co_return;
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}
 
-	ACTOR Future<Void> clogClient(ClogTlogWorkload* self, Database cx) {
+	Future<Void> clogClient(ClogTlogWorkload* self, Database cx) {
 		if (deterministicRandom()->coinflip()) {
 			self->useDisconnection = true;
 		}
 
 		// Let cycle workload issue some transactions.
-		wait(delay(20.0));
+		co_await delay(20.0);
 
 		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait(self->dbInfo->onChange());
+			co_await self->dbInfo->onChange();
 		}
 
 		double startTime = now();
-		state double workloadEnd = now() + self->testDuration - 10;
+		double workloadEnd = now() + self->testDuration - 10;
 		TraceEvent("ClogTlog").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
 		// Clog and wait for recovery to happen
 		self->clogTlog(workloadEnd - now());
 		while (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
-			wait(self->dbInfo->onChange());
+			co_await self->dbInfo->onChange();
 		}
 
-		state bool useGrayFailureToRecover = false;
+		bool useGrayFailureToRecover = false;
 		if (deterministicRandom()->coinflip() && self->useDisconnection) {
 			// Use gray failure instead of exclusion to recover the cluster.
 			TraceEvent("ClogTLogUseGrayFailreToRecover").log();
@@ -180,21 +185,25 @@ struct ClogTlogWorkload : TestWorkload {
 
 		// start exclusion and wait for fully recovery. When using gray failure, the cluster should recover by itself
 		// eventually.
-		state Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(self, cx);
-		state Future<Void> onChange = self->dbInfo->onChange();
-		loop choose {
-			when(wait(onChange)) {
+		Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(self, cx);
+		Future<Void> onChange = self->dbInfo->onChange();
+		loop {
+			auto choice = co_await race(onChange, delayUntil(workloadEnd));
+			if (choice.index() == 0) {
+
 				if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
 					TraceEvent("ClogDoneFullyRecovered").log();
 					self->unclogAll();
-					return Void();
+					co_return;
 				}
 				onChange = self->dbInfo->onChange();
-			}
-			when(wait(delayUntil(workloadEnd))) {
+			} else if (choice.index() == 1) {
+
 				// Expect to reach fully recovered state before workload ends
 				TraceEvent(SevError, "ClogTLogFailure").detail("RecoveryState", self->dbInfo->get().recoveryState);
-				return Void();
+				co_return;
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}

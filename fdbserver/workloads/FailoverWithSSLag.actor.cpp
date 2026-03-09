@@ -29,6 +29,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last include.
 
 // This actor tests failover with remote tlogs being in sync with primary but with remote storage servers lagging
@@ -135,16 +136,16 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Optional<Version>> fetchStorageServerLag(FailoverWithSSLagWorkload* self, Database cx) {
-		state double startTime = now();
-		StatusObject result = wait(StatusClient::statusFetcher(cx));
+	static Future<Optional<Version>> fetchStorageServerLag(FailoverWithSSLagWorkload* self, Database cx) {
+		double startTime = now();
+		StatusObject result = co_await StatusClient::statusFetcher(cx);
 		double duration = now() - startTime;
 
 		StatusObjectReader statusObj(result);
 		StatusObjectReader statusObjCluster;
 		if (!statusObj.get("cluster", statusObjCluster)) {
 			TraceEvent("SSLagNoCluster");
-			return Optional<Version>();
+			co_return Optional<Version>();
 		}
 
 		// Fetch the lag between primary and remote tlogs.
@@ -152,7 +153,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		double tlogLagInSeconds = 0;
 		if (!self->fetchLagFromStatusObject("logserver_lag", statusObjCluster, tlogLagInVersions, tlogLagInSeconds)) {
 			TraceEvent("NoLogServerLagData");
-			return Optional<Version>();
+			co_return Optional<Version>();
 		}
 
 		// Fetch the lag between primary and remote storage servers.
@@ -160,7 +161,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		double ssLagInSeconds = 0;
 		if (!self->fetchLagFromStatusObject("storageserver_lag", statusObjCluster, ssLagInVersions, ssLagInSeconds)) {
 			TraceEvent("NoStorageServerLagData");
-			return Optional<Version>();
+			co_return Optional<Version>();
 		}
 
 		// Fetch the lag between primary and remote data centers.
@@ -168,7 +169,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		double dcLagInSeconds = 0;
 		if (!self->fetchLagFromStatusObject("datacenter_lag", statusObjCluster, dcLagInVersions, dcLagInSeconds)) {
 			TraceEvent("NoDataCenterLagData");
-			return Optional<Version>();
+			co_return Optional<Version>();
 		}
 
 		TraceEvent("LagInfo")
@@ -180,82 +181,87 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		    .detail("DataCenterLagInSeconds", dcLagInSeconds)
 		    .detail("TimeToFetchStatus", duration);
 
-		return ssLagInVersions;
+		co_return ssLagInVersions;
 	}
 
-	ACTOR static Future<Void> waitForRemoteDataCenterToLag(FailoverWithSSLagWorkload* self, Database cx) {
-		state Future<Optional<Version>> ssLag = Never();
-		loop choose {
-			when(wait(delay(5.0))) {
+	static Future<Void> waitForRemoteDataCenterToLag(FailoverWithSSLagWorkload* self, Database cx) {
+		Future<Optional<Version>> ssLag = Never();
+		loop {
+			auto choice = co_await race(delay(5.0), ssLag);
+			if (choice.index() == 0) {
+
 				// Fetch SS lag every 5s.
 				ssLag = self->fetchStorageServerLag(self, cx);
-			}
-			when(Optional<Version> versionLag = wait(ssLag)) {
+			} else if (choice.index() == 1) {
+				Optional<Version> versionLag = std::get<1>(std::move(choice));
+
 				if (versionLag.present() && versionLag.get() >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					TraceEvent("SSLag").detail("Versions", versionLag.get());
-					return Void();
+					co_return;
 				}
 				ssLag = Never();
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}
 
-	ACTOR static Future<Void> failover(FailoverWithSSLagWorkload* self, Database cx) {
+	static Future<Void> failover(FailoverWithSSLagWorkload* self, Database cx) {
 		TraceEvent("FailoverBegin").log();
 
-		wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true)));
+		co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true));
 		TraceEvent("Failover_WaitFor_PrimaryDatacenterKey").log();
 
 		// when failover, primaryDC should change to 1
-		wait(waitForPrimaryDC(cx, "1"_sr));
+		co_await waitForPrimaryDC(cx, "1"_sr);
 		TraceEvent("FailoverComplete").log();
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> doFailover(FailoverWithSSLagWorkload* self, Database cx) {
-		state bool connectionsClogged = true;
-		state bool failoverCompleted = false;
-		loop choose {
-			// NOTE: We don't have a way of verifying that failover is blocked because of the
-			// data center/storage server lag. So verify that failover is blocked for 100 seconds
-			// (which is way longer than the time needed to complete failover) and then unclog
-			// connections and let failover make progress.
-			when(wait(delay(100.0))) {
+	static Future<Void> doFailover(FailoverWithSSLagWorkload* self, Database cx) {
+		bool connectionsClogged = true;
+		bool failoverCompleted = false;
+		loop {
+			auto choice = co_await race(delay(100.0), self->failover(self, cx));
+			if (choice.index() == 0) {
+
 				if (connectionsClogged) {
 					if (failoverCompleted) {
 						// Failover completed even while the remote storages are clogged, which
 						// shouldn't happen. Mark the test as failed.
 						self->testSuccess = false;
-						return Void();
+						co_return;
 					}
 					self->clogUnclogRemoteStorages(false /* clog */);
 					connectionsClogged = false;
 				}
-			}
-			when(wait(self->failover(self, cx))) {
+			} else if (choice.index() == 1) {
+
 				if (connectionsClogged) {
 					// Failover completed even while the remote storages are clogged, which
 					// shouldn't happen. Mark the test as failed.
 					self->testSuccess = false;
-					return Void();
+					co_return;
 				}
 				failoverCompleted = true;
 
 				// Verify that the storage server lag has gone below the threshold.
-				state Future<Optional<Version>> ssLag = self->fetchStorageServerLag(self, cx);
-				Optional<Version> versionLag = wait(ssLag);
+				Future<Optional<Version>> ssLag = self->fetchStorageServerLag(self, cx);
+				Optional<Version> versionLag = co_await ssLag;
 				if (versionLag.present() && versionLag.get() >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					TraceEvent("SSLag").detail("Versions", versionLag.get());
 					self->testSuccess = false;
 				}
-				return Void();
+				co_return;
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}
 
-	ACTOR Future<Void> clogClient(FailoverWithSSLagWorkload* self, Database cx) {
+	Future<Void> clogClient(FailoverWithSSLagWorkload* self, Database cx) {
 		while (self->dbInfo->get().recoveryState < RecoveryState::FULLY_RECOVERED) {
-			wait(self->dbInfo->onChange());
+			co_await self->dbInfo->onChange();
 		}
 
 		// Clog connections between remote tlogs and storage servers.
@@ -263,17 +269,17 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 			// Couldn't find remote tlogs/storage servers. Probably configuration will
 			// need to be adjusted.
 			self->testSuccess = false;
-			return Void();
+			co_return;
 		}
 
 		// Wait until the data center/storage server lag goes above the threshold.
-		wait(self->waitForRemoteDataCenterToLag(self, cx));
+		co_await self->waitForRemoteDataCenterToLag(self, cx);
 
 		// Initiate failover and verify that it doesn't complete until the data center/
 		// storage server lag gets below the threshold.
-		wait(self->doFailover(self, cx));
+		co_await self->doFailover(self, cx);
 
-		return Void();
+		co_return;
 	}
 };
 

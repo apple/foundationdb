@@ -28,6 +28,7 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const Value EMPTY = Tuple().pack();
@@ -68,13 +69,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> performSetup(Database cx, GetMappedRangeWorkload* self) {
+	Future<Void> performSetup(Database cx, GetMappedRangeWorkload* self) {
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);
 		types.push_back(READ_YOUR_WRITES);
 
-		wait(self->chooseTransactionFactory(cx, types));
-		return Void();
+		co_await self->chooseTransactionFactory(cx, types);
+		co_return;
 	}
 
 	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
@@ -95,44 +96,52 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static Value recordValue(int i) { return Tuple::makeTuple(dataOfRecord(i)).pack(); }
 	static Value recordValue(int i, int split) { return Tuple::makeTuple(dataOfRecord(i, split)).pack(); }
 
-	ACTOR Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
-		state Transaction tr(cx);
+	Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
+		Transaction tr(cx);
 		loop {
 			std::cout << "start fillInRecords n=" << n << std::endl;
 			// TODO: When n is large, split into multiple transactions.
 			recordSize = 0;
 			indexSize = 0;
-			try {
-				for (int i = 0; i < n; i++) {
-					if (self->SPLIT_RECORDS) {
-						for (int split = 0; split < SPLIT_SIZE; split++) {
-							tr.set(recordKey(i, split), recordValue(i, split));
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					for (int i = 0; i < n; i++) {
+						if (self->SPLIT_RECORDS) {
+							for (int split = 0; split < SPLIT_SIZE; split++) {
+								tr.set(recordKey(i, split), recordValue(i, split));
+								if (i == 0) {
+									recordSize +=
+									    recordKey(i, split).size() + recordValue(i, split).size() + sizeof(KeyValueRef);
+								}
+							}
+						} else {
+							tr.set(recordKey(i), recordValue(i));
 							if (i == 0) {
-								recordSize +=
-								    recordKey(i, split).size() + recordValue(i, split).size() + sizeof(KeyValueRef);
+								recordSize += recordKey(i).size() + recordValue(i).size() + sizeof(KeyValueRef);
 							}
 						}
-					} else {
-						tr.set(recordKey(i), recordValue(i));
+						tr.set(indexEntryKey(i), EMPTY);
 						if (i == 0) {
-							recordSize += recordKey(i).size() + recordValue(i).size() + sizeof(KeyValueRef);
+							indexSize += indexEntryKey(i).size() + sizeof(KeyValueRef);
 						}
 					}
-					tr.set(indexEntryKey(i), EMPTY);
-					if (i == 0) {
-						indexSize += indexEntryKey(i).size() + sizeof(KeyValueRef);
-					}
+					co_await tr.commit();
+					std::cout << "finished fillInRecords with version " << tr.getCommittedVersion() << " recordSize "
+					          << recordSize << " indexSize " << indexSize << std::endl;
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
 				}
-				wait(tr.commit());
-				std::cout << "finished fillInRecords with version " << tr.getCommittedVersion() << " recordSize "
-				          << recordSize << " indexSize " << indexSize << std::endl;
-				break;
-			} catch (Error& e) {
-				std::cout << "failed fillInRecords, retry" << std::endl;
-				wait(tr.onError(e));
+				if (hasErr) {
+					std::cout << "failed fillInRecords, retry" << std::endl;
+					co_await tr.onError(err);
+				}
 			}
 		}
-		return Void();
+		co_return;
 	}
 
 	static void showResult(const RangeResult& result) {
@@ -142,21 +151,29 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	ACTOR Future<Void> scanRange(Database cx, KeyRangeRef range) {
+	Future<Void> scanRange(Database cx, KeyRangeRef range) {
 		std::cout << "start scanRange " << range.toString() << std::endl;
 		// TODO: When n is large, split into multiple transactions.
-		state Transaction tr(cx);
+		Transaction tr(cx);
 		loop {
-			try {
-				RangeResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
-				//			showResult(result);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					RangeResult result = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
+					//			showResult(result);
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					co_await tr.onError(err);
+				}
 			}
 		}
 		std::cout << "finished scanRange" << std::endl;
-		return Void();
+		co_return;
 	}
 
 	// Return true if need to retry.
@@ -205,15 +222,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return false;
 	}
 
-	ACTOR Future<MappedRangeResult> scanMappedRangeWithLimits(Database cx,
-	                                                          KeySelector beginSelector,
-	                                                          KeySelector endSelector,
-	                                                          Key mapper,
-	                                                          int limit,
-	                                                          int byteLimit,
-	                                                          int expectedBeginId,
-	                                                          GetMappedRangeWorkload* self,
-	                                                          bool allMissing) {
+	Future<MappedRangeResult> scanMappedRangeWithLimits(Database cx,
+	                                                    KeySelector beginSelector,
+	                                                    KeySelector endSelector,
+	                                                    Key mapper,
+	                                                    int limit,
+	                                                    int byteLimit,
+	                                                    int expectedBeginId,
+	                                                    GetMappedRangeWorkload* self,
+	                                                    bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
@@ -221,101 +238,109 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " STRICTLY_ENFORCE_BYTE_LIMIT: " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << " allMissing "
 		          << allMissing << std::endl;
 		loop {
-			state Reference<TransactionWrapper> tr = self->createTransaction();
-			try {
-				MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
-				                                                   endSelector,
-				                                                   mapper,
-				                                                   GetRangeLimits(limit, byteLimit),
-				                                                   self->snapshot,
-				                                                   Reverse::False));
-				//			showResult(result);
-				if (self->BAD_MAPPER) {
-					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
-				}
-				std::cout << "result.size()=" << result.size() << std::endl;
-				std::cout << "result.more=" << result.more << std::endl;
-				ASSERT(result.size() <= limit);
-				int expectedId = expectedBeginId;
-				bool needRetry = false;
-				int cnt = 0;
-				const MappedKeyValueRef* it = result.begin();
-				for (; cnt < result.size(); cnt++, it++) {
-					if (validateRecord(expectedId, it, self, allMissing)) {
-						needRetry = true;
-						break;
+			Reference<TransactionWrapper> tr = self->createTransaction();
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					MappedRangeResult result = co_await tr->getMappedRange(beginSelector,
+					                                                       endSelector,
+					                                                       mapper,
+					                                                       GetRangeLimits(limit, byteLimit),
+					                                                       self->snapshot,
+					                                                       Reverse::False);
+					//			showResult(result);
+					if (self->BAD_MAPPER) {
+						TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
 					}
-					expectedId++;
+					std::cout << "result.size()=" << result.size() << std::endl;
+					std::cout << "result.more=" << result.more << std::endl;
+					ASSERT(result.size() <= limit);
+					int expectedId = expectedBeginId;
+					bool needRetry = false;
+					int cnt = 0;
+					const MappedKeyValueRef* it = result.begin();
+					for (; cnt < result.size(); cnt++, it++) {
+						if (validateRecord(expectedId, it, self, allMissing)) {
+							needRetry = true;
+							break;
+						}
+						expectedId++;
+					}
+					if (needRetry) {
+						continue;
+					}
+					std::cout << "finished scanMappedRangeWithLimits" << std::endl;
+					co_return result;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
 				}
-				if (needRetry) {
-					continue;
+				if (hasErr) {
+					if ((self->BAD_MAPPER && err.code() == error_code_mapper_bad_index) ||
+					    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && err.code() == error_code_quick_get_value_miss) ||
+					    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
+					     err.code() == error_code_quick_get_key_values_miss)) {
+						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
+						co_return MappedRangeResult();
+					} else if (err.code() == error_code_commit_proxy_memory_limit_exceeded ||
+					           err.code() == error_code_operation_cancelled) {
+						// requests have overwhelmed commit proxy, rest a bit
+						co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+						continue;
+					} else {
+						std::cout << "scan error " << err.what() << "  code is " << err.code() << std::endl;
+						co_await tr->onError(err);
+					}
+					std::cout << "failed scanMappedRangeWithLimits" << std::endl;
 				}
-				std::cout << "finished scanMappedRangeWithLimits" << std::endl;
-				return result;
-			} catch (Error& e) {
-				if ((self->BAD_MAPPER && e.code() == error_code_mapper_bad_index) ||
-				    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && e.code() == error_code_quick_get_value_miss) ||
-				    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
-				     e.code() == error_code_quick_get_key_values_miss)) {
-					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
-					return MappedRangeResult();
-				} else if (e.code() == error_code_commit_proxy_memory_limit_exceeded ||
-				           e.code() == error_code_operation_cancelled) {
-					// requests have overwhelmed commit proxy, rest a bit
-					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-					continue;
-				} else {
-					std::cout << "scan error " << e.what() << "  code is " << e.code() << std::endl;
-					wait(tr->onError(e));
-				}
-				std::cout << "failed scanMappedRangeWithLimits" << std::endl;
 			}
 		}
 	}
 
 	// if sendFirstRequestIndefinitely is true, then this method would send the first request indefinitely
 	// it is in order to test the metric
-	ACTOR Future<Void> submitSmallRequestIndefinitely(Database cx,
-	                                                  int beginId,
-	                                                  int endId,
-	                                                  Key mapper,
-	                                                  GetMappedRangeWorkload* self) {
+	Future<Void> submitSmallRequestIndefinitely(Database cx,
+	                                            int beginId,
+	                                            int endId,
+	                                            Key mapper,
+	                                            GetMappedRangeWorkload* self) {
 		Key beginTuple = Tuple().append(prefix).append(INDEX).append(indexKey(beginId)).getDataAsStandalone();
-		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
+		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple().append(prefix).append(INDEX).append(indexKey(endId)).getDataAsStandalone();
-		state KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
-		state int limit = 1;
-		state int byteLimit = 10000;
+		KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
+		int limit = 1;
+		int byteLimit = 10000;
 		while (true) {
-			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
-			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, self, false));
+			MappedRangeResult result = co_await self->scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, self, false);
 			if (result.empty()) {
 				TraceEvent("EmptyResult");
 			}
 			// to avoid requests make proxy memory overwhelmed
-			wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 		}
 	}
 
-	ACTOR Future<Void> scanMappedRange(Database cx,
-	                                   int beginId,
-	                                   int endId,
-	                                   Key mapper,
-	                                   GetMappedRangeWorkload* self,
-	                                   bool allMissing = false) {
+	Future<Void> scanMappedRange(Database cx,
+	                             int beginId,
+	                             int endId,
+	                             Key mapper,
+	                             GetMappedRangeWorkload* self,
+	                             bool allMissing = false) {
 		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
-		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
+		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
-		state KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
-		state int limit = 100;
-		state int byteLimit = deterministicRandom()->randomInt(1, 9) * 10000;
-		state int expectedBeginId = beginId;
+		KeySelector endSelector = KeySelector(firstGreaterOrEqual(endTuple));
+		int limit = 100;
+		int byteLimit = deterministicRandom()->randomInt(1, 9) * 10000;
+		int expectedBeginId = beginId;
 		std::cout << "ByteLimit: " << byteLimit << " limit: " << limit
 		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
 		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
-			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
-			    cx, beginSelector, endSelector, mapper, limit, byteLimit, expectedBeginId, self, allMissing));
+			MappedRangeResult result = co_await self->scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, expectedBeginId, self, allMissing);
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
@@ -352,7 +377,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 		ASSERT(expectedBeginId == endId);
 
-		return Void();
+		co_return;
 	}
 
 	static void conflictWriteOnRecord(int conflictRecordId,
@@ -394,62 +419,78 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	// If another transaction writes to our read set (the scanned ranges) before we commit, the transaction should
 	// fail.
-	ACTOR Future<Void> testSerializableConflicts(GetMappedRangeWorkload* self) {
+	Future<Void> testSerializableConflicts(GetMappedRangeWorkload* self) {
 		std::cout << "testSerializableConflicts" << std::endl;
 
 		loop {
-			state Reference<TransactionWrapper> tr1 = self->createTransaction();
-			try {
-				MappedRangeResult result = wait(runGetMappedRange(5, 10, tr1, self));
+			Reference<TransactionWrapper> tr1 = self->createTransaction();
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1, self);
 
-				// Commit another transaction that has conflict writes.
-				loop {
-					state Reference<TransactionWrapper> tr2 = self->createTransaction();
-					try {
-						conflictWriteOnRecord(7, tr2, self);
-						wait(tr2->commit());
-						break;
-					} catch (Error& e) {
-						std::cout << "tr2 error " << e.what() << std::endl;
-						wait(tr2->onError(e));
+					// Commit another transaction that has conflict writes.
+					loop {
+						Reference<TransactionWrapper> tr2 = self->createTransaction();
+						{
+							Error err;
+							bool hasErr = false;
+							try {
+								conflictWriteOnRecord(7, tr2, self);
+								co_await tr2->commit();
+								break;
+							} catch (Error& e) {
+								err = e;
+								hasErr = true;
+							}
+							if (hasErr) {
+								std::cout << "tr2 error " << err.what() << std::endl;
+								co_await tr2->onError(err);
+							}
+						}
 					}
-				}
 
-				// Do some writes so that tr1 is not read-only.
-				tr1->set(SOMETHING, SOMETHING);
-				wait(tr1->commit());
-				UNREACHABLE();
-			} catch (Error& e) {
-				if (e.code() == error_code_not_committed) {
-					std::cout << "tr1 failed because of conflicts (as expected)" << std::endl;
-					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
-					return Void();
-				} else {
-					std::cout << "tr1 error " << e.what() << std::endl;
-					wait(tr1->onError(e));
+					// Do some writes so that tr1 is not read-only.
+					tr1->set(SOMETHING, SOMETHING);
+					co_await tr1->commit();
+					UNREACHABLE();
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					if (err.code() == error_code_not_committed) {
+						std::cout << "tr1 failed because of conflicts (as expected)" << std::endl;
+						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
+						co_return;
+					} else {
+						std::cout << "tr1 error " << err.what() << std::endl;
+						co_await tr1->onError(err);
+					}
 				}
 			}
 		}
 	}
 
 	// checking the max storage queue length is bounded
-	ACTOR static Future<Void> reportMetric(GetMappedRangeWorkload* self, Database cx) {
+	static Future<Void> reportMetric(GetMappedRangeWorkload* self, Database cx) {
 		loop {
-			StatusObject result = wait(StatusClient::statusFetcher(cx));
+			StatusObject result = co_await StatusClient::statusFetcher(cx);
 			StatusObjectReader statusObj(result);
-			state StatusObjectReader statusObjCluster;
-			state StatusObjectReader processesMap;
-			state int64_t queryQueueMax = 0;
-			state int waitInterval = 2;
+			StatusObjectReader statusObjCluster;
+			StatusObjectReader processesMap;
+			int64_t queryQueueMax = 0;
+			int waitInterval = 2;
 			if (!statusObj.get("cluster", statusObjCluster)) {
 				TraceEvent("NoCluster");
-				wait(delay(waitInterval));
+				co_await delay(waitInterval);
 				continue;
 			}
 
 			if (!statusObjCluster.get("processes", processesMap)) {
 				TraceEvent("NoProcesses");
-				wait(delay(waitInterval));
+				co_await delay(waitInterval);
 				continue;
 			}
 			for (auto proc : processesMap.obj()) {
@@ -470,60 +511,74 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					TraceEvent("NoRoles");
 				}
 			}
-			wait(delay(waitInterval));
+			co_await delay(waitInterval);
 		}
 	}
 
 	// If the same transaction writes to the read set (the scanned ranges) before reading, it should throw read your
 	// write exception.
-	ACTOR Future<Void> testRYW(GetMappedRangeWorkload* self) {
+	Future<Void> testRYW(GetMappedRangeWorkload* self) {
 		std::cout << "testRYW" << std::endl;
 		loop {
-			state Reference<TransactionWrapper> tr1 = self->createTransaction();
-			try {
-				// Write something that will be read in getMappedRange.
-				conflictWriteOnRecord(7, tr1, self);
-				MappedRangeResult result = wait(runGetMappedRange(5, 10, tr1, self));
-				UNREACHABLE();
-			} catch (Error& e) {
-				if (e.code() == error_code_get_mapped_range_reads_your_writes) {
-					std::cout << "tr1 failed because of read your writes (as expected)" << std::endl;
-					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
-					return Void();
-				} else {
-					std::cout << "tr1 error " << e.what() << std::endl;
-					wait(tr1->onError(e));
+			Reference<TransactionWrapper> tr1 = self->createTransaction();
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					// Write something that will be read in getMappedRange.
+					conflictWriteOnRecord(7, tr1, self);
+					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1, self);
+					UNREACHABLE();
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					if (err.code() == error_code_get_mapped_range_reads_your_writes) {
+						std::cout << "tr1 failed because of read your writes (as expected)" << std::endl;
+						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
+						co_return;
+					} else {
+						std::cout << "tr1 error " << err.what() << std::endl;
+						co_await tr1->onError(err);
+					}
 				}
 			}
 		}
 	}
 
-	ACTOR static Future<Void> testMetric(Database cx,
-	                                     GetMappedRangeWorkload* self,
-	                                     int beginId,
-	                                     int endId,
-	                                     Key mapper,
-	                                     int seconds) {
-		loop choose {
-			when(wait(reportMetric(self, cx))) {
+	static Future<Void> testMetric(Database cx,
+	                               GetMappedRangeWorkload* self,
+	                               int beginId,
+	                               int endId,
+	                               Key mapper,
+	                               int seconds) {
+		loop {
+			auto choice = co_await race(reportMetric(self, cx),
+			                            self->submitSmallRequestIndefinitely(cx, 10, 490, mapper, self),
+			                            delay(seconds));
+			if (choice.index() == 0) {
+
 				TraceEvent(SevError, "Error: ReportMetric has ended");
-				return Void();
-			}
-			when(wait(self->submitSmallRequestIndefinitely(cx, 10, 490, mapper, self))) {
+				co_return;
+			} else if (choice.index() == 1) {
+
 				TraceEvent(SevError, "Error: submitSmallRequestIndefinitely has ended");
-				return Void();
-			}
-			when(wait(delay(seconds))) {
-				return Void();
+				co_return;
+			} else if (choice.index() == 2) {
+
+				co_return;
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}
 
-	ACTOR Future<Void> _start(Database cx, GetMappedRangeWorkload* self) {
+	Future<Void> _start(Database cx, GetMappedRangeWorkload* self) {
 		TraceEvent("GetMappedRangeWorkloadConfig").detail("BadMapper", self->BAD_MAPPER);
 
 		// TODO: Use toml to config
-		wait(self->fillInRecords(cx, 500, self));
+		co_await self->fillInRecords(cx, 500, self);
 
 		if (self->transactionType == NATIVE) {
 			self->snapshot = Snapshot::True;
@@ -531,11 +586,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			self->snapshot = Snapshot::False;
 			const double rand = deterministicRandom()->random01();
 			if (rand < 0.1) {
-				wait(self->testSerializableConflicts(self));
-				return Void();
+				co_await self->testSerializableConflicts(self);
+				co_return;
 			} else if (rand < 0.2) {
-				wait(self->testRYW(self));
-				return Void();
+				co_await self->testRYW(self);
+				co_return;
 			} else {
 				// Test the happy path where there is no conflicts or RYW
 			}
@@ -546,17 +601,17 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		state Key mapper = getMapper(self, false);
+		Key mapper = getMapper(self, false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
-		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
-		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
-		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
-		wait(testMetric(cx, self, 10, 490, mapper, self->checkStorageQueueSeconds));
+		bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
+		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
+		co_await self->scanMappedRange(cx, 10, 490, mapper, self);
+		co_await testMetric(cx, self, 10, 490, mapper, self->checkStorageQueueSeconds);
 
 		// reset it to default
-		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
-		return Void();
+		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
+		co_return;
 	}
 
 	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing) {
