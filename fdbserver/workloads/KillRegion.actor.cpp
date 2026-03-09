@@ -26,7 +26,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "flow/actorcompiler.h" // This must be the last include.
+#include "flow/CoroUtils.h"
 
 struct KillRegionWorkload : TestWorkload {
 	static constexpr auto NAME = "KillRegion";
@@ -57,34 +57,34 @@ struct KillRegionWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
+	static Future<Void> _setup(KillRegionWorkload* self, Database cx) {
 		TraceEvent("ForceRecovery_DisablePrimaryBegin").log();
-		wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true)));
+		co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true));
 		TraceEvent("ForceRecovery_WaitForRemote").log();
-		wait(waitForPrimaryDC(cx, "1"_sr));
+		co_await waitForPrimaryDC(cx, "1"_sr);
 		TraceEvent("ForceRecovery_DisablePrimaryComplete").log();
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> waitForStorageRecovered(KillRegionWorkload* self) {
+	static Future<Void> waitForStorageRecovered(KillRegionWorkload* self) {
 		while (self->dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED) {
-			wait(self->dbInfo->onChange());
+			co_await self->dbInfo->onChange();
 		}
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> killRegion(KillRegionWorkload* self, Database cx) {
+	static Future<Void> killRegion(KillRegionWorkload* self, Database cx) {
 		ASSERT(g_network->isSimulated());
 		if (deterministicRandom()->random01() < 0.5) {
 			TraceEvent("ForceRecovery_DisableRemoteBegin").log();
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disableRemote, true)));
+			co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disableRemote, true));
 			TraceEvent("ForceRecovery_WaitForPrimary").log();
-			wait(waitForPrimaryDC(cx, "0"_sr));
+			co_await waitForPrimaryDC(cx, "0"_sr);
 			TraceEvent("ForceRecovery_DisableRemoteComplete").log();
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->originalRegions, true)));
+			co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->originalRegions, true));
 		}
 		TraceEvent("ForceRecovery_Wait").log();
-		wait(delay(deterministicRandom()->random01() * self->testDuration));
+		co_await delay(deterministicRandom()->random01() * self->testDuration);
 
 		// FIXME: killDataCenter breaks simulation if forceKill=false, since some processes can survive and
 		// partially complete a recovery
@@ -103,11 +103,11 @@ struct KillRegionWorkload : TestWorkload {
 
 		TraceEvent("ForceRecovery_Begin").log();
 
-		wait(forceRecovery(cx->getConnectionRecord(), "1"_sr));
+		co_await forceRecovery(cx->getConnectionRecord(), "1"_sr);
 
 		TraceEvent("ForceRecovery_UsableRegions").log();
 
-		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
+		DatabaseConfiguration conf = co_await getDatabaseConfiguration(cx);
 
 		TraceEvent("ForceRecovery_GotConfig")
 		    .setMaxEventLength(11000)
@@ -117,21 +117,19 @@ struct KillRegionWorkload : TestWorkload {
 		if (conf.usableRegions > 1) {
 			loop {
 				// only needed if force recovery was unnecessary and we killed the secondary
-				wait(success(ManagementAPI::changeConfig(
+				co_await success(ManagementAPI::changeConfig(
 				    cx.getReference(), g_simulator->disablePrimary + " repopulate_anti_quorum=1", true)));
-				choose {
-					when(wait(waitForStorageRecovered(self))) {
-						break;
-					}
-					when(wait(delay(300.0))) {}
+				auto result = co_await race(waitForStorageRecovered(self), delay(300.0));
+				if (result.index() == 0) {
+					break;
 				}
 			}
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true)));
+			co_await success(ManagementAPI::changeConfig(cx.getReference(), "usable_regions=1", true));
 		}
 
 		TraceEvent("ForceRecovery_Complete").log();
 
-		return Void();
+		co_return;
 	}
 };
 
