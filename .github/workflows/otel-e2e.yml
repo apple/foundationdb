@@ -76,7 +76,79 @@ jobs:
           path: build/prometheus_output.txt
 
   # ============================================================
-  # Job 2: macOS — Prometheus /metrics E2E
+  # Job 2: Linux CentOS 7 — Prometheus /metrics E2E
+  # ============================================================
+  test-centos7:
+    name: "Linux CentOS 7"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h
+
+      - name: Build FDB from source
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace foundationdb/build:centos7-latest /bin/bash -c "
+            source /opt/rh/devtoolset-11/enable &&
+            # Fix CentOS 7 EOL mirror issues
+            sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* &&
+            sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* &&
+            yum clean all &&
+            yum install -y epel-release centos-release-scl &&
+            sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-scl.repo &&
+            sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl.repo &&
+            yum clean all &&
+            yum install -y cmake3 ninja-build &&
+            ln -sf /usr/bin/cmake3 /usr/bin/cmake &&
+
+            # Ensure clean build from source
+            rm -rf build &&
+            mkdir build &&
+            cd build &&
+            cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
+            echo '=== Starting build ===' &&
+            ninja -j2 fdbserver &&
+            echo '=== Build complete ==='
+          "
+
+      - name: Verify fdbserver binary exists
+        run: |
+          ls -la build/bin/fdbserver
+          file build/bin/fdbserver
+          echo "Binary size: $(du -h build/bin/fdbserver | cut -f1)"
+
+      - name: Run Prometheus /metrics simulation test
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace/build foundationdb/build:centos7-latest /bin/bash -c "
+            source /opt/rh/devtoolset-11/enable &&
+            echo '=== Running Prometheus /metrics E2E test ===' &&
+            ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on &&
+            echo '' &&
+            echo '=== Prometheus /metrics endpoint output ===' &&
+            cat prometheus_output.txt &&
+            echo '' &&
+            echo '=== Validating output ===' &&
+            grep -c '# TYPE' prometheus_output.txt &&
+            echo 'TYPE annotations found' &&
+            grep 'test_prometheus_requests' prometheus_output.txt &&
+            echo 'SimpleCounter metric found' &&
+            echo '=== E2E TEST PASSED ==='
+          "
+
+      - name: Upload Prometheus output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output-centos7
+          path: build/prometheus_output.txt
+
+  # ============================================================
+  # Job 3: macOS — Prometheus /metrics E2E
   # ============================================================
   test-macos:
     name: "macOS Latest"
@@ -140,11 +212,11 @@ jobs:
           path: build/prometheus_output.txt
 
   # ============================================================
-  # Job 3: Results Summary
+  # Job 4: Results Summary
   # ============================================================
   report-results:
     name: "Results Summary"
-    needs: [test-rhel9, test-macos]
+    needs: [test-rhel9, test-centos7, test-macos]
     runs-on: ubuntu-latest
     if: always()
 
@@ -162,7 +234,7 @@ jobs:
           PASS=0
           TOTAL=0
 
-          for platform in rhel9 macos; do
+          for platform in rhel9 centos7 macos; do
             TOTAL=$((TOTAL + 1))
             echo "::group::$platform"
             if [ -f "prometheus-output-$platform/prometheus_output.txt" ]; then
