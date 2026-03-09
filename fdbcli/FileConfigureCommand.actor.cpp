@@ -34,20 +34,17 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
-                                             std::string filePath,
-                                             bool isNewDatabase,
-                                             bool force) {
-	state ConfigurationResult result;
+Future<bool> fileConfigureCommandActor(Reference<IDatabase> db, std::string filePath, bool isNewDatabase, bool force) {
+	ConfigurationResult result;
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
 	if (!json_spirit::read_string(contents, config)) {
 		fprintf(stderr, "ERROR: Invalid JSON\n");
-		return false;
+		co_return false;
 	}
 	if (config.type() != json_spirit::obj_type) {
 		fprintf(stderr, "ERROR: Configuration file must contain a JSON object\n");
-		return false;
+		co_return false;
 	}
 	StatusObject configJSON = config.get_obj();
 
@@ -59,17 +56,17 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	std::string errorStr;
 	if (!schemaMatch(schema.get_obj(), configJSON, errorStr)) {
 		printf("%s", errorStr.c_str());
-		return false;
+		co_return false;
 	}
 
-	state std::string configString;
+	std::string configString;
 
 	try {
 		configString += DatabaseConfiguration::configureStringFromJSON(configJSON);
 	} catch (Error& e) {
 		fmt::print("ERROR: {}", e.what());
 		printUsage("fileconfigure"_sr);
-		return false;
+		co_return false;
 	}
 
 	if (isNewDatabase) {
@@ -83,7 +80,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	if (configString.find(" backup_worker_enabled:=") != std::string::npos) {
 		result = ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED;
 	} else {
-		ConfigurationResult r = wait(ManagementAPI::changeConfig(db, configString, force));
+		ConfigurationResult r = co_await ManagementAPI::changeConfig(db, configString, force);
 		result = r;
 	}
 	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
@@ -174,7 +171,7 @@ ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 		ASSERT(false);
 		ret = false;
 	};
-	return ret;
+	co_return ret;
 }
 
 CommandFactory fileconfigureFactory(

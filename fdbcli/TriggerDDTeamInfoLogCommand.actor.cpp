@@ -31,20 +31,22 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			std::string v = deterministicRandom()->randomUniqueID().toString();
 			tr->set(triggerDDTeamInfoPrintKey, v);
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 			printf("Triggered team info logging in data distribution.\n");
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

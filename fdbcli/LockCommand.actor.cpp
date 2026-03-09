@@ -32,26 +32,27 @@
 
 namespace {
 
-ACTOR Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
 			tr->set(fdb_cli::lockSpecialKey, id.toString());
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 			printf("Database locked.\n");
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_database_locked)
-				throw e;
-			else if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+			err = e;
+			if (err.code() == error_code_database_locked)
+				throw err;
+			else if (err.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
 				fprintf(stderr, "%s\n", errorMsgStr.c_str());
-				return false;
+				co_return false;
 			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -61,47 +62,48 @@ namespace fdb_cli {
 
 const KeyRef lockSpecialKey = "\xff\xff/management/db_locked"_sr;
 
-ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 1) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else {
-		state UID lockUID = deterministicRandom()->randomUniqueID();
+		UID lockUID = deterministicRandom()->randomUniqueID();
 		printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-		bool result = wait((lockDatabase(db, lockUID)));
-		return result;
+		bool result = co_await lockDatabase(db, lockUID);
+		co_return result;
 	}
 }
 
-ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
-			state ThreadFuture<Optional<Value>> valF = tr->get(fdb_cli::lockSpecialKey);
-			Optional<Value> val = wait(safeThreadFutureToFuture(valF));
+			ThreadFuture<Optional<Value>> valF = tr->get(fdb_cli::lockSpecialKey);
+			Optional<Value> val = co_await safeThreadFutureToFuture(valF);
 
 			if (!val.present())
-				return true;
+				co_return true;
 
 			if (val.present() && UID::fromString(val.get().toString()) != uid) {
 				printf("Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
-				return false;
+				co_return false;
 			}
 
 			tr->clear(fdb_cli::lockSpecialKey);
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 			printf("Database unlocked.\n");
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+			err = e;
+			if (err.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
 				fprintf(stderr, "%s\n", errorMsgStr.c_str());
-				return false;
+				co_return false;
 			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

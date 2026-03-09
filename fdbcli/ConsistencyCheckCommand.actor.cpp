@@ -32,30 +32,28 @@ namespace fdb_cli {
 
 const KeyRef consistencyCheckSpecialKey = "\xff\xff/management/consistency_check_suspended"_sr;
 
-ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
-                                                std::vector<StringRef> tokens,
-                                                bool intrans) {
+Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans) {
 	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.
 	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
 		// hold the returned standalone object's memory
-		state ThreadFuture<Optional<Value>> suspendedF = tr->get(consistencyCheckSpecialKey);
-		Optional<Value> suspended = wait(safeThreadFutureToFuture(suspendedF));
+		ThreadFuture<Optional<Value>> suspendedF = tr->get(consistencyCheckSpecialKey);
+		Optional<Value> suspended = co_await safeThreadFutureToFuture(suspendedF);
 		printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
 		tr->set(consistencyCheckSpecialKey, Value());
 		if (!intrans)
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "on")) {
 		tr->clear(consistencyCheckSpecialKey);
 		if (!intrans)
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 	} else {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
-	return true;
+	co_return true;
 }
 
 CommandFactory consistencyCheckFactory(

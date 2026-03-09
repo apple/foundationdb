@@ -29,13 +29,13 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 2) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
-	wait(safeThreadFutureToFuture(db->forceRecoveryWithDataLoss(tokens[1])));
-	return true;
+	co_await safeThreadFutureToFuture(db->forceRecoveryWithDataLoss(tokens[1]));
+	co_return true;
 }
 
 CommandFactory forceRecoveryWithDataLossFactory(

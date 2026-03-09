@@ -53,15 +53,15 @@ ReadHotSubRangeRequest::SplitType parseSplitType(const std::string& typeStr) {
 
 namespace fdb_cli {
 
-ACTOR Future<bool> hotRangeCommandActor(Database localdb,
-                                        Reference<IDatabase> db,
-                                        std::vector<StringRef> tokens,
-                                        std::map<std::string, StorageServerInterface>* storage_interface) {
+Future<bool> hotRangeCommandActor(Database localdb,
+                                  Reference<IDatabase> db,
+                                  std::vector<StringRef> tokens,
+                                  std::map<std::string, StorageServerInterface>* storage_interface) {
 
 	if (tokens.size() == 1) {
 		// initialize storage interfaces
 		storage_interface->clear();
-		wait(getStorageServerInterfaces(db, storage_interface));
+		co_await getStorageServerInterfaces(db, storage_interface);
 		fmt::print("\nThe following {} storage servers can be queried:\n", storage_interface->size());
 		for (const auto& [addr, _] : *storage_interface) {
 			fmt::print("{}\n", addr);
@@ -70,26 +70,26 @@ ACTOR Future<bool> hotRangeCommandActor(Database localdb,
 	} else if (tokens.size() == 6) {
 		if (storage_interface->size() == 0) {
 			fprintf(stderr, "ERROR: no storage processes to query. You must run the `hotrange’ command first.\n");
-			return false;
+			co_return false;
 		}
-		state Key address = tokens[1];
+		Key address = tokens[1];
 		// At present we only support one process(IP:Port) at a time
 		if (!storage_interface->count(address.toString())) {
 			fprintf(stderr, "ERROR: storage process `%s' not recognized.\n", printable(address).c_str());
-			return false;
+			co_return false;
 		}
-		state int splitCount;
+		int splitCount{ 0 };
 		try {
 			splitCount = boost::lexical_cast<int>(tokens[5].toString());
 		} catch (...) {
 			fmt::print("Error: splitCount value: '{}', cannot be parsed to an Integer\n", tokens[5].toString());
-			return false;
+			co_return false;
 		}
 		ReadHotSubRangeRequest::SplitType splitType = parseSplitType(tokens[2].toString());
 		KeyRangeRef range(tokens[3], tokens[4]);
 		// TODO: refactor this to support multiversion fdbcli in the future
-		Standalone<VectorRef<ReadHotRangeWithMetrics>> metrics =
-		    wait(localdb->getHotRangeMetrics((*storage_interface)[address.toString()], range, splitType, splitCount));
+		Standalone<VectorRef<ReadHotRangeWithMetrics>> metrics = co_await localdb->getHotRangeMetrics(
+		    (*storage_interface)[address.toString()], range, splitType, splitCount);
 		// next parse the result and form a json array for each object
 		json_spirit::mArray resultArray;
 		for (const auto& metric : metrics) {
@@ -107,10 +107,10 @@ ACTOR Future<bool> hotRangeCommandActor(Database localdb,
 		fmt::print("\n{}\n", result);
 	} else {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
 
-	return true;
+	co_return true;
 }
 
 CommandFactory hotRangeFactory(

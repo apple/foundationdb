@@ -38,36 +38,36 @@ Optional<double> parseAgeValue(StringRef token) {
 
 namespace fdb_cli {
 
-ACTOR Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> tokens) {
+Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2 || tokens.size() > 3) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else {
 		auto const action = tokens[1];
 		if (action == "status"_sr) {
 			if (tokens.size() != 2) {
 				printUsage(tokens[0]);
-				return false;
+				co_return false;
 			}
-			JsonBuilderObject status = wait(getIdmpKeyStatus(db));
+			JsonBuilderObject status = co_await getIdmpKeyStatus(db);
 			fmt::print("{}\n", status.getJson());
-			return true;
+			co_return true;
 		} else if (action == "clear"_sr) {
 			if (tokens.size() != 3) {
 				printUsage(tokens[0]);
-				return false;
+				co_return false;
 			}
 			auto const age = parseAgeValue(tokens[2]);
 			if (!age.present()) {
 				printUsage(tokens[0]);
-				return false;
+				co_return false;
 			}
-			wait(cleanIdempotencyIds(db, age.get()));
+			co_await cleanIdempotencyIds(db, age.get());
 			fmt::print("Successfully cleared idempotency IDs.\n");
-			return true;
+			co_return true;
 		} else {
 			printUsage(tokens[0]);
-			return false;
+			co_return false;
 		}
 	}
 }
