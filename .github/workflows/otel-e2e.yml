@@ -26,77 +26,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build & Run OTEL + Prometheus Tests
+      - name: Build & Run Prometheus /metrics Test
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace foundationdb/build:rockylinux9-latest /bin/bash -c "
             dnf install -y 'dnf-command(config-manager)' &&
             dnf config-manager --set-enabled crb || true &&
             dnf install -y epel-release || true &&
-            dnf install -y git cmake ninja-build gcc-c++ python3 &&
+            dnf install -y git cmake ninja-build gcc-c++ &&
 
             mkdir build &&
             cd build &&
             cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
             ninja -j\$(nproc) fdbserver &&
 
-            echo '=== Test 1: Prometheus /metrics simulation test ===' &&
+            echo '=== Prometheus /metrics simulation test ===' &&
             ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on &&
 
             echo '=== Prometheus output ===' &&
-            cat prometheus_output.txt 2>/dev/null || echo 'No prometheus_output.txt generated' &&
-
-            echo '' &&
-            echo '=== Test 2: OTEL UDP emission test ===' &&
-            python3 -c \"
-          import socket, time, threading, sys
-
-          results = {'packets': 0, 'bytes': 0}
-
-          def capture_udp():
-              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-              sock.bind(('127.0.0.1', 8903))
-              sock.settimeout(2.0)
-              start = time.time()
-              while time.time() - start < 40:
-                  try:
-                      data, _ = sock.recvfrom(65536)
-                      results['packets'] += 1
-                      results['bytes'] += len(data)
-                      print(f'UDP: Received {len(data)} bytes (total: {results[\"packets\"]} packets)')
-                  except socket.timeout:
-                      continue
-              sock.close()
-
-          t = threading.Thread(target=capture_udp, daemon=True)
-          t.start()
-          time.sleep(1)
-
-          import subprocess
-          proc = subprocess.Popen([
-              './bin/fdbserver',
-              '-r', 'simulation',
-              '-f', '../tests/fast/AtomicOps.toml',
-              '-s', '12345',
-              '--knob-metrics_data_model=otel',
-              '--knob-metrics_emission_interval=5',
-              '--knob-otel_udp_emission_addr=127.0.0.1',
-              '--knob-otel_udp_emission_port=8903'
-          ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-          t.join(timeout=45)
-          proc.terminate()
-          proc.wait(timeout=10)
-
-          print(f'\\nOTEL UDP Results: {results[\"packets\"]} packets, {results[\"bytes\"]} bytes')
-          with open('/tmp/otel_metrics_summary.txt', 'w') as f:
-              f.write(f'Packets received: {results[\"packets\"]}\\n')
-              f.write(f'Total bytes: {results[\"bytes\"]}\\n')
-
-          if results['packets'] > 0:
-              print('OTEL UDP: PASSED')
-          else:
-              print('OTEL UDP: SKIPPED - simulation uses virtual networking, real UDP not available')
-          \"
+            cat prometheus_output.txt 2>/dev/null || echo 'No prometheus_output.txt generated'
           "
 
       - name: Upload artifacts
@@ -125,7 +72,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build & Run OTEL + Prometheus Tests
+      - name: Build & Run Prometheus /metrics Test
         run: |
           docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace foundationdb/build:centos7-latest /bin/bash -c "
             source /opt/rh/devtoolset-11/enable &&
@@ -137,68 +84,19 @@ jobs:
             sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-scl.repo &&
             sed -i 's|# baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl.repo &&
             yum clean all &&
-            yum install -y rh-python38 rh-python38-python-pip cmake3 ninja-build &&
+            yum install -y cmake3 ninja-build &&
             ln -sf /usr/bin/cmake3 /usr/bin/cmake &&
-            source /opt/rh/rh-python38/enable &&
 
             mkdir -p build &&
             cd build &&
             cmake -G Ninja -DOLD_FDB_alloc_instrumentation=ON .. &&
             ninja -j2 fdbserver &&
 
-            echo '=== Test 1: Prometheus /metrics simulation test ===' &&
+            echo '=== Prometheus /metrics simulation test ===' &&
             ./bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on &&
 
             echo '=== Prometheus output ===' &&
-            cat prometheus_output.txt 2>/dev/null || echo 'No prometheus_output.txt generated' &&
-
-            echo '' &&
-            echo '=== Test 2: OTEL UDP emission test ===' &&
-            python3 -c \"
-          import socket, time, threading, subprocess, sys
-
-          results = {'packets': 0, 'bytes': 0}
-
-          def capture_udp():
-              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-              sock.bind(('127.0.0.1', 8903))
-              sock.settimeout(2.0)
-              start = time.time()
-              while time.time() - start < 40:
-                  try:
-                      data, _ = sock.recvfrom(65536)
-                      results['packets'] += 1
-                      results['bytes'] += len(data)
-                      print(f'UDP: Received {len(data)} bytes (total: {results[\"packets\"]} packets)')
-                  except socket.timeout:
-                      continue
-              sock.close()
-
-          t = threading.Thread(target=capture_udp, daemon=True)
-          t.start()
-          time.sleep(1)
-
-          proc = subprocess.Popen([
-              './bin/fdbserver',
-              '-r', 'simulation',
-              '-f', '../tests/fast/AtomicOps.toml',
-              '-s', '12345',
-              '--knob-metrics_data_model=otel',
-              '--knob-metrics_emission_interval=5',
-              '--knob-otel_udp_emission_addr=127.0.0.1',
-              '--knob-otel_udp_emission_port=8903'
-          ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-          t.join(timeout=45)
-          proc.terminate()
-          proc.wait(timeout=10)
-
-          print(f'\\nOTEL UDP Results: {results[\"packets\"]} packets, {results[\"bytes\"]} bytes')
-          if results['packets'] > 0:
-              print('OTEL UDP: PASSED')
-          else:
-              print('OTEL UDP: SKIPPED - simulation uses virtual networking, real UDP not available')
-          \"
+            cat prometheus_output.txt 2>/dev/null || echo 'No prometheus_output.txt generated'
           "
 
       - name: Upload artifacts
@@ -246,54 +144,8 @@ jobs:
           echo "=== Prometheus output ==="
           cat prometheus_output.txt 2>/dev/null || echo "No prometheus_output.txt generated"
 
-      - name: Test OTEL UDP emission
-        run: |
-          cd build
-          python3 -c "
-          import socket, time, threading, subprocess, sys
 
-          results = {'packets': 0, 'bytes': 0}
 
-          def capture_udp():
-              sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-              sock.bind(('127.0.0.1', 8903))
-              sock.settimeout(2.0)
-              start = time.time()
-              while time.time() - start < 40:
-                  try:
-                      data, _ = sock.recvfrom(65536)
-                      results['packets'] += 1
-                      results['bytes'] += len(data)
-                      print(f'UDP: Received {len(data)} bytes (total: {results[\"packets\"]} packets)')
-                  except socket.timeout:
-                      continue
-              sock.close()
-
-          t = threading.Thread(target=capture_udp, daemon=True)
-          t.start()
-          time.sleep(1)
-
-          proc = subprocess.Popen([
-              './bin/fdbserver',
-              '-r', 'simulation',
-              '-f', '../tests/fast/AtomicOps.toml',
-              '-s', '12345',
-              '--knob-metrics_data_model=otel',
-              '--knob-metrics_emission_interval=5',
-              '--knob-otel_udp_emission_addr=127.0.0.1',
-              '--knob-otel_udp_emission_port=8903'
-          ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-          t.join(timeout=45)
-          proc.terminate()
-          proc.wait(timeout=10)
-
-          print(f'\nOTEL UDP Results: {results[\"packets\"]} packets, {results[\"bytes\"]} bytes')
-          if results['packets'] > 0:
-              print('OTEL UDP: PASSED')
-          else:
-              print('OTEL UDP: SKIPPED - simulation uses virtual networking, real UDP not available')
-          "
 
       - name: Upload artifacts
         if: always()
