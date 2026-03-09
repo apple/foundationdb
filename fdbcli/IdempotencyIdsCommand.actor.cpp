@@ -49,7 +49,7 @@ Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> toke
 				printUsage(tokens[0]);
 				co_return false;
 			}
-			JsonBuilderObject status = co_await getIdmpKeyStatus(db);
+			JsonBuilderObject const& status = co_await getIdmpKeyStatus(db);
 			fmt::print("{}\n", status.getJson());
 			co_return true;
 		} else if (action == "clear"_sr) {
