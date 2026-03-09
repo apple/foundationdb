@@ -29,7 +29,7 @@
 
 namespace fdb_cli {
 
-Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
 	bool result = true;
 	if (tokens.size() < 2) {
 		printUsage(tokens[0]);

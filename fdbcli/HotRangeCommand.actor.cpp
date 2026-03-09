@@ -55,8 +55,8 @@ namespace fdb_cli {
 
 Future<bool> hotRangeCommandActor(Database localdb,
                                   Reference<IDatabase> db,
-                                  std::vector<StringRef> tokens,
-                                  std::map<std::string, StorageServerInterface>* storage_interface) {
+                                  std::vector<StringRef> const& tokens,
+                                  std::map<std::string, StorageServerInterface>* const& storage_interface) {
 
 	if (tokens.size() == 1) {
 		// initialize storage interfaces

@@ -43,7 +43,7 @@ Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransac
 	co_return;
 }
 
-Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> tokens) {
+Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> const& tokens) {
 	// Skip the command token so start at begin+1
 	std::list<StringRef> args(tokens.begin() + 1, tokens.end());
 

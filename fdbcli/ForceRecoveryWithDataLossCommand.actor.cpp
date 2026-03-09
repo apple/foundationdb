@@ -29,7 +29,7 @@
 
 namespace fdb_cli {
 
-Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
 	if (tokens.size() != 2) {
 		printUsage(tokens[0]);
 		co_return false;

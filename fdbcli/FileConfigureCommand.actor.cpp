@@ -34,7 +34,10 @@
 
 namespace fdb_cli {
 
-Future<bool> fileConfigureCommandActor(Reference<IDatabase> db, std::string filePath, bool isNewDatabase, bool force) {
+Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
+                                       std::string const& filePath,
+                                       bool isNewDatabase,
+                                       bool force) {
 	ConfigurationResult result;
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
