@@ -1990,13 +1990,13 @@ TEST_CASE("/flow/coro/raceReady") {
 	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("later"));
 	ASSERT(raced.isReady());
 	auto result = raced.get();
-	ASSERT(result.index() == 0);
-	ASSERT(std::get<0>(result) == 7);
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
 
 	Future<std::variant<int, std::string>> errorFirst = race(Future<int>(io_error()), Future<std::string>("later"));
 	ASSERT(errorFirst.isReady());
 	ASSERT(errorFirst.isError());
-	ASSERT(errorFirst.getError().code() == error_code_io_error);
+	ASSERT_EQ(errorFirst.getError().code(), error_code_io_error);
 	return Void();
 }
 
@@ -2006,8 +2006,8 @@ TEST_CASE("/flow/coro/raceSuccess") {
 	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
 	stringPromise.send("winner");
 	auto result = co_await raced;
-	ASSERT(result.index() == 1);
-	ASSERT(std::get<1>(result) == "winner");
+	ASSERT_EQ(result.index(), 1);
+	ASSERT_EQ(std::get<1>(result), "winner");
 	co_return;
 }
 
@@ -2020,7 +2020,7 @@ TEST_CASE("/flow/coro/raceError") {
 		co_await raced;
 		ASSERT(false);
 	} catch (Error const& e) {
-		ASSERT(e.code() == error_code_io_error);
+		ASSERT_EQ(e.code(), error_code_io_error);
 	}
 	co_return;
 }
@@ -2032,10 +2032,10 @@ TEST_CASE("/flow/coro/raceCancel") {
 	raced.cancel();
 	ASSERT(raced.isReady());
 	ASSERT(raced.isError());
-	ASSERT(raced.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
 	intPromise.send(1);
 	stringPromise.send("late");
-	ASSERT(raced.getError().code() == error_code_actor_cancelled);
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
 	return Void();
 }
 
@@ -2045,8 +2045,8 @@ TEST_CASE("/flow/coro/raceStreamReady") {
 	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), Future<std::string>("later"));
 	ASSERT(raced.isReady());
 	auto result = raced.get();
-	ASSERT(result.index() == 0);
-	ASSERT(std::get<0>(result) == 11);
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 11);
 	return Void();
 }
 
@@ -2056,7 +2056,7 @@ TEST_CASE("/flow/coro/raceStreamSuccess") {
 	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), stringPromise.getFuture());
 	intStream.send(13);
 	auto result = co_await raced;
-	ASSERT(result.index() == 0);
-	ASSERT(std::get<0>(result) == 13);
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 13);
 	co_return;
 }
