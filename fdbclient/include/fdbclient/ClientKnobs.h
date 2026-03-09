@@ -207,6 +207,8 @@ public:
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int RESTORE_RANGES_READ_BATCH;
 
+	// interval for version directory bucketing in range-partitioned backup.
+	int64_t BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
 	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 	bool ENABLE_REPLICA_CONSISTENCY_CHECK_ON_BACKUP_READS;
 	int BACKUP_CONSISTENCY_CHECK_REQUIRED_REPLICAS;
