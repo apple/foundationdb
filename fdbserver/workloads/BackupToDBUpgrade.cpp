@@ -94,7 +94,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _setup(cx, this);
+		return _setup(cx);
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -271,24 +271,24 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _setup(Database cx, BackupToDBUpgradeWorkload* self) {
+	Future<Void> _setup(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
 
 		if (BUGGIFY) {
 			for (auto r : getSystemBackupRanges()) {
-				self->backupRanges.push_back_deep(self->backupRanges.arena(), r);
+				backupRanges.push_back_deep(backupRanges.arena(), r);
 			}
 		}
 
 		try {
-			co_await delay(self->backupAfter);
+			co_await delay(backupAfter);
 
-			TraceEvent("DRU_DoBackup").detail("Tag", printable(self->backupTag));
-			Future<Void> b = doBackup(self, &backupAgent, self->extraDB, self->backupTag, self->backupRanges);
+			TraceEvent("DRU_DoBackup").detail("Tag", printable(backupTag));
+			Future<Void> b = doBackup(this, &backupAgent, extraDB, backupTag, backupRanges);
 
-			TraceEvent("DRU_DoBackupWait").detail("BackupTag", printable(self->backupTag));
+			TraceEvent("DRU_DoBackupWait").detail("BackupTag", printable(backupTag));
 			co_await b;
-			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(self->backupTag));
+			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(backupTag));
 		} catch (Error& e) {
 			TraceEvent(SevError, "BackupToDBUpgradeSetupError").error(e);
 			throw;

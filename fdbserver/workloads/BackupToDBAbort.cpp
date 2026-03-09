@@ -46,16 +46,16 @@ struct BackupToDBAbort : TestWorkload {
 	Future<Void> setup(const Database& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _setup(this, cx);
+		return _setup(cx);
 	}
 
-	static Future<Void> _setup(BackupToDBAbort* self, Database cx) {
+	Future<Void> _setup(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("BDBA_Submit1").log();
-			co_await backupAgent.submitBackup(self->extraDB,
+			co_await backupAgent.submitBackup(extraDB,
 			                                  BackupAgentBase::getDefaultTag(),
-			                                  self->backupRanges,
+			                                  backupRanges,
 			                                  StopWhenDone::False,
 			                                  StringRef(),
 			                                  StringRef(),
@@ -94,15 +94,13 @@ struct BackupToDBAbort : TestWorkload {
 		}
 	}
 
-	static Future<bool> _check(BackupToDBAbort* self, Database cx) {
+	Future<bool> check(const Database& cx) override {
 		TraceEvent("BDBA_UnlockPrimary").log();
 		// Too much of the tester framework expects the primary database to be unlocked, so we unlock it
 		// once all of the workloads have finished.
-		co_await unlockDatabase(cx, self->lockid);
+		co_await unlockDatabase(cx, lockid);
 		co_return true;
 	}
-
-	Future<bool> check(const Database& cx) override { return _check(this, cx); }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };

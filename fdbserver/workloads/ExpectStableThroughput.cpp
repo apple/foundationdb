@@ -43,35 +43,35 @@ class ExpectStableThroughputWorkload : public TestWorkload {
 
 	Key getKey(int index) { return Key(format("%06d", index)).withPrefix(keyPrefix); }
 
-	static Future<Void> runTransaction(ExpectStableThroughputWorkload* self, Database cx) {
+	Future<Void> runTransaction(Database cx) {
 		Transaction tr(cx);
 		std::vector<Future<Void>> futures;
 		while (true) {
 			Error err;
 			try {
-				tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, self->throttlingTag);
+				tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, throttlingTag);
 				futures.clear();
-				futures.reserve(self->opsPerTransaction);
-				for (int i = 0; i < self->opsPerTransaction; ++i) {
-					futures.push_back(success(tr.get(self->getKey(i))));
+				futures.reserve(opsPerTransaction);
+				for (int i = 0; i < opsPerTransaction; ++i) {
+					futures.push_back(success(tr.get(getKey(i))));
 				}
 				co_await waitForAll(futures);
-				self->finishTransaction(tr);
+				finishTransaction(tr);
 				co_return;
 			} catch (Error& e) {
 				err = e;
 			}
-			self->finishTransaction(tr);
-			if (err.code() == error_code_proxy_tag_throttled && now() > self->startTime + self->warmupTime) {
-				++self->tagThrottledErrors;
+			finishTransaction(tr);
+			if (err.code() == error_code_proxy_tag_throttled && now() > startTime + warmupTime) {
+				++tagThrottledErrors;
 			}
 			co_await tr.onError(err);
 		}
 	}
 
-	static Future<Void> runClient(ExpectStableThroughputWorkload* self, Database cx) {
+	Future<Void> runClient(Database cx) {
 		while (true) {
-			co_await (delay(1 / self->attemptedTransactionRatePerActor) && runTransaction(self, cx));
+			co_await (delay(1 / attemptedTransactionRatePerActor) && runTransaction(cx));
 		}
 	}
 
@@ -98,7 +98,7 @@ public:
 		startTime = now();
 		std::vector<Future<Void>> clients;
 		for (int i = 0; i < numActors; ++i) {
-			clients.push_back(runClient(this, cx));
+			clients.push_back(runClient(cx));
 		}
 		return success(timeout(waitForAll(clients), warmupTime + testDuration));
 	}

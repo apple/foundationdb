@@ -41,15 +41,13 @@ struct MemoryLifetime : KVWorkload {
 
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-
 	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	Future<Void> _setup(Database cx, MemoryLifetime* self) {
+	Future<Void> setup(Database const& cx) override {
 		Promise<double> loadTime;
-		co_await bulkSetup(cx, self, self->nodeCount, loadTime);
+		co_await bulkSetup(cx, this, nodeCount, loadTime);
 	}
 
 	Future<Void> start(Database const& cx) override {

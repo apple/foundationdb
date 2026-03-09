@@ -259,7 +259,7 @@ struct MeasurePeriodically : IMeasurer {
 
 	Future<Void> start() override {
 		msp.start();
-		return periodicActor(this);
+		return periodicActor();
 	}
 	void addTransaction(ITransactor::Stats* st, double now) override { msp.addTransaction(st, now); }
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -280,13 +280,13 @@ struct MeasurePeriodically : IMeasurer {
 		msp.start();
 	}
 
-	static Future<Void> periodicActor(MeasurePeriodically* self) {
+	Future<Void> periodicActor() {
 		double startT = now();
 		double elapsed = 0;
 		while (true) {
-			elapsed += self->period;
+			elapsed += period;
 			co_await delayUntil(startT + elapsed);
-			self->nextPeriod(elapsed);
+			nextPeriod(elapsed);
 		}
 	}
 };
@@ -385,32 +385,32 @@ struct ThroughputWorkload : TestWorkload {
 		Future<Void> ac = actorCollection(add.getFuture(), &activeActors);
 		Future<Void> r = timeout(measurer->start() && ac, testDuration, Void());
 		ASSERT(!ac.isReady()); // ... because else the following line would create an unbreakable reference cycle
-		add.send(throughputActor(cx, this, add));
+		add.send(throughputActor(cx, add));
 		return r;
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	static Future<Void> throughputActor(Database db, ThroughputWorkload* self, PromiseStream<Future<Void>> add) {
+	Future<Void> throughputActor(Database db, PromiseStream<Future<Void>> add) {
 		double before = now();
 		ITransactor::Stats stats;
-		co_await self->op->doTransaction(db, &stats);
+		co_await op->doTransaction(db, &stats);
 		double after = now();
 
 		co_await delay(0.0);
 		stats.totalLatency = after - before;
-		self->measurer->addTransaction(&stats, after);
+		measurer->addTransaction(&stats, after);
 
-		self->totalLatencyIntegral += after - before;
-		self->totalTransactionsIntegral += 1;
+		totalLatencyIntegral += after - before;
+		totalTransactionsIntegral += 1;
 
-		double error = after - before - self->targetLatency;
+		double error = after - before - targetLatency;
 		// Ideally ierror would be integral [avg. transaction latency - targetLatency] dt.
 		// Actually we calculate integral[ transaction latency - targetLatency ] dtransaction and change units.
-		double ierror = (self->totalLatencyIntegral - self->totalTransactionsIntegral * self->targetLatency) /
-		                self->totalTransactionsIntegral * (after - self->startT);
+		double ierror = (totalLatencyIntegral - totalTransactionsIntegral * targetLatency) / totalTransactionsIntegral *
+		                (after - startT);
 
-		double desiredSuccessors = 1 - (error * self->Pgain + ierror * self->Igain) / self->targetLatency;
+		double desiredSuccessors = 1 - (error * Pgain + ierror * Igain) / targetLatency;
 
 		// if (deterministicRandom()->random01() < .001) TraceEvent("ThroughputControl").detail("Error",
 		// error).detail("IError", ierror).detail("DesiredSuccessors", desiredSuccessors).detail("ActiveActors",
@@ -421,12 +421,12 @@ struct ThroughputWorkload : TestWorkload {
 		// SOMEDAY: How can we prevent the number of actors on different clients from diverging?
 
 		int successors = deterministicRandom()->random01() + desiredSuccessors;
-		if (successors < 1 && self->activeActors <= 1)
+		if (successors < 1 && activeActors <= 1)
 			successors = 1;
-		if (successors > 1 && self->activeActors >= 200000)
+		if (successors > 1 && activeActors >= 200000)
 			successors = 1;
 		for (int s = 0; s < successors; s++)
-			add.send(throughputActor(db, self, add));
+			add.send(throughputActor(db, add));
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { measurer->getMetrics(m); }

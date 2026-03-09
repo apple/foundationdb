@@ -60,7 +60,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		    options, "blockWritesFor"_sr, double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
 
-	static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
+	Future<Void> testStorage(Database cx, StorageServerInterface ssi) {
 		Transaction tr(cx);
 		std::vector<Future<GetValueReply>> requests;
 		requests.reserve(100);
@@ -78,7 +78,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			}
 			if (expectedRateLimit < metrics.localRateLimit - 0.01 ||
 			    expectedRateLimit > metrics.localRateLimit + 0.01) {
-				self->testFailed = true;
+				testFailed = true;
 				TraceEvent(SevError, "StorageRateLimitTooFarOff")
 				    .detail("Storage", ssi.id())
 				    .detail("Expected", expectedRateLimit)
@@ -111,7 +111,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			int errors = 0;
 			for (const auto& resp : requests) {
 				if (resp.isError()) {
-					self->testFailed = true;
+					testFailed = true;
 					++errors;
 					TraceEvent(SevError, "LoadBalancedResponseReturnedError").error(resp.getError());
 				} else if (resp.get().error.present() && resp.get().error.get().code() == error_code_future_version) {
@@ -122,7 +122,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				}
 			}
 			TraceEvent("RejectedVersions").detail("NumRejected", failedRequests);
-			if (self->testFailed) {
+			if (testFailed) {
 				co_return;
 			}
 			co_await delay(5.0);
@@ -136,7 +136,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 		Future<Void> done = delay(blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
 		co_await delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6));
-		co_await (testStorage(this, cx, ssi) || done);
+		co_await (testStorage(cx, ssi) || done);
 	}
 
 	Future<Void> start(Database const& cx) override {

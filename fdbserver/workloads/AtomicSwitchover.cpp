@@ -46,16 +46,16 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _setup(cx, this);
+		return _setup(cx);
 	}
 
-	static Future<Void> _setup(Database cx, AtomicSwitchoverWorkload* self) {
+	Future<Void> _setup(Database cx) {
 		DatabaseBackupAgent backupAgent(cx);
 		try {
 			TraceEvent("AS_Submit1").log();
-			co_await backupAgent.submitBackup(self->extraDB,
+			co_await backupAgent.submitBackup(extraDB,
 			                                  BackupAgentBase::getDefaultTag(),
-			                                  self->backupRanges,
+			                                  backupRanges,
 			                                  StopWhenDone::False,
 			                                  StringRef(),
 			                                  StringRef(),

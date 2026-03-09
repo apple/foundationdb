@@ -89,13 +89,13 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		goodTag = TransactionTag(std::string("gT"));
 	}
 
-	static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
+	Future<Void> _setup(Database cx) {
 		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
 		       CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH >= MIN_TRANSACTION_TAG_LENGTH);
-		if (self->populateData) {
-			co_await bulkSetup(cx, self, self->keyCount, Promise<double>());
+		if (populateData) {
+			co_await bulkSetup(cx, this, keyCount, Promise<double>());
 		}
-		if (self->clientId == 0) {
+		if (clientId == 0) {
 			co_await ThrottleApi::enableAuto(cx.getReference(), true);
 		}
 	}
@@ -105,7 +105,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			fastSuccess = true;
 			return Void();
 		}
-		return _setup(cx, this);
+		return _setup(cx);
 	}
 	Future<Void> _start(Database cx) {
 		std::vector<Future<Void>> clientActors;
@@ -116,7 +116,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		for (actorId = 0; actorId < badActorPerClient; ++actorId) {
 			clientActors.push_back(clientActor(true, actorId, badOpRate, cx, this));
 		}
-		clientActors.push_back(throttledTagUpdater(cx, this));
+		clientActors.push_back(throttledTagUpdater(cx));
 		co_await timeout(waitForAll(clientActors), testDuration, Void());
 	}
 	Future<Void> start(Database const& cx) override {
@@ -301,13 +301,13 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			throttledTags.insert(tag.tag.toString());
 		}
 	}
-	static Future<Void> throttledTagUpdater(Database cx, WriteTagThrottlingWorkload* self) {
+	Future<Void> throttledTagUpdater(Database cx) {
 		std::vector<TagThrottleInfo> tags;
 		Reference<DatabaseContext> db = cx.getReference();
 		while (true) {
 			co_await delay(1.0);
 			co_await store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, ContainsRecommended::True));
-			self->recordThrottledTags(tags);
+			recordThrottledTags(tags);
 		}
 	}
 

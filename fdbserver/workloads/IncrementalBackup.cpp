@@ -90,14 +90,14 @@ struct IncrementalBackupWorkload : TestWorkload {
 		if (clientId) {
 			return true;
 		}
-		return _check(cx, this);
+		return _check(cx);
 	}
 
-	static Future<bool> _check(Database cx, IncrementalBackupWorkload* self) {
-		if (self->waitForBackup) {
+	Future<bool> _check(Database cx) {
+		if (waitForBackup) {
 			// Undergoing recovery with the snapshot system keys set will pause the backup agent
 			// Pre-emptively unpause any backup agents before attempting to wait to avoid getting stuck
-			co_await self->backupAgent.changePause(cx, false);
+			co_await backupAgent.changePause(cx, false);
 			Reference<IBackupContainer> backupContainer;
 			UID backupUID;
 			Version v{ 0 };
@@ -115,18 +115,17 @@ struct IncrementalBackupWorkload : TestWorkload {
 			while (true) {
 				// Wait for backup container to be created and avoid race condition
 				TraceEvent("IBackupWaitContainer").log();
-				co_await self->backupAgent.waitBackup(
-				    cx, self->tag.toString(), StopWhenDone::False, &backupContainer, &backupUID);
+				co_await backupAgent.waitBackup(cx, tag.toString(), StopWhenDone::False, &backupContainer, &backupUID);
 
 				Optional<std::string> restoreEncryptionKeyFileName;
-				if (self->encryptionKeyFileName.present() && fileExists(self->encryptionKeyFileName.get())) {
-					restoreEncryptionKeyFileName = self->encryptionKeyFileName.get();
+				if (encryptionKeyFileName.present() && fileExists(encryptionKeyFileName.get())) {
+					restoreEncryptionKeyFileName = encryptionKeyFileName.get();
 				}
 
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt").log();
 					std::vector<std::string> containers =
-					    co_await IBackupContainer::listContainers(self->backupDir.toString(), {});
+					    co_await IBackupContainer::listContainers(backupDir.toString(), {});
 					TraceEvent("IBackupCheckListContainersSuccess")
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
@@ -156,16 +155,16 @@ struct IncrementalBackupWorkload : TestWorkload {
 				}
 				if (desc.contiguousLogEnd.get() >= v)
 					break;
-				if (self->waitRetries != -1 && tries > self->waitRetries)
+				if (waitRetries != -1 && tries > waitRetries)
 					break;
 				// Avoid spamming requests with a delay
 				co_await delay(5.0);
 			}
 		}
-		if (self->stopBackup) {
+		if (stopBackup) {
 			try {
 				TraceEvent("IBackupDiscontinueBackup").log();
-				co_await self->backupAgent.discontinueBackup(cx, self->tag);
+				co_await backupAgent.discontinueBackup(cx, tag);
 			} catch (Error& e) {
 				TraceEvent("IBackupDiscontinueBackupException").error(e);
 				if (e.code() != error_code_backup_unneeded) {

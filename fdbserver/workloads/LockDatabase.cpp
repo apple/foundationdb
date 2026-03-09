@@ -42,7 +42,7 @@ struct LockDatabaseWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
-			return onlyCheckLocked ? timeout(checkLocked(cx, this), 60, Void()) : lockWorker(cx, this);
+			return onlyCheckLocked ? timeout(checkLocked(cx), 60, Void()) : lockWorker(cx);
 		return Void();
 	}
 
@@ -50,7 +50,7 @@ struct LockDatabaseWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<RangeResult> lockAndSave(Database cx, LockDatabaseWorkload* self, UID lockID) {
+	Future<RangeResult> lockAndSave(Database cx, UID lockID) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -68,7 +68,7 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> unlockAndCheck(Database cx, LockDatabaseWorkload* self, UID lockID, RangeResult data) {
+	Future<Void> unlockAndCheck(Database cx, UID lockID, RangeResult data) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
@@ -85,7 +85,7 @@ struct LockDatabaseWorkload : TestWorkload {
 					TraceEvent(SevError, "DataChangedWhileLocked")
 					    .detail("BeforeSize", data.size())
 					    .detail("AfterSize", data2.size());
-					self->ok = false;
+					ok = false;
 				} else if (data != data2) {
 					TraceEvent(SevError, "DataChangedWhileLocked").detail("Size", data.size());
 					for (int i = 0; i < data.size(); i++) {
@@ -96,7 +96,7 @@ struct LockDatabaseWorkload : TestWorkload {
 							    .detail("After", printable(data2[i]));
 						}
 					}
-					self->ok = false;
+					ok = false;
 				}
 				co_await tr.commit();
 				co_return;
@@ -107,14 +107,14 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> checkLocked(Database cx, LockDatabaseWorkload* self) {
+	Future<Void> checkLocked(Database cx) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
 			try {
 				Version v = co_await tr.getReadVersion();
 				TraceEvent(SevError, "GotVersionWhileLocked").detail("Version", v);
-				self->ok = false;
+				ok = false;
 				co_return;
 			} catch (Error& e) {
 				err = e;
@@ -124,14 +124,14 @@ struct LockDatabaseWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> lockWorker(Database cx, LockDatabaseWorkload* self) {
+	Future<Void> lockWorker(Database cx) {
 		UID lockID = deterministicRandom()->randomUniqueID();
-		co_await delay(self->lockAfter);
-		RangeResult data = co_await lockAndSave(cx, self, lockID);
-		Future<Void> checker = checkLocked(cx, self);
-		co_await delay(self->unlockAfter - self->lockAfter);
+		co_await delay(lockAfter);
+		RangeResult data = co_await lockAndSave(cx, lockID);
+		Future<Void> checker = checkLocked(cx);
+		co_await delay(unlockAfter - lockAfter);
 		checker.cancel();
-		co_await unlockAndCheck(cx, self, lockID, data);
+		co_await unlockAndCheck(cx, lockID, data);
 	}
 };
 

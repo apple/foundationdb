@@ -100,27 +100,27 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
-			return _setup(this);
+			return _setup();
 
 		return Void();
 	}
 
-	Future<Void> _setup(DiskDurabilityWorkload* self) {
-		ASSERT(!self->path.empty());
+	Future<Void> _setup() {
+		ASSERT(!path.empty());
 
 		int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE;
 
-		if (self->unbufferedIO)
+		if (unbufferedIO)
 			flags |= IAsyncFile::OPEN_UNBUFFERED;
-		if (self->uncachedIO)
+		if (uncachedIO)
 			flags |= IAsyncFile::OPEN_UNCACHED;
 
 		try {
-			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(self->path, flags, 0666);
-			if (self->fileHandle.getPtr() == nullptr)
-				self->fileHandle = makeReference<AsyncFileHandle>(file, self->path, false);
+			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(path, flags, 0666);
+			if (fileHandle.getPtr() == nullptr)
+				fileHandle = makeReference<AsyncFileHandle>(file, path, false);
 			else
-				self->fileHandle->file = file;
+				fileHandle->file = file;
 		} catch (Error& error) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Could not open file");
 			throw;
@@ -141,22 +141,22 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		return x;
 	}
 
-	static Future<Void> worker(DiskDurabilityWorkload* self) {
+	Future<Void> worker() {
 		Reference<AsyncFileBuffer> buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
-		int logfp = (int)ceil(log2(self->filePages));
+		int logfp = (int)ceil(log2(filePages));
 		while (true) {
 			int block = intHash(std::min<int>(
 			                deterministicRandom()->randomInt(0, 1 << deterministicRandom()->randomInt(0, logfp)),
-			                self->filePages - 1)) %
-			            self->filePages;
-			co_await self->blocks[block].test(self->fileHandle, self->pagesPerWrite, buffer);
+			                filePages - 1)) %
+			            filePages;
+			co_await blocks[block].test(fileHandle, pagesPerWrite, buffer);
 		}
 	}
 
-	static Future<Void> syncLoop(DiskDurabilityWorkload* self) {
+	Future<Void> syncLoop() {
 		while (true) {
-			co_await delay(deterministicRandom()->random01() * self->syncInterval);
-			co_await self->fileHandle->file->sync();
+			co_await delay(deterministicRandom()->random01() * syncInterval);
+			co_await fileHandle->file->sync();
 		}
 	}
 
@@ -166,10 +166,10 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 			blocks.push_back(FileBlock(i));
 
 		std::vector<Future<Void>> tasks;
-		tasks.push_back(syncLoop(this));
+		tasks.push_back(syncLoop());
 
 		for (int i = 0; i < writers; ++i)
-			tasks.push_back(worker(this));
+			tasks.push_back(worker());
 
 		co_await timeout(waitForAll(tasks), testDuration, Void());
 	}

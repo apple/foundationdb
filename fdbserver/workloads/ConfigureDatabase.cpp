@@ -254,10 +254,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
-	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
-
-	Future<bool> check(Database const& cx) override { return _check(this, cx); }
-
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
 	static inline uint64_t valueToUInt64(const StringRef& v) {
@@ -266,16 +262,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return x;
 	}
 
-	static inline Standalone<StringRef> getDatabaseName(ConfigureDatabaseWorkload* self, int dbIndex) {
-		return StringRef(format("DestroyDB%d", dbIndex));
-	}
+	inline Standalone<StringRef> getDatabaseName(int dbIndex) { return StringRef(format("DestroyDB%d", dbIndex)); }
 
 	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
 		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
-	Future<Void> _setup(Database cx, ConfigureDatabaseWorkload* self) {
+	Future<Void> setup(Database const& cx) override {
 		co_await ManagementAPI::changeConfig(cx.getReference(), "single storage_migration_type=aggressive", true);
 	}
 
@@ -320,12 +314,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		co_return false;
 	}
 
-	Future<bool> _check(ConfigureDatabaseWorkload* self, Database cx) {
+	Future<bool> check(Database const& cx) override {
 		co_await delay(30.0);
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
-		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
+		if (allowTestStorageMigration || waitStoreTypeCheck) {
 			bool aggressiveMigrationTriggered = false;
 			while (true) {
 				// There exists a race where the check can start before the last transaction that singleDB issued
@@ -344,7 +338,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 				if (!aggressiveMigrationTriggered) {
 					co_await store(aggressiveMigrationTriggered,
-					               self->issueAggressiveMigrationIfNeeded(cx, conf, storageServers));
+					               issueAggressiveMigrationIfNeeded(cx, conf, storageServers));
 				}
 
 				for (i = 0; i < storageServers.size(); i++) {

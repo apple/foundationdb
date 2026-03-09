@@ -57,27 +57,27 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		if (clientId) {
 			return true;
 		}
-		return _check(cx, this);
+		return _check(cx);
 	}
 
 	Future<Void> _start(Database cx) {
 		if (initialize) {
-			co_await setInitialValue(cx, this);
+			co_await setInitialValue(cx);
 		}
 		for (int i = 0; i < iterations; ++i) {
-			clients.push_back(timeout(applyAtomicAdd(cx, this), testDuration, Void()));
+			clients.push_back(timeout(applyAtomicAdd(cx), testDuration, Void()));
 		}
 		waitForAll(clients);
 	}
 
-	static Future<Void> setInitialValue(Database cx, SimpleAtomicAddWorkload* self) {
+	Future<Void> setInitialValue(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		Value val = StringRef((const uint8_t*)&self->initialValue, sizeof(self->initialValue));
+		Value val = StringRef((const uint8_t*)&initialValue, sizeof(initialValue));
 		while (true) {
 			Error err;
 			try {
-				TraceEvent("SAASetInitialValue").detail("Key", self->sumKey).detail("Value", val);
-				tr.set(self->sumKey, val);
+				TraceEvent("SAASetInitialValue").detail("Key", sumKey).detail("Value", val);
+				tr.set(sumKey, val);
 				co_await tr.commit();
 				break;
 			} catch (Error& e) {
@@ -88,14 +88,14 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> applyAtomicAdd(Database cx, SimpleAtomicAddWorkload* self) {
+	Future<Void> applyAtomicAdd(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		Value val = StringRef((const uint8_t*)&self->addValue, sizeof(self->addValue));
+		Value val = StringRef((const uint8_t*)&addValue, sizeof(addValue));
 		while (true) {
 			Error err;
 			try {
-				TraceEvent("SAABegin").detail("Key", self->sumKey).detail("Value", val);
-				tr.atomicOp(self->sumKey, val, MutationRef::AddValue);
+				TraceEvent("SAABegin").detail("Key", sumKey).detail("Value", val);
+				tr.atomicOp(sumKey, val, MutationRef::AddValue);
 				co_await tr.commit();
 				break;
 			} catch (Error& e) {
@@ -106,17 +106,17 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		}
 	}
 
-	static Future<bool> _check(Database cx, SimpleAtomicAddWorkload* self) {
+	Future<bool> _check(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		uint64_t expectedValue = self->addValue * self->iterations;
-		if (self->initialize) {
-			expectedValue += self->initialValue;
+		uint64_t expectedValue = addValue * iterations;
+		if (initialize) {
+			expectedValue += initialValue;
 		}
 		while (true) {
 			Error err;
 			try {
 				TraceEvent("SAACheckKey").log();
-				Optional<Value> actualValue = co_await tr.get(self->sumKey);
+				Optional<Value> actualValue = co_await tr.get(sumKey);
 				uint64_t actualValueInt = 0;
 				if (actualValue.present()) {
 					memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());

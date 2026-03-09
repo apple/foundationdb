@@ -34,26 +34,26 @@ struct TokenBucket {
 	double bucketSize;
 	Future<Void> tokenAdderActor;
 
-	static Future<Void> tokenAdder(TokenBucket* self) {
+	Future<Void> tokenAdder() {
 		while (true) {
-			self->bucketSize = std::min(self->bucketSize + self->transactionRate * addTokensInterval, self->maxBurst);
+			bucketSize = std::min(bucketSize + transactionRate * addTokensInterval, maxBurst);
 			if (deterministicRandom()->randomInt(0, 100) == 0)
 				TraceEvent("AddingTokensx100")
-				    .detail("BucketSize", self->bucketSize)
-				    .detail("TransactionRate", self->transactionRate);
+				    .detail("BucketSize", bucketSize)
+				    .detail("TransactionRate", transactionRate);
 			co_await delay(addTokensInterval);
 		}
 	}
 
 	TokenBucket(double maxBurst = 1000) : transactionRate(0), maxBurst(maxBurst), bucketSize(maxBurst) {
-		tokenAdderActor = tokenAdder(this);
+		tokenAdderActor = tokenAdder();
 	}
 
-	static Future<Void> startTransaction(TokenBucket* self) {
+	Future<Void> startTransaction() {
 		double sleepTime = addTokensInterval;
 		while (true) {
-			if (self->bucketSize >= 1.0) {
-				--self->bucketSize;
+			if (bucketSize >= 1.0) {
+				--bucketSize;
 				co_return;
 			}
 			if (deterministicRandom()->randomInt(0, 100) == 0)
@@ -95,23 +95,23 @@ struct ThrottlingWorkload : KVWorkload {
 		return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
-	static Future<Void> clientActor(Database cx, ThrottlingWorkload* self) {
+	Future<Void> clientActor(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 
 		while (true) {
-			co_await TokenBucket::startTransaction(&self->tokenBucket);
+			co_await tokenBucket.startTransaction();
 			tr.reset();
 			try {
-				for (int i = 0; i < self->readsPerTransaction; ++i) {
-					Optional<Value> value = co_await tr.get(self->getRandomKey());
+				for (int i = 0; i < readsPerTransaction; ++i) {
+					Optional<Value> value = co_await tr.get(getRandomKey());
 				}
-				for (int i = 0; i < self->writesPerTransaction; ++i) {
-					tr.set(self->getRandomKey(), getRandomValue());
+				for (int i = 0; i < writesPerTransaction; ++i) {
+					tr.set(getRandomKey(), getRandomValue());
 				}
 				co_await tr.commit();
 				if (deterministicRandom()->randomInt(0, 1000) == 0)
 					TraceEvent("TransactionCommittedx1000").log();
-				++self->transactionsCommitted;
+				++transactionsCommitted;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
 					throw;
@@ -120,7 +120,7 @@ struct ThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	static Future<Void> specialKeysActor(Database cx, ThrottlingWorkload* self) {
+	Future<Void> specialKeysActor(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 		json_spirit::mValue aggregateSchema = readJSONStrictly(JSONSchemas::aggregateHealthSchema.toString()).get_obj();
 		json_spirit::mValue storageSchema = readJSONStrictly(JSONSchemas::storageHealthSchema.toString()).get_obj();
@@ -141,10 +141,10 @@ struct ThrottlingWorkload : KVWorkload {
 							TraceEvent(SevError, "AggregateHealthSchemaValidationFailed")
 							    .detail("ErrorStr", errorStr.c_str())
 							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-							self->correctSpecialKeys = false;
+							correctSpecialKeys = false;
 						}
 						auto tpsLimit = valueObj.at("tps_limit").get_real();
-						self->tokenBucket.transactionRate = tpsLimit * self->throttlingMultiplier / self->clientCount;
+						tokenBucket.transactionRate = tpsLimit * throttlingMultiplier / clientCount;
 					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
 						CODE_PROBE(true, "Test storage health metrics schema");
 						UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)
@@ -154,7 +154,7 @@ struct ThrottlingWorkload : KVWorkload {
 							TraceEvent(SevError, "StorageHealthSchemaValidationFailed")
 							    .detail("ErrorStr", errorStr.c_str())
 							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-							self->correctSpecialKeys = false;
+							correctSpecialKeys = false;
 						}
 					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("log/"_sr)) {
 						CODE_PROBE(true, "Test log health metrics schema");
@@ -165,7 +165,7 @@ struct ThrottlingWorkload : KVWorkload {
 							TraceEvent(SevError, "LogHealthSchemaValidationFailed")
 							    .detail("ErrorStr", errorStr.c_str())
 							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
-							self->correctSpecialKeys = false;
+							correctSpecialKeys = false;
 						}
 					} else {
 						ASSERT(false); // Unrecognized key
@@ -184,9 +184,9 @@ struct ThrottlingWorkload : KVWorkload {
 	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> clientActors;
 		for (int actorId = 0; actorId < actorsPerClient; ++actorId) {
-			clientActors.push_back(timeout(clientActor(cx, this), testDuration, Void()));
+			clientActors.push_back(timeout(clientActor(cx), testDuration, Void()));
 		}
-		clientActors.push_back(timeout(specialKeysActor(cx, this), testDuration, Void()));
+		clientActors.push_back(timeout(specialKeysActor(cx), testDuration, Void()));
 		clientActors.push_back(timeout(tokenBucket.tokenAdderActor, testDuration, Void()));
 		co_await delay(testDuration);
 	}

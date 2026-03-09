@@ -37,7 +37,7 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(Database const& cx) override { return clientId == 0 ? worker(this, cx) : Void(); }
+	Future<Void> start(Database const& cx) override { return clientId == 0 ? worker(cx) : Void(); }
 
 	Future<bool> check(Database const& cx) override { return true; }
 
@@ -47,26 +47,23 @@ struct LockDatabaseFrequentlyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> worker(LockDatabaseFrequentlyWorkload* self, Database cx) {
-		Future<Void> end = delay(self->testDuration);
+	Future<Void> worker(Database cx) {
+		Future<Void> end = delay(testDuration);
 		double lastLock = g_network->now();
-		double lastUnlock = g_network->now() + self->delayBetweenLocks / 2;
+		double lastUnlock = g_network->now() + delayBetweenLocks / 2;
 		while (true) {
-			co_await lockAndUnlock(self, cx, &lastLock, &lastUnlock);
-			++self->lockCount;
+			co_await lockAndUnlock(cx, &lastLock, &lastUnlock);
+			++lockCount;
 			if (end.isReady()) {
 				co_return;
 			}
 		}
 	}
 
-	static Future<Void> lockAndUnlock(LockDatabaseFrequentlyWorkload* self,
-	                                  Database cx,
-	                                  double* lastLock,
-	                                  double* lastUnlock) {
+	Future<Void> lockAndUnlock(Database cx, double* lastLock, double* lastUnlock) {
 		UID uid = deterministicRandom()->randomUniqueID();
-		co_await (lockDatabase(cx, uid) && poisson(lastLock, self->delayBetweenLocks));
-		co_await (unlockDatabase(cx, uid) && poisson(lastUnlock, self->delayBetweenLocks));
+		co_await (lockDatabase(cx, uid) && poisson(lastLock, delayBetweenLocks));
+		co_await (unlockDatabase(cx, uid) && poisson(lastUnlock, delayBetweenLocks));
 	}
 };
 

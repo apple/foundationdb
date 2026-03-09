@@ -205,8 +205,6 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		subtaskCount = getOption(options, "subtaskCount"_sr, 20);
 	}
 
-	Future<bool> check(Database const& cx) override { return _check(cx, this); }
-
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr,
@@ -300,9 +298,9 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	Future<bool> _check(Database cx, TaskBucketCorrectnessWorkload* self) {
+	Future<bool> check(Database const& cx) override {
 		bool ret = co_await runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return self->checkSayHello(tr, self->subtaskCount); });
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) { return checkSayHello(tr, subtaskCount); });
 		co_return ret;
 	}
 
