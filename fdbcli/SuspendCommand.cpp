@@ -1,5 +1,5 @@
 /*
- * SuspendCommand.actor.cpp
+ * SuspendCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,14 +29,12 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace fdb_cli {
 
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                  Reference<ITransaction> tr,
                                  std::vector<StringRef> const& tokens,
-                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* const& address_interface) {
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(tokens.size() >= 1);
 	bool result = true;
 	std::string addressesStr;

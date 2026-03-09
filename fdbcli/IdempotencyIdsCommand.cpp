@@ -1,5 +1,5 @@
 /*
- * IdempotencyIdsCommand.actor.cpp
+ * IdempotencyIdsCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,8 +22,6 @@
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
-#include "flow/actorcompiler.h" // This must be the last include
-
 namespace {
 
 Optional<double> parseAgeValue(StringRef token) {

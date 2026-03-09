@@ -245,7 +245,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                  Reference<ITransaction> tr,
                                  std::vector<StringRef> const& tokens,
-                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* const& address_interface);
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command

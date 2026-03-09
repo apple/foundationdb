@@ -1,5 +1,5 @@
 /*
- * HotRangeCommand.actor.cpp
+ * HotRangeCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -31,8 +31,6 @@
 #include "flow/FastRef.h"
 #include "flow/NetworkAddress.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace {
 
 ReadHotSubRangeRequest::SplitType parseSplitType(const std::string& typeStr) {

@@ -1,5 +1,5 @@
 /*
- * ConsistencyScanCommand.actor.cpp
+ * ConsistencyScanCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,8 +26,6 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace fdb_cli {
 
 Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
@@ -51,7 +49,7 @@ Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> con
 	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	bool error = false;
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);

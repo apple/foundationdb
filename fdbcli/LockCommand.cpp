@@ -1,5 +1,5 @@
 /*
- * LockCommand.actor.cpp
+ * LockCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,13 +28,11 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace {
 
 Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {
@@ -76,7 +74,7 @@ Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> co
 
 Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {
