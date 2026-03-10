@@ -90,7 +90,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/MockS3Server.h"
 #include "fdbserver/MockS3ServerChaos.h"
 #include "flow/IRandom.h"

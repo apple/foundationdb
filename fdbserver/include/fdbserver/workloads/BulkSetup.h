@@ -1,5 +1,5 @@
 /*
- * BulkSetup.actor.h
+ * BulkSetup.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,8 +20,8 @@
 
 #pragma once
 
-#ifndef FDBSERVER_BULK_SETUP_ACTOR_H
-#define FDBSERVER_BULK_SETUP_ACTOR_H
+#ifndef FDBSERVER_BULK_SETUP_H
+#define FDBSERVER_BULK_SETUP_H
 
 #include <string>
 #include <utility>

@@ -23,7 +23,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
