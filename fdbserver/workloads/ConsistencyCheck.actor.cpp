@@ -183,7 +183,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<Void> monitorConsistencyCheckSettings(Database cx, ConsistencyCheckWorkload* self) {
-		loop {
+		while (true) {
 			ReadYourWritesTransaction tr(cx);
 			{
 				Error err;
@@ -210,7 +210,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
-		loop {
+		while (true) {
 			while (self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Suspended").log();
 				co_await self->suspendConsistencyCheck.onChange();
@@ -252,7 +252,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				loop {
+				while (true) {
 					{
 						Error err;
 						try {
@@ -516,7 +516,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<StorageServerInterface> servers;
 		std::unordered_map<UID, StorageMetadataType> id_ssi;
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			servers.clear();
 			id_ssi.clear();
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -789,7 +789,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	Future<bool> checkCoordinators(Database cx) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -1094,7 +1094,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		ConsistencyScanState cs;
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {

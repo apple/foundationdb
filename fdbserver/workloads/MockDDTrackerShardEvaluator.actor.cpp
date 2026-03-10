@@ -69,7 +69,7 @@ public:
 	}
 
 	Future<Void> relocateShardReporter(FutureStream<RelocateShard> input) {
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {

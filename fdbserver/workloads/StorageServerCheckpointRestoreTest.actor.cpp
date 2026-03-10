@@ -95,7 +95,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		                      : DataMoveType::LOGICAL,
 		                  DataMovementReason::TEAM_HEALTHY,
 		                  UnassignShard(false));
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -120,7 +120,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		    .detail("DataMoveID", dataMoveId);
 
 		// Fetch checkpoint meta data.
-		loop {
+		while (true) {
 			records.clear();
 			try {
 				co_await store(records,
@@ -148,7 +148,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
 		std::vector<std::pair<KeyRange, CheckpointMetaData>>::iterator it = records.begin();
 		for (; it != records.end(); ++it) {
-			loop {
+			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				{
 					Error err;
@@ -187,7 +187,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		// For now, it should have been a single key.
 		tr.reset();
 		RangeResult res;
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -221,7 +221,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 	                           ErrorOr<Optional<Value>> expectedValue) {
 		Transaction tr(cx);
 
-		loop {
+		while (true) {
 			Error err;
 			try {
 				Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
@@ -243,7 +243,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 	Future<Version> writeAndVerify(SSCheckpointRestoreWorkload* self, Database cx, Key key, Optional<Value> value) {
 		Transaction tr(cx);
 		Version version{ 0 };
-		loop {
+		while (true) {
 			Error err;
 			try {
 				if (value.present()) {

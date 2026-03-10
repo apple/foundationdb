@@ -329,7 +329,7 @@ Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 	} else {
 		while (t < stopAt) {
 			double end = now();
-			loop {
+			while (true) {
 				t += 1.0 / workload->operationsPerSecond;
 				double op = deterministicRandom()->random01();
 				if (op < workload->commitFraction) {

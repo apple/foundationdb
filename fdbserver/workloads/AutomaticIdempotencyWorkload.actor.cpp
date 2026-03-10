@@ -89,7 +89,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		if (clientId == 0) {
 			co_await sharedConfigProperty.set(cx.getReference(), sharedConfig);
 		} else {
-			loop {
+			while (true) {
 				Optional<SharedConfiguration> sharedConfig = co_await sharedConfigProperty.get(cx.getReference());
 				if (sharedConfig.present()) {
 					this->sharedConfig = sharedConfig.get();
@@ -260,7 +260,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 
 		ReadYourWritesTransaction tr(db);
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -344,7 +344,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		int64_t oldestCreatedTime{ 0 };
 		int64_t successes = 0;
 		actors->add(cleaner);
-		loop {
+		while (true) {
 			// Oldest created time of a transaction from the workload which still has an idempotency id
 			co_await store(oldestCreatedTime, getOldestCreatedTime(db));
 			if (oldestCreatedTime == -1) {
@@ -430,7 +430,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 		// Slowly and somewhat randomly allow the cleaner to do more cleaning. Observe that it cleans some, but not too
 		// much.
-		loop {
+		while (true) {
 			minAgeSeconds *= 1 / (slop * 2);
 			if (minAgeSeconds < minMinAgeSeconds) {
 				break;

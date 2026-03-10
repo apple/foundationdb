@@ -110,7 +110,7 @@ struct PerformanceWorkload : TestWorkload {
 	Future<std::vector<TesterInterface>> getTesters(PerformanceWorkload* self) {
 		std::vector<WorkerDetails> workers;
 
-		loop {
+		while (true) {
 			{
 				auto choice = co_await race(
 				    brokenPromiseToNever(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(
@@ -167,7 +167,7 @@ struct PerformanceWorkload : TestWorkload {
 		bool retry = false;
 		double multiplier = 2.0;
 
-		loop {
+		while (true) {
 			Standalone<VectorRef<VectorRef<KeyValueRef>>> options = self->getOpts(tps);
 			TraceEvent start("PerformaceProbeStarting");
 			start.detail("RateTarget", tps);

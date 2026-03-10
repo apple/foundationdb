@@ -84,7 +84,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		fmt::print("EndVersion: {}\n", self->endVersion);
 
 		while (iStart < self->records) {
-			loop {
+			while (true) {
 				{
 					Error err;
 					try {
@@ -119,7 +119,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		int nextExpectedRecord = 0;
 
 		try {
-			loop {
+			while (true) {
 				Standalone<RangeResultRef> results = co_await reader->getNext();
 
 				for (const auto& rec : results) {

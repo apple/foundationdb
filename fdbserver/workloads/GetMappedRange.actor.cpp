@@ -97,7 +97,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			std::cout << "start fillInRecords n=" << n << std::endl;
 			// TODO: When n is large, split into multiple transactions.
 			recordSize = 0;
@@ -151,7 +151,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "start scanRange " << range.toString() << std::endl;
 		// TODO: When n is large, split into multiple transactions.
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -230,7 +230,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " limit:" << limit << " byteLimit: " << byteLimit << "  recordSize: " << recordSize
 		          << " STRICTLY_ENFORCE_BYTE_LIMIT: " << SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT << " allMissing "
 		          << allMissing << std::endl;
-		loop {
+		while (true) {
 			Reference<TransactionWrapper> tr = self->createTransaction();
 			{
 				Error err;
@@ -408,7 +408,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	Future<Void> testSerializableConflicts(GetMappedRangeWorkload* self) {
 		std::cout << "testSerializableConflicts" << std::endl;
 
-		loop {
+		while (true) {
 			Reference<TransactionWrapper> tr1 = self->createTransaction();
 			{
 				Error err;
@@ -416,7 +416,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1);
 
 					// Commit another transaction that has conflict writes.
-					loop {
+					while (true) {
 						Reference<TransactionWrapper> tr2 = self->createTransaction();
 						{
 							Error err;
@@ -457,7 +457,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	// checking the max storage queue length is bounded
 	Future<Void> reportMetric(Database cx) {
-		loop {
+		while (true) {
 			StatusObject result = co_await StatusClient::statusFetcher(cx);
 			StatusObjectReader statusObj(result);
 			StatusObjectReader statusObjCluster;
@@ -501,7 +501,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	// write exception.
 	Future<Void> testRYW(GetMappedRangeWorkload* self) {
 		std::cout << "testRYW" << std::endl;
-		loop {
+		while (true) {
 			Reference<TransactionWrapper> tr1 = self->createTransaction();
 			{
 				Error err;
@@ -528,7 +528,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	Future<Void> testMetric(Database cx, int beginId, int endId, Key mapper, int seconds) {
-		loop {
+		while (true) {
 			auto choice = co_await race(
 			    reportMetric(cx), submitSmallRequestIndefinitely(cx, 10, 490, mapper, this), delay(seconds));
 			if (choice.index() == 0) {

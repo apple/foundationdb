@@ -284,7 +284,7 @@ struct SerializabilityWorkload : TestWorkload {
 			// sometimes wait for a random operation
 			if (deterministicRandom()->random01() < 0.2) {
 				int waitType = deterministicRandom()->randomInt(0, 4);
-				loop {
+				while (true) {
 					if (waitType == 0 && getFutures->size()) {
 						co_await ::success(deterministicRandom()->randomChoice(*getFutures));
 						break;
@@ -325,7 +325,7 @@ struct SerializabilityWorkload : TestWorkload {
 	Future<Void> _start(Database cx, SerializabilityWorkload* self) {
 		double startTime = now();
 
-		loop {
+		while (true) {
 			std::vector<ReadYourWritesTransaction> tr;
 			std::vector<std::vector<Future<Optional<Value>>>> getFutures;
 			std::vector<std::vector<Future<Key>>> getKeyFutures;

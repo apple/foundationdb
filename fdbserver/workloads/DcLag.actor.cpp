@@ -165,7 +165,7 @@ struct DcLagWorkload : TestWorkload {
 
 		Future<Optional<double>> status = Never();
 		bool lagged = false;
-		loop {
+		while (true) {
 			auto choice = co_await race(delay(5.0), status);
 			if (choice.index() == 0) {
 

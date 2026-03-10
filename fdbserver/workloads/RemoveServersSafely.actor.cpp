@@ -517,7 +517,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	                                 bool markExcludeAsFailed) {
 		std::unordered_set<std::string> killLocalities = origKillLocalities;
 
-		loop {
+		while (true) {
 			co_await delay(10.0);
 			co_await updateProcessIds(cx);
 			std::unordered_set<std::string> toKillLocalities = getLocalitiesFromAddresses(toKillArray);
@@ -596,7 +596,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 		if (markExcludeAsFailed) {
 			int retries = 0;
-			loop {
+			while (true) {
 				bool safe = false;
 				std::set<AddressExclusion> failSet =
 				    random_subset(toKillArray, deterministicRandom()->randomInt(0, toKillArray.size() + 1));

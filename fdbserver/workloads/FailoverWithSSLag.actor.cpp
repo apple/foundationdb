@@ -186,7 +186,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 
 	Future<Void> waitForRemoteDataCenterToLag(Database cx) {
 		Future<Optional<Version>> ssLag = Never();
-		loop {
+		while (true) {
 			auto choice = co_await race(delay(5.0), ssLag);
 			if (choice.index() == 0) {
 
@@ -220,7 +220,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 	Future<Void> doFailover(Database cx) {
 		bool connectionsClogged = true;
 		bool failoverCompleted = false;
-		loop {
+		while (true) {
 			auto choice = co_await race(delay(100.0), failover(cx));
 			if (choice.index() == 0) {
 

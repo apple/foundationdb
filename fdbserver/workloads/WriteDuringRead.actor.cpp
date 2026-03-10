@@ -216,7 +216,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		Standalone<VectorRef<KeyValueRef>> results;
 		if (reverse) {
-			loop {
+			while (true) {
 				if (beginIter == endIter || limit.reachedBy(results))
 					break;
 
@@ -615,7 +615,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	// transaction
 	Future<Void> writeBarrier(Database cx) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -637,7 +637,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
 		double startTime = now();
-		loop {
+		while (true) {
 			co_await self->writeBarrier(cx);
 
 			int i = 0;
@@ -648,7 +648,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			self->memoryDatabase = std::map<Key, Value>();
 			for (; i < self->nodes; i += keysPerBatch) {
 				Transaction tr(cx);
-				loop {
+				while (true) {
 					{
 						Error err;
 						try {
@@ -698,7 +698,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			self->addedConflicts.insert(allKeys, false);
 			//TraceEvent("WDRInit");
 
-			loop {
+			while (true) {
 				co_await delay(now() - startTime > self->slowModeStart ||
 				                       (g_network->isSimulated() && g_simulator->speedUpSimulation)
 				                   ? 1.0
@@ -828,7 +828,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		uint8_t* data = mutateString(timebombStr);
 		memcpy(data, &timebomb, 8);
 
-		loop {
+		while (true) {
 			if (now() - testStartTime > self->testDuration) {
 				co_return;
 			}

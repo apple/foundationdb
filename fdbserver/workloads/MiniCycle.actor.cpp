@@ -84,7 +84,7 @@ struct MiniCycleWorkload : TestWorkload {
 
 		Future<Void> end = delay(self->testDuration);
 		bool ok = true;
-		loop {
+		while (true) {
 			{
 				auto choice = co_await race(self->_checkCycle(cx->clone(), self, ok), end);
 				if (choice.index() == 0) {
@@ -177,7 +177,7 @@ struct MiniCycleWorkload : TestWorkload {
 	Future<Void> cycleClient(Database cx, MiniCycleWorkload* self, double delay) {
 		double lastTime = now();
 		try {
-			loop {
+			while (true) {
 				co_await poisson(&lastTime, delay);
 
 				double tstart = now();
@@ -339,7 +339,7 @@ struct MiniCycleWorkload : TestWorkload {
 
 		Transaction tr(cx);
 		int retryCount = 0;
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {

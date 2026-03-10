@@ -70,7 +70,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 		// we want to advance the read version of both clusters so that they are roughly the same. This makes the test
 		// more effective (since it's more likely that we can read from both clusters with the same version).
-		loop {
+		while (true) {
 			try {
 				wait(store(rv1, tr1.getReadVersion()) && store(rv2, tr2.getReadVersion()));
 				break;
@@ -110,7 +110,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	ACTOR static Future<std::pair<Version, Optional<Value>>> doRead(Database cx,
 	                                                                DifferentClustersSameRVWorkload* self) {
 		state Transaction tr(cx);
-		loop {
+		while (true) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
 				state Version rv = wait(tr.getReadVersion());
@@ -125,7 +125,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	ACTOR static Future<Void> doWrite(Database cx, Value key, Optional<Value> val) {
 		state Transaction tr(cx);
-		loop {
+		while (true) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				if (val.present()) {
@@ -144,7 +144,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	ACTOR static Future<Void> advanceVersion(Database cx, Version v) {
 		state Transaction tr(cx);
-		loop {
+		while (true) {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
@@ -217,7 +217,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	ACTOR static Future<Void> writerClient(Database cx, DifferentClustersSameRVWorkload* self) {
 		state Transaction tr(cx);
-		loop {
+		while (true) {
 			try {
 				Optional<Value> value = wait(tr.get(self->keyToRead));
 				int x = 0;
@@ -261,7 +261,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		state Version rv2;
 		state Optional<Value> val1;
 		state Optional<Value> val2;
-		loop {
+		while (true) {
 			tr1.reset();
 			tr2.reset();
 			tr1.setOption(FDBTransactionOptions::READ_LOCK_AWARE);

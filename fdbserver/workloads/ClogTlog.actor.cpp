@@ -130,7 +130,7 @@ struct ClogTlogWorkload : TestWorkload {
 	}
 
 	Future<Void> excludeFailedLog(Database cx) {
-		loop {
+		while (true) {
 			auto choice = co_await race(dbInfo->onChange(), delay(30));
 			if (choice.index() == 0) {
 
@@ -187,7 +187,7 @@ struct ClogTlogWorkload : TestWorkload {
 		// eventually.
 		Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(cx);
 		Future<Void> onChange = self->dbInfo->onChange();
-		loop {
+		while (true) {
 			auto choice = co_await race(onChange, delayUntil(workloadEnd));
 			if (choice.index() == 0) {
 

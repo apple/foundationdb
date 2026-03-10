@@ -39,7 +39,7 @@ struct ReadWriteCommonImpl {
 	// trace methods
 	static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
 		try {
-			loop {
+			while (true) {
 				{
 					auto choice = co_await race(db->onChange(),
 					                            db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()));
@@ -134,7 +134,7 @@ Future<Void> ReadWriteCommon::tracePeriodically() {
 	double elapsed = 0.0;
 	int64_t last_ops = 0;
 
-	loop {
+	while (true) {
 		elapsed += periodicLoggingInterval;
 		co_await delayUntil(start + elapsed);
 
@@ -320,7 +320,7 @@ static Version lastRV = invalidVersion;
 
 static Future<Version> getNextRV(Database db) {
 	Transaction tr(db);
-	loop {
+	while (true) {
 		{
 			Error err;
 			try {
@@ -510,7 +510,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		std::vector<int64_t> keys;
 		keys.push_back(deterministicRandom()->randomInt64(0, nodeCount));
 		double startTime = now();
-		loop {
+		while (true) {
 			Transaction tr(cx);
 			{
 				Error err;
@@ -589,7 +589,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1);
 		}
 
-		loop {
+		while (true) {
 			co_await poisson(&lastTime, delay);
 
 			if (self->rampUpConcurrency) {
@@ -648,7 +648,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				self->transactionSuccessMetric->retries = 0;
 				self->transactionSuccessMetric->commitLatency = -1;
 
-				loop {
+				while (true) {
 					{
 						Error err;
 						try {

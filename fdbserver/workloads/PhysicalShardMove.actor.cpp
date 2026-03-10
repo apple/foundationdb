@@ -261,7 +261,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		TraceEvent(SevDebug, "DataMoveDeleteCheckpoints").detail("Checkpoints", describe(checkpointIds));
 
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				std::vector<Future<Optional<Value>>> checkpointEntries;
@@ -309,7 +309,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		TraceEvent("CheckpointRestore").detail("DMID1", dataMoveId.first()).detail("DMID2", dataMoveId.second());
 		Version version{ 0 };
 
-		loop {
+		while (true) {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -326,7 +326,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		// Fetch checkpoint meta data.
 		std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
-		loop {
+		while (true) {
 			records.clear();
 			try {
 				co_await store(records,
@@ -353,7 +353,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		ASSERT(platform::createDirectory(checkpointDir));
 		std::vector<Future<CheckpointMetaData>> checkpointFutures;
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		loop {
+		while (true) {
 			checkpointFutures.clear();
 			try {
 				if (asKeyValues) {
@@ -452,7 +452,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
-		loop {
+		while (true) {
 			debugID = deterministicRandom()->randomUniqueID();
 			Error err;
 			try {
@@ -480,7 +480,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	Future<Void> validateData(PhysicalShardMoveWorkLoad* self, Database cx, KeyRange range, std::map<Key, Value>* kvs) {
 		Transaction tr(cx);
 		UID debugID;
-		loop {
+		while (true) {
 			debugID = deterministicRandom()->randomUniqueID();
 			Error err;
 			try {
@@ -511,7 +511,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Version readVersion{ 0 };
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-		loop {
+		while (true) {
 			Error err;
 			try {
 				Version _readVersion = co_await tr.getReadVersion();
@@ -540,7 +540,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
-		loop {
+		while (true) {
 			debugID = deterministicRandom()->randomUniqueID();
 			Error err;
 			try {
@@ -595,7 +595,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		Transaction tr(cx);
 
-		loop {
+		while (true) {
 			{
 				Error err;
 				try {
@@ -668,7 +668,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	Future<std::vector<StorageServerShard>> getStorageServerShards(Database cx, UID ssId, KeyRange range) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(ssId));
