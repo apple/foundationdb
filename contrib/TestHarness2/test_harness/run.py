@@ -432,6 +432,7 @@ class TestRun:
         extra_args: List[str] | None = None,
     ):
         self.binary = binary
+        self.is_old_binary = False
         self.test_file = test_file
         self.random_seed = random_seed
         self.uid = uid
