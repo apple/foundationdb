@@ -117,8 +117,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		while (true) {
 			records.clear();
 			try {
-				co_await store(records,
-				               getCheckpointMetaData(cx, { testRange }, version, format, Optional<UID>(dataMoveId)));
+				co_await store(
+				    records,
+				    getCheckpointMetaData(
+				        cx, std::vector<KeyRange>(1, testRange), version, format, Optional<UID>(dataMoveId)));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
