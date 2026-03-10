@@ -32,7 +32,7 @@ Future<double> latencyOfRead(Transaction* tr, Key k) {
 	double start = timer();
 	loop {
 		try {
-			co_await success(tr->get(k));
+			co_await tr->get(k);
 			break;
 		} catch (Error& e) {
 			if (e.code() == error_code_future_version) {
@@ -106,10 +106,9 @@ struct ReadAfterWriteWorkload : KVWorkload {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return _start(cx, this); }
-	Future<Void> _start(Database cx, ReadAfterWriteWorkload* self) {
-		Future<Void> lifetime = benchmark(cx, self);
-		co_await delay(self->testDuration);
+	Future<Void> start(Database const& cx) override {
+		Future<Void> lifetime = benchmark(cx, this);
+		co_await delay(testDuration);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

@@ -152,8 +152,8 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 	PerpetualWiggleStatsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
 	static Future<Void> _setup(PerpetualWiggleStatsWorkload* self, Database cx) {
-		co_await success(setDDMode(cx, 0));
-		co_await success(takeMoveKeysLock(cx, UID())); // force current DD to quit
+		co_await setDDMode(cx, 0);
+		co_await takeMoveKeysLock(cx, UID()); // force current DD to quit
 		bool success = co_await IssueConfigurationChange(cx, "storage_migration_type=disabled", true);
 		ASSERT(success);
 		co_await delay(30.0); // make sure the DD has already quit before the test start
@@ -166,10 +166,10 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		// update wiggle metrics
 		self->lastMetrics = getRandomWiggleMetrics();
 		auto& lastMetrics = self->lastMetrics;
-		co_await success(runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		co_await runRYWTransaction(cx, [&lastMetrics](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			StorageWiggleData wiggleData;
 			return wiggleData.updateStorageWiggleMetrics(tr, lastMetrics, PrimaryRegion(true));
-		}));
+		});
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -181,14 +181,14 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return _start(this, cx);
+			return _start(cx);
 		}
 		return Void();
 	};
 
 	Future<bool> check(Database const& cx) override { return true; };
 
-	static Future<Void> _start(PerpetualWiggleStatsWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		Reference<IDDTxnProcessor> db = makeReference<DDTxnProcessor>(cx);
 		DatabaseConfiguration conf;
 		DDTeamCollectionTester tester({ db,
@@ -213,19 +213,19 @@ struct PerpetualWiggleStatsWorkload : public TestWorkload {
 		tester.configuration.storageTeamSize = 3;
 		tester.configuration.perpetualStorageWiggleSpeed = 1;
 
-		co_await prepareTestEnv(self, cx);
+		co_await prepareTestEnv(this, cx);
 		tester.resetStorageWiggleState();
-		co_await DDTeamCollectionTester::testRestoreAndResetStats(&tester, self->lastMetrics);
+		co_await DDTeamCollectionTester::testRestoreAndResetStats(&tester, lastMetrics);
 
-		co_await prepareTestEnv(self, cx);
+		co_await prepareTestEnv(this, cx);
 		tester.resetStorageWiggleState();
-		co_await DDTeamCollectionTester::switchPerpetualWiggleWhenDDIsDead(&tester, self->lastMetrics);
+		co_await DDTeamCollectionTester::switchPerpetualWiggleWhenDDIsDead(&tester, lastMetrics);
 
-		co_await prepareTestEnv(self, cx);
+		co_await prepareTestEnv(this, cx);
 		tester.resetStorageWiggleState();
-		co_await DDTeamCollectionTester::finishWiggleAfterPWDisabled(&tester, self->lastMetrics);
+		co_await DDTeamCollectionTester::finishWiggleAfterPWDisabled(&tester, lastMetrics);
 
-		co_await success(setDDMode(cx, 1));
+		co_await setDDMode(cx, 1);
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }

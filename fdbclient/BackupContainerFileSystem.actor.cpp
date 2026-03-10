@@ -1289,6 +1289,14 @@ public:
 		return format("%s/%s/", (partitioned ? "plogs" : "logs"), versionFolderString(v, 11).c_str());
 	}
 
+	static std::string logVersionFolderStringForRangePartitioned(Version v, Version baseVersion) {
+		Version directoryVersion =
+		    baseVersion + ((v - baseVersion) / CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL) *
+		                      CLIENT_KNOBS->BACKUP_RANGE_PARTITIONED_VDIR_INTERVAL;
+		std::string vFixed = format("%019lld", directoryVersion);
+		return format("rlogs/%s/", vFixed.c_str());
+	}
+
 	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
 		std::string name = fileNameOnly(path);
 		LogFile f;
@@ -1459,6 +1467,12 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version
 
 	return writeFile(BackupContainerFileSystemImpl::snapshotFolderString(snapshotBeginVersion) +
 	                 format("/%d/", snapshotFileCount / (BUGGIFY ? 1 : 5000)) + fileName);
+}
+
+Future<Void> BackupContainerFileSystem::writePartitionListFile(Version v, std::string contents) {
+	return writeEntireFile(BackupContainerFileSystemImpl::logVersionFolderStringForRangePartitioned(v, v) +
+	                           "partitionId_keyRange_map",
+	                       contents);
 }
 
 Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>>

@@ -55,7 +55,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -114,23 +114,23 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		// Don't clear keys - we want to keep original data for validation comparison
 		// The restore will put data at the addPrefix location
 
-		co_await success(backupAgent->restore(cx,
-		                                      cx,
-		                                      restoreTag,
-		                                      KeyRef(backupContainer->getURL()),
-		                                      backupContainer->getProxy(),
-		                                      restoreRanges,
-		                                      WaitForComplete::True,
-		                                      ::invalidVersion,
-		                                      Verbose::True,
-		                                      self->addPrefix,
-		                                      Key(), // removePrefix
-		                                      LockDB{ false },
-		                                      UnlockDB::True,
-		                                      OnlyApplyMutationLogs::False,
-		                                      InconsistentSnapshotOnly::False,
-		                                      ::invalidVersion,
-		                                      backupContainer->getEncryptionKeyFileName()));
+		co_await backupAgent->restore(cx,
+		                              cx,
+		                              restoreTag,
+		                              KeyRef(backupContainer->getURL()),
+		                              backupContainer->getProxy(),
+		                              restoreRanges,
+		                              WaitForComplete::True,
+		                              ::invalidVersion,
+		                              Verbose::True,
+		                              self->addPrefix,
+		                              Key(), // removePrefix
+		                              LockDB{ false },
+		                              UnlockDB::True,
+		                              OnlyApplyMutationLogs::False,
+		                              InconsistentSnapshotOnly::False,
+		                              ::invalidVersion,
+		                              backupContainer->getEncryptionKeyFileName());
 
 		TraceEvent("BARV_RestoreComplete")
 		    .detail("Tag", printable(restoreTag))
@@ -170,9 +170,9 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		TraceEvent("BARV_DatabaseUnlocked").detail("Tag", printable(restoreTag));
 	}
 
-	static Future<Void> _start(Database cx, BackupAndRestoreValidationWorkload* self) {
+	Future<Void> _start(Database cx) {
 		// Only run on client 0 to avoid conflicts
-		if (self->clientId != 0) {
+		if (clientId != 0) {
 			co_return;
 		}
 
@@ -184,31 +184,31 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 			Error err;
 			try {
 				// Wait before starting backup
-				co_await delay(self->backupAfter);
+				co_await delay(backupAfter);
 
 				// Perform backup
 				TraceEvent("BARV_StartBackup", randomID)
-				    .detail("Tag", printable(self->backupTag))
+				    .detail("Tag", printable(backupTag))
 				    .detail("RetryCount", retryCount);
-				co_await doBackup(self, &backupAgent, cx);
+				co_await doBackup(this, &backupAgent, cx);
 
 				// Get backup container info
-				KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+				KeyBackedTag keyBackedTag = makeBackupTag(backupTag.toString());
 				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
 				UID logUid = uidFlag.first;
 				Reference<IBackupContainer> backupContainer =
 				    co_await BackupConfig(logUid).backupContainer().getD(cx.getReference());
 
 				// Wait before starting restore
-				co_await delay(self->restoreAfter - self->backupAfter);
+				co_await delay(restoreAfter - backupAfter);
 
 				// Perform restore with prefix
 				TraceEvent("BARV_StartRestore", randomID)
-				    .detail("Tag", printable(self->backupTag))
+				    .detail("Tag", printable(backupTag))
 				    .detail("Container", backupContainer->getURL());
-				co_await doRestore(self, &backupAgent, cx, backupContainer);
+				co_await doRestore(this, &backupAgent, cx, backupContainer);
 
-				TraceEvent("BARV_Complete", randomID).detail("Tag", printable(self->backupTag));
+				TraceEvent("BARV_Complete", randomID).detail("Tag", printable(backupTag));
 				break; // Success!
 
 			} catch (Error& e) {
@@ -227,8 +227,8 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 				    .detail("BackoffSeconds", backoff);
 				co_await delay(backoff);
 				// Reset state and retry
-				self->backupAfter = 0.0; // Don't wait again
-				self->restoreAfter = self->restoreAfter - self->backupAfter;
+				backupAfter = 0.0; // Don't wait again
+				restoreAfter = restoreAfter - backupAfter;
 				// Loop will retry
 			} else {
 				TraceEvent(SevError, "BARV_Error", randomID).error(err).detail("RetryCount", retryCount);
