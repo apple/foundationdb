@@ -176,7 +176,7 @@ struct MakoWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (doChecksumVerificationOnly)
 			return Void();
-		return _start(cx);
+		return _start(cx, this);
 	}
 
 	Future<bool> check(Database const& cx) override {

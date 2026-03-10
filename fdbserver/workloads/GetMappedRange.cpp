@@ -151,18 +151,16 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		// TODO: When n is large, split into multiple transactions.
 		Transaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				try {
-					RangeResult result = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
-					//			showResult(result);
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+			Error err;
+			try {
+				RangeResult result = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
+				//			showResult(result);
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 		std::cout << "finished scanRange" << std::endl;

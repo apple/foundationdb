@@ -456,30 +456,27 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 			// This if block prevents formatting issues with clang-format
 			if (1) {
-				{
-					auto choice = co_await race(tr->watch(key), self->finished.onTrigger());
-					if (choice.index() == 0) {
-
-						if (changeNum == self->changeCount[key]) {
-							TraceEvent(SevError, "WDRWatchWrongResult", randomID)
-							    .detail("Reason", "Triggered without changing")
-							    .detail("Key", key)
-							    .detail("Value", changeNum)
-							    .detail("DuringCommit", *doingCommit);
-						}
-					} else if (choice.index() == 1) {
-
-						Optional<Value> memRes2 = self->memoryGet(&self->memoryDatabase, key);
-						if (memRes != memRes2) {
-							TraceEvent(SevError, "WDRWatchWrongResult", randomID)
-							    .detail("Reason", "Changed without triggering")
-							    .detail("Key", key)
-							    .detail("Value1", memRes)
-							    .detail("Value2", memRes2);
-						}
-					} else {
-						UNREACHABLE();
+				auto choice = co_await race(tr->watch(key), self->finished.onTrigger());
+				if (choice.index() == 0) {
+					if (changeNum == self->changeCount[key]) {
+						TraceEvent(SevError, "WDRWatchWrongResult", randomID)
+						    .detail("Reason", "Triggered without changing")
+						    .detail("Key", key)
+						    .detail("Value", changeNum)
+						    .detail("DuringCommit", *doingCommit);
 					}
+				} else if (choice.index() == 1) {
+
+					Optional<Value> memRes2 = self->memoryGet(&self->memoryDatabase, key);
+					if (memRes != memRes2) {
+						TraceEvent(SevError, "WDRWatchWrongResult", randomID)
+						    .detail("Reason", "Changed without triggering")
+						    .detail("Key", key)
+						    .detail("Value1", memRes)
+						    .detail("Value2", memRes2);
+					}
+				} else {
+					UNREACHABLE();
 				}
 			}
 			*memLimit += memRes.expectedSize();
@@ -615,21 +612,19 @@ struct WriteDuringReadWorkload : TestWorkload {
 	Future<Void> writeBarrier(Database cx) {
 		Transaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					// Write-only transactions have a self-conflict in the system keys
-					tr.addWriteConflictRange(allKeys);
-					co_await tr.commit();
-					co_return;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				// Write-only transactions have a self-conflict in the system keys
+				tr.addWriteConflictRange(allKeys);
+				co_await tr.commit();
+				co_return;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -648,48 +643,46 @@ struct WriteDuringReadWorkload : TestWorkload {
 			for (; i < self->nodes; i += keysPerBatch) {
 				Transaction tr(cx);
 				while (true) {
-					{
-						Error err;
-						try {
-							if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
-								co_return;
-							if (self->useSystemKeys)
-								tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					Error err;
+					try {
+						if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
+							co_return;
+						if (self->useSystemKeys)
+							tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-							int64_t txnSize = 0;
-							if (i == 0) {
-								tr.clear(normalKeys);
-							}
+						int64_t txnSize = 0;
+						if (i == 0) {
+							tr.clear(normalKeys);
+						}
 
-							int end = std::min(self->nodes, i + keysPerBatch);
-							tr.clear(KeyRangeRef(self->getKeyForIndex(i), self->getKeyForIndex(end)));
-							self->memoryDatabase.erase(self->memoryDatabase.lower_bound(self->getKeyForIndex(i)),
-							                           self->memoryDatabase.lower_bound(self->getKeyForIndex(end)));
+						int end = std::min(self->nodes, i + keysPerBatch);
+						tr.clear(KeyRangeRef(self->getKeyForIndex(i), self->getKeyForIndex(end)));
+						self->memoryDatabase.erase(self->memoryDatabase.lower_bound(self->getKeyForIndex(i)),
+						                           self->memoryDatabase.lower_bound(self->getKeyForIndex(end)));
 
-							for (int j = i; j < end; j++) {
-								if (deterministicRandom()->random01() < self->initialKeyDensity) {
-									Key key = self->getKeyForIndex(j);
-									if (key.size() <= getMaxWriteKeySize(key, false)) {
-										Value value = self->getRandomValue();
-										value = value.substr(
-										    0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
-										self->memoryDatabase[key] = value;
-										tr.set(key, value);
-										int64_t rowSize = key.expectedSize() + value.expectedSize();
-										txnSize += rowSize;
-									}
+						for (int j = i; j < end; j++) {
+							if (deterministicRandom()->random01() < self->initialKeyDensity) {
+								Key key = self->getKeyForIndex(j);
+								if (key.size() <= getMaxWriteKeySize(key, false)) {
+									Value value = self->getRandomValue();
+									value =
+									    value.substr(0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
+									self->memoryDatabase[key] = value;
+									tr.set(key, value);
+									int64_t rowSize = key.expectedSize() + value.expectedSize();
+									txnSize += rowSize;
 								}
 							}
-							co_await tr.commit();
-							self->dataWritten += txnSize;
-							//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr.getCommittedVersion());
-							break;
-						} catch (Error& e) {
-							err = e;
 						}
-						if (err.isValid()) {
-							co_await tr.onError(err);
-						}
+						co_await tr.commit();
+						self->dataWritten += txnSize;
+						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr.getCommittedVersion());
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.isValid()) {
+						co_await tr.onError(err);
 					}
 				}
 			}

@@ -399,15 +399,12 @@ Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 
 	Future<Void> main = testKVStoreMain(workload, &test);
 	try {
-		{
-			auto choice = co_await race(main, test.store->getError());
-			if (choice.index() == 0) {
-			} else if (choice.index() == 1) {
-
-				ASSERT(false);
-			} else {
-				UNREACHABLE();
-			}
+		auto choice = co_await race(main, test.store->getError());
+		if (choice.index() == 0) {
+		} else if (choice.index() == 1) {
+			ASSERT(false);
+		} else {
+			UNREACHABLE();
 		}
 	} catch (Error& e) {
 		err = e;

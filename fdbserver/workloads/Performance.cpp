@@ -110,24 +110,18 @@ struct PerformanceWorkload : TestWorkload {
 		std::vector<WorkerDetails> workers;
 
 		while (true) {
-			{
-				auto choice = co_await race(
-				    brokenPromiseToNever(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(
-				        GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY))),
-				    self->dbInfo->onChange());
-				if (choice.index() == 0) {
-					std::vector<WorkerDetails> w = std::get<0>(std::move(choice));
+			auto choice = co_await race(
+			    brokenPromiseToNever(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(
+			        GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY))),
+			    self->dbInfo->onChange());
+			if (choice.index() == 0) {
+				std::vector<WorkerDetails> w = std::get<0>(std::move(choice));
 
-					workers = w;
-					goto __flow_choose_break_1;
-				} else if (choice.index() == 1) {
-				} else {
-					UNREACHABLE();
-				}
-				goto __flow_choose_done_1;
-			__flow_choose_break_1:
+				workers = w;
 				break;
-			__flow_choose_done_1:;
+			} else if (choice.index() == 1) {
+			} else {
+				UNREACHABLE();
 			}
 		}
 

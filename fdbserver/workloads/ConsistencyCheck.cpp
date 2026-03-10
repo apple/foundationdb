@@ -215,22 +215,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				co_await self->suspendConsistencyCheck.onChange();
 			}
 			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
-			{
-				auto choice = co_await race(self->runCheck(cx, self), self->suspendConsistencyCheck.onChange());
-				if (choice.index() == 0) {
-
-					if (!self->indefinite)
-						goto __flow_choose_break_1;
-					self->repetitions++;
-					co_await delay(5.0);
-				} else if (choice.index() == 1) {
-				} else {
-					UNREACHABLE();
-				}
-				goto __flow_choose_done_1;
-			__flow_choose_break_1:
-				break;
-			__flow_choose_done_1:;
+			auto choice = co_await race(self->runCheck(cx, self), self->suspendConsistencyCheck.onChange());
+			if (choice.index() == 0) {
+				if (!self->indefinite)
+					break;
+				self->repetitions++;
+				co_await delay(5.0);
+			} else if (choice.index() == 1) {
+			} else {
+				UNREACHABLE();
 			}
 		}
 		if (self->firstClient && g_network->isSimulated() && self->performQuiescentChecks) {
@@ -252,27 +245,25 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				Transaction tr(cx);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				while (true) {
-					{
-						Error err;
-						try {
-							if (self->performTSSCheck) {
-								tssMapping.clear();
-								co_await readTSSMapping(&tr, &tssMapping);
-							}
-							RangeResult res = co_await tr.getRange(configKeys, 1000);
-							if (res.size() == 1000) {
-								TraceEvent("ConsistencyCheck_TooManyConfigOptions").log();
-								self->testFailure("Read too many configuration options");
-							}
-							for (int i = 0; i < res.size(); i++)
-								configuration.set(res[i].key, res[i].value);
-							break;
-						} catch (Error& e) {
-							err = e;
+					Error err;
+					try {
+						if (self->performTSSCheck) {
+							tssMapping.clear();
+							co_await readTSSMapping(&tr, &tssMapping);
 						}
-						if (err.isValid()) {
-							co_await tr.onError(err);
+						RangeResult res = co_await tr.getRange(configKeys, 1000);
+						if (res.size() == 1000) {
+							TraceEvent("ConsistencyCheck_TooManyConfigOptions").log();
+							self->testFailure("Read too many configuration options");
 						}
+						for (int i = 0; i < res.size(); i++)
+							configuration.set(res[i].key, res[i].value);
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.isValid()) {
+						co_await tr.onError(err);
 					}
 				}
 
@@ -789,48 +780,46 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	Future<bool> checkCoordinators(Database cx) {
 		Transaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Optional<Value> currentKey = co_await tr.get(coordinatorsKey);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> currentKey = co_await tr.get(coordinatorsKey);
 
-					if (!currentKey.present()) {
-						TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();
-						co_return false;
-					}
+				if (!currentKey.present()) {
+					TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();
+					co_return false;
+				}
 
-					ClusterConnectionString old(currentKey.get().toString());
-					std::vector<NetworkAddress> oldCoordinators = co_await old.tryResolveHostnames();
+				ClusterConnectionString old(currentKey.get().toString());
+				std::vector<NetworkAddress> oldCoordinators = co_await old.tryResolveHostnames();
 
-					std::vector<ProcessData> workers = co_await ::getWorkers(&tr);
+				std::vector<ProcessData> workers = co_await ::getWorkers(&tr);
 
-					std::map<NetworkAddress, LocalityData> addr_locality;
-					for (auto w : workers) {
-						addr_locality[w.address] = w.locality;
-					}
+				std::map<NetworkAddress, LocalityData> addr_locality;
+				for (auto w : workers) {
+					addr_locality[w.address] = w.locality;
+				}
 
-					std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-					for (const auto& addr : oldCoordinators) {
-						auto findResult = addr_locality.find(addr);
-						if (findResult != addr_locality.end()) {
-							if (checkDuplicates.contains(findResult->second.zoneId())) {
-								TraceEvent("ConsistencyCheck_BadCoordinator")
-								    .detail("Addr", addr)
-								    .detail("NotFound", findResult == addr_locality.end());
-								co_return false;
-							}
-							checkDuplicates.insert(findResult->second.zoneId());
+				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
+				for (const auto& addr : oldCoordinators) {
+					auto findResult = addr_locality.find(addr);
+					if (findResult != addr_locality.end()) {
+						if (checkDuplicates.contains(findResult->second.zoneId())) {
+							TraceEvent("ConsistencyCheck_BadCoordinator")
+							    .detail("Addr", addr)
+							    .detail("NotFound", findResult == addr_locality.end());
+							co_return false;
 						}
+						checkDuplicates.insert(findResult->second.zoneId());
 					}
+				}
 
-					co_return true;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				co_return true;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -1094,18 +1083,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		ConsistencyScanState cs;
 		while (true) {
-			{
-				Error err;
-				try {
-					SystemDBWriteLockedNow(cx.getReference())->setOptions(tr);
-					ConsistencyScanState::Config config = co_await cs.config().getD(tr);
-					co_return !config.enabled;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await tr->onError(err);
-				}
+			Error err;
+			try {
+				SystemDBWriteLockedNow(cx.getReference())->setOptions(tr);
+				ConsistencyScanState::Config config = co_await cs.config().getD(tr);
+				co_return !config.enabled;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr->onError(err);
 			}
 		}
 	}

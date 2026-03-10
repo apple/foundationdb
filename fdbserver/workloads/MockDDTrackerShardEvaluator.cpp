@@ -69,27 +69,23 @@ public:
 
 	Future<Void> relocateShardReporter(FutureStream<RelocateShard> input) {
 		while (true) {
-			{
-				Error err;
-				try {
-					{
-						auto choice = co_await race(input);
-						if (choice.index() == 0) {
-							RelocateShard rs = std::get<0>(std::move(choice));
+			Error err;
+			try {
+				auto choice = co_await race(input);
+				if (choice.index() == 0) {
+					RelocateShard rs = std::get<0>(std::move(choice));
 
-							++rsReasonCounts[rs.reason];
-						} else {
-							UNREACHABLE();
-						}
-					}
-				} catch (Error& e) {
-					err = e;
+					++rsReasonCounts[rs.reason];
+				} else {
+					UNREACHABLE();
 				}
-				if (err.isValid()) {
-					if (err.code() != error_code_wrong_shard_server)
-						throw err;
-					co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
-				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				if (err.code() != error_code_wrong_shard_server)
+					throw err;
+				co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
 			}
 		}
 	}

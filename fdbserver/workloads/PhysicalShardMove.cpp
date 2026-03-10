@@ -592,67 +592,65 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Transaction tr(cx);
 
 		while (true) {
-			{
-				Error err;
-				try {
-					TraceEvent("TestMoveShard").detail("Range", keys.toString());
-					MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
+			Error err;
+			try {
+				TraceEvent("TestMoveShard").detail("Range", keys.toString());
+				MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
 
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					RangeResult dataMoves = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
-					Version readVersion = co_await tr.getReadVersion();
-					TraceEvent("TestMoveShardReadDataMoves")
-					    .detail("DataMoves", dataMoves.size())
-					    .detail("ReadVersion", readVersion);
-					int i = 0;
-					for (; i < dataMoves.size(); ++i) {
-						UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
-						DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
-						ASSERT(dataMoveId == dataMove.id);
-						TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
-						if (dataMove.ranges.empty()) {
-							// This dataMove cancellation is delayed to background cancellation
-							// For this case, the dataMove has empty ranges but it is in Deleting phase
-							// We simply bypass this case
-							ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
-							TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
-							continue;
-						}
-						co_await cleanUpDataMove(cx,
-						                         dataMoveId,
-						                         moveKeysLock,
-						                         &self->cleanUpDataMoveParallelismLock,
-						                         dataMove.ranges.front(),
-						                         &ddEnabledState);
-						TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				RangeResult dataMoves = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				Version readVersion = co_await tr.getReadVersion();
+				TraceEvent("TestMoveShardReadDataMoves")
+				    .detail("DataMoves", dataMoves.size())
+				    .detail("ReadVersion", readVersion);
+				int i = 0;
+				for (; i < dataMoves.size(); ++i) {
+					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
+					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
+					ASSERT(dataMoveId == dataMove.id);
+					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
+					if (dataMove.ranges.empty()) {
+						// This dataMove cancellation is delayed to background cancellation
+						// For this case, the dataMove has empty ranges but it is in Deleting phase
+						// We simply bypass this case
+						ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
+						TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
+						continue;
 					}
-
-					TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
-					co_await moveKeys(cx,
-					                  MoveKeysParams(dataMoveId,
-					                                 std::vector<KeyRange>{ keys },
-					                                 dests,
-					                                 dests,
-					                                 moveKeysLock,
-					                                 Promise<Void>(),
-					                                 &self->startMoveKeysParallelismLock,
-					                                 &self->finishMoveKeysParallelismLock,
-					                                 false,
-					                                 deterministicRandom()->randomUniqueID(), // for logging only
-					                                 &ddEnabledState,
-					                                 CancelConflictingDataMoves::False,
-					                                 Optional<BulkLoadTaskState>()));
-					break;
-				} catch (Error& e) {
-					err = e;
+					co_await cleanUpDataMove(cx,
+					                         dataMoveId,
+					                         moveKeysLock,
+					                         &self->cleanUpDataMoveParallelismLock,
+					                         dataMove.ranges.front(),
+					                         &ddEnabledState);
+					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
-				if (err.isValid()) {
-					if (err.code() == error_code_movekeys_conflict) {
-						// Conflict on moveKeysLocks with the current running DD is expected, just retry.
-						tr.reset();
-					} else {
-						co_await tr.onError(err);
-					}
+
+				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
+				co_await moveKeys(cx,
+				                  MoveKeysParams(dataMoveId,
+				                                 std::vector<KeyRange>{ keys },
+				                                 dests,
+				                                 dests,
+				                                 moveKeysLock,
+				                                 Promise<Void>(),
+				                                 &self->startMoveKeysParallelismLock,
+				                                 &self->finishMoveKeysParallelismLock,
+				                                 false,
+				                                 deterministicRandom()->randomUniqueID(), // for logging only
+				                                 &ddEnabledState,
+				                                 CancelConflictingDataMoves::False,
+				                                 Optional<BulkLoadTaskState>()));
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				if (err.code() == error_code_movekeys_conflict) {
+					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+					tr.reset();
+				} else {
+					co_await tr.onError(err);
 				}
 			}
 		}

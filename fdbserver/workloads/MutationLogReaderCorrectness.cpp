@@ -84,30 +84,28 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 		while (iStart < self->records) {
 			while (true) {
-				{
-					Error err;
-					try {
-						tr.reset();
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Error err;
+				try {
+					tr.reset();
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-						int i = iStart;
-						int iEnd = std::min(iStart + batchSize, self->records);
+					int i = iStart;
+					int iEnd = std::min(iStart + batchSize, self->records);
 
-						for (; i < iEnd; ++i) {
-							Key key = self->recordKey(i);
-							Value value = self->recordValue(i);
-							tr.set(key, value);
-						}
-
-						co_await tr.commit();
-						iStart = iEnd;
-						break;
-					} catch (Error& e) {
-						err = e;
+					for (; i < iEnd; ++i) {
+						Key key = self->recordKey(i);
+						Value value = self->recordValue(i);
+						tr.set(key, value);
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+
+					co_await tr.commit();
+					iStart = iEnd;
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.isValid()) {
+					co_await tr.onError(err);
 				}
 			}
 		}

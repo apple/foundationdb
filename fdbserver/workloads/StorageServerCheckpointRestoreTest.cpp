@@ -94,21 +94,19 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		                  DataMovementReason::TEAM_HEALTHY,
 		                  UnassignShard(false));
 		while (true) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					co_await createCheckpoint(&tr, { testRange }, format, dataMoveId);
-					co_await tr.commit();
-					version = tr.getCommittedVersion();
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				co_await createCheckpoint(&tr, { testRange }, format, dataMoveId);
+				co_await tr.commit();
+				version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 
@@ -148,22 +146,20 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		for (; it != records.end(); ++it) {
 			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
-				{
-					Error err;
-					try {
-						CheckpointMetaData record = co_await fetchCheckpoint(cx, it->second, folder);
-						fetchedCheckpoints.push_back(record);
-						TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					if (err.isValid()) {
-						TraceEvent("TestFetchCheckpointError")
-						    .errorUnsuppressed(err)
-						    .detail("Checkpoint", it->second.toString());
-						co_await delay(1);
-					}
+				Error err;
+				try {
+					CheckpointMetaData record = co_await fetchCheckpoint(cx, it->second, folder);
+					fetchedCheckpoints.push_back(record);
+					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
+					break;
+				} catch (Error& e) {
+					err = e;
+				}
+				if (err.isValid()) {
+					TraceEvent("TestFetchCheckpointError")
+					    .errorUnsuppressed(err)
+					    .detail("Checkpoint", it->second.toString());
+					co_await delay(1);
 				}
 			}
 		}
@@ -186,18 +182,16 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		tr.reset();
 		RangeResult res;
 		while (true) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 

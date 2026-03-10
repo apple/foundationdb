@@ -84,24 +84,17 @@ struct MiniCycleWorkload : TestWorkload {
 		Future<Void> end = delay(self->testDuration);
 		bool ok = true;
 		while (true) {
-			{
-				auto choice = co_await race(self->_checkCycle(cx->clone(), self, ok), end);
-				if (choice.index() == 0) {
-					bool ret = std::get<0>(std::move(choice));
+			auto choice = co_await race(self->_checkCycle(cx->clone(), self, ok), end);
+			if (choice.index() == 0) {
+				bool ret = std::get<0>(std::move(choice));
 
-					ok = ret && ok;
-					if (!ok)
-						co_return false;
-				} else if (choice.index() == 1) {
-
-					goto __flow_choose_break_1;
-				} else {
-					UNREACHABLE();
-				}
-				goto __flow_choose_done_1;
-			__flow_choose_break_1:
+				ok = ret && ok;
+				if (!ok)
+					co_return false;
+			} else if (choice.index() == 1) {
 				break;
-			__flow_choose_done_1:;
+			} else {
+				UNREACHABLE();
 			}
 		}
 
@@ -190,44 +183,42 @@ struct MiniCycleWorkload : TestWorkload {
 					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
 				while (true) {
-					{
-						Error err;
-						try {
-							// Reverse next and next^2 node
-							Optional<Value> v = co_await tr.get(self->key(r));
-							if (!v.present())
-								self->badRead("KeyR", r, tr);
-							int r2 = self->fromValue(v.get());
-							Optional<Value> v2 = co_await tr.get(self->key(r2));
-							if (!v2.present())
-								self->badRead("KeyR2", r2, tr);
-							int r3 = self->fromValue(v2.get());
-							Optional<Value> v3 = co_await tr.get(self->key(r3));
-							if (!v3.present())
-								self->badRead("KeyR3", r3, tr);
-							int r4 = self->fromValue(v3.get());
+					Error err;
+					try {
+						// Reverse next and next^2 node
+						Optional<Value> v = co_await tr.get(self->key(r));
+						if (!v.present())
+							self->badRead("KeyR", r, tr);
+						int r2 = self->fromValue(v.get());
+						Optional<Value> v2 = co_await tr.get(self->key(r2));
+						if (!v2.present())
+							self->badRead("KeyR2", r2, tr);
+						int r3 = self->fromValue(v2.get());
+						Optional<Value> v3 = co_await tr.get(self->key(r3));
+						if (!v3.present())
+							self->badRead("KeyR3", r3, tr);
+						int r4 = self->fromValue(v3.get());
 
-							tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
-							tr.set(self->key(r), self->value(r3));
-							tr.set(self->key(r2), self->value(r4));
-							tr.set(self->key(r3), self->value(r2));
-							// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
-							// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
-							// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
+						tr.clear(self->key(r)); //< Shouldn't have an effect, but will break with wrong ordering
+						tr.set(self->key(r), self->value(r3));
+						tr.set(self->key(r2), self->value(r4));
+						tr.set(self->key(r3), self->value(r2));
+						// TraceEvent("CyclicTest").detail("Key", self->key(r).toString()).detail("Value", self->value(r3).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
+						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
-							co_await tr.commit();
-							// TraceEvent("MiniCycleCommit");
-							break;
-						} catch (Error& e) {
-							err = e;
-						}
-						if (err.isValid()) {
-							if (err.code() == error_code_transaction_too_old)
-								++self->tooOldRetries;
-							else if (err.code() == error_code_not_committed)
-								++self->commitFailedRetries;
-							co_await tr.onError(err);
-						}
+						co_await tr.commit();
+						// TraceEvent("MiniCycleCommit");
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.isValid()) {
+						if (err.code() == error_code_transaction_too_old)
+							++self->tooOldRetries;
+						else if (err.code() == error_code_not_committed)
+							++self->commitFailedRetries;
+						co_await tr.onError(err);
 					}
 					++self->retries;
 				}
@@ -339,24 +330,22 @@ struct MiniCycleWorkload : TestWorkload {
 		Transaction tr(cx);
 		int retryCount = 0;
 		while (true) {
-			{
-				Error err;
-				try {
-					Version v = co_await tr.getReadVersion();
-					RangeResult data = co_await tr.getRange(
-					    firstGreaterOrEqual(doubleToTestKey(self->beginKey(self->clientId), self->keyPrefix)),
-					    firstGreaterOrEqual(doubleToTestKey(self->endKey(self->clientId), self->keyPrefix)),
-					    self->cycleSize(self->clientId) + 1);
-					ok = self->cycleCheckData(data, v, self->clientId) && ok;
-					break;
-				} catch (Error& e) {
-					err = e;
-				}
-				if (err.isValid()) {
-					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(err);
-					co_await tr.onError(err);
-				}
+			Error err;
+			try {
+				Version v = co_await tr.getReadVersion();
+				RangeResult data = co_await tr.getRange(
+				    firstGreaterOrEqual(doubleToTestKey(self->beginKey(self->clientId), self->keyPrefix)),
+				    firstGreaterOrEqual(doubleToTestKey(self->endKey(self->clientId), self->keyPrefix)),
+				    self->cycleSize(self->clientId) + 1);
+				ok = self->cycleCheckData(data, v, self->clientId) && ok;
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				retryCount++;
+				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(err);
+				co_await tr.onError(err);
 			}
 		}
 		co_return ok;

@@ -260,36 +260,34 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 		ReadYourWritesTransaction tr(db);
 		while (true) {
-			{
-				Error err;
-				try {
-					std::vector<Future<Optional<Value>>> futures;
+			Error err;
+			try {
+				std::vector<Future<Optional<Value>>> futures;
 
-					for (auto const& key : keys) {
-						futures.push_back(tr.get(key));
-					}
-
-					co_await waitForAll(futures);
-
-					int64_t maxCreatedTimeDelta = 0;
-					for (int i = 0; i < futures.size(); ++i) {
-						auto entry = futures[i].get();
-						ASSERT(entry.present());
-						auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
-						maxCreatedTimeDelta = std::max(timestamps[i] - e.createdTime, maxCreatedTimeDelta);
-					}
-
-					if (automaticPercentage == 0) {
-						ASSERT_EQ(futures.size(), numCreatedTimes);
-					}
-
-					co_return maxCreatedTimeDelta;
-				} catch (Error& e) {
-					err = e;
+				for (auto const& key : keys) {
+					futures.push_back(tr.get(key));
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
+
+				co_await waitForAll(futures);
+
+				int64_t maxCreatedTimeDelta = 0;
+				for (int i = 0; i < futures.size(); ++i) {
+					auto entry = futures[i].get();
+					ASSERT(entry.present());
+					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
+					maxCreatedTimeDelta = std::max(timestamps[i] - e.createdTime, maxCreatedTimeDelta);
 				}
+
+				if (automaticPercentage == 0) {
+					ASSERT_EQ(futures.size(), numCreatedTimes);
+				}
+
+				co_return maxCreatedTimeDelta;
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -434,26 +432,19 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			if (minAgeSeconds < minMinAgeSeconds) {
 				break;
 			}
-			{
-				auto choice =
-				    co_await race(testCleanerOneIteration(db, &actors, minAgeSeconds, maxTimestampDelta, &createdTimes),
-				                  actors.getResult());
-				if (choice.index() == 0) {
-					bool done = std::get<0>(std::move(choice));
+			auto choice =
+			    co_await race(testCleanerOneIteration(db, &actors, minAgeSeconds, maxTimestampDelta, &createdTimes),
+			                  actors.getResult());
+			if (choice.index() == 0) {
+				bool done = std::get<0>(std::move(choice));
 
-					if (done) {
-						goto __flow_choose_break_1;
-					}
-				} else if (choice.index() == 1) {
-
-					ASSERT(false);
-				} else {
-					UNREACHABLE();
+				if (done) {
+					break;
 				}
-				goto __flow_choose_done_1;
-			__flow_choose_break_1:
-				break;
-			__flow_choose_done_1:;
+			} else if (choice.index() == 1) {
+				ASSERT(false);
+			} else {
+				UNREACHABLE();
 			}
 		}
 	}

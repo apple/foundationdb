@@ -141,162 +141,158 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		std::vector<KeyRange> writeConflictRanges;
 
 		loop {
-			{
-				Optional<Error> err;
+			Optional<Error> err;
+			try {
+				// set the flag for empty key range testing
+				tr1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				// tr1 should never have conflicting keys, the result should always be empty
+				self->emptyConflictingKeysTest(tr1);
+
+				tr2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
+				// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
+				// where overlapped conflict ranges are not merged.
+				if (deterministicRandom()->coinflip())
+					tr1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				if (deterministicRandom()->coinflip())
+					tr2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+				// We have the two tx with same grv, then commit the first
+				// If the second one is not able to commit due to conflicts, verify the returned conflicting keys
+				// Otherwise, there is no conflicts between tr1's writeConflictRange and tr2's readConflictRange
+				Version readVersion = co_await tr1->getReadVersion();
+				tr2->setVersion(readVersion);
+				self->addRandomReadConflictRange(tr1.getPtr(), nullptr);
+				self->addRandomWriteConflictRange(tr1.getPtr(), &writeConflictRanges);
+				++self->commits;
+				co_await tr1->commit();
+				++self->xacts;
+				// tr1 should never have conflicting keys, test again after the commit
+				self->emptyConflictingKeysTest(tr1);
+
+				bool foundConflict = false;
 				try {
-					// set the flag for empty key range testing
-					tr1->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
-					// tr1 should never have conflicting keys, the result should always be empty
-					self->emptyConflictingKeysTest(tr1);
-
-					tr2->setOption(FDBTransactionOptions::REPORT_CONFLICTING_KEYS);
-					// If READ_YOUR_WRITES_DISABLE set, it behaves like native transaction object
-					// where overlapped conflict ranges are not merged.
-					if (deterministicRandom()->coinflip())
-						tr1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-					if (deterministicRandom()->coinflip())
-						tr2->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-					// We have the two tx with same grv, then commit the first
-					// If the second one is not able to commit due to conflicts, verify the returned conflicting keys
-					// Otherwise, there is no conflicts between tr1's writeConflictRange and tr2's readConflictRange
-					Version readVersion = co_await tr1->getReadVersion();
-					tr2->setVersion(readVersion);
-					self->addRandomReadConflictRange(tr1.getPtr(), nullptr);
-					self->addRandomWriteConflictRange(tr1.getPtr(), &writeConflictRanges);
+					self->addRandomReadConflictRange(tr2.getPtr(), &readConflictRanges);
+					self->addRandomWriteConflictRange(tr2.getPtr(), nullptr);
 					++self->commits;
-					co_await tr1->commit();
+					co_await tr2->commit();
 					++self->xacts;
-					// tr1 should never have conflicting keys, test again after the commit
-					self->emptyConflictingKeysTest(tr1);
-
-					bool foundConflict = false;
-					try {
-						self->addRandomReadConflictRange(tr2.getPtr(), &readConflictRanges);
-						self->addRandomWriteConflictRange(tr2.getPtr(), nullptr);
-						++self->commits;
-						co_await tr2->commit();
-						++self->xacts;
-					} catch (Error& e) {
-						if (e.code() != error_code_not_committed)
-							throw e;
-						foundConflict = true;
-						++self->conflicts;
-					}
-					// These two conflict sets should not be empty
-					ASSERT(readConflictRanges.size());
-					ASSERT(writeConflictRanges.size());
-					// check API correctness
-					if (foundConflict) {
-						// \xff\xff/transaction/conflicting_keys is always initialized to false, skip it here
-						KeyRange ckr = KeyRangeRef(keyAfter(""_sr.withPrefix(conflictingKeysRange.begin)),
-						                           "\xff\xff"_sr.withPrefix(conflictingKeysRange.begin));
-						// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/"
-						// happens locally Thus, the error handling is not needed here
-						Future<RangeResult> conflictingKeyRangesFuture = tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
-						ASSERT(conflictingKeyRangesFuture.isReady());
-
-						co_await validateSpecialSubrangeRead(tr2.getPtr(),
-						                                     firstGreaterOrEqual(ckr.begin),
-						                                     firstGreaterOrEqual(ckr.end),
-						                                     GetRangeLimits(),
-						                                     Reverse::False,
-						                                     conflictingKeyRangesFuture.get());
-
-						tr2 = makeReference<ReadYourWritesTransaction>(cx);
-
-						const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
-						ASSERT(conflictingKeyRanges.size() > 0);
-						ASSERT(conflictingKeyRanges.size() <= readConflictRanges.size() * 2);
-						ASSERT(conflictingKeyRanges.size() % 2 == 0);
-						ASSERT(!conflictingKeyRanges.more);
-						for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
-							KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
-							ASSERT(startKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
-							ASSERT(startKeyWithPrefix.value == conflictingKeysTrue);
-							KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i + 1];
-							ASSERT(endKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
-							ASSERT(endKeyWithPrefix.value == conflictingKeysFalse);
-							// Remove the prefix of returning keys
-							Key startKey = startKeyWithPrefix.key.removePrefix(conflictingKeysRange.begin);
-							Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysRange.begin);
-							KeyRangeRef kr = KeyRangeRef(startKey, endKey);
-							if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
-								    // Read_conflict_range remains same in the resolver.
-								    // Thus, the returned keyrange is either the original read_conflict_range or merged
-								    // by several overlapped ones in either cases, it contains at least one original
-								    // read_conflict_range
-								    return kr.contains(rCR);
-							    })) {
-								++self->invalidReports;
-								std::string allReadConflictRanges = "";
-								for (int i = 0; i < readConflictRanges.size(); i++) {
-									allReadConflictRanges += "Begin:" + printable(readConflictRanges[i].begin) +
-									                         ", End:" + printable(readConflictRanges[i].end) + "; ";
-								}
-								TraceEvent(SevError, "TestFailure")
-								    .detail("Reason",
-								            "Returned conflicting keys are not original or merged readConflictRanges")
-								    .detail("ConflictingKeyRange", kr.toString())
-								    .detail("ReadConflictRanges", allReadConflictRanges);
-							} else if (!std::any_of(
-							               writeConflictRanges.begin(), writeConflictRanges.end(), [&kr](KeyRange wCR) {
-								               // Returned key range should be conflicting with at least one
-								               // writeConflictRange
-								               return kr.intersects(wCR);
-							               })) {
-								++self->invalidReports;
-								std::string allWriteConflictRanges = "";
-								for (int i = 0; i < writeConflictRanges.size(); i++) {
-									allWriteConflictRanges += "Begin:" + printable(writeConflictRanges[i].begin) +
-									                          ", End:" + printable(writeConflictRanges[i].end) + "; ";
-								}
-								TraceEvent(SevError, "TestFailure")
-								    .detail("Reason",
-								            "Returned keyrange is not conflicting with any writeConflictRange")
-								    .detail("ConflictingKeyRange", kr.toString())
-								    .detail("WriteConflictRanges", allWriteConflictRanges);
-							}
-						}
-					} else {
-						// make sure no conflicts between tr2's readConflictRange and tr1's writeConflictRange
-						for (const KeyRange& rCR : readConflictRanges) {
-							if (std::any_of(
-							        writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR) {
-								        bool result = wCR.intersects(rCR);
-								        if (result)
-									        TraceEvent(SevError, "TestFailure")
-									            .detail("Reason", "No conflicts returned but it should")
-									            .detail("WriteConflictRangeInTr1", wCR.toString())
-									            .detail("ReadConflictRangeInTr2", rCR.toString());
-								        return result;
-							        })) {
-								++self->invalidReports;
-								std::string allReadConflictRanges = "";
-								for (int i = 0; i < readConflictRanges.size(); i++) {
-									allReadConflictRanges += "Begin:" + printable(readConflictRanges[i].begin) +
-									                         ", End:" + printable(readConflictRanges[i].end) + "; ";
-								}
-								std::string allWriteConflictRanges = "";
-								for (int i = 0; i < writeConflictRanges.size(); i++) {
-									allWriteConflictRanges += "Begin:" + printable(writeConflictRanges[i].begin) +
-									                          ", End:" + printable(writeConflictRanges[i].end) + "; ";
-								}
-								TraceEvent(SevError, "TestFailure")
-								    .detail("Reason", "No conflicts returned but it should")
-								    .detail("ReadConflictRanges", allReadConflictRanges)
-								    .detail("WriteConflictRanges", allWriteConflictRanges);
-								break;
-							}
-						}
-					}
 				} catch (Error& e) {
-					err = e;
+					if (e.code() != error_code_not_committed)
+						throw e;
+					foundConflict = true;
+					++self->conflicts;
 				}
-				if (err.present()) {
-					Error e2 = err.get();
-					co_await tr1->onError(e2);
-					co_await tr2->onError(e2);
+				// These two conflict sets should not be empty
+				ASSERT(readConflictRanges.size());
+				ASSERT(writeConflictRanges.size());
+				// check API correctness
+				if (foundConflict) {
+					// \xff\xff/transaction/conflicting_keys is always initialized to false, skip it here
+					KeyRange ckr = KeyRangeRef(keyAfter(""_sr.withPrefix(conflictingKeysRange.begin)),
+					                           "\xff\xff"_sr.withPrefix(conflictingKeysRange.begin));
+					// The getRange here using the special key prefix "\xff\xff/transaction/conflicting_keys/"
+					// happens locally Thus, the error handling is not needed here
+					Future<RangeResult> conflictingKeyRangesFuture = tr2->getRange(ckr, CLIENT_KNOBS->TOO_MANY);
+					ASSERT(conflictingKeyRangesFuture.isReady());
+
+					co_await validateSpecialSubrangeRead(tr2.getPtr(),
+					                                     firstGreaterOrEqual(ckr.begin),
+					                                     firstGreaterOrEqual(ckr.end),
+					                                     GetRangeLimits(),
+					                                     Reverse::False,
+					                                     conflictingKeyRangesFuture.get());
+
+					tr2 = makeReference<ReadYourWritesTransaction>(cx);
+
+					const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
+					ASSERT(conflictingKeyRanges.size() > 0);
+					ASSERT(conflictingKeyRanges.size() <= readConflictRanges.size() * 2);
+					ASSERT(conflictingKeyRanges.size() % 2 == 0);
+					ASSERT(!conflictingKeyRanges.more);
+					for (int i = 0; i < conflictingKeyRanges.size(); i += 2) {
+						KeyValueRef startKeyWithPrefix = conflictingKeyRanges[i];
+						ASSERT(startKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
+						ASSERT(startKeyWithPrefix.value == conflictingKeysTrue);
+						KeyValueRef endKeyWithPrefix = conflictingKeyRanges[i + 1];
+						ASSERT(endKeyWithPrefix.key.startsWith(conflictingKeysRange.begin));
+						ASSERT(endKeyWithPrefix.value == conflictingKeysFalse);
+						// Remove the prefix of returning keys
+						Key startKey = startKeyWithPrefix.key.removePrefix(conflictingKeysRange.begin);
+						Key endKey = endKeyWithPrefix.key.removePrefix(conflictingKeysRange.begin);
+						KeyRangeRef kr = KeyRangeRef(startKey, endKey);
+						if (!std::any_of(readConflictRanges.begin(), readConflictRanges.end(), [&kr](KeyRange rCR) {
+							    // Read_conflict_range remains same in the resolver.
+							    // Thus, the returned keyrange is either the original read_conflict_range or merged
+							    // by several overlapped ones in either cases, it contains at least one original
+							    // read_conflict_range
+							    return kr.contains(rCR);
+						    })) {
+							++self->invalidReports;
+							std::string allReadConflictRanges = "";
+							for (int i = 0; i < readConflictRanges.size(); i++) {
+								allReadConflictRanges += "Begin:" + printable(readConflictRanges[i].begin) +
+								                         ", End:" + printable(readConflictRanges[i].end) + "; ";
+							}
+							TraceEvent(SevError, "TestFailure")
+							    .detail("Reason",
+							            "Returned conflicting keys are not original or merged readConflictRanges")
+							    .detail("ConflictingKeyRange", kr.toString())
+							    .detail("ReadConflictRanges", allReadConflictRanges);
+						} else if (!std::any_of(
+						               writeConflictRanges.begin(), writeConflictRanges.end(), [&kr](KeyRange wCR) {
+							               // Returned key range should be conflicting with at least one
+							               // writeConflictRange
+							               return kr.intersects(wCR);
+						               })) {
+							++self->invalidReports;
+							std::string allWriteConflictRanges = "";
+							for (int i = 0; i < writeConflictRanges.size(); i++) {
+								allWriteConflictRanges += "Begin:" + printable(writeConflictRanges[i].begin) +
+								                          ", End:" + printable(writeConflictRanges[i].end) + "; ";
+							}
+							TraceEvent(SevError, "TestFailure")
+							    .detail("Reason", "Returned keyrange is not conflicting with any writeConflictRange")
+							    .detail("ConflictingKeyRange", kr.toString())
+							    .detail("WriteConflictRanges", allWriteConflictRanges);
+						}
+					}
+				} else {
+					// make sure no conflicts between tr2's readConflictRange and tr1's writeConflictRange
+					for (const KeyRange& rCR : readConflictRanges) {
+						if (std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR) {
+							    bool result = wCR.intersects(rCR);
+							    if (result)
+								    TraceEvent(SevError, "TestFailure")
+								        .detail("Reason", "No conflicts returned but it should")
+								        .detail("WriteConflictRangeInTr1", wCR.toString())
+								        .detail("ReadConflictRangeInTr2", rCR.toString());
+							    return result;
+						    })) {
+							++self->invalidReports;
+							std::string allReadConflictRanges = "";
+							for (int i = 0; i < readConflictRanges.size(); i++) {
+								allReadConflictRanges += "Begin:" + printable(readConflictRanges[i].begin) +
+								                         ", End:" + printable(readConflictRanges[i].end) + "; ";
+							}
+							std::string allWriteConflictRanges = "";
+							for (int i = 0; i < writeConflictRanges.size(); i++) {
+								allWriteConflictRanges += "Begin:" + printable(writeConflictRanges[i].begin) +
+								                          ", End:" + printable(writeConflictRanges[i].end) + "; ";
+							}
+							TraceEvent(SevError, "TestFailure")
+							    .detail("Reason", "No conflicts returned but it should")
+							    .detail("ReadConflictRanges", allReadConflictRanges)
+							    .detail("WriteConflictRanges", allWriteConflictRanges);
+							break;
+						}
+					}
 				}
+			} catch (Error& e) {
+				err = e;
+			}
+			if (err.present()) {
+				Error e2 = err.get();
+				co_await tr1->onError(e2);
+				co_await tr2->onError(e2);
 			}
 			readConflictRanges.clear();
 			writeConflictRanges.clear();

@@ -39,26 +39,24 @@ struct ReadWriteCommonImpl {
 	static Future<bool> traceDumpWorkers(Reference<AsyncVar<ServerDBInfo> const> db) {
 		try {
 			while (true) {
-				{
-					auto choice = co_await race(db->onChange(),
-					                            db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()));
-					if (choice.index() == 0) {
-					} else if (choice.index() == 1) {
-						ErrorOr<std::vector<WorkerDetails>> workerList = std::get<1>(std::move(choice));
+				auto choice = co_await race(db->onChange(),
+				                            db->get().clusterInterface.getWorkers.tryGetReply(GetWorkersRequest()));
+				if (choice.index() == 0) {
+				} else if (choice.index() == 1) {
+					ErrorOr<std::vector<WorkerDetails>> workerList = std::get<1>(std::move(choice));
 
-						if (workerList.present()) {
-							std::vector<Future<ErrorOr<Void>>> dumpRequests;
-							dumpRequests.reserve(workerList.get().size());
-							for (int i = 0; i < workerList.get().size(); i++)
-								dumpRequests.push_back(workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply(
-								    TraceBatchDumpRequest()));
-							co_await waitForAll(dumpRequests);
-							co_return true;
-						}
-						co_await delay(1.0);
-					} else {
-						UNREACHABLE();
+					if (workerList.present()) {
+						std::vector<Future<ErrorOr<Void>>> dumpRequests;
+						dumpRequests.reserve(workerList.get().size());
+						for (int i = 0; i < workerList.get().size(); i++)
+							dumpRequests.push_back(
+							    workerList.get()[i].interf.traceBatchDumpRequest.tryGetReply(TraceBatchDumpRequest()));
+						co_await waitForAll(dumpRequests);
+						co_return true;
 					}
+					co_await delay(1.0);
+				} else {
+					UNREACHABLE();
 				}
 			}
 		} catch (Error& e) {
@@ -320,17 +318,15 @@ static Version lastRV = invalidVersion;
 static Future<Version> getNextRV(Database db) {
 	Transaction tr(db);
 	while (true) {
-		{
-			Error err;
-			try {
-				Version v = co_await tr.getReadVersion();
-				co_return v;
-			} catch (Error& e) {
-				err = e;
-			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+		Error err;
+		try {
+			Version v = co_await tr.getReadVersion();
+			co_return v;
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -648,76 +644,74 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				self->transactionSuccessMetric->commitLatency = -1;
 
 				while (true) {
-					{
-						Error err;
-						try {
-							self->setupTransaction(tr);
+					Error err;
+					try {
+						self->setupTransaction(tr);
 
-							GRVStartTime = now();
-							self->transactionFailureMetric->startLatency = -1;
+						GRVStartTime = now();
+						self->transactionFailureMetric->startLatency = -1;
 
-							Version v = co_await (self->inconsistentReads ? getInconsistentReadVersion(cx)
-							                                              : tr.getReadVersion());
-							if (self->inconsistentReads)
-								tr.setVersion(v);
+						Version v =
+						    co_await (self->inconsistentReads ? getInconsistentReadVersion(cx) : tr.getReadVersion());
+						if (self->inconsistentReads)
+							tr.setVersion(v);
 
-							double grvLatency = now() - GRVStartTime;
-							self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
-							self->transactionFailureMetric->startLatency = grvLatency * 1e9;
-							if (self->shouldRecord())
-								self->GRVLatencies.addSample(grvLatency);
+						double grvLatency = now() - GRVStartTime;
+						self->transactionSuccessMetric->startLatency = grvLatency * 1e9;
+						self->transactionFailureMetric->startLatency = grvLatency * 1e9;
+						if (self->shouldRecord())
+							self->GRVLatencies.addSample(grvLatency);
 
-							double readStart = now();
-							co_await self->readOp(&tr, keys, self->shouldRecord());
+						double readStart = now();
+						co_await self->readOp(&tr, keys, self->shouldRecord());
 
-							double readLatency = now() - readStart;
-							if (self->shouldRecord())
-								self->fullReadLatencies.addSample(readLatency);
+						double readLatency = now() - readStart;
+						if (self->shouldRecord())
+							self->fullReadLatencies.addSample(readLatency);
 
-							if (!writes)
-								break;
-
-							if (self->adjacentWrites) {
-								int64_t startKey = self->getRandomKey(self->nodeCount - writes);
-								for (int op = 0; op < writes; op++)
-									tr.set(self->keyForIndex(startKey + op, false), values[op]);
-							} else {
-								for (int op = 0; op < writes; op++)
-									tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
-							}
-							for (int op = 0; op < extra_read_conflict_ranges; op++)
-								tr.addReadConflictRange(extra_ranges[op]);
-							for (int op = 0; op < extra_write_conflict_ranges; op++)
-								tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
-
-							double commitStart = now();
-							co_await tr.commit();
-
-							double commitLatency = now() - commitStart;
-							self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
-							if (self->shouldRecord())
-								self->commitLatencies.addSample(commitLatency);
-
+						if (!writes)
 							break;
-						} catch (Error& e) {
-							err = e;
+
+						if (self->adjacentWrites) {
+							int64_t startKey = self->getRandomKey(self->nodeCount - writes);
+							for (int op = 0; op < writes; op++)
+								tr.set(self->keyForIndex(startKey + op, false), values[op]);
+						} else {
+							for (int op = 0; op < writes; op++)
+								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
 						}
-						if (err.isValid()) {
-							if (err.code() == error_code_tag_throttled) {
-								++self->transactionsTagThrottled;
-							}
+						for (int op = 0; op < extra_read_conflict_ranges; op++)
+							tr.addReadConflictRange(extra_ranges[op]);
+						for (int op = 0; op < extra_write_conflict_ranges; op++)
+							tr.addWriteConflictRange(extra_ranges[op + extra_read_conflict_ranges]);
 
-							self->transactionFailureMetric->errorCode = err.code();
-							self->transactionFailureMetric->log();
+						double commitStart = now();
+						co_await tr.commit();
 
-							co_await tr.onError(err);
+						double commitLatency = now() - commitStart;
+						self->transactionSuccessMetric->commitLatency = commitLatency * 1e9;
+						if (self->shouldRecord())
+							self->commitLatencies.addSample(commitLatency);
 
-							++self->transactionSuccessMetric->retries;
-							++self->totalRetriesMetric;
-
-							if (self->shouldRecord())
-								++self->retries;
+						break;
+					} catch (Error& e) {
+						err = e;
+					}
+					if (err.isValid()) {
+						if (err.code() == error_code_tag_throttled) {
+							++self->transactionsTagThrottled;
 						}
+
+						self->transactionFailureMetric->errorCode = err.code();
+						self->transactionFailureMetric->log();
+
+						co_await tr.onError(err);
+
+						++self->transactionSuccessMetric->retries;
+						++self->totalRetriesMetric;
+
+						if (self->shouldRecord())
+							++self->retries;
 					}
 				}
 
@@ -757,38 +751,36 @@ Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx
 	double startTime = now();
 
 	while (currentCountIndex < countsOfInterest.size()) {
-		{
-			Error err;
-			try {
-				Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
-				Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
-				co_await (success(countFuture) && success(bytesFuture));
+		Error err;
+		try {
+			Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
+			Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
+			co_await (success(countFuture) && success(bytesFuture));
 
-				RangeResult counts = countFuture.get();
-				RangeResult bytes = bytesFuture.get();
+			RangeResult counts = countFuture.get();
+			RangeResult bytes = bytesFuture.get();
 
-				uint64_t numInserted = 0;
-				for (int i = 0; i < counts.size(); i++)
-					numInserted += *(uint64_t*)counts[i].value.begin();
+			uint64_t numInserted = 0;
+			for (int i = 0; i < counts.size(); i++)
+				numInserted += *(uint64_t*)counts[i].value.begin();
 
-				uint64_t bytesInserted = 0;
-				for (int i = 0; i < bytes.size(); i++)
-					bytesInserted += *(uint64_t*)bytes[i].value.begin();
+			uint64_t bytesInserted = 0;
+			for (int i = 0; i < bytes.size(); i++)
+				bytesInserted += *(uint64_t*)bytes[i].value.begin();
 
-				while (currentCountIndex < countsOfInterest.size() &&
-				       countsOfInterest[currentCountIndex] > lastInsertionCount &&
-				       countsOfInterest[currentCountIndex] <= numInserted)
-					countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++],
-					                                 bytesInserted / (now() - startTime));
+			while (currentCountIndex < countsOfInterest.size() &&
+			       countsOfInterest[currentCountIndex] > lastInsertionCount &&
+			       countsOfInterest[currentCountIndex] <= numInserted)
+				countInsertionRates.emplace_back(countsOfInterest[currentCountIndex++],
+				                                 bytesInserted / (now() - startTime));
 
-				lastInsertionCount = numInserted;
-				co_await delay(checkInterval);
-			} catch (Error& e) {
-				err = e;
-			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			lastInsertionCount = numInserted;
+			co_await delay(checkInterval);
+		} catch (Error& e) {
+			err = e;
+		}
+		if (err.isValid()) {
+			co_await tr.onError(err);
 		}
 	}
 
