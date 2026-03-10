@@ -524,8 +524,10 @@ struct SerializabilityWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				ReadYourWritesTransaction trErr(cx);
-				co_await trErr.onError(err);
+				if (err.isValid()) {
+					ReadYourWritesTransaction trErr(cx);
+					co_await trErr.onError(err);
+				}
 			}
 		}
 	}

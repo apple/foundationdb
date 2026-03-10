@@ -150,7 +150,9 @@ struct MemoryLifetime : KVWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			co_await tr.onError(err);
+			if (err.isValid()) {
+				co_await tr.onError(err);
+			}
 		}
 	}
 };

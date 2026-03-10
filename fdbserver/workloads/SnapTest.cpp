@@ -260,7 +260,9 @@ public: // workload functions
 				} catch (Error& e) {
 					err = e;
 				}
-				co_await tr.onError(err);
+				if (err.isValid()) {
+					co_await tr.onError(err);
+				}
 			}
 			if (cnt != 1000) {
 				TraceEvent(SevError, "SnapTestVerifyCntValue").detail("Value", cnt);
