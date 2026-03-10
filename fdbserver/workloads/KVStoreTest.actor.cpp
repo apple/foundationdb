@@ -172,7 +172,6 @@ Future<Void> testKVRead(KVTest* test, Key key, TestHistogram<float>* latency, Pe
 	ASSERT(s2 <= v || test->get(key, s2) == v); // Causal consistency
 	ASSERT(v <= test->lastCommit); // read committed
 	// ASSERT( v <= test->lastSet );  // read uncommitted
-	co_return;
 }
 
 Future<Void> testKVReadSaturation(KVTest* test, TestHistogram<float>* latency, PerfIntCounter* count) {
@@ -193,7 +192,6 @@ Future<Void> testKVCommit(KVTest* test, TestHistogram<float>* latency, PerfIntCo
 	++*count;
 	latency->addSample(timer() - begin);
 	test->lastDurable = std::max(test->lastDurable, v);
-	co_return;
 }
 
 Future<Void> testKVStore(struct KVStoreTestWorkload* workload);
@@ -368,8 +366,6 @@ Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 		}
 		TraceEvent("KVStoreClear").detail("Took", timer() - t);
 	}
-
-	co_return;
 }
 
 Future<Void> testKVStore(KVStoreTestWorkload* workload) {
@@ -424,5 +420,4 @@ Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 	co_await c;
 	if (err.code() != invalid_error_code)
 		throw err;
-	co_return;
 }

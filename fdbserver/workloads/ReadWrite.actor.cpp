@@ -222,7 +222,6 @@ struct ReadWriteCommonImpl {
 			++*latencyCount;
 			latencies->addSample(latency);
 		}
-		co_return;
 	}
 	static Future<Void> logLatency(Future<RangeResult> f,
 	                               DDSketch<double>* latencies,
@@ -242,7 +241,6 @@ struct ReadWriteCommonImpl {
 			++*latencyCount;
 			latencies->addSample(latency);
 		}
-		co_return;
 	}
 
 	static Future<Void> setup(Database cx, ReadWriteCommon* self) {
@@ -264,8 +262,6 @@ struct ReadWriteCommonImpl {
 
 		self->loadTime = loadTime.getFuture().get();
 		self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
-
-		co_return;
 	}
 };
 
@@ -345,15 +341,13 @@ static Future<Version> getNextRV(Database db) {
 	loop {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				Version v = co_await tr.getReadVersion();
 				co_return v;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
+			if (err.isValid()) {
 				co_await tr.onError(err);
 			}
 		}
@@ -527,7 +521,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				co_await self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord);
 			}
 		}
-		co_return;
 	}
 
 	static Future<Void> _start(Database cx, ReadWriteWorkload* self) {
@@ -539,7 +532,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 			Transaction tr(cx);
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					self->setupTransaction(tr);
 					co_await self->readOp(&tr, keys, self, false);
@@ -547,9 +539,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					if (err.code() == error_code_tag_throttled) {
 						++self->transactionsTagThrottled;
 					}
@@ -581,7 +572,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 
 		co_await (self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
 		                                        : delay(self->testDuration));
-		co_return;
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount) {
@@ -681,7 +671,6 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				loop {
 					{
 						Error err;
-						bool hasErr = false;
 						try {
 							self->setupTransaction(tr);
 
@@ -733,9 +722,8 @@ struct ReadWriteWorkload : ReadWriteCommon {
 							break;
 						} catch (Error& e) {
 							err = e;
-							hasErr = true;
 						}
-						if (hasErr) {
+						if (err.isValid()) {
 							if (err.code() == error_code_tag_throttled) {
 								++self->transactionsTagThrottled;
 							}
@@ -792,7 +780,6 @@ Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx
 	while (currentCountIndex < countsOfInterest.size()) {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
 				Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
@@ -819,9 +806,8 @@ Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx
 				co_await delay(checkInterval);
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
+			if (err.isValid()) {
 				co_await tr.onError(err);
 			}
 		}

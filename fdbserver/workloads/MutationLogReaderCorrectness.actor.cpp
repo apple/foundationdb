@@ -87,7 +87,6 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 			loop {
 				{
 					Error err;
-					bool hasErr = false;
 					try {
 						tr.reset();
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -106,9 +105,8 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 						break;
 					} catch (Error& e) {
 						err = e;
-						hasErr = true;
 					}
-					if (hasErr) {
+					if (err.isValid()) {
 						co_await tr.onError(err);
 					}
 				}
@@ -157,8 +155,6 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		printf("records found:    %d\n", nextExpectedRecord);
 
 		ASSERT_EQ(nextExpectedRecord, self->records);
-
-		co_return;
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

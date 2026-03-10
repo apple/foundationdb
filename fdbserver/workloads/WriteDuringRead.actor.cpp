@@ -618,7 +618,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -628,9 +627,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 					co_return;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -653,7 +651,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 				loop {
 					{
 						Error err;
-						bool hasErr = false;
 						try {
 							if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
 								co_return;
@@ -690,9 +687,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 							break;
 						} catch (Error& e) {
 							err = e;
-							hasErr = true;
 						}
-						if (hasErr) {
+						if (err.isValid()) {
 							co_await tr.onError(err);
 						}
 					}
@@ -854,7 +850,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 			self->addedConflicts.insert(self->conflictRange, true);
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					int numWaits = deterministicRandom()->randomInt(1, 5);
 					int i = 0;
@@ -1102,9 +1097,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					operations.clear();
 					commits.clear(false);
 					waitLocation = 0;
@@ -1138,7 +1132,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 		}
 		self->memoryDatabase = self->lastCommittedDatabase;
 		self->addedConflicts.insert(allKeys, false);
-		co_return;
 	}
 };
 

@@ -159,7 +159,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		self->monitorConsistencyCheckSettingsActor = self->monitorConsistencyCheckSettings(cx, self);
-		co_return;
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -188,7 +187,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			ReadYourWritesTransaction tr(cx);
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -203,9 +201,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					co_await watchCCSuspendFuture;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -241,7 +238,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			g_simulator->quiesced = false;
 			TraceEvent("ConsistencyCheckQuiescedEnd").detail("Quiesced", g_simulator->quiesced);
 		}
-		co_return;
 	}
 
 	Future<Void> runCheck(Database cx, ConsistencyCheckWorkload* self) {
@@ -259,7 +255,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				loop {
 					{
 						Error err;
-						bool hasErr = false;
 						try {
 							if (self->performTSSCheck) {
 								tssMapping.clear();
@@ -275,9 +270,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							break;
 						} catch (Error& e) {
 							err = e;
-							hasErr = true;
 						}
-						if (hasErr) {
+						if (err.isValid()) {
 							co_await tr.onError(err);
 						}
 					}
@@ -427,8 +421,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		TraceEvent("ConsistencyCheck_FinishedCheck")
 		    .detail("Repetitions", self->repetitions)
 		    .detail("TimeSpan", now() - consistenyCheckerBeginTime);
-
-		co_return;
 	}
 
 	// Comparison function used to compare map elements by value
@@ -531,7 +523,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					KeyBackedRangeResult<std::pair<UID, StorageMetadataType>> metadata =
 					    co_await metadataMap.getRange(&tr, {}, {}, CLIENT_KNOBS->TOO_MANY);
@@ -547,9 +538,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -802,7 +792,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					Optional<Value> currentKey = co_await tr.get(coordinatorsKey);
@@ -839,9 +828,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					co_return true;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -1109,16 +1097,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					SystemDBWriteLockedNow(cx.getReference())->setOptions(tr);
 					ConsistencyScanState::Config config = co_await cs.config().getD(tr);
 					co_return !config.enabled;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr->onError(err);
 				}
 			}

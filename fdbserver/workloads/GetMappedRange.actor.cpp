@@ -75,7 +75,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		types.push_back(READ_YOUR_WRITES);
 
 		co_await self->chooseTransactionFactory(cx, types);
-		co_return;
 	}
 
 	Future<Void> performSetup(Database const& cx) override { return performSetup(cx, this); }
@@ -105,7 +104,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			indexSize = 0;
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					for (int i = 0; i < n; i++) {
 						if (self->SPLIT_RECORDS) {
@@ -133,15 +131,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					std::cout << "failed fillInRecords, retry" << std::endl;
 					co_await tr.onError(err);
 				}
 			}
 		}
-		co_return;
 	}
 
 	static void showResult(const RangeResult& result) {
@@ -158,22 +154,19 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					RangeResult result = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
 					//			showResult(result);
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
 		}
 		std::cout << "finished scanRange" << std::endl;
-		co_return;
 	}
 
 	// Return true if need to retry.
@@ -241,7 +234,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			Reference<TransactionWrapper> tr = self->createTransaction();
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					MappedRangeResult result = co_await tr->getMappedRange(beginSelector,
 					                                                       endSelector,
@@ -274,9 +266,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					co_return result;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					if ((self->BAD_MAPPER && err.code() == error_code_mapper_bad_index) ||
 					    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && err.code() == error_code_quick_get_value_miss) ||
 					    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
@@ -376,8 +367,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			}
 		}
 		ASSERT(expectedBeginId == endId);
-
-		co_return;
 	}
 
 	static void conflictWriteOnRecord(int conflictRecordId,
@@ -426,7 +415,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			Reference<TransactionWrapper> tr1 = self->createTransaction();
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1, self);
 
@@ -435,16 +423,14 @@ struct GetMappedRangeWorkload : ApiWorkload {
 						Reference<TransactionWrapper> tr2 = self->createTransaction();
 						{
 							Error err;
-							bool hasErr = false;
 							try {
 								conflictWriteOnRecord(7, tr2, self);
 								co_await tr2->commit();
 								break;
 							} catch (Error& e) {
 								err = e;
-								hasErr = true;
 							}
-							if (hasErr) {
+							if (err.isValid()) {
 								std::cout << "tr2 error " << err.what() << std::endl;
 								co_await tr2->onError(err);
 							}
@@ -457,9 +443,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					UNREACHABLE();
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					if (err.code() == error_code_not_committed) {
 						std::cout << "tr1 failed because of conflicts (as expected)" << std::endl;
 						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
@@ -523,7 +508,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			Reference<TransactionWrapper> tr1 = self->createTransaction();
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					// Write something that will be read in getMappedRange.
 					conflictWriteOnRecord(7, tr1, self);
@@ -531,9 +515,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					UNREACHABLE();
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					if (err.code() == error_code_get_mapped_range_reads_your_writes) {
 						std::cout << "tr1 failed because of read your writes (as expected)" << std::endl;
 						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
@@ -611,7 +594,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 		// reset it to default
 		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
-		co_return;
 	}
 
 	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing) {

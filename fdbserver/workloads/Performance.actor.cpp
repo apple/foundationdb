@@ -150,8 +150,6 @@ struct PerformanceWorkload : TestWorkload {
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
 		DistributedTestResults results = co_await runWorkload(cx, testers, spec);
-
-		co_return;
 	}
 
 	PerfMetric getNamedMetric(std::string name, std::vector<PerfMetric> metrics) {
@@ -228,8 +226,6 @@ struct PerformanceWorkload : TestWorkload {
 			}
 			tps *= retry ? 1.0 : multiplier;
 		}
-
-		co_return;
 	}
 
 	Future<Void> _start(Database cx, PerformanceWorkload* self) {
@@ -237,7 +233,6 @@ struct PerformanceWorkload : TestWorkload {
 		TraceEvent("PerformanceSaturation")
 		    .detail("SaturationRate", self->maxAchievedTPS.value())
 		    .detail("SaturationLatency", self->latencySaturation.value());
-		co_return;
 	}
 };
 

@@ -302,8 +302,6 @@ struct SerializabilityWorkload : TestWorkload {
 				}
 			}
 		}
-
-		co_return;
 	}
 
 	static Future<RangeResult> getDatabaseContents(Database cx, int nodes) {
@@ -322,7 +320,6 @@ struct SerializabilityWorkload : TestWorkload {
 			tr.set(kv.key, kv.value);
 		co_await tr.commit();
 		//TraceEvent("SRL_Reset");
-		co_return;
 	}
 
 	Future<Void> _start(Database cx, SerializabilityWorkload* self) {
@@ -345,7 +342,6 @@ struct SerializabilityWorkload : TestWorkload {
 
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					if (now() - startTime > self->testDuration)
 						co_return;
@@ -528,9 +524,8 @@ struct SerializabilityWorkload : TestWorkload {
 					}
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					ReadYourWritesTransaction trErr(cx);
 					co_await trErr.onError(err);
 				}

@@ -438,8 +438,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		co_await includeLocalities(cx, std::vector<std::string>(), failed, true);
 		co_await includeLocalities(cx, std::vector<std::string>(), !failed, true);
 		self->includeAddresses(toKill2);
-
-		co_return;
 	}
 
 	std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs) {
@@ -777,8 +775,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		TraceEvent("RemoveAndKill", functionId)
 		    .detail("Step", "done")
 		    .detail("ClusterAvailable", g_simulator->isAvailable());
-
-		co_return;
 	}
 
 	static std::vector<ISimulator::ProcessInfo*> getServers() {
@@ -875,8 +871,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				}
 			}
 		}
-
-		co_return;
 	}
 };
 

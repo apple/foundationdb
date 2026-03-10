@@ -57,7 +57,6 @@ Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin,
 	while (true) {
 		Transaction tr(cx);
 		Error err;
-		bool hasErr = false;
 		setAuthToken(*workload, tr);
 		try {
 			Standalone<KeyValueRef> firstKV = (*workload)(begin);
@@ -69,9 +68,8 @@ Future<bool> checkRangeSimpleValueSize(Database cx, T* workload, uint64_t begin,
 		} catch (Error& e) {
 			TraceEvent("CheckRangeError").error(e).detail("Begin", begin).detail("End", end);
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
+		if (err.isValid()) {
 			co_await tr.onError(err);
 		}
 	}
@@ -84,7 +82,6 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 	while (true) {
 		Transaction tr(cx);
 		Error err;
-		bool hasErr = false;
 		setAuthToken(*workload, tr);
 		try {
 			if (deterministicRandom()->random01() < 0.001) {
@@ -126,9 +123,8 @@ Future<uint64_t> setupRange(Database cx, T* workload, uint64_t begin, uint64_t e
 			co_return bytesInserted;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
+		if (err.isValid()) {
 			co_await tr.onError(err);
 		}
 	}
@@ -162,7 +158,6 @@ Future<uint64_t> setupRangeWorker(Database cx,
 			if (keysLoaded - lastStoredKeysLoaded >= keySaveIncrement || jobs->size() == 0) {
 				Transaction tr(cx);
 				Error err;
-				bool hasErr = false;
 				setAuthToken(*workload, tr);
 				try {
 					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
@@ -175,9 +170,8 @@ Future<uint64_t> setupRangeWorker(Database cx,
 					lastStoredKeysLoaded = keysLoaded;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -232,7 +226,6 @@ Future<Void> waitForLowInFlight(Database cx, T* workload) {
 			co_await delay(1.0);
 		}
 	}
-	co_return;
 }
 
 template <class T>
@@ -381,7 +374,6 @@ Future<Void> bulkSetup(Database cx,
 	    .detail("ClientIdx", workload->clientId)
 	    .detail("WarmingDelay", postSetupWarming)
 	    .detail("KeyLoadElapsedTime", elapsed);
-	co_return;
 }
 
 #endif

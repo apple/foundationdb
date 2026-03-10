@@ -598,7 +598,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					TraceEvent("TestMoveShard").detail("Range", keys.toString());
 					MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
@@ -650,9 +649,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					if (err.code() == error_code_movekeys_conflict) {
 						// Conflict on moveKeysLocks with the current running DD is expected, just retry.
 						tr.reset();

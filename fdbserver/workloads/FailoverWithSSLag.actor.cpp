@@ -215,7 +215,6 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		// when failover, primaryDC should change to 1
 		co_await waitForPrimaryDC(cx, "1"_sr);
 		TraceEvent("FailoverComplete").log();
-		co_return;
 	}
 
 	static Future<Void> doFailover(FailoverWithSSLagWorkload* self, Database cx) {
@@ -278,8 +277,6 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		// Initiate failover and verify that it doesn't complete until the data center/
 		// storage server lag gets below the threshold.
 		co_await self->doFailover(self, cx);
-
-		co_return;
 	}
 };
 

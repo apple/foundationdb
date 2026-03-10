@@ -193,7 +193,6 @@ struct MiniCycleWorkload : TestWorkload {
 				while (true) {
 					{
 						Error err;
-						bool hasErr = false;
 						try {
 							// Reverse next and next^2 node
 							Optional<Value> v = co_await tr.get(self->key(r));
@@ -222,9 +221,8 @@ struct MiniCycleWorkload : TestWorkload {
 							break;
 						} catch (Error& e) {
 							err = e;
-							hasErr = true;
 						}
-						if (hasErr) {
+						if (err.isValid()) {
 							if (err.code() == error_code_transaction_too_old)
 								++self->tooOldRetries;
 							else if (err.code() == error_code_not_committed)
@@ -344,7 +342,6 @@ struct MiniCycleWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					Version v = co_await tr.getReadVersion();
 					RangeResult data = co_await tr.getRange(
@@ -355,9 +352,8 @@ struct MiniCycleWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					retryCount++;
 					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(err);
 					co_await tr.onError(err);

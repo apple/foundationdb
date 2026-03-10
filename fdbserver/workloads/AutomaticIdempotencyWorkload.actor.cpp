@@ -102,8 +102,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		if (self->sharedConfig.disableAutomaticIdempotency) {
 			self->automaticPercentage = 0;
 		}
-
-		co_return;
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -137,7 +135,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    return Future<Void>(Void());
 			    });
 		}
-		co_return;
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -179,7 +176,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    .detail("Id", id);
 			}
 		}
-		co_return;
 	}
 
 	// Check that each transaction committed exactly once.
@@ -211,7 +207,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			self->ok = false;
 		}
 		ASSERT_EQ(ids.size(), self->clientCount * self->numTransactions);
-		co_return;
 	}
 
 	std::vector<Key> idempotencyKeyValueToTestKeys(KeyValueRef kv, Version* commitVersion, int64_t* timestamp) {
@@ -271,7 +266,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					std::vector<Future<Optional<Value>>> futures;
 
@@ -296,9 +290,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					co_return maxCreatedTimeDelta;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -470,7 +463,6 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			__flow_choose_done_1:;
 			}
 		}
-		co_return;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}

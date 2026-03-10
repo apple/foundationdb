@@ -98,7 +98,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -108,9 +107,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -154,7 +152,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				{
 					Error err;
-					bool hasErr = false;
 					try {
 						CheckpointMetaData record = co_await fetchCheckpoint(cx, it->second, folder);
 						fetchedCheckpoints.push_back(record);
@@ -162,9 +159,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 						break;
 					} catch (Error& e) {
 						err = e;
-						hasErr = true;
 					}
-					if (hasErr) {
+					if (err.isValid()) {
 						TraceEvent("TestFetchCheckpointError")
 						    .errorUnsuppressed(err)
 						    .detail("Checkpoint", it->second.toString());
@@ -194,16 +190,14 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 					co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					co_await tr.onError(err);
 				}
 			}
@@ -219,7 +213,6 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		kvStore->dispose();
 		co_await close;
 		co_await success(setDDMode(cx, 1));
-		co_return;
 	}
 
 	Future<Void> readAndVerify(SSCheckpointRestoreWorkload* self,

@@ -73,7 +73,6 @@ public:
 		loop {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					{
 						auto choice = co_await race(input);
@@ -87,9 +86,8 @@ public:
 					}
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
+				if (err.isValid()) {
 					if (err.code() != error_code_wrong_shard_server)
 						throw err;
 					co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
