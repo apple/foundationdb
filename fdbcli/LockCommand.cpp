@@ -1,5 +1,5 @@
 /*
- * LockCommand.actor.cpp
+ * LockCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,30 +28,29 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace {
 
-ACTOR Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
 			tr->set(fdb_cli::lockSpecialKey, id.toString());
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 			printf("Database locked.\n");
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_database_locked)
-				throw e;
-			else if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				fprintf(stderr, "%s\n", errorMsgStr.c_str());
-				return false;
-			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
+			err = e;
 		}
+		if (err.code() == error_code_database_locked)
+			throw err;
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			fprintf(stderr, "%s\n", errorMsgStr.c_str());
+			co_return false;
+		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -61,47 +60,48 @@ namespace fdb_cli {
 
 const KeyRef lockSpecialKey = "\xff\xff/management/db_locked"_sr;
 
-ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
 	if (tokens.size() != 1) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else {
-		state UID lockUID = deterministicRandom()->randomUniqueID();
+		UID lockUID = deterministicRandom()->randomUniqueID();
 		printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
-		bool result = wait((lockDatabase(db, lockUID)));
-		return result;
+		bool result = co_await lockDatabase(db, lockUID);
+		co_return result;
 	}
 }
 
-ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
-			state ThreadFuture<Optional<Value>> valF = tr->get(fdb_cli::lockSpecialKey);
-			Optional<Value> val = wait(safeThreadFutureToFuture(valF));
+			ThreadFuture<Optional<Value>> valF = tr->get(fdb_cli::lockSpecialKey);
+			Optional<Value> val = co_await safeThreadFutureToFuture(valF);
 
 			if (!val.present())
-				return true;
+				co_return true;
 
 			if (val.present() && UID::fromString(val.get().toString()) != uid) {
 				printf("Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
-				return false;
+				co_return false;
 			}
 
 			tr->clear(fdb_cli::lockSpecialKey);
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 			printf("Database unlocked.\n");
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				fprintf(stderr, "%s\n", errorMsgStr.c_str());
-				return false;
-			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
+			err = e;
 		}
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			fprintf(stderr, "%s\n", errorMsgStr.c_str());
+			co_return false;
+		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
