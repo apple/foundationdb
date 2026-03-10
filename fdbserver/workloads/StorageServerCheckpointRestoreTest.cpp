@@ -98,7 +98,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				co_await createCheckpoint(&tr, { testRange }, format, dataMoveId);
+				co_await createCheckpoint(&tr, std::vector<KeyRange>(1, testRange), format, dataMoveId);
 				co_await tr.commit();
 				version = tr.getCommittedVersion();
 				break;
