@@ -28,7 +28,7 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"

@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/QuietDatabase.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/workloads/workloads.actor.h"
 

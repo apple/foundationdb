@@ -52,7 +52,7 @@
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h" // for poisson()
 #include "fdbserver/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"

@@ -31,7 +31,7 @@
 #include "fdbserver/GrvTransactionRateInfo.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "flow/Buggify.h"

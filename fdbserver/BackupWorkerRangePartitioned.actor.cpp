@@ -27,7 +27,7 @@
 #include "fdbserver/BackupPartitionMap.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose

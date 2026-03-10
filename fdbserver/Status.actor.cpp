@@ -38,7 +38,7 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/QuietDatabase.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/JsonBuilder.h"

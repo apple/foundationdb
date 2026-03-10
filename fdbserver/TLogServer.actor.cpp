@@ -40,7 +40,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/Histogram.h"

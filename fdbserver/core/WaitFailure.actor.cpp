@@ -22,7 +22,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/Deque.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/core/WaitFailure.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

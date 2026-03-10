@@ -1,5 +1,5 @@
 /*
- * QuietDatabase.h
+ * QuietDatabase.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,4 +20,4 @@
 
 #pragma once
 
-#include "fdbserver/core/QuietDatabase.h"
+#include "fdbserver/core/QuietDatabase.actor.h"

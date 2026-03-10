@@ -26,7 +26,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/QuietDatabase.actor.h"
 
 struct TargetedKillWorkload : TestWorkload {
 	static constexpr auto NAME = "TargetedKill";

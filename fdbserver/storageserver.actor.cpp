@@ -92,7 +92,7 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/TransactionTagCounter.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/StorageCorruptionBug.h"
 #include "fdbserver/StorageServerUtils.h"

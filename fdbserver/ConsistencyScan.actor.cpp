@@ -39,11 +39,11 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/QuietDatabase.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define DEBUG_SCAN_PROGRESS false

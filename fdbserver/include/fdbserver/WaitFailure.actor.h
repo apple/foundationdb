@@ -1,5 +1,5 @@
 /*
- * WaitFailure.h
+ * WaitFailure.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,4 +20,4 @@
 
 #pragma once
 
-#include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/core/WaitFailure.actor.h"

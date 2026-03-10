@@ -54,7 +54,7 @@
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/CodeProbe.h"

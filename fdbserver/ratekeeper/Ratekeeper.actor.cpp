@@ -21,7 +21,7 @@
 #include "fdbclient/ClientKnobs.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/core/WaitFailure.actor.h"
 #include "fdbserver/ratekeeper/Ratekeeper.h"
 #include "fdbserver/ratekeeper/TagThrottler.h"
 #include "flow/OwningResource.h"
