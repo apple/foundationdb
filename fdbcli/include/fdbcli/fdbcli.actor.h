@@ -165,11 +165,11 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
                                          LineNoise* linenoise,
                                          Future<Void> warn);
 // consistency command
-ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
-                                                std::vector<StringRef> tokens,
-                                                bool intrans);
+Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
+                                          std::vector<StringRef> const& tokens,
+                                          bool intrans);
 // consistency scan command
-ACTOR Future<bool> consistencyScanCommandActor(Database localDb, std::vector<StringRef> tokens);
+Future<bool> consistencyScanCommandActor(Database localDb, std::vector<StringRef> const& tokens);
 // coordinators command
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // datadistribution command
@@ -183,10 +183,10 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
     std::vector<StringRef> tokens,
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // fileconfigure command
-ACTOR Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
-                                             std::string filePath,
-                                             bool isNewDatabase,
-                                             bool force);
+Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
+                                       std::string const& filePath,
+                                       bool isNewDatabase,
+                                       bool force);
 // Trigger audit storage
 ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
                                            std::vector<StringRef> tokens);
@@ -199,7 +199,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 // Bulk dumping command
 ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
-ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 // include command
 ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
@@ -208,16 +208,16 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
                                     std::vector<StringRef> tokens,
                                     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // lock/unlock command
-ACTOR Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
+Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
+Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
 // blobrestore command
 ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command
-ACTOR Future<bool> hotRangeCommandActor(Database localDb,
-                                        Reference<IDatabase> db,
-                                        std::vector<StringRef> tokens,
-                                        std::map<std::string, StorageServerInterface>* storage_interface);
+Future<bool> hotRangeCommandActor(Database localDb,
+                                  Reference<IDatabase> db,
+                                  std::vector<StringRef> const& tokens,
+                                  std::map<std::string, StorageServerInterface>* const& storage_interface);
 
 // maintenance command
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
@@ -235,21 +235,21 @@ ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<String
 // setclass command
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
-ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 // status command
 ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
                                       Database localDb,
                                       std::vector<StringRef> tokens,
                                       bool isExecMode = false);
 // suspend command
-ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
-                                       Reference<ITransaction> tr,
-                                       std::vector<StringRef> tokens,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+Future<bool> suspendCommandActor(Reference<IDatabase> db,
+                                 Reference<ITransaction> tr,
+                                 std::vector<StringRef> const& tokens,
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // throttle command
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command
-ACTOR Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db);
+Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db);
 // tssq command
 ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // versionepoch command
@@ -257,7 +257,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 // targetversion command
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // idempotencyids command
-ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> const& tokens);
 
 // rangeconfig command
 ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);

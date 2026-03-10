@@ -1,5 +1,5 @@
 /*
- * SnapshotCommand.actor.cpp
+ * SnapshotCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,18 +25,16 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace fdb_cli {
 
-ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	state bool result = true;
+Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
+	bool result = true;
 	if (tokens.size() < 2) {
 		printUsage(tokens[0]);
 		result = false;
 	} else {
 		Standalone<StringRef> snap_cmd;
-		state Key uid(deterministicRandom()->randomUniqueID().toString());
+		Key uid(deterministicRandom()->randomUniqueID().toString());
 		for (int i = 1; i < tokens.size(); i++) {
 			snap_cmd = snap_cmd.withSuffix(tokens[i]);
 			if (i != tokens.size() - 1) {
@@ -44,7 +42,7 @@ ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<Str
 			}
 		}
 		try {
-			wait(safeThreadFutureToFuture(db->createSnapshot(uid, snap_cmd)));
+			co_await safeThreadFutureToFuture(db->createSnapshot(uid, snap_cmd));
 			printf("Snapshot command succeeded with UID %s\n", uid.toString().c_str());
 		} catch (Error& e) {
 			fprintf(stderr,
@@ -56,7 +54,7 @@ ACTOR Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<Str
 			result = false;
 		}
 	}
-	return result;
+	co_return result;
 }
 
 // hidden commands, no help text for now

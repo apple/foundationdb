@@ -1,5 +1,5 @@
 /*
- * SuspendCommand.actor.cpp
+ * SuspendCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,21 +29,19 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace fdb_cli {
 
-ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
-                                       Reference<ITransaction> tr,
-                                       std::vector<StringRef> tokens,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+Future<bool> suspendCommandActor(Reference<IDatabase> db,
+                                 Reference<ITransaction> tr,
+                                 std::vector<StringRef> const& tokens,
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(tokens.size() >= 1);
-	state bool result = true;
-	state std::string addressesStr;
+	bool result = true;
+	std::string addressesStr;
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
 		address_interface->clear();
-		wait(getWorkerInterfaces(tr, address_interface, true));
+		co_await getWorkerInterfaces(tr, address_interface, true);
 		if (address_interface->size() == 0) {
 			printf("\nNo addresses can be suspended.\n");
 		} else if (address_interface->size() == 1) {
@@ -68,9 +66,9 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		}
 
 		if (result) {
-			state double seconds;
+			double seconds{ 0 };
 			int n = 0;
-			state int i;
+			int i{ 0 };
 			auto secondsStr = tokens[1].toString();
 			if (sscanf(secondsStr.c_str(), "%lf%n", &seconds, &n) != 1 || n != secondsStr.size()) {
 				printUsage(tokens[0]);
@@ -82,7 +80,7 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 				}
 				addressesStr = boost::algorithm::join(addressesVec, ",");
 				int64_t suspendRequestSent =
-				    wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, static_cast<int>(seconds))));
+				    co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, static_cast<int>(seconds)));
 				if (!suspendRequestSent) {
 					result = false;
 					fprintf(
@@ -96,7 +94,7 @@ ACTOR Future<bool> suspendCommandActor(Reference<IDatabase> db,
 			}
 		}
 	}
-	return result;
+	co_return result;
 }
 
 CommandFactory suspendFactory(
