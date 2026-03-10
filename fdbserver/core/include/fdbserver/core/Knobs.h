@@ -1,5 +1,5 @@
 /*
- * ServerThroughputTracker.h
+ * Knobs.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,17 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_KNOBS_H
+#define FDBSERVER_KNOBS_H
+
 #pragma once
 
-#include "fdbserver/ratekeeper/ServerThroughputTracker.h"
+#include "fdbclient/IKnobCollection.h"
+
+#define SERVER_KNOBS (&IKnobCollection::getGlobalKnobCollection().getServerKnobs())
+
+inline const ServerKnobs& getServerKnobs() {
+	return *SERVER_KNOBS;
+}
+
+#endif // FDBSERVER_KNOBS_H

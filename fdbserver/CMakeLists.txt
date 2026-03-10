@@ -6,6 +6,14 @@ else()
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
 endif()
 
+add_subdirectory(core)
+add_subdirectory(ratekeeper)
+
+list(REMOVE_ITEM FDBSERVER_SRCS ${FDBSERVER_CORE_SRCS})
+list(REMOVE_ITEM FDBSERVER_SRCS
+  include/fdbserver/ServerDBInfo.actor.h
+  include/fdbserver/TesterInterface.actor.h
+  include/fdbserver/WorkerInterface.actor.h)
 
 if(WITH_ROCKSDB)
   find_package(LZ4 REQUIRED)
@@ -16,6 +24,44 @@ if(WITH_ROCKSDB)
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
+
+function(configure_fdbserver_common_includes target_name)
+  target_include_directories(${target_name} PRIVATE
+    ${CMAKE_SOURCE_DIR}/bindings/c
+    ${CMAKE_BINARY_DIR}/bindings/c)
+endfunction()
+
+function(configure_fdbserver_partition_includes target_name source_include_dir generated_include_dir)
+  configure_fdbserver_common_includes(${target_name})
+  target_include_directories(${target_name}
+    PUBLIC
+      ${source_include_dir}
+      ${generated_include_dir})
+endfunction()
+
+function(configure_fdbserver_target_includes target_name)
+  configure_fdbserver_common_includes(${target_name})
+  target_include_directories(${target_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+    ${CMAKE_CURRENT_BINARY_DIR}/core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/ratekeeper/include
+    ${CMAKE_CURRENT_BINARY_DIR}/ratekeeper/include
+  )
+endfunction()
+
+configure_fdbserver_partition_includes(
+  fdbserver_core
+  ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+  ${CMAKE_CURRENT_BINARY_DIR}/core/include)
+target_link_libraries(fdbserver_core PRIVATE fdbclient)
+
+configure_fdbserver_partition_includes(
+  fdbserver_ratekeeper
+  ${CMAKE_CURRENT_SOURCE_DIR}/ratekeeper/include
+  ${CMAKE_CURRENT_BINARY_DIR}/ratekeeper/include)
+target_link_libraries(fdbserver_ratekeeper PRIVATE fdbclient fdbserver_core)
 
 add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 
@@ -127,11 +173,8 @@ if (WITH_SWIFT)
   )
 endif()
 
-target_include_directories(fdbserver PRIVATE
-  ${CMAKE_SOURCE_DIR}/bindings/c
-  ${CMAKE_BINARY_DIR}/bindings/c
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_BINARY_DIR}/include)
+configure_fdbserver_target_includes(fdbserver)
+target_link_libraries(fdbserver PRIVATE fdbserver_ratekeeper fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

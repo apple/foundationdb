@@ -21,8 +21,9 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/ServerThroughputTracker.h"
-#include "fdbserver/TagThrottler.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/ratekeeper/ServerThroughputTracker.h"
+#include "fdbserver/ratekeeper/TagThrottler.h"
 
 #include <limits>
 

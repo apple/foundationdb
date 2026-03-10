@@ -18,48 +18,6 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_QUIETDATABASE_H
-#define FDBSERVER_QUIETDATABASE_H
 #pragma once
 
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbclient/FDBTypes.h"
-#include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/WorkerInterface.actor.h"
-
-Future<int64_t> getDataInFlight(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
-Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database const& cx,
-                                                     Reference<AsyncVar<struct ServerDBInfo> const> const&);
-Future<int64_t> getMaxStorageServerQueueSize(Database const& cx,
-                                             Reference<AsyncVar<struct ServerDBInfo> const> const&,
-                                             Version const& version);
-Future<int64_t> getDataDistributionQueueSize(Database const& cx,
-                                             Reference<AsyncVar<struct ServerDBInfo> const> const&,
-                                             bool const& reportInFlight);
-Future<bool> getTeamCollectionValid(Database const& cx, WorkerInterface const&);
-Future<bool> getTeamCollectionValid(Database const& cx, Reference<AsyncVar<struct ServerDBInfo> const> const&);
-Future<std::vector<StorageServerInterface>> getStorageServers(Database const& cx,
-                                                              bool const& use_system_priority = false);
-Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
-                                              int const& flags = 0);
-Future<WorkerInterface> getMasterWorker(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
-Future<Void> repairDeadDatacenter(Database const& cx,
-                                  Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
-                                  std::string const& context);
-Future<Void> reconfigureAfter(Database const& cx,
-                              double const& time,
-                              Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
-                              std::string const& context);
-
-// Returns list of worker interfaces for available storage servers and the number of unavailable
-// storage servers
-Future<std::pair<std::vector<WorkerInterface>, int>>
-getStorageWorkers(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> const& dbInfo, bool const& localOnly);
-Future<std::vector<WorkerInterface>> getCoordWorkers(Database const& cx,
-                                                     Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
-
-Future<Void> enableConsistencyScanInSim(Database const& db);
-Future<Void> disableConsistencyScanInSim(Database const& db, bool const& waitForCompletion);
-
-#endif
+#include "fdbserver/core/QuietDatabase.h"

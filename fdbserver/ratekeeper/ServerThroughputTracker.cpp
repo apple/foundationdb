@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ServerThroughputTracker.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/ratekeeper/ServerThroughputTracker.h"
 
 namespace {
 

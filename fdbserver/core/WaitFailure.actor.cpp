@@ -21,7 +21,8 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "flow/Deque.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/WaitFailure.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

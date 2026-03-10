@@ -1,5 +1,5 @@
 /*
- * ServerThroughputTracker.h
+ * ServerDBInfo.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,10 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_CORE_SERVERDBINFO_H
+#define FDBSERVER_CORE_SERVERDBINFO_H
 #pragma once
 
-#include "fdbserver/ratekeeper/ServerThroughputTracker.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
+
+#endif
