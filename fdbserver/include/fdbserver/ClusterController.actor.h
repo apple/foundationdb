@@ -34,7 +34,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"

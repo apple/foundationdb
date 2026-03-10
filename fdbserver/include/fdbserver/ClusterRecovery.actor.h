@@ -43,7 +43,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 #include "flow/SystemMonitor.h"
 

@@ -20,8 +20,8 @@
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/Smoother.h"

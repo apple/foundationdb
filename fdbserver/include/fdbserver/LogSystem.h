@@ -34,7 +34,7 @@
 #include "fdbserver/OTELSpanContextMessage.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/Histogram.h"

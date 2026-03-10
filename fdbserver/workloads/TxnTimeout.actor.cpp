@@ -19,7 +19,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Buggify.h"
 #include "flow/Error.h"

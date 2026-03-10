@@ -19,10 +19,10 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/Status.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct DDMetricsWorkload : TestWorkload {

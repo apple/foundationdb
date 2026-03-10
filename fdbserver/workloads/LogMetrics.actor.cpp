@@ -20,14 +20,14 @@
 
 #include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LogMetricsWorkload : TestWorkload {

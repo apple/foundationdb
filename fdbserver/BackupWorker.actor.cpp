@@ -28,10 +28,10 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/ServerDBInfo.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"

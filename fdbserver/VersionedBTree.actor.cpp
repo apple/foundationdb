@@ -29,7 +29,7 @@
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/VersionedBTreeDebug.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"

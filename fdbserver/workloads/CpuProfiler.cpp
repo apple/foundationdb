@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 // A workload which starts the CPU profiler at a given time and duration on all workers in a cluster

@@ -10,10 +10,6 @@ add_subdirectory(core)
 add_subdirectory(ratekeeper)
 
 list(REMOVE_ITEM FDBSERVER_SRCS ${FDBSERVER_CORE_SRCS})
-list(REMOVE_ITEM FDBSERVER_SRCS
-  include/fdbserver/ServerDBInfo.actor.h
-  include/fdbserver/TesterInterface.actor.h
-  include/fdbserver/WorkerInterface.actor.h)
 
 if(WITH_ROCKSDB)
   find_package(LZ4 REQUIRED)

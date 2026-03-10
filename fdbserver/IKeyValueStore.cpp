@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

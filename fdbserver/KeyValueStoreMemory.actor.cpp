@@ -22,7 +22,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueContainer.h"

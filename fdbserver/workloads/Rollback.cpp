@@ -20,12 +20,12 @@
 
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.h"
 
 // Choose a random proxy and a random tLog, represented as unclogTlog.
 // The workload first clogs network link between the chosen proxy and all tLogs but the unclogTlog;

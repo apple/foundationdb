@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 
 // NOTE: it might be simpler to test health metrics via something
 // other than simulation. Testing equivalent to what this workload does can

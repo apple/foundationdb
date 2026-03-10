@@ -19,7 +19,7 @@
  */
 
 #include "fdbrpc/ActorFuzz.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 Future<Void> sleepyActor(double interval, int* counter) {

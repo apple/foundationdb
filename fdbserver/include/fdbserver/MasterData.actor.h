@@ -28,7 +28,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolutionBalancer.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/swift_support.h"
