@@ -32,21 +32,21 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
-	KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
-	KeySelectorRef end = firstGreaterOrEqual(keys.end);
+ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
+	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
 	try {
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, 1e6);
 			limits.minRows = 0;
-			RangeResult rep = co_await tr->getRange(begin, end, limits, Snapshot::True);
+			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
 
 			results.send(rep);
 
 			if (!rep.more) {
 				results.sendError(end_of_stream());
-				co_return;
+				return Void();
 			}
 
 			begin = rep.nextBeginKeySelector();
@@ -60,10 +60,10 @@ Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction
 	}
 }
 
-Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream<KeyValue> output) {
+ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream<KeyValue> output) {
 	try {
 		loop {
-			RangeResult res = co_await input.getFuture();
+			RangeResult res = waitNext(input.getFuture());
 			for (auto& kv : res) {
 				output.send(kv);
 			}
@@ -74,7 +74,7 @@ Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream<KeyVa
 		}
 		output.sendError(e);
 	}
-	co_return;
+	return Void();
 }
 
 struct StreamingRangeReadWorkload : KVWorkload {
@@ -102,68 +102,60 @@ struct StreamingRangeReadWorkload : KVWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	// Reads the database using both the normal get range API and the streaming API and compares the results
-	Future<Void> streamingClient(Database cx, StreamingRangeReadWorkload* self) {
-		Transaction tr(cx);
-		Key next;
-		Future<Void> rateLimit = delay(0.01);
+	ACTOR Future<Void> streamingClient(Database cx, StreamingRangeReadWorkload* self) {
+		state Transaction tr(cx);
+		state Key next;
+		state Future<Void> rateLimit = delay(0.01);
 		loop {
-			PromiseStream<RangeResult> streamRaw;
-			PromiseStream<RangeResult> compareRaw;
-			PromiseStream<KeyValue> streamResults;
-			PromiseStream<KeyValue> compareResults;
+			state PromiseStream<RangeResult> streamRaw;
+			state PromiseStream<RangeResult> compareRaw;
+			state PromiseStream<KeyValue> streamResults;
+			state PromiseStream<KeyValue> compareResults;
 
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					Future<Void> compareConvert = convertStream(compareRaw, compareResults);
-					Future<Void> streamConvert = convertStream(streamRaw, streamResults);
-					Future<Void> compare = streamUsingGetRange(compareRaw, &tr, KeyRangeRef(next, normalKeys.end));
-					Future<Void> stream = tr.getRangeStream(streamRaw,
-					                                        KeySelector(firstGreaterOrEqual(next), next.arena()),
-					                                        KeySelector(firstGreaterOrEqual(normalKeys.end)),
-					                                        GetRangeLimits());
-					loop {
-						Optional<KeyValue> cmp;
-						Optional<KeyValue> res;
-						try {
-							KeyValue _cmp = co_await streamResults.getFuture();
-							cmp = _cmp;
-						} catch (Error& e) {
-							if (e.code() != error_code_end_of_stream) {
-								throw;
-							}
-							cmp = Optional<KeyValue>();
+			try {
+				state Future<Void> compareConvert = convertStream(compareRaw, compareResults);
+				state Future<Void> streamConvert = convertStream(streamRaw, streamResults);
+				state Future<Void> compare = streamUsingGetRange(compareRaw, &tr, KeyRangeRef(next, normalKeys.end));
+				state Future<Void> stream = tr.getRangeStream(streamRaw,
+				                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
+				                                              KeySelector(firstGreaterOrEqual(normalKeys.end)),
+				                                              GetRangeLimits());
+				loop {
+					state Optional<KeyValue> cmp;
+					state Optional<KeyValue> res;
+					try {
+						KeyValue _cmp = waitNext(streamResults.getFuture());
+						cmp = _cmp;
+					} catch (Error& e) {
+						if (e.code() != error_code_end_of_stream) {
+							throw;
 						}
-						try {
-							KeyValue _res = co_await compareResults.getFuture();
-							res = _res;
-						} catch (Error& e) {
-							if (e.code() != error_code_end_of_stream) {
-								throw;
-							}
-							res = Optional<KeyValue>();
-						}
-						if (cmp != res) {
-							TraceEvent(SevError, "RangeStreamMismatch");
-							ASSERT(false);
-						}
-						if (cmp.present()) {
-							next = keyAfter(cmp.get().key);
-						} else {
-							next = Key();
-							break;
-						}
+						cmp = Optional<KeyValue>();
 					}
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+					try {
+						KeyValue _res = waitNext(compareResults.getFuture());
+						res = _res;
+					} catch (Error& e) {
+						if (e.code() != error_code_end_of_stream) {
+							throw;
+						}
+						res = Optional<KeyValue>();
+					}
+					if (cmp != res) {
+						TraceEvent(SevError, "RangeStreamMismatch");
+						ASSERT(false);
+					}
+					if (cmp.present()) {
+						next = keyAfter(cmp.get().key);
+					} else {
+						next = Key();
+						break;
+					}
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-			co_await rateLimit;
+			wait(rateLimit);
 			rateLimit = delay(0.01);
 		}
 	}
