@@ -85,51 +85,51 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _setup(AutomaticIdempotencyWorkload* self, Database cx) {
-		if (self->clientId == 0) {
-			co_await self->sharedConfigProperty.set(cx.getReference(), self->sharedConfig);
+	Future<Void> _setup(Database cx) {
+		if (clientId == 0) {
+			co_await sharedConfigProperty.set(cx.getReference(), sharedConfig);
 		} else {
 			loop {
-				Optional<SharedConfiguration> sharedConfig = co_await self->sharedConfigProperty.get(cx.getReference());
+				Optional<SharedConfiguration> sharedConfig = co_await sharedConfigProperty.get(cx.getReference());
 				if (sharedConfig.present()) {
-					self->sharedConfig = sharedConfig.get();
+					this->sharedConfig = sharedConfig.get();
 					break;
 				}
 				co_await delay(1.0);
 			}
 		}
 
-		if (self->sharedConfig.disableAutomaticIdempotency) {
-			self->automaticPercentage = 0;
+		if (sharedConfig.disableAutomaticIdempotency) {
+			automaticPercentage = 0;
 		}
 	}
 
-	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
+	Future<Void> setup(Database const& cx) override { return _setup(cx); }
 
-	Future<Void> start(Database const& cx) override { return _start(this, cx); }
+	Future<Void> start(Database const& cx) override { return _start(cx); }
 
-	static Future<Void> _start(AutomaticIdempotencyWorkload* self, Database cx) {
+	Future<Void> _start(Database cx) {
 		int i = 0;
-		for (; i < self->numTransactions; ++i) {
+		for (; i < numTransactions; ++i) {
 			// Half direct representation, half indirect representation
 			int length = deterministicRandom()->coinflip() ? 16 : deterministicRandom()->randomInt(17, 256);
 			Value idempotencyId = makeString(length);
 			deterministicRandom()->randomBytes(mutateString(idempotencyId), length);
 			TraceEvent("IdempotencyIdWorkloadTransaction").detail("Id", idempotencyId);
 			co_await runRYWTransaction(
-			    cx, [self = self, idempotencyId = idempotencyId](Reference<ReadYourWritesTransaction> tr) {
+			    cx, [this, idempotencyId = idempotencyId](Reference<ReadYourWritesTransaction> tr) {
 				    // If we don't set AUTOMATIC_IDEMPOTENCY the idempotency id won't automatically get cleaned up, so
 				    // it should create work for the cleaner.
 				    tr->setOption(FDBTransactionOptions::IDEMPOTENCY_ID, idempotencyId);
-				    if (deterministicRandom()->random01() < self->automaticPercentage) {
+				    if (deterministicRandom()->random01() < automaticPercentage) {
 					    // We also want to exercise the automatic idempotency code path.
 					    tr->setOption(FDBTransactionOptions::AUTOMATIC_IDEMPOTENCY);
 				    }
-				    uint32_t index = self->keyPrefix.size();
+				    uint32_t index = keyPrefix.size();
 				    Value suffix = makeString(14);
 				    memset(mutateString(suffix), 0, 10);
 				    memcpy(mutateString(suffix) + 10, &index, 4);
-				    tr->atomicOp(self->keyPrefix.withSuffix(suffix),
+				    tr->atomicOp(keyPrefix.withSuffix(suffix),
 				                 ObjectWriter::toValue(ValueType{ idempotencyId, int64_t(now()) }, Unversioned()),
 				                 MutationRef::SetVersionstampedKey);
 				    return Future<Void>(Void());
@@ -141,19 +141,18 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		if (clientId != 0) {
 			return true;
 		}
-		return testAll(this, cx);
+		return testAll(cx);
 	}
 
-	static Future<bool> testAll(AutomaticIdempotencyWorkload* self, Database db) {
-		co_await runRYWTransaction(
-		    db, [=](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(self, tr); });
+	Future<bool> testAll(Database db) {
 		co_await runRYWTransaction(db,
-		                           [=](Reference<ReadYourWritesTransaction> tr) { return testIdempotency(self, tr); });
-		co_await testCleaner(self, db);
-		co_return self->ok;
+		                           [this](Reference<ReadYourWritesTransaction> tr) { return logIdempotencyIds(tr); });
+		co_await runRYWTransaction(db, [this](Reference<ReadYourWritesTransaction> tr) { return testIdempotency(tr); });
+		co_await testCleaner(db);
+		co_return ok;
 	}
 
-	static Future<Void> logIdempotencyIds(AutomaticIdempotencyWorkload* self, Reference<ReadYourWritesTransaction> tr) {
+	Future<Void> logIdempotencyIds(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		RangeResult result = co_await tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!result.more);
@@ -179,8 +178,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	// Check that each transaction committed exactly once.
-	static Future<Void> testIdempotency(AutomaticIdempotencyWorkload* self, Reference<ReadYourWritesTransaction> tr) {
-		RangeResult result = co_await tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY);
+	Future<Void> testIdempotency(Reference<ReadYourWritesTransaction> tr) {
+		RangeResult result = co_await tr->getRange(prefixRange(keyPrefix), CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!result.more);
 		std::unordered_set<Value> ids;
 		// Make sure they're all unique - ie no transaction committed twice
@@ -190,7 +189,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		for (const auto& [k, rawValue] : result) {
 			auto v = ObjectReader::fromStringRef<ValueType>(rawValue, Unversioned());
 			BinaryReader reader(k, Unversioned());
-			reader.readBytes(self->keyPrefix.size());
+			reader.readBytes(keyPrefix.size());
 			Version commitVersion;
 			reader >> commitVersion;
 			commitVersion = bigEndian64(commitVersion);
@@ -203,10 +202,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			    .detail("Id", v.idempotencyId)
 			    .detail("CreatedTime", v.createdTime);
 		}
-		if (ids.size() != self->clientCount * self->numTransactions) {
-			self->ok = false;
+		if (ids.size() != clientCount * numTransactions) {
+			ok = false;
 		}
-		ASSERT_EQ(ids.size(), self->clientCount * self->numTransactions);
+		ASSERT_EQ(ids.size(), clientCount * numTransactions);
 	}
 
 	std::vector<Key> idempotencyKeyValueToTestKeys(KeyValueRef kv, Version* commitVersion, int64_t* timestamp) {
@@ -239,9 +238,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	// Returns the largest gap between createdTime and the idempotency timestamp
-	static Future<int64_t> getMaxTimestampDelta(AutomaticIdempotencyWorkload* self,
-	                                            Database db,
-	                                            int64_t numCreatedTimes) {
+	Future<int64_t> getMaxTimestampDelta(Database db, int64_t numCreatedTimes) {
 		std::vector<int64_t> timestamps;
 		std::vector<Key> keys;
 
@@ -255,7 +252,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		for (const auto& kv : result) {
 			Version commitVersion;
 			int64_t timestamp;
-			std::vector<Key> decodedKeys = self->idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp);
+			std::vector<Key> decodedKeys = idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp);
 			for (auto const& key : decodedKeys) {
 				timestamps.push_back(timestamp);
 				keys.push_back(key);
@@ -283,7 +280,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 						maxCreatedTimeDelta = std::max(timestamps[i] - e.createdTime, maxCreatedTimeDelta);
 					}
 
-					if (self->automaticPercentage == 0) {
+					if (automaticPercentage == 0) {
 						ASSERT_EQ(futures.size(), numCreatedTimes);
 					}
 
@@ -298,7 +295,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 	}
 
-	static Future<int64_t> getOldestCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
+	Future<int64_t> getOldestCreatedTime(Database db) {
 		ReadYourWritesTransaction tr(db);
 		Key key;
 		Version commitVersion{ 0 };
@@ -314,7 +311,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 
 		int64_t timestamp;
-		key = self->idempotencyKeyValueToTestKeys(result[0], &commitVersion, &timestamp)[0];
+		key = idempotencyKeyValueToTestKeys(result[0], &commitVersion, &timestamp)[0];
 
 		// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
 		// be using a tenant.
@@ -333,24 +330,23 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		co_return e.createdTime;
 	}
 
-	static Future<bool> testCleanerOneIteration(AutomaticIdempotencyWorkload* self,
-	                                            Database db,
-	                                            ActorCollection* actors,
-	                                            int64_t minAgeSeconds,
-	                                            int64_t maxTimestampDelta,
-	                                            const std::vector<int64_t>* createdTimes) {
+	Future<bool> testCleanerOneIteration(Database db,
+	                                     ActorCollection* actors,
+	                                     int64_t minAgeSeconds,
+	                                     int64_t maxTimestampDelta,
+	                                     const std::vector<int64_t>* createdTimes) {
 		Future<Void> cleaner = recurringAsync(
 		    [db = db, minAgeSeconds = minAgeSeconds]() { return cleanIdempotencyIds(db, minAgeSeconds); },
-		    self->pollingInterval,
+		    pollingInterval,
 		    true,
-		    self->pollingInterval);
+		    pollingInterval);
 
 		int64_t oldestCreatedTime{ 0 };
 		int64_t successes = 0;
 		actors->add(cleaner);
 		loop {
 			// Oldest created time of a transaction from the workload which still has an idempotency id
-			co_await store(oldestCreatedTime, getOldestCreatedTime(self, db));
+			co_await store(oldestCreatedTime, getOldestCreatedTime(db));
 			if (oldestCreatedTime == -1) {
 				co_return true; // Test can't make meaningful progress anymore
 			}
@@ -370,15 +366,15 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				oldestCreatedTime = *iter + 1;
 			}
 			auto maxActualAge = int64_t(now()) - oldestCreatedTime;
-			if (maxActualAge > minAgeSeconds * self->slop) {
+			if (maxActualAge > minAgeSeconds * slop) {
 				CODE_PROBE(true, "Idempotency cleaner more to clean");
 				TraceEvent("AutomaticIdempotencyCleanerMoreToClean")
 				    .detail("MaxActualAge", maxActualAge)
 				    .detail("MinAgePolicy", minAgeSeconds);
 				successes = 0;
 				// Cleaning should happen eventually
-			} else if (maxActualAge < minAgeSeconds / self->slop) {
-				bool ok = self->automaticPercentage == 0;
+			} else if (maxActualAge < minAgeSeconds / slop) {
+				bool ok = automaticPercentage == 0;
 				TraceEvent(ok ? SevInfo : SevError, "AutomaticIdempotencyCleanedTooMuch")
 				    .detail("MaxActualAge", maxActualAge)
 				    .detail("MinAgePolicy", minAgeSeconds)
@@ -386,7 +382,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				    .detail("OldestCreatedTime", oldestCreatedTime)
 				    .detail("MaxTimestampDelta", maxTimestampDelta);
 				if (!ok) {
-					self->ok = false;
+					this->ok = false;
 				}
 				ASSERT(ok);
 				successes = 0;
@@ -400,15 +396,14 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					break;
 				}
 			}
-			co_await delay(self->pollingInterval);
+			co_await delay(pollingInterval);
 		}
 		cleaner.cancel();
 		co_return false;
 	}
 
-	static Future<std::vector<int64_t>> getCreatedTimes(AutomaticIdempotencyWorkload* self,
-	                                                    Reference<ReadYourWritesTransaction> tr) {
-		RangeResult result = co_await tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY);
+	Future<std::vector<int64_t>> getCreatedTimes(Reference<ReadYourWritesTransaction> tr) {
+		RangeResult result = co_await tr->getRange(prefixRange(keyPrefix), CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!result.more);
 		std::vector<int64_t> createdTimes;
 		for (const auto& [k, v] : result) {
@@ -420,31 +415,30 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	// Check that min age is respected. Also test that we can tolerate concurrent cleaners.
-	static Future<Void> testCleaner(AutomaticIdempotencyWorkload* self, Database db) {
+	Future<Void> testCleaner(Database db) {
 		ActorCollection actors;
 		int64_t minAgeSeconds{ 0 };
 		std::vector<int64_t> createdTimes;
 
 		// Initialize minAgeSeconds to match the current status
-		co_await (
-		    store(minAgeSeconds, fmap([](int64_t t) { return int64_t(now()) - t; }, getOldestCreatedTime(self, db))) &&
-		    store(createdTimes, runRYWTransaction(db, [self = self](Reference<ReadYourWritesTransaction> tr) {
-			          return getCreatedTimes(self, tr);
-		          })));
+		co_await (store(minAgeSeconds, fmap([](int64_t t) { return int64_t(now()) - t; }, getOldestCreatedTime(db))) &&
+		          store(createdTimes, runRYWTransaction(db, [this](Reference<ReadYourWritesTransaction> tr) {
+			                return getCreatedTimes(tr);
+		                })));
 
-		int64_t maxTimestampDelta = co_await getMaxTimestampDelta(self, db, createdTimes.size());
+		int64_t maxTimestampDelta = co_await getMaxTimestampDelta(db, createdTimes.size());
 
 		// Slowly and somewhat randomly allow the cleaner to do more cleaning. Observe that it cleans some, but not too
 		// much.
 		loop {
-			minAgeSeconds *= 1 / (self->slop * 2);
-			if (minAgeSeconds < self->minMinAgeSeconds) {
+			minAgeSeconds *= 1 / (slop * 2);
+			if (minAgeSeconds < minMinAgeSeconds) {
 				break;
 			}
 			{
-				auto choice = co_await race(
-				    testCleanerOneIteration(self, db, &actors, minAgeSeconds, maxTimestampDelta, &createdTimes),
-				    actors.getResult());
+				auto choice =
+				    co_await race(testCleanerOneIteration(db, &actors, minAgeSeconds, maxTimestampDelta, &createdTimes),
+				                  actors.getResult());
 				if (choice.index() == 0) {
 					bool done = std::get<0>(std::move(choice));
 

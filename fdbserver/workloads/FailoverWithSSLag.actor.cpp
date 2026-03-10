@@ -136,7 +136,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		return true;
 	}
 
-	static Future<Optional<Version>> fetchStorageServerLag(FailoverWithSSLagWorkload* self, Database cx) {
+	Future<Optional<Version>> fetchStorageServerLag(Database cx) {
 		double startTime = now();
 		StatusObject result = co_await StatusClient::statusFetcher(cx);
 		double duration = now() - startTime;
@@ -151,7 +151,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		// Fetch the lag between primary and remote tlogs.
 		Version tlogLagInVersions = 0;
 		double tlogLagInSeconds = 0;
-		if (!self->fetchLagFromStatusObject("logserver_lag", statusObjCluster, tlogLagInVersions, tlogLagInSeconds)) {
+		if (!fetchLagFromStatusObject("logserver_lag", statusObjCluster, tlogLagInVersions, tlogLagInSeconds)) {
 			TraceEvent("NoLogServerLagData");
 			co_return Optional<Version>();
 		}
@@ -159,7 +159,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		// Fetch the lag between primary and remote storage servers.
 		Version ssLagInVersions = 0;
 		double ssLagInSeconds = 0;
-		if (!self->fetchLagFromStatusObject("storageserver_lag", statusObjCluster, ssLagInVersions, ssLagInSeconds)) {
+		if (!fetchLagFromStatusObject("storageserver_lag", statusObjCluster, ssLagInVersions, ssLagInSeconds)) {
 			TraceEvent("NoStorageServerLagData");
 			co_return Optional<Version>();
 		}
@@ -167,7 +167,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		// Fetch the lag between primary and remote data centers.
 		Version dcLagInVersions = 0;
 		double dcLagInSeconds = 0;
-		if (!self->fetchLagFromStatusObject("datacenter_lag", statusObjCluster, dcLagInVersions, dcLagInSeconds)) {
+		if (!fetchLagFromStatusObject("datacenter_lag", statusObjCluster, dcLagInVersions, dcLagInSeconds)) {
 			TraceEvent("NoDataCenterLagData");
 			co_return Optional<Version>();
 		}
@@ -184,14 +184,14 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		co_return ssLagInVersions;
 	}
 
-	static Future<Void> waitForRemoteDataCenterToLag(FailoverWithSSLagWorkload* self, Database cx) {
+	Future<Void> waitForRemoteDataCenterToLag(Database cx) {
 		Future<Optional<Version>> ssLag = Never();
 		loop {
 			auto choice = co_await race(delay(5.0), ssLag);
 			if (choice.index() == 0) {
 
 				// Fetch SS lag every 5s.
-				ssLag = self->fetchStorageServerLag(self, cx);
+				ssLag = fetchStorageServerLag(cx);
 			} else if (choice.index() == 1) {
 				Optional<Version> versionLag = std::get<1>(std::move(choice));
 
@@ -206,7 +206,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> failover(FailoverWithSSLagWorkload* self, Database cx) {
+	Future<Void> failover(Database cx) {
 		TraceEvent("FailoverBegin").log();
 
 		co_await success(ManagementAPI::changeConfig(cx.getReference(), g_simulator->disablePrimary, true));
@@ -217,21 +217,21 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		TraceEvent("FailoverComplete").log();
 	}
 
-	static Future<Void> doFailover(FailoverWithSSLagWorkload* self, Database cx) {
+	Future<Void> doFailover(Database cx) {
 		bool connectionsClogged = true;
 		bool failoverCompleted = false;
 		loop {
-			auto choice = co_await race(delay(100.0), self->failover(self, cx));
+			auto choice = co_await race(delay(100.0), failover(cx));
 			if (choice.index() == 0) {
 
 				if (connectionsClogged) {
 					if (failoverCompleted) {
 						// Failover completed even while the remote storages are clogged, which
 						// shouldn't happen. Mark the test as failed.
-						self->testSuccess = false;
+						testSuccess = false;
 						co_return;
 					}
-					self->clogUnclogRemoteStorages(false /* clog */);
+					clogUnclogRemoteStorages(false /* clog */);
 					connectionsClogged = false;
 				}
 			} else if (choice.index() == 1) {
@@ -239,17 +239,17 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 				if (connectionsClogged) {
 					// Failover completed even while the remote storages are clogged, which
 					// shouldn't happen. Mark the test as failed.
-					self->testSuccess = false;
+					testSuccess = false;
 					co_return;
 				}
 				failoverCompleted = true;
 
 				// Verify that the storage server lag has gone below the threshold.
-				Future<Optional<Version>> ssLag = self->fetchStorageServerLag(self, cx);
+				Future<Optional<Version>> ssLag = fetchStorageServerLag(cx);
 				Optional<Version> versionLag = co_await ssLag;
 				if (versionLag.present() && versionLag.get() >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
 					TraceEvent("SSLag").detail("Versions", versionLag.get());
-					self->testSuccess = false;
+					testSuccess = false;
 				}
 				co_return;
 			} else {
@@ -272,11 +272,11 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		}
 
 		// Wait until the data center/storage server lag goes above the threshold.
-		co_await self->waitForRemoteDataCenterToLag(self, cx);
+		co_await self->waitForRemoteDataCenterToLag(cx);
 
 		// Initiate failover and verify that it doesn't complete until the data center/
 		// storage server lag gets below the threshold.
-		co_await self->doFailover(self, cx);
+		co_await self->doFailover(cx);
 	}
 };
 

@@ -389,11 +389,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "conflict write to " << printable(writeKey) << std::endl;
 	}
 
-	static Future<MappedRangeResult> runGetMappedRange(int beginId,
-	                                                   int endId,
-	                                                   Reference<TransactionWrapper>& tr,
-	                                                   GetMappedRangeWorkload* self) {
-		Key mapper = getMapper(self, false);
+	Future<MappedRangeResult> runGetMappedRange(int beginId, int endId, Reference<TransactionWrapper>& tr) {
+		Key mapper = getMapper(false);
 		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
 		Key endTuple = Tuple::makeTuple(prefix, INDEX, indexKey(endId)).getDataAsStandalone();
@@ -402,7 +399,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                          endSelector,
 		                          mapper,
 		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
-		                          self->snapshot,
+		                          snapshot,
 		                          Reverse::False);
 	}
 
@@ -416,7 +413,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			{
 				Error err;
 				try {
-					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1, self);
+					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1);
 
 					// Commit another transaction that has conflict writes.
 					loop {
@@ -459,7 +456,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	// checking the max storage queue length is bounded
-	static Future<Void> reportMetric(GetMappedRangeWorkload* self, Database cx) {
+	Future<Void> reportMetric(Database cx) {
 		loop {
 			StatusObject result = co_await StatusClient::statusFetcher(cx);
 			StatusObjectReader statusObj(result);
@@ -488,8 +485,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 							CODE_PROBE(queryQueueMax > 0, " SS query queue is non-empty");
 							TraceEvent(SevDebug, "QueryQueueMax")
 							    .detail("Value", queryQueueMax)
-							    .detail("MaxLength", self->queueMaxLength);
-							ASSERT(queryQueueMax < self->queueMaxLength);
+							    .detail("MaxLength", queueMaxLength);
+							ASSERT(queryQueueMax < queueMaxLength);
 						}
 					}
 				} else {
@@ -511,7 +508,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				try {
 					// Write something that will be read in getMappedRange.
 					conflictWriteOnRecord(7, tr1, self);
-					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1, self);
+					MappedRangeResult result = co_await runGetMappedRange(5, 10, tr1);
 					UNREACHABLE();
 				} catch (Error& e) {
 					err = e;
@@ -530,16 +527,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	static Future<Void> testMetric(Database cx,
-	                               GetMappedRangeWorkload* self,
-	                               int beginId,
-	                               int endId,
-	                               Key mapper,
-	                               int seconds) {
+	Future<Void> testMetric(Database cx, int beginId, int endId, Key mapper, int seconds) {
 		loop {
-			auto choice = co_await race(reportMetric(self, cx),
-			                            self->submitSmallRequestIndefinitely(cx, 10, 490, mapper, self),
-			                            delay(seconds));
+			auto choice = co_await race(
+			    reportMetric(cx), submitSmallRequestIndefinitely(cx, 10, 490, mapper, this), delay(seconds));
 			if (choice.index() == 0) {
 
 				TraceEvent(SevError, "Error: ReportMetric has ended");
@@ -584,25 +575,25 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "Test configuration: transactionType:" << self->transactionType << " snapshot:" << self->snapshot
 		          << "bad_mapper:" << self->BAD_MAPPER << std::endl;
 
-		Key mapper = getMapper(self, false);
+		Key mapper = getMapper(false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
 		bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
 		co_await self->scanMappedRange(cx, 10, 490, mapper, self);
-		co_await testMetric(cx, self, 10, 490, mapper, self->checkStorageQueueSeconds);
+		co_await testMetric(cx, 10, 490, mapper, self->checkStorageQueueSeconds);
 
 		// reset it to default
 		(const_cast<ServerKnobs*>(SERVER_KNOBS))->STRICTLY_ENFORCE_BYTE_LIMIT = originalStrictlyEnforeByteLimit;
 	}
 
-	static Key getMapper(GetMappedRangeWorkload* self, bool mapperForAllMissing) {
+	Key getMapper(bool mapperForAllMissing) {
 		Tuple mapperTuple;
-		if (self->BAD_MAPPER) {
+		if (BAD_MAPPER) {
 			mapperTuple << prefix << RECORD << "{K[xxx]}"_sr;
 		} else {
 			mapperTuple << prefix << RECORD << (mapperForAllMissing ? "{K[2]}"_sr : "{K[3]}"_sr);
-			if (self->SPLIT_RECORDS) {
+			if (SPLIT_RECORDS) {
 				mapperTuple << "{...}"_sr;
 			}
 		}

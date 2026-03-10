@@ -146,7 +146,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		if (!enabled)
 			return Void();
 		double delay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
-		return workloadMain(this, cx, delay, toKill1, toKill2);
+		return workloadMain(cx, delay, toKill1, toKill2);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -336,11 +336,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// toKill1 and toKill2 are two random subsets of all processes. If simply kill all processes in toKill1 or toKill2,
 	// we may kill too many processes to make the cluster unavailable and stuck.
-	static Future<Void> workloadMain(RemoveServersSafelyWorkload* self,
-	                                 Database cx,
-	                                 double waitSeconds,
-	                                 std::set<AddressExclusion> toKill1,
-	                                 std::set<AddressExclusion> toKill2) {
+	Future<Void> workloadMain(Database cx,
+	                          double waitSeconds,
+	                          std::set<AddressExclusion> toKill1,
+	                          std::set<AddressExclusion> toKill2) {
 		co_await updateProcessIds(cx);
 		co_await delay(waitSeconds);
 
@@ -357,18 +356,18 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// toKill1 may kill too many servers to make cluster unavailable.
 		// Get the processes in toKill1 that are safe to kill
-		killProcArray = self->protectServers(toKill1);
+		killProcArray = protectServers(toKill1);
 		// Update the kill networks to the killable processes
-		toKill1 = self->getNetworks(killProcArray);
+		toKill1 = getNetworks(killProcArray);
 		TraceEvent("RemoveAndKill")
 		    .detail("Step", "exclude list first")
 		    .detail("ToKillModified", describe(toKill1))
 		    .detail("KillTotalModified", toKill1.size())
 		    .detail("ClusterAvailable", g_simulator->isAvailable());
 
-		self->excludeAddresses(toKill1);
+		excludeAddresses(toKill1);
 
-		Optional<Void> result = co_await timeout(removeAndKill(self, cx, toKill1, nullptr, false), self->kill1Timeout);
+		Optional<Void> result = co_await timeout(removeAndKill(cx, toKill1, nullptr, false), kill1Timeout);
 
 		bClearedFirst = result.present();
 		TraceEvent("RemoveAndKill")
@@ -392,22 +391,22 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			co_await includeServers(cx, std::vector<AddressExclusion>(1));
 			co_await includeLocalities(cx, std::vector<std::string>(), failed, true);
 			co_await includeLocalities(cx, std::vector<std::string>(), !failed, true);
-			self->includeAddresses(toKill1);
+			includeAddresses(toKill1);
 		}
 
 		// toKill2 may kill too many servers to make cluster unavailable.
 		// Get the processes in toKill2 that are safe to kill
-		killProcArray = self->protectServers(toKill2);
+		killProcArray = protectServers(toKill2);
 
 		// Update the kill networks to the killable processes
-		toKill2 = self->getNetworks(killProcArray);
+		toKill2 = getNetworks(killProcArray);
 
 		TraceEvent("RemoveAndKill")
 		    .detail("Step", "exclude list second")
 		    .detail("KillTotal", toKill2.size())
 		    .detail("ToKill", describe(toKill2))
 		    .detail("ClusterAvailable", g_simulator->isAvailable());
-		self->excludeAddresses(toKill2);
+		excludeAddresses(toKill2);
 
 		// The second set of machines is selected so that we can always make progress without it, even after the
 		// permitted number of other permanent failures so we expect to succeed after a finite amount of time
@@ -417,10 +416,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("KillTotal", toKill2.size())
 		    .detail("Processes", killProcArray.size())
 		    .detail("ClusterAvailable", g_simulator->isAvailable());
-		co_await reportErrors(timeoutError(removeAndKill(self, cx, toKill2, bClearedFirst ? &toKill1 : nullptr, true),
-		                                   self->kill2Timeout),
-		                      "RemoveServersSafelyError",
-		                      UID());
+		co_await reportErrors(
+		    timeoutError(removeAndKill(cx, toKill2, bClearedFirst ? &toKill1 : nullptr, true), kill2Timeout),
+		    "RemoveServersSafelyError",
+		    UID());
 
 		TraceEvent("RemoveAndKill")
 		    .detail("Step", "excluded second list")
@@ -437,7 +436,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		co_await includeServers(cx, std::vector<AddressExclusion>(1));
 		co_await includeLocalities(cx, std::vector<std::string>(), failed, true);
 		co_await includeLocalities(cx, std::vector<std::string>(), !failed, true);
-		self->includeAddresses(toKill2);
+		includeAddresses(toKill2);
 	}
 
 	std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs) {
@@ -512,17 +511,16 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// If a process is rebooted, it's processid will change. So we need to monitor
 	// such changes and re-issue the locality-based exclusion again.
-	static Future<Void> checkLocalityChange(RemoveServersSafelyWorkload* self,
-	                                        Database cx,
-	                                        std::vector<AddressExclusion> toKillArray,
-	                                        std::unordered_set<std::string> origKillLocalities,
-	                                        bool markExcludeAsFailed) {
+	Future<Void> checkLocalityChange(Database cx,
+	                                 std::vector<AddressExclusion> toKillArray,
+	                                 std::unordered_set<std::string> origKillLocalities,
+	                                 bool markExcludeAsFailed) {
 		std::unordered_set<std::string> killLocalities = origKillLocalities;
 
 		loop {
 			co_await delay(10.0);
-			co_await self->updateProcessIds(cx);
-			std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+			co_await updateProcessIds(cx);
+			std::unordered_set<std::string> toKillLocalities = getLocalitiesFromAddresses(toKillArray);
 			if (toKillLocalities == killLocalities) {
 				continue;
 			}
@@ -551,11 +549,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	// Attempts to exclude a set of processes, and once the exclusion is successful it kills them.
 	// If markExcludeAsFailed is true, then it is an error if we cannot complete the exclusion.
-	static Future<Void> removeAndKill(RemoveServersSafelyWorkload* self,
-	                                  Database cx,
-	                                  std::set<AddressExclusion> toKill,
-	                                  std::set<AddressExclusion>* pIncAddrs,
-	                                  bool markExcludeAsFailed) {
+	Future<Void> removeAndKill(Database cx,
+	                           std::set<AddressExclusion> toKill,
+	                           std::set<AddressExclusion>* pIncAddrs,
+	                           bool markExcludeAsFailed) {
 		UID functionId = nondeterministicRandom()->randomUniqueID();
 
 		// First clear the exclusion list and exclude the given list
@@ -573,7 +570,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		    .detail("MarkExcludeAsFailed", markExcludeAsFailed);
 		// Reinclude the addresses that were excluded, if present
 		if (pIncAddrs) {
-			self->includeAddresses(*pIncAddrs);
+			includeAddresses(*pIncAddrs);
 		}
 
 		std::vector<ISimulator::ProcessInfo*> killProcArray;
@@ -617,8 +614,8 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					if (choice.index() == 0) {
 						bool _safe = std::get<0>(std::move(choice));
 
-						safe = _safe && self->protectServers(std::set<AddressExclusion>(toKillMarkFailedArray.begin(),
-						                                                                toKillMarkFailedArray.end()))
+						safe = _safe && protectServers(std::set<AddressExclusion>(toKillMarkFailedArray.begin(),
+						                                                          toKillMarkFailedArray.end()))
 						                        .size() == toKillMarkFailedArray.size();
 					} else if (choice.index() == 1) {
 
@@ -629,7 +626,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 						UNREACHABLE();
 					}
 				}
-				if (retries == self->maxSafetyCheckRetries) {
+				if (retries == maxSafetyCheckRetries) {
 					// Do not mark as failed if limit is reached
 					TraceEvent("RemoveAndKill", functionId)
 					    .detail("Step", "SafetyCheckLimitReached")
@@ -666,7 +663,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			toKill.erase(removeServer);
 			toKill.insert(coordExcl);
 		}
-		killProcArray = self->getProcesses(toKill);
+		killProcArray = getProcesses(toKill);
 		TraceEvent("RemoveAndKill", functionId)
 		    .detail("Step", "Activate Server Exclusion")
 		    .detail("KillAddrs", toKill.size())
@@ -681,7 +678,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		bool excludeLocalitiesInsteadOfServers = deterministicRandom()->coinflip();
 		std::unordered_set<std::string> toKillLocalitiesFailed;
 		if (markExcludeAsFailed) {
-			toKillLocalitiesFailed = self->getLocalitiesFromAddresses(toKillMarkFailedArray);
+			toKillLocalitiesFailed = getLocalitiesFromAddresses(toKillMarkFailedArray);
 			if (excludeLocalitiesInsteadOfServers && toKillLocalitiesFailed.size() > 0) {
 				TraceEvent("RemoveAndKill", functionId)
 				    .detail("Step", "Excluding localities with failed option")
@@ -701,7 +698,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 		}
 
-		std::unordered_set<std::string> toKillLocalities = self->getLocalitiesFromAddresses(toKillArray);
+		std::unordered_set<std::string> toKillLocalities = getLocalitiesFromAddresses(toKillArray);
 		if (excludeLocalitiesInsteadOfServers && toKillLocalities.size() > 0) {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "Excluding localities without failed option")
@@ -729,12 +726,10 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			    .detail("Addresses", describe(toKill))
 			    .detail("ClusterAvailable", g_simulator->isAvailable());
 			if (excludeLocalitiesInsteadOfServers) {
-				co_await (success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
-				          checkLocalityChange(self,
-				                              cx,
-				                              toKillArray,
-				                              toKillLocalities,
-				                              markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
+				co_await (
+				    success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */)) ||
+				    checkLocalityChange(
+				        cx, toKillArray, toKillLocalities, markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
 			} else {
 				co_await success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */));
 			}
@@ -765,7 +760,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 					break;
 			}
 
-			self->killAddresses(toKill);
+			killAddresses(toKill);
 		} else {
 			TraceEvent("RemoveAndKill", functionId)
 			    .detail("Step", "nothing to clear")

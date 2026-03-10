@@ -68,142 +68,6 @@ struct ReadWriteCommonImpl {
 		}
 	}
 
-	static Future<Void> tracePeriodically(ReadWriteCommon* self) {
-		double start = now();
-		double elapsed = 0.0;
-		int64_t last_ops = 0;
-
-		loop {
-			elapsed += self->periodicLoggingInterval;
-			co_await delayUntil(start + elapsed);
-
-			TraceEvent((self->description() + "_RowReadLatency").c_str())
-			    .detail("Mean", self->readLatencies.mean())
-			    .detail("Median", self->readLatencies.median())
-			    .detail("Percentile5", self->readLatencies.percentile(.05))
-			    .detail("Percentile95", self->readLatencies.percentile(.95))
-			    .detail("Percentile99", self->readLatencies.percentile(.99))
-			    .detail("Percentile99_9", self->readLatencies.percentile(.999))
-			    .detail("Max", self->readLatencies.max())
-			    .detail("Count", self->readLatencyCount)
-			    .detail("Elapsed", elapsed);
-
-			TraceEvent((self->description() + "_GRVLatency").c_str())
-			    .detail("Mean", self->GRVLatencies.mean())
-			    .detail("Median", self->GRVLatencies.median())
-			    .detail("Percentile5", self->GRVLatencies.percentile(.05))
-			    .detail("Percentile95", self->GRVLatencies.percentile(.95))
-			    .detail("Percentile99", self->GRVLatencies.percentile(.99))
-			    .detail("Percentile99_9", self->GRVLatencies.percentile(.999))
-			    .detail("Max", self->GRVLatencies.max());
-
-			TraceEvent((self->description() + "_CommitLatency").c_str())
-			    .detail("Mean", self->commitLatencies.mean())
-			    .detail("Median", self->commitLatencies.median())
-			    .detail("Percentile5", self->commitLatencies.percentile(.05))
-			    .detail("Percentile95", self->commitLatencies.percentile(.95))
-			    .detail("Percentile99", self->commitLatencies.percentile(.99))
-			    .detail("Percentile99_9", self->commitLatencies.percentile(.999))
-			    .detail("Max", self->commitLatencies.max());
-
-			TraceEvent((self->description() + "_TotalLatency").c_str())
-			    .detail("Mean", self->latencies.mean())
-			    .detail("Median", self->latencies.median())
-			    .detail("Percentile5", self->latencies.percentile(.05))
-			    .detail("Percentile95", self->latencies.percentile(.95))
-			    .detail("Percentile99", self->latencies.percentile(.99))
-			    .detail("Percentile99_9", self->latencies.percentile(.999))
-			    .detail("Max", self->latencies.max());
-
-			int64_t ops =
-			    (self->aTransactions.getValue() * (self->readsPerTransactionA + self->writesPerTransactionA)) +
-			    (self->bTransactions.getValue() * (self->readsPerTransactionB + self->writesPerTransactionB));
-			bool recordBegin = self->shouldRecord(std::max(now() - self->periodicLoggingInterval, self->clientBegin));
-			bool recordEnd = self->shouldRecord(now());
-			if (recordBegin && recordEnd) {
-				std::string ts = format("T=%04.0fs:", elapsed);
-				self->periodicMetrics.emplace_back(
-				    ts + "Operations/sec", (ops - last_ops) / self->periodicLoggingInterval, Averaged::False);
-
-				// if(self->rampUpLoad) {
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Latency (ms)", 1000 * self->latencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Latency (ms, averaged)", 1000 * self->latencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% Latency (ms, averaged)", 1000 * self->latencies.percentile(.05), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% Latency (ms, averaged)", 1000 * self->latencies.percentile(.95), Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Row Read Latency (ms)", 1000 * self->readLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Row Read Latency (ms, averaged)", 1000 * self->readLatencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "5% Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.percentile(.05),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "95% Row Read Latency (ms, averaged)",
-				                                   1000 * self->readLatencies.percentile(.95),
-				                                   Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Total Read Latency (ms)", 1000 * self->fullReadLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "Median Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.median(),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "5% Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.percentile(.05),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "95% Total Read Latency (ms, averaged)",
-				                                   1000 * self->fullReadLatencies.percentile(.95),
-				                                   Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean GRV Latency (ms)", 1000 * self->GRVLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "5% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.05), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "95% GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.percentile(.95), Averaged::True);
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Mean Commit Latency (ms)", 1000 * self->commitLatencies.mean(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Median Commit Latency (ms, averaged)", 1000 * self->commitLatencies.median(), Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "5% Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.percentile(.05),
-				                                   Averaged::True);
-				self->periodicMetrics.emplace_back(ts + "95% Commit Latency (ms, averaged)",
-				                                   1000 * self->commitLatencies.percentile(.95),
-				                                   Averaged::True);
-				//}
-
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Latency (ms, averaged)", 1000 * self->latencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Row Read Latency (ms, averaged)", 1000 * self->readLatencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Total Read Latency (ms, averaged)", 1000 * self->fullReadLatencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max GRV Latency (ms, averaged)", 1000 * self->GRVLatencies.max(), Averaged::True);
-				self->periodicMetrics.emplace_back(
-				    ts + "Max Commit Latency (ms, averaged)", 1000 * self->commitLatencies.max(), Averaged::True);
-			}
-			last_ops = ops;
-
-			// if(self->rampUpLoad) {
-			self->latencies.clear();
-			self->readLatencies.clear();
-			self->fullReadLatencies.clear();
-			self->GRVLatencies.clear();
-			self->commitLatencies.clear();
-			//}
-
-			self->readLatencyTotal = 0.0;
-			self->readLatencyCount = 0;
-		}
-	}
 	static Future<Void> logLatency(Future<Optional<Value>> f,
 	                               DDSketch<double>* latencies,
 	                               double* totalLatency,
@@ -243,30 +107,148 @@ struct ReadWriteCommonImpl {
 		}
 	}
 
-	static Future<Void> setup(Database cx, ReadWriteCommon* self) {
-		if (!self->doSetup)
+	static Future<Void> setup(Database cx, ReadWriteCommon& self) {
+		if (!self.doSetup)
 			co_return;
 
 		Promise<double> loadTime;
 		Promise<std::vector<std::pair<uint64_t, double>>> ratesAtKeyCounts;
 
 		co_await bulkSetup(cx,
-		                   self,
-		                   self->nodeCount,
+		                   &self,
+		                   self.nodeCount,
 		                   loadTime,
-		                   self->insertionCountsToMeasure.empty(),
-		                   self->warmingDelay,
-		                   self->maxInsertRate,
-		                   self->insertionCountsToMeasure,
+		                   self.insertionCountsToMeasure.empty(),
+		                   self.warmingDelay,
+		                   self.maxInsertRate,
+		                   self.insertionCountsToMeasure,
 		                   ratesAtKeyCounts);
 
-		self->loadTime = loadTime.getFuture().get();
-		self->ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
+		self.loadTime = loadTime.getFuture().get();
+		self.ratesAtKeyCounts = ratesAtKeyCounts.getFuture().get();
 	}
 };
 
 Future<Void> ReadWriteCommon::tracePeriodically() {
-	return ReadWriteCommonImpl::tracePeriodically(this);
+	double start = now();
+	double elapsed = 0.0;
+	int64_t last_ops = 0;
+
+	loop {
+		elapsed += periodicLoggingInterval;
+		co_await delayUntil(start + elapsed);
+
+		TraceEvent((description() + "_RowReadLatency").c_str())
+		    .detail("Mean", readLatencies.mean())
+		    .detail("Median", readLatencies.median())
+		    .detail("Percentile5", readLatencies.percentile(.05))
+		    .detail("Percentile95", readLatencies.percentile(.95))
+		    .detail("Percentile99", readLatencies.percentile(.99))
+		    .detail("Percentile99_9", readLatencies.percentile(.999))
+		    .detail("Max", readLatencies.max())
+		    .detail("Count", readLatencyCount)
+		    .detail("Elapsed", elapsed);
+
+		TraceEvent((description() + "_GRVLatency").c_str())
+		    .detail("Mean", GRVLatencies.mean())
+		    .detail("Median", GRVLatencies.median())
+		    .detail("Percentile5", GRVLatencies.percentile(.05))
+		    .detail("Percentile95", GRVLatencies.percentile(.95))
+		    .detail("Percentile99", GRVLatencies.percentile(.99))
+		    .detail("Percentile99_9", GRVLatencies.percentile(.999))
+		    .detail("Max", GRVLatencies.max());
+
+		TraceEvent((description() + "_CommitLatency").c_str())
+		    .detail("Mean", commitLatencies.mean())
+		    .detail("Median", commitLatencies.median())
+		    .detail("Percentile5", commitLatencies.percentile(.05))
+		    .detail("Percentile95", commitLatencies.percentile(.95))
+		    .detail("Percentile99", commitLatencies.percentile(.99))
+		    .detail("Percentile99_9", commitLatencies.percentile(.999))
+		    .detail("Max", commitLatencies.max());
+
+		TraceEvent((description() + "_TotalLatency").c_str())
+		    .detail("Mean", latencies.mean())
+		    .detail("Median", latencies.median())
+		    .detail("Percentile5", latencies.percentile(.05))
+		    .detail("Percentile95", latencies.percentile(.95))
+		    .detail("Percentile99", latencies.percentile(.99))
+		    .detail("Percentile99_9", latencies.percentile(.999))
+		    .detail("Max", latencies.max());
+
+		int64_t ops = (aTransactions.getValue() * (readsPerTransactionA + writesPerTransactionA)) +
+		              (bTransactions.getValue() * (readsPerTransactionB + writesPerTransactionB));
+		bool recordBegin = shouldRecord(std::max(now() - periodicLoggingInterval, clientBegin));
+		bool recordEnd = shouldRecord(now());
+		if (recordBegin && recordEnd) {
+			std::string ts = format("T=%04.0fs:", elapsed);
+			periodicMetrics.emplace_back(
+			    ts + "Operations/sec", (ops - last_ops) / periodicLoggingInterval, Averaged::False);
+
+			periodicMetrics.emplace_back(ts + "Mean Latency (ms)", 1000 * latencies.mean(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Median Latency (ms, averaged)", 1000 * latencies.median(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "5% Latency (ms, averaged)", 1000 * latencies.percentile(.05), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "95% Latency (ms, averaged)", 1000 * latencies.percentile(.95), Averaged::True);
+
+			periodicMetrics.emplace_back(
+			    ts + "Mean Row Read Latency (ms)", 1000 * readLatencies.mean(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Median Row Read Latency (ms, averaged)", 1000 * readLatencies.median(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "5% Row Read Latency (ms, averaged)", 1000 * readLatencies.percentile(.05), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "95% Row Read Latency (ms, averaged)", 1000 * readLatencies.percentile(.95), Averaged::True);
+
+			periodicMetrics.emplace_back(
+			    ts + "Mean Total Read Latency (ms)", 1000 * fullReadLatencies.mean(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Median Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.median(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "5% Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.percentile(.05), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "95% Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.percentile(.95), Averaged::True);
+
+			periodicMetrics.emplace_back(ts + "Mean GRV Latency (ms)", 1000 * GRVLatencies.mean(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Median GRV Latency (ms, averaged)", 1000 * GRVLatencies.median(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "5% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(.05), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "95% GRV Latency (ms, averaged)", 1000 * GRVLatencies.percentile(.95), Averaged::True);
+
+			periodicMetrics.emplace_back(
+			    ts + "Mean Commit Latency (ms)", 1000 * commitLatencies.mean(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Median Commit Latency (ms, averaged)", 1000 * commitLatencies.median(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "5% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(.05), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "95% Commit Latency (ms, averaged)", 1000 * commitLatencies.percentile(.95), Averaged::True);
+
+			periodicMetrics.emplace_back(ts + "Max Latency (ms, averaged)", 1000 * latencies.max(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Max Row Read Latency (ms, averaged)", 1000 * readLatencies.max(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Max Total Read Latency (ms, averaged)", 1000 * fullReadLatencies.max(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Max GRV Latency (ms, averaged)", 1000 * GRVLatencies.max(), Averaged::True);
+			periodicMetrics.emplace_back(
+			    ts + "Max Commit Latency (ms, averaged)", 1000 * commitLatencies.max(), Averaged::True);
+		}
+		last_ops = ops;
+
+		latencies.clear();
+		readLatencies.clear();
+		fullReadLatencies.clear();
+		GRVLatencies.clear();
+		commitLatencies.clear();
+
+		readLatencyTotal = 0.0;
+		readLatencyCount = 0;
+	}
 }
 
 Future<Void> ReadWriteCommon::logLatency(Future<Optional<Value>> f, bool shouldRecord) {
@@ -280,7 +262,7 @@ Future<Void> ReadWriteCommon::logLatency(Future<RangeResult> f, bool shouldRecor
 }
 
 Future<Void> ReadWriteCommon::setup(Database const& cx) {
-	return ReadWriteCommonImpl::setup(cx, this);
+	return ReadWriteCommonImpl::setup(cx, *this);
 }
 
 Future<bool> ReadWriteCommon::check(Database const& cx) {
@@ -491,50 +473,50 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		}
 	}
 
-	Future<Void> start(Database const& cx) override { return timeout(_start(cx, this), testDuration, Void()); }
+	Future<Void> start(Database const& cx) override { return timeout(_start(cx), testDuration, Void()); }
 
 	template <class Trans>
-	static Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, ReadWriteWorkload* self, bool shouldRecord) {
+	Future<Void> readOp(Trans* tr, std::vector<int64_t> keys, bool shouldRecord) {
 		if (!keys.size())
 			co_return;
-		if (!self->dependentReads) {
+		if (!dependentReads) {
 			std::vector<Future<Void>> readers;
-			if (self->rangeReads) {
+			if (rangeReads) {
 				for (int op = 0; op < keys.size(); op++) {
-					++self->totalReadsMetric;
-					readers.push_back(self->logLatency(
-					    tr->getRange(KeyRangeRef(self->keyForIndex(keys[op]), Key(strinc(self->keyForIndex(keys[op])))),
-					                 GetRangeLimits(-1, 80000)),
-					    shouldRecord));
+					++totalReadsMetric;
+					readers.push_back(
+					    logLatency(tr->getRange(KeyRangeRef(keyForIndex(keys[op]), Key(strinc(keyForIndex(keys[op])))),
+					                            GetRangeLimits(-1, 80000)),
+					               shouldRecord));
 				}
 			} else {
 				for (int op = 0; op < keys.size(); op++) {
-					++self->totalReadsMetric;
-					readers.push_back(self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord));
+					++totalReadsMetric;
+					readers.push_back(logLatency(tr->get(keyForIndex(keys[op])), shouldRecord));
 				}
 			}
 			co_await waitForAll(readers);
 		} else {
 			int op{ 0 };
 			for (op = 0; op < keys.size(); op++) {
-				++self->totalReadsMetric;
-				co_await self->logLatency(tr->get(self->keyForIndex(keys[op])), shouldRecord);
+				++totalReadsMetric;
+				co_await logLatency(tr->get(keyForIndex(keys[op])), shouldRecord);
 			}
 		}
 	}
 
-	static Future<Void> _start(Database cx, ReadWriteWorkload* self) {
+	Future<Void> _start(Database cx) {
 		// Read one record from the database to warm the cache of keyServers
 		std::vector<int64_t> keys;
-		keys.push_back(deterministicRandom()->randomInt64(0, self->nodeCount));
+		keys.push_back(deterministicRandom()->randomInt64(0, nodeCount));
 		double startTime = now();
 		loop {
 			Transaction tr(cx);
 			{
 				Error err;
 				try {
-					self->setupTransaction(tr);
-					co_await self->readOp(&tr, keys, self, false);
+					setupTransaction(tr);
+					co_await readOp(&tr, keys, false);
 					co_await tr.warmRange(allKeys);
 					break;
 				} catch (Error& e) {
@@ -542,7 +524,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				}
 				if (err.isValid()) {
 					if (err.code() == error_code_tag_throttled) {
-						++self->transactionsTagThrottled;
+						++transactionsTagThrottled;
 					}
 					co_await tr.onError(err);
 				}
@@ -552,26 +534,24 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		co_await delay(std::max(0.1, 1.0 - (now() - startTime)));
 
 		std::vector<Future<Void>> clients;
-		if (self->enableReadLatencyLogging)
-			clients.push_back(self->tracePeriodically());
+		if (enableReadLatencyLogging)
+			clients.push_back(tracePeriodically());
 
-		self->clientBegin = now();
-		for (int c = 0; c < self->actorCount; c++) {
+		clientBegin = now();
+		for (int c = 0; c < actorCount; c++) {
 			Future<Void> worker;
-			if (self->useRYW)
-				worker = self->randomReadWriteClient<ReadYourWritesTransaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c);
+			if (useRYW)
+				worker =
+				    randomReadWriteClient<ReadYourWritesTransaction>(cx, this, actorCount / transactionsPerSecond, c);
 			else
-				worker = self->randomReadWriteClient<Transaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c);
+				worker = randomReadWriteClient<Transaction>(cx, this, actorCount / transactionsPerSecond, c);
 			clients.push_back(worker);
 		}
 
-		if (!self->cancelWorkersAtDuration)
-			self->clients = clients; // Don't cancel them until check()
+		if (!cancelWorkersAtDuration)
+			this->clients = clients; // Don't cancel them until check()
 
-		co_await (self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
-		                                        : delay(self->testDuration));
+		co_await (cancelWorkersAtDuration ? timeout(waitForAll(clients), testDuration, Void()) : delay(testDuration));
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount) {
@@ -689,7 +669,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 								self->GRVLatencies.addSample(grvLatency);
 
 							double readStart = now();
-							co_await self->readOp(&tr, keys, self, self->shouldRecord());
+							co_await self->readOp(&tr, keys, self->shouldRecord());
 
 							double readLatency = now() - readStart;
 							if (self->shouldRecord())

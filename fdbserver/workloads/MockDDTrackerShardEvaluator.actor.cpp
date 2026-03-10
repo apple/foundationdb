@@ -68,8 +68,7 @@ public:
 		return Void();
 	}
 
-	static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
-	                                          FutureStream<RelocateShard> input) {
+	Future<Void> relocateShardReporter(FutureStream<RelocateShard> input) {
 		loop {
 			{
 				Error err;
@@ -79,7 +78,7 @@ public:
 						if (choice.index() == 0) {
 							RelocateShard rs = std::get<0>(std::move(choice));
 
-							++self->rsReasonCounts[rs.reason];
+							++rsReasonCounts[rs.reason];
 						} else {
 							UNREACHABLE();
 						}
@@ -102,6 +101,7 @@ public:
 
 		// start mock servers
 		actors.add(waitForAll(sharedMgs->runAllMockServers()));
+		actors.add(relocateShardReporter(output.getFuture()));
 
 		// start tracker
 		Reference<InitialDataDistribution> initData =
@@ -131,8 +131,6 @@ public:
 		                                        getAverageShardBytes.getFuture(),
 		                                        triggerStorageQueueRebalance.getFuture(),
 		                                        triggerShardBulkLoading.getFuture()));
-
-		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());
 	}

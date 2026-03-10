@@ -129,12 +129,12 @@ struct ClogTlogWorkload : TestWorkload {
 		cloggedPairs.clear();
 	}
 
-	static Future<Void> excludeFailedLog(ClogTlogWorkload* self, Database cx) {
+	Future<Void> excludeFailedLog(Database cx) {
 		loop {
-			auto choice = co_await race(self->dbInfo->onChange(), delay(30));
+			auto choice = co_await race(dbInfo->onChange(), delay(30));
 			if (choice.index() == 0) {
 
-				if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+				if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 					co_return;
 				}
 			} else if (choice.index() == 1) {
@@ -142,9 +142,9 @@ struct ClogTlogWorkload : TestWorkload {
 				// recovery state hasn't changed in 30s, exclude the failed tlog
 				CODE_PROBE(true, "Exclude failed tlog");
 				TraceEvent("ExcludeFailedLog")
-				    .detail("TLog", self->tlog.get())
-				    .detail("RecoveryState", self->dbInfo->get().recoveryState);
-				std::string modes = "exclude=" + formatIpPort(self->tlog.get().ip, self->tlog.get().port);
+				    .detail("TLog", tlog.get())
+				    .detail("RecoveryState", dbInfo->get().recoveryState);
+				std::string modes = "exclude=" + formatIpPort(tlog.get().ip, tlog.get().port);
 				ConfigurationResult r = co_await ManagementAPI::changeConfig(cx.getReference(), modes, /*force=*/true);
 				TraceEvent("ExcludeFailedLog").detail("Result", r);
 				co_return;
@@ -185,7 +185,7 @@ struct ClogTlogWorkload : TestWorkload {
 
 		// start exclusion and wait for fully recovery. When using gray failure, the cluster should recover by itself
 		// eventually.
-		Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(self, cx);
+		Future<Void> excludeLog = useGrayFailureToRecover ? Never() : excludeFailedLog(cx);
 		Future<Void> onChange = self->dbInfo->onChange();
 		loop {
 			auto choice = co_await race(onChange, delayUntil(workloadEnd));
