@@ -47,7 +47,7 @@ struct LogMetricsWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (clientId)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<Void> setSystemRate(LogMetricsWorkload* self, Database cx, uint32_t rate) {
@@ -67,7 +67,7 @@ struct LogMetricsWorkload : TestWorkload {
 			Transaction tr(cx);
 			Error err;
 			try {
-				co_await success(tr.getReadVersion());
+				co_await tr.getReadVersion();
 				tr.set(fastLoggingEnabled, br.toValue());
 				tr.makeSelfConflicting();
 				co_await tr.commit();
@@ -79,14 +79,14 @@ struct LogMetricsWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx, LogMetricsWorkload* self) {
-		co_await delay(self->logAt);
+	Future<Void> _start(Database cx) {
+		co_await delay(logAt);
 
-		co_await self->setSystemRate(self, cx, self->logsPerSecond);
-		co_await timeout(recurring(&systemMonitor, 1.0 / self->logsPerSecond), self->logDuration, Void());
+		co_await setSystemRate(this, cx, logsPerSecond);
+		co_await timeout(recurring(&systemMonitor, 1.0 / logsPerSecond), logDuration, Void());
 
 		// We're done, set everything back
-		co_await self->setSystemRate(self, cx, 1.0);
+		co_await setSystemRate(this, cx, 1.0);
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

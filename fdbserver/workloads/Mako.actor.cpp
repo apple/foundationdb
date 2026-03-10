@@ -176,7 +176,7 @@ struct MakoWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (doChecksumVerificationOnly)
 			return Void();
-		return _start(cx, this);
+		return _start(cx);
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -400,13 +400,13 @@ struct MakoWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx, MakoWorkload* self) {
+	Future<Void> _start(Database cx) {
 		// TODO: Do I need to read data to warm the cache of the keySystem like ReadWrite.actor.cpp (line 465)?
-		if (self->runBenchmark) {
-			co_await self->_runBenchmark(cx, self);
+		if (runBenchmark) {
+			co_await _runBenchmark(cx, this);
 		}
-		if (!self->preserveData && self->clientId == 0) {
-			co_await self->cleanup(cx, self);
+		if (!preserveData && clientId == 0) {
+			co_await cleanup(cx, this);
 		}
 	}
 
@@ -664,7 +664,7 @@ struct MakoWorkload : TestWorkload {
 	template <class T>
 	static Future<Void> logLatency(Future<T> f, DDSketch<double>* opLatencies) {
 		double opBegin = timer();
-		co_await success(f);
+		co_await f;
 		opLatencies->addSample(timer() - opBegin);
 	}
 
