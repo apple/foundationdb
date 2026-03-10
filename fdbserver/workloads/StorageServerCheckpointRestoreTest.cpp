@@ -78,7 +78,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 
 		TraceEvent("TestCheckpointRestoreBegin");
-		co_await success(setDDMode(cx, 0));
+		co_await setDDMode(cx, 0);
 		Version version = co_await self->writeAndVerify(self, cx, key, oldValue);
 
 		TraceEvent("TestCreatingCheckpoint").detail("Range", testRange);
@@ -210,7 +210,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		Future<Void> close = kvStore->onClosed();
 		kvStore->dispose();
 		co_await close;
-		co_await success(setDDMode(cx, 1));
+		co_await setDDMode(cx, 1);
 	}
 
 	Future<Void> readAndVerify(SSCheckpointRestoreWorkload* self,

@@ -730,7 +730,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 				    checkLocalityChange(
 				        cx, toKillArray, toKillLocalities, markExcludeAsFailed && toKillLocalitiesFailed.size() > 0));
 			} else {
-				co_await success(checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */));
+				co_await checkForExcludingServers(cx, toKillArray, true /* wait for exclusion */);
 			}
 
 			TraceEvent("RemoveAndKill", functionId)

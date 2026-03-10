@@ -336,9 +336,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							throw;
 					}
 
-					co_await ::success(self->checkForStorage(cx, configuration, tssMapping, self));
-					co_await ::success(self->checkForExtraDataStores(cx, self));
-					co_await ::success(self->checkStorageMetadata(cx, self));
+					co_await self->checkForStorage(cx, configuration, tssMapping, self);
+					co_await self->checkForExtraDataStores(cx, self);
+					co_await self->checkStorageMetadata(cx, self);
 
 					// Check that each machine is operating as its desired class
 					bool usingDesiredClasses = co_await self->checkUsingDesiredClasses(cx, self);

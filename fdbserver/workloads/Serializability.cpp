@@ -285,13 +285,13 @@ struct SerializabilityWorkload : TestWorkload {
 				int waitType = deterministicRandom()->randomInt(0, 4);
 				while (true) {
 					if (waitType == 0 && getFutures->size()) {
-						co_await ::success(deterministicRandom()->randomChoice(*getFutures));
+						co_await deterministicRandom()->randomChoice(*getFutures);
 						break;
 					} else if (waitType == 1 && getKeyFutures->size()) {
-						co_await ::success(deterministicRandom()->randomChoice(*getKeyFutures));
+						co_await deterministicRandom()->randomChoice(*getKeyFutures);
 						break;
 					} else if (waitType == 2 && getRangeFutures->size()) {
-						co_await ::success(deterministicRandom()->randomChoice(*getRangeFutures));
+						co_await deterministicRandom()->randomChoice(*getRangeFutures);
 						break;
 					} else if (waitType == 3) {
 						co_await delay(0.001 * deterministicRandom()->random01());
