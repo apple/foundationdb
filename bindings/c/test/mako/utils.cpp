@@ -34,7 +34,8 @@ int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t
 	int remaining = val - (interval * total_p * total_t);
 	if ((p_idx * total_t + t_idx) < remaining) {
 		return interval + 1;
-	} else if (interval == 0) {
+	}
+	if (interval == 0) {
 		return -1;
 	}
 	/* else */

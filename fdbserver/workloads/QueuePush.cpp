@@ -86,9 +86,8 @@ struct QueuePushWorkload : TestWorkload {
 		if (sscanf(value.substr(0, 8).toString().c_str(), "%x", &base) &&
 		    sscanf(value.substr(8, 8).toString().c_str(), "%x", &offset)) {
 			return std::make_pair(base, offset);
-		} else
-			// SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
-			throw client_invalid_operation();
+		} // SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
+		throw client_invalid_operation();
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -116,7 +115,7 @@ struct QueuePushWorkload : TestWorkload {
 					if (self->forward) {
 						Key _lastKey = co_await tr.getKey(lastLessThan(self->endingKey), Snapshot::True);
 						lastKey = _lastKey;
-						if (lastKey == StringRef())
+						if (lastKey.empty())
 							lastKey = self->startingKey;
 					} else {
 						Key _lastKey = co_await tr.getKey(firstGreaterThan(self->startingKey), Snapshot::True);

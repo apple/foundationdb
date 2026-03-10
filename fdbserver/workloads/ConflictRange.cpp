@@ -170,7 +170,7 @@ struct ConflictRangeWorkload : TestWorkload {
 					                                        randomLimit,
 					                                        Snapshot::False,
 					                                        reverse);
-					if (res.size()) {
+					if (!res.empty()) {
 						originalResults = res;
 						break;
 					}
@@ -345,56 +345,54 @@ struct ConflictRangeWorkload : TestWorkload {
 						TraceEvent("ConflictRangeDump").setMaxFieldLength(10000).detail("Keys", allKeyEntries);
 					}
 					throw not_committed();
-				} else {
-					// If the commit is successful, check that the result matches the first execution.
-					RangeResult res = co_await tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
-					                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
-					                                        randomLimit,
-					                                        Snapshot::False,
-					                                        reverse);
-					++self->withoutConflicts;
+				} // If the commit is successful, check that the result matches the first execution.
+				RangeResult res = co_await tr4.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
+				                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
+				                                        randomLimit,
+				                                        Snapshot::False,
+				                                        reverse);
+				++self->withoutConflicts;
 
-					if (res.size() == originalResults.size()) {
-						for (int i = 0; i < res.size(); i++) {
-							if (res[i] != originalResults[i] &&
-							    !(res[i].key.startsWith("\xff"_sr) && originalResults[i].key.startsWith("\xff"_sr))) {
-								TraceEvent(SevError, "ConflictRangeError")
-								    .detail("Info", "No conflict returned, however results do not match")
-								    .detail("Original",
-								            printable(originalResults[i].key) + " " +
-								                printable(originalResults[i].value))
-								    .detail("New", printable(res[i].key) + " " + printable(res[i].value));
-							}
+				if (res.size() == originalResults.size()) {
+					for (int i = 0; i < res.size(); i++) {
+						if (res[i] != originalResults[i] &&
+						    !(res[i].key.startsWith("\xff"_sr) && originalResults[i].key.startsWith("\xff"_sr))) {
+							TraceEvent(SevError, "ConflictRangeError")
+							    .detail("Info", "No conflict returned, however results do not match")
+							    .detail("Original",
+							            printable(originalResults[i].key) + " " + printable(originalResults[i].value))
+							    .detail("New", printable(res[i].key) + " " + printable(res[i].value));
 						}
-					} else {
-						std::string keyStr1 = "";
-						for (int i = 0; i < res.size(); i++) {
-							keyStr1 += printable(res[i].key) + " ";
-						}
-
-						std::string keyStr2 = "";
-						for (int i = 0; i < originalResults.size(); i++) {
-							keyStr2 += printable(originalResults[i].key) + " ";
-						}
-
-						TraceEvent(SevError, "ConflictRangeError")
-						    .detail("Info", "No conflict returned, however result sizes do not match")
-						    .detail("OriginalSize", originalResults.size())
-						    .detail("NewSize", res.size())
-						    .detail("RandomSets", randomSets)
-						    .detail("MyKeyA", myKeyA)
-						    .detail("MyKeyB", myKeyB)
-						    .detail("OnEqualA", onEqualA)
-						    .detail("OnEqualB", onEqualB)
-						    .detail("OffsetA", offsetA)
-						    .detail("OffsetB", offsetB)
-						    .detail("RandomLimit", randomLimit)
-						    .detail("Reverse", reverse)
-						    .detail("Size", originalResults.size())
-						    .detail("Results", keyStr1)
-						    .detail("Original", keyStr2);
 					}
+				} else {
+					std::string keyStr1 = "";
+					for (int i = 0; i < res.size(); i++) {
+						keyStr1 += printable(res[i].key) + " ";
+					}
+
+					std::string keyStr2 = "";
+					for (int i = 0; i < originalResults.size(); i++) {
+						keyStr2 += printable(originalResults[i].key) + " ";
+					}
+
+					TraceEvent(SevError, "ConflictRangeError")
+					    .detail("Info", "No conflict returned, however result sizes do not match")
+					    .detail("OriginalSize", originalResults.size())
+					    .detail("NewSize", res.size())
+					    .detail("RandomSets", randomSets)
+					    .detail("MyKeyA", myKeyA)
+					    .detail("MyKeyB", myKeyB)
+					    .detail("OnEqualA", onEqualA)
+					    .detail("OnEqualB", onEqualB)
+					    .detail("OffsetA", offsetA)
+					    .detail("OffsetB", offsetB)
+					    .detail("RandomLimit", randomLimit)
+					    .detail("Reverse", reverse)
+					    .detail("Size", originalResults.size())
+					    .detail("Results", keyStr1)
+					    .detail("Original", keyStr2);
 				}
+
 			} catch (Error& e) {
 				err = e;
 			}

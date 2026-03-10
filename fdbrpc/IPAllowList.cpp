@@ -62,24 +62,22 @@ IPAddress AuthAllowedSubnet::netmask() const {
 	if (addressMask.isV4()) {
 		uint32_t res = 0xffffffff ^ addressMask.toV4();
 		return IPAddress(res);
-	} else {
-		std::array<unsigned char, 16> res;
-		res.fill(0xff);
-		auto mask = addressMask.toV6();
-		for (int i = 0; i < mask.size(); ++i) {
-			res[i] ^= mask[i];
-		}
-		return IPAddress(res);
 	}
+	std::array<unsigned char, 16> res;
+	res.fill(0xff);
+	auto mask = addressMask.toV6();
+	for (int i = 0; i < mask.size(); ++i) {
+		res[i] ^= mask[i];
+	}
+	return IPAddress(res);
 }
 
 int AuthAllowedSubnet::netmaskWeight() const {
 	if (addressMask.isV4()) {
 		boost::asio::ip::address_v4 addr(netmask().toV4());
 		return netmaskWeightImpl(addr.to_bytes());
-	} else {
-		return netmaskWeightImpl(netmask().toV6());
 	}
+	return netmaskWeightImpl(netmask().toV6());
 }
 
 AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) {
@@ -98,14 +96,13 @@ AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) 
 		auto mask = boost::asio::ip::address_v4(bM).to_uint();
 		auto baseAddress = addr.to_v4().to_uint() & mask;
 		return AuthAllowedSubnet(IPAddress(baseAddress), IPAddress(mask));
-	} else {
-		auto mask = createBitMask(addr.to_v6().to_bytes(), netmaskWeight);
-		auto baseAddress = addr.to_v6().to_bytes();
-		for (int i = 0; i < mask.size(); ++i) {
-			baseAddress[i] &= mask[i];
-		}
-		return AuthAllowedSubnet(IPAddress(baseAddress), IPAddress(mask));
 	}
+	auto mask = createBitMask(addr.to_v6().to_bytes(), netmaskWeight);
+	auto baseAddress = addr.to_v6().to_bytes();
+	for (int i = 0; i < mask.size(); ++i) {
+		baseAddress[i] &= mask[i];
+	}
+	return AuthAllowedSubnet(IPAddress(baseAddress), IPAddress(mask));
 }
 
 void AuthAllowedSubnet::printIP(std::string_view txt, IPAddress const& address) {
@@ -208,9 +205,8 @@ struct SubNetTest {
 	static SubNetTest randomSubNet() {
 		if (deterministicRandom()->coinflip()) {
 			return randomSubNetImpl<true>();
-		} else {
-			return randomSubNetImpl<false>();
 		}
+		return randomSubNetImpl<false>();
 	}
 
 	template <bool V4>
@@ -250,9 +246,8 @@ struct SubNetTest {
 			if (!inSubnet) {
 				if (!subnet(res)) {
 					return res;
-				} else {
-					continue;
 				}
+				continue;
 			}
 			// first we make sure the address is in the subnet
 			if constexpr (V4) {
@@ -279,15 +274,13 @@ struct SubNetTest {
 			// return an address of a different type
 			if (subnet.baseAddress.isV4()) {
 				return randomAddress<false>(false);
-			} else {
-				return randomAddress<true>(false);
 			}
+			return randomAddress<true>(false);
 		}
 		if (subnet.addressMask.isV4()) {
 			return randomAddress<true>(inSubnet);
-		} else {
-			return randomAddress<false>(inSubnet);
 		}
+		return randomAddress<false>(inSubnet);
 	}
 };
 

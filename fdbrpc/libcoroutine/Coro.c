@@ -157,9 +157,8 @@ size_t Coro_bytesLeftOnStack(Coro* self) {
 
 	if (/*stackMovesUp*/ 0) {
 		return end - p1;
-	} else {
-		return p1 - start;
 	}
+	return p1 - start;
 }
 
 int Coro_stackSpaceAlmostGone(Coro* self) {

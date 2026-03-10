@@ -112,7 +112,7 @@ struct GetRangeStream : TestWorkload {
 						}
 						bytesRead += k.size() + v.size();
 					}
-					if (range.size()) {
+					if (!range.empty()) {
 						next = keyAfter(range.back().key);
 					}
 				}

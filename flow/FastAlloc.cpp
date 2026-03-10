@@ -581,7 +581,8 @@ void FastAllocator<Size>::getMagazine() {
 		thr.freelist = m;
 		thr.count = magazine_size;
 		return;
-	} else if (globalData()->partial_magazines.size()) {
+	}
+	if (globalData()->partial_magazines.size()) {
 		std::pair<int, void*> p = globalData()->partial_magazines.back();
 		globalData()->partial_magazines.pop_back();
 		globalData()->partialMagazineUnallocatedMemory -= p.first * Size;

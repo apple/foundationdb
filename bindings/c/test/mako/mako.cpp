@@ -45,8 +45,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <boost/asio.hpp>
 #include <fmt/format.h>
 #include <fmt/printf.h>
@@ -120,7 +118,8 @@ int cleanupNormalKeyspace(Database db, Arguments const& args) {
 		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
 		if (rc == FutureRC::OK) {
 			break;
-		} else if (rc == FutureRC::RETRY) {
+		}
+		if (rc == FutureRC::RETRY) {
 			// tx already reset
 			continue;
 		} else {
@@ -541,7 +540,7 @@ void runAsyncWorkload(Arguments const& args,
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
 		// launch [async_xacts] concurrent transactions
-		for (auto state : states)
+		for (const auto& state : states)
 			state->postNextTick();
 		while (stopcount.load() != args.async_xacts)
 			usleep(1000);
@@ -573,7 +572,7 @@ void runAsyncWorkload(Arguments const& args,
 		}
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
-		for (auto state : states)
+		for (const auto& state : states)
 			state->postNextTick();
 		logr.debug("Launched {} concurrent transactions", states.size());
 		while (stopcount.load() != args.async_xacts)
@@ -1030,27 +1029,26 @@ int parseTransaction(Arguments& args, char const* optarg) {
 			if (*ptr != ':') {
 				error = 1;
 				break;
-			} else {
-				ptr++; /* skip ':' */
-				/* check negative '-' sign */
-				if (*ptr == '-') {
-					args.txnspec.ops[op][OP_REVERSE] = 1;
-					ptr++;
-				} else {
-					args.txnspec.ops[op][OP_REVERSE] = 0;
-				}
-				num = 0;
-				if ((*ptr < '0') || (*ptr > '9')) {
-					error = 1;
-					break;
-				}
-				while ((*ptr >= '0') && (*ptr <= '9')) {
-					num = num * 10 + *ptr - '0';
-					ptr++;
-				}
-				/* set range */
-				args.txnspec.ops[op][OP_RANGE] = num;
 			}
+			ptr++; /* skip ':' */
+			/* check negative '-' sign */
+			if (*ptr == '-') {
+				args.txnspec.ops[op][OP_REVERSE] = 1;
+				ptr++;
+			} else {
+				args.txnspec.ops[op][OP_REVERSE] = 0;
+			}
+			num = 0;
+			if ((*ptr < '0') || (*ptr > '9')) {
+				error = 1;
+				break;
+			}
+			while ((*ptr >= '0') && (*ptr <= '9')) {
+				num = num * 10 + *ptr - '0';
+				ptr++;
+			}
+			/* set range */
+			args.txnspec.ops[op][OP_RANGE] = num;
 		}
 		rangeop = 0;
 	}
@@ -1546,7 +1544,8 @@ int Arguments::validate() {
 			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
 				logr.error("--async_xacts * --num_processes must be <= --iteration");
 				return -1;
-			} else if (async_xacts == 0 && num_threads * num_processes > iteration) {
+			}
+			if (async_xacts == 0 && num_threads * num_processes > iteration) {
 				logr.error("--num_threads * --num_processes must be <= --iteration");
 				return -1;
 			}
@@ -1567,7 +1566,8 @@ int Arguments::validate() {
 			if (async_xacts > 0) {
 				logr.error("--tpsmax|--tps must be 0 or unspecified because throttling is not supported in async mode");
 				return -1;
-			} else if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
+			}
+			if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
 				logr.error("--num_threads * --num_processes must be <= --tpsmax|--tps");
 				return -1;
 			}

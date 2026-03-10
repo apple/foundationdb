@@ -28,8 +28,7 @@ std::optional<fdb::Value> KeyValueStore::get(fdb::KeyRef key) const {
 	auto value = store.find(fdb::Key(key));
 	if (value != store.end())
 		return value->second;
-	else
-		return std::optional<fdb::Value>();
+	return std::optional<fdb::Value>();
 }
 
 // Checks if the key exists
@@ -81,7 +80,7 @@ fdb::Key KeyValueStore::getKey(fdb::KeyRef keyName, bool orEqual, int offset) co
 
 	if (mapItr == store.end())
 		return endKey();
-	else if (count == abs(offset))
+	if (count == abs(offset))
 		return mapItr->first;
 	else
 		return startKey();

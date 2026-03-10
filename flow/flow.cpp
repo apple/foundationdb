@@ -383,9 +383,9 @@ void bindDeterministicRandomToOpenssl() {
 		        "       OpenSSL error message: '%s'\n",
 		        msg);
 		throw internal_error();
-	} else {
-		printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
 	}
+	printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
+
 #else // OPENSSL_IS_BORINGSSL
 	static const RAND_METHOD method = {
 		[](const void*, int) -> void {},

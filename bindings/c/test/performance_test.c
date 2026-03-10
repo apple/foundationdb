@@ -37,9 +37,8 @@ fdb_error_t waitError(FDBFuture* f) {
 	fdb_error_t blockError = fdb_future_block_until_ready(f);
 	if (!blockError) {
 		return fdb_future_get_error(f);
-	} else {
-		return blockError;
 	}
+	return blockError;
 }
 
 struct RunResult run(struct ResultSet* rs,

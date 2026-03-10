@@ -47,9 +47,8 @@ public:
 				clogRandomPair();
 				return Void();
 			});
-		} else {
-			return Void();
 		}
+		return Void();
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }

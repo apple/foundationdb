@@ -4,5 +4,12 @@ Checks: >
   bugprone-sizeof-expression,
   bugprone-suspicious-string-compare,
   bugprone-use-after-move,
-  performance-for-range-copy
+  performance-for-range-copy,
+  readability-container-contains,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-delete-null-pointer,
+  readability-duplicate-include,
+  readability-else-after-return,
+  readability-inconsistent-ifelse-braces
 ...

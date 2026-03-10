@@ -305,8 +305,7 @@ void WriteMap::addConflictRange(KeyRangeRef keys) {
 WriteMap::iterator::SEGMENT_TYPE WriteMap::iterator::type() const {
 	if (offset)
 		return entry().following_keys_cleared ? CLEARED_RANGE : UNMODIFIED_RANGE;
-	else
-		return entry().stack.isDependent() ? DEPENDENT_WRITE : INDEPENDENT_WRITE;
+	return entry().stack.isDependent() ? DEPENDENT_WRITE : INDEPENDENT_WRITE;
 }
 
 WriteMap::iterator& WriteMap::iterator::operator++() {
@@ -360,7 +359,8 @@ RYWMutation WriteMap::coalesce(RYWMutation existingEntry, RYWMutation newEntry, 
 	if (newEntry.type == MutationRef::SetValue || newEntry.type == MutationRef::SetVersionstampedValue) {
 		// independent mutations
 		return newEntry;
-	} else if (newEntry.type == MutationRef::AddValue) {
+	}
+	if (newEntry.type == MutationRef::AddValue) {
 		switch (existingEntry.type) {
 		case MutationRef::SetValue:
 			return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value.get(), arena),

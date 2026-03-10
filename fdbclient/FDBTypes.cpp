@@ -26,11 +26,10 @@
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {
 	if (!prefix.present() || prefix.get().empty()) {
 		return range;
-	} else {
-		KeyRef begin = range.begin.startsWith(prefix.get()) ? range.begin.removePrefix(prefix.get()) : allKeys.begin;
-		KeyRef end = range.end.startsWith(prefix.get()) ? range.end.removePrefix(prefix.get()) : allKeys.end;
-		return KeyRangeRef(begin, end);
 	}
+	KeyRef begin = range.begin.startsWith(prefix.get()) ? range.begin.removePrefix(prefix.get()) : allKeys.begin;
+	KeyRef end = range.end.startsWith(prefix.get()) ? range.end.removePrefix(prefix.get()) : allKeys.end;
+	return KeyRangeRef(begin, end);
 }
 
 KeyRef keyBetween(const KeyRangeRef& keys) {
@@ -146,13 +145,11 @@ std::string KeySelectorRef::toString() const {
 	if (offset > 0) {
 		if (orEqual)
 			return format("%d+firstGreaterThan(%s)", offset - 1, printable(key).c_str());
-		else
-			return format("%d+firstGreaterOrEqual(%s)", offset - 1, printable(key).c_str());
+		return format("%d+firstGreaterOrEqual(%s)", offset - 1, printable(key).c_str());
 	} else {
 		if (orEqual)
 			return format("%d+lastLessOrEqual(%s)", offset, printable(key).c_str());
-		else
-			return format("%d+lastLessThan(%s)", offset, printable(key).c_str());
+		return format("%d+lastLessThan(%s)", offset, printable(key).c_str());
 	}
 }
 
@@ -206,7 +203,7 @@ TEST_CASE("/KeyRangeUtil/KeyRangeComplement") {
 		Key b = "a"_sr;
 		Key e = "z"_sr;
 		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
-		ASSERT(result.size() == 0);
+		ASSERT(result.empty());
 	}
 
 	return Void();

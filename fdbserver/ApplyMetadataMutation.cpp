@@ -173,7 +173,8 @@ private:
 	void checkSetRangeLockPrefix(const MutationRef& m) {
 		if (!m.param1.startsWith(rangeLockPrefix)) {
 			return;
-		} else if (rangeLock == nullptr) {
+		}
+		if (rangeLock == nullptr) {
 			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
 			    .detail("Mutation", m.toString())
 			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
@@ -684,7 +685,8 @@ private:
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
 		if (rangeLock == nullptr) {
 			return;
-		} else if (!rangeLockKeys.intersects(range)) {
+		}
+		if (!rangeLockKeys.intersects(range)) {
 			return;
 		}
 		ASSERT(!initialCommit);
@@ -700,9 +702,8 @@ private:
 		if (keyInfo) {
 			KeyRangeRef clearRange(r.begin.removePrefix(keyServersPrefix), r.end.removePrefix(keyServersPrefix));
 			keyInfo->insert(clearRange,
-			                clearRange.begin == StringRef()
-			                    ? ServerCacheInfo()
-			                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
+			                clearRange.begin.empty() ? ServerCacheInfo()
+			                                         : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
 			if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 				toCommit->setLogsChanged();
 			}
@@ -794,7 +795,7 @@ private:
 			}
 			// Might be a tss removal, which doesn't store a tag there.
 			// Chained if is a little verbose, but avoids unnecessary work
-			if (toCommit && !initialCommit && !serverKeysCleared.size()) {
+			if (toCommit && !initialCommit && serverKeysCleared.empty()) {
 				KeyRangeRef maybeTssRange = range & serverTagKeys;
 				if (maybeTssRange.singleKeyRange()) {
 					UID id = decodeServerTagKey(maybeTssRange.begin);

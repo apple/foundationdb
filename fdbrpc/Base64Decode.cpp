@@ -130,7 +130,7 @@ int getDecodedLength(int codeLength) noexcept {
 	const auto r = (codeLength % 4);
 	if (r == 1)
 		return -1;
-	else if (r == 0)
+	if (r == 0)
 		return (codeLength / 4) * 3;
 	else
 		return (codeLength / 4) * 3 + (r - 1);
@@ -175,14 +175,13 @@ int decodedLength(int codeLength) noexcept {
 int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __restrict plaintextOut) noexcept {
 	if (lengthIn % 4) {
 		return -1;
-	} else {
-		int actualLen = lengthIn;
-		if (actualLen > 0 && codeIn[actualLen - 1] == '=')
-			actualLen--;
-		if (actualLen > 0 && codeIn[actualLen - 1] == '=')
-			actualLen--;
-		return doDecode<false>(codeIn, actualLen, plaintextOut);
 	}
+	int actualLen = lengthIn;
+	if (actualLen > 0 && codeIn[actualLen - 1] == '=')
+		actualLen--;
+	if (actualLen > 0 && codeIn[actualLen - 1] == '=')
+		actualLen--;
+	return doDecode<false>(codeIn, actualLen, plaintextOut);
 }
 
 Optional<StringRef> decode(Arena& arena, StringRef codeText) {

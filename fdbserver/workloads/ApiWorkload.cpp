@@ -288,8 +288,7 @@ KeySelector ApiWorkload::generateKeySelector(VectorRef<KeyValueRef> const& data,
 Key ApiWorkload::selectRandomKey(VectorRef<KeyValueRef> const& data, double probabilityKeyExists) {
 	if (deterministicRandom()->random01() < probabilityKeyExists)
 		return data[deterministicRandom()->randomInt(0, data.size())].key;
-	else
-		return generateKey(data, minLongKeyLength, maxLongKeyLength, clientPrefix);
+	return generateKey(data, minLongKeyLength, maxLongKeyLength, clientPrefix);
 }
 
 // Generates a random value

@@ -788,9 +788,8 @@ public:
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options) {
 	if (options.databasePerTransaction) {
 		return std::make_unique<DBPerTransactionExecutor>(options);
-	} else {
-		return std::make_unique<DBPoolTransactionExecutor>(options);
 	}
+	return std::make_unique<DBPoolTransactionExecutor>(options);
 }
 
 } // namespace FdbApiTester

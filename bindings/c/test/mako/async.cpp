@@ -57,9 +57,8 @@ void ResumableStateForPopulate::runOneTick() {
 						if (f_rc == FutureRC::ABORT) {
 							signalEnd();
 							return;
-						} else {
-							postNextTick();
 						}
+						postNextTick();
 					});
 				} else {
 					// successfully committed

@@ -518,7 +518,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 							StringRef randomLocalityKey =
 							    localityKeys[deterministicRandom()->randomInt(0, localityKeys.size())];
 							if (randomSS.locality.isPresent(randomLocalityKey)) {
-								if (localityFilter.size() > 0) {
+								if (!localityFilter.empty()) {
 									localityFilter += ";";
 								}
 								localityFilter += randomLocalityKey.toString() + ":" +
@@ -526,7 +526,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 							}
 						}
 
-						if (localityFilter.size() > 0) {
+						if (!localityFilter.empty()) {
 							TraceEvent("ConfigureTestSettingWiggleLocality").detail("LocalityFilter", localityFilter);
 							randomPerpetualWiggleLocality = " perpetual_storage_wiggle_locality=" + localityFilter;
 						}

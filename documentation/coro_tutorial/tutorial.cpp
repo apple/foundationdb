@@ -439,7 +439,7 @@ Future<Void> fdbClientStream() {
 			                                        GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> range = co_await results.getFuture();
-				if (range.size()) {
+				if (!range.empty()) {
 					bytes += range.expectedSize();
 					next = keyAfter(range.back().key);
 				}
@@ -665,7 +665,8 @@ int main(int argc, char* argv[]) {
 			}
 			port = std::string(argv[++i]);
 			continue;
-		} else if (arg == "-s") {
+		}
+		if (arg == "-s") {
 			if (i + 1 >= argc) {
 				std::cout << "Expecting an argument after -s\n";
 				return 1;

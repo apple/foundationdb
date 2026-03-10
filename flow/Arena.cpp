@@ -147,7 +147,7 @@ std::string StringRef::toHexString(int limit) const {
 			else
 				rv.append(format("%02x ", b));
 		}
-		if (rv.size() > 0)
+		if (!rv.empty())
 			rv.resize(rv.size() - 1);
 	}
 	bytesCopied()->increment(rv.length());
@@ -161,7 +161,7 @@ std::string StringRef::toFullHexStringPlain() const {
 		uint8_t b = (*this)[i];
 		s.append(format("%02x ", b));
 	}
-	if (s.size() > 0)
+	if (!s.empty())
 		s.resize(s.size() - 1);
 	bytesCopied()->increment(s.length());
 	return s;
@@ -236,20 +236,17 @@ bool ArenaBlock::isTiny() const {
 int ArenaBlock::size() const {
 	if (isTiny())
 		return tinySize;
-	else
-		return bigSize;
+	return bigSize;
 }
 int ArenaBlock::used() const {
 	if (isTiny())
 		return tinyUsed;
-	else
-		return bigUsed;
+	return bigUsed;
 }
 int ArenaBlock::unused() const {
 	if (isTiny())
 		return tinySize - tinyUsed;
-	else
-		return bigSize - bigUsed;
+	return bigSize - bigUsed;
 }
 const void* ArenaBlock::getData() const {
 	return this;
@@ -333,11 +330,10 @@ int ArenaBlock::addUsed(int bytes) {
 		int t = tinyUsed;
 		tinyUsed += bytes;
 		return t;
-	} else {
-		int t = bigUsed;
-		bigUsed += bytes;
-		return t;
 	}
+	int t = bigUsed;
+	bigUsed += bytes;
+	return t;
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
@@ -380,9 +376,8 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size) {
 	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
 		return create(SMALL, self)->make4kAlignedBuffer(size);
-	} else {
-		return self->make4kAlignedBuffer(size);
 	}
+	return self->make4kAlignedBuffer(size);
 }
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {
@@ -525,7 +520,7 @@ void ArenaBlock::destroy() {
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
-	while (stack.size()) {
+	while (!stack.empty()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
 		allowAccess(b);
@@ -895,12 +890,12 @@ TEST_CASE("flow/StringRef/eat") {
 	str = "testcase"_sr;
 	first = str.eat("/"_sr);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	str = "testcase/"_sr;
 	first = str.eat("/"_sr);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	str = "test/case/extra"_sr;
 	first = str.eat("/"_sr);
@@ -918,7 +913,7 @@ TEST_CASE("flow/StringRef/eat") {
 	first = str.eat("/", &hasSep);
 	ASSERT(!hasSep);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	return Void();
 }

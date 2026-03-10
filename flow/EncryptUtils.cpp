@@ -29,7 +29,8 @@
 EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
 	if (modeStr == "NONE") {
 		return ENCRYPT_CIPHER_MODE_NONE;
-	} else if (modeStr == "AES-256-CTR") {
+	}
+	if (modeStr == "AES-256-CTR") {
 		return ENCRYPT_CIPHER_MODE_AES_256_CTR;
 	} else {
 		TraceEvent("EncryptModeFromString").detail("Mode", modeStr);
@@ -45,10 +46,9 @@ std::string getEncryptDbgTraceKey(std::string_view prefix,
 	if (baseCipherId.present()) {
 		boost::format fmter("%s.%lld.%llu");
 		return boost::str(boost::format(fmter % prefix % domainId % baseCipherId.get()));
-	} else {
-		boost::format fmter("%s.%lld.%s");
-		return boost::str(boost::format(fmter % prefix % domainId));
 	}
+	boost::format fmter("%s.%lld.%s");
+	return boost::str(boost::format(fmter % prefix % domainId));
 }
 
 std::string getEncryptDbgTraceKeyWithTS(std::string_view prefix,

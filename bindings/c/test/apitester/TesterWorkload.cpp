@@ -36,46 +36,40 @@ int WorkloadConfig::getIntOption(const std::string& name, int defaultVal) const 
 	auto iter = options.find(name);
 	if (iter == options.end()) {
 		return defaultVal;
-	} else {
-		char* endptr;
-		int intVal = strtol(iter->second.c_str(), &endptr, 10);
-		if (*endptr != '\0') {
-			throw TesterError(
-			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
-		}
-		return intVal;
 	}
+	char* endptr;
+	int intVal = strtol(iter->second.c_str(), &endptr, 10);
+	if (*endptr != '\0') {
+		throw TesterError(fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
+	}
+	return intVal;
 }
 
 double WorkloadConfig::getFloatOption(const std::string& name, double defaultVal) const {
 	auto iter = options.find(name);
 	if (iter == options.end()) {
 		return defaultVal;
-	} else {
-		char* endptr;
-		double floatVal = strtod(iter->second.c_str(), &endptr);
-		if (*endptr != '\0') {
-			throw TesterError(
-			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
-		}
-		return floatVal;
 	}
+	char* endptr;
+	double floatVal = strtod(iter->second.c_str(), &endptr);
+	if (*endptr != '\0') {
+		throw TesterError(fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
+	}
+	return floatVal;
 }
 
 bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) const {
 	auto iter = options.find(name);
 	if (iter == options.end()) {
 		return defaultVal;
+	}
+	std::string val(fdb::toCharsRef(lowerCase(fdb::toBytesRef(iter->second))));
+	if (val == "true") {
+		return true;
+	} else if (val == "false") {
+		return false;
 	} else {
-		std::string val(fdb::toCharsRef(lowerCase(fdb::toBytesRef(iter->second))));
-		if (val == "true") {
-			return true;
-		} else if (val == "false") {
-			return false;
-		} else {
-			throw TesterError(
-			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
-		}
+		throw TesterError(fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
 	}
 }
 
@@ -204,14 +198,14 @@ void WorkloadManager::run() {
 	std::vector<std::shared_ptr<IWorkload>> initialWorkloads;
 	{
 		std::unique_lock<std::mutex> lock(mutex);
-		for (auto iter : workloads) {
+		for (const auto& iter : workloads) {
 			initialWorkloads.push_back(iter.second.ref);
 		}
 	}
-	for (auto iter : initialWorkloads) {
+	for (const auto& iter : initialWorkloads) {
 		iter->init(this);
 	}
-	for (auto iter : initialWorkloads) {
+	for (const auto& iter : initialWorkloads) {
 		iter->start();
 	}
 	scheduler->join();
@@ -291,7 +285,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 
 void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
 	statsTimer = scheduler->scheduleWithDelay(timeIntervalMs, [this, timeIntervalMs]() {
-		for (auto workload : getActiveWorkloads()) {
+		for (const auto& workload : getActiveWorkloads()) {
 			workload->printStats();
 		}
 		this->schedulePrintStatistics(timeIntervalMs);
@@ -301,7 +295,7 @@ void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
 std::vector<std::shared_ptr<IWorkload>> WorkloadManager::getActiveWorkloads() {
 	std::unique_lock<std::mutex> lock(mutex);
 	std::vector<std::shared_ptr<IWorkload>> res;
-	for (auto iter : workloads) {
+	for (const auto& iter : workloads) {
 		res.push_back(iter.second.ref);
 	}
 	return res;

@@ -146,7 +146,7 @@ private:
 
 		void refreshRolesString() {
 			rolesString = "";
-			for (auto itr : roles) {
+			for (const auto& itr : roles) {
 				if (!rolesString.empty()) {
 					rolesString += ",";
 				}
@@ -375,7 +375,7 @@ public:
 		fields.addField("LogGroup", logGroup);
 
 		RoleInfo const& r = mutateRoleInfo();
-		if (r.rolesString.size() > 0) {
+		if (!r.rolesString.empty()) {
 			fields.addField("Roles", r.rolesString);
 		}
 
@@ -469,7 +469,7 @@ public:
 
 		MutexHolder hold(mutex);
 		bool roll = false;
-		if (!eventBuffer.size())
+		if (eventBuffer.empty())
 			return Void(); // SOMEDAY: maybe we still roll the tracefile here?
 
 		if (rollsize && bufferLength + loggedLength > rollsize) // SOMEDAY: more conditions to roll
@@ -688,7 +688,8 @@ bool traceFormatImpl(std::string& format) {
 			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
 		}
 		return true;
-	} else if (format == "json") {
+	}
+	if (format == "json") {
 		if (!validate) {
 			g_traceLog.formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
 		}
@@ -709,7 +710,8 @@ bool traceClockSource(std::string& source) {
 			g_trace_clock.store(TRACE_CLOCK_NOW);
 		}
 		return true;
-	} else if (source == "realtime") {
+	}
+	if (source == "realtime") {
 		if (!validate) {
 			g_trace_clock.store(TRACE_CLOCK_REALTIME);
 		}
@@ -1205,7 +1207,7 @@ BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* v
 BaseTraceEvent& BaseTraceEvent::trackLatest(const std::string& trackingKey) {
 	ASSERT(!logged);
 	this->trackingKey = trackingKey;
-	ASSERT(this->trackingKey.size() != 0 && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
+	ASSERT(!this->trackingKey.empty() && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
 	return *this;
 }
 
@@ -1431,9 +1433,9 @@ double BaseTraceEvent::getCurrentTime() {
 	if (g_trace_clock.load() == TRACE_CLOCK_NOW) {
 		if (!isNetworkThread() || !g_network) {
 			return timer_monotonic();
-		} else {
-			return now();
 		}
+		return now();
+
 	} else {
 		return timer();
 	}
@@ -1647,16 +1649,15 @@ std::string TraceEventFields::getValue(std::string key) const {
 	std::string value;
 	if (tryGetValue(key, value)) {
 		return value;
-	} else {
-		TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
-		ev.suppressFor(1.0);
-		if (tryGetValue("Type", value)) {
-			ev.detail("Event", value);
-		}
-		ev.detail("FieldName", key);
-
-		throw attribute_not_found_error(key);
 	}
+	TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
+	ev.suppressFor(1.0);
+	if (tryGetValue("Type", value)) {
+		ev.detail("Event", value);
+	}
+	ev.detail("FieldName", key);
+
+	throw attribute_not_found_error(key);
 }
 
 TraceEventFields::Field& TraceEventFields::mutate(int index) {
@@ -1684,9 +1685,8 @@ void parseNumericValue(std::string const& s, int& outValue, bool permissive = fa
 		if (std::numeric_limits<int>::min() <= iLong && iLong <= std::numeric_limits<int>::max()) {
 			outValue = (int)iLong; // Downcast definitely safe
 			return;
-		} else {
-			throw attribute_too_large();
 		}
+		throw attribute_too_large();
 	}
 
 	throw attribute_not_found();
@@ -1736,9 +1736,8 @@ bool getNumericValue(TraceEventFields const& fields, std::string key, T& outValu
 			ev.detail("FieldValue", field);
 
 			throw;
-		} else {
-			return false;
 		}
+		return false;
 	}
 }
 } // namespace

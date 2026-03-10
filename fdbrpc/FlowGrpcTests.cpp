@@ -189,7 +189,8 @@ int WriteTestFile(platform::TmpFile* file, int size) {
 		int to_write = block_size;
 		if (i == iterations && size % block_size == 0) {
 			break;
-		} else if (i == iterations) {
+		}
+		if (i == iterations) {
 			to_write = size % block_size;
 		}
 		generate_random_string(&buffer, to_write);

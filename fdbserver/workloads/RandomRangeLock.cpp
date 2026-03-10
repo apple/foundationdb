@@ -74,7 +74,8 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 		Standalone<StringRef> keyB = self->getRandomStringRef();
 		if (keyA < keyB) {
 			return Standalone(KeyRangeRef(keyA, keyB));
-		} else if (keyA > keyB) {
+		}
+		if (keyA > keyB) {
 			return Standalone(KeyRangeRef(keyB, keyA));
 		} else {
 			return singleKeyRange(keyA);

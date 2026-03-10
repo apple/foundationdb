@@ -231,7 +231,8 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
 	for (const auto& sample : data) {
 		if (sample->time > to) {
 			break;
-		} else if (sample->time >= from) {
+		}
+		if (sample->time >= from) {
 			res.push_back(sample);
 		}
 	}

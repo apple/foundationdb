@@ -89,8 +89,7 @@ int getEncodedLength(int dataLength) noexcept {
 		auto r = dataLength % 3;
 		if (r == 0)
 			return (dataLength / 3) * 4;
-		else
-			return (dataLength / 3) * 4 + r + 1;
+		return (dataLength / 3) * 4 + r + 1;
 	} else {
 		// any non-zero remainder after dividing the input length by 3 results in 4 extra output chars due to padding
 		return ((dataLength + 2) / 3) * 4;

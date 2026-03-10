@@ -91,6 +91,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 	return false;
 }
 
+// NOLINTBEGIN(readability-else-after-return): these C API macros intentionally return from catch branches.
 #define RETURN_FUTURE_ON_ERROR(return_type, code_to_run)                                                               \
 	try {                                                                                                              \
 		code_to_run                                                                                                    \
@@ -130,6 +131,7 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 #define CATCH_AND_RETURN(code_to_run)                                                                                  \
 	RETURN_ON_ERROR(code_to_run);                                                                                      \
 	return error_code_success;
+// NOLINTEND(readability-else-after-return)
 
 #define CATCH_AND_DIE(code_to_run)                                                                                     \
 	try {                                                                                                              \

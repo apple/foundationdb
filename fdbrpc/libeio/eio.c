@@ -57,7 +57,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <limits.h>
@@ -732,8 +731,7 @@ static int grp_dec(eio_req* grp) {
 	/* finish, if done */
 	if (!grp->size && grp->int1)
 		return eio_finish(grp);
-	else
-		return 0;
+	return 0;
 }
 
 static void eio_destroy(eio_req* req) {
@@ -1063,15 +1061,13 @@ static eio_ssize_t eio__sendfile(int ofd, int ifd, off_t offset, size_t count) {
 				return written;
 
 			break;
-		} else {
-			/* if we requested more, then probably the kernel was lazy */
-			written += res;
-			offset += res;
-			count -= res;
+		} /* if we requested more, then probably the kernel was lazy */
+		written += res;
+		offset += res;
+		count -= res;
 
-			if (!count)
-				return written;
-		}
+		if (!count)
+			return written;
 	}
 
 	if (res < 0 && (errno == ENOSYS || errno == EINVAL || errno == ENOTSOCK

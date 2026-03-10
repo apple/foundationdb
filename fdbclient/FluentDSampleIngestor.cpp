@@ -28,9 +28,8 @@ namespace {
 boost::asio::ip::address ipAddress(IPAddress const& n) {
 	if (n.isV6()) {
 		return boost::asio::ip::address_v6(n.toV6());
-	} else {
-		return boost::asio::ip::address_v4(n.toV4());
 	}
+	return boost::asio::ip::address_v4(n.toV4());
 }
 
 template <class Protocol>
@@ -245,7 +244,8 @@ void FluentDIngestor::ingest(const std::shared_ptr<Sample>& sample) {
 	if (!impl->socket) {
 		// the connection failed in the past and we wait for a timeout before we retry
 		return;
-	} else if (impl->socket->failed()) {
+	}
+	if (impl->socket->failed()) {
 		impl->retry();
 		return;
 	} else {

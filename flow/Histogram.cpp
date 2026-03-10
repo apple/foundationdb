@@ -36,11 +36,10 @@ HistogramRegistry& GetHistogramRegistry() {
 
 	if (h) {
 		return *reinterpret_cast<HistogramRegistry*>(h);
-	} else {
-		auto res = new HistogramRegistry();
-		g_network->setGlobal(INetwork::enHistogram, res);
-		return *res;
 	}
+	auto res = new HistogramRegistry();
+	g_network->setGlobal(INetwork::enHistogram, res);
+	return *res;
 }
 
 void HistogramRegistry::registerHistogram(Histogram* h) {

@@ -48,9 +48,8 @@ fdb::Database getOrCreateDatabase(std::map<std::string, fdb::Database>& db_map, 
 	if (iter == db_map.end()) {
 		auto [inserted_iter, _] = db_map.insert({ cluster_file, fdb::Database(cluster_file) });
 		return inserted_iter->second;
-	} else {
-		return iter->second;
 	}
+	return iter->second;
 }
 
 } // anonymous namespace

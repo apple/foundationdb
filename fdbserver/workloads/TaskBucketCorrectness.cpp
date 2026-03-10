@@ -264,11 +264,10 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 								bool isFutureEmpty = co_await futureBucket->isEmpty(cx);
 								if (isFutureEmpty)
 									break;
-								else {
-									co_await TaskBucket::debugPrintRange(
-									    cx, taskSubspace.key(), StringRef(format("client_%d", clientId)));
-									TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
-								}
+								co_await TaskBucket::debugPrintRange(
+								    cx, taskSubspace.key(), StringRef(format("client_%d", clientId)));
+								TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
+
 							} else {
 								co_await delay(1.0);
 							}
@@ -326,7 +325,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			// TraceEvent("CheckSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
 			data.erase(s.value.toString());
 		}
-		if (data.size() != 0) {
+		if (!data.empty()) {
 			TraceEvent(SevError, "CheckSayHello").detail("DataNotMatch", data.size());
 			co_return false;
 		}
@@ -344,7 +343,7 @@ void print_subspace_key(const Subspace& subspace, int id) {
 TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	Subspace subspace_test;
 	print_subspace_key(subspace_test, 0);
-	ASSERT(subspace_test.key().toString() == "");
+	ASSERT(subspace_test.key().toString().empty());
 
 	Subspace subspace_test1("abc"_sr);
 	print_subspace_key(subspace_test1, 1);

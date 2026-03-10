@@ -290,7 +290,8 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 
 	if (code == NULL_CODE) {
 		return ElementType::NULL_TYPE;
-	} else if (code == BYTES_CODE) {
+	}
+	if (code == BYTES_CODE) {
 		return ElementType::BYTES;
 	} else if (code == STRING_CODE) {
 		return ElementType::UTF8;
@@ -395,7 +396,8 @@ bool Tuple::getBool(size_t index) const {
 	uint8_t code = data[offsets[index]];
 	if (code == FALSE_CODE) {
 		return false;
-	} else if (code == TRUE_CODE) {
+	}
+	if (code == TRUE_CODE) {
 		return true;
 	} else {
 		throw invalid_tuple_data_type();
@@ -587,7 +589,8 @@ int compare(Standalone<VectorRef<unsigned char>> const& v1, Standalone<VectorRef
 	while (i < v1.size() && i < v2.size()) {
 		if (v1[i] < v2[i]) {
 			return -1;
-		} else if (v1[i] > v2[i]) {
+		}
+		if (v1[i] > v2[i]) {
 			return 1;
 		}
 		i += 1;

@@ -97,9 +97,8 @@ Key KVWorkload::getRandomKey() const {
 Key KVWorkload::getRandomKey(double absentFrac) const {
 	if (absentFrac > 0.0000001) {
 		return getRandomKey(deterministicRandom()->random01() < absentFrac);
-	} else {
-		return getRandomKey(false);
 	}
+	return getRandomKey(false);
 }
 
 Key KVWorkload::getRandomKey(bool absent) const {
@@ -109,9 +108,8 @@ Key KVWorkload::getRandomKey(bool absent) const {
 Key KVWorkload::keyForIndex(uint64_t index) const {
 	if (absentFrac > 0.0000001) {
 		return keyForIndex(index, deterministicRandom()->random01() < absentFrac);
-	} else {
-		return keyForIndex(index, false);
 	}
+	return keyForIndex(index, false);
 }
 
 int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
@@ -181,10 +179,9 @@ int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 			if (sscanf(options[i].value.toString().c_str(), "%d", &r)) {
 				options[i].value = ""_sr;
 				return r;
-			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-				throw test_specification_invalid();
 			}
+			TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
+			throw test_specification_invalid();
 		}
 
 	return defaultValue;
@@ -197,10 +194,9 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
 				options[i].value = ""_sr;
 				return r;
-			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-				throw test_specification_invalid();
 			}
+			TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
+			throw test_specification_invalid();
 		}
 
 	return defaultValue;
@@ -213,10 +209,9 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
 				options[i].value = ""_sr;
 				return r;
-			} else {
-				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-				throw test_specification_invalid();
 			}
+			TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
+			throw test_specification_invalid();
 		}
 
 	return defaultValue;
@@ -518,7 +513,7 @@ Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	}
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
-	if (!workload || unconsumedOptions.size()) {
+	if (!workload || !unconsumedOptions.empty()) {
 		TraceEvent evt(SevError, "TestCreationError");
 		evt.detail("TestName", testName);
 		if (!workload) {
@@ -1184,12 +1179,12 @@ std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> me
 	std::map<std::string, std::vector<PerfMetric>>::iterator it;
 	for (it = metricMap.begin(); it != metricMap.end(); it++) {
 		auto& vec = it->second;
-		if (!vec.size())
+		if (vec.empty())
 			continue;
 		double sum = 0;
 		for (int i = 0; i < vec.size(); i++)
 			sum += vec[i].value();
-		if (vec[0].averaged() && vec.size())
+		if (vec[0].averaged() && !vec.empty())
 			sum /= vec.size();
 		result.emplace_back(vec[0].name(), sum, Averaged::False, vec[0].format_code());
 	}
@@ -1431,7 +1426,8 @@ Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, A
 			auditState = auditState_;
 			if (auditState.getPhase() == AuditPhase::Complete) {
 				break;
-			} else if (auditState.getPhase() == AuditPhase::Running) {
+			}
+			if (auditState.getPhase() == AuditPhase::Running) {
 				TraceEvent("AuditStorageCorrectnessWait")
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", auditType)
@@ -1733,7 +1729,7 @@ const std::unordered_map<char, uint8_t> parseCharMap{
 
 Optional<Key> getKeyFromString(const std::string& str) {
 	Key emptyKey;
-	if (str.size() == 0) {
+	if (str.empty()) {
 		return emptyKey;
 	}
 	if (str.size() % 4 != 0) {
@@ -1965,7 +1961,7 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 					rangesToCheck.push_back(range.range());
 				}
 			}
-			if (rangesToCheck.size() == 0) {
+			if (rangesToCheck.empty()) {
 				TraceEvent(SevInfo, "ConsistencyCheckUrgent_Complete")
 				    .detail("ConsistencyCheckerId", consistencyCheckerId)
 				    .detail("RetryTimes", retryTimes)
@@ -2049,15 +2045,14 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
-			} else {
-				TraceEvent(SevInfo, "ConsistencyCheckUrgent_CoreWithRetriableFailure")
-				    .errorUnsuppressed(e)
-				    .detail("ConsistencyCheckerId", consistencyCheckerId)
-				    .detail("RetryTimes", retryTimes)
-				    .detail("Round", round);
-				caughtError = e;
-				needsErrorHandling = true;
 			}
+			TraceEvent(SevInfo, "ConsistencyCheckUrgent_CoreWithRetriableFailure")
+			    .errorUnsuppressed(e)
+			    .detail("ConsistencyCheckerId", consistencyCheckerId)
+			    .detail("RetryTimes", retryTimes)
+			    .detail("Round", round);
+			caughtError = e;
+			needsErrorHandling = true;
 		}
 
 		if (needsErrorHandling) {
@@ -2467,7 +2462,7 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 	while (ifs.good()) {
 		getline(ifs, cline);
 		std::string line = removeWhitespace(cline);
-		if (!line.size() || line.find(';') == 0)
+		if (line.empty() || line.find(';') == 0)
 			continue;
 
 		size_t found = line.find('=');
@@ -2480,11 +2475,11 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 		if (attrib == "testTitle") {
 			beforeFirstTest = false;
 			parsingWorkloads = false;
-			if (workloadOptions.size()) {
+			if (!workloadOptions.empty()) {
 				spec.options.push_back_deep(spec.options.arena(), workloadOptions);
 				workloadOptions = Standalone<VectorRef<KeyValueRef>>();
 			}
-			if (spec.options.size() && spec.title.size()) {
+			if (!spec.options.empty() && !spec.title.empty()) {
 				result.push_back(spec);
 				spec = TestSpec();
 			}
@@ -2501,7 +2496,7 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 		} else {
 			if (attrib == "testName") {
 				parsingWorkloads = true;
-				if (workloadOptions.size()) {
+				if (!workloadOptions.empty()) {
 					TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
 					spec.options.push_back_deep(spec.options.arena(), workloadOptions);
 					workloadOptions = Standalone<VectorRef<KeyValueRef>>();
@@ -2512,9 +2507,9 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 			TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
 		}
 	}
-	if (workloadOptions.size())
+	if (!workloadOptions.empty())
 		spec.options.push_back_deep(spec.options.arena(), workloadOptions);
-	if (spec.options.size() && spec.title.size()) {
+	if (!spec.options.empty() && !spec.title.empty()) {
 		result.push_back(spec);
 	}
 
@@ -2529,9 +2524,8 @@ std::string toml_to_string(const T& value) {
 	if (value.type() == toml::value_t::string) {
 		const std::string& formatted = toml::format(value);
 		return formatted.substr(1, formatted.size() - 2);
-	} else {
-		return toml::format(value);
 	}
+	return toml::format(value);
 }
 
 struct TestSet {
@@ -2874,7 +2868,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 	// If this is important it should be in the trace file also.  Who wants to read two places
 	// when we could be reading just one?
 	printSimulatedTopology();
-	if (useDB && startingConfiguration != StringRef()) {
+	if (useDB && !startingConfiguration.empty()) {
 		Error configErr;
 		try {
 			co_await timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0);
@@ -2909,7 +2903,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		g_simulator->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
 		g_simulator->remoteTLogPolicy = configuration.remoteTLogPolicy;
 		g_simulator->usableRegions = configuration.usableRegions;
-		if (configuration.regions.size() > 0) {
+		if (!configuration.regions.empty()) {
 			g_simulator->primaryDcId = configuration.regions[0].dcId;
 			g_simulator->hasSatelliteReplication = configuration.regions[0].satelliteTLogReplicationFactor > 0;
 			if (configuration.regions[0].satelliteTLogUsableDcsFallback > 0) {
@@ -2924,7 +2918,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 			g_simulator->satelliteTLogPolicy = configuration.regions[0].satelliteTLogPolicy;
 			g_simulator->satelliteTLogWriteAntiQuorum = configuration.regions[0].satelliteTLogWriteAntiQuorum;
 
-			for (auto s : configuration.regions[0].satellites) {
+			for (const auto& s : configuration.regions[0].satellites) {
 				g_simulator->primarySatelliteDcIds.push_back(s.dcId);
 			}
 		} else {
@@ -2938,7 +2932,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 			       configuration.regions[0].satelliteTLogPolicy->info() ==
 			           configuration.regions[1].satelliteTLogPolicy->info());
 
-			for (auto s : configuration.regions[1].satellites) {
+			for (const auto& s : configuration.regions[1].satellites) {
 				g_simulator->remoteSatelliteDcIds.push_back(s.dcId);
 			}
 		}

@@ -1,4 +1,5 @@
 add_library(stacktrace STATIC stacktrace.amalgamation.cpp)
+set_target_properties(stacktrace PROPERTIES CXX_CLANG_TIDY "")
 target_include_directories(stacktrace PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 if (USE_ASAN)
   target_compile_definitions(stacktrace PRIVATE ADDRESS_SANITIZER)

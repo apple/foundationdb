@@ -148,9 +148,9 @@ struct MetricKeyRef {
 		return mk;
 	}
 
-	const Standalone<StringRef> packLatestKey() const;
-	const Standalone<StringRef> packDataKey(int64_t time = -1) const;
-	const Standalone<StringRef> packFieldRegKey() const;
+	Standalone<StringRef> packLatestKey() const;
+	Standalone<StringRef> packDataKey(int64_t time = -1) const;
+	Standalone<StringRef> packFieldRegKey() const;
 
 	bool isField() const { return fieldName.size() > 0 && fieldType.size() > 0; }
 	void writeField(BinaryWriter& wr) const;

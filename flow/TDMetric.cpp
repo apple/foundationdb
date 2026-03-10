@@ -84,7 +84,7 @@ void MetricKeyRef::writeMetricName(BinaryWriter& wr) const {
 	wr.serializeBytes("\x00"_sr);
 }
 
-const Standalone<StringRef> MetricKeyRef::packLatestKey() const {
+Standalone<StringRef> MetricKeyRef::packLatestKey() const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
 	wr.serializeBytes("\x01TDMetricsLastValue\x00"_sr);
@@ -92,7 +92,7 @@ const Standalone<StringRef> MetricKeyRef::packLatestKey() const {
 	return wr.toValue();
 }
 
-const Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
+Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
 	if (isField())
@@ -108,7 +108,7 @@ const Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
 	return wr.toValue();
 }
 
-const Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
+Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
 	ASSERT(isField());
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
@@ -272,7 +272,8 @@ std::string createStatsdMessage(const std::string& name,
 MetricsDataModel knobToMetricModel(const std::string& knob) {
 	if (knob == "statsd") {
 		return MetricsDataModel::STATSD;
-	} else if (knob == "otel") {
+	}
+	if (knob == "otel") {
 		return MetricsDataModel::OTLP;
 	} else if (knob == "none") {
 		return MetricsDataModel::NONE;

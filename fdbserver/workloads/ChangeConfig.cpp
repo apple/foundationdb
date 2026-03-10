@@ -70,9 +70,9 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	Future<Void> configureExtraDatabase(Database db) {
 		co_await delay(5 * deterministicRandom()->random01());
-		if (configMode.size()) {
+		if (!configMode.empty()) {
 			bool existingDB = false;
-			if (g_simulator->startingDisabledConfiguration != "") {
+			if (!g_simulator->startingDisabledConfiguration.empty()) {
 				co_await ManagementAPI::changeConfig(
 				    db.getReference(), g_simulator->startingDisabledConfiguration, true);
 				TraceEvent("WaitForReplicasExtra").log();
@@ -83,7 +83,7 @@ struct ChangeConfigWorkload : TestWorkload {
 			std::string mode = getConfigMode(configMode, existingDB);
 			co_await ManagementAPI::changeConfig(db.getReference(), mode, true);
 		}
-		if (networkAddresses.size()) {
+		if (!networkAddresses.empty()) {
 			if (networkAddresses == "auto") {
 				co_await coordinatorsChangeActor(db, true);
 			} else {
@@ -97,7 +97,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	Future<Void> configureExtraDatabases() {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
-			for (auto extraDatabase : g_simulator->extraDatabases) {
+			for (const auto& extraDatabase : g_simulator->extraDatabases) {
 				Database db = Database::createSimulatedExtraDatabase(extraDatabase);
 				futures.push_back(configureExtraDatabase(db));
 			}
@@ -114,9 +114,9 @@ struct ChangeConfigWorkload : TestWorkload {
 			co_await configureExtraDatabases();
 		}
 
-		if (configMode.size()) {
+		if (!configMode.empty()) {
 			bool existingDB = false;
-			if (g_network->isSimulated() && g_simulator->startingDisabledConfiguration != "") {
+			if (g_network->isSimulated() && !g_simulator->startingDisabledConfiguration.empty()) {
 				co_await ManagementAPI::changeConfig(
 				    cx.getReference(), g_simulator->startingDisabledConfiguration, true);
 				TraceEvent("WaitForReplicas").log();
@@ -128,7 +128,7 @@ struct ChangeConfigWorkload : TestWorkload {
 			co_await ManagementAPI::changeConfig(cx.getReference(), mode, true);
 		}
 
-		if (networkAddresses.size()) {
+		if (!networkAddresses.empty()) {
 			for (int i = 0; i < coordinatorChanges; ++i) {
 				if (i > 0) {
 					co_await delay(20);
@@ -216,11 +216,11 @@ struct ChangeConfigWorkload : TestWorkload {
 				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 				ASSERT(valueObj["command"].get_str() == "coordinators");
 				break;
-			} else {
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
 			}
+			if (err.isValid()) {
+				co_await tr.onError(err);
+			}
+
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 		}
 	}

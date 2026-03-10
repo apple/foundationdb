@@ -270,18 +270,17 @@ Optional<PublicOrPrivateKey> parseEcP256Key(StringRef b64x, StringRef b64y, Opti
 		len = ::i2d_PrivateKey(pkey, &out);
 		// assign through public API, even if it means some parsing overhead
 		return PrivateKey(DerEncoded{}, StringRef(buf, len));
-	} else {
-		auto len = ::i2d_PUBKEY(pkey, nullptr);
-		if (len <= 0) {
-			JWK_PARSE_ERROR_OSSL("i2d_PUBKEY() for EC");
-			return {};
-		}
-		auto buf = new (arena) uint8_t[len];
-		auto out = std::add_pointer_t<uint8_t>(buf);
-		len = ::i2d_PUBKEY(pkey, &out);
-		// assign through public API, even if it means some parsing overhead
-		return PublicKey(DerEncoded{}, StringRef(buf, len));
 	}
+	auto len = ::i2d_PUBKEY(pkey, nullptr);
+	if (len <= 0) {
+		JWK_PARSE_ERROR_OSSL("i2d_PUBKEY() for EC");
+		return {};
+	}
+	auto buf = new (arena) uint8_t[len];
+	auto out = std::add_pointer_t<uint8_t>(buf);
+	len = ::i2d_PUBKEY(pkey, &out);
+	// assign through public API, even if it means some parsing overhead
+	return PublicKey(DerEncoded{}, StringRef(buf, len));
 }
 
 Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
@@ -396,18 +395,17 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
 		len = ::i2d_PrivateKey(pkey, &out);
 		// assign through public API, even if it means some parsing overhead
 		return PrivateKey(DerEncoded{}, StringRef(buf, len));
-	} else {
-		auto len = ::i2d_PUBKEY(pkey, nullptr);
-		if (len <= 0) {
-			JWK_PARSE_ERROR_OSSL("i2d_PUBKEY() for RSA");
-			return {};
-		}
-		auto buf = new (arena) uint8_t[len];
-		auto out = std::add_pointer_t<uint8_t>(buf);
-		len = ::i2d_PUBKEY(pkey, &out);
-		// assign through public API, even if it means some parsing overhead
-		return PublicKey(DerEncoded{}, StringRef(buf, len));
 	}
+	auto len = ::i2d_PUBKEY(pkey, nullptr);
+	if (len <= 0) {
+		JWK_PARSE_ERROR_OSSL("i2d_PUBKEY() for RSA");
+		return {};
+	}
+	auto buf = new (arena) uint8_t[len];
+	auto out = std::add_pointer_t<uint8_t>(buf);
+	len = ::i2d_PUBKEY(pkey, &out);
+	// assign through public API, even if it means some parsing overhead
+	return PublicKey(DerEncoded{}, StringRef(buf, len));
 }
 
 template <class Value>
@@ -427,7 +425,8 @@ Optional<PublicOrPrivateKey> parseKey(const Value& key, StringRef kty, int keyIn
 		DECLARE_JWK_REQUIRED_STRING_MEMBER(key, y);
 		DECLARE_JWK_OPTIONAL_STRING_MEMBER(key, d);
 		return parseEcP256Key(x, y, d, keyIndex);
-	} else if (kty == "RSA"_sr) {
+	}
+	if (kty == "RSA"_sr) {
 		DECLARE_JWK_REQUIRED_STRING_MEMBER(key, alg);
 		if (alg != "RS256"_sr) {
 			JWK_PARSE_ERROR("Unsupported RSA algorithm").detail("Algorithm", alg.toString());
@@ -675,7 +674,8 @@ bool encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef key
 	}
 	if (alg == PKeyAlgorithm::EC) {
 		return encodeEcKey(writer, keyName, pKey, isPublic);
-	} else if (alg == PKeyAlgorithm::RSA) {
+	}
+	if (alg == PKeyAlgorithm::RSA) {
 		return encodeRsaKey(writer, keyName, pKey, isPublic);
 	} else {
 		JWK_WRITE_ERROR("Attempted to encode PKey with unsupported algorithm");

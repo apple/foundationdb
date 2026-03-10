@@ -278,9 +278,9 @@ uint64_t parseWithSuffix(const char* to_parse, const char* default_unit) {
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+	while (!f.empty() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
 		f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+	while (!d.empty() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
 		d = d.substr(0, d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
@@ -297,7 +297,7 @@ std::string cleanPath(std::string const& path) {
 		}
 		std::string part = path.substr(i, sep - i);
 		i = sep + 1;
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+		if (part.empty() || (part.size() == 1 && part[0] == '.'))
 			continue;
 		if (part == "..") {
 			if (!finalParts.empty() && finalParts.back() != "..") {
@@ -459,7 +459,8 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		        cmd->ssection.c_str(),
 		        fork_delay);
 		return;
-	} else if (pid == 0) { /* we are the child */
+	}
+	if (pid == 0) { /* we are the child */
 		/* remove signal handlers from parent */
 		signal(SIGHUP, SIG_DFL);
 		signal(SIGINT, SIG_DFL);
@@ -741,7 +742,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		for (const auto& i : sections) {
 			if (auto dot = strrchr(i.pItem, '.')) {
 				ProcessID id = i.pItem;
-				if (!id_pid.count(id)) {
+				if (!id_pid.contains(id)) {
 					/* Found something we haven't yet started */
 					Command* cmd;
 
@@ -899,7 +900,8 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				/* Don't do anything for existing non-links */
 				if (!S_ISLNK(path_stat.st_mode)) {
 					break;
-				} else if (level++ == 100) {
+				}
+				if (level++ == 100) {
 					log_msg(SevError, "Too many nested symlinks in path %s\n", path.c_str());
 					exit(1);
 				}
