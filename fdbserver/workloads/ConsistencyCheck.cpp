@@ -1,5 +1,5 @@
 /*
- * ConsistencyCheck.actor.cpp
+ * ConsistencyCheck.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -41,7 +41,6 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo

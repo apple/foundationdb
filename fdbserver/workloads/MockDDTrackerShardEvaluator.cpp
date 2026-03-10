@@ -1,5 +1,5 @@
 /*
- * MockDDTrackerShardEvaluator.actor.cpp
+ * MockDDTrackerShardEvaluator.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,6 @@
 
 #include "fdbserver/workloads/MockDDTest.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 public:

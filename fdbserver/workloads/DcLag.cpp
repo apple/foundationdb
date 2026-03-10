@@ -1,5 +1,5 @@
 /*
- * DcLag.actor.cpp
+ * DcLag.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -35,7 +35,6 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // This workload tests a gray failure scenario: a satellite TLog is have network issue
 // for sending packets to the remote data center's log routers. This will cause these

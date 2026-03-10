@@ -1,5 +1,5 @@
 /*
- * GetMappedRange.actor.cpp
+ * GetMappedRange.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,7 +29,6 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 const Value EMPTY = Tuple().pack();
 ValueRef SOMETHING = "SOMETHING"_sr;

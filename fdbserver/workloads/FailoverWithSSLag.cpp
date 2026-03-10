@@ -1,5 +1,5 @@
 /*
- * FailoverWithSSLag.actor.cpp
+ * FailoverWithSSLag.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,7 +30,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last include.
 
 // This actor tests failover with remote tlogs being in sync with primary but with remote storage servers lagging
 // behind the primary. Failover shouldn't complete until the remote storage servers also get in sync with the primary.

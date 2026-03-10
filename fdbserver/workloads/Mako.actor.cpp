@@ -401,7 +401,7 @@ struct MakoWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx, MakoWorkload* self) {
-		// TODO: Do I need to read data to warm the cache of the keySystem like ReadWrite.actor.cpp (line 465)?
+		// TODO: Do I need to read data to warm the cache of the keySystem like ReadWrite.cpp (line 465)?
 		if (self->runBenchmark) {
 			co_await self->_runBenchmark(cx, self);
 		}

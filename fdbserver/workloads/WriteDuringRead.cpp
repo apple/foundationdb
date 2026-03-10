@@ -1,5 +1,5 @@
 /*
- * WriteDuringRead.actor.cpp
+ * WriteDuringRead.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,7 +28,6 @@
 #include "fdbclient/Atomic.h"
 #include "flow/ApiVersion.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
 	static constexpr auto NAME = "WriteDuringRead";

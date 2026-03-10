@@ -1,5 +1,5 @@
 /*
- * Serializability.actor.cpp
+ * Serializability.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,6 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SerializabilityWorkload : TestWorkload {
 	static constexpr auto NAME = "Serializability";

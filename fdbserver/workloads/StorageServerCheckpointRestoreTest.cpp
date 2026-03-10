@@ -1,5 +1,5 @@
 /*
- *PhysicalShardMove.actor.cpp
+ * StorageServerCheckpointRestoreTest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -32,8 +32,6 @@
 #include "flow/flow.h"
 #include <cstdint>
 #include <limits>
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 std::string printValue(const ErrorOr<Optional<Value>>& value) {

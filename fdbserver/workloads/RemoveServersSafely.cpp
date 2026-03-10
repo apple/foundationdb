@@ -1,5 +1,5 @@
 /*
- * RemoveServersSafely.actor.cpp
+ * RemoveServersSafely.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 template <>
 std::string describe(uint32_t const& item) {

@@ -1,5 +1,5 @@
 /*
- * MutationLogReaderCorrectness.actor.cpp
+ * MutationLogReaderCorrectness.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,7 +29,6 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "MutationLogReaderCorrectness";

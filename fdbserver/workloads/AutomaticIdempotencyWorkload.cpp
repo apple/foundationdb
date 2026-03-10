@@ -1,5 +1,5 @@
 /*
- * AutomaticIdempotencyWorkload.actor.cpp
+ * AutomaticIdempotencyWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,7 +24,6 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 struct ValueType {

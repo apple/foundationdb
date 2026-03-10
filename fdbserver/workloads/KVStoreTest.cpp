@@ -1,5 +1,5 @@
 /*
- * KVStoreTest.actor.cpp
+ * KVStoreTest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,6 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 extern IKeyValueStore* makeDummyKeyValueStore();
 

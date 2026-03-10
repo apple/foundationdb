@@ -1,5 +1,5 @@
 /*
- * MiniCycle.actor.cpp
+ * MiniCycle.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,7 +30,6 @@
 #include <cstring>
 
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MiniCycleWorkload : TestWorkload {
 	static constexpr auto NAME = "MiniCycle";
