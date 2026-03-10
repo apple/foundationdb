@@ -645,13 +645,11 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				if (err.code() == error_code_movekeys_conflict) {
-					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
-					tr.reset();
-				} else {
-					co_await tr.onError(err);
-				}
+			if (err.code() == error_code_movekeys_conflict) {
+				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				tr.reset();
+			} else {
+				co_await tr.onError(err);
 			}
 		}
 

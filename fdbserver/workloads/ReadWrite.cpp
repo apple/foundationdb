@@ -325,9 +325,7 @@ static Future<Version> getNextRV(Database db) {
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -517,12 +515,10 @@ struct ReadWriteWorkload : ReadWriteCommon {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					if (err.code() == error_code_tag_throttled) {
-						++transactionsTagThrottled;
-					}
-					co_await tr.onError(err);
+				if (err.code() == error_code_tag_throttled) {
+					++transactionsTagThrottled;
 				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -697,22 +693,20 @@ struct ReadWriteWorkload : ReadWriteCommon {
 					} catch (Error& e) {
 						err = e;
 					}
-					if (err.isValid()) {
-						if (err.code() == error_code_tag_throttled) {
-							++self->transactionsTagThrottled;
-						}
-
-						self->transactionFailureMetric->errorCode = err.code();
-						self->transactionFailureMetric->log();
-
-						co_await tr.onError(err);
-
-						++self->transactionSuccessMetric->retries;
-						++self->totalRetriesMetric;
-
-						if (self->shouldRecord())
-							++self->retries;
+					if (err.code() == error_code_tag_throttled) {
+						++self->transactionsTagThrottled;
 					}
+
+					self->transactionFailureMetric->errorCode = err.code();
+					self->transactionFailureMetric->log();
+
+					co_await tr.onError(err);
+
+					++self->transactionSuccessMetric->retries;
+					++self->totalRetriesMetric;
+
+					if (self->shouldRecord())
+						++self->retries;
 				}
 
 				if (debugID != UID())
@@ -779,9 +773,7 @@ Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Database cx
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 
 	co_return countInsertionRates;

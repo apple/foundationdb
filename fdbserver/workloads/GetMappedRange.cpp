@@ -131,10 +131,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					std::cout << "failed fillInRecords, retry" << std::endl;
-					co_await tr.onError(err);
-				}
+				std::cout << "failed fillInRecords, retry" << std::endl;
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -159,9 +157,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 		std::cout << "finished scanRange" << std::endl;
 	}
@@ -264,24 +260,22 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					if ((self->BAD_MAPPER && err.code() == error_code_mapper_bad_index) ||
-					    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && err.code() == error_code_quick_get_value_miss) ||
-					    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
-					     err.code() == error_code_quick_get_key_values_miss)) {
-						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
-						co_return MappedRangeResult();
-					} else if (err.code() == error_code_commit_proxy_memory_limit_exceeded ||
-					           err.code() == error_code_operation_cancelled) {
-						// requests have overwhelmed commit proxy, rest a bit
-						co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-						continue;
-					} else {
-						std::cout << "scan error " << err.what() << "  code is " << err.code() << std::endl;
-						co_await tr->onError(err);
-					}
-					std::cout << "failed scanMappedRangeWithLimits" << std::endl;
+				if ((self->BAD_MAPPER && err.code() == error_code_mapper_bad_index) ||
+				    (!SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK && err.code() == error_code_quick_get_value_miss) ||
+				    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
+				     err.code() == error_code_quick_get_key_values_miss)) {
+					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
+					co_return MappedRangeResult();
+				} else if (err.code() == error_code_commit_proxy_memory_limit_exceeded ||
+				           err.code() == error_code_operation_cancelled) {
+					// requests have overwhelmed commit proxy, rest a bit
+					co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+					continue;
+				} else {
+					std::cout << "scan error " << err.what() << "  code is " << err.code() << std::endl;
+					co_await tr->onError(err);
 				}
+				std::cout << "failed scanMappedRangeWithLimits" << std::endl;
 			}
 		}
 	}
@@ -424,10 +418,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 							} catch (Error& e) {
 								err = e;
 							}
-							if (err.isValid()) {
-								std::cout << "tr2 error " << err.what() << std::endl;
-								co_await tr2->onError(err);
-							}
+							std::cout << "tr2 error " << err.what() << std::endl;
+							co_await tr2->onError(err);
 						}
 					}
 
@@ -438,15 +430,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					if (err.code() == error_code_not_committed) {
-						std::cout << "tr1 failed because of conflicts (as expected)" << std::endl;
-						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
-						co_return;
-					} else {
-						std::cout << "tr1 error " << err.what() << std::endl;
-						co_await tr1->onError(err);
-					}
+				if (err.code() == error_code_not_committed) {
+					std::cout << "tr1 failed because of conflicts (as expected)" << std::endl;
+					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
+					co_return;
+				} else {
+					std::cout << "tr1 error " << err.what() << std::endl;
+					co_await tr1->onError(err);
 				}
 			}
 		}
@@ -510,15 +500,13 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					if (err.code() == error_code_get_mapped_range_reads_your_writes) {
-						std::cout << "tr1 failed because of read your writes (as expected)" << std::endl;
-						TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
-						co_return;
-					} else {
-						std::cout << "tr1 error " << err.what() << std::endl;
-						co_await tr1->onError(err);
-					}
+				if (err.code() == error_code_get_mapped_range_reads_your_writes) {
+					std::cout << "tr1 failed because of read your writes (as expected)" << std::endl;
+					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(err);
+					co_return;
+				} else {
+					std::cout << "tr1 error " << err.what() << std::endl;
+					co_await tr1->onError(err);
 				}
 			}
 		}

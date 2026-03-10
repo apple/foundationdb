@@ -286,9 +286,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 

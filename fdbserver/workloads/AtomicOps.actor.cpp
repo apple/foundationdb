@@ -250,10 +250,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			TraceEvent("DumpLogKVError").detail("Error", err.what());
-			co_await tr.onError(err);
-		}
+		TraceEvent("DumpLogKVError").detail("Error", err.what());
+		co_await tr.onError(err);
 	}
 
 	Future<Void> dumpDebugKV(Database cx, int g) {
@@ -271,10 +269,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			TraceEvent("DumpDebugKVError").detail("Error", err.what());
-			co_await tr.onError(err);
-		}
+		TraceEvent("DumpDebugKVError").detail("Error", err.what());
+		co_await tr.onError(err);
 	}
 
 	Future<Void> dumpOpsKV(Database cx, int g) {
@@ -300,10 +296,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			TraceEvent("DumpOpsKVError").detail("Error", err.what());
-			co_await tr.onError(err);
-		}
+		TraceEvent("DumpOpsKVError").detail("Error", err.what());
+		co_await tr.onError(err);
 	}
 
 	Future<Void> validateOpsKey(Database cx, AtomicOpsWorkload* self, int g) {
@@ -445,9 +439,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				co_await tr.onError(err);
 			}
 		}
 		co_return ret;

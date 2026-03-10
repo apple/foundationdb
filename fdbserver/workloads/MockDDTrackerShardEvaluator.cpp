@@ -82,11 +82,9 @@ public:
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				if (err.code() != error_code_wrong_shard_server)
-					throw err;
-				co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
-			}
+			if (err.code() != error_code_wrong_shard_server)
+				throw err;
+			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
 		}
 	}
 

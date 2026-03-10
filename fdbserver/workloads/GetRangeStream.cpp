@@ -86,9 +86,7 @@ struct GetRangeStream : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tx.onError(err);
-			}
+			co_await tx.onError(err);
 		}
 	}
 
@@ -125,9 +123,7 @@ struct GetRangeStream : TestWorkload {
 			if (err.code() == error_code_end_of_stream) {
 				break;
 			}
-			if (err.isValid()) {
-				co_await tx.onError(err);
-			}
+			co_await tx.onError(err);
 		}
 	}
 };

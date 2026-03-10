@@ -627,15 +627,13 @@ struct MakoWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				TraceEvent("FailedToExecOperations").error(err);
-				if (err.code() == error_code_operation_cancelled)
-					throw err;
-				else if (err.code() == error_code_not_committed)
-					++self->conflicts;
-				co_await tr.onError(err);
-				++self->retries;
-			}
+			TraceEvent("FailedToExecOperations").error(err);
+			if (err.code() == error_code_operation_cancelled)
+				throw err;
+			else if (err.code() == error_code_not_committed)
+				++self->conflicts;
+			co_await tr.onError(err);
+			++self->retries;
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);
 			tr.reset();

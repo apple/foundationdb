@@ -213,13 +213,11 @@ struct MiniCycleWorkload : TestWorkload {
 					} catch (Error& e) {
 						err = e;
 					}
-					if (err.isValid()) {
-						if (err.code() == error_code_transaction_too_old)
-							++self->tooOldRetries;
-						else if (err.code() == error_code_not_committed)
-							++self->commitFailedRetries;
-						co_await tr.onError(err);
-					}
+					if (err.code() == error_code_transaction_too_old)
+						++self->tooOldRetries;
+					else if (err.code() == error_code_not_committed)
+						++self->commitFailedRetries;
+					co_await tr.onError(err);
 					++self->retries;
 				}
 				++self->transactions;
@@ -342,11 +340,9 @@ struct MiniCycleWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				retryCount++;
-				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(err);
-				co_await tr.onError(err);
-			}
+			retryCount++;
+			TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(err);
+			co_await tr.onError(err);
 		}
 		co_return ok;
 	}

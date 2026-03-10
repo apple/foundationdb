@@ -58,10 +58,8 @@ struct ClearSingleRange : TestWorkload {
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			TraceEvent("ClearRangeError").error(err);
-			co_await tr.onError(err);
-		}
+		TraceEvent("ClearRangeError").error(err);
+		co_await tr.onError(err);
 	}
 };
 

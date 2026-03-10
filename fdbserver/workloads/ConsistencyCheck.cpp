@@ -201,9 +201,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -262,9 +260,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					} catch (Error& e) {
 						err = e;
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+					co_await tr.onError(err);
 				}
 
 				// Perform quiescence-only checks
@@ -529,9 +525,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					co_await tr.onError(err);
-				}
+				co_await tr.onError(err);
 			}
 		}
 
@@ -818,9 +812,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -1091,9 +1083,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr->onError(err);
-			}
+			co_await tr->onError(err);
 		}
 	}
 

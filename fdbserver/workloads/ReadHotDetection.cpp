@@ -130,9 +130,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				err = e;
 			}
 			// TraceEvent("RHDCheckPhaseReadGotError").error(e);
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 

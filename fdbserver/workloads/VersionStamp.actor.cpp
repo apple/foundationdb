@@ -431,9 +431,7 @@ struct VersionStampWorkload : TestWorkload {
 								} catch (Error& caughtErr) {
 									err = caughtErr;
 								}
-								if (err.isValid()) {
-									co_await cur_tr.onError(err);
-								}
+								co_await cur_tr.onError(err);
 							}
 						} else {
 							error = true;

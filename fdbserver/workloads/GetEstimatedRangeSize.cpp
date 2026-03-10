@@ -109,10 +109,8 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
-				co_await tr.onError(err);
-			}
+			TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 	}
 };

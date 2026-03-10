@@ -105,9 +105,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 
 		TraceEvent("TestCheckpointCreated")
@@ -155,12 +153,10 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					TraceEvent("TestFetchCheckpointError")
-					    .errorUnsuppressed(err)
-					    .detail("Checkpoint", it->second.toString());
-					co_await delay(1);
-				}
+				TraceEvent("TestFetchCheckpointError")
+				    .errorUnsuppressed(err)
+				    .detail("Checkpoint", it->second.toString());
+				co_await delay(1);
 			}
 		}
 
@@ -190,9 +186,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 
 		RangeResult kvRange = co_await kvStore->readRange(testRange);

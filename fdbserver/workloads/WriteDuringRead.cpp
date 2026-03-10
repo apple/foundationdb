@@ -623,9 +623,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -681,9 +679,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 					} catch (Error& e) {
 						err = e;
 					}
-					if (err.isValid()) {
-						co_await tr.onError(err);
-					}
+					co_await tr.onError(err);
 				}
 			}
 			self->lastCommittedDatabase = self->memoryDatabase;
@@ -1090,36 +1086,33 @@ struct WriteDuringReadWorkload : TestWorkload {
 				} catch (Error& e) {
 					err = e;
 				}
-				if (err.isValid()) {
-					operations.clear();
-					commits.clear(false);
-					waitLocation = 0;
-					watches.clear();
-					self->changeCount.insert(allKeys, 0);
-					doingCommit = false;
-					//TraceEvent("WDRError").errorUnsuppressed(e);
-					if (err.code() == error_code_database_locked) {
-						self->memoryDatabase = self->lastCommittedDatabase;
-						self->addedConflicts.insert(allKeys, false);
-						co_return;
-					}
-					if (err.code() == error_code_not_committed || err.code() == error_code_commit_unknown_result ||
-					    err.code() == error_code_transaction_too_large || err.code() == error_code_key_too_large ||
-					    err.code() == error_code_value_too_large || err.code() == error_code_too_many_watches ||
-					    cancelled)
-						throw not_committed();
-					try {
-						co_await tr.onError(err);
-					} catch (Error& err) {
-						if (err.code() == error_code_transaction_timed_out) {
-							ASSERT(timebomb != 0 && 1000 * (now() - startTime) >= timebomb - 1);
-							throw not_committed();
-						}
-						throw err;
-					}
+				operations.clear();
+				commits.clear(false);
+				waitLocation = 0;
+				watches.clear();
+				self->changeCount.insert(allKeys, 0);
+				doingCommit = false;
+				//TraceEvent("WDRError").errorUnsuppressed(e);
+				if (err.code() == error_code_database_locked) {
 					self->memoryDatabase = self->lastCommittedDatabase;
 					self->addedConflicts.insert(allKeys, false);
+					co_return;
 				}
+				if (err.code() == error_code_not_committed || err.code() == error_code_commit_unknown_result ||
+				    err.code() == error_code_transaction_too_large || err.code() == error_code_key_too_large ||
+				    err.code() == error_code_value_too_large || err.code() == error_code_too_many_watches || cancelled)
+					throw not_committed();
+				try {
+					co_await tr.onError(err);
+				} catch (Error& err) {
+					if (err.code() == error_code_transaction_timed_out) {
+						ASSERT(timebomb != 0 && 1000 * (now() - startTime) >= timebomb - 1);
+						throw not_committed();
+					}
+					throw err;
+				}
+				self->memoryDatabase = self->lastCommittedDatabase;
+				self->addedConflicts.insert(allKeys, false);
 			}
 		}
 		self->memoryDatabase = self->lastCommittedDatabase;
