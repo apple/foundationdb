@@ -234,7 +234,6 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
 		if (actorWaitStateIsCancelled(pt->waitState())) {
 			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
-			// actor was cancelled
 			return true;
 		}
 		return future.isReady();
@@ -264,7 +263,6 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
 			// await_ready() observed cancellation before await_suspend() registered a callback, so there is nothing to
 			// remove here.
-			// if the wait_state is -1 we still have to throw, so we fall through to the -2 case
 			throw actor_cancelled();
 		}
 
