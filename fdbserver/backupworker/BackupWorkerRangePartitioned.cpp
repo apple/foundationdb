@@ -80,12 +80,15 @@ struct BackupRangePartitionedData {
 	AsyncVar<bool> paused; // Track if "backupPausedKey" is set.
 	Reference<FlowLock> lock;
 	AsyncTrigger doneTrigger;
+	AsyncTrigger changedTrigger;
 	Database cx;
 	std::vector<RangePartitionedVersionedMessage> messages;
 	// Key range to partition ID map, used to determine which partition a mutation belongs to based on its key.
 	KeyRangeMap<int> keyRangeToPartitionId;
-	std::unordered_map<int, KeyRange>
-	    partitionToKeyRange; // Partition ID to key range map for easy lookup of partition's key range.
+	// Partition ID to key range map for easy lookup of partition's key range.
+	std::unordered_map<int, KeyRange> partitionToKeyRange;
+	// KeyRange to backup UID and partition id map needed to create log files for the right backup and partition.
+	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -199,11 +202,6 @@ struct BackupRangePartitionedData {
 	ACTOR static Future<Void> _waitAllInfoReady(BackupRangePartitionedData* self) {
 		std::vector<Future<Void>> all;
 		for (auto it = self->backups.begin(); it != self->backups.end();) {
-			if (it->second.stopped) {
-				TraceEvent("BWRangeParitionedRemoveStoppedContainer", self->myId).detail("BackupId", it->first);
-				it = self->backups.erase(it);
-				continue;
-			}
 			all.push_back(it->second.waitReady());
 			it++;
 		}
@@ -221,6 +219,149 @@ struct BackupRangePartitionedData {
 		return true;
 	}
 };
+ACTOR static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
+	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
+
+	while (!self->isAllInfoReady()) {
+		wait(self->waitAllInfoReady());
+	}
+
+	for (auto& [uid, info] : self->backups) {
+		const auto& backupRanges = info.ranges.get().get();
+
+		for (auto iter : self->keyRangeToPartitionId.ranges()) {
+			int32_t partitionId = iter.value();
+			KeyRange partitionRange = iter.range();
+
+			Optional<KeyRange> intersection = self->getKeyRangeIntersection(backupRanges, partitionRange);
+			if (!intersection.present())
+				continue;
+
+			std::pair<UID, int32_t> bk{ uid, partitionId };
+			for (auto& range : self->keyRangeToBackupAssignment.modify(intersection.get())) {
+				range->value().push_back(bk);
+			}
+		}
+	}
+	self->keyRangeToBackupAssignment.coalesce(allKeys);
+	return Void();
+}
+
+ACTOR static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
+                                          std::vector<std::pair<UID, Version>> uidVersions) {
+	std::unordered_set<UID> activeUids;
+	for (const auto& [uid, version] : uidVersions) {
+		activeUids.insert(uid);
+	}
+
+	bool modified = false;
+	bool hasNewBackup = false;
+	Version newBackupsMinVersion = std::numeric_limits<Version>::max();
+
+	// Add any new backups
+	for (const auto& [uid, version] : uidVersions) {
+		if (self->backups.find(uid) == self->backups.end()) {
+			self->backups.emplace(uid, BackupRangePartitionedData::PerBackupInfo(self, uid, version));
+			modified = true;
+			newBackupsMinVersion = std::min(newBackupsMinVersion, version);
+			hasNewBackup = true;
+		}
+	}
+
+	// Remove backups that are no longer active.
+	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
+		if (activeUids.find(it->first) == activeUids.end()) {
+			it->second.stopped = true;
+			it = self->backups.erase(it);
+			modified = true;
+		}
+	}
+
+	if (hasNewBackup && self->backupEpoch < self->recruitedEpoch && self->savedVersion + 1 == self->startVersion) {
+		// Advance savedVersion to minimize version ranges in case backupEpoch's progress is not saved. Master may set a
+		// very low startVersion that is already popped. Advance the version is safe because these versions are not
+		// popped -- if they are popped, their progress should be already recorded and Master would use a higher version
+		// than minVersion.
+		self->savedVersion = std::max(newBackupsMinVersion, self->savedVersion);
+	}
+	if (modified) {
+		self->changedTrigger.trigger();
+		wait(computeKeyRangeToBackupAssignment(self));
+	}
+	return Void();
+}
+
+ACTOR static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
+	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
+
+	while (!self->isAllInfoReady()) {
+		wait(self->waitAllInfoReady());
+	}
+
+	for (auto& [uid, info] : self->backups) {
+		const auto& backupRanges = info.ranges.get().get();
+
+		for (auto iter : self->keyRangeToPartitionId.ranges()) {
+			int32_t partitionId = iter.value();
+			KeyRange partitionRange = iter.range();
+
+			Optional<KeyRange> intersection = self->getKeyRangeIntersection(backupRanges, partitionRange);
+			if (!intersection.present())
+				continue;
+
+			std::pair<UID, int32_t> bk{ uid, partitionId };
+			for (auto& range : self->keyRangeToBackupAssignment.modify(intersection.get())) {
+				range->value().push_back(bk);
+			}
+		}
+	}
+	self->keyRangeToBackupAssignment.coalesce(allKeys);
+	return Void();
+}
+
+ACTOR static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
+                                          std::vector<std::pair<UID, Version>> uidVersions) {
+	std::unordered_set<UID> activeUids;
+	for (const auto& [uid, version] : uidVersions) {
+		activeUids.insert(uid);
+	}
+
+	bool modified = false;
+	bool hasNewBackup = false;
+	Version newBackupsMinVersion = std::numeric_limits<Version>::max();
+
+	// Add any new backups
+	for (const auto& [uid, version] : uidVersions) {
+		if (self->backups.find(uid) == self->backups.end()) {
+			self->backups.emplace(uid, BackupRangePartitionedData::PerBackupInfo(self, uid, version));
+			modified = true;
+			newBackupsMinVersion = std::min(newBackupsMinVersion, version);
+			hasNewBackup = true;
+		}
+	}
+
+	// Remove backups that are no longer active.
+	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
+		if (activeUids.find(it->first) == activeUids.end()) {
+			it->second.stopped = true;
+			it = self->backups.erase(it);
+			modified = true;
+		}
+	}
+
+	if (hasNewBackup && self->backupEpoch < self->recruitedEpoch && self->savedVersion + 1 == self->startVersion) {
+		// Advance savedVersion to minimize version ranges in case backupEpoch's progress is not saved. Master may set a
+		// very low startVersion that is already popped. Advance the version is safe because these versions are not
+		// popped -- if they are popped, their progress should be already recorded and Master would use a higher version
+		// than minVersion.
+		self->savedVersion = std::max(newBackupsMinVersion, self->savedVersion);
+	}
+	if (modified) {
+		self->changedTrigger.trigger();
+		wait(computeKeyRangeToBackupAssignment(self));
+	}
+	return Void();
+}
 
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
                           LogEpoch recoveryCount,
@@ -364,7 +505,7 @@ Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap 
 	std::string jsonContent = serializePartitionListJSON(partitionMap);
 
 	for (; it != self->backups.end();) {
-		if (it->second.stopped || !it->second.container.get().present()) {
+		if (!it->second.container.get().present()) {
 			TraceEvent("BWRangePartitionedRemoveContainer", self->myId).detail("BackupId", it->first);
 			it = self->backups.erase(it);
 			continue;
@@ -458,6 +599,8 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	self->pulledVersion.set(partitionMapVersion);
 	self->savedVersion = partitionMapVersion;
 	self->pop();
+	wait(computeKeyRangeToBackupAssignment(self));
+	return Void();
 }
 
 // Pulls mutations from TLog servers.
@@ -606,49 +749,46 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 	}
 
 	state std::vector<RangePartitionedLogFileInfo> activeFiles;
-	state KeyRangeMap<std::set<int>> keyRangetoFileIdxMap;
+	// Map of (backupUid, partitionId) -> index into activeFiles.
+	state std::map<std::pair<UID, int32_t>, int> fileIndexByBackupPartition;
 	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
 	state std::vector<Future<Reference<IBackupFile>>> fileFutures;
 
-	for (auto it = self->backups.begin(); it != self->backups.end();) {
-		if (it->second.stopped || !it->second.container.get().present()) {
-			TraceEvent("BWRangeParititonedNoContainer", self->myId).detail("BackupId", it->first);
-			it = self->backups.erase(it);
-			continue;
-		}
+	for (auto entry = self->keyRangeToBackupAssignment.ranges().begin();
+	     entry != self->keyRangeToBackupAssignment.ranges().end();
+	     ++entry) {
+		for (const auto& bkPartition : entry->value()) {
+			UID backupUid = bkPartition.first;
+			int32_t partitionId = bkPartition.second;
 
-		state Version fileEndVersion = lastVersionInFile + 1;
-		if (it->second.nextFileBeginVersion == invalidVersion) {
-			it->second.nextFileBeginVersion = self->savedVersion + 1;
-		}
+			auto it = self->backups.find(backupUid);
+			if (it == self->backups.end() || !it->second.container.get().present()) {
+				TraceEvent("BWRangePartitionedRemoveContainerInFileCreation", self->myId).detail("BackupId", backupUid);
+				continue;
+			}
 
-		state Version beginVersion = it->second.nextFileBeginVersion;
+			std::pair<UID, int32_t> bpKey(backupUid, partitionId);
+			if (fileIndexByBackupPartition.count(bpKey)) {
+				continue;
+			}
 
-		for (auto range : self->keyRangeToPartitionId.ranges()) {
-			state int32_t partitionId = range.value();
-			state KeyRange partitionRange = range.range();
-
-			// Calculate intersection between backup's ranges and partition range
-			state Optional<KeyRange> intersection =
-			    self->getKeyRangeIntersection(it->second.ranges.get().get(), partitionRange);
-
-			if (!intersection.present()) {
-				continue; // No overlap, skip this partition for this backup
+			state Version beginVersion = it->second.nextFileBeginVersion;
+			state Version fileEndVersion = lastVersionInFile + 1;
+			if (it->second.nextFileBeginVersion == invalidVersion) {
+				it->second.nextFileBeginVersion = self->savedVersion + 1;
 			}
 
 			RangePartitionedLogFileInfo lf;
 			lf.backupUid = it->first;
 			lf.partitionId = partitionId;
-			lf.fileKeyRange = intersection.get();
+			lf.fileKeyRange = entry->range();
 			lf.beginVersion = beginVersion;
 			lf.blockEnd = 0;
 
 			activeFiles.push_back(lf);
-			int fileIndex = activeFiles.size() - 1;
-
+			fileIndexByBackupPartition[bpKey] = activeFiles.size() - 1;
 			fileFutures.push_back(it->second.container.get().get()->writeRangePartitionedLogFile(
 			    beginVersion, fileEndVersion, self->logFolderBaseVersion, partitionId, blockSize));
-			self->insertRange(keyRangetoFileIdxMap, intersection.get(), fileIndex);
 		}
 	}
 
@@ -666,7 +806,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 	}
 	wait(waitForAll(headerWrites));
 
-	keyRangetoFileIdxMap.coalesce(allKeys);
 	if (activeFiles.empty()) {
 		return Void();
 	}
@@ -686,7 +825,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 
 		std::vector<Future<Void>> adds;
 		if (m.type != MutationRef::Type::ClearRange) {
-			for (int fileIdx : keyRangetoFileIdxMap[m.param1]) {
+			for (const auto& entry : self->keyRangeToBackupAssignment[m.param1]) {
+				auto it = fileIndexByBackupPartition.find(entry);
+				ASSERT(it != fileIndexByBackupPartition.end());
+
+				int fileIdx = it->second;
 				auto& lf = activeFiles[fileIdx];
 				// Different backups may have different start version so need this check before writing.
 				if (message.getVersion() >= lf.beginVersion) {
@@ -696,8 +839,12 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 		} else {
 			KeyRangeRef mutationRange(m.param1, m.param2);
 			std::unordered_set<int> writtenFiles;
-			for (auto range : keyRangetoFileIdxMap.intersectingRanges(mutationRange)) {
-				for (int fileIdx : range.value()) {
+			for (auto range : self->keyRangeToBackupAssignment.intersectingRanges(mutationRange)) {
+				for (const auto& entry : range.value()) {
+					auto it = fileIndexByBackupPartition.find(entry);
+					ASSERT(it != fileIndexByBackupPartition.end());
+
+					int fileIdx = it->second;
 					// For ClearRange, we only need to write the full mutation once for each file.
 					if (writtenFiles.find(fileIdx) != writtenFiles.end()) {
 						continue;
