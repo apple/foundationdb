@@ -2011,6 +2011,17 @@ TEST_CASE("/flow/coro/raceSuccess") {
 	co_return;
 }
 
+TEST_CASE("/flow/coro/raceSuccessFirstArgument") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	intPromise.send(42);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 42);
+	co_return;
+}
+
 TEST_CASE("/flow/coro/raceError") {
 	Promise<int> intPromise;
 	Promise<std::string> stringPromise;
