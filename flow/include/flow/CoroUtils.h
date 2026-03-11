@@ -327,6 +327,11 @@ struct RaceImplActor final : Actor<Result>,
 
 using Choose = coro::ChooseClause<>;
 
+// Waits for the first input Future/FutureStream to become ready and returns its value in a variant whose index
+// matches the winning argument. If multiple inputs are already ready, the lowest-index argument wins; for streams,
+// the next queued element is consumed. Errors and explicit cancellation propagate to the returned Future, while
+// non-winning inputs are only detached from the race. They are not actively cancelled here, but may still cancel
+// if dropping the race also drops their last reference.
 template <class... Futures>
 [[nodiscard]] auto race(Futures&&... futures) -> Future<coro::RaceResult<std::decay_t<Futures>...>> {
 	static_assert(sizeof...(Futures) > 0, "race requires at least one Future argument");
