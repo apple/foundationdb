@@ -32,6 +32,14 @@
 
 Reference<HTTP::IRequestHandler> makePrometheusMetricsHandler();
 
+// Validates the Prometheus /metrics HTTP endpoint exposed by sim_http_server.
+// Registers an HTTP handler that serves all collected metrics (SimpleCounter and OTEL)
+// in Prometheus text exposition format. Then repeatedly issues simulated HTTP GET
+// requests to /metrics and validates the response: correct status code, Content-Type
+// header, presence of # TYPE annotations, and presence of specific metric names.
+// The response is expected to contain at least 50 metric families from the OTEL
+// MetricCollection (flow_arena_*, flow_fastalloc_*, Transport_TLS_*, etc.) plus any
+// SimpleCounter metrics registered during the test.
 struct PrometheusMetricsTestWorkload : TestWorkload {
 	static constexpr auto NAME = "PrometheusMetricsTest";
 	double testDuration;
@@ -42,7 +50,6 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 
 	PerfIntCounter requestCount;
 
-	// CounterCollection used to create OTEL Sum metrics
 	CounterCollection cc;
 	Counter testOtelCounter;
 
@@ -71,11 +78,9 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 	ACTOR Future<Void> _start(PrometheusMetricsTestWorkload* self) {
 		state double startTime = now();
 
-		// Create a SimpleCounter metric
 		static SimpleCounter<int64_t>* testCounter = SimpleCounter<int64_t>::makeCounter("/test/prometheus/requests");
 		testCounter->increment(42);
 
-		// Increment OTEL counter (creates an OTELSum in MetricCollection)
 		self->testOtelCounter += 100;
 
 		wait(delay(0.5));
@@ -128,7 +133,6 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 		    .detail("ContentLength", body.size())
 		    .detail("SampleContent", body.substr(0, std::min(body.size(), size_t(500))));
 
-		// Basic validations
 		ASSERT(body.size() > 0);
 		ASSERT(body.find(" ") != std::string::npos);
 
@@ -138,10 +142,20 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 		// Verify SimpleCounter metric is present
 		ASSERT(body.find("test_prometheus_requests") != std::string::npos);
 
-		// Write body to file for CI reporting
-		std::ofstream out("prometheus_output.txt");
-		out << body;
-		out.close();
+		// Verify a reasonable number of metrics are reported (currently ~67)
+		int typeCount = 0;
+		size_t pos = 0;
+		while ((pos = body.find("# TYPE", pos)) != std::string::npos) {
+			typeCount++;
+			pos += 6;
+		}
+		ASSERT(typeCount >= 50);
+
+		if (0 /* enable this for local testing */) {
+			std::ofstream out("prometheus_output.txt");
+			out << body;
+			out.close();
+		}
 
 		conn->close();
 
