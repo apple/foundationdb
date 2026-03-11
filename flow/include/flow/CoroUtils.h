@@ -58,7 +58,7 @@ struct ChooseImplCallback<Parent, Idx, F, Args...>
 	}
 
 	void a_callback_fire(ThisCallback*, ValueType const& value) {
-		getParent()->actor_wait_state = 0;
+		getParent()->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		getParent()->removeCallbacks();
 		try {
 			std::get<Idx>(getParent()->functions)(value);
@@ -71,7 +71,7 @@ struct ChooseImplCallback<Parent, Idx, F, Args...>
 	}
 
 	void a_callback_error(ThisCallback*, Error e) {
-		getParent()->actor_wait_state = 0;
+		getParent()->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		getParent()->removeCallbacks();
 		getParent()->SAV<Void>::sendErrorAndDelPromiseRef(e);
 	}
@@ -105,13 +105,13 @@ struct ChooseImplActor final : Actor<Void>,
 	                std::tuple<std::function<void(FutureReturnTypeT<Args> const&)>...>&& functions)
 	  : Actor<Void>(), futures(futures), functions(functions) {
 		ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::registerCallbacks();
-		actor_wait_state = 1;
+		actor_wait_state = ACTOR_WAIT_STATE_WAITING;
 	}
 
 	void cancel() override {
 		const auto waitState = actor_wait_state;
-		actor_wait_state = -1;
-		if (waitState > 0) {
+		actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
+		if (actorWaitStateIsWaiting(waitState)) {
 			ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::removeCallbacks();
 			SAV<Void>::sendErrorAndDelPromiseRef(actor_cancelled());
 		}
@@ -294,27 +294,27 @@ struct RaceImplActor final : Actor<Result>,
 	using FastAllocated<RaceImplActor<Result, Futures...>>::operator delete;
 
 	explicit RaceImplActor(std::tuple<Futures...>&& futures) : Actor<Result>(), futures(std::move(futures)) {
+		this->actor_wait_state = ACTOR_WAIT_STATE_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::registerCallbacks();
-		this->actor_wait_state = 1;
 	}
 
 	template <std::size_t Idx, class T>
 	void finish(T const& value) {
-		this->actor_wait_state = 0;
+		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
 		this->SAV<Result>::sendAndDelPromiseRef(Result(std::in_place_index<Idx>, value));
 	}
 
 	void fail(Error e) {
-		this->actor_wait_state = 0;
+		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
 		this->SAV<Result>::sendErrorAndDelPromiseRef(e);
 	}
 
 	void cancel() override {
 		const auto waitState = this->actor_wait_state;
-		this->actor_wait_state = -1;
-		if (waitState > 0) {
+		this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
+		if (actorWaitStateIsWaiting(waitState)) {
 			RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
 			this->SAV<Result>::sendErrorAndDelPromiseRef(actor_cancelled());
 		}
