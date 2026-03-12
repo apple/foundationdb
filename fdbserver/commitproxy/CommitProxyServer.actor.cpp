@@ -49,7 +49,7 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/MutationTracking.h"
-#include "fdbserver/ProxyCommitData.actor.h"
+#include "fdbserver/commitproxy/ProxyCommitData.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/RestoreUtil.h"

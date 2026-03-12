@@ -19,11 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H)
-#define FDBSERVER_PROXYCOMMITDATA_ACTOR_G_H
-#include "fdbserver/ProxyCommitData.actor.g.h"
-#elif !defined(FDBSERVER_PROXYCOMMITDATA_ACTOR_H)
-#define FDBSERVER_PROXYCOMMITDATA_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H)
+#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H
+#include "fdbserver/commitproxy/ProxyCommitData.actor.g.h"
+#elif !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H)
+#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
@@ -32,8 +32,8 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -407,4 +407,4 @@ private:
 };
 
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_PROXYCOMMITDATA_H
+#endif // FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
