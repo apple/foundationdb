@@ -191,15 +191,21 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		Transaction tr(cx);
 		tr.setVersion(rv);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		Error readErr;
+		bool readFailed = false;
 		try {
 			Optional<Value> val2 = co_await tr.get(self->keyToRead);
 			// We read the same key at the same read version with the same db, we must get the same value (or fail to
 			// read)
 			ASSERT(val1 == val2);
 		} catch (Error& err) {
-			TraceEvent("DifferentClusters_ReadError").error(err);
-			TRACE_ERROR(err);
-			co_await tr.onError(err);
+			readErr = err;
+			readFailed = true;
+		}
+		if (readFailed) {
+			TraceEvent("DifferentClusters_ReadError").error(readErr);
+			TRACE_ERROR(readErr);
+			co_await tr.onError(readErr);
 		}
 		// In an actual switch we would call switchConnectionRecord after unlocking the database. But it's possible
 		// that a storage server serves a read at |rv| even after the recovery caused by unlocking the database, and we
@@ -209,11 +215,17 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		ASSERT(!watchFuture.isReady() || watchFuture.isError());
 		co_await doWrite(self->extraDB, self->keyToWatch, Optional<Value>{ ""_sr });
 		TraceEvent("DifferentClusters_WaitingForWatch").log();
+		Error watchErr;
+		bool watchFailed = false;
 		try {
 			co_await timeoutError(watchFuture, (self->testDuration - self->switchAfter) / 2);
 		} catch (Error& err) {
-			TraceEvent("DifferentClusters_WatchError").error(err);
-			co_await tr.onError(err);
+			watchErr = err;
+			watchFailed = true;
+		}
+		if (watchFailed) {
+			TraceEvent("DifferentClusters_WatchError").error(watchErr);
+			co_await tr.onError(watchErr);
 		}
 		TraceEvent("DifferentClusters_Done").log();
 		self->switchComplete = true;

@@ -110,6 +110,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 			PromiseStream<KeyValue> compareResults;
 
 			Error err;
+			bool failed = false;
 			try {
 				Future<Void> compareConvert = convertStream(compareRaw, compareResults);
 				Future<Void> streamConvert = convertStream(streamRaw, streamResults);
@@ -152,6 +153,9 @@ struct StreamingRangeReadWorkload : KVWorkload {
 				}
 			} catch (Error& e) {
 				err = e;
+				failed = true;
+			}
+			if (failed) {
 				co_await tr.onError(err);
 			}
 			co_await rateLimit;
