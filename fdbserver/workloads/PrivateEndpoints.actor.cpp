@@ -74,7 +74,6 @@ struct PrivateEndpoints : TestWorkload {
 				TraceEvent(SevError, "WrongErrorCode").error(e);
 			}
 		}
-		co_return;
 	}
 
 	template <class I, class RT>
@@ -139,7 +138,6 @@ struct PrivateEndpoints : TestWorkload {
 			ASSERT(false);
 		}
 		UNREACHABLE();
-		co_return;
 	}
 };
 

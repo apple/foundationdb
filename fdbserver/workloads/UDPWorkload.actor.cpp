@@ -254,7 +254,6 @@ struct UDPWorkload : TestWorkload {
 		}
 		co_await (clientSender(self, &remotes) && serverSender(self, &remotes) && _receiver(self));
 		UNSTOPPABLE_ASSERT(false);
-		co_return;
 	}
 	Future<Void> start(Database const& cx) override { return delay(runFor) || _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }

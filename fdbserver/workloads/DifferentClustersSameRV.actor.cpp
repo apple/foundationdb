@@ -57,15 +57,15 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		return _setup(cx, this);
+		return _setup(cx, extraDB);
 	}
 
-	static Future<Void> _setup(Database cx, DifferentClustersSameRVWorkload* self) {
+	static Future<Void> _setup(Database cx, Database extraDB) {
 		Version rv1{ 0 };
 		Version rv2{ 0 };
 		Version newClusterVersion{ 0 };
 		Transaction tr1(cx);
-		Transaction tr2(self->extraDB);
+		Transaction tr2(extraDB);
 		TraceEvent("DifferentClustersSameRVWorkload");
 
 		// we want to advance the read version of both clusters so that they are roughly the same. This makes the test
@@ -81,9 +81,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			co_await (tr1.onError(err) && tr2.onError(err));
 		}
 		newClusterVersion = std::max(rv1, rv2) + 10e6;
-		co_await (::advanceVersion(cx, newClusterVersion) && ::advanceVersion(self->extraDB, newClusterVersion));
+		co_await (::advanceVersion(cx, newClusterVersion) && ::advanceVersion(extraDB, newClusterVersion));
 		TraceEvent("DifferentClustersSameRVWorkload_AdvancedVersion").detail("Version", newClusterVersion);
-		co_return;
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -92,10 +91,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
 		originalDB = cx;
-		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
+		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, extraDB, keyToRead),
 			                                  doSwitch(switchConnFileDb, this),
-			                                  writerClient(cx, this),
-			                                  writerClient(extraDB, this) };
+			                                  writerClient(cx, keyToRead),
+			                                  writerClient(extraDB, keyToRead) };
 		return success(timeout(waitForAll(clients), testDuration));
 	}
 
@@ -109,14 +108,14 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<std::pair<Version, Optional<Value>>> doRead(Database cx, DifferentClustersSameRVWorkload* self) {
+	static Future<std::pair<Version, Optional<Value>>> doRead(Database cx, Value const& keyToRead) {
 		Transaction tr(cx);
 		while (true) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			Error err;
 			try {
 				Version rv = co_await tr.getReadVersion();
-				Optional<Value> val1 = co_await tr.get(self->keyToRead);
+				Optional<Value> val1 = co_await tr.get(keyToRead);
 				co_return std::make_pair(rv, val1);
 			} catch (Error& e) {
 				err = e;
@@ -180,7 +179,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		});
 		co_await (lockDatabase(self->originalDB, lockUid) && lockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_LockedDatabases").log();
-		std::pair<Version, Optional<Value>> read1 = co_await doRead(self->originalDB, self);
+		std::pair<Version, Optional<Value>> read1 = co_await doRead(self->originalDB, self->keyToRead);
 		Version rv = read1.first;
 		Optional<Value> val1 = read1.second;
 		co_await doWrite(self->extraDB, self->keyToRead, val1);
@@ -220,15 +219,14 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		TraceEvent("DifferentClusters_Done").log();
 		self->switchComplete = true;
 		co_await unlockDatabase(self->originalDB, lockUid); // So quietDatabase can finish
-		co_return;
 	}
 
-	static Future<Void> writerClient(Database cx, DifferentClustersSameRVWorkload* self) {
+	static Future<Void> writerClient(Database cx, Value const& keyToRead) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
 			try {
-				Optional<Value> value = co_await tr.get(self->keyToRead);
+				Optional<Value> value = co_await tr.get(keyToRead);
 				int x = 0;
 				if (value.present()) {
 					BinaryReader r(value.get(), Unversioned());
@@ -237,7 +235,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				x += 1;
 				BinaryWriter w(Unversioned());
 				serializer(w, x);
-				tr.set(self->keyToRead, w.toValue());
+				tr.set(keyToRead, w.toValue());
 				co_await tr.commit();
 				tr.reset();
 				continue;
@@ -249,7 +247,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Optional<Value>> readAtVersion(DifferentClustersSameRVWorkload* self,
+	static Future<Optional<Value>> readAtVersion(Value const& keyToRead,
 	                                             const char* name,
 	                                             Transaction* tr,
 	                                             Version version) {
@@ -257,7 +255,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		try {
 			tr->reset();
 			tr->setVersion(version);
-			co_await store(res, tr->get(self->keyToRead));
+			co_await store(res, tr->get(keyToRead));
 			co_return res;
 		} catch (Error& e) {
 			TraceEvent(name).error(e);
@@ -265,9 +263,9 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> readerClientSeparateDBs(Database cx, DifferentClustersSameRVWorkload* self) {
+	static Future<Void> readerClientSeparateDBs(Database cx, Database extraDB, Value const& keyToRead) {
 		Transaction tr1(cx);
-		Transaction tr2(self->extraDB);
+		Transaction tr2(extraDB);
 		Version rv1{ 0 };
 		Version rv2{ 0 };
 		Optional<Value> val1;
@@ -283,8 +281,10 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 				TraceEvent("DifferentClustersSameRVWorkload_GotReadVersion").detail("RV1", rv1).detail("RV2", rv2);
 				Version rv = std::min(rv1, rv2);
 				co_await (
-				    store(val1, readAtVersion(self, "DifferentClustersSameRVWorkload_Transaction1_Error", &tr1, rv)) &&
-				    store(val2, readAtVersion(self, "DifferentClustersSameRVWorkload_Transaction2_Error", &tr2, rv)));
+				    store(val1,
+				          readAtVersion(keyToRead, "DifferentClustersSameRVWorkload_Transaction1_Error", &tr1, rv)) &&
+				    store(val2,
+				          readAtVersion(keyToRead, "DifferentClustersSameRVWorkload_Transaction2_Error", &tr2, rv)));
 				// We're reading from different db's with the same read version. We can get a different value.
 				CODE_PROBE(val1.present() != val2.present() || !val1.present() || val1.get() != val2.get(),
 				           "reading from different dbs with the same version");

@@ -74,7 +74,6 @@ Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream<KeyVa
 		}
 		output.sendError(e);
 	}
-	co_return;
 }
 
 struct StreamingRangeReadWorkload : KVWorkload {
