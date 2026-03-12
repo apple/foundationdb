@@ -1,5 +1,5 @@
 /*
- * ConsistencyScanCommand.actor.cpp
+ * ConsistencyScanCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,36 +26,35 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace fdb_cli {
 
-ACTOR Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
-	state ConsistencyScanState::LifetimeStats statsLifetime;
-	state ConsistencyScanState::RoundStats statsCurrentRound;
-	wait(store(statsLifetime, cs->lifetimeStats().getD(tr)) &&
-	     store(statsCurrentRound, cs->currentRoundStats().getD(tr)));
+Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
+	ConsistencyScanState::LifetimeStats statsLifetime;
+	ConsistencyScanState::RoundStats statsCurrentRound;
+	co_await (store(statsLifetime, cs->lifetimeStats().getD(tr)) &&
+	          store(statsCurrentRound, cs->currentRoundStats().getD(tr)));
 	printf(
 	    "Current Round:\n%s\n",
 	    json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON()), json_spirit::pretty_print).c_str());
 	printf("Lifetime:\n%s\n",
 	       json_spirit::write_string(json_spirit::mValue(statsLifetime.toJSON()), json_spirit::pretty_print).c_str());
-	return Void();
+	co_return;
 }
 
-ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> tokens) {
+Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> const& tokens) {
 	// Skip the command token so start at begin+1
-	state std::list<StringRef> args(tokens.begin() + 1, tokens.end());
+	std::list<StringRef> args(tokens.begin() + 1, tokens.end());
 
-	state ConsistencyScanState cs = ConsistencyScanState();
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state bool error = false;
+	ConsistencyScanState cs = ConsistencyScanState();
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	bool error = false;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
 
-			state ConsistencyScanState::Config config = wait(ConsistencyScanState().config().getD(tr));
+			ConsistencyScanState::Config config = co_await ConsistencyScanState().config().getD(tr);
 
 			if (args.empty()) {
 				printf(
@@ -76,9 +75,9 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 				} else if (next == "restart") {
 					config.minStartVersion = tr->getReadVersion().get();
 				} else if (next == "stats") {
-					wait(dumpStats(&cs, tr));
+					co_await dumpStats(&cs, tr);
 				} else if (next == "clearstats") {
-					wait(cs.clearStats(tr));
+					co_await cs.clearStats(tr);
 				} else if (next == "maxRate") {
 					error = args.empty();
 					if (!error) {
@@ -98,19 +97,20 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 				break;
 			}
 			cs.config().set(tr, config);
-			wait(tr->commit());
+			co_await tr->commit();
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 
 	if (error) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
 
-	return true;
+	co_return true;
 }
 
 CommandFactory consistencyScanFactory(

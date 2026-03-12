@@ -1985,3 +1985,99 @@ TEST_CASE("/flow/coro/chooseRepeatedCancel") {
 	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
 	return Void();
 }
+
+TEST_CASE("/flow/coro/raceReady") {
+	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
+
+	Future<std::variant<int, std::string>> errorFirst = race(Future<int>(io_error()), Future<std::string>("later"));
+	ASSERT(errorFirst.isReady());
+	ASSERT(errorFirst.isError());
+	ASSERT_EQ(errorFirst.getError().code(), error_code_io_error);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceReadyFirstArgumentWinsTie") {
+	// When both inputs are already ready, race() breaks ties by argument order.
+	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("winner"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceSuccess") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	stringPromise.send("winner");
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 1);
+	ASSERT_EQ(std::get<1>(result), "winner");
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceSuccessFirstArgument") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	intPromise.send(42);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 42);
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceError") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	intPromise.sendError(io_error());
+	try {
+		co_await raced;
+		ASSERT(false);
+	} catch (Error const& e) {
+		ASSERT_EQ(e.code(), error_code_io_error);
+	}
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceCancel") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	raced.cancel();
+	ASSERT(raced.isReady());
+	ASSERT(raced.isError());
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	intPromise.send(1);
+	stringPromise.send("late");
+	ASSERT_EQ(raced.getError().code(), error_code_actor_cancelled);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamReady") {
+	PromiseStream<int> intStream;
+	intStream.send(11);
+	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), Future<std::string>("later"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 11);
+	return Void();
+}
+
+TEST_CASE("/flow/coro/raceStreamSuccess") {
+	PromiseStream<int> intStream;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intStream.getFuture(), stringPromise.getFuture());
+	intStream.send(13);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 13);
+	co_return;
+}

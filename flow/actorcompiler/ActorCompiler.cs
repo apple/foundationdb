@@ -869,7 +869,7 @@ namespace actorcompiler
 
             var exitFunc = getFunction("exitChoose", "");
             exitFunc.returnType = "void";
-            exitFunc.WriteLine("if ({0}->actor_wait_state > 0) {0}->actor_wait_state = 0;", This);
+            exitFunc.WriteLine("if (actorWaitStateIsWaiting({0}->actor_wait_state)) {0}->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;", This);
             foreach(var ch in choices)
                 exitFunc.WriteLine("{0}->{1}::remove();", This, ch.CallbackTypeInStateClass);
             exitFunc.endIsUnreachable = true;
@@ -991,7 +991,7 @@ namespace actorcompiler
                     firstChoice = false;
                     LineNumber(cx.target, stmt.FirstSourceLine);
                     if (actor.IsCancellable())
-                        cx.target.WriteLine("if ({1}->actor_wait_state < 0) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
+                        cx.target.WriteLine("if (actorWaitStateIsCancelled({1}->actor_wait_state)) return {0};", cx.catchFErr.call("actor_cancelled()", AdjustLoopDepth(cx.tryLoopDepth)), This);
                 }
 
                 cx.target.WriteLine("if ({0}.isReady()) {{ if ({0}.isError()) return {2}; else return {1}; }};", ch.Future, ch.Body.call(ch.Future + "." + getFunc + "()", "loopDepth"), cx.catchFErr.call(ch.Future + ".getError()", AdjustLoopDepth(cx.tryLoopDepth)));
@@ -1330,7 +1330,7 @@ namespace actorcompiler
                 };
                 cancelFunc.Indent(codeIndent);
                 cancelFunc.WriteLine("auto wait_state = this->actor_wait_state;");
-                cancelFunc.WriteLine("this->actor_wait_state = -1;");
+                cancelFunc.WriteLine("this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;");
                 cancelFunc.WriteLine("switch (wait_state) {");
                 int lastGroup = -1;
                 foreach (var cb in callbacks.OrderBy(cb => cb.CallbackGroup))

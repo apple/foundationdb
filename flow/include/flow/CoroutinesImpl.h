@@ -108,11 +108,10 @@ struct CoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 		if constexpr (IsCancellable) {
 			auto prev_wait_state = Actor<ValType>::actor_wait_state;
 
-			// Set wait state to -1
-			Actor<ValType>::actor_wait_state = -1;
+			Actor<ValType>::actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 
 			// If the actor is waiting, then resume the coroutine to throw actor_cancelled().
-			if (prev_wait_state > 0) {
+			if (actorWaitStateIsWaiting(prev_wait_state)) {
 				auto h = handle; // Copy to local — frame may be freed during resume
 				h.resume();
 			}
@@ -233,9 +232,8 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 	}
 
 	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
-		if (pt->waitState() < 0) {
-			pt->waitState() = -2;
-			// actor was cancelled
+		if (actorWaitStateIsCancelled(pt->waitState())) {
+			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
 			return true;
 		}
 		return future.isReady();
@@ -246,7 +244,7 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 		pt->setHandle(h);
 
 		// Set wait_state and add callback
-		pt->waitState() = 1;
+		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
 
 		if constexpr (IsStream) {
 			auto sf = future;
@@ -260,20 +258,20 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 	bool resumeImpl() {
 		// If actor is cancelled, then throw actor_cancelled()
 		switch (pt->waitState()) {
-		case -1:
+		case ACTOR_WAIT_STATE_CANCELLED:
 			this->remove();
-		case -2:
-			// -2 means that the `await_suspend` call returned `true`, so we shouldn't remove the callback.
-			// if the wait_state is -1 we still have to throw, so we fall through to the -2 case
+		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+			// await_ready() observed cancellation before await_suspend() registered a callback, so there is nothing to
+			// remove here.
 			throw actor_cancelled();
 		}
 
-		bool wasReady = pt->waitState() == 0;
+		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
 		// Actor return from waiting, remove callback and reset wait_state.
-		if (pt->waitState() > 0) {
+		if (actorWaitStateIsWaiting(pt->waitState())) {
 			this->remove();
 
-			pt->waitState() = 0;
+			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
 		}
 		return wasReady;
 	}
@@ -306,8 +304,8 @@ struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
 	}
 
 	[[maybe_unused]] [[nodiscard]] bool await_ready() const {
-		if (pt->waitState() < 0) {
-			pt->waitState() = -2;
+		if (actorWaitStateIsCancelled(pt->waitState())) {
+			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
 			// actor was cancelled
 			return true;
 		}
@@ -319,7 +317,7 @@ struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
 		pt->setHandle(h);
 
 		// Set wait_state and add callback
-		pt->waitState() = 1;
+		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
 
 		auto sf = future;
 		sf.addCallbackAndClear(this);
@@ -328,20 +326,21 @@ struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
 	bool resumeImpl() {
 		// If actor is cancelled, then throw actor_cancelled()
 		switch (pt->waitState()) {
-		case -1:
+		case ACTOR_WAIT_STATE_CANCELLED:
 			this->remove();
-		case -2:
-			// -2 means that the `await_suspend` call returned `true`, so we shouldn't remove the callback.
+		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+			// await_ready() observed cancellation before await_suspend() registered a callback, so there is nothing to
+			// remove here.
 			// if the wait_state is -1 we still have to throw, so we fall through to the -2 case
 			throw actor_cancelled();
 		}
 
-		bool wasReady = pt->waitState() == 0;
+		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
 		// Actor return from waiting, remove callback and reset wait_state.
-		if (pt->waitState() > 0) {
+		if (actorWaitStateIsWaiting(pt->waitState())) {
 			this->remove();
 
-			pt->waitState() = 0;
+			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
 		}
 		return wasReady;
 	}
