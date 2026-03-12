@@ -119,9 +119,6 @@ struct PerformanceWorkload : TestWorkload {
 
 				workers = w;
 				break;
-			} else if (choice.index() == 1) {
-			} else {
-				UNREACHABLE();
 			}
 		}
 
