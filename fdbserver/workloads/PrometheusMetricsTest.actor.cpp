@@ -151,7 +151,7 @@ struct PrometheusMetricsTestWorkload : TestWorkload {
 		}
 		ASSERT(typeCount >= 50);
 
-		if (1 /* enable this for local testing */) {
+		if (0 /* enable this for local testing */) {
 			std::ofstream out("prometheus_output.txt");
 			out << body;
 			out.close();
