@@ -34,222 +34,279 @@
 namespace {
 
 // Exclude the given servers and localities
-ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
-                                               std::vector<AddressExclusion> servers,
-                                               std::unordered_set<std::string> localities,
-                                               bool failed,
-                                               bool force) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
+                                         std::vector<AddressExclusion> servers,
+                                         std::unordered_set<std::string> localities,
+                                         bool failed,
+                                         bool force) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		try {
-			if (force && servers.size())
-				tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
-				        ValueRef());
-			for (const auto& s : servers) {
-				Key addr = failed ? fdb_cli::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
-				                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
-				tr->set(addr, ValueRef());
+		{
+			Error caughtErr;
+			bool hasCaughtErr = false;
+			try {
+				if (force && servers.size())
+					tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
+					        ValueRef());
+				for (const auto& s : servers) {
+					Key addr = failed ? fdb_cli::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
+					                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
+					tr->set(addr, ValueRef());
+				}
+				if (force && localities.size())
+					tr->set(failed ? fdb_cli::failedLocalityForceOptionSpecialKey
+					               : fdb_cli::excludedLocalityForceOptionSpecialKey,
+					        ValueRef());
+				for (const auto& l : localities) {
+					Key addr = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
+					                  : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
+					tr->set(addr, ValueRef());
+				}
+				co_await safeThreadFutureToFuture(tr->commit());
+				co_return true;
+			} catch (Error& e) {
+				caughtErr = e;
+				hasCaughtErr = true;
 			}
-			if (force && localities.size())
-				tr->set(failed ? fdb_cli::failedLocalityForceOptionSpecialKey
-				               : fdb_cli::excludedLocalityForceOptionSpecialKey,
-				        ValueRef());
-			for (const auto& l : localities) {
-				Key addr = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
-				                  : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
-				tr->set(addr, ValueRef());
+			if (hasCaughtErr) {
+				Error err(caughtErr);
+				if (caughtErr.code() == error_code_special_keys_api_failure) {
+					std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+					// last character is \n
+					auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
+					auto last_line = errorMsgStr.substr(pos + 1);
+					// customized the error message for fdbcli
+					fprintf(
+					    stderr,
+					    "%s\n%s\n",
+					    errorMsgStr.substr(0, pos).c_str(),
+					    last_line.find("free space") != std::string::npos
+					        ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
+					        : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
+					co_return false;
+				}
+				TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
+				co_await safeThreadFutureToFuture(tr->onError(err));
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return true;
-		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				// last character is \n
-				auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
-				auto last_line = errorMsgStr.substr(pos + 1);
-				// customized the error message for fdbcli
-				fprintf(stderr,
-				        "%s\n%s\n",
-				        errorMsgStr.substr(0, pos).c_str(),
-				        last_line.find("free space") != std::string::npos
-				            ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
-				            : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
-				return false;
-			}
-			TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
-			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 }
 
-ACTOR Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		try {
-			state ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				ThreadFuture<RangeResult> resultFuture =
+				    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
-				auto addr = i.key.removePrefix(fdb_cli::excludedServersSpecialKeyRange.begin).toString();
-				exclusions.push_back(addr);
+				std::vector<std::string> exclusions;
+				for (const auto& i : r) {
+					auto addr = i.key.removePrefix(fdb_cli::excludedServersSpecialKeyRange.begin).toString();
+					exclusions.push_back(addr);
+				}
+				co_return exclusions;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return exclusions;
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "GetExcludedServersError").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			if (hasErr) {
+				TraceEvent(SevWarn, "GetExcludedServersError").error(err);
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 }
 
 // Get the list of excluded localities by reading the keys.
-ACTOR Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		try {
-			state ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				ThreadFuture<RangeResult> resultFuture =
+				    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
-				auto locality = i.key.removePrefix(fdb_cli::excludedLocalitySpecialKeyRange.begin).toString();
-				excludedLocalities.push_back(locality);
+				std::vector<std::string> excludedLocalities;
+				for (const auto& i : r) {
+					auto locality = i.key.removePrefix(fdb_cli::excludedLocalitySpecialKeyRange.begin).toString();
+					excludedLocalities.push_back(locality);
+				}
+				co_return excludedLocalities;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return excludedLocalities;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			if (hasErr) {
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 }
 
-ACTOR Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		try {
-			state ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				ThreadFuture<RangeResult> resultFuture =
+				    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
-				auto addr = i.key.removePrefix(fdb_cli::failedServersSpecialKeyRange.begin).toString();
-				exclusions.push_back(addr);
+				std::vector<std::string> exclusions;
+				for (const auto& i : r) {
+					auto addr = i.key.removePrefix(fdb_cli::failedServersSpecialKeyRange.begin).toString();
+					exclusions.push_back(addr);
+				}
+				co_return exclusions;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return exclusions;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			if (hasErr) {
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 }
 
 // Get the list of failed localities by reading the keys.
-ACTOR Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		try {
-			state ThreadFuture<RangeResult> resultFuture =
-			    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state RangeResult r = wait(safeThreadFutureToFuture(resultFuture));
-			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				ThreadFuture<RangeResult> resultFuture =
+				    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
-				auto locality = i.key.removePrefix(fdb_cli::failedLocalitySpecialKeyRange.begin).toString();
-				excludedLocalities.push_back(locality);
+				std::vector<std::string> excludedLocalities;
+				for (const auto& i : r) {
+					auto locality = i.key.removePrefix(fdb_cli::failedLocalitySpecialKeyRange.begin).toString();
+					excludedLocalities.push_back(locality);
+				}
+				co_return excludedLocalities;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return excludedLocalities;
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			if (hasErr) {
+				TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(err);
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 }
 
-ACTOR Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
+Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> tr) {
 	ThreadFuture<RangeResult> resultFuture =
 	    tr->getRange(fdb_cli::exclusionInProgressSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-	RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
+	RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
 	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 	std::set<NetworkAddress> inProgressExclusion;
 	for (const auto& addr : result) {
 		inProgressExclusion.insert(
 		    NetworkAddress::parse(addr.key.removePrefix(fdb_cli::exclusionInProgressSpecialKeyRange.begin).toString()));
 	}
-	return inProgressExclusion;
+	co_return inProgressExclusion;
 }
 
-ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> db,
-                                                                std::set<AddressExclusion> exclusions,
-                                                                bool waitForAllExcluded) {
-	state std::set<NetworkAddress> inProgressExclusion;
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> db,
+                                                          std::set<AddressExclusion> exclusions,
+                                                          bool waitForAllExcluded) {
+	std::set<NetworkAddress> inProgressExclusion;
+	Reference<ITransaction> tr = db->createTransaction();
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	loop {
 		inProgressExclusion.clear();
-		try {
-			std::set<NetworkAddress> result = wait(getInProgressExclusion(tr));
-			if (result.empty())
-				return inProgressExclusion;
-			inProgressExclusion = result;
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				std::set<NetworkAddress> result = co_await getInProgressExclusion(tr);
+				if (result.empty())
+					co_return inProgressExclusion;
+				inProgressExclusion = result;
 
-			// Check if all of the specified exclusions are done.
-			bool allExcluded = true;
-			for (const auto& inProgressAddr : inProgressExclusion) {
-				if (!allExcluded) {
-					break;
-				}
-
-				for (const auto& exclusion : exclusions) {
-					// We found an exclusion that is still in progress
-					if (exclusion.excludes(inProgressAddr)) {
-						allExcluded = false;
+				// Check if all of the specified exclusions are done.
+				bool allExcluded = true;
+				for (const auto& inProgressAddr : inProgressExclusion) {
+					if (!allExcluded) {
 						break;
 					}
+
+					for (const auto& exclusion : exclusions) {
+						// We found an exclusion that is still in progress
+						if (exclusion.excludes(inProgressAddr)) {
+							allExcluded = false;
+							break;
+						}
+					}
 				}
+
+				if (allExcluded) {
+					inProgressExclusion.clear();
+					co_return inProgressExclusion;
+				}
+
+				if (!waitForAllExcluded)
+					break;
+
+				co_await delayJittered(1.0); // SOMEDAY: watches!
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-
-			if (allExcluded) {
-				inProgressExclusion.clear();
-				return inProgressExclusion;
+			if (hasErr) {
+				TraceEvent(SevWarn, "CheckForExcludingServersError").error(err);
+				co_await safeThreadFutureToFuture(tr->onError(err));
 			}
-
-			if (!waitForAllExcluded)
-				break;
-
-			wait(delayJittered(1.0)); // SOMEDAY: watches!
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "CheckForExcludingServersError").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
-	return inProgressExclusion;
+	co_return inProgressExclusion;
 }
 
-ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclusion> exclusions) {
+Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclusion> exclusions) {
 
-	state bool foundCoordinator = false;
-	state std::vector<NetworkAddress> coordinatorList;
-	state Reference<ITransaction> tr = db->createTransaction();
+	bool foundCoordinator = false;
+	std::vector<NetworkAddress> coordinatorList;
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		try {
-			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-			Optional<Value> coordinators = wait(safeThreadFutureToFuture(coordinatorsF));
-			ASSERT(coordinators.present());
-			coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
-			break;
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "CheckForCoordinatorsError").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				// Hold the reference to the standalone's memory
+				ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+				Optional<Value> coordinators = co_await safeThreadFutureToFuture(coordinatorsF);
+				ASSERT(coordinators.present());
+				coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				TraceEvent(SevWarn, "CheckForCoordinatorsError").error(err);
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 
@@ -263,7 +320,7 @@ ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<Addres
 	if (foundCoordinator)
 		printf("Type `help coordinators' for information on how to change the\n"
 		       "cluster's coordination servers before removing them.\n");
-	return Void();
+	co_return;
 }
 
 } // namespace
@@ -284,18 +341,18 @@ const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/
 const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
                                                      "\xff\xff/management/in_progress_exclusion0"_sr);
 
-ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn) {
+Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn) {
 	if (tokens.size() <= 1) {
-		state std::vector<std::string> excludedAddresses = wait(getExcludedServers(db));
-		state std::vector<std::string> excludedLocalities = wait(getExcludedLocalities(db));
-		state std::vector<std::string> failedAddresses = wait(getFailedServers(db));
-		state std::vector<std::string> failedLocalities = wait(getFailedLocalities(db));
+		std::vector<std::string> excludedAddresses = co_await getExcludedServers(db);
+		std::vector<std::string> excludedLocalities = co_await getExcludedLocalities(db);
+		std::vector<std::string> failedAddresses = co_await getFailedServers(db);
+		std::vector<std::string> failedLocalities = co_await getFailedLocalities(db);
 
 		if (!excludedAddresses.size() && !excludedLocalities.size() && !failedAddresses.size() &&
 		    !failedLocalities.size()) {
 			printf("There are currently no servers or localities excluded from the database.\n"
 			       "To learn how to exclude a server, type `help exclude'.\n");
-			return true;
+			co_return true;
 		}
 
 		printf("There are currently %zu servers or localities being excluded from the database:\n",
@@ -327,26 +384,26 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		printf("\n");
 
 		Reference<ITransaction> tr = db->createTransaction();
-		std::set<NetworkAddress> inProgressExclusion = wait(getInProgressExclusion(tr));
+		std::set<NetworkAddress> inProgressExclusion = co_await getInProgressExclusion(tr);
 		printf("There are currently %zu processes for which exclusion is in progress:\n", inProgressExclusion.size());
 		for (const auto& addr : inProgressExclusion) {
 			printf("%s\n", addr.toString().c_str());
 		}
 
-		return true;
+		co_return true;
 	} else {
-		state std::set<AddressExclusion> exclusionSet;
-		state std::vector<AddressExclusion> exclusionAddresses;
-		state std::unordered_set<std::string> exclusionLocalities;
-		state std::vector<std::string> noMatchLocalities;
-		state bool force = false;
-		state bool waitForAllExcluded = true;
-		state bool markFailed = false;
-		state std::vector<ProcessData> workers;
-		state std::map<std::string, StorageServerInterface> server_interfaces;
-		state Future<bool> future_workers = fdb_cli::getWorkers(db, &workers);
-		state Future<Void> future_server_interfaces = fdb_cli::getStorageServerInterfaces(db, &server_interfaces);
-		wait(success(future_workers) && success(future_server_interfaces));
+		std::set<AddressExclusion> exclusionSet;
+		std::vector<AddressExclusion> exclusionAddresses;
+		std::unordered_set<std::string> exclusionLocalities;
+		std::vector<std::string> noMatchLocalities;
+		bool force = false;
+		bool waitForAllExcluded = true;
+		bool markFailed = false;
+		std::vector<ProcessData> workers;
+		std::map<std::string, StorageServerInterface> server_interfaces;
+		Future<bool> future_workers = fdb_cli::getWorkers(db, &workers);
+		Future<Void> future_server_interfaces = fdb_cli::getStorageServerInterfaces(db, &server_interfaces);
+		co_await (success(future_workers) && success(future_server_interfaces));
 
 		for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 			if (*t == "FORCE"_sr) {
@@ -380,7 +437,7 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 					        t->toString().c_str());
 					if (t->toString().find(":tls") != std::string::npos)
 						printf("        Do not include the `:tls' suffix when naming a process\n");
-					return true;
+					co_return true;
 				}
 				exclusionSet.insert(a);
 				exclusionAddresses.push_back(a);
@@ -391,12 +448,12 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		// here the provided locality and/or address will not be excluded.
 		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
 			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality must be provided\n");
-			return false;
+			co_return false;
 		}
 
-		bool res = wait(excludeServersAndLocalities(db, exclusionAddresses, exclusionLocalities, markFailed, force));
+		bool res = co_await excludeServersAndLocalities(db, exclusionAddresses, exclusionLocalities, markFailed, force);
 		if (!res)
-			return false;
+			co_return false;
 
 		if (waitForAllExcluded) {
 			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
@@ -406,8 +463,8 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		if (warn.isValid())
 			warn.cancel();
 
-		state std::set<NetworkAddress> notExcludedServers =
-		    wait(checkForExcludingServers(db, exclusionSet, waitForAllExcluded));
+		std::set<NetworkAddress> notExcludedServers =
+		    co_await checkForExcludingServers(db, exclusionSet, waitForAllExcluded);
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
 		for (auto addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
@@ -470,8 +527,8 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 			    locality.c_str());
 		}
 
-		wait(checkForCoordinators(db, exclusionSet));
-		return true;
+		co_await checkForCoordinators(db, exclusionSet);
+		co_return true;
 	}
 }
 

@@ -32,15 +32,15 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
-                                         Database localDb,
-                                         std::vector<StringRef> tokens,
-                                         LineNoise* linenoise,
-                                         Future<Void> warn) {
-	state ConfigurationResult result;
-	state StatusObject s;
-	state int startToken = 1;
-	state bool force = false;
+Future<bool> configureCommandActor(Reference<IDatabase> db,
+                                   Database localDb,
+                                   std::vector<StringRef> tokens,
+                                   LineNoise* linenoise,
+                                   Future<Void> warn) {
+	ConfigurationResult result = ConfigurationResult::SUCCESS;
+	StatusObject s;
+	int startToken = 1;
+	bool force = false;
 	if (tokens.size() < 2)
 		result = ConfigurationResult::NO_OPTIONS_PROVIDED;
 	else {
@@ -49,19 +49,19 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 			startToken = 2;
 		}
 
-		state Optional<ConfigureAutoResult> conf;
+		Optional<ConfigureAutoResult> conf;
 		if (tokens[startToken] == "auto"_sr) {
 			// get cluster status
-			state Reference<ITransaction> tr = db->createTransaction();
+			Reference<ITransaction> tr = db->createTransaction();
 			if (!tr->isValid()) {
-				StatusObject _s = wait(StatusClient::statusFetcher(localDb));
+				StatusObject _s = co_await StatusClient::statusFetcher(localDb);
 				s = _s;
 			} else {
-				state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
-				Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+				ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
+				Optional<Value> statusValue = co_await safeThreadFutureToFuture(statusValueF);
 				if (!statusValue.present()) {
 					fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
-					return false;
+					co_return false;
 				}
 				json_spirit::mValue mv;
 				json_spirit::read_string(statusValue.get().toString(), mv);
@@ -75,7 +75,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 
 			if (!conf.get().isValid()) {
 				printf("Unable to provide advice for the current configuration.\n");
-				return false;
+				co_return false;
 			}
 
 			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
@@ -143,13 +143,13 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 			std::printf("%s", outputString.c_str());
 
 			if (noChanges)
-				return true;
+				co_return true;
 
 			// TODO: disable completion
-			Optional<std::string> line = wait(linenoise->read("Would you like to make these changes? [y/n]> "));
+			Optional<std::string> line = co_await linenoise->read("Would you like to make these changes? [y/n]> ");
 
 			if (!line.present() || (line.get() != "y" && line.get() != "Y")) {
-				return true;
+				co_return true;
 			}
 		}
 
@@ -163,8 +163,8 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		}
 
 		if (result != ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED) {
-			ConfigurationResult r = wait(ManagementAPI::changeConfig(
-			    db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force));
+			ConfigurationResult r = co_await ManagementAPI::changeConfig(
+			    db, std::vector<StringRef>(tokens.begin() + startToken, tokens.end()), conf, force);
 			result = r;
 		}
 	}
@@ -291,7 +291,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 		ASSERT(false);
 		ret = false;
 	};
-	return ret;
+	co_return ret;
 }
 
 void configureGenerator(const char* text,

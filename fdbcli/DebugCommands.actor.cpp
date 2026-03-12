@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -39,15 +40,23 @@ std::string toHex(StringRef v) {
 }
 
 // Gets a version at which to read from the storage servers
-ACTOR Future<Version> getVersion(Database cx) {
+Future<Version> getVersion(Database cx) {
 	loop {
-		state Transaction tr(cx);
+		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		try {
-			Version version = wait(tr.getReadVersion());
-			return version;
-		} catch (Error& e) {
-			wait(tr.onError(e));
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				Version version = co_await tr.getReadVersion();
+				co_return version;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
+			}
 		}
 	}
 }
@@ -57,30 +66,31 @@ ACTOR Future<Version> getVersion(Database cx) {
 // keyServersPromise will never be set).
 // If dcid is set, only return the storage servers in the given datacenter.
 // Ignore the input dcid if the cluster has not set dcid.
-ACTOR Future<bool> getKeyServers(
+Future<bool> getKeyServers(
     Database cx,
     Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise,
     KeyRangeRef kr,
     Optional<StringRef> dcid) {
-	state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
+	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers;
 
 	// Try getting key server locations from the first commit proxy
-	state Future<ErrorOr<GetKeyServerLocationsReply>> keyServerLocationFuture;
-	state Key begin = kr.begin;
-	state Key end = kr.end;
-	state int limitKeyServers = 100;
+	Future<ErrorOr<GetKeyServerLocationsReply>> keyServerLocationFuture;
+	Key begin = kr.begin;
+	Key end = kr.end;
+	int limitKeyServers = 100;
 
 	while (begin < end) {
-		state Reference<CommitProxyInfo> commitProxyInfo =
-		    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
+		Reference<CommitProxyInfo> commitProxyInfo = co_await cx->getCommitProxiesFuture(UseProvisionalProxies::False);
 		keyServerLocationFuture =
 		    commitProxyInfo->get(0, &CommitProxyInterface::getKeyServersLocations)
 		        .getReplyUnlessFailedFor(
 		            GetKeyServerLocationsRequest({}, begin, end, limitKeyServers, false, latestVersion, Arena()), 2, 0);
 
-		state bool keyServersInsertedForThisIteration = false;
-		choose {
-			when(ErrorOr<GetKeyServerLocationsReply> shards = wait(keyServerLocationFuture)) {
+		bool keyServersInsertedForThisIteration = false;
+		{
+			auto choice = co_await race(keyServerLocationFuture, cx->onProxiesChanged());
+			if (choice.index() == 0) {
+				ErrorOr<GetKeyServerLocationsReply> shards = std::get<0>(std::move(choice));
 				// Get the list of shards if one was returned.
 				if (shards.present() && !keyServersInsertedForThisIteration) {
 					std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> shardResultList;
@@ -99,36 +109,36 @@ ACTOR Future<bool> getKeyServers(
 					keyServers.insert(keyServers.end(), shardResultList.begin(), shardResultList.end());
 					keyServersInsertedForThisIteration = true;
 					begin = shards.get().results.back().first.end;
-					break;
 				}
+			} else if (choice.index() != 1) {
+				UNREACHABLE();
 			}
-			when(wait(cx->onProxiesChanged())) {}
 		}
 
 		if (!keyServersInsertedForThisIteration) // Retry the entire workflow
-			wait(delay(1.0));
+			co_await delay(1.0);
 	}
 
 	keyServersPromise.send(keyServers);
-	return true;
+	co_return true;
 }
 
 // The command is used to get all storage server addresses for a given key.
-ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens) {
+Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokens.size() != 2 && tokens.size() != 3) {
 		fmt::println("getlocation <KEY> [<KEY2>]\n"
 		             "fetch the storage server address for a given key or range.\n"
 		             "Displays the addresses of storage servers, or `not found' if location is not found.");
-		return false;
+		co_return false;
 	}
 
-	state KeyRange kr = KeyRangeRef(tokens[1], tokens.size() == 3 ? tokens[2] : keyAfter(tokens[1]));
+	KeyRange kr = KeyRangeRef(tokens[1], tokens.size() == 3 ? tokens[2] : keyAfter(tokens[1]));
 	// find key range locations without GRV
-	state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
-	bool found = wait(getKeyServers(cx, keyServersPromise, kr, Optional<StringRef>()));
+	Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServersPromise;
+	bool found = co_await getKeyServers(cx, keyServersPromise, kr, Optional<StringRef>());
 	if (!found) {
 		fmt::println("{} locations not found", printable(kr));
-		return false;
+		co_return false;
 	}
 	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 	    keyServersPromise.getFuture().get();
@@ -138,33 +148,33 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 			fmt::println("  {}", server.address().toString());
 		}
 	}
-	return true;
+	co_return true;
 }
 // hidden commands, no help text for now
 CommandFactory getLocationCommandFactory("getlocation");
 
 // The command is used to get values from all storage servers that have the given key.
-ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version) {
+Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version) {
 	if (tokens.size() != 2) {
 		fmt::println("getall <KEY>\n"
 		             "fetch values from all storage servers that have the given key.\n"
 		             "Displays the value and the addresses of storage servers, or `not found' if key is not found.");
-		return false;
+		co_return false;
 	}
 
-	KeyRangeLocationInfo loc = wait(getKeyLocation_internal(
-	    cx, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
+	KeyRangeLocationInfo loc = co_await getKeyLocation_internal(
+	    cx, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version);
 
 	if (loc.locations) {
 		fmt::println("version is {}", version);
 		fmt::println("`{}' is at:", printable(tokens[1]));
-		state Reference<LocationInfo::Locations> locations = loc.locations->locations();
-		state std::vector<Future<GetValueReply>> replies;
+		Reference<LocationInfo::Locations> locations = loc.locations->locations();
+		std::vector<Future<GetValueReply>> replies;
 		for (int i = 0; locations && i < locations->size(); i++) {
 			GetValueRequest req(/*spanContext=*/{}, tokens[1], version, {}, {}, {});
 			replies.push_back(locations->get(i, &StorageServerInterface::getValue).getReply(req));
 		}
-		wait(waitForAll(replies));
+		co_await waitForAll(replies);
 		for (int i = 0; i < replies.size(); i++) {
 			std::string ssi = locations->getInterface(i).address().toString();
 			if (replies[i].isError()) {
@@ -177,7 +187,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 	} else {
 		fmt::println("`{}': location not found", printable(tokens[1]));
 	}
-	return true;
+	co_return true;
 }
 // hidden commands, no help text for now
 CommandFactory getallCommandFactory("getall");
@@ -309,150 +319,158 @@ bool checkResults(Version version,
 	return allSame;
 }
 
-ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll);
+Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll);
 // Return whether inconsistency is detected in the inputRange
-ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll) {
-	state Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
-	state bool consistent = true;
+Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll) {
+	Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
+	bool consistent = true;
 	loop {
-		try {
-			fmt::println("Start checking for range: {}", printable(inputRange));
-			// Get SS interface for each shard of the inputRange
-			state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-			bool foundKeyServers = wait(getKeyServers(cx, keyServerPromise, inputRange, dcid));
-			if (!foundKeyServers) {
-				fmt::println("key server locations for {} not found, retrying in 1s...", printable(inputRange));
-				wait(delay(1.0));
-				continue;
-			}
-			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
-			    keyServerPromise.getFuture().get();
-			// We partition the entire input range into shards
-			// and we conduct comparison shard by shard
-			state int i = 0;
-			for (; i < keyServers.size(); i++) { // for each shard
-				state KeyRange rangeToCheck = keyServers[i].first;
-				rangeToCheck = rangeToCheck & inputRange; // Only check the shard part within the inputRange
-				if (rangeToCheck.empty()) {
-					continue; // Skip the shard if it is outside of the inputRange
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				fmt::println("Start checking for range: {}", printable(inputRange));
+				// Get SS interface for each shard of the inputRange
+				Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
+				bool foundKeyServers = co_await getKeyServers(cx, keyServerPromise, inputRange, dcid);
+				if (!foundKeyServers) {
+					fmt::println("key server locations for {} not found, retrying in 1s...", printable(inputRange));
+					co_await delay(1.0);
+					continue;
 				}
-				const auto& servers = keyServers[i].second;
-				state Key beginKeyToCheck = rangeToCheck.begin;
-				fmt::println("Key range to check: {}", printable(rangeToCheck));
-				for (const auto& server : servers) {
-					fmt::println("\t{}", server.address().toString());
-				}
-				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
-				state bool hasMore = true;
-				state int round = 0;
-				state Version version;
-				while (hasMore) {
-					wait(store(version, getVersion(cx)));
-					replies.clear();
-					fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
-					for (const auto& s : keyServers[i].second) { // for each storage server
-						GetKeyValuesRequest req;
-						req.begin = firstGreaterOrEqual(beginKeyToCheck);
-						req.end = firstGreaterOrEqual(rangeToCheck.end);
-						req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
-						req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
-						req.version = version; // all replica should read at the same version
-						req.tags = TagSet();
-						replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+				std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
+				    keyServerPromise.getFuture().get();
+				// We partition the entire input range into shards
+				// and we conduct comparison shard by shard
+				int i = 0;
+				for (; i < keyServers.size(); i++) { // for each shard
+					KeyRange rangeToCheck = keyServers[i].first;
+					rangeToCheck = rangeToCheck & inputRange; // Only check the shard part within the inputRange
+					if (rangeToCheck.empty()) {
+						continue; // Skip the shard if it is outside of the inputRange
 					}
-					wait(waitForAll(replies));
+					const auto& servers = keyServers[i].second;
+					Key beginKeyToCheck = rangeToCheck.begin;
+					fmt::println("Key range to check: {}", printable(rangeToCheck));
+					for (const auto& server : servers) {
+						fmt::println("\t{}", server.address().toString());
+					}
+					std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
+					bool hasMore = true;
+					int round = 0;
+					Version version{ 0 };
+					while (hasMore) {
+						co_await store(version, getVersion(cx));
+						replies.clear();
+						fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
+						for (const auto& s : keyServers[i].second) { // for each storage server
+							GetKeyValuesRequest req;
+							req.begin = firstGreaterOrEqual(beginKeyToCheck);
+							req.end = firstGreaterOrEqual(rangeToCheck.end);
+							req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
+							req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
+							req.version = version; // all replica should read at the same version
+							req.tags = TagSet();
+							replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+						}
+						co_await waitForAll(replies);
 
-					// Decide comparison scope
-					Key claimEndKey; // used for the next round if hasMore == true
-					Key maxEndKey;
-					hasMore = false; // re-calculate hasMore according to replies
-					for (int j = 0; j < replies.size(); j++) {
-						auto reply = replies[j].get();
-						if (reply.isError()) {
-							fmt::println("checkResults error: {}", reply.getError().what());
-							throw reply.getError();
-						} else if (reply.get().error.present()) {
-							fmt::println("checkResults error: {}", reply.get().error.get().what());
-							throw reply.get().error.get();
-						}
-						GetKeyValuesReply current = reply.get();
-						if (current.data.size() == 0) {
-							continue; // Ignore if no data has replied
-						}
-						if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
-							claimEndKey = current.data[current.data.size() - 1].key;
-						}
-						if (maxEndKey.empty() || current.data[current.data.size() - 1].key > maxEndKey) {
-							maxEndKey = current.data[current.data.size() - 1].key;
-						}
-						hasMore = hasMore || current.more;
-					}
-					fmt::println("Compare scope has been decided\n\tBeginKey: {}\n\tEndKey: {}\n\tHasMore: {}",
-					             toHex(beginKeyToCheck),
-					             toHex(claimEndKey),
-					             hasMore);
-					if (claimEndKey.empty()) {
-						// It is possible that there is clear operation between the prev round and the current round
-						// which result in empty claimEndKey --- nothing to compare
-						// In this case, we simply skip the current shard
-						ASSERT(hasMore == false);
-						continue;
-					} else if ((beginKeyToCheck == claimEndKey) && hasMore) {
-						// This is a special case: rangeBegin == claimEndKey == next beginKeyToCheck
-						// We separate this case and the third case to solve a corner issue led by the
-						// third code path: the progress will get stuck on repeatedly checking beginKeyToCheck.
-						// In the third code path, if hasMore == true and beginKeyToCheck == claimEndKey,
-						// The next round of beginKeyToCheck (aka claimEndKey) will always be beginKeyToCheck of the
-						// current round. To avoid this issue, we spawn a child checkall on a smaller range
-						// (beginKeyToCheck ~ maxEndKey). This smaller range guarantees that the hasMore is always false
-						// and the child checkall will complete and the global progress will move forward. Once the
-						// child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
-						state KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
-						fmt::println("Spawn new checkall for range {}", printable(spawnedRangeToCheck));
-						bool allSame = wait(doCheckAll(cx, spawnedRangeToCheck, dcid, checkAll));
-						beginKeyToCheck = spawnedRangeToCheck.end;
-						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
-					} else {
-						std::vector<GetKeyValuesReply> keyValueReplies;
+						// Decide comparison scope
+						Key claimEndKey; // used for the next round if hasMore == true
+						Key maxEndKey;
+						hasMore = false; // re-calculate hasMore according to replies
 						for (int j = 0; j < replies.size(); j++) {
 							auto reply = replies[j].get();
-							ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
-							keyValueReplies.push_back(reply.get());
+							if (reply.isError()) {
+								fmt::println("checkResults error: {}", reply.getError().what());
+								throw reply.getError();
+							} else if (reply.get().error.present()) {
+								fmt::println("checkResults error: {}", reply.get().error.get().what());
+								throw reply.get().error.get();
+							}
+							GetKeyValuesReply current = reply.get();
+							if (current.data.size() == 0) {
+								continue; // Ignore if no data has replied
+							}
+							if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
+								claimEndKey = current.data[current.data.size() - 1].key;
+							}
+							if (maxEndKey.empty() || current.data[current.data.size() - 1].key > maxEndKey) {
+								maxEndKey = current.data[current.data.size() - 1].key;
+							}
+							hasMore = hasMore || current.more;
 						}
-						// keyServers and keyValueReplies must follow the same order
-						bool allSame =
-						    checkResults(version, hasMore, claimEndKey, keyServers[i].second, keyValueReplies);
-						// Using claimEndKey of the current round as the nextBeginKey for the next round
-						// Note that claimEndKey is not compared in the current round
-						// This key will be compared in the next round
-						fmt::println("Result: compared {} - {}", toHex(beginKeyToCheck), toHex(claimEndKey));
-						beginKeyToCheck = claimEndKey;
-						fmt::println("allSame {}, hasMore {}, checkAll {}", allSame, hasMore, checkAll);
-						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
+						fmt::println("Compare scope has been decided\n\tBeginKey: {}\n\tEndKey: {}\n\tHasMore: {}",
+						             toHex(beginKeyToCheck),
+						             toHex(claimEndKey),
+						             hasMore);
+						if (claimEndKey.empty()) {
+							// It is possible that there is clear operation between the prev round and the current round
+							// which result in empty claimEndKey --- nothing to compare
+							// In this case, we simply skip the current shard
+							ASSERT(hasMore == false);
+							continue;
+						} else if ((beginKeyToCheck == claimEndKey) && hasMore) {
+							// This is a special case: rangeBegin == claimEndKey == next beginKeyToCheck
+							// We separate this case and the third case to solve a corner issue led by the
+							// third code path: the progress will get stuck on repeatedly checking beginKeyToCheck.
+							// In the third code path, if hasMore == true and beginKeyToCheck == claimEndKey,
+							// The next round of beginKeyToCheck (aka claimEndKey) will always be beginKeyToCheck of the
+							// current round. To avoid this issue, we spawn a child checkall on a smaller range
+							// (beginKeyToCheck ~ maxEndKey). This smaller range guarantees that the hasMore is always
+							// false and the child checkall will complete and the global progress will move forward.
+							// Once the child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
+							KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
+							fmt::println("Spawn new checkall for range {}", printable(spawnedRangeToCheck));
+							bool allSame = co_await doCheckAll(cx, spawnedRangeToCheck, dcid, checkAll);
+							beginKeyToCheck = spawnedRangeToCheck.end;
+							consistent = consistent && allSame; // !allSame of any subrange results in !consistent
+						} else {
+							std::vector<GetKeyValuesReply> keyValueReplies;
+							for (int j = 0; j < replies.size(); j++) {
+								auto reply = replies[j].get();
+								ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
+								keyValueReplies.push_back(reply.get());
+							}
+							// keyServers and keyValueReplies must follow the same order
+							bool allSame =
+							    checkResults(version, hasMore, claimEndKey, keyServers[i].second, keyValueReplies);
+							// Using claimEndKey of the current round as the nextBeginKey for the next round
+							// Note that claimEndKey is not compared in the current round
+							// This key will be compared in the next round
+							fmt::println("Result: compared {} - {}", toHex(beginKeyToCheck), toHex(claimEndKey));
+							beginKeyToCheck = claimEndKey;
+							fmt::println("allSame {}, hasMore {}, checkAll {}", allSame, hasMore, checkAll);
+							consistent = consistent && allSame; // !allSame of any subrange results in !consistent
+						}
+						if (!consistent && !checkAll) {
+							co_return false;
+						}
+						round++;
 					}
-					if (!consistent && !checkAll) {
-						return false;
-					}
-					round++;
 				}
-			}
-			break;
+				break;
 
-		} catch (Error& e) {
-			fmt::print("Error: {}", e.what());
-			wait(onErrorTr.onError(e));
-			fmt::println(", retrying in 1s...");
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				fmt::print("Error: {}", err.what());
+				co_await onErrorTr.onError(err);
+				fmt::println(", retrying in 1s...");
+			}
 		}
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
-	return consistent;
+	co_return consistent;
 }
 
 // The command is used to check the data inconsistency of the user input range
-ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
-	state bool checkAll = false; // If set, do not return on first error, continue checking all keys
-	state Optional<StringRef> dcid;
-	state KeyRange inputRange;
+Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens) {
+	bool checkAll = false; // If set, do not return on first error, continue checking all keys
+	Optional<StringRef> dcid;
+	KeyRange inputRange;
 	if (tokens.size() == 3) {
 		inputRange = KeyRangeRef(tokens[1], tokens[2]);
 	} else if (tokens.size() == 4 && tokens[3] == "all"_sr) {
@@ -475,16 +493,16 @@ ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> toke
 		    "`all` is optional. When `all` is appended, the checker does not stop until all subranges have checked.\n"
 		    "Note this is intended to check a small range of keys, not the entire database (consider consistencycheck "
 		    "for that purpose).");
-		return false;
+		co_return false;
 	}
 	if (inputRange.empty()) {
 		fmt::println("Input empty range: {}.\nImmediately exit.", printable(inputRange));
-		return false;
+		co_return false;
 	}
 	// At this point, we have a non-empty inputRange to check
-	bool res = wait(doCheckAll(cx, inputRange, dcid, checkAll));
+	bool res = co_await doCheckAll(cx, inputRange, dcid, checkAll);
 	fmt::println("Checking complete. AllSame: {}", res);
-	return true;
+	co_return true;
 }
 
 CommandFactory checkallCommandFactory("checkall");

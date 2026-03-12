@@ -72,18 +72,17 @@
 
 namespace fdb_cli {
 
-ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                           std::vector<StringRef> tokens) {
+Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2) {
 		printUsage(tokens[0]);
-		return UID();
+		co_return UID();
 	}
 
-	state UID resAuditId;
+	UID resAuditId;
 	if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 4) {
 			printUsage(tokens[0]);
-			return UID();
+			co_return UID();
 		}
 		AuditType type = AuditType::Invalid;
 		if (tokencmp(tokens[2], "ha")) {
@@ -98,10 +97,10 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			type = AuditType::ValidateRestore;
 		} else {
 			printUsage(tokens[0]);
-			return UID();
+			co_return UID();
 		}
 		const UID auditId = UID::fromString(tokens[3].toString());
-		UID cancelledAuditId = wait(cancelAuditStorage(clusterFile, type, auditId, /*timeoutSeconds=*/60));
+		UID cancelledAuditId = co_await cancelAuditStorage(clusterFile, type, auditId, /*timeoutSeconds=*/60);
 		resAuditId = cancelledAuditId;
 
 	} else {
@@ -118,7 +117,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			type = AuditType::ValidateRestore;
 		} else {
 			printUsage(tokens[0]);
-			return UID();
+			co_return UID();
 		}
 
 		Key begin = allKeys.begin, end = allKeys.end;
@@ -129,15 +128,15 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			end = tokens[3];
 		} else {
 			printUsage(tokens[0]);
-			return UID();
+			co_return UID();
 		}
 		if (end > allKeys.end) {
 			printUsage(tokens[0]);
-			return UID();
+			co_return UID();
 		}
 		if (begin >= end) {
 			printUsage(tokens[0]);
-			return UID();
+			co_return UID();
 		}
 
 		KeyValueStoreType engineType = KeyValueStoreType::END;
@@ -146,16 +145,16 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			if (engineType != KeyValueStoreType::SSD_BTREE_V2 && engineType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			    engineType != KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 				printUsage(tokens[0]);
-				return UID();
+				co_return UID();
 			}
 		}
 		// For KeyValueStoreType::END: do not specify any storage engine
 		// Every storage engine will be audited
 		UID startedAuditId =
-		    wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, engineType, /*timeoutSeconds=*/60));
+		    co_await auditStorage(clusterFile, KeyRangeRef(begin, end), type, engineType, /*timeoutSeconds=*/60);
 		resAuditId = startedAuditId;
 	}
-	return resAuditId;
+	co_return resAuditId;
 }
 
 CommandFactory auditStorageFactory(

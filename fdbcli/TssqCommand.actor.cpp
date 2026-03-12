@@ -32,108 +32,124 @@
 
 namespace {
 
-ACTOR Future<Void> tssQuarantineList(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
+Future<Void> tssQuarantineList(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			// Hold the reference to the standalone's memory
-			state ThreadFuture<RangeResult> resultFuture = tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY);
-			RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
-			// shouldn't have many quarantined TSSes
-			ASSERT(!result.more);
-			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
-			for (auto& it : result) {
-				printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				// Hold the reference to the standalone's memory
+				ThreadFuture<RangeResult> resultFuture = tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY);
+				RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
+				// shouldn't have many quarantined TSSes
+				ASSERT(!result.more);
+				printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
+				for (auto& it : result) {
+					printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
+				}
+				co_return;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return Void();
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			if (hasErr) {
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 }
 
-ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId) {
+	Reference<ITransaction> tr = db->createTransaction();
+	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 
 	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			// Do some validation first to make sure the command is valid
-			// hold the returned standalone object's memory
-			state ThreadFuture<Optional<Value>> serverListValueF = tr->get(serverListKeyFor(tssId));
-			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(serverListValueF));
-			if (!serverListValue.present()) {
-				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
-				return false;
-			}
-			state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
-			if (!ssi.isTss()) {
-				printf("Cannot quarantine Non-TSS storage ID %s!\n", tssId.toString().c_str());
-				return false;
-			}
+				// Do some validation first to make sure the command is valid
+				// hold the returned standalone object's memory
+				ThreadFuture<Optional<Value>> serverListValueF = tr->get(serverListKeyFor(tssId));
+				Optional<Value> serverListValue = co_await safeThreadFutureToFuture(serverListValueF);
+				if (!serverListValue.present()) {
+					printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
+					co_return false;
+				}
+				StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+				if (!ssi.isTss()) {
+					printf("Cannot quarantine Non-TSS storage ID %s!\n", tssId.toString().c_str());
+					co_return false;
+				}
 
-			// hold the returned standalone object's memory
-			state ThreadFuture<Optional<Value>> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
-			Optional<Value> currentQuarantineValue = wait(safeThreadFutureToFuture(currentQuarantineValueF));
-			if (enable && currentQuarantineValue.present()) {
-				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
-				return false;
-			} else if (!enable && !currentQuarantineValue.present()) {
-				printf("TSS %s is not in quarantine, cannot remove from quarantine!.\n", tssId.toString().c_str());
-				return false;
-			}
+				// hold the returned standalone object's memory
+				ThreadFuture<Optional<Value>> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
+				Optional<Value> currentQuarantineValue = co_await safeThreadFutureToFuture(currentQuarantineValueF);
+				if (enable && currentQuarantineValue.present()) {
+					printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
+					co_return false;
+				} else if (!enable && !currentQuarantineValue.present()) {
+					printf("TSS %s is not in quarantine, cannot remove from quarantine!.\n", tssId.toString().c_str());
+					co_return false;
+				}
 
-			if (enable) {
-				tr->set(tssQuarantineKeyFor(tssId), ""_sr);
-				// remove server from TSS mapping when quarantine is enabled
-				tssMapDB.erase(tr, ssi.tssPairID.get());
-			} else {
-				tr->clear(tssQuarantineKeyFor(tssId));
-			}
+				if (enable) {
+					tr->set(tssQuarantineKeyFor(tssId), ""_sr);
+					// remove server from TSS mapping when quarantine is enabled
+					tssMapDB.erase(tr, ssi.tssPairID.get());
+				} else {
+					tr->clear(tssQuarantineKeyFor(tssId));
+				}
 
-			wait(safeThreadFutureToFuture(tr->commit()));
-			break;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+				co_await safeThreadFutureToFuture(tr->commit());
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await safeThreadFutureToFuture(tr->onError(err));
+			}
 		}
 	}
 	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
-	return true;
+	co_return true;
 }
 
 } // namespace
 
 namespace fdb_cli {
 
-ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 2) {
 		if (tokens[1] != "list"_sr) {
 			printUsage(tokens[0]);
-			return false;
+			co_return false;
 		} else {
-			wait(tssQuarantineList(db));
+			co_await tssQuarantineList(db);
 		}
 	} else if (tokens.size() == 3) {
 		if ((tokens[1] != "start"_sr && tokens[1] != "stop"_sr) || (tokens[2].size() != 32) ||
 		    !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
 			printUsage(tokens[0]);
-			return false;
+			co_return false;
 		} else {
 			bool enable = tokens[1] == "start"_sr;
 			UID tssId = UID::fromString(tokens[2].toString());
-			bool success = wait(tssQuarantine(db, enable, tssId));
-			return success;
+			bool success = co_await tssQuarantine(db, enable, tssId);
+			co_return success;
 		}
 	} else {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
-	return true;
+	co_return true;
 }
 
 CommandFactory tssqFactory(

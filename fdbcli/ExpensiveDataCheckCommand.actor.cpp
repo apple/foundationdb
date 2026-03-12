@@ -36,17 +36,17 @@ namespace fdb_cli {
 // The command is used to send a data check request to the specified process
 // The check request is accomplished by rebooting the process
 
-ACTOR Future<bool> expensiveDataCheckCommandActor(
+Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,
     Reference<ITransaction> tr,
     std::vector<StringRef> tokens,
     std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
-	state bool result = true;
-	state std::string addressesStr;
+	bool result = true;
+	std::string addressesStr;
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
 		address_interface->clear();
-		wait(getWorkerInterfaces(tr, address_interface, true));
+		co_await getWorkerInterfaces(tr, address_interface, true);
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {
@@ -72,7 +72,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 			}
 			addressesStr = boost::algorithm::join(addressesVec, ",");
 			// make sure we only call the interface once to send requests in parallel
-			int64_t checkRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0)));
+			int64_t checkRequestsSent = co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0));
 			if (!checkRequestsSent) {
 				result = false;
 				fprintf(stderr,
@@ -83,7 +83,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 			}
 		}
 	} else {
-		state int i;
+		int i{ 0 };
 		for (i = 1; i < tokens.size(); i++) {
 			if (!address_interface->count(tokens[i])) {
 				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
@@ -98,7 +98,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 				addressesVec.push_back(tokens[i].toString());
 			}
 			addressesStr = boost::algorithm::join(addressesVec, ",");
-			int64_t checkRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0)));
+			int64_t checkRequestsSent = co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0));
 			if (!checkRequestsSent) {
 				result = false;
 				fprintf(stderr,
@@ -110,7 +110,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 			}
 		}
 	}
-	return result;
+	co_return result;
 }
 // hidden commands, no help text for now
 CommandFactory expensiveDataCheckFactory("expensive_data_check");

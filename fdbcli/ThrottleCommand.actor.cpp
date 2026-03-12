@@ -35,21 +35,21 @@ namespace fdb_cli {
 
 static constexpr int defaultThrottleListLimit = 100;
 
-ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() > 4) {
 			fmt::print("Usage: throttle list [throttled|recommended|all] [LIMIT]\n\n");
 			fmt::print("Lists tags that are currently throttled.\n");
 			fmt::print("The default LIMIT is {} tags.\n", defaultThrottleListLimit);
-			return false;
+			co_return false;
 		}
 
-		state bool reportThrottled = true;
-		state bool reportRecommended = false;
+		bool reportThrottled = true;
+		bool reportRecommended = false;
 		if (tokens.size() >= 3) {
 			if (tokencmp(tokens[2], "recommended")) {
 				reportThrottled = false;
@@ -59,27 +59,27 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 				reportRecommended = true;
 			} else if (!tokencmp(tokens[2], "throttled")) {
 				printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
-				return false;
+				co_return false;
 			}
 		}
 
-		state int throttleListLimit = defaultThrottleListLimit;
+		int throttleListLimit = defaultThrottleListLimit;
 		if (tokens.size() >= 4) {
 			char* end;
 			throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
 			if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
 				fprintf(stderr, "ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
-				return false;
+				co_return false;
 			}
 		}
 
-		state std::vector<TagThrottleInfo> tags;
+		std::vector<TagThrottleInfo> tags;
 		if (reportThrottled && reportRecommended) {
-			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, ContainsRecommended::True)));
+			co_await store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, ContainsRecommended::True));
 		} else if (reportThrottled) {
-			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
+			co_await store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit));
 		} else if (reportRecommended) {
-			wait(store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit)));
+			co_await store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit));
 		}
 
 		bool anyLogged = false;
@@ -130,7 +130,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			       "d) (default 1h).\n");
 			printf("An optional priority can be specified. Choices are `default', `immediate', and "
 			       "`batch' (default `default').\n");
-			return false;
+			co_return false;
 		}
 
 		double tpsRate = 0.0;
@@ -142,24 +142,24 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
 			if ((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
 				fprintf(stderr, "ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
-				return false;
+				co_return false;
 			}
 			if (tpsRate < 0) {
 				fprintf(stderr, "ERROR: rate cannot be negative `%f'\n", tpsRate);
-				return false;
+				co_return false;
 			}
 		}
 		if (tokens.size() == 6) {
 			Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
 			if (!parsedDuration.present()) {
 				fprintf(stderr, "ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
-				return false;
+				co_return false;
 			}
 			duration = parsedDuration.get();
 
 			if (duration == 0) {
 				fprintf(stderr, "ERROR: throttle duration cannot be 0\n");
-				return false;
+				co_return false;
 			}
 		}
 		if (tokens.size() == 7) {
@@ -174,18 +174,18 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 				        "ERROR: unrecognized priority `%s'. Must be one of `default',\n  `immediate', "
 				        "or `batch'.\n",
 				        tokens[6].toString().c_str());
-				return false;
+				co_return false;
 			}
 		}
 
 		TagSet tagSet;
 		tagSet.addTag(tokens[3]);
 
-		wait(ThrottleApi::throttleTags(db, tagSet, tpsRate, duration, TagThrottleType::MANUAL, priority));
+		co_await ThrottleApi::throttleTags(db, tagSet, tpsRate, duration, TagThrottleType::MANUAL, priority);
 		printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 	} else if (tokencmp(tokens[1], "off")) {
 		int nextIndex = 2;
-		state TagSet tagSet;
+		TagSet tagSet;
 		bool throttleTypeSpecified = false;
 		bool is_error = false;
 		Optional<TagThrottleType> throttleType = TagThrottleType::MANUAL;
@@ -254,13 +254,13 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		}
 
 		if (!is_error) {
-			state const char* throttleTypeString =
+			const char* throttleTypeString =
 			    !throttleType.present() ? "" : (throttleType.get() == TagThrottleType::AUTO ? "auto-" : "manually ");
-			state std::string priorityString =
+			std::string priorityString =
 			    priority.present() ? format(" at %s priority", transactionPriorityToString(priority.get(), false)) : "";
 
 			if (tagSet.size() > 0) {
-				bool success = wait(ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority));
+				bool success = co_await ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority);
 				if (success) {
 					fmt::print("Unthrottled {0}{1}\n", tagSet.toString(), priorityString);
 				} else {
@@ -270,7 +270,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 					           priorityString);
 				}
 			} else {
-				bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));
+				bool unthrottled = co_await ThrottleApi::unthrottleAll(db, throttleType, priority);
 				if (unthrottled) {
 					printf("Unthrottled all %sthrottled tags%s\n", throttleTypeString, priorityString.c_str());
 				} else {
@@ -297,17 +297,17 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			printf("Usage: throttle <enable|disable> auto\n");
 			printf("\n");
 			printf("Enables or disable automatic tag throttling.\n");
-			return false;
+			co_return false;
 		}
-		state bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
-		wait(ThrottleApi::enableAuto(db, autoTagThrottlingEnabled));
+		bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
+		co_await ThrottleApi::enableAuto(db, autoTagThrottlingEnabled);
 		printf("Automatic tag throttling has been %s\n", autoTagThrottlingEnabled ? "enabled" : "disabled");
 	} else {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
 
-	return true;
+	co_return true;
 }
 
 void throttleGenerator(const char* text,

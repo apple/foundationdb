@@ -1213,12 +1213,12 @@ void printStatus(StatusObjectReader statusObj,
 // localDb is the native Database object
 // localDb is rarely needed except the "db" has not established a connection to the cluster where the operation will
 // return Never as we expect status command to always return, we use "localDb" to return the default result
-ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
-                                      Database localDb,
-                                      std::vector<StringRef> tokens,
-                                      bool isExecMode) {
+Future<bool> statusCommandActor(Reference<IDatabase> db,
+                                Database localDb,
+                                std::vector<StringRef> tokens,
+                                bool isExecMode) {
 
-	state StatusClient::StatusLevel level;
+	StatusClient::StatusLevel level;
 	if (tokens.size() == 1)
 		level = StatusClient::NORMAL;
 	else if (tokens.size() == 2 && tokencmp(tokens[1], "details"))
@@ -1229,17 +1229,17 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 		level = StatusClient::JSON;
 	else {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	}
 
-	state StatusObject s;
-	state Reference<ITransaction> tr = db->createTransaction();
+	StatusObject s;
+	Reference<ITransaction> tr = db->createTransaction();
 	if (!tr->isValid()) {
-		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
+		StatusObject _s = co_await StatusClient::statusFetcher(localDb);
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
-		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+		ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
+		Optional<Value> statusValue = co_await safeThreadFutureToFuture(statusValueF);
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 		}
@@ -1253,7 +1253,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 	printStatus(s, level);
 	if (!isExecMode)
 		printf("\n");
-	return true;
+	co_return true;
 }
 
 void statusGenerator(const char* text,

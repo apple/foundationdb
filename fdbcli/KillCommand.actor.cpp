@@ -34,17 +34,17 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
-                                    Reference<ITransaction> tr,
-                                    std::vector<StringRef> tokens,
-                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+Future<bool> killCommandActor(Reference<IDatabase> db,
+                              Reference<ITransaction> tr,
+                              std::vector<StringRef> tokens,
+                              std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	ASSERT(tokens.size() >= 1);
-	state bool result = true;
-	state std::string addressesStr;
+	bool result = true;
+	std::string addressesStr;
 	if (tokens.size() == 1) {
 		// initialize worker interfaces
 		address_interface->clear();
-		wait(getWorkerInterfaces(tr, address_interface, true));
+		co_await getWorkerInterfaces(tr, address_interface, true);
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {
@@ -71,7 +71,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			}
 			addressesStr = boost::algorithm::join(addressesVec, ",");
 			// make sure we only call the interface once to send requests in parallel
-			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
+			int64_t killRequestsSent = co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0));
 			if (!killRequestsSent) {
 				result = false;
 				fprintf(stderr,
@@ -82,7 +82,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			}
 		}
 	} else {
-		state int i;
+		int i{ 0 };
 		for (i = 1; i < tokens.size(); i++) {
 			if (!address_interface->count(tokens[i])) {
 				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
@@ -97,7 +97,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 				addressesVec.push_back(tokens[i].toString());
 			}
 			addressesStr = boost::algorithm::join(addressesVec, ",");
-			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
+			int64_t killRequestsSent = co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0));
 			if (!killRequestsSent) {
 				result = false;
 				fprintf(stderr,
@@ -106,12 +106,12 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 				        addressesStr.c_str());
 			} else {
 				// delay in case the network queue is not flush before the client exits
-				wait(delay(3.0));
+				co_await delay(3.0);
 				printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 			}
 		}
 	}
-	return result;
+	co_return result;
 }
 
 void killGenerator(const char* text,
