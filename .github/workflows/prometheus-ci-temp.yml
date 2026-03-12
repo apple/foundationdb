@@ -1,0 +1,62 @@
+# TEMPORARY CI — delete before final PR review
+# Tests Prometheus /metrics endpoint with Cycle + Attrition workloads
+
+name: "Prometheus Metrics CI Test"
+
+on:
+  push:
+    branches: ["feature/prometheus-metrics-endpoint"]
+
+jobs:
+  macos-test:
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja python3
+          pip3 install Jinja2
+
+      - name: Build fdbserver
+        run: |
+          mkdir build && cd build
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=$(xcrun -f clang) \
+            -DCMAKE_CXX_COMPILER=$(xcrun -f clang++) \
+            ..
+          ninja fdbserver
+
+      - name: Run Prometheus simulation test
+        run: |
+          cd build
+          echo "=== Running PrometheusMetrics simulation ==="
+          bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on -s 12345 2>&1 | tail -100
+          echo "=== Test completed ==="
+
+      - name: Show Prometheus output
+        if: always()
+        run: |
+          echo "=== Checking for prometheus_output.txt ==="
+          if [ -f build/prometheus_output.txt ]; then
+            echo "--- Full Prometheus output ---"
+            cat build/prometheus_output.txt
+            echo ""
+            echo "--- Metric count ---"
+            grep -c "# TYPE" build/prometheus_output.txt || echo "0 TYPE lines found"
+          else
+            echo "No prometheus_output.txt found (file writing is in if(0) block)"
+            echo "Check simulation logs for PrometheusMetricsTestResponse trace events"
+          fi
+
+      - name: Check simulation logs
+        if: always()
+        run: |
+          echo "=== Simulation trace events ==="
+          find build -name "*.xml" -newer build/CMakeCache.txt | head -5 | while read f; do
+            echo "--- $f ---"
+            grep -i "prometheus\|PrometheusMetrics" "$f" 2>/dev/null | head -20
+          done
