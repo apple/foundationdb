@@ -22,8 +22,8 @@
 #include <iterator>
 
 #include "fdbrpc/sim_validation.h"
-#include "fdbserver/CoordinatedState.h"
-#include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
+#include "fdbserver/coordinator/CoordinatedState.h"
+#include "fdbserver/coordinator/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/ResolutionBalancer.actor.h"

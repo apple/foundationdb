@@ -41,7 +41,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationInterface.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"

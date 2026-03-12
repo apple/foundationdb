@@ -40,14 +40,14 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/BackupProgress.actor.h"
-#include "fdbserver/CoordinatedState.h"
-#include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
+#include "fdbserver/coordinator/CoordinatedState.h"
+#include "fdbserver/coordinator/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/ClusterController.actor.h"
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/LeaderElection.h"
+#include "fdbserver/coordinator/LeaderElection.h"
 #include "fdbserver/tlog/LogSystem.h"
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/tlog/LogSystemDiskQueueAdapter.h"

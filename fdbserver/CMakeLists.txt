@@ -10,6 +10,8 @@ function(configure_fdbserver_common_includes target_name)
   target_include_directories(${target_name} PRIVATE
     ${CMAKE_SOURCE_DIR}/bindings/c
     ${CMAKE_BINARY_DIR}/bindings/c
+    ${CMAKE_SOURCE_DIR}/fdbserver/coordinator/include
+    ${CMAKE_BINARY_DIR}/fdbserver/coordinator/include
     ${CMAKE_SOURCE_DIR}/fdbserver/tlog/include
     ${CMAKE_BINARY_DIR}/fdbserver/tlog/include)
 endfunction()
@@ -24,6 +26,7 @@ endfunction()
 
 add_subdirectory(core)
 add_subdirectory(commitproxy)
+add_subdirectory(coordinator)
 add_subdirectory(datadistributor)
 add_subdirectory(consistencyscan)
 add_subdirectory(grvproxy)
@@ -151,7 +154,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

@@ -20,7 +20,7 @@
 
 #include <cstdint>
 
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"

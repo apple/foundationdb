@@ -32,7 +32,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"

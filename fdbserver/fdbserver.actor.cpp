@@ -57,7 +57,7 @@
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationInterface.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"

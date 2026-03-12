@@ -19,11 +19,11 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbserver/CoordinatedState.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinatedState.h"
+#include "fdbserver/coordinator/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/LeaderElection.h"
+#include "fdbserver/coordinator/LeaderElection.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 ACTOR Future<GenerationRegReadReply> waitAndSendRead(GenerationRegInterface stateServer, GenerationRegReadRequest req) {
