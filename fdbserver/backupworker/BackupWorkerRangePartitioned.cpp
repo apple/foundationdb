@@ -863,6 +863,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 	}
 
 	// Finish files
+	// TODO akanksha: Add FileLevel checksum.
 	std::vector<Future<Void>> finished;
 	for (auto& lf : activeFiles) {
 		finished.push_back(lf.file->finish());
