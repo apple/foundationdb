@@ -785,7 +785,7 @@ class ActorCompiler:
         cancel_func.specifiers = "override"
         cancel_func.indent(self.code_indent)
         cancel_func.write_line("auto wait_state = this->actor_wait_state;")
-        cancel_func.write_line("this->actor_wait_state = -1;")
+        cancel_func.write_line("this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;")
         cancel_func.write_line("switch (wait_state) {")
         last_group = -1
         for cb in sorted(self.callbacks, key=lambda c: c.callback_group):
@@ -1412,7 +1412,8 @@ class ActorCompiler:
         exit_func = self.get_function("exitChoose", "", [])
         exit_func.return_type = "void"
         exit_func.write_line(
-            "if ({0}->actor_wait_state > 0) {0}->actor_wait_state = 0;", self.this
+            "if (actorWaitStateIsWaiting({0}->actor_wait_state)) {0}->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;",
+            self.this,
         )
         for choice in choices:
             exit_func.write_line(
@@ -1554,7 +1555,7 @@ class ActorCompiler:
                 self.line_numberFunction(cx.target, stmt.first_source_line)
                 if self.actor.is_cancellable():
                     cx.target.write_line(
-                        "if ({1}->actor_wait_state < 0) return {0};",
+                        "if (actorWaitStateIsCancelled({1}->actor_wait_state)) return {0};",
                         cx.catch_f_err.call(
                             "actor_cancelled()", self.adjust_loop_depth(cx.try_loop_depth)
                         ),
