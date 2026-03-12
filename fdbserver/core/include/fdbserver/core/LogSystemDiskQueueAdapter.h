@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/LogSystem.h"
 
 struct PeekTxsInfo {

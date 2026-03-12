@@ -20,9 +20,9 @@
 
 #pragma once
 
-#include "fdbserver/ClusterController.actor.h"
-#include "fdbserver/RatekeeperInterface.h"
-#include "fdbserver/DataDistributorInterface.h"
+#include "fdbserver/clustercontroller/ClusterController.actor.h"
+#include "fdbserver/core/RatekeeperInterface.h"
+#include "fdbserver/core/DataDistributorInterface.h"
 
 // This is used to artificially amplify the used count for processes
 // occupied by non-singletons. This ultimately makes it less desirable

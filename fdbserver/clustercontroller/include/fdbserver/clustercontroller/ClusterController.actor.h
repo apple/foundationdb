@@ -20,11 +20,11 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H)
-#define FDBSERVER_CLUSTERCONTROLLER_ACTOR_G_H
-#include "fdbserver/ClusterController.actor.g.h"
-#elif !defined(FDBSERVER_CLUSTERCONTROLLER_ACTOR_H)
-#define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_G_H)
+#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_G_H
+#include "fdbserver/clustercontroller/ClusterController.actor.g.h"
+#elif !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_H)
+#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_H
 #pragma once
 
 #include <utility>
@@ -33,7 +33,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/NetworkAddress.h"

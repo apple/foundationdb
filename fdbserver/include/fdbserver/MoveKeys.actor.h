@@ -28,6 +28,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/SeedShardServers.h"
 #include "fdbserver/MasterInterface.h"
 #include "flow/BooleanParam.h"
 #include "flow/actorcompiler.h"
@@ -144,8 +145,6 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
-
-void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 

@@ -14,6 +14,8 @@ endfunction()
 
 function(configure_fdbserver_executable_role_includes target_name)
   target_include_directories(${target_name} PRIVATE
+    ${CMAKE_SOURCE_DIR}/fdbserver/clustercontroller/include
+    ${CMAKE_BINARY_DIR}/fdbserver/clustercontroller/include
     ${CMAKE_SOURCE_DIR}/fdbserver/commitproxy/include
     ${CMAKE_BINARY_DIR}/fdbserver/commitproxy/include
     ${CMAKE_SOURCE_DIR}/fdbserver/coordinator/include
@@ -42,6 +44,7 @@ function(configure_fdbserver_target_includes target_name)
 endfunction()
 
 add_subdirectory(core)
+add_subdirectory(clustercontroller)
 add_subdirectory(commitproxy)
 add_subdirectory(coordinator)
 add_subdirectory(datadistributor)
@@ -185,7 +188,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

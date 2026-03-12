@@ -25,24 +25,23 @@
 #include "flow/Trace.h"
 #include <utility>
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERRECOVERY_ACTOR_G_H)
-#define FDBSERVER_CLUSTERRECOVERY_ACTOR_G_H
-#include "fdbserver/ClusterRecovery.actor.g.h"
-#elif !defined(FDBSERVER_CLUSTERRECOVERY_ACTOR_H)
-#define FDBSERVER_CLUSTERRECOVERY_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_G_H)
+#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_G_H
+#include "fdbserver/clustercontroller/ClusterRecovery.actor.g.h"
+#elif !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_H)
+#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "fdbserver/ClusterController.actor.h"
-#include "fdbserver/DBCoreState.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/clustercontroller/ClusterController.actor.h"
+#include "fdbserver/core/DBCoreState.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/core/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 #include "flow/SystemMonitor.h"
