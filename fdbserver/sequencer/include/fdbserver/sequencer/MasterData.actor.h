@@ -26,8 +26,8 @@
 #include "fdbserver/coordinator/CoordinatedState.h"
 #include "fdbserver/coordinator/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/Knobs.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/ResolutionBalancer.actor.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/sequencer/ResolutionBalancer.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
@@ -45,11 +45,11 @@ struct MasterData;
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_MASTERDATA_ACTOR_G_H)
-#define FDBSERVER_MASTERDATA_ACTOR_G_H
-#include "fdbserver/MasterData.actor.g.h"
-#elif !defined(FDBSERVER_MASTERDATA_ACTOR_H)
-#define FDBSERVER_MASTERDATA_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_G_H)
+#define FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_G_H
+#include "fdbserver/sequencer/MasterData.actor.g.h"
+#elif !defined(FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_H)
+#define FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include
 
 // FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.

@@ -20,16 +20,16 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbserver/ResolverInterface.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESOLUTION_BALANCER_G_H)
-#define FDBSERVER_RESOLUTION_BALANCER_G_H
-#include "fdbserver/ResolutionBalancer.actor.g.h"
-#elif !defined(FDBSERVER_RESOLUTION_BALANCER_H)
-#define FDBSERVER_RESOLUTION_BALANCER_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SEQUENCER_RESOLUTION_BALANCER_G_H)
+#define FDBSERVER_SEQUENCER_RESOLUTION_BALANCER_G_H
+#include "fdbserver/sequencer/ResolutionBalancer.actor.g.h"
+#elif !defined(FDBSERVER_SEQUENCER_RESOLUTION_BALANCER_H)
+#define FDBSERVER_SEQUENCER_RESOLUTION_BALANCER_H
 
 #include <set>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/MasterInterface.h"
+#include "fdbserver/core/MasterInterface.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"

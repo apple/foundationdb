@@ -25,14 +25,14 @@
 #include "fdbserver/coordinator/CoordinatedState.h"
 #include "fdbserver/coordinator/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/Knobs.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/ResolutionBalancer.actor.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/sequencer/ResolutionBalancer.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbserver/MasterData.actor.h"
+#include "fdbserver/sequencer/MasterData.actor.h"
 
 #ifdef WITH_SWIFT
 #include "SwiftModules/FDBServer"

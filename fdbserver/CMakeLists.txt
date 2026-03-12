@@ -12,6 +12,8 @@ function(configure_fdbserver_common_includes target_name)
     ${CMAKE_BINARY_DIR}/bindings/c
     ${CMAKE_SOURCE_DIR}/fdbserver/coordinator/include
     ${CMAKE_BINARY_DIR}/fdbserver/coordinator/include
+    ${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include
+    ${CMAKE_BINARY_DIR}/fdbserver/sequencer/include
     ${CMAKE_SOURCE_DIR}/fdbserver/tlog/include
     ${CMAKE_BINARY_DIR}/fdbserver/tlog/include)
 endfunction()
@@ -31,6 +33,7 @@ add_subdirectory(datadistributor)
 add_subdirectory(consistencyscan)
 add_subdirectory(grvproxy)
 add_subdirectory(ratekeeper)
+add_subdirectory(sequencer)
 add_subdirectory(tlog)
 
 if(WITH_ROCKSDB)
@@ -52,7 +55,7 @@ if (WITH_SWIFT)
   add_definitions(-DWITH_SWIFT)
 
   add_library(fdbserver_swift STATIC
-          masterserver.swift
+          sequencer/masterserver.swift
           swift_fdbserver_cxx_swift_value_conformance.swift
           swift_fdbserver_collections.swift
           swift_fdbserver_stream_support.swift
@@ -71,6 +74,8 @@ if (WITH_SWIFT)
       "${CMAKE_BINARY_DIR}/fdbclient"
       "${CMAKE_BINARY_DIR}/fdbclient/include"
       "${CMAKE_BINARY_DIR}/fdbserver/include"
+      "${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include"
+      "${CMAKE_BINARY_DIR}/fdbserver/sequencer/include"
       "${CMAKE_SOURCE_DIR}/fdbrpc/include"
       "${CMAKE_BINARY_DIR}/fdbrpc/include"
       "${CMAKE_SOURCE_DIR}/contrib/md5/include"
@@ -121,6 +126,7 @@ if (WITH_SWIFT)
   add_dependencies(fdbserver_swift flow_actors)
   add_dependencies(fdbserver_swift fdbclient_swift)
   add_dependencies(fdbserver_swift fdbserver_actors)
+  add_dependencies(fdbserver_sequencer fdbserver_swift_header)
   # This does not work! (see rdar://99107402)
   # target_link_libraries(flow PRIVATE flow_swift)
   add_dependencies(fdbserver fdbserver_swift)
@@ -146,7 +152,15 @@ if (WITH_SWIFT)
   # Generate the module map for FDBServer.
   include(GenerateModulemap)
   set(FDBSERVER_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbserver")
+  get_target_property(FDBSERVER_MODULE_HEADERS fdbserver HEADER_FILES)
+  if(NOT FDBSERVER_MODULE_HEADERS)
+    set(FDBSERVER_MODULE_HEADERS "")
+  endif()
+  list(APPEND FDBSERVER_MODULE_HEADERS
+    "${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include/fdbserver/sequencer/MasterData.actor.h"
+    "${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include/fdbserver/sequencer/ResolutionBalancer.actor.h")
   generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "FDBServer" fdbserver
+     HEADERS ${FDBSERVER_MODULE_HEADERS}
      OMIT
      ArtMutationBuffer.h # actually a textual include
      art_impl.h # actually a textual include
@@ -154,7 +168,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_sequencer fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
