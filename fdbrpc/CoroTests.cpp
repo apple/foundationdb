@@ -2000,6 +2000,15 @@ TEST_CASE("/flow/coro/raceReady") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/raceReadyFirstArgumentWinsTie") {
+	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("winner"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceSuccess") {
 	Promise<int> intPromise;
 	Promise<std::string> stringPromise;
