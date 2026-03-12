@@ -29,7 +29,7 @@
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/DebugTrace.h"

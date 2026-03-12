@@ -28,7 +28,7 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbclient/StorageServerInterface.h"

@@ -26,7 +26,7 @@
 #include "fdbclient/Tracing.h"
 #include "fdbserver/BackupPartitionMap.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/WaitFailure.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

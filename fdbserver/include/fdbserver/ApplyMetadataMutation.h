@@ -31,7 +31,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/commitproxy/ProxyCommitData.actor.h"
 #include "flow/FastRef.h"
 

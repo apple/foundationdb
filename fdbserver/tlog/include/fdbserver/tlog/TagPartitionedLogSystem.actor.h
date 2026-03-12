@@ -28,7 +28,7 @@
 
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "flow/ActorCollection.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

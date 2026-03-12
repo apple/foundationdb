@@ -28,11 +28,12 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TCInfo.h"
+#include "fdbserver/core/DataMovement.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
@@ -90,9 +91,6 @@ public:
 private:
 	Value value;
 };
-
-extern int dataMovementPriority(DataMovementReason moveReason);
-extern DataMovementReason priorityToDataMovementReason(int priority);
 
 DataMoveType getDataMoveTypeFromDataMoveId(const UID& dataMoveId);
 

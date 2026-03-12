@@ -12,6 +12,8 @@ function(configure_fdbserver_common_includes target_name)
     ${CMAKE_BINARY_DIR}/bindings/c
     ${CMAKE_SOURCE_DIR}/fdbserver/coordinator/include
     ${CMAKE_BINARY_DIR}/fdbserver/coordinator/include
+    ${CMAKE_SOURCE_DIR}/fdbserver/datadistributor/include
+    ${CMAKE_BINARY_DIR}/fdbserver/datadistributor/include
     ${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include
     ${CMAKE_BINARY_DIR}/fdbserver/sequencer/include
     ${CMAKE_SOURCE_DIR}/fdbserver/tlog/include
@@ -35,6 +37,7 @@ add_subdirectory(grvproxy)
 add_subdirectory(ratekeeper)
 add_subdirectory(resolver)
 add_subdirectory(sequencer)
+add_subdirectory(storageserver)
 add_subdirectory(tlog)
 
 if(WITH_ROCKSDB)
@@ -169,7 +172,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

@@ -28,7 +28,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 

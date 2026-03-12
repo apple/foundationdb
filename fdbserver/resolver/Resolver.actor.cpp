@@ -30,7 +30,7 @@
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/tlog/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"

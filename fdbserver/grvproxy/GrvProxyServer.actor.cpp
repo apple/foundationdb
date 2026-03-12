@@ -29,7 +29,7 @@
 #include "fdbclient/VersionVector.h"
 #include "fdbserver/grvproxy/GrvProxyTagThrottler.h"
 #include "fdbserver/grvproxy/GrvTransactionRateInfo.h"
-#include "fdbserver/tlog/LogSystem.h"
+#include "fdbserver/core/LogSystem.h"
 #include "fdbserver/tlog/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

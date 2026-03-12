@@ -71,62 +71,6 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
-typedef std::map<DataMovementReason, int> DmReasonPriorityMapping;
-typedef std::map<int, DataMovementReason> PriorityDmReasonMapping;
-std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildPriorityMappings() {
-	static DmReasonPriorityMapping reasonPriority{
-		{ DataMovementReason::INVALID, -1 },
-		{ DataMovementReason::RECOVER_MOVE, SERVER_KNOBS->PRIORITY_RECOVER_MOVE },
-		{ DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM },
-		{ DataMovementReason::REBALANCE_OVERUTILIZED_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM },
-		{ DataMovementReason::REBALANCE_READ_OVERUTIL_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM },
-		{ DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM, SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM },
-		{ DataMovementReason::PERPETUAL_STORAGE_WIGGLE, SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE },
-		{ DataMovementReason::TEAM_HEALTHY, SERVER_KNOBS->PRIORITY_TEAM_HEALTHY },
-		{ DataMovementReason::TEAM_CONTAINS_UNDESIRED_SERVER, SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER },
-		{ DataMovementReason::TEAM_REDUNDANT, SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT },
-		{ DataMovementReason::MERGE_SHARD, SERVER_KNOBS->PRIORITY_MERGE_SHARD },
-		{ DataMovementReason::POPULATE_REGION, SERVER_KNOBS->PRIORITY_POPULATE_REGION },
-		{ DataMovementReason::TEAM_UNHEALTHY, SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY },
-		{ DataMovementReason::TEAM_2_LEFT, SERVER_KNOBS->PRIORITY_TEAM_2_LEFT },
-		{ DataMovementReason::TEAM_1_LEFT, SERVER_KNOBS->PRIORITY_TEAM_1_LEFT },
-		{ DataMovementReason::TEAM_FAILED, SERVER_KNOBS->PRIORITY_TEAM_FAILED },
-		{ DataMovementReason::TEAM_0_LEFT, SERVER_KNOBS->PRIORITY_TEAM_0_LEFT },
-		{ DataMovementReason::SPLIT_SHARD, SERVER_KNOBS->PRIORITY_SPLIT_SHARD },
-		{ DataMovementReason::ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,
-		  SERVER_KNOBS->PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD },
-		{ DataMovementReason::REBALANCE_STORAGE_QUEUE, SERVER_KNOBS->PRIORITY_REBALANCE_STORAGE_QUEUE },
-		{ DataMovementReason::ASSIGN_EMPTY_RANGE, -2 }, // dummy reason, no corresponding actual data move
-		{ DataMovementReason::SEED_SHARD_SERVER, -3 }, // dummy reason, no corresponding actual data move
-		{ DataMovementReason::NUMBER_OF_REASONS, -4 }, // dummy reason, no corresponding actual data move
-	};
-
-	static PriorityDmReasonMapping priorityReason;
-	if (priorityReason.empty()) { // only build once
-		for (const auto& [r, p] : reasonPriority) {
-			priorityReason[p] = r;
-		}
-		// Don't allow 2 priorities value being the same.
-		if (priorityReason.size() != reasonPriority.size()) {
-			TraceEvent(SevError, "DuplicateDataMovementPriority").log();
-			ASSERT(false);
-		}
-	}
-
-	return std::make_pair(&reasonPriority, &priorityReason);
-}
-
-// Return negative priority for invalid or dummy reasons
-int dataMovementPriority(DataMovementReason reason) {
-	auto [reasonPriority, _] = buildPriorityMappings();
-	return reasonPriority->at(reason);
-}
-
-DataMovementReason priorityToDataMovementReason(int priority) {
-	auto [_, priorityReason] = buildPriorityMappings();
-	return priorityReason->at(priority);
-}
-
 RelocateData::RelocateData()
   : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
     dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
