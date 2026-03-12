@@ -25,7 +25,7 @@
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DeltaTree.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/VersionedBTreeDebug.h"

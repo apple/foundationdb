@@ -20,7 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"

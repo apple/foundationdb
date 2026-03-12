@@ -20,8 +20,8 @@
 
 #include "fdbserver/core/LogSystem.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/OTELSpanContextMessage.h"
-#include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/core/OTELSpanContextMessage.h"
+#include "fdbserver/core/SpanContextMessage.h"
 #include "flow/serialize.h"
 
 std::string LogSet::logRouterString() {

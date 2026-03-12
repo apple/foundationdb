@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 
 #ifdef WITH_ROCKSDB
 #include <rocksdb/db.h>
@@ -33,10 +33,10 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MutationTracking.h"
+#include "fdbserver/core/MutationTracking.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/FDBRocksDBVersion.h"
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"

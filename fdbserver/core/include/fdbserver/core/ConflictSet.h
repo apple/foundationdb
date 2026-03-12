@@ -26,7 +26,7 @@
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
-#include "fdbserver/ResolverBug.h"
+#include "fdbserver/core/ResolverBug.h"
 
 struct ConflictSet;
 ConflictSet* newConflictSet();

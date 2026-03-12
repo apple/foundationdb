@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/Knobs.h"

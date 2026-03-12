@@ -22,9 +22,9 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DDSharedContext.h"
 #include "fdbserver/DDTxnProcessor.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

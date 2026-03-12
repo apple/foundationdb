@@ -21,13 +21,13 @@
 #ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H
 #define FOUNDATIONDB_MOCKGLOBALSTATE_H
 
-#include "fdbserver/StorageMetrics.actor.h"
+#include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/KeyLocationService.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
 
 constexpr const char* MOCK_DD_TEST_CLASS = "MockDD";
 

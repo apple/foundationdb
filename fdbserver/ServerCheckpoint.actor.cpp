@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ServerCheckpoint.actor.h"
-#include "fdbserver/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/ServerCheckpoint.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

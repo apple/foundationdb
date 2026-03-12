@@ -26,7 +26,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct SubmitBackupWorkload : TestWorkload {
 	static constexpr auto NAME = "SubmitBackup";

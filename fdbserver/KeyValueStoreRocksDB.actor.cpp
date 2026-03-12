@@ -50,7 +50,7 @@
 #endif
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/FDBRocksDBVersion.h"
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #include "fdbserver/RocksDBLogForwarder.h"
 #include "flow/ActorCollection.h"
 #include "flow/flow.h"
@@ -66,8 +66,8 @@
 #endif // WITH_ROCKSDB
 
 #include "fdbserver/Knobs.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/RocksDBCommon.h"
 
 #include "flow/actorcompiler.h" // has to be last include

@@ -19,17 +19,17 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_MOVEKEYS_ACTOR_G_H)
-#define FDBSERVER_MOVEKEYS_ACTOR_G_H
-#include "fdbserver/MoveKeys.actor.g.h"
-#elif !defined(FDBSERVER_MOVEKEYS_ACTOR_H)
-#define FDBSERVER_MOVEKEYS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_MOVEKEYS_ACTOR_G_H)
+#define FDBSERVER_CORE_MOVEKEYS_ACTOR_G_H
+#include "fdbserver/core/MoveKeys.actor.g.h"
+#elif !defined(FDBSERVER_CORE_MOVEKEYS_ACTOR_H)
+#define FDBSERVER_CORE_MOVEKEYS_ACTOR_H
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
-#include "fdbserver/MasterInterface.h"
 #include "flow/BooleanParam.h"
 #include "flow/actorcompiler.h"
 

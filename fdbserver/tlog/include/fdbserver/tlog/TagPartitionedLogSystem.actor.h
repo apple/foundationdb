@@ -27,7 +27,7 @@
 #pragma once
 
 #include "fdbrpc/Replication.h"
-#include "fdbserver/DBCoreState.h"
+#include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/LogSystem.h"
 #include "flow/ActorCollection.h"
 

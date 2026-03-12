@@ -35,8 +35,8 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/MutationTracking.h"
-#include "fdbserver/RestoreUtil.h"
+#include "fdbserver/core/MutationTracking.h"
+#include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 

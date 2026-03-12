@@ -23,7 +23,7 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

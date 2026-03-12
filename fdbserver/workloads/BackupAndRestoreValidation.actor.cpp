@@ -23,7 +23,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/QuietDatabase.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

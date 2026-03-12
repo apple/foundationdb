@@ -19,17 +19,17 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_STORAGEMETRICS_G_H)
-#define FDBSERVER_STORAGEMETRICS_G_H
-#include "fdbserver/StorageMetrics.actor.g.h"
-#elif !defined(FDBSERVER_STORAGEMETRICS_H)
-#define FDBSERVER_STORAGEMETRICS_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_STORAGEMETRICS_G_H)
+#define FDBSERVER_CORE_STORAGEMETRICS_G_H
+#include "fdbserver/core/StorageMetrics.actor.g.h"
+#elif !defined(FDBSERVER_CORE_STORAGEMETRICS_H)
+#define FDBSERVER_CORE_STORAGEMETRICS_H
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/actorcompiler.h"
 
 const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;

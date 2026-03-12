@@ -23,7 +23,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/grvproxy/GrvTransactionRateInfo.h"
-#include "fdbserver/LatencyBandsMap.h"
+#include "fdbserver/core/LatencyBandsMap.h"
 
 // GrvProxyTagThrottler is used to throttle GetReadVersionRequests based on tag quotas
 // before they're pushed into priority-partitioned queues.

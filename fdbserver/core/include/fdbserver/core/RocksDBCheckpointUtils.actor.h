@@ -19,14 +19,14 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_G_H)
-#define FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_G_H
-#include "fdbserver/RocksDBCheckpointUtils.actor.g.h"
-#elif !defined(FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H)
-#define FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_ROCKSDB_CHECKPOINT_UTILS_ACTOR_G_H)
+#define FDBSERVER_CORE_ROCKSDB_CHECKPOINT_UTILS_ACTOR_G_H
+#include "fdbserver/core/RocksDBCheckpointUtils.actor.g.h"
+#elif !defined(FDBSERVER_CORE_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H)
+#define FDBSERVER_CORE_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/core/ServerCheckpoint.actor.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include

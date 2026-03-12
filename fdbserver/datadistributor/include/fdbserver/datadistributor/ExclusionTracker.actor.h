@@ -22,11 +22,11 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#if defined(NO_INTELLISENSE) && !defined(EXCLUSION_TRACKER_ACTOR_G_H)
-#define EXCLUSION_TRACKER_ACTOR_G_H
-#include "fdbserver/ExclusionTracker.actor.g.h"
-#elif !defined(EXCLUSION_TRACKER_ACTOR_H)
-#define EXCLUSION_TRACKER_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_G_H)
+#define FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_G_H
+#include "fdbserver/datadistributor/ExclusionTracker.actor.g.h"
+#elif !defined(FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_H)
+#define FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_H
 
 #include <set>
 #include "flow/flow.h"

@@ -19,15 +19,15 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKLOADS_ACTOR_G_H)
-#define FDBSERVER_WORKLOADS_ACTOR_G_H
-#include "fdbserver/workloads/workloads.actor.g.h"
-#elif !defined(FDBSERVER_WORKLOADS_ACTOR_H)
-#define FDBSERVER_WORKLOADS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_WORKLOADS_ACTOR_G_H)
+#define FDBSERVER_CORE_WORKLOADS_ACTOR_G_H
+#include "fdbserver/core/workloads.actor.g.h"
+#elif !defined(FDBSERVER_CORE_WORKLOADS_ACTOR_H)
+#define FDBSERVER_CORE_WORKLOADS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/KnobProtectiveGroups.h"
+#include "fdbserver/core/KnobProtectiveGroups.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
 
@@ -78,7 +78,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.

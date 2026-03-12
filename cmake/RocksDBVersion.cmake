@@ -5,7 +5,7 @@
 # Choose ONE of the two options below by uncommenting the appropriate section.
 # Do NOT set both - CMake will error if both are configured.
 #
-# CMake will automatically generate fdbserver/include/fdbserver/FDBRocksDBVersion.h
+# CMake will automatically generate fdbserver/core/include/fdbserver/core/FDBRocksDBVersion.h
 # based on the version specified here. Do NOT edit that file manually.
 #
 # To get SHA256:

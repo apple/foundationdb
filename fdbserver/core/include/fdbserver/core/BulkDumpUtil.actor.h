@@ -20,11 +20,11 @@
 
 #include <cstdint>
 #include <string>
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKDUMPUTIL_ACTOR_G_H)
-#define FDBSERVER_BULKDUMPUTIL_ACTOR_G_H
-#include "fdbserver/BulkDumpUtil.actor.g.h"
-#elif !defined(FDBSERVER_BULKDUMPUTIL_ACTOR_H)
-#define FDBSERVER_BULKDUMPUTIL_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_BULKDUMPUTIL_ACTOR_G_H)
+#define FDBSERVER_CORE_BULKDUMPUTIL_ACTOR_G_H
+#include "fdbserver/core/BulkDumpUtil.actor.g.h"
+#elif !defined(FDBSERVER_CORE_BULKDUMPUTIL_ACTOR_H)
+#define FDBSERVER_CORE_BULKDUMPUTIL_ACTOR_H
 #pragma once
 
 #include "fdbclient/BulkDumping.h"
@@ -48,7 +48,7 @@ struct SSBulkDumpTask {
 	SSBulkDumpTask(const StorageServerInterface& targetServer,
 	               const std::vector<UID>& checksumServers,
 	               const BulkDumpState& bulkDumpState)
-	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
+	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
 
 	std::string toString() const {
 		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [TargetServer]: " + targetServer.toString() +

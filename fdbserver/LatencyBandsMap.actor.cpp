@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/LatencyBandsMap.h"
+#include "fdbserver/core/LatencyBandsMap.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 

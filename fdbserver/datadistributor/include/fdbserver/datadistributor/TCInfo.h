@@ -22,8 +22,8 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ReplicationTypes.h"
-#include "fdbserver/DataDistributionTeam.h"
-#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 

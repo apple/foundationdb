@@ -21,10 +21,10 @@
 #include <algorithm>
 #include <vector>
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/MutationTracking.h"
-#include "fdbserver/LogProtocolMessage.h"
-#include "fdbserver/SpanContextMessage.h"
-#include "fdbserver/OTELSpanContextMessage.h"
+#include "fdbserver/core/MutationTracking.h"
+#include "fdbserver/core/LogProtocolMessage.h"
+#include "fdbserver/core/SpanContextMessage.h"
+#include "fdbserver/core/OTELSpanContextMessage.h"
 #include "fdbclient/SystemData.h"
 #if defined(FDB_CLEAN_BUILD) && MUTATION_TRACKING_ENABLED
 #error "You cannot use mutation tracking in a clean/release build."

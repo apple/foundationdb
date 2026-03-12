@@ -23,7 +23,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 
-#include "fdbserver/RestoreUtil.h"
+#include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"

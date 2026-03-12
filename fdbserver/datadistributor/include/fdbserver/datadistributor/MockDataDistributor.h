@@ -22,7 +22,7 @@
 
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
-#include "fdbserver/MockGlobalState.h"
+#include "fdbserver/datadistributor/MockGlobalState.h"
 
 class MockDataDistributor {
 public:

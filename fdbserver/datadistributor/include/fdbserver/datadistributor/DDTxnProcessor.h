@@ -21,10 +21,10 @@
 #ifndef FOUNDATIONDB_DDTXNPROCESSOR_H
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/MoveKeys.actor.h"
 #include "flow/FastRef.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/MockGlobalState.h"
+#include "fdbserver/datadistributor/MockGlobalState.h"
 
 FDB_BOOLEAN_PARAM(SkipDDModeCheck);
 

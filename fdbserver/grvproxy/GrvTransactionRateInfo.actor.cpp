@@ -20,7 +20,7 @@
 
 #include "fdbserver/grvproxy/GrvTransactionRateInfo.h"
 
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 

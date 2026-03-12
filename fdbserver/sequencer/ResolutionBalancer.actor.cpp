@@ -21,8 +21,8 @@
 #include "fdbserver/sequencer/ResolutionBalancer.actor.h"
 
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
-#include "fdbserver/Knobs.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

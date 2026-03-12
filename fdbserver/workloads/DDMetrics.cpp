@@ -20,10 +20,10 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/Status.actor.h"
+#include "fdbserver/core/Status.actor.h"
 #include "fdbserver/QuietDatabase.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct DDMetricsWorkload : TestWorkload {
 	static constexpr auto NAME = "DDMetrics";

@@ -23,7 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct TokenBucket {
 	static constexpr const double addTokensInterval = 0.1;

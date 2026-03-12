@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SEQUENCER_RESOLUTION_BALANCER_G_H)
 #define FDBSERVER_SEQUENCER_RESOLUTION_BALANCER_G_H
 #include "fdbserver/sequencer/ResolutionBalancer.actor.g.h"

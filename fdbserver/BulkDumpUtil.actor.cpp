@@ -23,11 +23,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/S3Client.actor.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/core/BulkDumpUtil.actor.h"
+#include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/StorageMetrics.actor.h"
+#include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
+#include "fdbserver/core/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,

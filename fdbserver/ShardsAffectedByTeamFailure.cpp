@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;

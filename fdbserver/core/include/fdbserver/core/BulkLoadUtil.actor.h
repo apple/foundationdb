@@ -19,11 +19,11 @@
  */
 
 #include <memory>
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKLOADUTIL_ACTOR_G_H)
-#define FDBSERVER_BULKLOADUTIL_ACTOR_G_H
-#include "fdbserver/BulkLoadUtil.actor.g.h"
-#elif !defined(FDBSERVER_BULKLOADUTIL_ACTOR_H)
-#define FDBSERVER_BULKLOADUTIL_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_BULKLOADUTIL_ACTOR_G_H)
+#define FDBSERVER_CORE_BULKLOADUTIL_ACTOR_G_H
+#include "fdbserver/core/BulkLoadUtil.actor.g.h"
+#elif !defined(FDBSERVER_CORE_BULKLOADUTIL_ACTOR_H)
+#define FDBSERVER_CORE_BULKLOADUTIL_ACTOR_H
 #pragma once
 
 #include "fdbclient/BulkLoading.h"

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/OnDemandStore.h"
+#include "fdbserver/core/OnDemandStore.h"
 #include "flow/actorcompiler.h" // must be last include
 
 ACTOR static Future<Void> onErr(Future<Future<Void>> e) {

@@ -19,12 +19,12 @@
  */
 #ifndef FOUNDATIONDB_DDSHAREDCONTEXT_H
 #define FOUNDATIONDB_DDSHAREDCONTEXT_H
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fdbserver/core/DataDistributorInterface.h"
+#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/DDShardTracker.h"
 #include "fdbserver/datadistributor/DDRelocationQueue.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/DataDistributorInterface.h"
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same
 // context.

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/AccumulativeChecksumUtil.h"
+#include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,

@@ -58,9 +58,9 @@
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IConnection.h"
-#include "fdbserver/MockGlobalState.h"
+#include "fdbserver/datadistributor/MockGlobalState.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max

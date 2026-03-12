@@ -25,7 +25,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/QuietDatabase.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"

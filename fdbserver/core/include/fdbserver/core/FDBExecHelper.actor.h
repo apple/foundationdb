@@ -19,11 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_EXEC_HELPER_ACTOR_G_H)
-#define FDBSERVER_EXEC_HELPER_ACTOR_G_H
-#include "fdbserver/FDBExecHelper.actor.g.h"
-#elif !defined(FDBSERVER_EXEC_HELPER_ACTOR_H)
-#define FDBSERVER_EXEC_HELPER_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_EXEC_HELPER_ACTOR_G_H)
+#define FDBSERVER_CORE_EXEC_HELPER_ACTOR_G_H
+#include "fdbserver/core/FDBExecHelper.actor.g.h"
+#elif !defined(FDBSERVER_CORE_EXEC_HELPER_ACTOR_H)
+#define FDBSERVER_CORE_EXEC_HELPER_ACTOR_H
 
 #include <string>
 #include <vector>

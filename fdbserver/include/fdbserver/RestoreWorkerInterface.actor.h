@@ -38,7 +38,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/RestoreUtil.h"
+#include "fdbserver/core/RestoreUtil.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class RestoreConfigFR;

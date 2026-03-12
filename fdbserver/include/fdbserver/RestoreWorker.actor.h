@@ -33,7 +33,7 @@
 #include <cstdint>
 #include <cstdarg>
 
-#include "fdbserver/RestoreUtil.h"
+#include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreLoader.actor.h"

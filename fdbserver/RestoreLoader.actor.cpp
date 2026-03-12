@@ -28,8 +28,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/MutationTracking.h"
-#include "fdbserver/StorageMetrics.actor.h"
+#include "fdbserver/core/MutationTracking.h"
+#include "fdbserver/core/StorageMetrics.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

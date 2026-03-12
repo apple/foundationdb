@@ -21,11 +21,11 @@
 #include <cstdint>
 
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/OnDemandStore.h"
+#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/OnDemandStore.h"
+#include "fdbserver/core/Status.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/Status.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"

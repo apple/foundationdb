@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/datadistributor/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
 #include "flow/Buggify.h"
 #include "flow/FastRef.h"
@@ -32,8 +32,8 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"

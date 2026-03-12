@@ -31,7 +31,7 @@
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/Arena.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

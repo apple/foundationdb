@@ -29,8 +29,8 @@
 #include "flow/serialize.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/S3Client.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/BulkLoadUtil.actor.h"
+#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "flow/Platform.h"
 
 #include <string>

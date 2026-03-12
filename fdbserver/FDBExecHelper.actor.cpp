@@ -45,7 +45,7 @@
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 

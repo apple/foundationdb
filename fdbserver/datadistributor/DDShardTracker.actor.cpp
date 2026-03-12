@@ -24,7 +24,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ShardSizing.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"

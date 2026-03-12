@@ -22,7 +22,7 @@
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "foundationdb/CppWorkload.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

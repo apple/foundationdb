@@ -19,11 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SERVER_CHECKPOINT_ACTOR_G_H)
-#define FDBSERVER_SERVER_CHECKPOINT_ACTOR_G_H
-#include "fdbserver/ServerCheckpoint.actor.g.h"
-#elif !defined(FDBSERVER_SERVER_CHECKPOINT_ACTOR_H)
-#define FDBSERVER_SERVER_CHECKPOINT_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_G_H)
+#define FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_G_H
+#include "fdbserver/core/ServerCheckpoint.actor.g.h"
+#elif !defined(FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_H)
+#define FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
