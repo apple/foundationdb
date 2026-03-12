@@ -53,6 +53,7 @@ Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<Str
 					if (rv <= v) {
 						tr->set(advanceVersionSpecialKey, boost::lexical_cast<std::string>(v));
 						co_await safeThreadFutureToFuture(tr->commit());
+						continue;
 					} else {
 						fmt::print("Current read version is {}\n", rv);
 						co_return true;

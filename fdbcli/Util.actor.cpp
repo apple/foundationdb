@@ -122,7 +122,6 @@ Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* worke
 	loop {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -162,12 +161,9 @@ Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* worke
 				co_return true;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				TraceEvent(SevWarn, "GetWorkersError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			TraceEvent(SevWarn, "GetWorkersError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -179,7 +175,6 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 		interfaces->clear();
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -197,12 +192,9 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }

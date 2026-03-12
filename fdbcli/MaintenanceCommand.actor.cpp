@@ -43,7 +43,6 @@ Future<Void> printHealthyZone(Reference<IDatabase> db) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				// We need to keep the future as the returned standalone is not guaranteed to manage its memory when
 				// using an external client, but the ThreadFuture holds a reference to the memory
@@ -65,11 +64,8 @@ Future<Void> printHealthyZone(Reference<IDatabase> db) {
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -91,7 +87,6 @@ Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double se
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				// hold the returned standalone object's memory
 				ThreadFuture<RangeResult> resultFuture =
@@ -113,11 +108,8 @@ Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double se
 				co_return true;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -130,7 +122,6 @@ Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, bool c
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				// hold the returned standalone object's memory
 				ThreadFuture<RangeResult> resultFuture =
@@ -152,11 +143,8 @@ Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, bool c
 				co_return true;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }

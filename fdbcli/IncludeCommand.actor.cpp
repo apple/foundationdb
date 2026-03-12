@@ -43,7 +43,6 @@ Future<Void> includeLocalities(Reference<IDatabase> db,
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				if (includeAll) {
 					if (failed) {
@@ -62,12 +61,9 @@ Future<Void> includeLocalities(Reference<IDatabase> db,
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -79,7 +75,6 @@ Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusio
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				for (auto& s : servers) {
 					// include all, just clear the whole key range
@@ -109,12 +104,9 @@ Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusio
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				TraceEvent("IncludeServersError").errorUnsuppressed(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			TraceEvent("IncludeServersError").errorUnsuppressed(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }

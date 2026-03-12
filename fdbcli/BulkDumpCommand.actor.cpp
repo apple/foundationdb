@@ -46,7 +46,6 @@ Future<bool> getOngoingBulkDumpJob(Database cx) {
 	loop {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
 				if (job.present()) {
@@ -58,11 +57,8 @@ Future<bool> getOngoingBulkDumpJob(Database cx) {
 				}
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 }

@@ -40,7 +40,6 @@ Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
 	loop {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				// Hold the reference to the standalone's memory
 				ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
@@ -59,11 +58,8 @@ Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }

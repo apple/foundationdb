@@ -37,7 +37,6 @@ Future<Void> tssQuarantineList(Reference<IDatabase> db) {
 	loop {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -53,11 +52,8 @@ Future<Void> tssQuarantineList(Reference<IDatabase> db) {
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -69,7 +65,6 @@ Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId) {
 	loop {
 		{
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -111,11 +106,8 @@ Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
