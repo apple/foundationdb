@@ -1,5 +1,6 @@
 # TEMPORARY CI — delete before final PR review
-# Tests Prometheus /metrics endpoint with Cycle + Attrition workloads
+# Full E2E test: build fdbserver from source, run PrometheusMetrics simulation
+# with Cycle + Attrition workloads on RHEL 9, CentOS 7, and macOS
 
 name: "Prometheus Metrics CI Test"
 
@@ -8,55 +9,156 @@ on:
     branches: ["feature/prometheus-metrics-endpoint"]
 
 jobs:
-  macos-test:
-    runs-on: macos-14
-    timeout-minutes: 120
+  # ============================================
+  # RHEL 9 (Docker)
+  # ============================================
+  rhel9-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: registry.access.redhat.com/ubi9/ubi:latest
     steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gcc gcc-c++ cmake ninja-build python3 python3-pip git
+          pip3 install Jinja2
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          brew install cmake ninja python3
-          pip3 install Jinja2
-
       - name: Build fdbserver
         run: |
-          mkdir build && cd build
-          cmake -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=$(xcrun -f clang) \
-            -DCMAKE_CXX_COMPILER=$(xcrun -f clang++) \
-            ..
+          rm -rf build && mkdir build && cd build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
           ninja fdbserver
+          echo "=== Binary check ==="
+          ls -la bin/fdbserver
+          file bin/fdbserver
 
       - name: Run Prometheus simulation test
         run: |
           cd build
-          echo "=== Running PrometheusMetrics simulation ==="
           bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on -s 12345 2>&1 | tail -100
           echo "=== Test completed ==="
 
       - name: Show Prometheus output
         if: always()
         run: |
-          echo "=== Checking for prometheus_output.txt ==="
           if [ -f build/prometheus_output.txt ]; then
             echo "--- Full Prometheus output ---"
             cat build/prometheus_output.txt
             echo ""
             echo "--- Metric count ---"
-            grep -c "# TYPE" build/prometheus_output.txt || echo "0 TYPE lines found"
-          else
-            echo "No prometheus_output.txt found (file writing is in if(0) block)"
-            echo "Check simulation logs for PrometheusMetricsTestResponse trace events"
+            grep -c "# TYPE" build/prometheus_output.txt || echo "0"
           fi
 
-      - name: Check simulation logs
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output-rhel9
+          path: build/prometheus_output.txt
+          if-no-files-found: ignore
+
+  # ============================================
+  # CentOS 7 (Docker)
+  # ============================================
+  centos7-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: foundationdb/build:centos7-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build fdbserver
+        run: |
+          source /opt/rh/devtoolset-11/enable
+          source /opt/rh/rh-python38/enable
+          pip3 install Jinja2
+          rm -rf build && mkdir build && cd build
+          cmake3 -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+          ninja fdbserver
+          echo "=== Binary check ==="
+          ls -la bin/fdbserver
+          file bin/fdbserver
+
+      - name: Run Prometheus simulation test
+        run: |
+          source /opt/rh/devtoolset-11/enable
+          cd build
+          bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on -s 12345 2>&1 | tail -100
+          echo "=== Test completed ==="
+
+      - name: Show Prometheus output
         if: always()
         run: |
-          echo "=== Simulation trace events ==="
-          find build -name "*.xml" -newer build/CMakeCache.txt | head -5 | while read f; do
-            echo "--- $f ---"
-            grep -i "prometheus\|PrometheusMetrics" "$f" 2>/dev/null | head -20
-          done
+          if [ -f build/prometheus_output.txt ]; then
+            echo "--- Full Prometheus output ---"
+            cat build/prometheus_output.txt
+            echo ""
+            echo "--- Metric count ---"
+            grep -c "# TYPE" build/prometheus_output.txt || echo "0"
+          fi
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output-centos7
+          path: build/prometheus_output.txt
+          if-no-files-found: ignore
+
+  # ============================================
+  # macOS
+  # ============================================
+  macos-test:
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake ninja
+          python3 -m pip install --break-system-packages Jinja2
+
+      - name: Build fdbserver
+        run: |
+          rm -rf build && mkdir build && cd build
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=$(xcrun -f clang) \
+            -DCMAKE_CXX_COMPILER=$(xcrun -f clang++) \
+            ..
+          ninja fdbserver
+          echo "=== Binary check ==="
+          ls -la bin/fdbserver
+          file bin/fdbserver
+
+      - name: Run Prometheus simulation test
+        run: |
+          cd build
+          bin/fdbserver -r simulation -f ../tests/fast/PrometheusMetrics.toml -b on -s 12345 2>&1 | tail -100
+          echo "=== Test completed ==="
+
+      - name: Show Prometheus output
+        if: always()
+        run: |
+          if [ -f build/prometheus_output.txt ]; then
+            echo "--- Full Prometheus output ---"
+            cat build/prometheus_output.txt
+            echo ""
+            echo "--- Metric count ---"
+            grep -c "# TYPE" build/prometheus_output.txt || echo "0"
+          fi
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prometheus-output-macos
+          path: build/prometheus_output.txt
+          if-no-files-found: ignore
