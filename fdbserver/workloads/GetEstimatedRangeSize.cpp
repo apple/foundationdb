@@ -103,6 +103,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 				if (!sizeIsAsExpected(size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					co_await delay(5.0);
+					continue;
 				} else {
 					co_return size;
 				}
