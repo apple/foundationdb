@@ -97,29 +97,27 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		Error err;
+		bool hasErr = false;
+		try {
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-				std::vector<std::string> exclusions;
-				for (const auto& i : r) {
-					auto addr = i.key.removePrefix(fdb_cli::excludedServersSpecialKeyRange.begin).toString();
-					exclusions.push_back(addr);
-				}
-				co_return exclusions;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+			std::vector<std::string> exclusions;
+			for (const auto& i : r) {
+				auto addr = i.key.removePrefix(fdb_cli::excludedServersSpecialKeyRange.begin).toString();
+				exclusions.push_back(addr);
 			}
-			if (hasErr) {
-				TraceEvent(SevWarn, "GetExcludedServersError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_return exclusions;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			TraceEvent(SevWarn, "GetExcludedServersError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -128,28 +126,26 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		Error err;
+		bool hasErr = false;
+		try {
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-				std::vector<std::string> excludedLocalities;
-				for (const auto& i : r) {
-					auto locality = i.key.removePrefix(fdb_cli::excludedLocalitySpecialKeyRange.begin).toString();
-					excludedLocalities.push_back(locality);
-				}
-				co_return excludedLocalities;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+			std::vector<std::string> excludedLocalities;
+			for (const auto& i : r) {
+				auto locality = i.key.removePrefix(fdb_cli::excludedLocalitySpecialKeyRange.begin).toString();
+				excludedLocalities.push_back(locality);
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_return excludedLocalities;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -157,28 +153,26 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		Error err;
+		bool hasErr = false;
+		try {
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-				std::vector<std::string> exclusions;
-				for (const auto& i : r) {
-					auto addr = i.key.removePrefix(fdb_cli::failedServersSpecialKeyRange.begin).toString();
-					exclusions.push_back(addr);
-				}
-				co_return exclusions;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+			std::vector<std::string> exclusions;
+			for (const auto& i : r) {
+				auto addr = i.key.removePrefix(fdb_cli::failedServersSpecialKeyRange.begin).toString();
+				exclusions.push_back(addr);
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_return exclusions;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -187,29 +181,27 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
+		Error err;
+		bool hasErr = false;
+		try {
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult r = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
-				std::vector<std::string> excludedLocalities;
-				for (const auto& i : r) {
-					auto locality = i.key.removePrefix(fdb_cli::failedLocalitySpecialKeyRange.begin).toString();
-					excludedLocalities.push_back(locality);
-				}
-				co_return excludedLocalities;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+			std::vector<std::string> excludedLocalities;
+			for (const auto& i : r) {
+				auto locality = i.key.removePrefix(fdb_cli::failedLocalitySpecialKeyRange.begin).toString();
+				excludedLocalities.push_back(locality);
 			}
-			if (hasErr) {
-				TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_return excludedLocalities;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -236,48 +228,46 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	loop {
 		inProgressExclusion.clear();
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				std::set<NetworkAddress> result = co_await getInProgressExclusion(tr);
-				if (result.empty())
-					co_return inProgressExclusion;
-				inProgressExclusion = result;
+		Error err;
+		bool hasErr = false;
+		try {
+			std::set<NetworkAddress> result = co_await getInProgressExclusion(tr);
+			if (result.empty())
+				co_return inProgressExclusion;
+			inProgressExclusion = result;
 
-				// Check if all of the specified exclusions are done.
-				bool allExcluded = true;
-				for (const auto& inProgressAddr : inProgressExclusion) {
-					if (!allExcluded) {
+			// Check if all of the specified exclusions are done.
+			bool allExcluded = true;
+			for (const auto& inProgressAddr : inProgressExclusion) {
+				if (!allExcluded) {
+					break;
+				}
+
+				for (const auto& exclusion : exclusions) {
+					// We found an exclusion that is still in progress
+					if (exclusion.excludes(inProgressAddr)) {
+						allExcluded = false;
 						break;
 					}
-
-					for (const auto& exclusion : exclusions) {
-						// We found an exclusion that is still in progress
-						if (exclusion.excludes(inProgressAddr)) {
-							allExcluded = false;
-							break;
-						}
-					}
 				}
-
-				if (allExcluded) {
-					inProgressExclusion.clear();
-					co_return inProgressExclusion;
-				}
-
-				if (!waitForAllExcluded)
-					break;
-
-				co_await delayJittered(1.0); // SOMEDAY: watches!
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				TraceEvent(SevWarn, "CheckForExcludingServersError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
+
+			if (allExcluded) {
+				inProgressExclusion.clear();
+				co_return inProgressExclusion;
 			}
+
+			if (!waitForAllExcluded)
+				break;
+
+			co_await delayJittered(1.0); // SOMEDAY: watches!
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			TraceEvent(SevWarn, "CheckForExcludingServersError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 	co_return inProgressExclusion;
@@ -289,24 +279,22 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 	std::vector<NetworkAddress> coordinatorList;
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				// Hold the reference to the standalone's memory
-				ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-				Optional<Value> coordinators = co_await safeThreadFutureToFuture(coordinatorsF);
-				ASSERT(coordinators.present());
-				coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
-				break;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				TraceEvent(SevWarn, "CheckForCoordinatorsError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+		Error err;
+		bool hasErr = false;
+		try {
+			// Hold the reference to the standalone's memory
+			ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+			Optional<Value> coordinators = co_await safeThreadFutureToFuture(coordinatorsF);
+			ASSERT(coordinators.present());
+			coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
+			break;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			TraceEvent(SevWarn, "CheckForCoordinatorsError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 

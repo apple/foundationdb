@@ -120,51 +120,49 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-				ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
-				co_await (success(safeThreadFutureToFuture(processClasses)) &&
-				          success(safeThreadFutureToFuture(processData)));
-				ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
-				ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+			co_await (success(safeThreadFutureToFuture(processClasses)) &&
+			          success(safeThreadFutureToFuture(processData)));
+			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
 
-				std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-				int i{ 0 };
-				for (i = 0; i < processClasses.get().size(); i++) {
-					try {
-						id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
-						    decodeProcessClassValue(processClasses.get()[i].value);
-					} catch (Error& e) {
-						fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
-						co_return false;
-					}
+			std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
+			int i{ 0 };
+			for (i = 0; i < processClasses.get().size(); i++) {
+				try {
+					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
+					    decodeProcessClassValue(processClasses.get()[i].value);
+				} catch (Error& e) {
+					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
+					co_return false;
 				}
-
-				for (i = 0; i < processData.get().size(); i++) {
-					ProcessData data = decodeWorkerListValue(processData.get()[i].value);
-					ProcessClass processClass = id_class[data.locality.processId()];
-
-					if (processClass.classSource() == ProcessClass::DBSource ||
-					    data.processClass.classType() == ProcessClass::UnsetClass)
-						data.processClass = processClass;
-
-					if (data.processClass.classType() != ProcessClass::TesterClass)
-						workers->push_back(data);
-				}
-
-				co_return true;
-			} catch (Error& e) {
-				err = e;
 			}
-			TraceEvent(SevWarn, "GetWorkersError").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
+
+			for (i = 0; i < processData.get().size(); i++) {
+				ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+				ProcessClass processClass = id_class[data.locality.processId()];
+
+				if (processClass.classSource() == ProcessClass::DBSource ||
+				    data.processClass.classType() == ProcessClass::UnsetClass)
+					data.processClass = processClass;
+
+				if (data.processClass.classType() != ProcessClass::TesterClass)
+					workers->push_back(data);
+			}
+
+			co_return true;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent(SevWarn, "GetWorkersError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -173,29 +171,27 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		interfaces->clear();
-		{
-			Error err;
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				co_await success(safeThreadFutureToFuture(serverListF));
-				ASSERT(!serverListF.get().more);
-				ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
-				RangeResult serverList = serverListF.get();
-				// decode server interfaces
-				for (int i = 0; i < serverList.size(); i++) {
-					auto ssi = decodeServerListValue(serverList[i].value);
-					(*interfaces)[ssi.address().toString()] = ssi;
-				}
-				co_return;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			co_await success(safeThreadFutureToFuture(serverListF));
+			ASSERT(!serverListF.get().more);
+			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
+			RangeResult serverList = serverListF.get();
+			// decode server interfaces
+			for (int i = 0; i < serverList.size(); i++) {
+				auto ssi = decodeServerListValue(serverList[i].value);
+				(*interfaces)[ssi.address().toString()] = ssi;
 			}
-			TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

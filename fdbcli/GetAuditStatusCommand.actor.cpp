@@ -39,42 +39,40 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 	int64_t finishCount = 0;
 	while (rangeToReadBegin < auditRange.end) {
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
-					std::vector<AuditStorageState> auditStates =
-					    co_await getAuditStateByRange(cx, auditType, auditId, rangeToRead);
-					for (int i = 0; i < auditStates.size(); i++) {
-						AuditPhase phase = auditStates[i].getPhase();
-						if (phase == AuditPhase::Invalid) {
-							fmt::println("( Ongoing ) {}", auditStates[i].range.toString());
-						} else if (phase == AuditPhase::Error) {
-							fmt::println("( Error   ) {}", auditStates[i].range.toString());
-							++finishCount;
-						} else {
-							++finishCount;
-							continue;
-						}
+			Error err;
+			bool hasErr = false;
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				std::vector<AuditStorageState> auditStates =
+				    co_await getAuditStateByRange(cx, auditType, auditId, rangeToRead);
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						fmt::println("( Ongoing ) {}", auditStates[i].range.toString());
+					} else if (phase == AuditPhase::Error) {
+						fmt::println("( Error   ) {}", auditStates[i].range.toString());
+						++finishCount;
+					} else {
+						++finishCount;
+						continue;
 					}
-					rangeToReadBegin = auditStates.back().range.end;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					if (err.code() == error_code_actor_cancelled) {
-						throw err;
-					}
-					if (retryCount > 30) {
-						fmt::println("Incomplete check");
-						co_return;
-					}
-					co_await delay(0.5);
-					retryCount++;
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
 				}
+				if (retryCount > 30) {
+					fmt::println("Incomplete check");
+					co_return;
+				}
+				co_await delay(0.5);
+				retryCount++;
 			}
 		}
 	}
@@ -87,24 +85,22 @@ Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
 	loop {
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-				std::vector<StorageServerInterface> servers;
-				servers.reserve(serverList.size());
-				for (int i = 0; i < serverList.size(); i++)
-					servers.push_back(decodeServerListValue(serverList[i].value));
-				co_return servers;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+		Error err;
+		bool hasErr = false;
+		try {
+			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			std::vector<StorageServerInterface> servers;
+			servers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++)
+				servers.push_back(decodeServerListValue(serverList[i].value));
+			co_return servers;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -119,37 +115,35 @@ Future<AuditPhase> getAuditProgressByServer(Database cx,
 	int retryCount = 0;
 	while (rangeToReadBegin < auditRange.end) {
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
-					std::vector<AuditStorageState> auditStates =
-					    co_await getAuditStateByServer(cx, auditType, auditId, serverId, rangeToRead);
-					for (int i = 0; i < auditStates.size(); i++) {
-						AuditPhase phase = auditStates[i].getPhase();
-						if (phase == AuditPhase::Invalid) {
-							co_return AuditPhase::Running;
-						} else if (phase == AuditPhase::Error) {
-							co_return AuditPhase::Error;
-						}
+			Error err;
+			bool hasErr = false;
+			try {
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				std::vector<AuditStorageState> auditStates =
+				    co_await getAuditStateByServer(cx, auditType, auditId, serverId, rangeToRead);
+				for (int i = 0; i < auditStates.size(); i++) {
+					AuditPhase phase = auditStates[i].getPhase();
+					if (phase == AuditPhase::Invalid) {
+						co_return AuditPhase::Running;
+					} else if (phase == AuditPhase::Error) {
+						co_return AuditPhase::Error;
 					}
-					rangeToReadBegin = auditStates.back().range.end;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					if (err.code() == error_code_actor_cancelled) {
-						throw err;
-					}
-					if (retryCount > 30) {
-						co_return AuditPhase::Invalid;
-					}
-					co_await delay(0.5);
-					retryCount++;
+				rangeToReadBegin = auditStates.back().range.end;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				if (err.code() == error_code_actor_cancelled) {
+					throw err;
 				}
+				if (retryCount > 30) {
+					co_return AuditPhase::Invalid;
+				}
+				co_await delay(0.5);
+				retryCount++;
 			}
 		}
 	}

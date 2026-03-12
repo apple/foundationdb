@@ -38,29 +38,26 @@ namespace {
 Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
-		{
-			Error err;
-			try {
-				// Hold the reference to the standalone's memory
-				ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
-				Optional<Value> description = co_await safeThreadFutureToFuture(descriptionF);
-				ASSERT(description.present());
-				printf("Cluster description: %s\n", description.get().toString().c_str());
-				// Hold the reference to the standalone's memory
-				ThreadFuture<Optional<Value>> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-				Optional<Value> processes = co_await safeThreadFutureToFuture(processesF);
-				ASSERT(processes.present());
-				std::vector<std::string> process_addresses;
-				boost::split(process_addresses, processes.get().toString(), [](char c) { return c == ','; });
-				printf(
-				    "Cluster coordinators (%zu): %s\n", process_addresses.size(), processes.get().toString().c_str());
-				printf("Type `help coordinators' to learn how to change this information.\n");
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await safeThreadFutureToFuture(tr->onError(err));
+		Error err;
+		try {
+			// Hold the reference to the standalone's memory
+			ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
+			Optional<Value> description = co_await safeThreadFutureToFuture(descriptionF);
+			ASSERT(description.present());
+			printf("Cluster description: %s\n", description.get().toString().c_str());
+			// Hold the reference to the standalone's memory
+			ThreadFuture<Optional<Value>> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+			Optional<Value> processes = co_await safeThreadFutureToFuture(processesF);
+			ASSERT(processes.present());
+			std::vector<std::string> process_addresses;
+			boost::split(process_addresses, processes.get().toString(), [](char c) { return c == ','; });
+			printf("Cluster coordinators (%zu): %s\n", process_addresses.size(), processes.get().toString().c_str());
+			printf("Type `help coordinators' to learn how to change this information.\n");
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

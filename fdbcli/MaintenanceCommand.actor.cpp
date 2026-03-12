@@ -41,32 +41,29 @@ Future<Void> printHealthyZone(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			try {
-				// We need to keep the future as the returned standalone is not guaranteed to manage its memory when
-				// using an external client, but the ThreadFuture holds a reference to the memory
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(res.size() <= 1);
-				if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
-					printf(
-					    "Data distribution has been disabled for all storage server failures in this cluster and thus "
-					    "maintenance mode is not active.\n");
-				} else if (!res.size() || boost::lexical_cast<double>(res[0].value.toString()) <= 0) {
-					printf("No ongoing maintenance.\n");
-				} else {
-					std::string zoneId = res[0].key.removePrefix(fdb_cli::maintenanceSpecialKeyRange.begin).toString();
-					int64_t seconds = static_cast<int64_t>(boost::lexical_cast<double>(res[0].value.toString()));
-					fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n", zoneId, seconds);
-				}
-				co_return;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			// We need to keep the future as the returned standalone is not guaranteed to manage its memory when
+			// using an external client, but the ThreadFuture holds a reference to the memory
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(res.size() <= 1);
+			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
+				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
+				       "maintenance mode is not active.\n");
+			} else if (!res.size() || boost::lexical_cast<double>(res[0].value.toString()) <= 0) {
+				printf("No ongoing maintenance.\n");
+			} else {
+				std::string zoneId = res[0].key.removePrefix(fdb_cli::maintenanceSpecialKeyRange.begin).toString();
+				int64_t seconds = static_cast<int64_t>(boost::lexical_cast<double>(res[0].value.toString()));
+				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n", zoneId, seconds);
 			}
-			co_await safeThreadFutureToFuture(tr->onError(err));
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -85,32 +82,29 @@ Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double se
 	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			try {
-				// hold the returned standalone object's memory
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(res.size() <= 1);
-				if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
-					if (printWarning) {
-						fprintf(
-						    stderr,
-						    "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-						    "server failures. Use 'datadistribution on' to reenable data distribution.\n");
-					}
-					co_return false;
+		Error err;
+		try {
+			// hold the returned standalone object's memory
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(res.size() <= 1);
+			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
+				if (printWarning) {
+					fprintf(stderr,
+					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
-				tr->set(fdb_cli::maintenanceSpecialKeyRange.begin.withSuffix(zoneId),
-				        boost::lexical_cast<std::string>(seconds));
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return true;
-			} catch (Error& e) {
-				err = e;
+				co_return false;
 			}
-			co_await safeThreadFutureToFuture(tr->onError(err));
+			tr->set(fdb_cli::maintenanceSpecialKeyRange.begin.withSuffix(zoneId),
+			        boost::lexical_cast<std::string>(seconds));
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return true;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -120,32 +114,29 @@ Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, bool c
 	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			try {
-				// hold the returned standalone object's memory
-				ThreadFuture<RangeResult> resultFuture =
-				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
-				ASSERT(res.size() <= 1);
-				if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
-					if (printWarning) {
-						fprintf(
-						    stderr,
-						    "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-						    "server failures. Use 'datadistribution on' to reenable data distribution.\n");
-					}
-					co_return false;
+		Error err;
+		try {
+			// hold the returned standalone object's memory
+			ThreadFuture<RangeResult> resultFuture =
+			    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
+			ASSERT(res.size() <= 1);
+			if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
+				if (printWarning) {
+					fprintf(stderr,
+					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
+					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
-
-				tr->clear(fdb_cli::maintenanceSpecialKeyRange);
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return true;
-			} catch (Error& e) {
-				err = e;
+				co_return false;
 			}
-			co_await safeThreadFutureToFuture(tr->onError(err));
+
+			tr->clear(fdb_cli::maintenanceSpecialKeyRange);
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return true;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

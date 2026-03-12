@@ -41,30 +41,28 @@ Future<Void> includeLocalities(Reference<IDatabase> db,
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			try {
-				if (includeAll) {
-					if (failed) {
-						tr->clear(fdb_cli::failedLocalitySpecialKeyRange);
-					} else {
-						tr->clear(fdb_cli::excludedLocalitySpecialKeyRange);
-					}
+		Error err;
+		try {
+			if (includeAll) {
+				if (failed) {
+					tr->clear(fdb_cli::failedLocalitySpecialKeyRange);
 				} else {
-					for (const auto& l : localities) {
-						Key locality = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
-						                      : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
-						tr->clear(locality);
-					}
+					tr->clear(fdb_cli::excludedLocalitySpecialKeyRange);
 				}
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return;
-			} catch (Error& e) {
-				err = e;
+			} else {
+				for (const auto& l : localities) {
+					Key locality = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
+					                      : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
+					tr->clear(locality);
+				}
 			}
-			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -73,41 +71,39 @@ Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusio
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			try {
-				for (auto& s : servers) {
-					// include all, just clear the whole key range
-					if (!s.isValid()) {
-						if (failed) {
-							tr->clear(fdb_cli::failedServersSpecialKeyRange);
-						} else {
-							tr->clear(fdb_cli::excludedServersSpecialKeyRange);
-						}
+		Error err;
+		try {
+			for (auto& s : servers) {
+				// include all, just clear the whole key range
+				if (!s.isValid()) {
+					if (failed) {
+						tr->clear(fdb_cli::failedServersSpecialKeyRange);
 					} else {
-						Key addr = failed ? fdb_cli::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
-						                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
-						tr->clear(addr);
-						// Eliminate both any ip-level exclusion (1.2.3.4) and any
-						// port-level exclusions (1.2.3.4:5)
-						// The range ['IP', 'IP;'] was originally deleted. ';' is
-						// char(':' + 1). This does not work, as other for all
-						// x between 0 and 9, 'IPx' will also be in this range.
-						//
-						// This is why we now make two clears: first only of the ip
-						// address, the second will delete all ports.
-						if (s.isWholeMachine())
-							tr->clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
+						tr->clear(fdb_cli::excludedServersSpecialKeyRange);
 					}
+				} else {
+					Key addr = failed ? fdb_cli::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
+					                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
+					tr->clear(addr);
+					// Eliminate both any ip-level exclusion (1.2.3.4) and any
+					// port-level exclusions (1.2.3.4:5)
+					// The range ['IP', 'IP;'] was originally deleted. ';' is
+					// char(':' + 1). This does not work, as other for all
+					// x between 0 and 9, 'IPx' will also be in this range.
+					//
+					// This is why we now make two clears: first only of the ip
+					// address, the second will delete all ports.
+					if (s.isWholeMachine())
+						tr->clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
 				}
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return;
-			} catch (Error& e) {
-				err = e;
 			}
-			TraceEvent("IncludeServersError").errorUnsuppressed(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent("IncludeServersError").errorUnsuppressed(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

@@ -75,44 +75,42 @@ Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-					KeyRangeRef currentKeys(begin, allKeys.end);
-					RangeResult shards =
-					    co_await krmGetRanges(tr, keyServersPrefix, currentKeys, n, CLIENT_KNOBS->TOO_MANY);
+				KeyRangeRef currentKeys(begin, allKeys.end);
+				RangeResult shards =
+				    co_await krmGetRanges(tr, keyServersPrefix, currentKeys, n, CLIENT_KNOBS->TOO_MANY);
 
-					int i = 0;
-					for (; i < shards.size() - 1 && numShards < n; ++i) {
-						KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
-						std::vector<UID> src;
-						std::vector<UID> dest;
-						UID srcId;
-						UID destId;
-						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-						if (physicalShard == (srcId != anonymousShardId)) {
-							co_await printKeyServersEntry(tr, UIDtoTagMap, shards[i].value, currentRange);
-							++numShards;
-						}
+				int i = 0;
+				for (; i < shards.size() - 1 && numShards < n; ++i) {
+					KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId;
+					UID destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+					if (physicalShard == (srcId != anonymousShardId)) {
+						co_await printKeyServersEntry(tr, UIDtoTagMap, shards[i].value, currentRange);
+						++numShards;
 					}
+				}
 
-					begin = shards.back().key;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+				begin = shards.back().key;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 	}
@@ -132,42 +130,40 @@ Future<Void> printPhysicalShardCount(Database cx) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-					KeyRangeRef currentKeys(begin, allKeys.end);
-					RangeResult shards = co_await krmGetRanges(
-					    tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
+				KeyRangeRef currentKeys(begin, allKeys.end);
+				RangeResult shards = co_await krmGetRanges(
+				    tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
 
-					for (int i = 0; i < shards.size() - 1; ++i) {
-						std::vector<UID> src;
-						std::vector<UID> dest;
-						UID srcId;
-						UID destId;
-						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-						if (srcId != anonymousShardId) {
-							++numPhysicalShards;
-						}
+				for (int i = 0; i < shards.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId;
+					UID destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+					if (srcId != anonymousShardId) {
+						++numPhysicalShards;
 					}
+				}
 
-					begin = shards.back().key;
-					numShards += shards.size() - 1;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+				begin = shards.back().key;
+				numShards += shards.size() - 1;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 	}
@@ -185,40 +181,38 @@ Future<Void> printServerShards(Database cx, UID serverId) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					RangeResult serverShards =
-					    co_await krmGetRanges(tr, serverKeysPrefixFor(serverId), KeyRangeRef(begin, allKeys.end));
+				RangeResult serverShards =
+				    co_await krmGetRanges(tr, serverKeysPrefixFor(serverId), KeyRangeRef(begin, allKeys.end));
 
-					for (int i = 0; i < serverShards.size() - 1; ++i) {
-						KeyRangeRef currentRange(serverShards[i].key, serverShards[i + 1].key);
-						UID shardId;
-						bool assigned, emptyRange;
-						DataMoveType dataMoveType = DataMoveType::LOGICAL;
-						DataMovementReason dataMoveReason = DataMovementReason::INVALID;
-						decodeServerKeysValue(
-						    serverShards[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
-						printf("Range: %s, ShardID: %s, Assigned: %s\n",
-						       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
-						       shardId.toString().c_str(),
-						       assigned ? "true" : "false");
-					}
-
-					begin = serverShards.back().key;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+				for (int i = 0; i < serverShards.size() - 1; ++i) {
+					KeyRangeRef currentRange(serverShards[i].key, serverShards[i + 1].key);
+					UID shardId;
+					bool assigned, emptyRange;
+					DataMoveType dataMoveType = DataMoveType::LOGICAL;
+					DataMovementReason dataMoveReason = DataMovementReason::INVALID;
+					decodeServerKeysValue(
+					    serverShards[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
+					printf("Range: %s, ShardID: %s, Assigned: %s\n",
+					       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
+					       shardId.toString().c_str(),
+					       assigned ? "true" : "false");
 				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+
+				begin = serverShards.back().key;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 	}
@@ -234,36 +228,34 @@ Future<Void> resolveRange(Database cx, KeyRange range) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult UIDtoTagMap = co_await tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-					KeyRangeRef currentKeys(begin, range.end);
-					RangeResult shards = co_await krmGetRanges(
-					    tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
+				KeyRangeRef currentKeys(begin, range.end);
+				RangeResult shards = co_await krmGetRanges(
+				    tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY);
 
-					int i = 0;
-					for (; i < shards.size() - 1; ++i) {
-						KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
-						co_await printKeyServersEntry(tr, UIDtoTagMap, shards[i].value, currentRange);
-					}
-
-					begin = shards.back().key;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+				int i = 0;
+				for (; i < shards.size() - 1; ++i) {
+					KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+					co_await printKeyServersEntry(tr, UIDtoTagMap, shards[i].value, currentRange);
 				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+
+				begin = shards.back().key;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 	}

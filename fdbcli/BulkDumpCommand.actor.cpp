@@ -44,22 +44,20 @@ static const std::string BULK_DUMP_HELP_MESSAGE =
 Future<bool> getOngoingBulkDumpJob(Database cx) {
 	Transaction tr(cx);
 	loop {
-		{
-			Error err;
-			try {
-				Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
-				if (job.present()) {
-					fmt::println("Running bulk dumping job: {}", job.get().getJobId().toString());
-					co_return true;
-				} else {
-					fmt::println("No bulk dumping job is running");
-					co_return false;
-				}
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
+			if (job.present()) {
+				fmt::println("Running bulk dumping job: {}", job.get().getJobId().toString());
+				co_return true;
+			} else {
+				fmt::println("No bulk dumping job is running");
+				co_return false;
 			}
-			co_await tr.onError(err);
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 

@@ -325,141 +325,139 @@ Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dc
 	Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 	bool consistent = true;
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				fmt::println("Start checking for range: {}", printable(inputRange));
-				// Get SS interface for each shard of the inputRange
-				Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-				bool foundKeyServers = co_await getKeyServers(cx, keyServerPromise, inputRange, dcid);
-				if (!foundKeyServers) {
-					fmt::println("key server locations for {} not found, retrying in 1s...", printable(inputRange));
-					co_await delay(1.0);
-					continue;
+		Error err;
+		bool hasErr = false;
+		try {
+			fmt::println("Start checking for range: {}", printable(inputRange));
+			// Get SS interface for each shard of the inputRange
+			Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
+			bool foundKeyServers = co_await getKeyServers(cx, keyServerPromise, inputRange, dcid);
+			if (!foundKeyServers) {
+				fmt::println("key server locations for {} not found, retrying in 1s...", printable(inputRange));
+				co_await delay(1.0);
+				continue;
+			}
+			std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
+			    keyServerPromise.getFuture().get();
+			// We partition the entire input range into shards
+			// and we conduct comparison shard by shard
+			int i = 0;
+			for (; i < keyServers.size(); i++) { // for each shard
+				KeyRange rangeToCheck = keyServers[i].first;
+				rangeToCheck = rangeToCheck & inputRange; // Only check the shard part within the inputRange
+				if (rangeToCheck.empty()) {
+					continue; // Skip the shard if it is outside of the inputRange
 				}
-				std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
-				    keyServerPromise.getFuture().get();
-				// We partition the entire input range into shards
-				// and we conduct comparison shard by shard
-				int i = 0;
-				for (; i < keyServers.size(); i++) { // for each shard
-					KeyRange rangeToCheck = keyServers[i].first;
-					rangeToCheck = rangeToCheck & inputRange; // Only check the shard part within the inputRange
-					if (rangeToCheck.empty()) {
-						continue; // Skip the shard if it is outside of the inputRange
+				const auto& servers = keyServers[i].second;
+				Key beginKeyToCheck = rangeToCheck.begin;
+				fmt::println("Key range to check: {}", printable(rangeToCheck));
+				for (const auto& server : servers) {
+					fmt::println("\t{}", server.address().toString());
+				}
+				std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
+				bool hasMore = true;
+				int round = 0;
+				Version version{ 0 };
+				while (hasMore) {
+					co_await store(version, getVersion(cx));
+					replies.clear();
+					fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
+					for (const auto& s : keyServers[i].second) { // for each storage server
+						GetKeyValuesRequest req;
+						req.begin = firstGreaterOrEqual(beginKeyToCheck);
+						req.end = firstGreaterOrEqual(rangeToCheck.end);
+						req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
+						req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
+						req.version = version; // all replica should read at the same version
+						req.tags = TagSet();
+						replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 					}
-					const auto& servers = keyServers[i].second;
-					Key beginKeyToCheck = rangeToCheck.begin;
-					fmt::println("Key range to check: {}", printable(rangeToCheck));
-					for (const auto& server : servers) {
-						fmt::println("\t{}", server.address().toString());
-					}
-					std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
-					bool hasMore = true;
-					int round = 0;
-					Version version{ 0 };
-					while (hasMore) {
-						co_await store(version, getVersion(cx));
-						replies.clear();
-						fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
-						for (const auto& s : keyServers[i].second) { // for each storage server
-							GetKeyValuesRequest req;
-							req.begin = firstGreaterOrEqual(beginKeyToCheck);
-							req.end = firstGreaterOrEqual(rangeToCheck.end);
-							req.limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT;
-							req.limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES;
-							req.version = version; // all replica should read at the same version
-							req.tags = TagSet();
-							replies.push_back(s.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
-						}
-						co_await waitForAll(replies);
+					co_await waitForAll(replies);
 
-						// Decide comparison scope
-						Key claimEndKey; // used for the next round if hasMore == true
-						Key maxEndKey;
-						hasMore = false; // re-calculate hasMore according to replies
+					// Decide comparison scope
+					Key claimEndKey; // used for the next round if hasMore == true
+					Key maxEndKey;
+					hasMore = false; // re-calculate hasMore according to replies
+					for (int j = 0; j < replies.size(); j++) {
+						auto reply = replies[j].get();
+						if (reply.isError()) {
+							fmt::println("checkResults error: {}", reply.getError().what());
+							throw reply.getError();
+						} else if (reply.get().error.present()) {
+							fmt::println("checkResults error: {}", reply.get().error.get().what());
+							throw reply.get().error.get();
+						}
+						GetKeyValuesReply current = reply.get();
+						if (current.data.size() == 0) {
+							continue; // Ignore if no data has replied
+						}
+						if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
+							claimEndKey = current.data[current.data.size() - 1].key;
+						}
+						if (maxEndKey.empty() || current.data[current.data.size() - 1].key > maxEndKey) {
+							maxEndKey = current.data[current.data.size() - 1].key;
+						}
+						hasMore = hasMore || current.more;
+					}
+					fmt::println("Compare scope has been decided\n\tBeginKey: {}\n\tEndKey: {}\n\tHasMore: {}",
+					             toHex(beginKeyToCheck),
+					             toHex(claimEndKey),
+					             hasMore);
+					if (claimEndKey.empty()) {
+						// It is possible that there is clear operation between the prev round and the current round
+						// which result in empty claimEndKey --- nothing to compare
+						// In this case, we simply skip the current shard
+						ASSERT(hasMore == false);
+						continue;
+					} else if ((beginKeyToCheck == claimEndKey) && hasMore) {
+						// This is a special case: rangeBegin == claimEndKey == next beginKeyToCheck
+						// We separate this case and the third case to solve a corner issue led by the
+						// third code path: the progress will get stuck on repeatedly checking beginKeyToCheck.
+						// In the third code path, if hasMore == true and beginKeyToCheck == claimEndKey,
+						// The next round of beginKeyToCheck (aka claimEndKey) will always be beginKeyToCheck of the
+						// current round. To avoid this issue, we spawn a child checkall on a smaller range
+						// (beginKeyToCheck ~ maxEndKey). This smaller range guarantees that the hasMore is always
+						// false and the child checkall will complete and the global progress will move forward.
+						// Once the child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
+						KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
+						fmt::println("Spawn new checkall for range {}", printable(spawnedRangeToCheck));
+						bool allSame = co_await doCheckAll(cx, spawnedRangeToCheck, dcid, checkAll);
+						beginKeyToCheck = spawnedRangeToCheck.end;
+						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
+					} else {
+						std::vector<GetKeyValuesReply> keyValueReplies;
 						for (int j = 0; j < replies.size(); j++) {
 							auto reply = replies[j].get();
-							if (reply.isError()) {
-								fmt::println("checkResults error: {}", reply.getError().what());
-								throw reply.getError();
-							} else if (reply.get().error.present()) {
-								fmt::println("checkResults error: {}", reply.get().error.get().what());
-								throw reply.get().error.get();
-							}
-							GetKeyValuesReply current = reply.get();
-							if (current.data.size() == 0) {
-								continue; // Ignore if no data has replied
-							}
-							if (claimEndKey.empty() || current.data[current.data.size() - 1].key < claimEndKey) {
-								claimEndKey = current.data[current.data.size() - 1].key;
-							}
-							if (maxEndKey.empty() || current.data[current.data.size() - 1].key > maxEndKey) {
-								maxEndKey = current.data[current.data.size() - 1].key;
-							}
-							hasMore = hasMore || current.more;
+							ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
+							keyValueReplies.push_back(reply.get());
 						}
-						fmt::println("Compare scope has been decided\n\tBeginKey: {}\n\tEndKey: {}\n\tHasMore: {}",
-						             toHex(beginKeyToCheck),
-						             toHex(claimEndKey),
-						             hasMore);
-						if (claimEndKey.empty()) {
-							// It is possible that there is clear operation between the prev round and the current round
-							// which result in empty claimEndKey --- nothing to compare
-							// In this case, we simply skip the current shard
-							ASSERT(hasMore == false);
-							continue;
-						} else if ((beginKeyToCheck == claimEndKey) && hasMore) {
-							// This is a special case: rangeBegin == claimEndKey == next beginKeyToCheck
-							// We separate this case and the third case to solve a corner issue led by the
-							// third code path: the progress will get stuck on repeatedly checking beginKeyToCheck.
-							// In the third code path, if hasMore == true and beginKeyToCheck == claimEndKey,
-							// The next round of beginKeyToCheck (aka claimEndKey) will always be beginKeyToCheck of the
-							// current round. To avoid this issue, we spawn a child checkall on a smaller range
-							// (beginKeyToCheck ~ maxEndKey). This smaller range guarantees that the hasMore is always
-							// false and the child checkall will complete and the global progress will move forward.
-							// Once the child checkall is done, we move to the range: maxEndKey ~ rangeToCheck.end
-							KeyRange spawnedRangeToCheck = Standalone(KeyRangeRef(beginKeyToCheck, maxEndKey));
-							fmt::println("Spawn new checkall for range {}", printable(spawnedRangeToCheck));
-							bool allSame = co_await doCheckAll(cx, spawnedRangeToCheck, dcid, checkAll);
-							beginKeyToCheck = spawnedRangeToCheck.end;
-							consistent = consistent && allSame; // !allSame of any subrange results in !consistent
-						} else {
-							std::vector<GetKeyValuesReply> keyValueReplies;
-							for (int j = 0; j < replies.size(); j++) {
-								auto reply = replies[j].get();
-								ASSERT(reply.present() && !reply.get().error.present()); // has thrown eariler of error
-								keyValueReplies.push_back(reply.get());
-							}
-							// keyServers and keyValueReplies must follow the same order
-							bool allSame =
-							    checkResults(version, hasMore, claimEndKey, keyServers[i].second, keyValueReplies);
-							// Using claimEndKey of the current round as the nextBeginKey for the next round
-							// Note that claimEndKey is not compared in the current round
-							// This key will be compared in the next round
-							fmt::println("Result: compared {} - {}", toHex(beginKeyToCheck), toHex(claimEndKey));
-							beginKeyToCheck = claimEndKey;
-							fmt::println("allSame {}, hasMore {}, checkAll {}", allSame, hasMore, checkAll);
-							consistent = consistent && allSame; // !allSame of any subrange results in !consistent
-						}
-						if (!consistent && !checkAll) {
-							co_return false;
-						}
-						round++;
+						// keyServers and keyValueReplies must follow the same order
+						bool allSame =
+						    checkResults(version, hasMore, claimEndKey, keyServers[i].second, keyValueReplies);
+						// Using claimEndKey of the current round as the nextBeginKey for the next round
+						// Note that claimEndKey is not compared in the current round
+						// This key will be compared in the next round
+						fmt::println("Result: compared {} - {}", toHex(beginKeyToCheck), toHex(claimEndKey));
+						beginKeyToCheck = claimEndKey;
+						fmt::println("allSame {}, hasMore {}, checkAll {}", allSame, hasMore, checkAll);
+						consistent = consistent && allSame; // !allSame of any subrange results in !consistent
 					}
+					if (!consistent && !checkAll) {
+						co_return false;
+					}
+					round++;
 				}
-				break;
+			}
+			break;
 
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				fmt::print("Error: {}", err.what());
-				co_await onErrorTr.onError(err);
-				fmt::println(", retrying in 1s...");
-			}
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			fmt::print("Error: {}", err.what());
+			co_await onErrorTr.onError(err);
+			fmt::println(", retrying in 1s...");
 		}
 		co_await delay(1.0);
 	}
