@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TEST_TLOG_ACTOR_G_H)
-#define FDBSERVER_TEST_TLOG_ACTOR_G_H
-#include "fdbserver/TestTLogServer.actor.g.h"
-#elif !defined(FDBSERVER_TEST_TLOG_ACTOR_H)
-#define FDBSERVER_TEST_TLOG_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOG_TEST_TLOG_ACTOR_G_H)
+#define FDBSERVER_TLOG_TEST_TLOG_ACTOR_G_H
+#include "fdbserver/tlog/TestTLogServer.actor.g.h"
+#elif !defined(FDBSERVER_TLOG_TEST_TLOG_ACTOR_H)
+#define FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
 
 #include <memory>
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/LogSystem.h"
+#include "fdbserver/tlog/LogSystem.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -84,7 +84,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID) {};
+	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
 // test state
@@ -133,4 +133,4 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 };
 
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_TEST_TLOG_ACTOR_G_H
+#endif // FDBSERVER_TLOG_TEST_TLOG_ACTOR_H

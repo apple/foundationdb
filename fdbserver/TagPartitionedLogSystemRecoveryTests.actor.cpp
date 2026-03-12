@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TagPartitionedLogSystem.actor.h"
+#include "fdbserver/tlog/TagPartitionedLogSystem.actor.h"
 #include "flow/UnitTest.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

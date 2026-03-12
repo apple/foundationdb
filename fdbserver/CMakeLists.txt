@@ -9,7 +9,9 @@ endif()
 function(configure_fdbserver_common_includes target_name)
   target_include_directories(${target_name} PRIVATE
     ${CMAKE_SOURCE_DIR}/bindings/c
-    ${CMAKE_BINARY_DIR}/bindings/c)
+    ${CMAKE_BINARY_DIR}/bindings/c
+    ${CMAKE_SOURCE_DIR}/fdbserver/tlog/include
+    ${CMAKE_BINARY_DIR}/fdbserver/tlog/include)
 endfunction()
 
 function(configure_fdbserver_target_includes target_name)
@@ -25,6 +27,7 @@ add_subdirectory(commitproxy)
 add_subdirectory(datadistributor)
 add_subdirectory(grvproxy)
 add_subdirectory(ratekeeper)
+add_subdirectory(tlog)
 
 if(WITH_ROCKSDB)
   find_package(LZ4 REQUIRED)
@@ -147,7 +150,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_commitproxy fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

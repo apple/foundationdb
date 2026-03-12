@@ -28,7 +28,7 @@
 #include <tuple>
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/LogSystem.h"
+#include "fdbserver/tlog/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

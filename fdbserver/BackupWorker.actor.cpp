@@ -27,7 +27,7 @@
 #include "fdbserver/BackupProgress.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogProtocolMessage.h"
-#include "fdbserver/LogSystem.h"
+#include "fdbserver/tlog/LogSystem.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.actor.h"

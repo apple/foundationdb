@@ -32,7 +32,7 @@
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/LogSystem.h"
+#include "fdbserver/tlog/LogSystem.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"

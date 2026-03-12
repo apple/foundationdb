@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/LogSystem.h"
+#include "fdbserver/tlog/LogSystem.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/OTELSpanContextMessage.h"
 #include "fdbserver/SpanContextMessage.h"

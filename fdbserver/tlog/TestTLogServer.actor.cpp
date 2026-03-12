@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TestTLogServer.actor.h"
+#include "fdbserver/tlog/TestTLogServer.actor.h"
 
 #include <filesystem>
 #include <vector>
@@ -29,7 +29,7 @@
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/LogSystem.h"
+#include "fdbserver/tlog/LogSystem.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/DebugTrace.h"
