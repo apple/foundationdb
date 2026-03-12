@@ -62,7 +62,6 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
-#include "fdbclient/ParallelStream.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -3018,14 +3017,14 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 	return Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>();
 }
 
-// Streams all of the KV pairs in a target key range into a ParallelStream fragment
-ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
-                                          ParallelStream<RangeResult>::Fragment* results,
-                                          KeyRange keys,
-                                          GetRangeLimits limits,
-                                          Snapshot snapshot,
-                                          Reverse reverse,
-                                          SpanContext spanContext) {
+// Streams all of the KV pairs in a target key range directly to the client in order.
+ACTOR Future<Void> getRangeStreamImpl(Reference<TransactionState> trState,
+                                      PromiseStream<RangeResult> results,
+                                      KeyRange keys,
+                                      GetRangeLimits limits,
+                                      Snapshot snapshot,
+                                      Reverse reverse,
+                                      SpanContext spanContext) {
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(
 		    trState, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream));
@@ -3065,7 +3064,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 				if (locations[shard].locations->size() == 0) {
 					wait(trState->cx->connectionFileChanged());
-					results->sendError(transaction_too_old());
+					results.sendError(transaction_too_old());
 					return Void();
 				}
 
@@ -3122,11 +3121,11 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 				state bool breakAgain = false;
 				loop {
-					wait(results->onEmpty());
+					wait(results.onEmpty());
 					try {
 						choose {
 							when(wait(trState->cx->connectionFileChanged())) {
-								results->sendError(transaction_too_old());
+								results.sendError(transaction_too_old());
 								if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
 									tssDuplicateStream.get().stream.sendError(transaction_too_old());
 								}
@@ -3225,12 +3224,11 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 									output.readThroughEnd = true;
 								}
 								output.arena().dependsOn(keys.arena());
-								// for getRangeStreamFragment, one fragment end doesn't mean it's the end of getRange
-								// so set 'more' to true
+								// getRangeStream() uses end_of_stream to indicate exhaustion, so keep 'more' true.
 								output.more = true;
 								output.setReadThrough(reverse ? keys.begin : keys.end);
-								results->send(std::move(output));
-								results->finish();
+								results.send(std::move(output));
+								results.sendError(end_of_stream());
 								if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
 									tssDuplicateStream.get().stream.sendError(end_of_stream());
 								}
@@ -3242,10 +3240,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 							++shard;
 						}
 						output.arena().dependsOn(range.arena());
-						// if it's not the last shard, set more to true and readThrough to the shard boundary
+						// If it's not the last shard, set more to true and readThrough to the shard boundary.
 						output.more = true;
 						output.setReadThrough(reverse ? range.begin : range.end);
-						results->send(std::move(output));
+						results.send(std::move(output));
 						break;
 					}
 
@@ -3256,7 +3254,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					if (keys.end == allKeys.end && reverse) {
 						output.readThroughEnd = true;
 					}
-					results->send(std::move(output));
+					results.send(std::move(output));
 				}
 				if (breakAgain) {
 					break;
@@ -3283,7 +3281,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
 				} else {
-					results->sendError(e);
+					results.sendError(e);
 					return Void();
 				}
 			}
@@ -3294,13 +3292,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
                                                                 int64_t chunkSize);
-
-static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
-	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
-}
-
-// Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the results so
-// the client get them in order
+// Streams the requested key range directly from storage servers without fragment-level parallelism.
 ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
                                   PromiseStream<RangeResult> _results,
                                   KeySelector begin,
@@ -3309,8 +3301,6 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
                                   Promise<std::pair<Key, Key>> conflictRange,
                                   Snapshot snapshot,
                                   Reverse reverse) {
-	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
-
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
 	state Span span("NAPI:getRangeStream"_loc, trState->spanContext);
@@ -3332,52 +3322,11 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 	}
 
 	if (b >= e) {
-		wait(results.finish());
+		_results.sendError(end_of_stream());
 		return Void();
 	}
 
-	// if e is allKeys.end, we have read through the end of the database
-	// if b is allKeys.begin, we have either read through the beginning of the database,
-	// or allKeys.begin exists in the database and will be part of the conflict range anyways
-
-	state std::vector<Future<Void>> outstandingRequests;
-	while (b < e) {
-		state KeyRangeLocationInfo locationInfo =
-		    wait(getKeyLocation(trState, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, reverse));
-		state KeyRange shardIntersection = intersect(locationInfo.range, KeyRangeRef(b, e));
-		state Standalone<VectorRef<KeyRef>> splitPoints =
-		    wait(getRangeSplitPoints(trState, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
-		state std::vector<KeyRange> toSend;
-		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
-
-		if (!splitPoints.empty()) {
-			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, splitPoints.front()), splitPoints.arena()));
-			for (int i = 0; i < splitPoints.size() - 1; ++i) {
-				toSend.push_back(KeyRange(KeyRangeRef(splitPoints[i], splitPoints[i + 1]), splitPoints.arena()));
-			}
-			toSend.push_back(KeyRange(KeyRangeRef(splitPoints.back(), shardIntersection.end), splitPoints.arena()));
-		} else {
-			toSend.push_back(KeyRange(KeyRangeRef(shardIntersection.begin, shardIntersection.end)));
-		}
-
-		state int idx = 0;
-		state int useIdx = 0;
-		for (; idx < toSend.size(); ++idx) {
-			useIdx = reverse ? toSend.size() - idx - 1 : idx;
-			if (toSend[useIdx].empty()) {
-				continue;
-			}
-			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
-			outstandingRequests.push_back(
-			    getRangeStreamFragment(trState, fragment, toSend[useIdx], limits, snapshot, reverse, span.context));
-		}
-		if (reverse) {
-			e = shardIntersection.begin;
-		} else {
-			b = shardIntersection.end;
-		}
-	}
-	wait(waitForAll(outstandingRequests) && results.finish());
+	wait(getRangeStreamImpl(trState, _results, KeyRange(KeyRangeRef(b, e)), limits, snapshot, reverse, span.context));
 	return Void();
 }
 
