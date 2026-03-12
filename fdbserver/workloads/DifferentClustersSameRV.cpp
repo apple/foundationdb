@@ -172,10 +172,11 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		UID lockUid = deterministicRandom()->randomUniqueID();
 		co_await delay(self->switchAfter);
 		Future<Void> watchFuture;
-		co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) mutable -> Future<Void> {
-			watchFuture = tr->watch(self->keyToWatch);
-			return Void();
-		});
+		co_await runRYWTransaction(
+		    cx, [&watchFuture, self](Reference<ReadYourWritesTransaction> tr) mutable -> Future<Void> {
+			    watchFuture = tr->watch(self->keyToWatch);
+			    return Void();
+		    });
 		co_await (lockDatabase(self->originalDB, lockUid) && lockDatabase(self->extraDB, lockUid));
 		TraceEvent("DifferentClusters_LockedDatabases").log();
 		std::pair<Version, Optional<Value>> read1 = co_await doRead(self->originalDB, self->keyToRead);
