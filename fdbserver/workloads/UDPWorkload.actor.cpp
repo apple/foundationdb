@@ -1,5 +1,5 @@
 /*
- * UDPWorkload.cpp
+ * UDPWorkload.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,7 @@
 #include <functional>
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
-#include "flow/CoroUtils.h"
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace {
 
@@ -62,32 +62,30 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> _setup(UDPWorkload* self, Database cx) {
-		NetworkAddress localAddress(g_network->getLocalAddress().ip,
-		                            deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
-		                            true,
-		                            false);
-		Key key = self->keyPrefix.withSuffix(BinaryWriter::toValue(self->clientId, Unversioned()));
-		Value serializedLocalAddress = BinaryWriter::toValue(localAddress, IncludeVersion());
-		ReadYourWritesTransaction tr(cx);
-		Reference<IUDPSocket> s = co_await INetworkConnections::net()->createUDPSocket(localAddress.isV6());
+	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
+		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
+		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
+		                                  true,
+		                                  false);
+		state Key key = self->keyPrefix.withSuffix(BinaryWriter::toValue(self->clientId, Unversioned()));
+		state Value serializedLocalAddress = BinaryWriter::toValue(localAddress, IncludeVersion());
+		state ReadYourWritesTransaction tr(cx);
+		Reference<IUDPSocket> s = wait(INetworkConnections::net()->createUDPSocket(localAddress.isV6()));
 		self->serverSocket = std::move(s);
 		self->serverSocket->bind(localAddress);
 		self->serverAddress = localAddress;
-		while (true) {
-			Error err;
+		loop {
 			try {
-				Optional<Value> v = co_await tr.get(key);
+				Optional<Value> v = wait(tr.get(key));
 				if (v.present()) {
-					co_return;
+					return Void();
 				}
 				tr.set(key, serializedLocalAddress);
-				co_await tr.commit();
-				co_return;
+				wait(tr.commit());
+				return Void();
 			} catch (Error& e) {
-				err = e;
+				wait(tr.onError(e));
 			}
-			co_await tr.onError(err);
 		}
 	}
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
@@ -131,13 +129,12 @@ struct UDPWorkload : TestWorkload {
 	static Message ping() { return Message{ Message::Type::PING }; }
 	static Message pong() { return Message{ Message::Type::PONG }; }
 
-	static Future<Void> _receiver(UDPWorkload* self) {
-		Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
-		uint8_t* packet = mutateString(packetString);
-		NetworkAddress peerAddress;
-		while (true) {
-			int sz =
-			    co_await self->serverSocket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peerAddress);
+	ACTOR static Future<Void> _receiver(UDPWorkload* self) {
+		state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+		state uint8_t* packet = mutateString(packetString);
+		state NetworkAddress peerAddress;
+		loop {
+			int sz = wait(self->serverSocket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peerAddress));
 			auto msg = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
 			if (msg.type() == Message::Type::PONG) {
 				self->successes[peerAddress] += 1;
@@ -150,93 +147,83 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> serverSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
-		Standalone<StringRef> packetString;
-		NetworkAddress peer;
-		while (true) {
-			{
-				auto choice = co_await race(delay(0.1), self->toAck.getFuture());
-				if (choice.index() == 0) {
+	ACTOR static Future<Void> serverSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
+		state Standalone<StringRef> packetString;
+		state NetworkAddress peer;
+		loop {
+			choose {
+				when(wait(delay(0.1))) {
 					peer = deterministicRandom()->randomChoice(*remotes);
 					packetString = BinaryWriter::toValue(Message{ Message::Type::PING }, IncludeVersion());
 					self->sent[peer] += 1;
-				} else if (choice.index() == 1) {
-					NetworkAddress p = std::get<1>(std::move(choice));
+				}
+				when(NetworkAddress p = waitNext(self->toAck.getFuture())) {
 					peer = p;
 					packetString = BinaryWriter::toValue(pong(), IncludeVersion());
 					self->acked[peer] += 1;
-				} else {
-					UNREACHABLE();
 				}
 			}
-			int res = co_await self->serverSocket->sendTo(packetString.begin(), packetString.end(), peer);
+			int res = wait(self->serverSocket->sendTo(packetString.begin(), packetString.end(), peer));
 			ASSERT(res == packetString.size());
 		}
 	}
 
-	static Future<Void> clientReceiver(UDPWorkload* self, Reference<IUDPSocket> socket, Future<Void> done) {
-		Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
-		uint8_t* packet = mutateString(packetString);
-		NetworkAddress peer;
-		Future<Void> finished = Never();
-		while (true) {
-			{
-				auto choice = co_await race(
-				    socket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peer), done, finished);
-				if (choice.index() == 0) {
-					int sz = std::get<0>(std::move(choice));
+	ACTOR static Future<Void> clientReceiver(UDPWorkload* self, Reference<IUDPSocket> socket, Future<Void> done) {
+		state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+		state uint8_t* packet = mutateString(packetString);
+		state NetworkAddress peer;
+		state Future<Void> finished = Never();
+		loop {
+			choose {
+				when(int sz = wait(socket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peer))) {
 					auto res = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
 					ASSERT(res.type() == Message::Type::PONG);
 					self->successes[peer] += 1;
-				} else if (choice.index() == 1) {
+				}
+				when(wait(done)) {
 					finished = delay(1.0);
 					done = Never();
-				} else if (choice.index() == 2) {
-					co_return;
-				} else {
-					UNREACHABLE();
+				}
+				when(wait(finished)) {
+					return Void();
 				}
 			}
 		}
 	}
 
-	static Future<Void> clientSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
-		AsyncVar<Reference<IUDPSocket>> socket;
-		Standalone<StringRef> sendString;
-		ActorCollection actors(false);
-		NetworkAddress peer;
+	ACTOR static Future<Void> clientSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
+		state AsyncVar<Reference<IUDPSocket>> socket;
+		state Standalone<StringRef> sendString;
+		state ActorCollection actors(false);
+		state NetworkAddress peer;
 
-		while (true) {
-			{
-				auto choice = co_await race(delay(0.1), actors.getResult());
-				if (choice.index() == 0) {
-				} else if (choice.index() == 1) {
+		loop {
+			choose {
+				when(wait(delay(0.1))) {}
+				when(wait(actors.getResult())) {
 					UNSTOPPABLE_ASSERT(false);
-				} else {
-					UNREACHABLE();
 				}
 			}
 			if (!socket.get().isValid() || deterministicRandom()->random01() < 0.05) {
 				peer = deterministicRandom()->randomChoice(*remotes);
-				Reference<IUDPSocket> s = co_await INetworkConnections::net()->createUDPSocket(peer);
+				Reference<IUDPSocket> s = wait(INetworkConnections::net()->createUDPSocket(peer));
 				socket.set(s);
 				socket = s;
 				actors.add(clientReceiver(self, socket.get(), socket.onChange()));
 			}
 			sendString = BinaryWriter::toValue(ping(), IncludeVersion());
-			int res = co_await socket.get()->send(sendString.begin(), sendString.end());
+			int res = wait(socket.get()->send(sendString.begin(), sendString.end()));
 			ASSERT(res == sendString.size());
 			self->sent[peer] += 1;
 		}
 	}
 
-	static Future<Void> _start(UDPWorkload* self, Database cx) {
-		ReadYourWritesTransaction tr(cx);
-		std::vector<NetworkAddress> remotes;
-		while (true) {
-			Error err;
+	ACTOR static Future<Void> _start(UDPWorkload* self, Database cx) {
+		state ReadYourWritesTransaction tr(cx);
+		state std::vector<NetworkAddress> remotes;
+		loop {
 			try {
-				RangeResult range = co_await tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY);
+				RangeResult range = wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				for (auto const& p : range) {
 					auto cID = BinaryReader::fromStringRef<decltype(self->clientId)>(
@@ -247,12 +234,12 @@ struct UDPWorkload : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
-				err = e;
+				wait(tr.onError(e));
 			}
-			co_await tr.onError(err);
 		}
-		co_await (clientSender(self, &remotes) && serverSender(self, &remotes) && _receiver(self));
+		wait(clientSender(self, &remotes) && serverSender(self, &remotes) && _receiver(self));
 		UNSTOPPABLE_ASSERT(false);
+		return Void();
 	}
 	Future<Void> start(Database const& cx) override { return delay(runFor) || _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }

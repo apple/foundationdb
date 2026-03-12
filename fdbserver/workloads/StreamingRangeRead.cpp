@@ -108,17 +108,21 @@ struct StreamingRangeReadWorkload : KVWorkload {
 			PromiseStream<RangeResult> compareRaw;
 			PromiseStream<KeyValue> streamResults;
 			PromiseStream<KeyValue> compareResults;
+			Future<Void> compareConvert;
+			Future<Void> streamConvert;
+			Future<Void> compare;
+			Future<Void> stream;
 
 			Error err;
 			bool failed = false;
 			try {
-				Future<Void> compareConvert = convertStream(compareRaw, compareResults);
-				Future<Void> streamConvert = convertStream(streamRaw, streamResults);
-				Future<Void> compare = streamUsingGetRange(compareRaw, &tr, KeyRangeRef(next, normalKeys.end));
-				Future<Void> stream = tr.getRangeStream(streamRaw,
-				                                        KeySelector(firstGreaterOrEqual(next), next.arena()),
-				                                        KeySelector(firstGreaterOrEqual(normalKeys.end)),
-				                                        GetRangeLimits());
+				compareConvert = convertStream(compareRaw, compareResults);
+				streamConvert = convertStream(streamRaw, streamResults);
+				compare = streamUsingGetRange(compareRaw, &tr, KeyRangeRef(next, normalKeys.end));
+				stream = tr.getRangeStream(streamRaw,
+				                           KeySelector(firstGreaterOrEqual(next), next.arena()),
+				                           KeySelector(firstGreaterOrEqual(normalKeys.end)),
+				                           GetRangeLimits());
 				while (true) {
 					Optional<KeyValue> cmp;
 					Optional<KeyValue> res;
