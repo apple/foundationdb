@@ -20,6 +20,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {
@@ -54,10 +55,10 @@ struct PrivateEndpoints : TestWorkload {
 		}
 	}
 
-	ACTOR template <class T>
+	template <class T>
 	static Future<Void> assumeFailure(Future<T> f) {
 		try {
-			T t = wait(f);
+			T t = co_await f;
 			(void)t;
 			ASSERT(false);
 		} catch (Error& e) {
@@ -73,7 +74,7 @@ struct PrivateEndpoints : TestWorkload {
 				TraceEvent(SevError, "WrongErrorCode").error(e);
 			}
 		}
-		return Void();
+		co_return;
 	}
 
 	template <class I, class RT>
@@ -111,33 +112,34 @@ struct PrivateEndpoints : TestWorkload {
 		m.emplace_back("Successes", double(numSuccesses), Averaged::True);
 	}
 
-	ACTOR static Future<Void> _start(PrivateEndpoints* self, Database cx) {
-		state Reference<AsyncVar<ClientDBInfo>> clientInfo = cx->clientInfo;
-		state Future<Void> end;
+	static Future<Void> _start(PrivateEndpoints* self, Database cx) {
+		Reference<AsyncVar<ClientDBInfo>> clientInfo = cx->clientInfo;
 		TraceEvent("PrivateEndpointTestStartWait").detail("WaitTime", self->startAfter).log();
-		wait(delay(self->startAfter));
+		co_await delay(self->startAfter);
 		TraceEvent("PrivateEndpointTestStart").detail("RunFor", self->runFor).log();
-		end = delay(self->runFor);
+		Future<Void> end = delay(self->runFor);
 		try {
 			loop {
-				auto testFuture = deterministicRandom()->randomChoice(self->testFunctions)(cx->clientInfo);
-				choose {
-					when(wait(end)) {
+				auto testFuture = deterministicRandom()->randomChoice(self->testFunctions)(clientInfo);
+				{
+					auto choice = co_await race(end, testFuture);
+					if (choice.index() == 0) {
 						TraceEvent("PrivateEndpointTestDone").log();
-						return Void();
-					}
-					when(wait(testFuture)) {
+						co_return;
+					} else if (choice.index() == 1) {
 						++self->numSuccesses;
+					} else {
+						UNREACHABLE();
 					}
 				}
-				wait(delay(0.2));
+				co_await delay(0.2);
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "PrivateEndpointTestError").errorUnsuppressed(e);
 			ASSERT(false);
 		}
 		UNREACHABLE();
-		return Void();
+		co_return;
 	}
 };
 
