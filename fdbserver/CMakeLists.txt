@@ -21,6 +21,7 @@ function(configure_fdbserver_target_includes target_name)
 endfunction()
 
 add_subdirectory(core)
+add_subdirectory(grvproxy)
 add_subdirectory(ratekeeper)
 
 if(WITH_ROCKSDB)
@@ -144,7 +145,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_ratekeeper fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_grvproxy fdbserver_ratekeeper fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

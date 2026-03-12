@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/GrvTransactionRateInfo.h"
+#include "fdbserver/grvproxy/GrvTransactionRateInfo.h"
 
 #include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"

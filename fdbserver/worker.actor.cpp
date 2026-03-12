@@ -161,37 +161,6 @@ ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoReq
 	return notUpdated;
 }
 
-ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
-                                            Reference<AsyncVar<ClientDBInfo>> info) {
-	state std::vector<UID> lastCommitProxyUIDs;
-	state std::vector<CommitProxyInterface> lastCommitProxies;
-	state std::vector<UID> lastGrvProxyUIDs;
-	state std::vector<GrvProxyInterface> lastGrvProxies;
-	loop {
-		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
-		info->setUnconditional(ni);
-		wait(db->onChange());
-	}
-}
-
-Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
-                        TaskPriority taskID,
-                        LockAware lockAware,
-                        EnableLocalityLoadBalance enableLocalityLoadBalance) {
-	auto info = makeReference<AsyncVar<ClientDBInfo>>();
-	auto cx = DatabaseContext::create(info,
-	                                  extractClientInfo(db, info),
-	                                  enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
-	                                  enableLocalityLoadBalance,
-	                                  taskID,
-	                                  lockAware);
-	cx->globalConfig->init(db, std::addressof(db->get().client));
-	cx->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	cx->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
-	return cx;
-}
-
 struct ErrorInfo {
 	Error error;
 	const Role& role;
