@@ -2001,6 +2001,7 @@ TEST_CASE("/flow/coro/raceReady") {
 }
 
 TEST_CASE("/flow/coro/raceReadyFirstArgumentWinsTie") {
+	// When both inputs are already ready, race() breaks ties by argument order.
 	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("winner"));
 	ASSERT(raced.isReady());
 	auto result = raced.get();
