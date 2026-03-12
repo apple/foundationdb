@@ -2000,6 +2000,16 @@ TEST_CASE("/flow/coro/raceReady") {
 	return Void();
 }
 
+TEST_CASE("/flow/coro/raceReadyFirstArgumentWinsTie") {
+	// When both inputs are already ready, race() breaks ties by argument order.
+	Future<std::variant<int, std::string>> raced = race(Future<int>(7), Future<std::string>("winner"));
+	ASSERT(raced.isReady());
+	auto result = raced.get();
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 7);
+	return Void();
+}
+
 TEST_CASE("/flow/coro/raceSuccess") {
 	Promise<int> intPromise;
 	Promise<std::string> stringPromise;
@@ -2008,6 +2018,17 @@ TEST_CASE("/flow/coro/raceSuccess") {
 	auto result = co_await raced;
 	ASSERT_EQ(result.index(), 1);
 	ASSERT_EQ(std::get<1>(result), "winner");
+	co_return;
+}
+
+TEST_CASE("/flow/coro/raceSuccessFirstArgument") {
+	Promise<int> intPromise;
+	Promise<std::string> stringPromise;
+	Future<std::variant<int, std::string>> raced = race(intPromise.getFuture(), stringPromise.getFuture());
+	intPromise.send(42);
+	auto result = co_await raced;
+	ASSERT_EQ(result.index(), 0);
+	ASSERT_EQ(std::get<0>(result), 42);
 	co_return;
 }
 
