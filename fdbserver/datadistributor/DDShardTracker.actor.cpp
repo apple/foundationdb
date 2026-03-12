@@ -25,6 +25,7 @@
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/core/ShardSizing.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
@@ -80,65 +81,6 @@ void restartShardTrackers(DataDistributionTracker* self,
 
 // Gets the permitted size and IO bounds for a shard. A shard that starts at allKeys.begin
 //  (i.e. '') will have a permitted size of 0, since the database can contain no data.
-ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
-	ShardSizeBounds bounds;
-
-	if (shard.begin >= keyServersKeys.begin) {
-		bounds.max.bytes = SERVER_KNOBS->KEY_SERVER_SHARD_BYTES;
-	} else {
-		bounds.max.bytes = maxShardSize;
-	}
-
-	bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
-	bounds.max.iosPerKSecond = bounds.max.infinity;
-	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
-	bounds.max.opsReadPerKSecond = bounds.max.infinity;
-
-	// The first shard can have arbitrarily small size
-	if (shard.begin == allKeys.begin) {
-		bounds.min.bytes = 0;
-	} else {
-		bounds.min.bytes = maxShardSize / SERVER_KNOBS->SHARD_BYTES_RATIO;
-	}
-
-	bounds.min.bytesWrittenPerKSecond = 0;
-	bounds.min.iosPerKSecond = 0;
-	bounds.min.bytesReadPerKSecond = 0;
-	bounds.min.opsReadPerKSecond = 0;
-
-	// The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last
-	// shard)
-	bounds.permittedError.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO / 3;
-	bounds.permittedError.bytesWrittenPerKSecond = bounds.permittedError.infinity;
-	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
-	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
-	bounds.permittedError.opsReadPerKSecond = bounds.permittedError.infinity;
-
-	return bounds;
-}
-
-int64_t getMaxShardSize(double dbSizeEstimate) {
-	int64_t size = std::min((SERVER_KNOBS->MIN_SHARD_BYTES + (int64_t)std::sqrt(std::max<double>(dbSizeEstimate, 0)) *
-	                                                             SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
-	                            SERVER_KNOBS->SHARD_BYTES_RATIO,
-	                        (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
-	if (SERVER_KNOBS->ALLOW_LARGE_SHARD) {
-		size = std::max(size, static_cast<int64_t>(SERVER_KNOBS->MAX_LARGE_SHARD_BYTES));
-	}
-
-	TraceEvent("MaxShardSize")
-	    .suppressFor(60.0)
-	    .detail("Bytes", size)
-	    .detail("EstimatedDbSize", dbSizeEstimate)
-	    .detail("SqrtBytes", SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES)
-	    .detail("AllowLargeShard", SERVER_KNOBS->ALLOW_LARGE_SHARD);
-	return size;
-}
-
-bool ddLargeTeamEnabled() {
-	return SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
-}
-
 // Returns the shard size bounds as well as whether `keys` a read hot shard.
 std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
     const KeyRange& keys,

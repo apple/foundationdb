@@ -20,7 +20,7 @@
 
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/tlog/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // has to be last include
 

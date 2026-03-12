@@ -75,24 +75,6 @@ Optional<KeyRange> RelocateShard::getParentRange() const {
 	return parent_range;
 }
 
-ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
-	return ShardSizeBounds{ .max = StorageMetrics{ .bytes = -1,
-		                                           .bytesWrittenPerKSecond = StorageMetrics::infinity,
-		                                           .iosPerKSecond = StorageMetrics::infinity,
-		                                           .bytesReadPerKSecond = StorageMetrics::infinity,
-		                                           .opsReadPerKSecond = StorageMetrics::infinity },
-		                    .min = StorageMetrics{ .bytes = -1,
-		                                           .bytesWrittenPerKSecond = 0,
-		                                           .iosPerKSecond = 0,
-		                                           .bytesReadPerKSecond = 0,
-		                                           .opsReadPerKSecond = 0 },
-		                    .permittedError = StorageMetrics{ .bytes = -1,
-		                                                      .bytesWrittenPerKSecond = StorageMetrics::infinity,
-		                                                      .iosPerKSecond = StorageMetrics::infinity,
-		                                                      .bytesReadPerKSecond = StorageMetrics::infinity,
-		                                                      .opsReadPerKSecond = StorageMetrics::infinity } };
-}
-
 namespace {
 
 std::set<int> const& normalDDQueueErrors() {

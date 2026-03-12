@@ -9,4 +9,4 @@ target_include_directories(fdbserver_sequencer
     ${CMAKE_BINARY_DIR}/fdbserver/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include)
-target_link_libraries(fdbserver_sequencer PRIVATE fdbclient fdbserver_coordinator fdbserver_core)
+target_link_libraries(fdbserver_sequencer PRIVATE fdbclient fdbserver_core)

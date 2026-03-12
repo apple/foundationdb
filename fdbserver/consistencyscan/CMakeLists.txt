@@ -9,4 +9,4 @@ target_include_directories(fdbserver_consistencyscan
     ${CMAKE_BINARY_DIR}/fdbserver/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include)
-target_link_libraries(fdbserver_consistencyscan PRIVATE fdbclient fdbserver_core fdbserver_datadistributor)
+target_link_libraries(fdbserver_consistencyscan PRIVATE fdbclient fdbserver_core)

@@ -20,7 +20,7 @@
 
 #include <cstdint>
 
-#include "fdbserver/coordinator/CoordinationInterface.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
@@ -76,40 +76,6 @@ struct GenerationRegVal {
 		serializer(ar, readGen, writeGen, val);
 	}
 };
-
-GenerationRegInterface::GenerationRegInterface(NetworkAddress const& remote)
-  : read(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_READ)),
-    write(Endpoint::wellKnown({ remote }, WLTOKEN_GENERATIONREG_WRITE)) {}
-
-GenerationRegInterface::GenerationRegInterface(INetwork* local) {
-	read.makeWellKnownEndpoint(WLTOKEN_GENERATIONREG_READ, TaskPriority::Coordination);
-	write.makeWellKnownEndpoint(WLTOKEN_GENERATIONREG_WRITE, TaskPriority::Coordination);
-}
-
-LeaderElectionRegInterface::LeaderElectionRegInterface(NetworkAddress const& remote)
-  : ClientLeaderRegInterface(remote), candidacy(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_CANDIDACY)),
-    electionResult(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT)),
-    leaderHeartbeat(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT)),
-    forward(Endpoint::wellKnown({ remote }, WLTOKEN_LEADERELECTIONREG_FORWARD)) {}
-
-LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : ClientLeaderRegInterface(local) {
-	candidacy.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_CANDIDACY, TaskPriority::Coordination);
-	electionResult.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_ELECTIONRESULT, TaskPriority::Coordination);
-	leaderHeartbeat.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_LEADERHEARTBEAT, TaskPriority::Coordination);
-	forward.makeWellKnownEndpoint(WLTOKEN_LEADERELECTIONREG_FORWARD, TaskPriority::Coordination);
-}
-
-ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
-	ClusterConnectionString cs = ccr->getConnectionString();
-	for (auto h : cs.hostnames) {
-		leaderElectionServers.emplace_back(h);
-		stateServers.emplace_back(h);
-	}
-	for (auto s : cs.coords) {
-		leaderElectionServers.emplace_back(s);
-		stateServers.emplace_back(s);
-	}
-}
 
 ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandStore* pstore) {
 	state GenerationRegVal v;

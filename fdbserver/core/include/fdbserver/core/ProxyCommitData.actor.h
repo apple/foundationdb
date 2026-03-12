@@ -19,11 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H)
-#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_G_H
-#include "fdbserver/commitproxy/ProxyCommitData.actor.g.h"
-#elif !defined(FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H)
-#define FDBSERVER_COMMITPROXY_PROXYCOMMITDATA_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_G_H)
+#define FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_G_H
+#include "fdbserver/core/ProxyCommitData.actor.g.h"
+#elif !defined(FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_H)
+#define FDBSERVER_CORE_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RangeLock.h"
@@ -31,7 +31,7 @@
 #include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/tlog/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"

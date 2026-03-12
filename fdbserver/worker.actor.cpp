@@ -58,7 +58,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/coordinator/CoordinationInterface.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"

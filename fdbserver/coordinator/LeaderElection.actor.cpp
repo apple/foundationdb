@@ -20,7 +20,7 @@
 
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
-#include "fdbserver/coordinator/CoordinationInterface.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

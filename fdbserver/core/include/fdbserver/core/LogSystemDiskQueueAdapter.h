@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IDiskQueue.h"
+#include "fdbserver/core/LogSystem.h"
 
 struct PeekTxsInfo {
 	int8_t primaryLocality;

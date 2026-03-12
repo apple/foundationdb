@@ -29,6 +29,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/TCInfo.h"
 #include "fdbserver/core/DataMovement.h"
+#include "fdbserver/core/ShardSizing.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
@@ -507,27 +508,6 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::vector<AuditStorageState> auditStates;
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
-
-// Holds the permitted size and IO Bounds for a shard
-struct ShardSizeBounds {
-	StorageMetrics max;
-	StorageMetrics min;
-	StorageMetrics permittedError;
-
-	bool operator==(ShardSizeBounds const& rhs) const {
-		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
-	}
-
-	static ShardSizeBounds shardSizeBoundsBeforeTrack();
-};
-
-// Gets the permitted size and IO bounds for a shard
-ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
-
-// Determines the maximum shard size based on the size of the database
-int64_t getMaxShardSize(double dbSizeEstimate);
-
-bool ddLargeTeamEnabled();
 
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;

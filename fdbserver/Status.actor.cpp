@@ -34,7 +34,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
 #include "fdbserver/ClusterRecovery.actor.h"
-#include "fdbserver/coordinator/CoordinationInterface.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"

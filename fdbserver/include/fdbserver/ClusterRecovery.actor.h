@@ -34,14 +34,14 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/coordinator/CoordinatedState.h"
-#include "fdbserver/coordinator/CoordinationInterface.h" // copy constructors for ServerCoordinators class
+#include "fdbserver/core/CoordinatedState.h"
+#include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/ClusterController.actor.h"
 #include "fdbserver/DBCoreState.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/LogSystemConfig.h"
-#include "fdbserver/tlog/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"

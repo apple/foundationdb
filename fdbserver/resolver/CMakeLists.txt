@@ -7,4 +7,4 @@ target_include_directories(fdbserver_resolver
   PUBLIC
     ${CMAKE_SOURCE_DIR}/fdbserver/include
     ${CMAKE_BINARY_DIR}/fdbserver/include)
-target_link_libraries(fdbserver_resolver PRIVATE fdbclient fdbserver_commitproxy fdbserver_core fdbserver_tlog)
+target_link_libraries(fdbserver_resolver PRIVATE fdbclient fdbserver_core)
