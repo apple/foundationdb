@@ -141,8 +141,7 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
 			    .detail("SSVersion", ssVersion)
 			    .detail("MutationVersion", mutationVersion);
 			throw please_reboot();
-		}
-		if (mutationBuffer[0].second.accumulativeChecksumIndex.get() != acsIndex) {
+		} else if (mutationBuffer[0].second.accumulativeChecksumIndex.get() != acsIndex) {
 			TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
 			    .detail("Reason", "Mutation ACSIndex changed when AddMutation")
 			    .detail("AcsTag", tag)
@@ -210,8 +209,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		    .detail("Epoch", acsMutationState.epoch)
 		    .detail("ExistInTable", existInTable);
 		throw please_reboot();
-	}
-	if (newVersion != mutationBuffer.back().first) {
+	} else if (newVersion != mutationBuffer.back().first) {
 		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
 		    .detail(
 		        "Reason",

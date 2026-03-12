@@ -77,7 +77,7 @@ inline PKeyAlgorithm getPKeyAlgorithm(const EVP_PKEY* key) noexcept {
 	auto id = ::EVP_PKEY_base_id(key);
 	if (id == EVP_PKEY_RSA)
 		return PKeyAlgorithm::RSA;
-	if (id == EVP_PKEY_EC)
+	else if (id == EVP_PKEY_EC)
 		return PKeyAlgorithm::EC;
 	else
 		return PKeyAlgorithm::UNSUPPORTED;

@@ -397,8 +397,7 @@ static int64_t safe_stoi64(std::string const& str) {
 static bool safe_stob(std::string const& str) {
 	if (toLower(str) == "true") {
 		return true;
-	}
-	if (toLower(str) == "false") {
+	} else if (toLower(str) == "false") {
 		return false;
 	} else {
 		return safe_stoi(str) != 0;
@@ -412,8 +411,7 @@ ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const
 	try {
 		if (double_knobs.contains(knob)) {
 			return safe_stod(value);
-		}
-		if (bool_knobs.count(knob)) {
+		} else if (bool_knobs.count(knob)) {
 			return safe_stob(value);
 		} else if (int64_knobs.count(knob)) {
 			return safe_stoi64(value);

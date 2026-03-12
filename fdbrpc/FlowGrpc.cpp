@@ -95,8 +95,9 @@ Future<Void> GrpcServer::runInternal() {
 			// gRPC can't run a server without registered service.
 			if (!registered_services_.empty()) {
 				break;
+			} else {
+				next = on_services_changed_.onTrigger();
 			}
-			next = on_services_changed_.onTrigger();
 		}
 
 		co_await stopServer();

@@ -608,8 +608,7 @@ int main(int argc, char** argv) {
 							reload = true;
 							reload_additional_watches = true;
 							break;
-						}
-						if (event->wd == confdir_wd && event->len && conffile == event->name) {
+						} else if (event->wd == confdir_wd && event->len && conffile == event->name) {
 							reload = true;
 						}
 					}

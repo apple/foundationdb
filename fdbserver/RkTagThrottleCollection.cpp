@@ -25,8 +25,9 @@
 double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) const {
 	if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 		return limits.tpsRate;
+	} else {
+		return std::min(limits.tpsRate, (limits.tpsRate / requestRate.get()) * clientRate.smoothTotal());
 	}
-	return std::min(limits.tpsRate, (limits.tpsRate / requestRate.get()) * clientRate.smoothTotal());
 }
 
 Optional<double> RkTagThrottleCollection::RkTagThrottleData::updateAndGetClientRate(Optional<double> requestRate) {
@@ -46,10 +47,11 @@ Optional<double> RkTagThrottleCollection::RkTagThrottleData::updateAndGetClientR
 		double rate = clientRate.smoothTotal();
 		ASSERT_GE(rate, 0);
 		return rate;
+	} else {
+		CODE_PROBE(true, "Get throttle rate for expired throttle");
+		rateSet = false;
+		return Optional<double>();
 	}
-	CODE_PROBE(true, "Get throttle rate for expired throttle");
-	rateSet = false;
-	return Optional<double>();
 }
 
 RkTagThrottleCollection::RkTagThrottleCollection(RkTagThrottleCollection&& other) {
@@ -73,8 +75,9 @@ double RkTagThrottleCollection::computeTargetTpsRate(double currentBusyness,
 	if (targetBusyness < 1) {
 		double targetFraction = targetBusyness * (1 - currentBusyness) / ((1 - targetBusyness) * currentBusyness);
 		return requestRate * targetFraction;
+	} else {
+		return std::numeric_limits<double>::max();
 	}
-	return std::numeric_limits<double>::max();
 }
 
 Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
@@ -151,8 +154,9 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 
 	if (tpsRate.get() != std::numeric_limits<double>::max()) {
 		return tpsRate.get();
+	} else {
+		return Optional<double>();
 	}
-	return Optional<double>();
 }
 
 void RkTagThrottleCollection::manualThrottleTag(UID id,

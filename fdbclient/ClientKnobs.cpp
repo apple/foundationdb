@@ -27,8 +27,9 @@
 int getSimulatedTxnTimeoutSeconds() {
 	if (deterministicRandom()->truePercent(90)) {
 		return 5;
+	} else {
+		return deterministicRandom()->randomInt(1, 11); // [1, 10]
 	}
-	return deterministicRandom()->randomInt(1, 11); // [1, 10]
 }
 
 #define init(knob, value) INIT_KNOB(knob, value)

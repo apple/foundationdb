@@ -731,7 +731,8 @@ static int grp_dec(eio_req* grp) {
 	/* finish, if done */
 	if (!grp->size && grp->int1)
 		return eio_finish(grp);
-	return 0;
+	else
+		return 0;
 }
 
 static void eio_destroy(eio_req* req) {
@@ -1061,13 +1062,15 @@ static eio_ssize_t eio__sendfile(int ofd, int ifd, off_t offset, size_t count) {
 				return written;
 
 			break;
-		} /* if we requested more, then probably the kernel was lazy */
-		written += res;
-		offset += res;
-		count -= res;
+		} else {
+			/* if we requested more, then probably the kernel was lazy */
+			written += res;
+			offset += res;
+			count -= res;
 
-		if (!count)
-			return written;
+			if (!count)
+				return written;
+		}
 	}
 
 	if (res < 0 && (errno == ENOSYS || errno == EINVAL || errno == ENOTSOCK

@@ -173,8 +173,7 @@ private:
 	void checkSetRangeLockPrefix(const MutationRef& m) {
 		if (!m.param1.startsWith(rangeLockPrefix)) {
 			return;
-		}
-		if (rangeLock == nullptr) {
+		} else if (rangeLock == nullptr) {
 			TraceEvent(SevWarnAlways, "MutationHasRangeLockPrefixButFeatureIsOff")
 			    .detail("Mutation", m.toString())
 			    .detail("FeatureFlag", SERVER_KNOBS->ENABLE_READ_LOCK_ON_RANGE);
@@ -685,8 +684,7 @@ private:
 	void checkClearRangeLockPrefix(KeyRangeRef range) {
 		if (rangeLock == nullptr) {
 			return;
-		}
-		if (!rangeLockKeys.intersects(range)) {
+		} else if (!rangeLockKeys.intersects(range)) {
 			return;
 		}
 		ASSERT(!initialCommit);

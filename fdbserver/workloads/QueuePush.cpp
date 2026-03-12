@@ -86,8 +86,9 @@ struct QueuePushWorkload : TestWorkload {
 		if (sscanf(value.substr(0, 8).toString().c_str(), "%x", &base) &&
 		    sscanf(value.substr(8, 8).toString().c_str(), "%x", &offset)) {
 			return std::make_pair(base, offset);
-		} // SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
-		throw client_invalid_operation();
+		} else
+			// SOMEDAY: what should this really be?  Should we rely on exceptions for control flow here?
+			throw client_invalid_operation();
 	}
 
 	Future<Void> start(Database const& cx) override {

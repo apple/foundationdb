@@ -91,8 +91,7 @@ std::string generateEmptyManifestFileName() {
 std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase) {
 	if (phase == BulkLoadJobPhase::Invalid) {
 		return "Invalid";
-	}
-	if (phase == BulkLoadJobPhase::Submitted) {
+	} else if (phase == BulkLoadJobPhase::Submitted) {
 		return "Submitted";
 	} else if (phase == BulkLoadJobPhase::Complete) {
 		return "Complete";
@@ -188,8 +187,7 @@ std::string getBackupDataPath(const std::string& url, const std::string& suffix)
 std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod method) {
 	if (method == BulkLoadTransportMethod::Invalid) {
 		return "Invalid";
-	}
-	if (method == BulkLoadTransportMethod::CP) {
+	} else if (method == BulkLoadTransportMethod::CP) {
 		return "LocalFileCopy";
 	} else if (method == BulkLoadTransportMethod::BLOBSTORE) {
 		return "BlobStore";

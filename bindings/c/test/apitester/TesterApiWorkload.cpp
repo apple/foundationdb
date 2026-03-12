@@ -50,8 +50,9 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 IWorkloadControlIfc* ApiWorkload::getControlIfc() {
 	if (runUntilStop) {
 		return this;
+	} else {
+		return nullptr;
 	}
-	return nullptr;
 }
 
 void ApiWorkload::stop() {
@@ -149,8 +150,9 @@ fdb::Key ApiWorkload::randomExistingKey(std::optional<int> tenantId) {
 fdb::Key ApiWorkload::randomKey(double existingKeyRatio, std::optional<int> tenantId) {
 	if (Random::get().randomBool(existingKeyRatio)) {
 		return randomExistingKey(tenantId);
+	} else {
+		return randomNotExistingKey(tenantId);
 	}
-	return randomNotExistingKey(tenantId);
 }
 
 fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
@@ -171,8 +173,9 @@ fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
 std::optional<int> ApiWorkload::randomTenant() {
 	if (!tenants.empty()) {
 		return Random::get().randomInt(0, tenants.size() - 1);
+	} else {
+		return {};
 	}
-	return {};
 }
 
 void ApiWorkload::populateDataTx(TTaskFct cont, std::optional<int> tenantId) {
@@ -328,8 +331,9 @@ void ApiWorkload::randomClearRangeOp(TTaskFct cont, std::optional<int> tenantId)
 std::optional<fdb::BytesRef> ApiWorkload::getTenant(std::optional<int> tenantId) {
 	if (tenantId) {
 		return tenants[*tenantId];
+	} else {
+		return {};
 	}
-	return {};
 }
 
 std::string ApiWorkload::debugTenantStr(std::optional<int> tenantId) {

@@ -774,11 +774,12 @@ Optional<ValueRef> DatabaseConfiguration::get(KeyRef key) const {
 		if (i == mutableConfiguration.get().end())
 			return Optional<ValueRef>();
 		return ValueRef(i->second);
+	} else {
+		auto i = lower_bound(rawConfiguration, key);
+		if (i == rawConfiguration.end() || i->key != key)
+			return Optional<ValueRef>();
+		return i->value;
 	}
-	auto i = lower_bound(rawConfiguration, key);
-	if (i == rawConfiguration.end() || i->key != key)
-		return Optional<ValueRef>();
-	return i->value;
 }
 
 bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a, const LocalityData& locality) const {

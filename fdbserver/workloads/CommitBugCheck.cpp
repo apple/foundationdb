@@ -151,11 +151,12 @@ struct CommitBugWorkload : TestWorkload {
 					}
 
 					break;
-				}
-				CODE_PROBE(true, "Commit conflict");
+				} else {
+					CODE_PROBE(true, "Commit conflict");
 
-				TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
-				co_await tr.onError(e);
+					TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i + 1);
+					co_await tr.onError(e);
+				}
 			}
 		}
 	}

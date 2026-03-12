@@ -372,9 +372,10 @@ public:
 				level--;
 				finger[level] = x;
 				return true;
+			} else {
+				x = next;
+				return false;
 			}
-			x = next;
-			return false;
 		}
 
 		// pre: !finished()
@@ -391,7 +392,8 @@ public:
 			Node* n = finger[0]->getNext(0); // or alreadyChecked, but that is more easily invalidated
 			if (n && n->length() == value.size() && !memcmp(n->value(), value.begin(), value.size()))
 				return n;
-			return nullptr;
+			else
+				return nullptr;
 		}
 
 		StringRef getValue() const {
@@ -747,7 +749,8 @@ private:
 						if (nextS->length() == start.value.size() &&
 						    !memcmp(nextS->value(), start.value.begin(), start.value.size()))
 							return noConflict();
-						return conflict();
+						else
+							return conflict();
 					}
 					start.nextLevel();
 				}

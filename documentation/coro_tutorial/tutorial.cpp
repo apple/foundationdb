@@ -665,8 +665,7 @@ int main(int argc, char* argv[]) {
 			}
 			port = std::string(argv[++i]);
 			continue;
-		}
-		if (arg == "-s") {
+		} else if (arg == "-s") {
 			if (i + 1 >= argc) {
 				std::cout << "Expecting an argument after -s\n";
 				return 1;

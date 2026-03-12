@@ -688,8 +688,7 @@ bool traceFormatImpl(std::string& format) {
 			g_traceLog.formatter = Reference<ITraceLogFormatter>(new XmlTraceLogFormatter());
 		}
 		return true;
-	}
-	if (format == "json") {
+	} else if (format == "json") {
 		if (!validate) {
 			g_traceLog.formatter = Reference<ITraceLogFormatter>(new JsonTraceLogFormatter());
 		}
@@ -710,8 +709,7 @@ bool traceClockSource(std::string& source) {
 			g_trace_clock.store(TRACE_CLOCK_NOW);
 		}
 		return true;
-	}
-	if (source == "realtime") {
+	} else if (source == "realtime") {
 		if (!validate) {
 			g_trace_clock.store(TRACE_CLOCK_REALTIME);
 		}
@@ -1433,9 +1431,9 @@ double BaseTraceEvent::getCurrentTime() {
 	if (g_trace_clock.load() == TRACE_CLOCK_NOW) {
 		if (!isNetworkThread() || !g_network) {
 			return timer_monotonic();
+		} else {
+			return now();
 		}
-		return now();
-
 	} else {
 		return timer();
 	}
@@ -1649,15 +1647,16 @@ std::string TraceEventFields::getValue(std::string key) const {
 	std::string value;
 	if (tryGetValue(key, value)) {
 		return value;
-	}
-	TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
-	ev.suppressFor(1.0);
-	if (tryGetValue("Type", value)) {
-		ev.detail("Event", value);
-	}
-	ev.detail("FieldName", key);
+	} else {
+		TraceEvent ev(SevWarn, "TraceEventFieldNotFound");
+		ev.suppressFor(1.0);
+		if (tryGetValue("Type", value)) {
+			ev.detail("Event", value);
+		}
+		ev.detail("FieldName", key);
 
-	throw attribute_not_found_error(key);
+		throw attribute_not_found_error(key);
+	}
 }
 
 TraceEventFields::Field& TraceEventFields::mutate(int index) {
@@ -1685,8 +1684,9 @@ void parseNumericValue(std::string const& s, int& outValue, bool permissive = fa
 		if (std::numeric_limits<int>::min() <= iLong && iLong <= std::numeric_limits<int>::max()) {
 			outValue = (int)iLong; // Downcast definitely safe
 			return;
+		} else {
+			throw attribute_too_large();
 		}
-		throw attribute_too_large();
 	}
 
 	throw attribute_not_found();
@@ -1736,8 +1736,9 @@ bool getNumericValue(TraceEventFields const& fields, std::string key, T& outValu
 			ev.detail("FieldValue", field);
 
 			throw;
+		} else {
+			return false;
 		}
-		return false;
 	}
 }
 } // namespace

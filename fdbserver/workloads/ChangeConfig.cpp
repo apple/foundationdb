@@ -216,11 +216,11 @@ struct ChangeConfigWorkload : TestWorkload {
 				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 				ASSERT(valueObj["command"].get_str() == "coordinators");
 				break;
+			} else {
+				if (err.isValid()) {
+					co_await tr.onError(err);
+				}
 			}
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
-
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
 		}
 	}

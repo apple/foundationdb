@@ -118,8 +118,7 @@ int cleanupNormalKeyspace(Database db, Arguments const& args) {
 		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
 		if (rc == FutureRC::OK) {
 			break;
-		}
-		if (rc == FutureRC::RETRY) {
+		} else if (rc == FutureRC::RETRY) {
 			// tx already reset
 			continue;
 		} else {
@@ -1029,26 +1028,27 @@ int parseTransaction(Arguments& args, char const* optarg) {
 			if (*ptr != ':') {
 				error = 1;
 				break;
-			}
-			ptr++; /* skip ':' */
-			/* check negative '-' sign */
-			if (*ptr == '-') {
-				args.txnspec.ops[op][OP_REVERSE] = 1;
-				ptr++;
 			} else {
-				args.txnspec.ops[op][OP_REVERSE] = 0;
+				ptr++; /* skip ':' */
+				/* check negative '-' sign */
+				if (*ptr == '-') {
+					args.txnspec.ops[op][OP_REVERSE] = 1;
+					ptr++;
+				} else {
+					args.txnspec.ops[op][OP_REVERSE] = 0;
+				}
+				num = 0;
+				if ((*ptr < '0') || (*ptr > '9')) {
+					error = 1;
+					break;
+				}
+				while ((*ptr >= '0') && (*ptr <= '9')) {
+					num = num * 10 + *ptr - '0';
+					ptr++;
+				}
+				/* set range */
+				args.txnspec.ops[op][OP_RANGE] = num;
 			}
-			num = 0;
-			if ((*ptr < '0') || (*ptr > '9')) {
-				error = 1;
-				break;
-			}
-			while ((*ptr >= '0') && (*ptr <= '9')) {
-				num = num * 10 + *ptr - '0';
-				ptr++;
-			}
-			/* set range */
-			args.txnspec.ops[op][OP_RANGE] = num;
 		}
 		rangeop = 0;
 	}
@@ -1544,8 +1544,7 @@ int Arguments::validate() {
 			if (async_xacts > 0 && async_xacts * num_processes > iteration) {
 				logr.error("--async_xacts * --num_processes must be <= --iteration");
 				return -1;
-			}
-			if (async_xacts == 0 && num_threads * num_processes > iteration) {
+			} else if (async_xacts == 0 && num_threads * num_processes > iteration) {
 				logr.error("--num_threads * --num_processes must be <= --iteration");
 				return -1;
 			}
@@ -1566,8 +1565,7 @@ int Arguments::validate() {
 			if (async_xacts > 0) {
 				logr.error("--tpsmax|--tps must be 0 or unspecified because throttling is not supported in async mode");
 				return -1;
-			}
-			if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
+			} else if (async_xacts == 0 && num_threads * num_processes > tpsmax) {
 				logr.error("--num_threads * --num_processes must be <= --tpsmax|--tps");
 				return -1;
 			}

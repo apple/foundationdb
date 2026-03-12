@@ -119,8 +119,9 @@ std::string toml_to_string(const T& value) {
 	if (value.type() == toml::value_t::string) {
 		const std::string& formatted = toml::format(value);
 		return formatted.substr(1, formatted.size() - 2);
+	} else {
+		return toml::format(value);
 	}
-	return toml::format(value);
 }
 
 } // namespace
@@ -138,8 +139,7 @@ TestSpec readTomlTestSpec(std::string fileName) {
 	const toml::array& tests = toml::find(conf, "test").as_array();
 	if (tests.empty()) {
 		throw TesterError("Invalid test file. No [test] section found");
-	}
-	if (tests.size() > 1) {
+	} else if (tests.size() > 1) {
 		throw TesterError("Invalid test file. More than one [test] section found");
 	}
 

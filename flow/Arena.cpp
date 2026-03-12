@@ -236,17 +236,20 @@ bool ArenaBlock::isTiny() const {
 int ArenaBlock::size() const {
 	if (isTiny())
 		return tinySize;
-	return bigSize;
+	else
+		return bigSize;
 }
 int ArenaBlock::used() const {
 	if (isTiny())
 		return tinyUsed;
-	return bigUsed;
+	else
+		return bigUsed;
 }
 int ArenaBlock::unused() const {
 	if (isTiny())
 		return tinySize - tinyUsed;
-	return bigSize - bigUsed;
+	else
+		return bigSize - bigUsed;
 }
 const void* ArenaBlock::getData() const {
 	return this;
@@ -330,10 +333,11 @@ int ArenaBlock::addUsed(int bytes) {
 		int t = tinyUsed;
 		tinyUsed += bytes;
 		return t;
+	} else {
+		int t = bigUsed;
+		bigUsed += bytes;
+		return t;
 	}
-	int t = bigUsed;
-	bigUsed += bytes;
-	return t;
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
@@ -376,8 +380,9 @@ void ArenaBlock::dependOn(Reference<ArenaBlock>& self, ArenaBlock* other) {
 void* ArenaBlock::dependOn4kAlignedBuffer(Reference<ArenaBlock>& self, uint32_t size) {
 	if (!self || self->isTiny() || self->unused() < sizeof(ArenaBlockRef)) {
 		return create(SMALL, self)->make4kAlignedBuffer(size);
+	} else {
+		return self->make4kAlignedBuffer(size);
 	}
-	return self->make4kAlignedBuffer(size);
 }
 
 void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem isSecure) {

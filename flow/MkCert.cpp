@@ -317,17 +317,18 @@ CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, Optional<
 			caNative = cnkNative;
 		}
 		return CertChainRef(chain, chainLength);
+	} else {
+		int const chainLength = specs.size() + 1; /* account for deep-copied rootAuthority */
+		auto chain = new (arena) CertAndKeyRef[chainLength];
+		auto caNative = CertAndKeyNative::fromPem(rootAuthority.get());
+		chain[chainLength - 1] = rootAuthority.get().deepCopy(arena);
+		for (auto i = chainLength - 2; i >= 0; i--) {
+			auto cnkNative = makeCertNative(specs[i], caNative);
+			chain[i] = cnkNative.toPem(arena);
+			caNative = cnkNative;
+		}
+		return CertChainRef(chain, chainLength);
 	}
-	int const chainLength = specs.size() + 1; /* account for deep-copied rootAuthority */
-	auto chain = new (arena) CertAndKeyRef[chainLength];
-	auto caNative = CertAndKeyNative::fromPem(rootAuthority.get());
-	chain[chainLength - 1] = rootAuthority.get().deepCopy(arena);
-	for (auto i = chainLength - 2; i >= 0; i--) {
-		auto cnkNative = makeCertNative(specs[i], caNative);
-		chain[i] = cnkNative.toPem(arena);
-		caNative = cnkNative;
-	}
-	return CertChainRef(chain, chainLength);
 }
 
 VectorRef<CertSpecRef> makeCertChainSpec(Arena& arena, unsigned length, ESide side) {
@@ -362,8 +363,7 @@ StringRef CertKind::getCommonName(StringRef prefix, Arena& arena) const {
 	if (isIntermediateCA()) {
 		auto const level = isClientSide() ? get<ClientIntermediateCA>().level : get<ServerIntermediateCA>().level;
 		return prefix.withSuffix(fmt::format("{} Intermediate {}", side, level), arena);
-	}
-	if (isRootCA()) {
+	} else if (isRootCA()) {
 		return prefix.withSuffix(fmt::format("{} Root", side), arena);
 	} else {
 		return prefix.withSuffix(side, arena);

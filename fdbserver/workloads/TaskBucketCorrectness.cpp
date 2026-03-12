@@ -264,10 +264,11 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 								bool isFutureEmpty = co_await futureBucket->isEmpty(cx);
 								if (isFutureEmpty)
 									break;
-								co_await TaskBucket::debugPrintRange(
-								    cx, taskSubspace.key(), StringRef(format("client_%d", clientId)));
-								TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
-
+								else {
+									co_await TaskBucket::debugPrintRange(
+									    cx, taskSubspace.key(), StringRef(format("client_%d", clientId)));
+									TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
+								}
 							} else {
 								co_await delay(1.0);
 							}

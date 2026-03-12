@@ -97,8 +97,9 @@ Key KVWorkload::getRandomKey() const {
 Key KVWorkload::getRandomKey(double absentFrac) const {
 	if (absentFrac > 0.0000001) {
 		return getRandomKey(deterministicRandom()->random01() < absentFrac);
+	} else {
+		return getRandomKey(false);
 	}
-	return getRandomKey(false);
 }
 
 Key KVWorkload::getRandomKey(bool absent) const {
@@ -108,8 +109,9 @@ Key KVWorkload::getRandomKey(bool absent) const {
 Key KVWorkload::keyForIndex(uint64_t index) const {
 	if (absentFrac > 0.0000001) {
 		return keyForIndex(index, deterministicRandom()->random01() < absentFrac);
+	} else {
+		return keyForIndex(index, false);
 	}
-	return keyForIndex(index, false);
 }
 
 int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
@@ -179,9 +181,10 @@ int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue) {
 			if (sscanf(options[i].value.toString().c_str(), "%d", &r)) {
 				options[i].value = ""_sr;
 				return r;
+			} else {
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
+				throw test_specification_invalid();
 			}
-			TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-			throw test_specification_invalid();
 		}
 
 	return defaultValue;
@@ -194,9 +197,10 @@ uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValu
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
 				options[i].value = ""_sr;
 				return r;
+			} else {
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
+				throw test_specification_invalid();
 			}
-			TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-			throw test_specification_invalid();
 		}
 
 	return defaultValue;
@@ -209,9 +213,10 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 			if (sscanf(options[i].value.toString().c_str(), "%" SCNd64, &r)) {
 				options[i].value = ""_sr;
 				return r;
+			} else {
+				TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
+				throw test_specification_invalid();
 			}
-			TraceEvent(SevError, "InvalidTestOption").detail("OptionName", key);
-			throw test_specification_invalid();
 		}
 
 	return defaultValue;
@@ -1426,8 +1431,7 @@ Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, A
 			auditState = auditState_;
 			if (auditState.getPhase() == AuditPhase::Complete) {
 				break;
-			}
-			if (auditState.getPhase() == AuditPhase::Running) {
+			} else if (auditState.getPhase() == AuditPhase::Running) {
 				TraceEvent("AuditStorageCorrectnessWait")
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", auditType)
@@ -2045,14 +2049,15 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
+			} else {
+				TraceEvent(SevInfo, "ConsistencyCheckUrgent_CoreWithRetriableFailure")
+				    .errorUnsuppressed(e)
+				    .detail("ConsistencyCheckerId", consistencyCheckerId)
+				    .detail("RetryTimes", retryTimes)
+				    .detail("Round", round);
+				caughtError = e;
+				needsErrorHandling = true;
 			}
-			TraceEvent(SevInfo, "ConsistencyCheckUrgent_CoreWithRetriableFailure")
-			    .errorUnsuppressed(e)
-			    .detail("ConsistencyCheckerId", consistencyCheckerId)
-			    .detail("RetryTimes", retryTimes)
-			    .detail("Round", round);
-			caughtError = e;
-			needsErrorHandling = true;
 		}
 
 		if (needsErrorHandling) {
@@ -2524,8 +2529,9 @@ std::string toml_to_string(const T& value) {
 	if (value.type() == toml::value_t::string) {
 		const std::string& formatted = toml::format(value);
 		return formatted.substr(1, formatted.size() - 2);
+	} else {
+		return toml::format(value);
 	}
-	return toml::format(value);
 }
 
 struct TestSet {

@@ -27,8 +27,9 @@ static Optional<V> tryGet(std::unordered_map<K, V, H> const& m, K const& k) {
 	auto it = m.find(k);
 	if (it == m.end()) {
 		return {};
+	} else {
+		return it->second;
 	}
-	return it->second;
 }
 
 } // namespace
@@ -42,12 +43,12 @@ std::vector<TransactionTag> ServerThroughputTracker::getTagsAffectingStorageServ
 	auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
 	if (!tagToThroughputCounters.present()) {
 		return {};
+	} else {
+		result.reserve(tagToThroughputCounters.get().size());
+		for (const auto& [tag, _] : tagToThroughputCounters.get()) {
+			result.push_back(tag);
+		}
 	}
-	result.reserve(tagToThroughputCounters.get().size());
-	for (const auto& [tag, _] : tagToThroughputCounters.get()) {
-		result.push_back(tag);
-	}
-
 	return result;
 }
 

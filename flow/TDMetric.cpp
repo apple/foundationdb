@@ -272,8 +272,7 @@ std::string createStatsdMessage(const std::string& name,
 MetricsDataModel knobToMetricModel(const std::string& knob) {
 	if (knob == "statsd") {
 		return MetricsDataModel::STATSD;
-	}
-	if (knob == "otel") {
+	} else if (knob == "otel") {
 		return MetricsDataModel::OTLP;
 	} else if (knob == "none") {
 		return MetricsDataModel::NONE;

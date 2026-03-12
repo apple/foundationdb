@@ -256,8 +256,7 @@ class TransactionCostWorkload : public TestWorkload {
 		auto const rand = deterministicRandom()->randomInt(0, 9);
 		if (rand == 0) {
 			return std::make_unique<ReadEmptyTest>(testNumber);
-		}
-		if (rand == 1) {
+		} else if (rand == 1) {
 			return std::make_unique<ReadLargeValueTest>(testNumber);
 		} else if (rand == 2) {
 			return std::make_unique<ReadMultipleValuesTest>(testNumber);

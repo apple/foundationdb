@@ -150,8 +150,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 				co_await delay(1.0);
 				tr->reset();
 				continue;
-			}
-			if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::SAME_NETWORK_ADDRESSES)) {
+			} else if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::SAME_NETWORK_ADDRESSES)) {
 				GetCoordinatorsRequest get_req;
 				GetCoordinatorsReply get_rep;
 				auto ret = co_await getCoordinators(db, &get_req, &get_rep);

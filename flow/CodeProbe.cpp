@@ -80,8 +80,7 @@ struct CodeProbes {
 		bool operator<(Location const& rhs) const {
 			if (file < rhs.file) {
 				return true;
-			}
-			if (file == rhs.file) {
+			} else if (file == rhs.file) {
 				return line < rhs.line;
 			} else {
 				return false;
@@ -90,8 +89,7 @@ struct CodeProbes {
 		bool operator<=(Location const& rhs) const {
 			if (file < rhs.file) {
 				return true;
-			}
-			if (file == rhs.file) {
+			} else if (file == rhs.file) {
 				return line <= rhs.line;
 			} else {
 				return false;

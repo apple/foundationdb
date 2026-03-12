@@ -25,7 +25,8 @@ Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {
 	std::map<Key, Value>::const_iterator value = store.find(key);
 	if (value != store.end())
 		return value->second;
-	return Optional<Value>();
+	else
+		return Optional<Value>();
 }
 
 // Returns the key designated by a key selector
@@ -70,7 +71,7 @@ Key MemoryKeyValueStore::getKey(KeySelectorRef selector) const {
 
 	if (mapItr == store.end())
 		return endKey();
-	if (count == abs(selector.offset))
+	else if (count == abs(selector.offset))
 		return mapItr->first;
 	else
 		return startKey();

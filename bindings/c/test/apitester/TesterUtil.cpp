@@ -61,8 +61,9 @@ void print_internal_error(const char* msg, const char* file, int line) {
 std::optional<fdb::Value> copyValueRef(fdb::future_var::ValueRef::Type value) {
 	if (value) {
 		return std::make_optional(fdb::Value(value.value()));
+	} else {
+		return std::nullopt;
 	}
-	return std::nullopt;
 }
 
 KeyValueArray copyKeyValueArray(fdb::future_var::KeyValueRefArray::Type array) {

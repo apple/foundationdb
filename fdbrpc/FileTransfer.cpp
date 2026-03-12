@@ -66,8 +66,7 @@ grpc::Status FileTransferServiceImpl::DownloadFile(grpc::ServerContext* context,
 			// Inject error 10% of the times times.
 			if (error_inject_ == FAIL_RANDOMLY) {
 				return grpc::Status(grpc::StatusCode::INTERNAL, "Random test failure");
-			}
-			if (error_inject_ == FLIP_BYTE) {
+			} else if (error_inject_ == FLIP_BYTE) {
 				buffer[0] = ~buffer[0];
 			}
 		}
@@ -120,8 +119,9 @@ std::optional<fdbrpc::GetFileInfoReply> FileTransferClient::GetFileInfo(const st
 	grpc::Status status = stub_->GetFileInfo(&context, request, &response);
 	if (status.ok()) {
 		return { response };
+	} else {
+		return std::nullopt;
 	}
-	return std::nullopt;
 }
 
 //------ FileTransferClient ------

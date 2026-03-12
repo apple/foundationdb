@@ -240,7 +240,8 @@ JNIEXPORT jthrowable JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1ge
 	fdb_error_t err = fdb_future_get_error(sav);
 	if (err)
 		return getThrowable(jenv, err);
-	return JNI_NULL;
+	else
+		return JNI_NULL;
 }
 
 JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1isReady(JNIEnv* jenv,
@@ -1697,42 +1698,43 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 	g_jvm = vm;
 	if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
 		return JNI_ERR;
+	} else {
+		jclass local_range_result_class = env->FindClass("com/apple/foundationdb/RangeResult");
+		range_result_init = env->GetMethodID(local_range_result_class, "<init>", "([B[IZ)V");
+		range_result_class = (jclass)(env)->NewGlobalRef(local_range_result_class);
+
+		jclass local_mapped_range_result_class = env->FindClass("com/apple/foundationdb/MappedRangeResult");
+		mapped_range_result_init =
+		    env->GetMethodID(local_mapped_range_result_class, "<init>", "([Lcom/apple/foundationdb/MappedKeyValue;Z)V");
+		mapped_range_result_class = (jclass)(env)->NewGlobalRef(local_mapped_range_result_class);
+
+		jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/MappedKeyValue");
+		mapped_key_value_from_bytes = env->GetStaticMethodID(
+		    local_mapped_key_value_class, "fromBytes", "([B[I)Lcom/apple/foundationdb/MappedKeyValue;");
+		mapped_key_value_class = (jclass)(env)->NewGlobalRef(local_mapped_key_value_class);
+
+		jclass local_key_array_result_class = env->FindClass("com/apple/foundationdb/KeyArrayResult");
+		key_array_result_init = env->GetMethodID(local_key_array_result_class, "<init>", "([B[I)V");
+		key_array_result_class = (jclass)(env)->NewGlobalRef(local_key_array_result_class);
+
+		jclass local_keyrange_class = env->FindClass("com/apple/foundationdb/Range");
+		keyrange_init = env->GetMethodID(local_keyrange_class, "<init>", "([B[B)V");
+		keyrange_class = (jclass)(env)->NewGlobalRef(local_keyrange_class);
+
+		jclass local_keyrange_array_result_class = env->FindClass("com/apple/foundationdb/KeyRangeArrayResult");
+		keyrange_array_result_init =
+		    env->GetMethodID(local_keyrange_array_result_class, "<init>", "([Lcom/apple/foundationdb/Range;)V");
+		keyrange_array_result_class = (jclass)(env)->NewGlobalRef(local_keyrange_array_result_class);
+
+		jclass local_range_result_summary_class = env->FindClass("com/apple/foundationdb/RangeResultSummary");
+		range_result_summary_init = env->GetMethodID(local_range_result_summary_class, "<init>", "([BIZ)V");
+		range_result_summary_class = (jclass)(env)->NewGlobalRef(local_range_result_summary_class);
+
+		jclass local_string_class = env->FindClass("java/lang/String");
+		string_class = (jclass)(env)->NewGlobalRef(local_string_class);
+
+		return JNI_VERSION_1_6;
 	}
-	jclass local_range_result_class = env->FindClass("com/apple/foundationdb/RangeResult");
-	range_result_init = env->GetMethodID(local_range_result_class, "<init>", "([B[IZ)V");
-	range_result_class = (jclass)(env)->NewGlobalRef(local_range_result_class);
-
-	jclass local_mapped_range_result_class = env->FindClass("com/apple/foundationdb/MappedRangeResult");
-	mapped_range_result_init =
-	    env->GetMethodID(local_mapped_range_result_class, "<init>", "([Lcom/apple/foundationdb/MappedKeyValue;Z)V");
-	mapped_range_result_class = (jclass)(env)->NewGlobalRef(local_mapped_range_result_class);
-
-	jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/MappedKeyValue");
-	mapped_key_value_from_bytes = env->GetStaticMethodID(
-	    local_mapped_key_value_class, "fromBytes", "([B[I)Lcom/apple/foundationdb/MappedKeyValue;");
-	mapped_key_value_class = (jclass)(env)->NewGlobalRef(local_mapped_key_value_class);
-
-	jclass local_key_array_result_class = env->FindClass("com/apple/foundationdb/KeyArrayResult");
-	key_array_result_init = env->GetMethodID(local_key_array_result_class, "<init>", "([B[I)V");
-	key_array_result_class = (jclass)(env)->NewGlobalRef(local_key_array_result_class);
-
-	jclass local_keyrange_class = env->FindClass("com/apple/foundationdb/Range");
-	keyrange_init = env->GetMethodID(local_keyrange_class, "<init>", "([B[B)V");
-	keyrange_class = (jclass)(env)->NewGlobalRef(local_keyrange_class);
-
-	jclass local_keyrange_array_result_class = env->FindClass("com/apple/foundationdb/KeyRangeArrayResult");
-	keyrange_array_result_init =
-	    env->GetMethodID(local_keyrange_array_result_class, "<init>", "([Lcom/apple/foundationdb/Range;)V");
-	keyrange_array_result_class = (jclass)(env)->NewGlobalRef(local_keyrange_array_result_class);
-
-	jclass local_range_result_summary_class = env->FindClass("com/apple/foundationdb/RangeResultSummary");
-	range_result_summary_init = env->GetMethodID(local_range_result_summary_class, "<init>", "([BIZ)V");
-	range_result_summary_class = (jclass)(env)->NewGlobalRef(local_range_result_summary_class);
-
-	jclass local_string_class = env->FindClass("java/lang/String");
-	string_class = (jclass)(env)->NewGlobalRef(local_string_class);
-
-	return JNI_VERSION_1_6;
 }
 
 // Is automatically called once the Classloader is destroyed
@@ -1740,27 +1742,29 @@ void JNI_OnUnload(JavaVM* vm, void* reserved) {
 	JNIEnv* env;
 	if (vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
 		return;
-	} // delete global references so the GC can collect them
-	if (range_result_summary_class != JNI_NULL) {
-		env->DeleteGlobalRef(range_result_summary_class);
-	}
-	if (range_result_class != JNI_NULL) {
-		env->DeleteGlobalRef(range_result_class);
-	}
-	if (keyrange_array_result_class != JNI_NULL) {
-		env->DeleteGlobalRef(keyrange_array_result_class);
-	}
-	if (keyrange_class != JNI_NULL) {
-		env->DeleteGlobalRef(keyrange_class);
-	}
-	if (mapped_range_result_class != JNI_NULL) {
-		env->DeleteGlobalRef(mapped_range_result_class);
-	}
-	if (mapped_key_value_class != JNI_NULL) {
-		env->DeleteGlobalRef(mapped_key_value_class);
-	}
-	if (string_class != JNI_NULL) {
-		env->DeleteGlobalRef(string_class);
+	} else {
+		// delete global references so the GC can collect them
+		if (range_result_summary_class != JNI_NULL) {
+			env->DeleteGlobalRef(range_result_summary_class);
+		}
+		if (range_result_class != JNI_NULL) {
+			env->DeleteGlobalRef(range_result_class);
+		}
+		if (keyrange_array_result_class != JNI_NULL) {
+			env->DeleteGlobalRef(keyrange_array_result_class);
+		}
+		if (keyrange_class != JNI_NULL) {
+			env->DeleteGlobalRef(keyrange_class);
+		}
+		if (mapped_range_result_class != JNI_NULL) {
+			env->DeleteGlobalRef(mapped_range_result_class);
+		}
+		if (mapped_key_value_class != JNI_NULL) {
+			env->DeleteGlobalRef(mapped_key_value_class);
+		}
+		if (string_class != JNI_NULL) {
+			env->DeleteGlobalRef(string_class);
+		}
 	}
 }
 

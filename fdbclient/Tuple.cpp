@@ -289,8 +289,7 @@ Tuple::ElementType Tuple::getType(size_t index) const {
 
 	if (code == '\x00') {
 		return ElementType::NULL_TYPE;
-	}
-	if (code == '\x01') {
+	} else if (code == '\x01') {
 		return ElementType::BYTES;
 	} else if (code == '\x02') {
 		return ElementType::UTF8;
@@ -409,8 +408,7 @@ bool Tuple::getBool(size_t index) const {
 	uint8_t code = data[offsets[index]];
 	if (code == 0x26) {
 		return false;
-	}
-	if (code == 0x27) {
+	} else if (code == 0x27) {
 		return true;
 	} else {
 		throw invalid_tuple_data_type();

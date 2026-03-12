@@ -459,8 +459,7 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		        cmd->ssection.c_str(),
 		        fork_delay);
 		return;
-	}
-	if (pid == 0) { /* we are the child */
+	} else if (pid == 0) { /* we are the child */
 		/* remove signal handlers from parent */
 		signal(SIGHUP, SIG_DFL);
 		signal(SIGINT, SIG_DFL);
@@ -900,8 +899,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				/* Don't do anything for existing non-links */
 				if (!S_ISLNK(path_stat.st_mode)) {
 					break;
-				}
-				if (level++ == 100) {
+				} else if (level++ == 100) {
 					log_msg(SevError, "Too many nested symlinks in path %s\n", path.c_str());
 					exit(1);
 				}

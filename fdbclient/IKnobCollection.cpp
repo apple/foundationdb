@@ -26,8 +26,7 @@
 std::unique_ptr<IKnobCollection> IKnobCollection::create(Type type, Randomize randomize, IsSimulated isSimulated) {
 	if (type == Type::CLIENT) {
 		return std::make_unique<ClientKnobCollection>(randomize, isSimulated);
-	}
-	if (type == Type::SERVER) {
+	} else if (type == Type::SERVER) {
 		return std::make_unique<ServerKnobCollection>(randomize, isSimulated);
 	} else if (type == Type::TEST) {
 		return std::make_unique<TestKnobCollection>(randomize, isSimulated);
@@ -60,8 +59,7 @@ KnobValue IKnobCollection::parseKnobValue(std::string const& knobName, std::stri
 			clientKnobCollection = create(type, Randomize::False, IsSimulated::False);
 		}
 		return clientKnobCollection->parseKnobValue(knobName, knobValue);
-	}
-	if (type == Type::SERVER) {
+	} else if (type == Type::SERVER) {
 		if (!serverKnobCollection) {
 			serverKnobCollection = create(type, Randomize::False, IsSimulated::False);
 		}

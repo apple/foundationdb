@@ -10,6 +10,5 @@ Checks: >
   readability-container-size-empty,
   readability-delete-null-pointer,
   readability-duplicate-include,
-  readability-else-after-return,
   readability-inconsistent-ifelse-braces
 ...

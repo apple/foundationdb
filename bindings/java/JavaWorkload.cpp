@@ -187,21 +187,24 @@ struct JNIError {
 	std::string location() const {
 		if (file == nullptr) {
 			return "UNKNOWN";
+		} else {
+			return file + std::string(":") + std::to_string(line);
 		}
-		return file + std::string(":") + std::to_string(line);
 	}
 
 	std::string toString() {
 		if (!throwable) {
 			return "JNIError";
+		} else {
+			jboolean isCopy = false;
+			jmethodID toStringM =
+			    env->GetMethodID(env->FindClass("java/lang/Object"), "toString", "()Ljava/lang/String;");
+			jstring s = (jstring)env->CallObjectMethod(throwable, toStringM);
+			const char* utf = env->GetStringUTFChars(s, &isCopy);
+			std::string res(utf);
+			env->ReleaseStringUTFChars(s, utf);
+			return res;
 		}
-		jboolean isCopy = false;
-		jmethodID toStringM = env->GetMethodID(env->FindClass("java/lang/Object"), "toString", "()Ljava/lang/String;");
-		jstring s = (jstring)env->CallObjectMethod(throwable, toStringM);
-		const char* utf = env->GetStringUTFChars(s, &isCopy);
-		std::string res(utf);
-		env->ReleaseStringUTFChars(s, utf);
-		return res;
 	}
 };
 
