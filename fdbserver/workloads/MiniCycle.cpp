@@ -1,5 +1,5 @@
 /*
- * MiniCycle.actor.cpp
+ * MiniCycle.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,14 +22,14 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include <cstring>
 
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 struct MiniCycleWorkload : TestWorkload {
 	static constexpr auto NAME = "MiniCycle";
@@ -73,26 +73,28 @@ struct MiniCycleWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return _check(cx->clone(), this); }
 
-	ACTOR Future<bool> _check(Database cx, MiniCycleWorkload* self) {
-		state std::vector<Future<Void>> cycleClients;
+	Future<bool> _check(Database cx, MiniCycleWorkload* self) {
+		std::vector<Future<Void>> cycleClients;
 		for (int c = 0; c < self->clientCount; c++)
 			cycleClients.push_back(
 			    timeout(self->cycleClient(cx->clone(), self, self->actorCount / self->transactionsPerSecond),
 			            self->testDuration,
 			            Void()));
 
-		state Future<Void> end = delay(self->testDuration);
-		state bool ok = true;
-		loop {
-			choose {
-				when(bool ret = wait(self->_checkCycle(cx->clone(), self, ok))) {
-					ok = ret && ok;
-					if (!ok)
-						return false;
-				}
-				when(wait(end)) {
-					break;
-				}
+		Future<Void> end = delay(self->testDuration);
+		bool ok = true;
+		while (true) {
+			auto choice = co_await race(self->_checkCycle(cx->clone(), self, ok), end);
+			if (choice.index() == 0) {
+				bool ret = std::get<0>(std::move(choice));
+
+				ok = ret && ok;
+				if (!ok)
+					co_return false;
+			} else if (choice.index() == 1) {
+				break;
+			} else {
+				UNREACHABLE();
 			}
 		}
 
@@ -105,15 +107,15 @@ struct MiniCycleWorkload : TestWorkload {
 		cycleClients.clear();
 
 		printf("Beginning full cycle check...");
-		bool ret = wait(self->_checkCycle(cx->clone(), self, ok));
-		return ret;
+		bool ret = co_await self->_checkCycle(cx->clone(), self, ok);
+		co_return ret;
 	}
 
-	ACTOR Future<bool> _checkCycle(Database cx, MiniCycleWorkload* self, bool ok) {
-		state std::vector<Future<bool>> checkClients;
+	Future<bool> _checkCycle(Database cx, MiniCycleWorkload* self, bool ok) {
+		std::vector<Future<bool>> checkClients;
 		for (int c = 0; c < self->clientCount; c++)
 			checkClients.push_back(self->cycleCheckClient(cx->clone(), self, ok));
-		bool ret = wait(allTrue(checkClients));
+		bool ret = co_await allTrue(checkClients);
 
 		// Check for errors in the cycle clients
 		int errors = 0;
@@ -121,7 +123,7 @@ struct MiniCycleWorkload : TestWorkload {
 			errors += checkClients[c].isError();
 		if (errors)
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were checker errors.");
-		return ret;
+		co_return ret;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
@@ -164,34 +166,35 @@ struct MiniCycleWorkload : TestWorkload {
 		    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken);
 	}
 
-	ACTOR Future<Void> cycleClient(Database cx, MiniCycleWorkload* self, double delay) {
-		state double lastTime = now();
+	Future<Void> cycleClient(Database cx, MiniCycleWorkload* self, double delay) {
+		double lastTime = now();
 		try {
-			loop {
-				wait(poisson(&lastTime, delay));
+			while (true) {
+				co_await poisson(&lastTime, delay);
 
-				state double tstart = now();
-				state int r =
+				double tstart = now();
+				int r =
 				    deterministicRandom()->randomInt(self->beginKey(self->clientId), self->endKey(self->clientId) - 1);
-				state Transaction tr(cx);
+				Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
-					state Span span("MiniCycleClient"_loc);
+					Span span("MiniCycleClient"_loc);
 					TraceEvent("MiniCycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
 					             BinaryWriter::toValue(span.context, Unversioned()));
 				}
 				while (true) {
+					Error err;
 					try {
 						// Reverse next and next^2 node
-						Optional<Value> v = wait(tr.get(self->key(r)));
+						Optional<Value> v = co_await tr.get(self->key(r));
 						if (!v.present())
 							self->badRead("KeyR", r, tr);
-						state int r2 = self->fromValue(v.get());
-						Optional<Value> v2 = wait(tr.get(self->key(r2)));
+						int r2 = self->fromValue(v.get());
+						Optional<Value> v2 = co_await tr.get(self->key(r2));
 						if (!v2.present())
 							self->badRead("KeyR2", r2, tr);
-						state int r3 = self->fromValue(v2.get());
-						Optional<Value> v3 = wait(tr.get(self->key(r3)));
+						int r3 = self->fromValue(v2.get());
+						Optional<Value> v3 = co_await tr.get(self->key(r3));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
@@ -204,16 +207,17 @@ struct MiniCycleWorkload : TestWorkload {
 						// TraceEvent("CyclicTest").detail("Key", self->key(r2).toString()).detail("Value", self->value(r4).toString());
 						// TraceEvent("CyclicTest").detail("Key", self->key(r3).toString()).detail("Value", self->value(r2).toString());
 
-						wait(tr.commit());
+						co_await tr.commit();
 						// TraceEvent("MiniCycleCommit");
 						break;
 					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_old)
-							++self->tooOldRetries;
-						else if (e.code() == error_code_not_committed)
-							++self->commitFailedRetries;
-						wait(tr.onError(e));
+						err = e;
 					}
+					if (err.code() == error_code_transaction_too_old)
+						++self->tooOldRetries;
+					else if (err.code() == error_code_not_committed)
+						++self->commitFailedRetries;
+					co_await tr.onError(err);
 					++self->retries;
 				}
 				++self->transactions;
@@ -302,7 +306,7 @@ struct MiniCycleWorkload : TestWorkload {
 		}
 		return true;
 	}
-	ACTOR Future<bool> cycleCheckClient(Database cx, MiniCycleWorkload* self, bool ok) {
+	Future<bool> cycleCheckClient(Database cx, MiniCycleWorkload* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
@@ -318,27 +322,29 @@ struct MiniCycleWorkload : TestWorkload {
 		}
 
 		// One client checks the validity of the cycle at a time
-		wait(self->checkLock.take());
-		state FlowLock::Releaser releaser(self->checkLock);
+		co_await self->checkLock.take();
+		FlowLock::Releaser releaser(self->checkLock);
 
-		state Transaction tr(cx);
-		state int retryCount = 0;
-		loop {
+		Transaction tr(cx);
+		int retryCount = 0;
+		while (true) {
+			Error err;
 			try {
-				state Version v = wait(tr.getReadVersion());
-				RangeResult data = wait(
-				    tr.getRange(firstGreaterOrEqual(doubleToTestKey(self->beginKey(self->clientId), self->keyPrefix)),
-				                firstGreaterOrEqual(doubleToTestKey(self->endKey(self->clientId), self->keyPrefix)),
-				                self->cycleSize(self->clientId) + 1));
+				Version v = co_await tr.getReadVersion();
+				RangeResult data = co_await tr.getRange(
+				    firstGreaterOrEqual(doubleToTestKey(self->beginKey(self->clientId), self->keyPrefix)),
+				    firstGreaterOrEqual(doubleToTestKey(self->endKey(self->clientId), self->keyPrefix)),
+				    self->cycleSize(self->clientId) + 1);
 				ok = self->cycleCheckData(data, v, self->clientId) && ok;
 				break;
 			} catch (Error& e) {
-				retryCount++;
-				TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			retryCount++;
+			TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "MiniCycleCheckError").error(err);
+			co_await tr.onError(err);
 		}
-		return ok;
+		co_return ok;
 	}
 };
 

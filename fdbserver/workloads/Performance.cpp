@@ -1,5 +1,5 @@
 /*
- * Performance.actor.cpp
+ * Performance.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 // TODO: explain purpose of this workload. Obviously simulation is aimed at correctness,
 // not performance, so a workload literally named Performance has some explaining to do.
@@ -106,19 +106,19 @@ struct PerformanceWorkload : TestWorkload {
 	}
 
 	// FIXME: does not use testers which are recruited on workers
-	ACTOR Future<std::vector<TesterInterface>> getTesters(PerformanceWorkload* self) {
-		state std::vector<WorkerDetails> workers;
+	Future<std::vector<TesterInterface>> getTesters(PerformanceWorkload* self) {
+		std::vector<WorkerDetails> workers;
 
-		loop {
-			choose {
-				when(
-				    std::vector<WorkerDetails> w = wait(
-				        brokenPromiseToNever(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(
-				            GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY))))) {
-					workers = w;
-					break;
-				}
-				when(wait(self->dbInfo->onChange())) {}
+		while (true) {
+			auto choice = co_await race(
+			    brokenPromiseToNever(self->dbInfo->get().clusterInterface.getWorkers.getReply(GetWorkersRequest(
+			        GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY))),
+			    self->dbInfo->onChange());
+			if (choice.index() == 0) {
+				std::vector<WorkerDetails> w = std::get<0>(std::move(choice));
+
+				workers = w;
+				break;
 			}
 		}
 
@@ -126,22 +126,20 @@ struct PerformanceWorkload : TestWorkload {
 		ts.reserve(workers.size());
 		for (int i = 0; i < workers.size(); i++)
 			ts.push_back(workers[i].interf.testerInterface);
-		return ts;
+		co_return ts;
 	}
 
-	ACTOR Future<Void> _setup(Database cx, PerformanceWorkload* self) {
-		state Standalone<VectorRef<VectorRef<KeyValueRef>>> options = self->getOpts(1000.0);
+	Future<Void> _setup(Database cx, PerformanceWorkload* self) {
+		Standalone<VectorRef<VectorRef<KeyValueRef>>> options = self->getOpts(1000.0);
 		self->logOptions(options);
 
-		std::vector<TesterInterface> testers = wait(self->getTesters(self));
+		std::vector<TesterInterface> testers = co_await self->getTesters(self);
 		self->testers = testers;
 
 		TestSpec spec("PerformanceSetup"_sr, false, false);
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
-		DistributedTestResults results = wait(runWorkload(cx, testers, spec));
-
-		return Void();
+		DistributedTestResults results = co_await runWorkload(cx, testers, spec);
 	}
 
 	PerfMetric getNamedMetric(std::string name, std::vector<PerfMetric> metrics) {
@@ -153,13 +151,13 @@ struct PerformanceWorkload : TestWorkload {
 		return PerfMetric();
 	}
 
-	ACTOR Future<Void> getSaturation(Database cx, PerformanceWorkload* self) {
-		state double tps = 400;
-		state bool reported = false;
-		state bool retry = false;
-		state double multiplier = 2.0;
+	Future<Void> getSaturation(Database cx, PerformanceWorkload* self) {
+		double tps = 400;
+		bool reported = false;
+		bool retry = false;
+		double multiplier = 2.0;
 
-		loop {
+		while (true) {
 			Standalone<VectorRef<VectorRef<KeyValueRef>>> options = self->getOpts(tps);
 			TraceEvent start("PerformaceProbeStarting");
 			start.detail("RateTarget", tps);
@@ -169,12 +167,12 @@ struct PerformanceWorkload : TestWorkload {
 					             printable(options[i][j].key) + "=" + printable(options[i][j].value));
 				}
 			}
-			state DistributedTestResults results;
+			DistributedTestResults results;
 			try {
 				TestSpec spec("PerformanceRun"_sr, false, false);
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
-				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec));
+				DistributedTestResults r = co_await runWorkload(cx, self->testers, spec);
 				results = r;
 			} catch (Error& e) {
 				TraceEvent("PerformanceRunError")
@@ -207,7 +205,7 @@ struct PerformanceWorkload : TestWorkload {
 					retry = true;
 				} else if (multiplier < 2.0) {
 					evt.detail("Saturation", "final");
-					return Void();
+					co_return;
 				} else {
 					tps /= 2;
 					multiplier = 1.189;
@@ -218,16 +216,13 @@ struct PerformanceWorkload : TestWorkload {
 			}
 			tps *= retry ? 1.0 : multiplier;
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, PerformanceWorkload* self) {
-		wait(self->getSaturation(cx, self));
+	Future<Void> _start(Database cx, PerformanceWorkload* self) {
+		co_await self->getSaturation(cx, self);
 		TraceEvent("PerformanceSaturation")
 		    .detail("SaturationRate", self->maxAchievedTPS.value())
 		    .detail("SaturationLatency", self->latencySaturation.value());
-		return Void();
 	}
 };
 

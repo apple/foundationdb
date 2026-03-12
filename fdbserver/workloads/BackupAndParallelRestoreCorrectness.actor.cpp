@@ -27,7 +27,7 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define TEST_ABORT_FASTRESTORE 0

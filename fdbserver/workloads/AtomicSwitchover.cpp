@@ -22,7 +22,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 // A workload which test the correctness of backup and restore process
 struct AtomicSwitchoverWorkload : TestWorkload {

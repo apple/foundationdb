@@ -25,7 +25,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "flow/ApiVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
