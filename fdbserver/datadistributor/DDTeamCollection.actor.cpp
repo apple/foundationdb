@@ -22,7 +22,7 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
 #include "fdbserver/Knobs.h"

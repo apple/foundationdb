@@ -17,15 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FOUNDATIONDB_MOCKDATADISTRIBUTOR_H
-#define FOUNDATIONDB_MOCKDATADISTRIBUTOR_H
 
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/DDSharedContext.h"
-#include "fdbserver/MockGlobalState.h"
+#pragma once
 
-class MockDataDistributor {
-public:
-	Future<Void> run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor);
-};
-#endif // FOUNDATIONDB_MOCKDATADISTRIBUTOR_H
+#include "fdbserver/datadistributor/MockDataDistributor.h"

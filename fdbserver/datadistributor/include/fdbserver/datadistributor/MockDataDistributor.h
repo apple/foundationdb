@@ -1,5 +1,5 @@
 /*
- * DDShardTracker.h
+ * MockDataDistributor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,7 +17,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef FOUNDATIONDB_MOCKDATADISTRIBUTOR_H
+#define FOUNDATIONDB_MOCKDATADISTRIBUTOR_H
 
-#pragma once
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "fdbserver/MockGlobalState.h"
 
-#include "fdbserver/datadistributor/DDShardTracker.h"
+class MockDataDistributor {
+public:
+	Future<Void> run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor);
+};
+#endif // FOUNDATIONDB_MOCKDATADISTRIBUTOR_H

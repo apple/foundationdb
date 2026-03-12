@@ -22,15 +22,15 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/DDSharedContext.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
-#include "fdbserver/DDShardTracker.h"
+#include "fdbserver/datadistributor/DDShardTracker.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // The used bandwidth of a shard. The higher the value is, the busier the shard is.

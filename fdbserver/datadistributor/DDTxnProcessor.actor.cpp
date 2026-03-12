@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

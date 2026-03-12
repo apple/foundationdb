@@ -31,13 +31,13 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
-#include "fdbserver/DDRelocationQueue.h"
+#include "fdbserver/datadistributor/DDRelocationQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -130,7 +130,7 @@ DataMovementReason priorityToDataMovementReason(int priority) {
 RelocateData::RelocateData()
   : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
     dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
-    interval("QueuedRelocation") {};
+    interval("QueuedRelocation"){};
 
 RelocateData::RelocateData(RelocateShard const& rs)
   : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
@@ -216,7 +216,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 
 public:
 	ParallelTCInfo() = default;
-	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs) {};
+	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs){};
 
 	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
 

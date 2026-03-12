@@ -17,51 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FOUNDATIONDB_DDSHAREDCONTEXT_H
-#define FOUNDATIONDB_DDSHAREDCONTEXT_H
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/ShardsAffectedByTeamFailure.h"
-#include "fdbserver/DDShardTracker.h"
-#include "fdbserver/DDRelocationQueue.h"
-#include "fdbserver/DDTeamCollection.h"
-#include "fdbserver/DataDistributorInterface.h"
 
-// The common info shared by all DD components. Normally the DD components should share the reference to the same
-// context.
-// NOTE: We should avoid the shared class become an insanely large class, think twice before add member to it.
-class DDSharedContext : public ReferenceCounted<DDSharedContext> {
-public:
-	const std::unique_ptr<DDEnabledState>
-	    ddEnabledState; // Note: can't be reset because the underlying object is shared with snapshot server
+#pragma once
 
-	DataDistributorInterface interface;
-	UID ddId;
-	MoveKeysLock lock;
-	bool trackerCancelled = false;
-	DatabaseConfiguration configuration;
-
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-
-	Reference<DataDistributionTracker> tracker;
-	Reference<DDQueue> ddQueue;
-	Reference<DDTeamCollection> primaryTeamCollection, remoteTeamCollection;
-
-	DDSharedContext() = default;
-
-	explicit DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) { interface = iface; }
-
-	explicit DDSharedContext(UID id)
-	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}
-
-	UID id() const { return ddId; }
-
-	void markTrackerCancelled() { trackerCancelled = true; }
-
-	bool isTrackerCancelled() const { return trackerCancelled; }
-
-	decltype(auto) usableRegions() const { return configuration.usableRegions; }
-
-	bool isDDEnabled() const { return ddEnabledState->isEnabled(); };
-};
-
-#endif // FOUNDATIONDB_DDSHAREDCONTEXT_H
+#include "fdbserver/datadistributor/DDSharedContext.h"
