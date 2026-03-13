@@ -75,7 +75,6 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 	Transaction tr(cx);
 
 	while (true) {
-		Error err;
 		try {
 			Optional<BulkDumpState> currentJob = co_await getSubmittedBulkDumpJob(&tr);
 			bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
@@ -91,9 +90,8 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 			co_await delay(pollInterval);
 			tr.reset();
 		} catch (Error& e) {
-			err = e;
+			co_await tr.onError(e);
 		}
-		co_await tr.onError(err);
 	}
 }
 
@@ -114,8 +112,9 @@ Future<bool> monitorBulkLoadJobCompletion(Database cx,
 		if (!stillRunning) {
 			co_return true; // Job completed successfully
 		}
+	}
 
-		if (now() - timeoutStart > timeoutDuration) {
+	    if (now() - timeoutStart > timeoutDuration) {
 			co_return false; // Timed out
 		}
 
@@ -2030,8 +2029,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		FlowLock::Releaser releaser(task->extendMutex, 1);
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2059,11 +2056,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				task->timeoutVersion = newTimeout;
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -2221,8 +2214,6 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				while (true) {
-					Error err;
-					bool hasErr = false;
 					try {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2233,11 +2224,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 						break;
 					} catch (Error& e) {
-						err = e;
-						hasErr = true;
-					}
-					if (hasErr) {
-						co_await tr->onError(err);
+						co_await tr->onError(e);
 					}
 				}
 
@@ -2407,8 +2394,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		// Read all shard boundaries and add them to the map
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2427,11 +2412,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				beginKey = keyAfter(shardBoundaries.get().back());
 				tr->reset();
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -2449,8 +2430,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 		tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2498,11 +2477,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -2511,8 +2486,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		tr->reset();
 		beginKey = allKeys.begin;
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2535,11 +2508,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 				beginKey = keyAfter(bounds.get().results.back().first);
 				tr->reset();
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -2742,8 +2711,6 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			// Now add the selected ranges in a single transaction.
 			tr->reset();
 			while (true) {
-				Error err;
-				bool hasErr = false;
 				try {
 					TraceEvent("FileBackupSnapshotDispatchAddingTasks")
 					    .suppressFor(2)
@@ -2842,11 +2809,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 					dispatchedInThisIteration = true;
 					break;
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -2979,8 +2942,6 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// Wait for the read version to pass endVersion
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					co_await taskBucket->keepRunning(tr, task);
 
@@ -2999,11 +2960,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 					             (double)(endVersion - currentVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 					tr->reset();
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -3532,8 +3489,6 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		int batchSize = BUGGIFY ? 1 : 1000000;
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3560,11 +3515,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				startKey = keyAfter(rangeresults.results.back().first);
 				tr->reset();
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -3767,8 +3718,6 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 		bool jobAlreadyRunning = false;
 
 		{
-			Error err;
-			bool hasErr = false;
 			try {
 				// Submit BulkDump job via ManagementAPI
 				// This is a black box delegation to the existing BulkDump system
@@ -3793,8 +3742,6 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// a running BulkDump job" error that occurs when multiple backup agents try to run the same task.
 				Transaction checkTr(cx);
 				while (true) {
-					Error err;
-					bool hasErr = false;
 					try {
 						checkTr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 						checkTr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3808,11 +3755,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 						}
 						break;
 					} catch (Error& e) {
-						err = e;
-						hasErr = true;
-					}
-					if (hasErr) {
-						co_await checkTr.onError(err);
+						co_await checkTr.onError(e);
 					}
 				}
 
@@ -3900,13 +3843,9 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				g_bulkDumpTaskCompleteCount.fetch_add(1);
 
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				Error savedError = err;
+				Error savedError = e;
 				TraceEvent(SevWarn, "BulkDumpTaskError")
-				    .error(err)
+				    .error(e)
 				    .detail("BackupUID", config.getUid())
 				    .detail("SnapshotVersion", snapshotVersion)
 				    .detail("JobAlreadyRunning", jobAlreadyRunning);
@@ -4003,8 +3942,6 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		BackupConfig config(task);
 		Future<Optional<bool>> partitionedLog;
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -4012,11 +3949,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				co_await success(partitionedLog);
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -4033,8 +3966,6 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		// Get start version after backup worker are enabled
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -4045,11 +3976,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				Params.beginVersion().set(task, startVersionFuture.get());
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -4058,8 +3985,6 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		while (true) {
 			Future<Void> watchFuture;
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -4101,11 +4026,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 					}
 					co_return;
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -4267,8 +4188,6 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 		int originalBulkLoadMode = 0;
 
 		{
-			Error err;
-			bool hasErr = false;
 			try {
 				// Open backup container for metadata access
 				Reference<IBackupContainer> bcRef = IBackupContainer::openContainer(backupUrl, {}, {});
@@ -4422,13 +4341,9 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				g_bulkLoadRestoreTaskCompleteCount.fetch_add(1);
 
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				Error savedError = err;
+				Error savedError = e;
 				TraceEvent(SevWarn, "BulkLoadRestoreTaskError")
-				    .error(err)
+				    .error(e)
 				    .detail("RestoreUID", restore.getUid())
 				    .detail("BackupUrl", backupUrl);
 				// Restore original BulkLoad mode on error
@@ -4660,8 +4575,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		Future<Key> removePrefix;
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -4679,11 +4592,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 				break;
 
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -4753,8 +4662,6 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 
 			tr->reset();
 			while (true) {
-				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -4821,14 +4728,10 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 						break;
 					tr->reset();
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					if (err.code() == error_code_transaction_too_large)
+					if (e.code() == error_code_transaction_too_large)
 						dataSizeLimit /= 2;
 					else
-						co_await tr->onError(err);
+						co_await tr->onError(e);
 				}
 			}
 		}
@@ -5101,8 +5004,6 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		std::vector<KeyRange> ranges;
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5117,11 +5018,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -5142,8 +5039,6 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 
 		tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				if (start == end)
 					co_return;
@@ -5190,14 +5085,10 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				start = i;
 				tr->reset();
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				if (err.code() == error_code_transaction_too_large)
+				if (e.code() == error_code_transaction_too_large)
 					dataSizeLimit /= 2;
 				else
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 			}
 		}
 	}
@@ -5476,8 +5367,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		// this transaction does blind writes, so they are idempotent operations even if multiple instances of
 		// the same tasks are running these transactions.
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				if (mutationIndex == totalMutation) {
 					break;
@@ -5508,14 +5397,10 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				    .detail("Bytes", txBytes);
 				mutationIndex += mutationCount; // update mutationIndex after the commit succeeds
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				if (err.code() == error_code_transaction_too_large) {
+				if (e.code() == error_code_transaction_too_large) {
 					txBytesLimit /= 2;
 				} else {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -5537,8 +5422,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges; // this is the actual KV, not version
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -5553,11 +5436,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -5610,8 +5489,6 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		int64_t totalBytes = 0;
 		Standalone<VectorRef<KeyValueRef>> oneVersionData;
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				Standalone<VectorRef<KeyValueRef>> _data = co_await mutationStream.getFuture();
 				oneVersionData = _data;
@@ -5626,17 +5503,13 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				mutations.push_back(oneVersionData);
 				totalBytes += bytes;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				if (err.code() == error_code_end_of_stream) {
+				if (e.code() == error_code_end_of_stream) {
 					if (mutations.size() > 0) {
 						co_await writeMutations(cx, mutations, restore.mutationLogPrefix(), task, taskBucket);
 					}
 					break;
 				} else {
-					throw err;
+					throw e;
 				}
 			}
 		}
@@ -6416,7 +6289,6 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	while (true) {
-		Error err;
 		try {
 			ERestoreState estate = co_await abortRestore(tr, tagName);
 			if (estate != ERestoreState::ABORTED) {
@@ -6425,9 +6297,8 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 			co_await tr->commit();
 			break;
 		} catch (Error& e) {
-			err = e;
+			co_await tr->onError(e);
 		}
-		co_await tr->onError(err);
 	}
 
 	tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -6435,7 +6306,6 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 	// Commit a dummy transaction before returning success, to ensure the mutation applier has stopped submitting
 	// mutations
 	while (true) {
-		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6445,9 +6315,8 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 			co_await tr->commit();
 			co_return ERestoreState::ABORTED;
 		} catch (Error& e) {
-			err = e;
+			co_await tr->onError(e);
 		}
-		co_await tr->onError(err);
 	}
 }
 
@@ -6475,8 +6344,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		bool inconsistentSnapshotOnly{ false };
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6509,18 +6376,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
 		tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6536,11 +6397,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					break;
 				}
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -6604,8 +6461,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6613,11 +6468,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -6629,8 +6480,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		tr->reset();
 		while (logStart != logEnd) {
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6659,11 +6508,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					logStart = logIt;
 					tr->reset();
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -6674,8 +6519,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		tr->reset();
 		while (rangeStart != rangeEnd) {
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6703,11 +6546,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					rangeStart = rangeIt;
 					tr->reset();
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -6719,8 +6558,6 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		tr->reset();
 		while (start != end) {
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6755,11 +6592,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					start = it;
 					tr->reset();
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -6934,8 +6767,6 @@ public:
 		TraceEvent("FastRestoreToolWaitForRestoreToFinish").detail("DBLock", randomUID);
 		// TODO: register watch first and then check if the key exist
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -6951,11 +6782,7 @@ public:
 					break;
 				}
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr.onError(err);
+				co_await tr.onError(e);
 			}
 		}
 
@@ -7022,8 +6849,6 @@ public:
 		int numTries = 0;
 		// lock DB for restore
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				if (lockDB) {
 					co_await lockDatabase(cx, randomUID);
@@ -7033,16 +6858,12 @@ public:
 				TraceEvent("FastRestoreToolSubmitRestoreRequests").detail("DBIsLocked", randomUID);
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
 				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsMayFail")
-				    .error(err)
+				    .error(e)
 				    .detail("Reason", "DB is not properly locked")
 				    .detail("ExpectedLockID", randomUID);
 				numTries++;
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -7053,8 +6874,6 @@ public:
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					// Note: we always lock DB here in case DB is modified at the bacupRanges boundary.
 					for (restoreIndex = 0; restoreIndex < backupRanges.size(); restoreIndex++) {
@@ -7077,15 +6896,11 @@ public:
 					co_await tr->commit(); // Trigger restore
 					break;
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
 					TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsRetry")
-					    .error(err)
+					    .error(e)
 					    .detail("RestoreIndex", restoreIndex);
 					numTries++;
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -7109,8 +6924,6 @@ public:
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					Optional<UidAndAbortedFlagT> oldUidAndAborted = co_await tag.get(tr);
 					if (!oldUidAndAborted.present()) {
@@ -7144,11 +6957,7 @@ public:
 					co_await tr->commit();
 					co_await watchFuture;
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -7415,8 +7224,6 @@ public:
 		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -7455,11 +7262,7 @@ public:
 					else
 						co_await watchFuture;
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -7567,8 +7370,6 @@ public:
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			{
-				Error err;
-				bool hasErr = false;
 				try {
 					// This is the pause key is in the task bucket, for backup agents
 					backupAgent->taskBucket->changePause(tr, pause);
@@ -7577,11 +7378,7 @@ public:
 					co_await tr->commit();
 					break;
 				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
+					co_await tr->onError(e);
 				}
 			}
 		}
@@ -7624,8 +7421,6 @@ public:
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				JsonBuilderObject doc;
 				doc.setKey("SchemaVersion", "1.0.0");
@@ -7768,11 +7563,7 @@ public:
 
 				co_return doc.getJson();
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 	}
@@ -7785,8 +7576,6 @@ public:
 		std::string statusText;
 
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -7981,11 +7770,7 @@ public:
 
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -8106,8 +7891,6 @@ public:
 
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8131,14 +7914,10 @@ public:
 				co_await tr->commit();
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				if (err.code() == error_code_restore_duplicate_tag) {
-					throw err;
+				if (e.code() == error_code_restore_duplicate_tag) {
+					throw e;
 				}
-				co_await tr->onError(err);
+				co_await tr->onError(e);
 			}
 		}
 
@@ -8164,8 +7943,6 @@ public:
 		BackupConfig backupConfig;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8180,11 +7957,7 @@ public:
 
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await ryw_tr->onError(err);
+				co_await ryw_tr->onError(e);
 			}
 		}
 
@@ -8193,8 +7966,6 @@ public:
 		Version commitVersion{ 0 };
 		UID randomUid = deterministicRandom()->randomUniqueID();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				// We must get a commit version so add a conflict range that won't likely cause conflicts
 				// but will ensure that the transaction is actually submitted.
@@ -8205,18 +7976,12 @@ public:
 				TraceEvent("AS_Locked").detail("CommitVer", commitVersion);
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr.onError(err);
+				co_await tr.onError(e);
 			}
 		}
 
 		ryw_tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				Optional<Version> restoreVersion = co_await backupConfig.getLatestRestorableVersion(ryw_tr);
 				if (restoreVersion.present() && restoreVersion.get() >= commitVersion) {
@@ -8227,32 +7992,22 @@ public:
 					co_await delay(0.2);
 				}
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await ryw_tr->onError(err);
+				co_await ryw_tr->onError(e);
 			}
 		}
 
 		ryw_tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				co_await discontinueBackup(backupAgent, ryw_tr, tagName);
 				co_await ryw_tr->commit();
 				TraceEvent("AS_DiscontinuedBackup").log();
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				if (err.code() == error_code_backup_unneeded || err.code() == error_code_backup_duplicate) {
+				if (e.code() == error_code_backup_unneeded || e.code() == error_code_backup_duplicate) {
 					break;
 				}
-				co_await ryw_tr->onError(err);
+				co_await ryw_tr->onError(e);
 			}
 		}
 
@@ -8261,8 +8016,6 @@ public:
 
 		ryw_tr->reset();
 		while (true) {
-			Error err;
-			bool hasErr = false;
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8274,11 +8027,7 @@ public:
 				TraceEvent("AS_ClearedRange").log();
 				break;
 			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await ryw_tr->onError(err);
+				co_await ryw_tr->onError(e);
 			}
 		}
 
@@ -8339,8 +8088,6 @@ public:
 				Reference<ReadYourWritesTransaction> rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
 				while (true) {
-					Error err;
-					bool hasErr = false;
 					try {
 						rywTransaction->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						rywTransaction->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8349,11 +8096,7 @@ public:
 						co_await rywTransaction->commit();
 						break;
 					} catch (Error& e) {
-						err = e;
-						hasErr = true;
-					}
-					if (hasErr) {
-						co_await rywTransaction->onError(err);
+						co_await rywTransaction->onError(e);
 					}
 				}
 			}
@@ -8716,7 +8459,6 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 	// Sanity check data has been written to DB
 	ReadYourWritesTransaction tr(cx);
 	while (true) {
-		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -8730,10 +8472,9 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 			ASSERT(readKVs.size() > 0 || begin == end);
 			break;
 		} catch (Error& e) {
-			err = e;
+			TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(e);
+			co_await tr.onError(e);
 		}
-		TraceEvent("TransformDatabaseContentsWriteKVReadBackError").error(err);
-		co_await tr.onError(err);
 	}
 
 	TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVDone").detail("Begin", begin).detail("End", end);
@@ -8753,7 +8494,6 @@ static Future<Void> transformDatabaseContents(Database cx,
 	    .detail("RemovePrefix", removePrefix);
 	int i = 0;
 	while (true) { // Read all data from DB
-		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8766,14 +8506,13 @@ static Future<Void> transformDatabaseContents(Database cx,
 			}
 			break;
 		} catch (Error& e) {
-			err = e;
+			TraceEvent("FastRestoreWorkloadTransformDatabaseContentsGetAllKeys")
+			    .error(e)
+			    .detail("Index", i)
+			    .detail("RestoreRange", restoreRanges[i]);
+			oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
+			co_await tr.onError(e);
 		}
-		TraceEvent("FastRestoreWorkloadTransformDatabaseContentsGetAllKeys")
-		    .error(err)
-		    .detail("Index", i)
-		    .detail("RestoreRange", restoreRanges[i]);
-		oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
-		co_await tr.onError(err);
 	}
 
 	// Convert data by removePrefix and addPrefix in memory
@@ -8823,7 +8562,6 @@ static Future<Void> transformDatabaseContents(Database cx,
 	// Sanity check to ensure no data in the ranges
 	tr.reset();
 	while (true) {
-		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8836,14 +8574,12 @@ static Future<Void> transformDatabaseContents(Database cx,
 			}
 			break;
 		} catch (Error& e) {
-			err = e;
+			co_await tr.onError(e);
 		}
-		co_await tr.onError(err);
 	}
 
 	// Write transformed KVs (i.e., kv backup took) back to DB
 	while (true) {
-		Error err;
 		try {
 			std::vector<Future<Void>> fwrites;
 			int begin = 0;
@@ -8855,16 +8591,14 @@ static Future<Void> transformDatabaseContents(Database cx,
 			co_await waitForAll(fwrites);
 			break;
 		} catch (Error& e) {
-			err = e;
+			TraceEvent(SevError, "FastRestoreWorkloadTransformDatabaseContentsUnexpectedErrorOnWriteKVs").error(e);
+			co_await tr.onError(e);
 		}
-		TraceEvent(SevError, "FastRestoreWorkloadTransformDatabaseContentsUnexpectedErrorOnWriteKVs").error(err);
-		co_await tr.onError(err);
 	}
 
 	// Sanity check
 	tr.reset();
 	while (true) {
-		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -8881,9 +8615,8 @@ static Future<Void> transformDatabaseContents(Database cx,
 			}
 			break;
 		} catch (Error& e) {
-			err = e;
+			co_await tr.onError(e);
 		}
-		co_await tr.onError(err);
 	}
 
 	TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
@@ -8909,7 +8642,8 @@ Future<Void> transformRestoredDatabase(Database cx,
 			    .detail("To", range);
 			restoreRanges.push_back_deep(restoreRanges.arena(), KeyRangeRef(begin.contents(), end.contents()));
 		}
-		co_await transformDatabaseContents(cx, removePrefix, addPrefix, restoreRanges);
+	}
+	    co_await transformDatabaseContents(cx, removePrefix, addPrefix, restoreRanges);
 	} catch (Error& e) {
 		TraceEvent(SevError, "FastRestoreTransformRestoredDatabaseUnexpectedError").error(e);
 		throw;
