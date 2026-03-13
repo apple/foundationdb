@@ -299,12 +299,13 @@ const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/
 const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
                                                      "\xff\xff/management/in_progress_exclusion0"_sr);
 
-Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn) {
+Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> _warn) {
+	auto warn = std::move(_warn);
 	if (tokens.size() <= 1) {
-		std::vector<std::string> const& excludedAddresses = co_await getExcludedServers(db);
-		std::vector<std::string> const& excludedLocalities = co_await getExcludedLocalities(db);
-		std::vector<std::string> const& failedAddresses = co_await getFailedServers(db);
-		std::vector<std::string> const& failedLocalities = co_await getFailedLocalities(db);
+		std::vector<std::string> excludedAddresses = co_await getExcludedServers(db);
+		std::vector<std::string> excludedLocalities = co_await getExcludedLocalities(db);
+		std::vector<std::string> failedAddresses = co_await getFailedServers(db);
+		std::vector<std::string> failedLocalities = co_await getFailedLocalities(db);
 
 		if (!excludedAddresses.size() && !excludedLocalities.size() && !failedAddresses.size() &&
 		    !failedLocalities.size()) {

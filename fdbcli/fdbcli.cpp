@@ -652,10 +652,11 @@ Future<Void> timeWarning(double when, const char* msg) {
 	fputs(msg, stderr);
 }
 
-Future<Void> checkStatus(Future<Void> f,
+Future<Void> checkStatus(Future<Void> _f,
                          Reference<IDatabase> db,
                          Database localDb,
                          bool displayDatabaseAvailable = true) {
+	auto f = std::move(_f);
 	co_await f;
 	Reference<ITransaction> tr = db->createTransaction();
 	StatusObject s;

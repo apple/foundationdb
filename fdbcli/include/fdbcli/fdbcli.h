@@ -153,7 +153,7 @@ Future<bool> configureCommandActor(Reference<IDatabase> db,
                                    Database localDb,
                                    std::vector<StringRef> tokens,
                                    LineNoise* linenoise,
-                                   Future<Void> warn);
+                                   Future<Void> _warn);
 // consistency command
 Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                           std::vector<StringRef> const& tokens,
@@ -165,7 +165,7 @@ Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<Strin
 // datadistribution command
 Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // exclude command
-Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
+Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> _warn);
 // expensive_data_check command
 Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,

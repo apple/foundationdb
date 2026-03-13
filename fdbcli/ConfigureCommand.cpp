@@ -35,7 +35,8 @@ Future<bool> configureCommandActor(Reference<IDatabase> db,
                                    Database localDb,
                                    std::vector<StringRef> tokens,
                                    LineNoise* linenoise,
-                                   Future<Void> warn) {
+                                   Future<Void> _warn) {
+	auto warn = std::move(_warn);
 	ConfigurationResult result = ConfigurationResult::SUCCESS;
 	StatusObject s;
 	int startToken = 1;
