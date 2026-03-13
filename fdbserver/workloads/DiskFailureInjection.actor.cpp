@@ -211,7 +211,6 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				}
 			}
 		}
-		co_return;
 	}
 
 	// Fetches chaosMetrics and verifies that chaos events are happening for enabled workers
@@ -274,7 +273,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				TraceEvent("FoundChaos")
 				    .detail("ChaosMetricCount", foundChaosMetrics)
 				    .detail("ClientID", self->clientId);
-				co_return;
+				break;
 			}
 		}
 	}

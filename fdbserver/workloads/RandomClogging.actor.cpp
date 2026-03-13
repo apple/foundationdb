@@ -78,12 +78,11 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			                               "RandomCloggingError"),
 			                  self->testDuration,
 			                  Void()));
-			if (!done.isReady() && self->iterate) {
-				co_await delay(self->suspend);
-				self->suspend *= self->backoff;
-			} else {
-				co_return;
+			if (done.isReady() || !self->iterate) {
+				break;
 			}
+			co_await delay(self->suspend);
+			self->suspend *= self->backoff;
 		}
 	}
 

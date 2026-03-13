@@ -133,7 +133,6 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			co_await excludeIncludeServer(cx, ssToWiggle);
 			co_await validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-2");
 		}
-		co_return;
 	}
 
 	static Future<Void> excludeIncludeServer(Database cx, StorageServerInterface ssToExcludeInclude) {
@@ -163,8 +162,6 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		// Include all the processes the cluster knows.
 		co_await includeServers(cx, std::vector<AddressExclusion>(1));
 		TraceEvent("Test_IncludeServerDone").log();
-
-		co_return;
 	}
 
 	static Future<Void> validateDatabase(Database cx,
@@ -253,7 +250,6 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			// storage engine in the last check.
 			ASSERT(!containWiggleStorage);
 		}
-		co_return;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }

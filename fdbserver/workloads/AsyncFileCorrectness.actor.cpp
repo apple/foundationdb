@@ -112,8 +112,6 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 		// Create or open the file being used for testing
 		co_await self->openFile(self, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, self->fileSize, true);
-
-		co_return;
 	}
 
 	// Updates the memory buffer, locks, and validity mask to a new file size
@@ -155,8 +153,6 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 		// Try to let the IO operations finish so we can clean up after them
 		co_await timeout(waitForAll(self->operations), 10, Void());
-
-		co_return;
 	}
 
 	Future<Void> runCorrectnessTest(AsyncFileCorrectnessWorkload* self) {

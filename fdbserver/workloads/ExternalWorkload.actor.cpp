@@ -368,7 +368,6 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		if (!res) {
 			TraceEvent(SevError, "ExternalWorkloadFailure").detail("Stage", stage);
 		}
-		co_return;
 	}
 
 	Future<Void> setup(Database const& cx) override {

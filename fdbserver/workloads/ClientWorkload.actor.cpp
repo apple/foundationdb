@@ -47,7 +47,6 @@ class WorkloadProcessState {
 		self->init.send(Void());
 		co_await Future<Void>(Never());
 		ASSERT(false); // does not happen
-		co_return;
 	}
 
 	static Future<Void> processStart(WorkloadProcessState* self) {
@@ -96,7 +95,6 @@ class WorkloadProcessState {
 			ASSERT(false);
 		}
 		ASSERT(false);
-		co_return;
 	}
 
 	static std::vector<WorkloadProcessState*>& states() {
@@ -161,7 +159,6 @@ struct WorkloadProcess {
 		if (err.present()) {
 			throw err.get();
 		}
-		co_return;
 	}
 
 	ISimulator::ProcessInfo* childProcess() { return processState->childProcess; }
@@ -229,7 +226,6 @@ struct WorkloadProcess {
 			throw err.get();
 		}
 		if constexpr (std::is_same_v<Ret, Void>) {
-			co_return;
 		} else {
 			co_return res;
 		}

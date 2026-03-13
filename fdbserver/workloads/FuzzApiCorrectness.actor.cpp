@@ -250,8 +250,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		self->db = db;
 
 		ASSERT(self->numTenants == 0);
-
-		co_return;
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -296,24 +294,22 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	Future<Void> writeBarrier(Reference<IDatabase> db) {
 		Reference<ITransaction> tr = db->createTransaction();
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					// Write-only transactions have a self-conflict in the system keys
-					tr->addWriteConflictRange(allKeys);
-					tr->clear(normalKeys);
-					co_await unsafeThreadFutureToFuture(tr->commit());
-					co_return;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await unsafeThreadFutureToFuture(tr->onError(err));
-				}
+				// Write-only transactions have a self-conflict in the system keys
+				tr->addWriteConflictRange(allKeys);
+				tr->clear(normalKeys);
+				co_await unsafeThreadFutureToFuture(tr->commit());
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await unsafeThreadFutureToFuture(tr->onError(err));
 			}
 		}
 	}
@@ -337,47 +333,45 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 						loop {
 							if (now() - startTime > self->testDuration)
 								co_return;
-							{
-								Error err;
-								bool hasErr = false;
-								try {
-									if (self->useSystemKeys && tenantNum == -1) {
-										tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-									}
-									if (self->specialKeysRelaxed)
-										tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
-									if (self->specialKeysWritesEnabled)
-										tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+							Error err;
+							bool hasErr = false;
+							try {
+								if (self->useSystemKeys && tenantNum == -1) {
+									tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+								}
+								if (self->specialKeysRelaxed)
+									tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
+								if (self->specialKeysWritesEnabled)
+									tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 
-									if (i == 0) {
-										tr->clear(normalKeys);
-									}
+								if (i == 0) {
+									tr->clear(normalKeys);
+								}
 
-									int end = std::min(nodesPerTenant, i + keysPerBatch);
-									tr->clear(KeyRangeRef(self->getKeyForIndex(tenantNum, i),
-									                      self->getKeyForIndex(tenantNum, end)));
+								int end = std::min(nodesPerTenant, i + keysPerBatch);
+								tr->clear(KeyRangeRef(self->getKeyForIndex(tenantNum, i),
+								                      self->getKeyForIndex(tenantNum, end)));
 
-									for (int j = i; j < end; j++) {
-										if (deterministicRandom()->random01() < self->initialKeyDensity) {
-											Key key = self->getKeyForIndex(tenantNum, j);
-											if (key.size() <= getMaxWriteKeySize(key, false)) {
-												Value value = self->getRandomValue();
-												value = value.substr(
-												    0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
-												tr->set(key, value);
-											}
+								for (int j = i; j < end; j++) {
+									if (deterministicRandom()->random01() < self->initialKeyDensity) {
+										Key key = self->getKeyForIndex(tenantNum, j);
+										if (key.size() <= getMaxWriteKeySize(key, false)) {
+											Value value = self->getRandomValue();
+											value = value.substr(
+											    0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
+											tr->set(key, value);
 										}
 									}
-									co_await unsafeThreadFutureToFuture(tr->commit());
-									//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
-									break;
-								} catch (Error& e) {
-									err = e;
-									hasErr = true;
 								}
-								if (hasErr) {
-									co_await unsafeThreadFutureToFuture(tr->onError(err));
-								}
+								co_await unsafeThreadFutureToFuture(tr->commit());
+								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
+								break;
+							} catch (Error& e) {
+								err = e;
+								hasErr = true;
+							}
+							if (hasErr) {
+								co_await unsafeThreadFutureToFuture(tr->onError(err));
 							}
 						}
 					}
@@ -433,74 +427,71 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 			tr->addWriteConflictRange(self->conflictRange);
 
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					int numWaits = deterministicRandom()->randomInt(1, 5);
-					int i = 0;
+			Error err;
+			bool hasErr = false;
+			try {
+				int numWaits = deterministicRandom()->randomInt(1, 5);
+				int i = 0;
 
-					// Code path here will create a bunch of ops, wait for ONE of them to complete,
-					// then add more ops, wait for another one, and so on.
-					for (; i < numWaits; i++) {
-						int numOps = deterministicRandom()->randomInt(1, self->numOps);
-						int j = 0;
-						for (; j < numOps; j++) {
-							int operationType = deterministicRandom()->randomInt(0, testCases.size());
-							printf("%d: Selected Operation %d\n", self->operationId + 1, operationType);
-							try {
-								operations.push_back(testCases[operationType](++self->operationId, self, tr));
-							} catch (Error& e) {
-								TraceEvent(SevWarn, "IgnoredOperation")
-								    .error(e)
-								    .detail("Operation", operationType)
-								    .detail("Id", self->operationId);
-							}
-						}
-
-						// Wait for a random op to complete.
-						if (waitLocation < operations.size()) {
-							int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
-							co_await operations[waitOp];
-							co_await delay(0.000001); // to ensure errors have propagated from reads to commits
-							waitLocation = operations.size();
+				// Code path here will create a bunch of ops, wait for ONE of them to complete,
+				// then add more ops, wait for another one, and so on.
+				for (; i < numWaits; i++) {
+					int numOps = deterministicRandom()->randomInt(1, self->numOps);
+					int j = 0;
+					for (; j < numOps; j++) {
+						int operationType = deterministicRandom()->randomInt(0, testCases.size());
+						printf("%d: Selected Operation %d\n", self->operationId + 1, operationType);
+						try {
+							operations.push_back(testCases[operationType](++self->operationId, self, tr));
+						} catch (Error& e) {
+							TraceEvent(SevWarn, "IgnoredOperation")
+							    .error(e)
+							    .detail("Operation", operationType)
+							    .detail("Id", self->operationId);
 						}
 					}
-					co_await waitForAll(operations);
-					try {
-						co_await timeoutError(unsafeThreadFutureToFuture(tr->commit()), 30);
-					} catch (Error& e) {
-						if (e.code() == error_code_client_invalid_operation ||
-						    e.code() == error_code_transaction_too_large || e.code() == error_code_invalid_option) {
-							throw not_committed();
-						}
+
+					// Wait for a random op to complete.
+					if (waitLocation < operations.size()) {
+						int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
+						co_await operations[waitOp];
+						co_await delay(0.000001); // to ensure errors have propagated from reads to commits
+						waitLocation = operations.size();
 					}
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					operations.clear();
-					waitLocation = 0;
-
-					if (err.code() == error_code_not_committed || err.code() == error_code_commit_unknown_result ||
-					    cancelled) {
+				co_await waitForAll(operations);
+				try {
+					co_await timeoutError(unsafeThreadFutureToFuture(tr->commit()), 30);
+				} catch (Error& e) {
+					if (e.code() == error_code_client_invalid_operation ||
+					    e.code() == error_code_transaction_too_large || e.code() == error_code_invalid_option) {
 						throw not_committed();
 					}
+				}
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				operations.clear();
+				waitLocation = 0;
 
-					try {
-						co_await unsafeThreadFutureToFuture(tr->onError(err));
-					} catch (Error& err) {
-						if (err.code() == error_code_transaction_timed_out) {
-							throw not_committed();
-						}
-						throw err;
+				if (err.code() == error_code_not_committed || err.code() == error_code_commit_unknown_result ||
+				    err.code() == error_code_transaction_cancelled || cancelled) {
+					throw not_committed();
+				}
+
+				try {
+					co_await unsafeThreadFutureToFuture(tr->onError(err));
+				} catch (Error& err) {
+					if (err.code() == error_code_transaction_timed_out) {
+						throw not_committed();
 					}
+					throw err;
 				}
 			}
-		}
-		co_return;
+		    }
 	}
 
 	template <typename Subclass, typename T>
@@ -511,50 +502,28 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			Subclass self(id, wl, tr);
 
 			try {
-				if constexpr (std::is_same_v<value_type, Void>) {
-					co_await timeoutError(BaseTest::runTest2(tr, &self), 1000);
-					self.contract.handleNotThrown(tr);
-					self.errorCheck(tr, Void());
-					co_return;
+				Future<value_type> future = unsafeThreadFutureToFuture(self.createFuture(tr));
+
+				// Create may have added some other things to do before we can get the result.
+				for (auto i = self.pre_steps.begin(); i != self.pre_steps.end(); ++i) {
+					co_await unsafeThreadFutureToFuture(*i);
+				}
+
+				co_await timeoutError(ready(future), 1000);
+
+				if (future.isError()) {
+					self.contract.handleException(future.getError(), tr);
 				} else {
-					value_type result = co_await timeoutError(BaseTest::runTest2(tr, &self), 1000);
+					ASSERT(future.isValid());
 					self.contract.handleNotThrown(tr);
-					self.errorCheck(tr, result);
+					if constexpr (std::is_same_v<value_type, Void>) {
+						self.errorCheck(tr, Void());
+					} else {
+						self.errorCheck(tr, future.get());
+					}
 				}
 			} catch (Error& e) {
 				self.contract.handleException(e, tr);
-			}
-			co_return;
-		}
-
-		static Future<value_type> runTest2(Reference<ITransaction> tr, Subclass* self) {
-			Future<value_type> future = unsafeThreadFutureToFuture(self->createFuture(tr));
-
-			// Create may have added some other things to do before
-			// we can get the result.
-			std::vector<ThreadFuture<Void>>::iterator i;
-			for (i = self->pre_steps.begin(); i != self->pre_steps.end(); ++i) {
-				co_await unsafeThreadFutureToFuture(*i);
-			}
-
-			if constexpr (std::is_same_v<value_type, Void>) {
-				co_await future;
-				if (future.isError()) {
-					self->contract.handleException(future.getError(), tr);
-				} else {
-					ASSERT(future.isValid());
-				}
-
-				co_return;
-			} else {
-				value_type result = co_await future;
-				if (future.isError()) {
-					self->contract.handleException(future.getError(), tr);
-				} else {
-					ASSERT(future.isValid());
-				}
-
-				co_return result;
 			}
 		}
 
