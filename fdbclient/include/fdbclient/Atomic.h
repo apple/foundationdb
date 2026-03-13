@@ -24,10 +24,10 @@
 
 #include "fdbclient/CommitTransaction.h"
 
-inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional,
-                                  const ValueRef& otherOperand,
+inline ValueRef doLittleEndianAdd(Optional<ValueRef> const& existingValueOptional,
+                                  ValueRef const& otherOperand,
                                   Arena& ar) {
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size())
 		return otherOperand;
 	if (!otherOperand.size())
@@ -51,8 +51,8 @@ inline ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptiona
 	return StringRef(buf, i);
 }
 
-inline ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+inline ValueRef doAnd(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!otherOperand.size())
 		return otherOperand;
 
@@ -67,15 +67,15 @@ inline ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const Val
 	return StringRef(buf, i);
 }
 
-inline ValueRef doAndV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+inline ValueRef doAndV2(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present())
 		return otherOperand;
 
 	return doAnd(existingValueOptional, otherOperand, ar);
 }
 
-inline ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+inline ValueRef doOr(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size())
 		return otherOperand;
 	if (!otherOperand.size())
@@ -92,8 +92,8 @@ inline ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const Valu
 	return StringRef(buf, i);
 }
 
-inline ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+inline ValueRef doXor(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size())
 		return otherOperand;
 	if (!otherOperand.size())
@@ -111,10 +111,10 @@ inline ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const Val
 	return StringRef(buf, i);
 }
 
-inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
-                               const ValueRef& otherOperand,
+inline ValueRef doAppendIfFits(Optional<ValueRef> const& existingValueOptional,
+                               ValueRef const& otherOperand,
                                Arena& ar) {
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size())
 		return otherOperand;
 	if (!otherOperand.size())
@@ -136,8 +136,8 @@ inline ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional,
 	return StringRef(buf, i + j);
 }
 
-inline ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+inline ValueRef doMax(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size())
 		return otherOperand;
 	if (!otherOperand.size())
@@ -169,22 +169,22 @@ inline ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const Val
 	return otherOperand;
 }
 
-inline ValueRef doByteMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+inline ValueRef doByteMax(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present())
 		return otherOperand;
 
-	const ValueRef& existingValue = existingValueOptional.get();
+	ValueRef const& existingValue = existingValueOptional.get();
 	if (existingValue > otherOperand)
 		return existingValue;
 
 	return otherOperand;
 }
 
-inline ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+inline ValueRef doMin(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
 	if (!otherOperand.size())
 		return otherOperand;
 
-	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
+	ValueRef const& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	int i, j;
 
 	for (i = otherOperand.size() - 1; i >= existingValue.size(); i--) {
@@ -218,26 +218,26 @@ inline ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const Val
 	return otherOperand;
 }
 
-inline ValueRef doMinV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+inline ValueRef doMinV2(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present())
 		return otherOperand;
 
 	return doMin(existingValueOptional, otherOperand, ar);
 }
 
-inline ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+inline ValueRef doByteMin(Optional<ValueRef> const& existingValueOptional, ValueRef const& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present())
 		return otherOperand;
 
-	const ValueRef& existingValue = existingValueOptional.get();
+	ValueRef const& existingValue = existingValueOptional.get();
 	if (existingValue < otherOperand)
 		return existingValue;
 
 	return otherOperand;
 }
 
-inline Optional<ValueRef> doCompareAndClear(const Optional<ValueRef>& existingValueOptional,
-                                            const ValueRef& otherOperand,
+inline Optional<ValueRef> doCompareAndClear(Optional<ValueRef> const& existingValueOptional,
+                                            ValueRef const& otherOperand,
                                             Arena& ar) {
 	if (!existingValueOptional.present() || existingValueOptional.get() == otherOperand) {
 		// Clear the value.
@@ -266,9 +266,9 @@ inline int32_t parseVersionstampOffset(StringRef& key) {
  * Returns the range corresponding to the specified versionstamp key.
  */
 inline KeyRangeRef getVersionstampKeyRange(Arena& arena,
-                                           const KeyRef& key,
+                                           KeyRef const& key,
                                            Optional<Version> readVersion,
-                                           const KeyRef& maxKey) {
+                                           KeyRef const& maxKey) {
 	KeyRef begin(arena, key);
 	KeyRef end(arena, key);
 
@@ -301,7 +301,7 @@ inline void transformVersionstampKey(StringRef& key, Version version, uint16_t t
 }
 
 inline void transformVersionstampMutation(MutationRef& mutation,
-                                          StringRef MutationRef::* param,
+                                          StringRef MutationRef::*param,
                                           Version version,
                                           uint16_t transactionNumber) {
 	mutation.clearChecksumAndAccumulativeIndex();

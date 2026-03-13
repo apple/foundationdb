@@ -78,7 +78,7 @@ ISimulator::ISimulator()
     drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
-bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
+bool simulator_should_inject_fault(char const* context, char const* file, int line, int error_code) {
 	if (!g_network->isSimulated() || !faultInjectionActivated)
 		return false;
 
@@ -117,11 +117,11 @@ bool simulator_should_inject_fault(const char* context, const char* file, int li
 	return false;
 }
 
-void ISimulator::disableFor(const std::string& desc, double time) {
+void ISimulator::disableFor(std::string const& desc, double time) {
 	disabledMap[desc] = time;
 }
 
-double ISimulator::checkDisabled(const std::string& desc) const {
+double ISimulator::checkDisabled(std::string const& desc) const {
 	auto iter = disabledMap.find(desc);
 	if (iter != disabledMap.end()) {
 		return iter->second;
@@ -137,7 +137,7 @@ bool ISimulator::checkInjectedCorruption() {
 }
 
 flowGlobalType ISimulator::global(int id) const {
-	const ProcessInfo* proc = getCurrentProcess();
+	ProcessInfo const* proc = getCurrentProcess();
 	if (!proc) {
 		// currentProcess can be nullptr during process destruction when currentProcess
 		// is cleared in destroyProcess() or before any process is created (initialization).
@@ -223,7 +223,7 @@ struct SimClogging {
 		return t - tnow;
 	}
 
-	bool disconnected(const IPAddress& from, const IPAddress& to) {
+	bool disconnected(IPAddress const& from, IPAddress const& to) {
 		auto pair = std::make_pair(from, to);
 		if (g_simulator->speedUpSimulation || disconnectPairUntil.find(pair) == disconnectPairUntil.end()) {
 			return false;
@@ -233,12 +233,12 @@ struct SimClogging {
 		return now() < disconnectUntil;
 	}
 
-	void clogPairFor(const IPAddress& from, const IPAddress& to, double t) {
+	void clogPairFor(IPAddress const& from, IPAddress const& to, double t) {
 		auto& u = clogPairUntil[std::make_pair(from, to)];
 		u = std::max(u, now() + t);
 	}
 
-	void unclogPair(const IPAddress& from, const IPAddress& to) {
+	void unclogPair(IPAddress const& from, IPAddress const& to) {
 		auto pair = std::make_pair(from, to);
 		clogPairUntil.erase(pair);
 		clogPairLatency.erase(pair);
@@ -246,32 +246,32 @@ struct SimClogging {
 
 	// Clog a pair of processes until a time. This is more fine-grained than
 	// the IPAddress based one.
-	void clogPairFor(const NetworkAddress& from, const NetworkAddress& to, double t) {
+	void clogPairFor(NetworkAddress const& from, NetworkAddress const& to, double t) {
 		auto& u = clogProcessPairUntil[std::make_pair(from, to)];
 		u = std::max(u, now() + t);
 	}
 
-	void clogSendFor(const IPAddress& from, double t) {
+	void clogSendFor(IPAddress const& from, double t) {
 		auto& u = clogSendUntil[from];
 		u = std::max(u, now() + t);
 	}
-	void clogRecvFor(const IPAddress& from, double t) {
+	void clogRecvFor(IPAddress const& from, double t) {
 		auto& u = clogRecvUntil[from];
 		u = std::max(u, now() + t);
 	}
-	double setPairLatencyIfNotSet(const IPAddress& from, const IPAddress& to, double t) {
+	double setPairLatencyIfNotSet(IPAddress const& from, IPAddress const& to, double t) {
 		auto i = clogPairLatency.find(std::make_pair(from, to));
 		if (i == clogPairLatency.end())
 			i = clogPairLatency.insert(std::make_pair(std::make_pair(from, to), t)).first;
 		return i->second;
 	}
 
-	void disconnectPairFor(const IPAddress& from, const IPAddress& to, double t) {
+	void disconnectPairFor(IPAddress const& from, IPAddress const& to, double t) {
 		auto& u = disconnectPairUntil[std::make_pair(from, to)];
 		u = std::max(u, now() + t);
 	}
 
-	void reconnectPair(const IPAddress& from, const IPAddress& to) {
+	void reconnectPair(IPAddress const& from, IPAddress const& to) {
 		disconnectPairUntil.erase(std::make_pair(from, to));
 	}
 
@@ -284,7 +284,7 @@ private:
 
 	double halfLatency() const {
 		double a = deterministicRandom()->random01();
-		const double pFast = 0.999;
+		double const pFast = 0.999;
 		if (a <= pFast || g_simulator->speedUpSimulation) {
 			a = a / pFast;
 			return 0.5 * (FLOW_KNOBS->MIN_NETWORK_LATENCY * (1 - a) +
@@ -601,7 +601,7 @@ private:
 #include <fcntl.h>
 #include <sys/stat.h>
 
-int sf_open(const char* filename, int flags, int convFlags, int mode);
+int sf_open(char const* filename, int flags, int convFlags, int mode);
 
 #if defined(_WIN32)
 #include <io.h>
@@ -617,7 +617,7 @@ int sf_open(const char* filename, int flags, int convFlags, int mode);
 #define _chsize ::ftruncate
 #define O_BINARY 0
 
-int sf_open(const char* filename, int flags, int convFlags, int mode) {
+int sf_open(char const* filename, int flags, int convFlags, int mode) {
 	return _open(filename, convFlags, mode);
 }
 
@@ -698,7 +698,7 @@ public:
 	Future<int> read(void* data, int length, int64_t offset) override { return read_impl(this, data, length, offset); }
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
-		return write_impl(this, StringRef((const uint8_t*)data, length), offset);
+		return write_impl(this, StringRef((uint8_t const*)data, length), offset);
 	}
 
 	Future<Void> truncate(int64_t size) override { return truncate_impl(this, size); }
@@ -731,8 +731,8 @@ private:
 	SimpleFile(int h,
 	           Reference<DiskParameters> diskParameters,
 	           bool delayOnWrite,
-	           const std::string& filename,
-	           const std::string& actualFilename,
+	           std::string const& filename,
+	           std::string const& actualFilename,
 	           int flags)
 	  : h(h), diskParameters(diskParameters), filename(filename), actualFilename(actualFilename), flags(flags),
 	    dbgId(deterministicRandom()->randomUniqueID()), delayOnWrite(delayOnWrite) {}
@@ -780,7 +780,7 @@ private:
 		}
 
 		if (randLog) {
-			uint32_t a = crc32c_append(0, (const uint8_t*)data, read_bytes);
+			uint32_t a = crc32c_append(0, (uint8_t const*)data, read_bytes);
 			fprintf(randLog,
 			        "SFR2 %s %s %s %d %d\n",
 			        self->dbgId.shortString().c_str(),
@@ -978,7 +978,7 @@ struct SimDiskSpace {
 void doReboot(ISimulator::ProcessInfo* const& p, ISimulator::KillType const& kt);
 
 struct Sim2Listener final : IListener, ReferenceCounted<Sim2Listener> {
-	explicit Sim2Listener(ISimulator::ProcessInfo* process, const NetworkAddress& listenAddr)
+	explicit Sim2Listener(ISimulator::ProcessInfo* process, NetworkAddress const& listenAddr)
 	  : process(process), address(listenAddr) {}
 
 	void incomingConnection(double seconds, Reference<IConnection> conn) { // Called by another process!
@@ -1144,20 +1144,20 @@ public:
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) override;
 
 	// Add a <hostname, vector<NetworkAddress>> pair to mock DNS in simulation.
-	void addMockTCPEndpoint(const std::string& host,
-	                        const std::string& service,
-	                        const std::vector<NetworkAddress>& addresses) override {
+	void addMockTCPEndpoint(std::string const& host,
+	                        std::string const& service,
+	                        std::vector<NetworkAddress> const& addresses) override {
 		mockDNS.add(host, service, addresses);
 	}
-	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
+	void removeMockTCPEndpoint(std::string const& host, std::string const& service) override {
 		mockDNS.remove(host, service);
 	}
 	// Convert hostnameToAddresses from/to string. The format is:
 	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
-	void parseMockDNSFromString(const std::string& s) override { mockDNS = DNSCache::parseFromString(s); }
+	void parseMockDNSFromString(std::string const& s) override { mockDNS = DNSCache::parseFromString(s); }
 	std::string convertMockDNSToString() override { return mockDNS.toString(); }
-	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
-	                                                       const std::string& service) override {
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string const& host,
+	                                                       std::string const& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
 		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
 		if (mock.present()) {
@@ -1165,8 +1165,8 @@ public:
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
-	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
-	                                                                   const std::string& service) override {
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(std::string const& host,
+	                                                                   std::string const& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
 		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
 		if (mock.present()) {
@@ -1180,8 +1180,8 @@ public:
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
-	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
-	                                                       const std::string& service) override {
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(std::string const& host,
+	                                                       std::string const& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
 		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
 		if (mock.present()) {
@@ -1189,8 +1189,8 @@ public:
 		}
 		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}
-	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
-	                                                                   const std::string& service) override {
+	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(std::string const& host,
+	                                                                   std::string const& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
 		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
 		if (mock.present()) {
@@ -1233,7 +1233,7 @@ public:
 			}
 		}
 	}
-	const TLSConfig& getTLSConfig() const override {
+	TLSConfig const& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
@@ -1270,7 +1270,7 @@ public:
 		THREAD_RETURN;
 	}
 
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, char const* name) override {
 		SimThreadArgs* simArgs = new SimThreadArgs(func, arg);
 		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
@@ -1404,15 +1404,15 @@ public:
 
 	void run() override { runLoop(this); }
 
-	ProcessInfo* newProcess(const char* name,
+	ProcessInfo* newProcess(char const* name,
 	                        IPAddress ip,
 	                        uint16_t port,
 	                        bool sslEnabled,
 	                        uint16_t listenPerProcess,
 	                        LocalityData locality,
 	                        ProcessClass startingClass,
-	                        const char* dataFolder,
-	                        const char* coordinationFolder,
+	                        char const* dataFolder,
+	                        char const* coordinationFolder,
 	                        ProtocolVersion protocol,
 	                        bool drProcess) override {
 		ASSERT(locality.machineId().present());
@@ -1513,7 +1513,7 @@ public:
 		if (!dcId.present()) {
 			return addresses;
 		}
-		for (const auto& processInfo : getAllProcesses()) {
+		for (auto const& processInfo : getAllProcesses()) {
 			if (processInfo->locality.dcId() == dcId) {
 				addresses.emplace_back(processInfo->address.ip, processInfo->address.port);
 			}
@@ -2332,7 +2332,7 @@ public:
 
 		return (kt == ktMin);
 	}
-	void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) override {
+	void clogInterface(IPAddress const& ip, double seconds, ClogMode mode = ClogDefault) override {
 		if (mode == ClogDefault) {
 			double a = deterministicRandom()->random01();
 			if (a < 0.3)
@@ -2355,22 +2355,22 @@ public:
 		if (mode == ClogReceive || mode == ClogAll)
 			g_clogging.clogRecvFor(ip, seconds);
 	}
-	void clogPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+	void clogPair(IPAddress const& from, IPAddress const& to, double seconds) override {
 		TraceEvent("CloggingPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.clogPairFor(from, to, seconds);
 	}
 
-	void unclogPair(const IPAddress& from, const IPAddress& to) override {
+	void unclogPair(IPAddress const& from, IPAddress const& to) override {
 		TraceEvent("UncloggingPair").detail("From", from).detail("To", to);
 		g_clogging.unclogPair(from, to);
 	}
 
-	void disconnectPair(const IPAddress& from, const IPAddress& to, double seconds) override {
+	void disconnectPair(IPAddress const& from, IPAddress const& to, double seconds) override {
 		TraceEvent("DisconnectPair").detail("From", from).detail("To", to).detail("Seconds", seconds);
 		g_clogging.disconnectPairFor(from, to, seconds);
 	}
 
-	void reconnectPair(const IPAddress& from, const IPAddress& to) override {
+	void reconnectPair(IPAddress const& from, IPAddress const& to) override {
 		TraceEvent("ReconnectPair").detail("From", from).detail("To", to);
 		g_clogging.reconnectPair(from, to);
 	}
@@ -2982,7 +2982,7 @@ void extendConnectionFailures(std::string const& context, double duration) {
 
 #include <Windows.h>
 
-int sf_open(const char* filename, int flags, int convFlags, int mode) {
+int sf_open(char const* filename, int flags, int convFlags, int mode) {
 	HANDLE wh = CreateFile(filename,
 	                       GENERIC_READ | ((flags & IAsyncFile::OPEN_READWRITE) ? GENERIC_WRITE : 0),
 	                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -3003,7 +3003,7 @@ int sf_open(const char* filename, int flags, int convFlags, int mode) {
 #endif
 
 // Opens a file for asynchronous I/O
-Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
+Future<Reference<class IAsyncFile>> Sim2FileSystem::open(std::string const& filename, int64_t flags, int64_t mode) {
 	ASSERT((flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) || !(flags & IAsyncFile::OPEN_CREATE) ||
 	       StringRef(filename).endsWith(
 	           ".fdb-lock"_sr)); // We don't use "ordinary" non-atomic file creation right now except for
@@ -3062,7 +3062,7 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power
 // failure.
-Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
+Future<Void> Sim2FileSystem::deleteFile(std::string const& filename, bool mustBeDurable) {
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
@@ -3093,7 +3093,7 @@ Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string con
 	return renameFileImpl(from, to);
 }
 
-Future<std::time_t> Sim2FileSystem::lastWriteTime(const std::string& filename) {
+Future<std::time_t> Sim2FileSystem::lastWriteTime(std::string const& filename) {
 	// TODO: update this map upon file writes.
 	static std::map<std::string, double> fileWrites;
 	if (BUGGIFY && deterministicRandom()->random01() < 0.01) {

@@ -109,7 +109,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				//     .detail("KeyRangesBackBeginKey", keyRanges.back().begin)
 				//     .detail("KeyRangesBackEndKey", keyRanges.back().end);
 				// Loose check.
-				for (const auto& kr : keyRanges) {
+				for (auto const& kr : keyRanges) {
 					if (kr.keys.contains(self->readKey)) {
 						self->passed = true;
 						co_return;

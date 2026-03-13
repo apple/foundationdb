@@ -97,16 +97,16 @@ struct WorkloadConfig {
 	std::unordered_map<std::string, std::string> options;
 
 	// Get option of a certain type by name. Throws an exception if the values is of a wrong type
-	int getIntOption(const std::string& name, int defaultVal) const;
-	double getFloatOption(const std::string& name, double defaultVal) const;
-	bool getBoolOption(const std::string& name, bool defaultVal) const;
+	int getIntOption(std::string const& name, int defaultVal) const;
+	double getFloatOption(std::string const& name, double defaultVal) const;
+	bool getBoolOption(std::string const& name, bool defaultVal) const;
 };
 
 // A base class for test workloads
 // Tracks if workload is active, notifies the workload manager when the workload completes
 class WorkloadBase : public IWorkload {
 public:
-	WorkloadBase(const WorkloadConfig& config);
+	WorkloadBase(WorkloadConfig const& config);
 
 	// Initialize the workload
 	void init(WorkloadManager* manager) override;
@@ -136,10 +136,10 @@ protected:
 	                   bool failOnError = true);
 
 	// Log an error message, increase error counter
-	void error(const std::string& msg);
+	void error(std::string const& msg);
 
 	// Log an info message
-	void info(const std::string& msg);
+	void info(std::string const& msg);
 
 	// Confirm a successful progress check
 	void confirmProgress();
@@ -204,7 +204,7 @@ public:
 	  : txExecutor(txExecutor), scheduler(scheduler), numWorkloadsFailed(0) {}
 
 	// Open named pipes for communication with the test controller
-	void openControlPipes(const std::string& inputPipeName, const std::string& outputPipeName);
+	void openControlPipes(std::string const& inputPipeName, std::string const& outputPipeName);
 
 	// Add a workload
 	// A continuation is to be specified for subworkloads
@@ -283,14 +283,14 @@ private:
 // A workload factory
 struct IWorkloadFactory {
 	// create a workload by name
-	static std::shared_ptr<IWorkload> create(std::string const& name, const WorkloadConfig& config);
+	static std::shared_ptr<IWorkload> create(std::string const& name, WorkloadConfig const& config);
 
 	// a singleton registry of workload factories
 	static std::unordered_map<std::string, IWorkloadFactory*>& factories();
 
 	// Interface to be implemented by a workload factory
 	virtual ~IWorkloadFactory() = default;
-	virtual std::shared_ptr<IWorkload> create(const WorkloadConfig& config) = 0;
+	virtual std::shared_ptr<IWorkload> create(WorkloadConfig const& config) = 0;
 };
 
 /**
@@ -301,8 +301,8 @@ struct IWorkloadFactory {
  */
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = this; }
-	std::shared_ptr<IWorkload> create(const WorkloadConfig& config) override {
+	WorkloadFactory(char const* name) { factories()[name] = this; }
+	std::shared_ptr<IWorkload> create(WorkloadConfig const& config) override {
 		return std::make_shared<WorkloadType>(config);
 	}
 };

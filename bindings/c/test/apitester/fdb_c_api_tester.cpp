@@ -87,7 +87,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_RETAIN_CLIENT_LIB_COPIES, "--retain-client-lib-copies", SO_NONE },
 	  SO_END_OF_OPTIONS };
 
-void printProgramUsage(const char* execName) {
+void printProgramUsage(char const* execName) {
 	printf("usage: %s [OPTIONS]\n"
 	       "\n",
 	       execName);
@@ -142,9 +142,9 @@ bool validateTraceFormat(std::string_view format) {
 	return format == "xml" || format == "json";
 }
 
-const int MIN_TESTABLE_API_VERSION = 400;
+int const MIN_TESTABLE_API_VERSION = 400;
 
-void processIntOption(const std::string& optionName, const std::string& value, int minValue, int maxValue, int& res) {
+void processIntOption(std::string const& optionName, std::string const& value, int minValue, int maxValue, int& res) {
 	char* endptr;
 	res = strtol(value.c_str(), &endptr, 10);
 	if (*endptr != '\0') {
@@ -156,7 +156,7 @@ void processIntOption(const std::string& optionName, const std::string& value, i
 	}
 }
 
-bool processArg(TesterOptions& options, const CSimpleOpt& args) {
+bool processArg(TesterOptions& options, CSimpleOpt const& args) {
 	switch (args.OptionId()) {
 	case OPT_CONNFILE:
 		options.clusterFile = args.OptionArg();
@@ -355,7 +355,7 @@ bool runWorkloads(TesterOptions& options) {
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
 		int maxSelfBlockingFutures = 0;
-		for (const auto& workloadSpec : options.testSpec.workloads) {
+		for (auto const& workloadSpec : options.testSpec.workloads) {
 			for (int i = 0; i < options.numClients; i++) {
 				WorkloadConfig config;
 				config.name = workloadSpec.name;
@@ -389,7 +389,7 @@ bool runWorkloads(TesterOptions& options) {
 		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
 
 		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
-		for (const auto& workload : workloads) {
+		for (auto const& workload : workloads) {
 			workloadMgr.add(workload);
 		}
 
@@ -403,7 +403,7 @@ bool runWorkloads(TesterOptions& options) {
 		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
-	} catch (const std::exception& err) {
+	} catch (std::exception const& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		return false;
 	}
@@ -437,7 +437,7 @@ int main(int argc, char** argv) {
 		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
 		fprintf(stderr, "FDB network thread successfully stopped\n");
-	} catch (const std::exception& err) {
+	} catch (std::exception const& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;
 	}

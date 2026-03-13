@@ -22,17 +22,17 @@
 
 UnitTestCollection g_unittests = { nullptr };
 
-UnitTest::UnitTest(const char* name, const char* file, int line, TestFunction func)
+UnitTest::UnitTest(char const* name, char const* file, int line, TestFunction func)
   : name(name), file(file), line(line), func(func), next(g_unittests.tests) {
 	g_unittests.tests = this;
 }
 
-void UnitTestParameters::set(const std::string& name, const std::string& value) {
+void UnitTestParameters::set(std::string const& name, std::string const& value) {
 	printf("setting %s = %s\n", name.c_str(), value.c_str());
 	params[name] = value;
 }
 
-Optional<std::string> UnitTestParameters::get(const std::string& name) const {
+Optional<std::string> UnitTestParameters::get(std::string const& name) const {
 	auto it = params.find(name);
 	if (it != params.end()) {
 		return it->second;
@@ -40,15 +40,15 @@ Optional<std::string> UnitTestParameters::get(const std::string& name) const {
 	return {};
 }
 
-void UnitTestParameters::set(const std::string& name, int64_t value) {
+void UnitTestParameters::set(std::string const& name, int64_t value) {
 	set(name, format("%" PRId64, value));
 };
 
-void UnitTestParameters::set(const std::string& name, double value) {
+void UnitTestParameters::set(std::string const& name, double value) {
 	set(name, format("%g", value));
 };
 
-Optional<int64_t> UnitTestParameters::getInt(const std::string& name) const {
+Optional<int64_t> UnitTestParameters::getInt(std::string const& name) const {
 	auto opt = get(name);
 	if (opt.present()) {
 		return atoll(opt.get().c_str());
@@ -56,7 +56,7 @@ Optional<int64_t> UnitTestParameters::getInt(const std::string& name) const {
 	return {};
 }
 
-Optional<double> UnitTestParameters::getDouble(const std::string& name) const {
+Optional<double> UnitTestParameters::getDouble(std::string const& name) const {
 	auto opt = get(name);
 	if (opt.present()) {
 		return atof(opt.get().c_str());

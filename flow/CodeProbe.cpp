@@ -55,7 +55,7 @@ std::vector<ExecutionContext> fromStrings(std::vector<std::string> const& ctxs) 
 	return res;
 }
 
-std::string_view normalizePath(const char* path) {
+std::string_view normalizePath(char const* path) {
 	std::string_view srcBase(FDB_SOURCE_DIR);
 	std::string_view binBase(FDB_SOURCE_DIR);
 	std::string_view filename(path);
@@ -115,7 +115,7 @@ struct CodeProbes {
 
 	void verify() const {
 		std::map<std::pair<std::string_view, std::string_view>, ICodeProbe const*> comments;
-		for (const auto& [probeLocation, probe] : codeProbes) {
+		for (auto const& [probeLocation, probe] : codeProbes) {
 			auto file = probeLocation.file;
 			auto comment = probe->comment();
 			auto commentEntry = std::make_pair(file, std::string_view(comment));
@@ -156,7 +156,7 @@ struct CodeProbes {
 		} else {
 			std::vector<std::string_view> files;
 			fmt::print("\t<CoverageCases>\n");
-			for (const auto& [probeLocation, probe] : codeProbes) {
+			for (auto const& [probeLocation, probe] : codeProbes) {
 				files.push_back(probeLocation.file);
 				fmt::print("\t\t<Case File=\"{}\" Line=\"{}\" Comment=\"{}\" Condition=\"{}\"/>\n",
 				           probeLocation.file,
@@ -187,8 +187,8 @@ struct CodeProbes {
 			fmt::print("{}\n", boost::core::demangle(typeid(f).name()));
 		} while (false);
 		auto contexts = fromStrings(context);
-		const ICodeProbe* prev = nullptr;
-		for (const auto& [_probeLocation, probe] : codeProbes) {
+		ICodeProbe const* prev = nullptr;
+		for (auto const& [_probeLocation, probe] : codeProbes) {
 			if (!contexts.empty()) {
 				bool print = false;
 				for (auto c : contexts) {
@@ -222,12 +222,12 @@ size_t hash_value(CodeProbes::Location const& location) {
 
 void CodeProbes::traceMissedProbes(Optional<ExecutionContext> context) const {
 	boost::unordered_map<Location, bool> locations;
-	for (const auto& [probeLocation, probe] : codeProbes) {
+	for (auto const& [probeLocation, probe] : codeProbes) {
 		decltype(locations.begin()) iter;
 		std::tie(iter, std::ignore) = locations.emplace(probeLocation, false);
 		iter->second = iter->second || probe->wasHit();
 	}
-	for (const auto& [loc, probe] : codeProbes) {
+	for (auto const& [loc, probe] : codeProbes) {
 		auto iter = locations.find(loc);
 		ASSERT(iter != locations.end());
 		if (!iter->second && probe->shouldTrace()) {
@@ -239,14 +239,14 @@ void CodeProbes::traceMissedProbes(Optional<ExecutionContext> context) const {
 
 } // namespace
 
-std::string functionNameFromInnerType(const char* name) {
+std::string functionNameFromInnerType(char const* name) {
 	auto res = boost::core::demangle(name);
 	auto pos = res.find_last_of(':');
 	ASSERT(pos != res.npos);
 	return res.substr(0, pos - 1);
 }
 
-void registerProbe(const ICodeProbe& probe) {
+void registerProbe(ICodeProbe const& probe) {
 	CodeProbes::instance().add(&probe);
 }
 
@@ -256,11 +256,11 @@ void traceMissedProbes(Optional<ExecutionContext> context) {
 
 ICodeProbe::~ICodeProbe() {}
 
-bool ICodeProbe::operator==(const ICodeProbe& other) const {
+bool ICodeProbe::operator==(ICodeProbe const& other) const {
 	return filename() == other.filename() && line() == other.line();
 }
 
-bool ICodeProbe::operator!=(const ICodeProbe& other) const {
+bool ICodeProbe::operator!=(ICodeProbe const& other) const {
 	return !(*this == other);
 }
 

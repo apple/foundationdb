@@ -26,7 +26,7 @@
 // Convert hierarchical metric names into Prometheus-compatible metric
 // names.  Do this by a) removing initial '/' chars, and b) converting
 // remaining '/' chars to '_' chars.
-static std::string hierarchicalToPrometheus(const std::string input) {
+static std::string hierarchicalToPrometheus(std::string const input) {
 	std::string output;
 	for (char ch : input) {
 		if (ch == '/') {

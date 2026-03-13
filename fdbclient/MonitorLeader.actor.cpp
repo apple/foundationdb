@@ -84,7 +84,7 @@ std::string ClusterConnectionString::getErrorString(std::string const& source, E
 	}
 }
 
-ClusterConnectionString::ClusterConnectionString(const std::string& connectionString) {
+ClusterConnectionString::ClusterConnectionString(std::string const& connectionString) {
 	auto trimmed = trim(connectionString);
 	// Split on '@' into key@addrs
 	int pAt = trimmed.find_first_of('@');
@@ -269,7 +269,7 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 
 ACTOR Future<std::vector<NetworkAddress>> tryResolveHostnamesImpl(ClusterConnectionString* self) {
 	state std::set<NetworkAddress> allCoordinatorsSet;
-	for (const auto& coord : self->coords) {
+	for (auto const& coord : self->coords) {
 		allCoordinatorsSet.insert(coord);
 	}
 	std::vector<Future<Void>> fs;
@@ -387,7 +387,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 	return Void();
 }
 
-ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddress>& servers, Key key)
+ClusterConnectionString::ClusterConnectionString(std::vector<NetworkAddress> const& servers, Key key)
   : coords(servers) {
 	std::set<NetworkAddress> s(servers.begin(), servers.end());
 	if (s.size() != servers.size()) {
@@ -397,7 +397,7 @@ ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddres
 	parseKey(keyString);
 }
 
-ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key) : hostnames(hosts) {
+ClusterConnectionString::ClusterConnectionString(std::vector<Hostname> const& hosts, Key key) : hostnames(hosts) {
 	std::set<Hostname> h(hosts.begin(), hosts.end());
 	if (h.size() != hosts.size()) {
 		throw connection_string_invalid();
@@ -406,7 +406,7 @@ ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& ho
 	parseKey(keyString);
 }
 
-void ClusterConnectionString::parseKey(const std::string& key) {
+void ClusterConnectionString::parseKey(std::string const& key) {
 	// Check the structure of the given key, and fill in this->key and this->keyDesc
 
 	// The key must contain one (and only one) : character
@@ -466,7 +466,7 @@ ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) 
 
 ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators)
   : clusterKey(clusterKey) {
-	for (const auto& coord : coordinators) {
+	for (auto const& coord : coordinators) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(coord));
 	}
 	ccr = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(coordinators, clusterKey));
@@ -535,7 +535,7 @@ ACTOR Future<Void> monitorNominee(Key key,
 // Also used in fdbserver/LeaderElection.actor.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
 // This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
-Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees) {
+Optional<std::pair<LeaderInfo, bool>> getLeader(std::vector<Optional<LeaderInfo>> const& nominees) {
 	// If any coordinator says that the quorum is forwarded, then it is
 	for (int i = 0; i < nominees.size(); i++)
 		if (nominees[i].present() && nominees[i].get().forward)
@@ -556,7 +556,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 
 	std::sort(maskedNominees.begin(),
 	          maskedNominees.end(),
-	          [](const std::pair<UID, int>& l, const std::pair<UID, int>& r) { return l.first < r.first; });
+	          [](std::pair<UID, int> const& l, std::pair<UID, int> const& r) { return l.first < r.first; });
 
 	int bestCount = 1;
 	int bestIdx = 0;
@@ -668,8 +668,8 @@ ACTOR Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> s
 namespace {
 
 void tryInsertIntoSamples(OpenDatabaseRequest::Samples& samples,
-                          const NetworkAddress& networkAddress,
-                          const Key& traceLogGroup) {
+                          NetworkAddress const& networkAddress,
+                          Key const& traceLogGroup) {
 	++samples.count;
 	if (samples.samples.size() < static_cast<size_t>(CLIENT_KNOBS->CLIENT_EXAMPLE_AMOUNT)) {
 		samples.samples.insert({ networkAddress, traceLogGroup });
@@ -682,8 +682,8 @@ OpenDatabaseRequest ClientData::getRequest() {
 	OpenDatabaseRequest req;
 
 	for (auto& ci : clientStatusInfoMap) {
-		const auto& networkAddress = ci.first;
-		const auto& traceLogGroup = ci.second.traceLogGroup;
+		auto const& networkAddress = ci.first;
+		auto const& traceLogGroup = ci.second.traceLogGroup;
 
 		for (auto& issue : ci.second.issues) {
 			tryInsertIntoSamples(req.issues[issue], networkAddress, traceLogGroup);
@@ -858,10 +858,10 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 	state bool allConnectionsFailed = false;
 
 	clientLeaderServers.reserve(coordinatorsSize);
-	for (const auto& h : cs.hostnames) {
+	for (auto const& h : cs.hostnames) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
 	}
-	for (const auto& c : cs.coords) {
+	for (auto const& c : cs.coords) {
 		clientLeaderServers.push_back(ClientLeaderRegInterface(c));
 	}
 	ASSERT(clientLeaderServers.size() > 0);

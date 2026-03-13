@@ -28,8 +28,8 @@
 
 IAsyncFile::~IAsyncFile() = default;
 
-const static unsigned int ONE_MEGABYTE = 1 << 20;
-const static unsigned int FOUR_KILOBYTES = 4 << 10;
+static unsigned int const ONE_MEGABYTE = 1 << 20;
+static unsigned int const FOUR_KILOBYTES = 4 << 10;
 
 ACTOR static Future<Void> zeroRangeHelper(Reference<IAsyncFile> f, int64_t offset, int64_t length, int fixedbyte) {
 	state int64_t pos = offset;
@@ -109,7 +109,7 @@ ACTOR static Future<Void> incrementalDeleteHelper(std::string filename,
 	return Void();
 }
 
-Future<Void> IAsyncFileSystem::incrementalDeleteFile(const std::string& filename, bool mustBeDurable) {
+Future<Void> IAsyncFileSystem::incrementalDeleteFile(std::string const& filename, bool mustBeDurable) {
 	return uncancellable(incrementalDeleteHelper(filename,
 	                                             mustBeDurable,
 	                                             FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT,
@@ -163,7 +163,7 @@ TEST_CASE("/fileio/rename") {
 	bool renamedExists = false;
 	auto bName = basename(renamedFile);
 	auto files = platform::listFiles("/tmp/");
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		if (file == bName) {
 			renamedExists = true;
 		}

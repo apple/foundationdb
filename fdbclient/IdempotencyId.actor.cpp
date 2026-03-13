@@ -38,7 +38,7 @@ void IdempotencyIdKVBuilder::setCommitVersion(Version commitVersion) {
 	impl->commitVersion = commitVersion;
 }
 
-void IdempotencyIdKVBuilder::add(const IdempotencyIdRef& id, uint16_t batchIndex) {
+void IdempotencyIdKVBuilder::add(IdempotencyIdRef const& id, uint16_t batchIndex) {
 	ASSERT(id.valid());
 	if (impl->batchIndexHighOrderByte.present()) {
 		ASSERT((batchIndex >> 8) == impl->batchIndexHighOrderByte.get());
@@ -75,7 +75,7 @@ Optional<KeyValue> IdempotencyIdKVBuilder::buildAndClear() {
 
 IdempotencyIdKVBuilder::~IdempotencyIdKVBuilder() = default;
 
-Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id) {
+Optional<CommitResult> kvContainsIdempotencyId(KeyValueRef const& kv, IdempotencyIdRef const& id) {
 	ASSERT(id.valid());
 	StringRef needle = id.asStringRefUnsafe();
 	StringRef haystack = kv.value;
@@ -94,7 +94,7 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 	while (!reader.empty()) {
 		uint8_t length;
 		reader >> length;
-		StringRef candidate{ reinterpret_cast<const uint8_t*>(reader.readBytes(length)), length };
+		StringRef candidate{ reinterpret_cast<uint8_t const*>(reader.readBytes(length)), length };
 		uint8_t lowOrderBatchIndex;
 		reader >> lowOrderBatchIndex;
 		if (candidate == needle) {
@@ -141,10 +141,10 @@ TEST_CASE("/fdbclient/IdempotencyId/basic") {
 	batchIndex = firstBatchIndex;
 	Optional<KeyValue> kvOpt = builder.buildAndClear();
 	ASSERT(kvOpt.present());
-	const auto& kv = kvOpt.get();
+	auto const& kv = kvOpt.get();
 
 	ASSERT(idSet.size() == idVector.size());
-	for (const auto& id : idVector) {
+	for (auto const& id : idVector) {
 		auto commitResult = kvContainsIdempotencyId(kv, id);
 		ASSERT(commitResult.present());
 		ASSERT(commitResult.get().commitVersion == commitVersion);
@@ -176,7 +176,7 @@ TEST_CASE("/fdbclient/IdempotencyId/serialization") {
 }
 
 KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex) {
-	static const auto size =
+	static auto const size =
 	    idempotencyIdKeys.begin.size() + sizeof(version) + sizeof(highOrderBatchIndex) + /*\x00*/ 1;
 
 	StringRef second = makeString(size, arena);

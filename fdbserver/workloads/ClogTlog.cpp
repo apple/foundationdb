@@ -73,8 +73,8 @@ struct ClogTlogWorkload : TestWorkload {
 
 		IPAddress cc = dbInfo->get().clusterInterface.address().ip;
 		std::vector<IPAddress> ips; // all FDB process IPs
-		for (const auto& process : g_simulator->getAllProcesses()) {
-			const auto& ip = process->address.ip;
+		for (auto const& process : g_simulator->getAllProcesses()) {
+			auto const& ip = process->address.ip;
 			if (process->startingClass != ProcessClass::TesterClass) {
 				ips.push_back(ip);
 			}
@@ -84,11 +84,11 @@ struct ClogTlogWorkload : TestWorkload {
 		// Find all primary tlogs
 		std::vector<NetworkAddress> logs; // all primary logs except CC
 		for (int i = 0; i < dbInfo->get().logSystemConfig.tLogs.size(); i++) {
-			const auto& tlogset = dbInfo->get().logSystemConfig.tLogs[i];
+			auto const& tlogset = dbInfo->get().logSystemConfig.tLogs[i];
 			if (!tlogset.isLocal)
 				continue;
-			for (const auto& log : tlogset.tLogs) {
-				const NetworkAddress& addr = log.interf().address();
+			for (auto const& log : tlogset.tLogs) {
+				NetworkAddress const& addr = log.interf().address();
 				if (cc != addr.ip) {
 					if (!tlog.present()) {
 						tlog = addr;
@@ -100,7 +100,7 @@ struct ClogTlogWorkload : TestWorkload {
 		ASSERT(logs.size() > 0 && tlog.present());
 
 		// clog pairs
-		for (const auto& ip : ips) {
+		for (auto const& ip : ips) {
 			if (ip != tlog.get().ip && ip != cc) {
 				if (useDisconnection) {
 					g_simulator->disconnectPair(ip, tlog.get().ip, seconds);
@@ -118,7 +118,7 @@ struct ClogTlogWorkload : TestWorkload {
 
 	void unclogAll() {
 		// unclog previously clogged connections
-		for (const auto& pair : cloggedPairs) {
+		for (auto const& pair : cloggedPairs) {
 			if (useDisconnection) {
 				g_simulator->reconnectPair(pair.first, pair.second);
 			} else {

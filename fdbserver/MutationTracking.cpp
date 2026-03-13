@@ -34,13 +34,13 @@
 // keys in debugKeys and the ranges in debugRanges.
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // MutationTracking TraceEvent for easier searching/recognition.
-std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "foo"_sr } };
-std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = { { "Everything", { ""_sr, "\xff\xff\xff\xff"_sr } } };
+std::vector<std::pair<char const*, KeyRef>> debugKeys = { { "SomeKey", "foo"_sr } };
+std::vector<std::pair<char const*, KeyRangeRef>> debugRanges = { { "Everything", { ""_sr, "\xff\xff\xff\xff"_sr } } };
 
-TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
-	const char* label = nullptr;
+TraceEvent debugMutationEnabled(char const* context, Version version, MutationRef const& mutation, UID id) {
+	char const* label = nullptr;
 
-	for (const auto& [keyLabel, debugKey] : debugKeys) {
+	for (auto const& [keyLabel, debugKey] : debugKeys) {
 		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
 		     KeyRangeRef(mutation.param1, mutation.param2).contains(debugKey)) ||
 		    mutation.param1 == debugKey) {
@@ -49,7 +49,7 @@ TraceEvent debugMutationEnabled(const char* context, Version version, MutationRe
 		}
 	}
 
-	for (const auto& [rangeLabel, debugRange] : debugRanges) {
+	for (auto const& [rangeLabel, debugRange] : debugRanges) {
 		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
 		     KeyRangeRef(mutation.param1, mutation.param2).intersects(debugRange)) ||
 		    debugRange.contains(mutation.param1)) {
@@ -67,11 +67,11 @@ TraceEvent debugMutationEnabled(const char* context, Version version, MutationRe
 	return TraceEvent();
 }
 
-TraceEvent debugKeyRangeEnabled(const char* context, Version version, KeyRangeRef const& keys, UID id) {
+TraceEvent debugKeyRangeEnabled(char const* context, Version version, KeyRangeRef const& keys, UID id) {
 	return debugMutation(context, version, MutationRef(MutationRef::DebugKeyRange, keys.begin, keys.end), id);
 }
 
-TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, StringRef commitBlob, UID id) {
+TraceEvent debugTagsAndMessageEnabled(char const* context, Version version, StringRef commitBlob, UID id) {
 	BinaryReader rdr(commitBlob, AssumeVersion(g_network->protocolVersion()));
 	while (!rdr.empty()) {
 		if (*(int32_t*)rdr.peekBytes(4) == VERSION_HEADER) {
@@ -82,7 +82,7 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 		TagsAndMessage msg;
 		msg.loadFromArena(&rdr, nullptr);
 		bool logAdapterMessage =
-		    std::any_of(msg.tags.begin(), msg.tags.end(), [](const Tag& t) { return t.locality == tagLocalityTxs; });
+		    std::any_of(msg.tags.begin(), msg.tags.end(), [](Tag const& t) { return t.locality == tagLocalityTxs; });
 		StringRef mutationData = msg.getMessageWithoutTags();
 		uint8_t mutationType = *mutationData.begin();
 		if (logAdapterMessage) {
@@ -116,23 +116,23 @@ TraceEvent debugTagsAndMessageEnabled(const char* context, Version version, Stri
 }
 
 #if MUTATION_TRACKING_ENABLED
-TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id) {
+TraceEvent debugMutation(char const* context, Version version, MutationRef const& mutation, UID id) {
 	return debugMutationEnabled(context, version, mutation, id);
 }
-TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys, UID id) {
+TraceEvent debugKeyRange(char const* context, Version version, KeyRangeRef const& keys, UID id) {
 	return debugKeyRangeEnabled(context, version, keys, id);
 }
-TraceEvent debugTagsAndMessage(const char* context, Version version, StringRef commitBlob, UID id) {
+TraceEvent debugTagsAndMessage(char const* context, Version version, StringRef commitBlob, UID id) {
 	return debugTagsAndMessageEnabled(context, version, commitBlob, id);
 }
 #else
-TraceEvent debugMutation(const char* context, Version version, MutationRef const& mutation, UID id) {
+TraceEvent debugMutation(char const* context, Version version, MutationRef const& mutation, UID id) {
 	return TraceEvent();
 }
-TraceEvent debugKeyRange(const char* context, Version version, KeyRangeRef const& keys, UID id) {
+TraceEvent debugKeyRange(char const* context, Version version, KeyRangeRef const& keys, UID id) {
 	return TraceEvent();
 }
-TraceEvent debugTagsAndMessage(const char* context, Version version, StringRef commitBlob, UID id) {
+TraceEvent debugTagsAndMessage(char const* context, Version version, StringRef commitBlob, UID id) {
 	return TraceEvent();
 }
 #endif

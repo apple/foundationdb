@@ -63,11 +63,11 @@ using VersionedMutationsMap = std::map<LogMessageVersion, MutationsVec>;
 ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
 ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
 ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
-void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
+void handleFinishRestoreRequest(RestoreFinishRequest const& req, Reference<RestoreRoleData> self);
 
 class RoleVersionBatchState {
 public:
-	static const int INVALID = -1;
+	static int const INVALID = -1;
 
 	virtual int get() const { return vbState; }
 
@@ -101,8 +101,7 @@ public:
 	NotifiedVersion versionBatchId; // The index of the version batch that has been initialized and put into pipeline
 	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
-	RestoreRoleData()
-	  : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0), delayedActors(0) {};
+	RestoreRoleData() : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0), delayedActors(0){};
 
 	virtual ~RestoreRoleData() = default;
 

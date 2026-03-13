@@ -448,12 +448,12 @@ ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
 		if (model == MetricsDataModel::STATSD) {
 			std::string statsd_message = message.toString();
 			auto metrics = splitString(statsd_message, "\n");
-			for (const auto& metric : metrics) {
+			for (auto const& metric : metrics) {
 				ASSERT(verifyStatsdMessage(metric));
 			}
 		} else if (model == MetricsDataModel::OTLP) {
 			msgpack::object_handle result;
-			msgpack::unpack(result, reinterpret_cast<const char*>(packet), size);
+			msgpack::unpack(result, reinterpret_cast<char const*>(packet), size);
 		}
 	}
 }
@@ -480,7 +480,7 @@ ACTOR Future<Void> runMetrics() {
 }
 
 TEST_CASE("/fdbserver/metrics/TraceEvents") {
-	auto getenv2 = [](const char* s) -> const char* {
+	auto getenv2 = [](char const* s) -> char const* {
 		s = getenv(s);
 		return s ? s : "";
 	};
@@ -516,8 +516,8 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	state BoolMetricHandle boolMetric = BoolMetricHandle("DummyBool"_sr);
 	state StringMetricHandle stringMetric = StringMetricHandle("DummyString"_sr);
 
-	static const char* dStrings[] = { "one", "two", "" };
-	state const char** d = dStrings;
+	static char const* dStrings[] = { "one", "two", "" };
+	state char const** d = dStrings;
 	state Arena arena;
 
 	loop {
@@ -526,7 +526,7 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 			for (int i = 0; i < chunk; ++i, ++x) {
 				intMetric = x;
 				boolMetric = (x % 2) > 0;
-				const char* s = d[x % 3];
+				char const* s = d[x % 3];
 				// s doesn't actually require an arena
 				stringMetric = Standalone<StringRef>(StringRef((uint8_t*)s, strlen(s)), arena);
 

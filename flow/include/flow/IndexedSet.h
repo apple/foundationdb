@@ -89,35 +89,35 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 
 	template <bool isConst>
 	struct IteratorImpl {
-		typename std::conditional_t<isConst, const IndexedSet::Node, IndexedSet::Node>* node;
+		typename std::conditional_t<isConst, IndexedSet::Node const, IndexedSet::Node>* node;
 
-		explicit IteratorImpl<isConst>(const IteratorImpl<!isConst>& nonConstIter) : node(nonConstIter.node) {
+		explicit IteratorImpl<isConst>(IteratorImpl<!isConst> const& nonConstIter) : node(nonConstIter.node) {
 			static_assert(isConst);
 		}
 
-		explicit IteratorImpl(decltype(node) n = nullptr) : node(n) {};
+		explicit IteratorImpl(decltype(node) n = nullptr) : node(n){};
 
-		typename std::conditional_t<isConst, const T, T>& operator*() const { return node->data; }
+		typename std::conditional_t<isConst, T const, T>& operator*() const { return node->data; }
 
-		typename std::conditional_t<isConst, const T, T>* operator->() const { return &node->data; }
+		typename std::conditional_t<isConst, T const, T>* operator->() const { return &node->data; }
 
 		void operator++();
 		void decrementNonEnd();
-		bool operator==(const IteratorImpl<isConst>& r) const { return node == r.node; }
-		bool operator!=(const IteratorImpl<isConst>& r) const { return node != r.node; }
+		bool operator==(IteratorImpl<isConst> const& r) const { return node == r.node; }
+		bool operator!=(IteratorImpl<isConst> const& r) const { return node != r.node; }
 		// following two methods are for memory storage engine(KeyValueStoreMemory class) use only
 		// in order to have same interface as radixtree
-		typename std::conditional_t<isConst, const StringRef, StringRef>& getKey(uint8_t* dummyContent) const {
+		typename std::conditional_t<isConst, StringRef const, StringRef>& getKey(uint8_t* dummyContent) const {
 			return node->data.key;
 		}
-		typename std::conditional_t<isConst, const StringRef, StringRef>& getValue() const { return node->data.value; }
+		typename std::conditional_t<isConst, StringRef const, StringRef>& getValue() const { return node->data.value; }
 	};
 
 	template <bool isConst>
 	struct Impl {
-		using NodeT = std::conditional_t<isConst, const Node, Node>;
+		using NodeT = std::conditional_t<isConst, Node const, Node>;
 		using IteratorT = IteratorImpl<isConst>;
-		using SetT = std::conditional_t<isConst, const IndexedSet<T, Metric>, IndexedSet<T, Metric>>;
+		using SetT = std::conditional_t<isConst, IndexedSet<T, Metric> const, IndexedSet<T, Metric>>;
 
 		static IteratorT begin(SetT&);
 
@@ -125,19 +125,19 @@ private: // Forward-declare IndexedSet::Node because Clang is much stricter abou
 		static IteratorImpl<isConst || constIterator> previous(SetT&, IteratorImpl<constIterator>);
 
 		template <class M>
-		static IteratorT index(SetT&, const M&);
+		static IteratorT index(SetT&, M const&);
 
 		template <class Key>
-		static IteratorT find(SetT&, const Key&);
+		static IteratorT find(SetT&, Key const&);
 
 		template <class Key>
-		static IteratorT upper_bound(SetT&, const Key&);
+		static IteratorT upper_bound(SetT&, Key const&);
 
 		template <class Key>
-		static IteratorT lower_bound(SetT&, const Key&);
+		static IteratorT lower_bound(SetT&, Key const&);
 
 		template <class Key>
-		static IteratorT lastLessOrEqual(SetT&, const Key&);
+		static IteratorT lastLessOrEqual(SetT&, Key const&);
 
 		static IteratorT lastItem(SetT&);
 	};
@@ -149,7 +149,7 @@ public:
 	using iterator = IteratorImpl<false>;
 	using const_iterator = IteratorImpl<true>;
 
-	IndexedSet() : root(nullptr) {};
+	IndexedSet() : root(nullptr){};
 	~IndexedSet() { delete root; }
 	IndexedSet(IndexedSet&& r) noexcept : root(r.root) { r.root = nullptr; }
 	IndexedSet& operator=(IndexedSet&& r) noexcept {
@@ -190,7 +190,7 @@ public:
 	// and,
 	//   replaceExisting == true, it will be overwritten (and its metric will be replaced). returns the number of items
 	//   inserted.
-	int insert(const std::vector<std::pair<T, Metric>>& data, bool replaceExisting = true);
+	int insert(std::vector<std::pair<T, Metric>> const& data, bool replaceExisting = true);
 
 	// Increase the metric for the given item by the given amount.  Inserts data into the set if it
 	//   doesn't exist. Returns the pair of new sum and inserted iterator.
@@ -199,7 +199,7 @@ public:
 
 	// Remove the data item, if any, which is equal to key
 	template <class Key>
-	void erase(const Key& key) {
+	void erase(Key const& key) {
 		erase(find(key));
 	}
 
@@ -209,14 +209,14 @@ public:
 
 	// Erase all data items x for which begin<=x<end
 	template <class Key>
-	void erase(const Key& begin, const Key& end) {
+	void erase(Key const& begin, Key const& end) {
 		erase(lower_bound(begin), lower_bound(end));
 	}
 
 	// Erase data items with a deferred (async) free process. The data structure has the items removed
 	//  synchronously with the invocation of this method so any subsequent call will see this new state.
 	template <class Key>
-	Future<Void> eraseAsync(const Key& begin, const Key& end);
+	Future<Void> eraseAsync(Key const& begin, Key const& end);
 
 	// Erase the items in the indicated range.
 	void erase(iterator begin, iterator end);
@@ -227,51 +227,51 @@ public:
 
 	// Returns the number of items equal to key (either 0 or 1)
 	template <class Key>
-	int count(const Key& key) const {
+	int count(Key const& key) const {
 		return find(key) != end();
 	}
 
 	// Returns x such that key==*x, or end()
 	template <class Key>
-	const_iterator find(const Key& key) const {
+	const_iterator find(Key const& key) const {
 		return ConstImpl::find(*this, key);
 	}
 
 	template <class Key>
-	iterator find(const Key& key) {
+	iterator find(Key const& key) {
 		return NonConstImpl::find(*this, key);
 	}
 
 	// Returns the smallest x such that *x>=key, or end()
 	template <class Key>
-	const_iterator lower_bound(const Key& key) const {
+	const_iterator lower_bound(Key const& key) const {
 		return ConstImpl::lower_bound(*this, key);
 	}
 
 	template <class Key>
-	iterator lower_bound(const Key& key) {
+	iterator lower_bound(Key const& key) {
 		return NonConstImpl::lower_bound(*this, key);
 	};
 
 	// Returns the smallest x such that *x>key, or end()
 	template <class Key>
-	const_iterator upper_bound(const Key& key) const {
+	const_iterator upper_bound(Key const& key) const {
 		return ConstImpl::upper_bound(*this, key);
 	}
 
 	template <class Key>
-	iterator upper_bound(const Key& key) {
+	iterator upper_bound(Key const& key) {
 		return NonConstImpl::upper_bound(*this, key);
 	};
 
 	// Returns the largest x such that *x<=key, or end()
 	template <class Key>
-	const_iterator lastLessOrEqual(const Key& key) const {
+	const_iterator lastLessOrEqual(Key const& key) const {
 		return ConstImpl::lastLessOrEqual(*this, key);
 	};
 
 	template <class Key>
-	iterator lastLessOrEqual(const Key& key) {
+	iterator lastLessOrEqual(Key const& key) {
 		return NonConstImpl::lastLessOrEqual(*this, key);
 	}
 
@@ -302,7 +302,7 @@ public:
 
 	// Return the sum of getMetric(x) for all x s.t. begin <= *x && *x < end
 	template <class Key>
-	Metric sumRange(const Key& begin, const Key& end) const {
+	Metric sumRange(Key const& begin, Key const& end) const {
 		return sumRange(lower_bound(begin), lower_bound(end));
 	}
 
@@ -311,8 +311,8 @@ public:
 
 private:
 	// Copy operations unimplemented.  SOMEDAY: Implement and make public.
-	IndexedSet(const IndexedSet&);
-	IndexedSet& operator=(const IndexedSet&);
+	IndexedSet(IndexedSet const&);
+	IndexedSet& operator=(IndexedSet const&);
 
 	Node* root;
 
@@ -329,7 +329,7 @@ private:
 	}
 
 	template <int direction, bool isConst>
-	static void moveIteratorImpl(std::conditional_t<isConst, const Node, Node>*& node) {
+	static void moveIteratorImpl(std::conditional_t<isConst, Node const, Node>*& node) {
 		if (node->child[0 ^ direction]) {
 			node = node->child[0 ^ direction];
 			while (node->child[1 ^ direction])
@@ -439,23 +439,23 @@ public:
 	iterator previous(iterator i) { return set.previous(i); }
 	bool empty() const { return set.empty(); }
 
-	Value& operator[](const Key& key) {
+	Value& operator[](Key const& key) {
 		iterator i = set.insert(Pair(key, Value()), Metric(1), false);
 		return i->value;
 	}
 
-	Value& get(const Key& key, Metric m = Metric(1)) {
+	Value& get(Key const& key, Metric m = Metric(1)) {
 		iterator i = set.insert(Pair(key, Value()), m, false);
 		return i->value;
 	}
 
-	iterator insert(const Pair& p, bool replaceExisting = true, Metric m = Metric(1)) {
+	iterator insert(Pair const& p, bool replaceExisting = true, Metric m = Metric(1)) {
 		return set.insert(p, m, replaceExisting);
 	}
 	iterator insert(Pair&& p, bool replaceExisting = true, Metric m = Metric(1)) {
 		return set.insert(std::move(p), m, replaceExisting);
 	}
-	int insert(const std::vector<std::pair<MapPair<Key, Value>, Metric>>& pairs, bool replaceExisting = true) {
+	int insert(std::vector<std::pair<MapPair<Key, Value>, Metric>> const& pairs, bool replaceExisting = true) {
 		return set.insert(pairs, replaceExisting);
 	}
 
@@ -525,7 +525,7 @@ public:
 	Metric sumRange(const_iterator begin, const_iterator end) const { return set.sumRange(begin, end); }
 	Metric sumRange(iterator begin, iterator end) const { return set.sumRange(begin, end); }
 	template <class KeyCompatible>
-	Metric sumRange(const KeyCompatible& begin, const KeyCompatible& end) const {
+	Metric sumRange(KeyCompatible const& begin, KeyCompatible const& end) const {
 		return set.sumRange(begin, end);
 	}
 
@@ -917,7 +917,7 @@ typename IndexedSet<T, Metric>::iterator IndexedSet<T, Metric>::insert(T_&& data
 }
 
 template <class T, class Metric>
-int IndexedSet<T, Metric>::insert(const std::vector<std::pair<T, Metric>>& dataVector, bool replaceExisting) {
+int IndexedSet<T, Metric>::insert(std::vector<std::pair<T, Metric>> const& dataVector, bool replaceExisting) {
 	int num_inserted = 0;
 	Node* blockStart = nullptr;
 	Node* blockEnd = nullptr;
@@ -1262,7 +1262,7 @@ template <bool isConst>
 template <class Key>
 typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::find(
     IndexedSet<T, Metric>::Impl<isConst>::SetT& self,
-    const Key& key) {
+    Key const& key) {
 	NodeT* t = self.root;
 	while (t) {
 		int cmp = compare(key, t->data);
@@ -1279,7 +1279,7 @@ template <bool isConst>
 template <class Key>
 typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::lower_bound(
     IndexedSet<T, Metric>::Impl<isConst>::SetT& self,
-    const Key& key) {
+    Key const& key) {
 	NodeT* t = self.root;
 	if (!t)
 		return self.end();
@@ -1304,7 +1304,7 @@ template <bool isConst>
 template <class Key>
 typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::upper_bound(
     IndexedSet<T, Metric>::Impl<isConst>::SetT& self,
-    const Key& key) {
+    Key const& key) {
 	NodeT* t = self.root;
 	if (!t)
 		return self.end();
@@ -1328,7 +1328,7 @@ template <bool isConst>
 template <class Key>
 typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::lastLessOrEqual(
     IndexedSet<T, Metric>::Impl<isConst>::SetT& self,
-    const Key& key) {
+    Key const& key) {
 	auto i = self.upper_bound(key);
 	if (i == self.begin())
 		return self.end();
@@ -1341,7 +1341,7 @@ template <bool isConst>
 template <class M>
 typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, Metric>::Impl<isConst>::index(
     IndexedSet<T, Metric>::Impl<isConst>::SetT& self,
-    const M& metric) {
+    M const& metric) {
 	M m = metric;
 	NodeT* t = self.root;
 	while (t) {
@@ -1374,7 +1374,7 @@ Metric IndexedSet<T, Metric>::sumTo(typename IndexedSet<T, Metric>::const_iterat
 		return root ? root->total : Metric();
 
 	Metric m = end.node->child[0] ? end.node->child[0]->total : Metric();
-	for (const Node* p = end.node; p->parent; p = p->parent) {
+	for (Node const* p = end.node; p->parent; p = p->parent) {
 		if (p->parent->child[1] == p) {
 			m = m - p->total;
 			m = m + p->parent->total;
@@ -1397,7 +1397,7 @@ void IndexedSet<T, Metric>::erase(typename IndexedSet<T, Metric>::iterator begin
 
 template <class T, class Metric>
 template <class Key>
-Future<Void> IndexedSet<T, Metric>::eraseAsync(const Key& begin, const Key& end) {
+Future<Void> IndexedSet<T, Metric>::eraseAsync(Key const& begin, Key const& end) {
 	return eraseAsync(lower_bound(begin), lower_bound(end));
 }
 

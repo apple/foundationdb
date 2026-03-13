@@ -86,7 +86,7 @@ std::string pathToString(IDirectory::Path const& path) {
 
 IDirectory::Path combinePaths(IDirectory::Path const& path1, IDirectory::Path const& path2) {
 	IDirectory::Path outPath(path1.begin(), path1.end());
-	for (const auto& p : path2) {
+	for (auto const& p : path2) {
 		outPath.push_back(p);
 	}
 
@@ -102,7 +102,7 @@ void logOp(std::string message, bool force = false) {
 
 // DIRECTORY_CREATE_SUBSPACE
 struct DirectoryCreateSubspaceFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state Tuple path = wait(popTuple(data));
@@ -114,12 +114,12 @@ struct DirectoryCreateSubspaceFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryCreateSubspaceFunc::name = "DIRECTORY_CREATE_SUBSPACE";
+char const* DirectoryCreateSubspaceFunc::name = "DIRECTORY_CREATE_SUBSPACE";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateSubspaceFunc);
 
 // DIRECTORY_CREATE_LAYER
 struct DirectoryCreateLayerFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<Tuple> args = wait(data->stack.waitAndPop(3));
@@ -148,12 +148,12 @@ struct DirectoryCreateLayerFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryCreateLayerFunc::name = "DIRECTORY_CREATE_LAYER";
+char const* DirectoryCreateLayerFunc::name = "DIRECTORY_CREATE_LAYER";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateLayerFunc);
 
 // DIRECTORY_CHANGE
 struct DirectoryChangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple index = wait(data->stack.waitAndPop());
@@ -177,12 +177,12 @@ struct DirectoryChangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryChangeFunc::name = "DIRECTORY_CHANGE";
+char const* DirectoryChangeFunc::name = "DIRECTORY_CHANGE";
 REGISTER_INSTRUCTION_FUNC(DirectoryChangeFunc);
 
 // DIRECTORY_SET_ERROR_INDEX
 struct DirectorySetErrorIndexFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple index = wait(data->stack.waitAndPop());
@@ -191,12 +191,12 @@ struct DirectorySetErrorIndexFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectorySetErrorIndexFunc::name = "DIRECTORY_SET_ERROR_INDEX";
+char const* DirectorySetErrorIndexFunc::name = "DIRECTORY_SET_ERROR_INDEX";
 REGISTER_INSTRUCTION_FUNC(DirectorySetErrorIndexFunc);
 
 // DIRECTORY_CREATE_OR_OPEN
 struct DirectoryCreateOrOpenFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state IDirectory::Path path = wait(popPath(data));
@@ -216,12 +216,12 @@ struct DirectoryCreateOrOpenFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryCreateOrOpenFunc::name = "DIRECTORY_CREATE_OR_OPEN";
+char const* DirectoryCreateOrOpenFunc::name = "DIRECTORY_CREATE_OR_OPEN";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateOrOpenFunc);
 
 // DIRECTORY_CREATE
 struct DirectoryCreateFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state IDirectory::Path path = wait(popPath(data));
@@ -246,12 +246,12 @@ struct DirectoryCreateFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryCreateFunc::name = "DIRECTORY_CREATE";
+char const* DirectoryCreateFunc::name = "DIRECTORY_CREATE";
 REGISTER_INSTRUCTION_FUNC(DirectoryCreateFunc);
 
 // DIRECTORY_OPEN
 struct DirectoryOpenFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state IDirectory::Path path = wait(popPath(data));
@@ -268,12 +268,12 @@ struct DirectoryOpenFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryOpenFunc::name = "DIRECTORY_OPEN";
+char const* DirectoryOpenFunc::name = "DIRECTORY_OPEN";
 REGISTER_INSTRUCTION_FUNC(DirectoryOpenFunc);
 
 // DIRECTORY_MOVE
 struct DirectoryMoveFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<IDirectory::Path> paths = wait(popPaths(data, 2));
@@ -291,12 +291,12 @@ struct DirectoryMoveFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryMoveFunc::name = "DIRECTORY_MOVE";
+char const* DirectoryMoveFunc::name = "DIRECTORY_MOVE";
 REGISTER_INSTRUCTION_FUNC(DirectoryMoveFunc);
 
 // DIRECTORY_MOVE_TO
 struct DirectoryMoveToFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		IDirectory::Path path = wait(popPath(data));
@@ -312,12 +312,12 @@ struct DirectoryMoveToFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryMoveToFunc::name = "DIRECTORY_MOVE_TO";
+char const* DirectoryMoveToFunc::name = "DIRECTORY_MOVE_TO";
 REGISTER_INSTRUCTION_FUNC(DirectoryMoveToFunc);
 
 // DIRECTORY_REMOVE
 struct DirectoryRemoveFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple count = wait(data->stack.waitAndPop());
@@ -336,12 +336,12 @@ struct DirectoryRemoveFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryRemoveFunc::name = "DIRECTORY_REMOVE";
+char const* DirectoryRemoveFunc::name = "DIRECTORY_REMOVE";
 REGISTER_INSTRUCTION_FUNC(DirectoryRemoveFunc);
 
 // DIRECTORY_REMOVE_IF_EXISTS
 struct DirectoryRemoveIfExistsFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple count = wait(data->stack.waitAndPop());
@@ -362,12 +362,12 @@ struct DirectoryRemoveIfExistsFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryRemoveIfExistsFunc::name = "DIRECTORY_REMOVE_IF_EXISTS";
+char const* DirectoryRemoveIfExistsFunc::name = "DIRECTORY_REMOVE_IF_EXISTS";
 REGISTER_INSTRUCTION_FUNC(DirectoryRemoveIfExistsFunc);
 
 // DIRECTORY_LIST
 struct DirectoryListFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple count = wait(data->stack.waitAndPop());
@@ -393,12 +393,12 @@ struct DirectoryListFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryListFunc::name = "DIRECTORY_LIST";
+char const* DirectoryListFunc::name = "DIRECTORY_LIST";
 REGISTER_INSTRUCTION_FUNC(DirectoryListFunc);
 
 // DIRECTORY_EXISTS
 struct DirectoryExistsFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple count = wait(data->stack.waitAndPop());
@@ -419,12 +419,12 @@ struct DirectoryExistsFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryExistsFunc::name = "DIRECTORY_EXISTS";
+char const* DirectoryExistsFunc::name = "DIRECTORY_EXISTS";
 REGISTER_INSTRUCTION_FUNC(DirectoryExistsFunc);
 
 // DIRECTORY_PACK_KEY
 struct DirectoryPackKeyFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple tuple = wait(popTuple(data));
@@ -433,12 +433,12 @@ struct DirectoryPackKeyFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryPackKeyFunc::name = "DIRECTORY_PACK_KEY";
+char const* DirectoryPackKeyFunc::name = "DIRECTORY_PACK_KEY";
 REGISTER_INSTRUCTION_FUNC(DirectoryPackKeyFunc);
 
 // DIRECTORY_UNPACK_KEY
 struct DirectoryUnpackKeyFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple key = wait(data->stack.waitAndPop());
@@ -454,12 +454,12 @@ struct DirectoryUnpackKeyFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryUnpackKeyFunc::name = "DIRECTORY_UNPACK_KEY";
+char const* DirectoryUnpackKeyFunc::name = "DIRECTORY_UNPACK_KEY";
 REGISTER_INSTRUCTION_FUNC(DirectoryUnpackKeyFunc);
 
 // DIRECTORY_RANGE
 struct DirectoryRangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple tuple = wait(popTuple(data));
@@ -470,12 +470,12 @@ struct DirectoryRangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryRangeFunc::name = "DIRECTORY_RANGE";
+char const* DirectoryRangeFunc::name = "DIRECTORY_RANGE";
 REGISTER_INSTRUCTION_FUNC(DirectoryRangeFunc);
 
 // DIRECTORY_CONTAINS
 struct DirectoryContainsFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple key = wait(data->stack.waitAndPop());
@@ -485,12 +485,12 @@ struct DirectoryContainsFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryContainsFunc::name = "DIRECTORY_CONTAINS";
+char const* DirectoryContainsFunc::name = "DIRECTORY_CONTAINS";
 REGISTER_INSTRUCTION_FUNC(DirectoryContainsFunc);
 
 // DIRECTORY_OPEN_SUBSPACE
 struct DirectoryOpenSubspaceFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple tuple = wait(popTuple(data));
@@ -502,12 +502,12 @@ struct DirectoryOpenSubspaceFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryOpenSubspaceFunc::name = "DIRECTORY_OPEN_SUBSPACE";
+char const* DirectoryOpenSubspaceFunc::name = "DIRECTORY_OPEN_SUBSPACE";
 REGISTER_INSTRUCTION_FUNC(DirectoryOpenSubspaceFunc);
 
 // DIRECTORY_LOG_SUBSPACE
 struct DirectoryLogSubspaceFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple prefix = wait(data->stack.waitAndPop());
@@ -518,12 +518,12 @@ struct DirectoryLogSubspaceFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryLogSubspaceFunc::name = "DIRECTORY_LOG_SUBSPACE";
+char const* DirectoryLogSubspaceFunc::name = "DIRECTORY_LOG_SUBSPACE";
 REGISTER_INSTRUCTION_FUNC(DirectoryLogSubspaceFunc);
 
 // DIRECTORY_LOG_DIRECTORY
 struct DirectoryLogDirectoryFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state Reference<IDirectory> directory = data->directoryData.directory();
@@ -553,12 +553,12 @@ struct DirectoryLogDirectoryFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryLogDirectoryFunc::name = "DIRECTORY_LOG_DIRECTORY";
+char const* DirectoryLogDirectoryFunc::name = "DIRECTORY_LOG_DIRECTORY";
 REGISTER_INSTRUCTION_FUNC(DirectoryLogDirectoryFunc);
 
 // DIRECTORY_STRIP_PREFIX
 struct DirectoryStripPrefixFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple str = wait(data->stack.waitAndPop());
@@ -568,5 +568,5 @@ struct DirectoryStripPrefixFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DirectoryStripPrefixFunc::name = "DIRECTORY_STRIP_PREFIX";
+char const* DirectoryStripPrefixFunc::name = "DIRECTORY_STRIP_PREFIX";
 REGISTER_INSTRUCTION_FUNC(DirectoryStripPrefixFunc);

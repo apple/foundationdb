@@ -70,13 +70,13 @@ private:
 public:
 	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator begin() const { return optionInfo.begin(); }
 	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator end() const { return optionInfo.end(); }
-	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator find(const typename T::Option& key) const {
+	typename std::map<typename T::Option, FDBOptionInfo>::const_iterator find(typename T::Option const& key) const {
 		return optionInfo.find(key);
 	}
 
-	void insert(const typename T::Option& key, FDBOptionInfo info) { optionInfo[key] = info; }
+	void insert(typename T::Option const& key, FDBOptionInfo info) { optionInfo[key] = info; }
 
-	FDBOptionInfo const& getMustExist(const typename T::Option& key) const {
+	FDBOptionInfo const& getMustExist(typename T::Option const& key) const {
 		auto itr = optionInfo.find(key);
 		ASSERT(itr != optionInfo.end());
 		return itr->second;

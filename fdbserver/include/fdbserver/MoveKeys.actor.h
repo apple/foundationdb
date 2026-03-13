@@ -56,7 +56,7 @@ class DDEnabledState {
 	Value stateValue = ENABLED;
 
 public:
-	bool sameId(const UID&) const;
+	bool sameId(UID const&) const;
 
 	bool isEnabled() const;
 
@@ -85,7 +85,7 @@ struct MoveKeysParams {
 	FlowLock* finishMoveKeysParallelismLock = nullptr;
 	bool hasRemote;
 	UID relocationIntervalId;
-	const DDEnabledState* ddEnabledState = nullptr;
+	DDEnabledState const* ddEnabledState = nullptr;
 	CancelConflictingDataMoves cancelConflictingDataMoves = CancelConflictingDataMoves::False;
 
 	Optional<BulkLoadTaskState> bulkLoadTaskState;
@@ -93,16 +93,16 @@ struct MoveKeysParams {
 	MoveKeysParams() {}
 
 	MoveKeysParams(UID dataMoveId,
-	               const KeyRange& keys,
-	               const std::vector<UID>& destinationTeam,
-	               const std::vector<UID>& healthyDestinations,
-	               const MoveKeysLock& lock,
-	               const Promise<Void>& dataMovementComplete,
+	               KeyRange const& keys,
+	               std::vector<UID> const& destinationTeam,
+	               std::vector<UID> const& healthyDestinations,
+	               MoveKeysLock const& lock,
+	               Promise<Void> const& dataMovementComplete,
 	               FlowLock* startMoveKeysParallelismLock,
 	               FlowLock* finishMoveKeysParallelismLock,
 	               bool hasRemote,
 	               UID relocationIntervalId,
-	               const DDEnabledState* ddEnabledState,
+	               DDEnabledState const* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves,
 	               Optional<BulkLoadTaskState> bulkLoadTaskState)
 	  : dataMoveId(dataMoveId), keys(keys), destinationTeam(destinationTeam), healthyDestinations(healthyDestinations),
@@ -113,16 +113,16 @@ struct MoveKeysParams {
 	    cancelConflictingDataMoves(cancelConflictingDataMoves), bulkLoadTaskState(bulkLoadTaskState) {}
 
 	MoveKeysParams(UID dataMoveId,
-	               const std::vector<KeyRange>& ranges,
-	               const std::vector<UID>& destinationTeam,
-	               const std::vector<UID>& healthyDestinations,
-	               const MoveKeysLock& lock,
-	               const Promise<Void>& dataMovementComplete,
+	               std::vector<KeyRange> const& ranges,
+	               std::vector<UID> const& destinationTeam,
+	               std::vector<UID> const& healthyDestinations,
+	               MoveKeysLock const& lock,
+	               Promise<Void> const& dataMovementComplete,
 	               FlowLock* startMoveKeysParallelismLock,
 	               FlowLock* finishMoveKeysParallelismLock,
 	               bool hasRemote,
 	               UID relocationIntervalId,
-	               const DDEnabledState* ddEnabledState,
+	               DDEnabledState const* ddEnabledState,
 	               CancelConflictingDataMoves cancelConflictingDataMoves,
 	               Optional<BulkLoadTaskState> bulkLoadTaskState)
 	  : dataMoveId(dataMoveId), ranges(ranges), destinationTeam(destinationTeam),
@@ -143,19 +143,19 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
-Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
+Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, DDEnabledState const* ddEnabledState);
 
 void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
 Future<Void> rawStartMovement(Database occ,
-                              const MoveKeysParams& params,
+                              MoveKeysParams const& params,
                               std::map<UID, StorageServerInterface>& tssMapping);
 
 Future<Void> rawFinishMovement(Database occ,
-                               const MoveKeysParams& params,
-                               const std::map<UID, StorageServerInterface>& tssMapping);
+                               MoveKeysParams const& params,
+                               std::map<UID, StorageServerInterface> const& tssMapping);
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,
 // for restarting the remainder, and for not otherwise cancelling it before
@@ -170,7 +170,7 @@ ACTOR Future<Void> cleanUpDataMove(
     MoveKeysLock lock,
     FlowLock* cleanUpDataMoveParallelismLock,
     KeyRange range,
-    const DDEnabledState* ddEnabledState,
+    DDEnabledState const* ddEnabledState,
     Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor = Optional<PromiseStream<Future<Void>>>());
 
 ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
@@ -182,7 +182,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
                                        UID serverID,
                                        Optional<UID> tssPairID, // if serverID is a tss, set to its ss pair id
                                        MoveKeysLock lock,
-                                       const DDEnabledState* ddEnabledState);
+                                       DDEnabledState const* ddEnabledState);
 // Removes the given storage server permanently from the database.  It must already
 // have no shards assigned to it.  The storage server MUST NOT be added again after this
 // (though a new storage server with a new unique ID may be recruited from the same fdbserver).
@@ -194,13 +194,13 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
                                               std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
-                                              const DDEnabledState* ddEnabledState);
+                                              DDEnabledState const* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
 
 Future<Void> checkMoveKeysLock(Transaction* tr,
                                MoveKeysLock const& lock,
-                               const DDEnabledState* ddEnabledState,
+                               DDEnabledState const* ddEnabledState,
                                bool isWrite = true);
 
 #include "flow/unactorcompiler.h"

@@ -26,8 +26,8 @@
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct TokenBucket {
-	static constexpr const double addTokensInterval = 0.1;
-	static constexpr const double maxSleepTime = 60.0;
+	static constexpr double const addTokensInterval = 0.1;
+	static constexpr double const maxSleepTime = 60.0;
 
 	double transactionRate;
 	double maxBurst;
@@ -131,7 +131,7 @@ struct ThrottlingWorkload : KVWorkload {
 				RangeResult result =
 				    co_await tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!result.more);
-				for (const auto& [k, v] : result) {
+				for (auto const& [k, v] : result) {
 					ASSERT(k.startsWith("\xff\xff/metrics/health/"_sr));
 					auto valueObj = readJSONStrictly(v.toString()).get_obj();
 					if (k.removePrefix("\xff\xff/metrics/health/"_sr) == "aggregate"_sr) {

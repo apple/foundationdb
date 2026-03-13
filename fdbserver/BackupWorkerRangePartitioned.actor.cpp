@@ -38,7 +38,7 @@ struct RangePartitionedVersionedMessage {
 	VectorRef<Tag> tags;
 	Arena arena;
 
-	RangePartitionedVersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
+	RangePartitionedVersionedMessage(LogMessageVersion v, StringRef m, VectorRef<Tag> const& t, Arena const& a)
 	  : version(v), message(m), tags(t), arena(a) {}
 
 	Version getVersion() const { return version.version; }
@@ -46,13 +46,13 @@ struct RangePartitionedVersionedMessage {
 };
 
 struct BackupRangePartitionedData {
-	const UID myId;
-	const Tag tag; // tag for this backup worker
-	const int totalTags; // Total backup worker tags
-	const Version startVersion; // This worker's start version
-	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
-	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
-	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	UID const myId;
+	Tag const tag; // tag for this backup worker
+	int const totalTags; // Total backup worker tags
+	Version const startVersion; // This worker's start version
+	Optional<Version> const endVersion; // old epoch's end version (inclusive), or empty for current epoch
+	LogEpoch const recruitedEpoch; // current epoch whose tLogs are receiving mutations
+	LogEpoch const backupEpoch; // the epoch workers should pull mutations
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
@@ -89,7 +89,7 @@ struct BackupRangePartitionedData {
 
 	explicit BackupRangePartitionedData(UID id,
 	                                    Reference<AsyncVar<ServerDBInfo> const> db,
-	                                    const InitializeBackupRequest& req)
+	                                    InitializeBackupRequest const& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), pulledVersion(0),
@@ -102,7 +102,7 @@ struct BackupRangePartitionedData {
 
 	void eraseMessagesAfterEndVersion() {
 		ASSERT(endVersion.present());
-		const Version ver = endVersion.get();
+		Version const ver = endVersion.get();
 		while (!messages.empty()) {
 			if (messages.back().getVersion() > ver) {
 				size_t bytes = messages.back().getEstimatedSize();

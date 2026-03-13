@@ -338,9 +338,9 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 
 			// Read key and value.  If anything throws then there is a problem.
 			uint32_t kLen = reader.consumeNetworkUInt32();
-			const uint8_t* k = reader.consume(kLen);
+			uint8_t const* k = reader.consume(kLen);
 			uint32_t vLen = reader.consumeNetworkUInt32();
-			const uint8_t* v = reader.consume(vLen);
+			uint8_t const* v = reader.consume(vLen);
 
 			results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
 		}

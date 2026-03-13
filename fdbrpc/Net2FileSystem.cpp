@@ -46,7 +46,7 @@
 #include "fdbrpc/AsyncFileWriteChecker.actor.h"
 
 // Opens a file for asynchronous I/O
-Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
+Future<Reference<class IAsyncFile>> Net2FileSystem::open(std::string const& filename, int64_t flags, int64_t mode) {
 #ifdef __linux__
 	if (checkFileSystem) {
 		dev_t fileDeviceId = getDeviceId(filename);
@@ -96,11 +96,11 @@ Future<Reference<class IAsyncFile>> Net2FileSystem::open(const std::string& file
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power
 // failure.
-Future<Void> Net2FileSystem::deleteFile(const std::string& filename, bool mustBeDurable) {
+Future<Void> Net2FileSystem::deleteFile(std::string const& filename, bool mustBeDurable) {
 	return Net2AsyncFile::deleteFile(filename, mustBeDurable);
 }
 
-Future<std::time_t> Net2FileSystem::lastWriteTime(const std::string& filename) {
+Future<std::time_t> Net2FileSystem::lastWriteTime(std::string const& filename) {
 	return Net2AsyncFile::lastWriteTime(filename);
 }
 
@@ -110,11 +110,11 @@ ActorLineageSet& Net2FileSystem::getActorLineageSet() {
 }
 #endif
 
-void Net2FileSystem::newFileSystem(double ioTimeout, const std::string& fileSystemPath) {
+void Net2FileSystem::newFileSystem(double ioTimeout, std::string const& fileSystemPath) {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Net2FileSystem(ioTimeout, fileSystemPath));
 }
 
-Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPath) {
+Net2FileSystem::Net2FileSystem(double ioTimeout, std::string const& fileSystemPath) {
 	Net2AsyncFile::init();
 #ifdef __linux__
 	if (!FLOW_KNOBS->DISABLE_POSIX_KERNEL_AIO)
@@ -144,7 +144,7 @@ Net2FileSystem::Net2FileSystem(double ioTimeout, const std::string& fileSystemPa
 #endif
 }
 
-Future<Void> Net2FileSystem::renameFile(const std::string& from, const std::string& to) {
+Future<Void> Net2FileSystem::renameFile(std::string const& from, std::string const& to) {
 	return Net2AsyncFile::renameFile(from, to);
 }
 

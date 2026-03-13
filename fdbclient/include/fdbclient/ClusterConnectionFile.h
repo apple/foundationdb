@@ -36,7 +36,7 @@ public:
 	// Creates a cluster file from the given filename. If the filename is empty, attempts to load the default
 	// cluster file instead.
 	static Reference<ClusterConnectionFile> openOrDefault(std::string const& filename);
-	static Reference<ClusterConnectionFile> openOrDefault(const char* filename);
+	static Reference<ClusterConnectionFile> openOrDefault(char const* filename);
 
 	// Sets the connections string held by this object and persists it.
 	Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) override;

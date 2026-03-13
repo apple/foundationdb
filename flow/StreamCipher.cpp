@@ -59,7 +59,7 @@ StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
 }
 
 void StreamCipherKey::cleanup() noexcept {
-	for (const auto& [_cipherId, cipherKey] : cipherKeys) {
+	for (auto const& [_cipherId, cipherKey] : cipherKeys) {
 		cipherKey->reset();
 	}
 }
@@ -108,12 +108,12 @@ HMAC_CTX* StreamCipher::getHmacCtx() {
 }
 
 void StreamCipher::cleanup() noexcept {
-	for (const auto& [_ctxId, cipherContext] : ctxs) {
+	for (auto const& [_ctxId, cipherContext] : ctxs) {
 		EVP_CIPHER_CTX_free(cipherContext);
 	}
 }
 
-EncryptionStreamCipher::EncryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv)
+EncryptionStreamCipher::EncryptionStreamCipher(StreamCipherKey const* key, StreamCipher::IV const& iv)
   : cipher(StreamCipher(key->size())) {
 	EVP_EncryptInit_ex(cipher.getCtx(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr);
 	EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
@@ -135,7 +135,7 @@ StringRef EncryptionStreamCipher::finish(Arena& arena) {
 	return StringRef(ciphertext, bytes);
 }
 
-DecryptionStreamCipher::DecryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv)
+DecryptionStreamCipher::DecryptionStreamCipher(StreamCipherKey const* key, StreamCipher::IV const& iv)
   : cipher(key->size()) {
 	EVP_DecryptInit_ex(cipher.getCtx(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr);
 	EVP_CIPHER_CTX_ctrl(cipher.getCtx(), EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr);
@@ -196,8 +196,8 @@ TEST_CASE("flow/StreamCipher") {
 		int index = 0;
 		int encryptedOffset = 0;
 		while (index < plaintext.size()) {
-			const auto chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), plaintext.size() - index);
-			const auto encrypted = encryptor.encrypt(&plaintext[index], chunkSize, arena);
+			auto const chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), plaintext.size() - index);
+			auto const encrypted = encryptor.encrypt(&plaintext[index], chunkSize, arena);
 			TraceEvent("StreamCipherTestEcryptedChunk")
 			    .detail("EncryptedSize", encrypted.size())
 			    .detail("EncryptedOffset", encryptedOffset)
@@ -206,7 +206,7 @@ TEST_CASE("flow/StreamCipher") {
 			encryptedOffset += encrypted.size();
 			index += chunkSize;
 		}
-		const auto encrypted = encryptor.finish(arena);
+		auto const encrypted = encryptor.finish(arena);
 		std::copy(encrypted.begin(), encrypted.end(), &ciphertext[encryptedOffset]);
 		ciphertext.resize(encryptedOffset + encrypted.size());
 	}
@@ -216,8 +216,8 @@ TEST_CASE("flow/StreamCipher") {
 		int index = 0;
 		int decryptedOffset = 0;
 		while (index < plaintext.size()) {
-			const auto chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), plaintext.size() - index);
-			const auto decrypted = decryptor.decrypt(&ciphertext[index], chunkSize, arena);
+			auto const chunkSize = std::min<int>(deterministicRandom()->randomInt(1, 101), plaintext.size() - index);
+			auto const decrypted = decryptor.decrypt(&ciphertext[index], chunkSize, arena);
 			TraceEvent("StreamCipherTestDecryptedChunk")
 			    .detail("DecryptedSize", decrypted.size())
 			    .detail("DecryptedOffset", decryptedOffset)
@@ -226,7 +226,7 @@ TEST_CASE("flow/StreamCipher") {
 			decryptedOffset += decrypted.size();
 			index += chunkSize;
 		}
-		const auto decrypted = decryptor.finish(arena);
+		auto const decrypted = decryptor.finish(arena);
 		std::copy(decrypted.begin(), decrypted.end(), &decryptedtext[decryptedOffset]);
 		ASSERT_EQ(decryptedOffset + decrypted.size(), plaintext.size());
 		decryptedtext.resize(decryptedOffset + decrypted.size());

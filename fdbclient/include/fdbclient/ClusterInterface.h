@@ -121,7 +121,7 @@ struct OpenDatabaseRequest {
 		}
 
 		// Merges a set of Samples into *this
-		Samples& operator+=(const Samples& other) {
+		Samples& operator+=(Samples const& other) {
 			count += other.count;
 			samples.insert(std::begin(other.samples), std::end(other.samples));
 

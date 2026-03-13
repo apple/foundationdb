@@ -53,21 +53,21 @@ struct CommandHelp {
 	std::string short_desc;
 	std::string long_desc;
 	CommandHelp() {}
-	CommandHelp(const char* usage, const char* short_desc, const char* long_desc)
+	CommandHelp(char const* usage, char const* short_desc, char const* long_desc)
 	  : usage(usage), short_desc(short_desc), long_desc(long_desc) {}
 };
 
-void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
+void arrayGenerator(char const* text, char const* line, char const** options, std::vector<std::string>& lc);
 
 struct CommandFactory {
-	typedef void (*CompletionGeneratorFunc)(const char* text,
-	                                        const char* line,
+	typedef void (*CompletionGeneratorFunc)(char const* text,
+	                                        char const* line,
 	                                        std::vector<std::string>& lc,
 	                                        std::vector<StringRef> const& tokens);
 
-	typedef std::vector<const char*> (*HintGeneratorFunc)(std::vector<StringRef> const& tokens, bool inArgument);
+	typedef std::vector<char const*> (*HintGeneratorFunc)(std::vector<StringRef> const& tokens, bool inArgument);
 
-	CommandFactory(const char* name,
+	CommandFactory(char const* name,
 	               CommandHelp help,
 	               CompletionGeneratorFunc completionFunc = nullptr,
 	               HintGeneratorFunc hintFunc = nullptr) {
@@ -79,7 +79,7 @@ struct CommandFactory {
 			hintGenerators()[name] = hintFunc;
 		}
 	}
-	CommandFactory(const char* name) { hiddenCommands().insert(name); }
+	CommandFactory(char const* name) { hiddenCommands().insert(name); }
 	static std::map<std::string, CommandHelp>& commands() {
 		static std::map<std::string, CommandHelp> helpMap;
 		return helpMap;
@@ -100,40 +100,40 @@ struct CommandFactory {
 
 // Special keys used by fdbcli commands
 
-extern const KeyRef advanceVersionSpecialKey;
-extern const KeyRef consistencyCheckSpecialKey;
-extern const KeyRef clusterDescriptionSpecialKey;
-extern const KeyRef coordinatorsAutoSpecialKey;
-extern const KeyRef coordinatorsProcessSpecialKey;
-extern const KeyRef ddModeSpecialKey;
-extern const KeyRef ddIgnoreRebalanceSpecialKey;
+extern KeyRef const advanceVersionSpecialKey;
+extern KeyRef const consistencyCheckSpecialKey;
+extern KeyRef const clusterDescriptionSpecialKey;
+extern KeyRef const coordinatorsAutoSpecialKey;
+extern KeyRef const coordinatorsProcessSpecialKey;
+extern KeyRef const ddModeSpecialKey;
+extern KeyRef const ddIgnoreRebalanceSpecialKey;
 
-extern const KeyRangeRef excludedServersSpecialKeyRange;
-extern const KeyRangeRef failedServersSpecialKeyRange;
-extern const KeyRangeRef excludedLocalitySpecialKeyRange;
-extern const KeyRangeRef failedLocalitySpecialKeyRange;
-extern const KeyRef excludedForceOptionSpecialKey;
-extern const KeyRef failedForceOptionSpecialKey;
-extern const KeyRef excludedLocalityForceOptionSpecialKey;
-extern const KeyRef failedLocalityForceOptionSpecialKey;
-extern const KeyRangeRef exclusionInProgressSpecialKeyRange;
+extern KeyRangeRef const excludedServersSpecialKeyRange;
+extern KeyRangeRef const failedServersSpecialKeyRange;
+extern KeyRangeRef const excludedLocalitySpecialKeyRange;
+extern KeyRangeRef const failedLocalitySpecialKeyRange;
+extern KeyRef const excludedForceOptionSpecialKey;
+extern KeyRef const failedForceOptionSpecialKey;
+extern KeyRef const excludedLocalityForceOptionSpecialKey;
+extern KeyRef const failedLocalityForceOptionSpecialKey;
+extern KeyRangeRef const exclusionInProgressSpecialKeyRange;
 
-extern const KeyRef lockSpecialKey;
+extern KeyRef const lockSpecialKey;
 
-extern const KeyRangeRef maintenanceSpecialKeyRange;
-extern const KeyRef ignoreSSFailureSpecialKey;
+extern KeyRangeRef const maintenanceSpecialKeyRange;
+extern KeyRef const ignoreSSFailureSpecialKey;
 
-extern const KeyRangeRef processClassSourceSpecialKeyRange;
-extern const KeyRangeRef processClassTypeSpecialKeyRange;
+extern KeyRangeRef const processClassSourceSpecialKeyRange;
+extern KeyRangeRef const processClassTypeSpecialKeyRange;
 
-inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
-inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
+inline KeyRef const errorMsgSpecialKey = "\xff\xff/error_message"_sr;
+inline KeyRef const workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 
 ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
 ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                               std::map<std::string, StorageServerInterface>* interfaces);
 
-bool tokencmp(StringRef token, const char* command);
+bool tokencmp(StringRef token, char const* command);
 void printUsage(StringRef command);
 void printLongDesc(StringRef command);
 

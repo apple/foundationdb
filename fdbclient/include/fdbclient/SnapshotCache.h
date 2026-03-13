@@ -88,7 +88,7 @@ struct ExtStringRef {
 		return ::compare(size(), rhs.size());
 	}
 
-	bool startsWith(const ExtStringRef& s) const {
+	bool startsWith(ExtStringRef const& s) const {
 		if (size() < s.size())
 			return false;
 		int cbl = std::min(base.size(), s.base.size());
@@ -116,28 +116,28 @@ private:
 	StringRef base;
 	int extra_zero_bytes;
 };
-inline bool operator==(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+inline bool operator==(ExtStringRef const& lhs, ExtStringRef const& rhs) {
 	return lhs.size() == rhs.size() && !lhs.compare(rhs);
 }
-inline bool operator!=(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+inline bool operator!=(ExtStringRef const& lhs, ExtStringRef const& rhs) {
 	return !(lhs == rhs);
 }
-inline bool operator<(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+inline bool operator<(ExtStringRef const& lhs, ExtStringRef const& rhs) {
 	return lhs.compare(rhs) < 0;
 }
-inline bool operator>(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+inline bool operator>(ExtStringRef const& lhs, ExtStringRef const& rhs) {
 	return lhs.compare(rhs) > 0;
 }
-inline bool operator<=(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+inline bool operator<=(ExtStringRef const& lhs, ExtStringRef const& rhs) {
 	return lhs.compare(rhs) <= 0;
 }
-inline bool operator>=(const ExtStringRef& lhs, const ExtStringRef& rhs) {
+inline bool operator>=(ExtStringRef const& lhs, ExtStringRef const& rhs) {
 	return lhs.compare(rhs) >= 0;
 }
 
 template <>
 struct Traceable<ExtStringRef> : std::true_type {
-	static std::string toString(const ExtStringRef str) {
+	static std::string toString(ExtStringRef const str) {
 		std::string result;
 		result.reserve(str.size());
 		std::copy(str.base.begin(), str.base.end(), std::back_inserter(result));
@@ -224,7 +224,7 @@ public:
 				return ExtStringRef(it->values[(offset - 1) >> 1].key, 1 - (offset & 1));
 		}
 
-		const KeyValueRef* kv(Arena& arena) const { // only if is_kv()
+		KeyValueRef const* kv(Arena& arena) const { // only if is_kv()
 			return &it->values[(offset - 2) >> 1];
 		}
 
@@ -252,8 +252,8 @@ public:
 			return *this;
 		}
 
-		bool operator==(const iterator& r) const { return it == r.it && offset == r.offset; }
-		bool operator!=(const iterator& r) const { return !(*this == r); }
+		bool operator==(iterator const& r) const { return it == r.it && offset == r.offset; }
+		bool operator!=(iterator const& r) const { return !(*this == r); }
 
 		void skip(
 		    KeyRef key) { // Changes *this to the segment containing key (so that beginKey()<=key && key < endKey())

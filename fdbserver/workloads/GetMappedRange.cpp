@@ -30,11 +30,11 @@
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
 
-const Value EMPTY = Tuple().pack();
+Value const EMPTY = Tuple().pack();
 ValueRef SOMETHING = "SOMETHING"_sr;
-const KeyRef prefix = "prefix"_sr;
-const KeyRef RECORD = "RECORD"_sr;
-const KeyRef INDEX = "INDEX"_sr;
+KeyRef const prefix = "prefix"_sr;
+KeyRef const RECORD = "RECORD"_sr;
+KeyRef const INDEX = "INDEX"_sr;
 
 int recordSize;
 int indexSize;
@@ -44,10 +44,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	Snapshot snapshot = Snapshot::False;
 
 	//	const bool BAD_MAPPER = deterministicRandom()->random01() < 0.1;
-	const bool BAD_MAPPER = false;
+	bool const BAD_MAPPER = false;
 	//	const bool SPLIT_RECORDS = deterministicRandom()->random01() < 0.5;
-	const bool SPLIT_RECORDS = true;
-	const static int SPLIT_SIZE = 3;
+	bool const SPLIT_RECORDS = true;
+	static int const SPLIT_SIZE = 3;
 	double checkStorageQueueSeconds;
 	uint64_t queueMaxLength;
 
@@ -137,9 +137,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		}
 	}
 
-	static void showResult(const RangeResult& result) {
+	static void showResult(RangeResult const& result) {
 		std::cout << "result size: " << result.size() << std::endl;
-		for (const KeyValueRef* it = result.begin(); it != result.end(); it++) {
+		for (KeyValueRef const* it = result.begin(); it != result.end(); it++) {
 			std::cout << "key=" << it->key.printable() << ", value=" << it->value.printable() << std::endl;
 		}
 	}
@@ -164,7 +164,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 
 	// Return true if need to retry.
 	static bool validateRecord(int expectedId,
-	                           const MappedKeyValueRef* it,
+	                           MappedKeyValueRef const* it,
 	                           GetMappedRangeWorkload* self,
 	                           bool allMissing) {
 		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
@@ -244,7 +244,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 					int expectedId = expectedBeginId;
 					bool needRetry = false;
 					int cnt = 0;
-					const MappedKeyValueRef* it = result.begin();
+					MappedKeyValueRef const* it = result.begin();
 					for (; cnt < result.size(); cnt++, it++) {
 						if (validateRecord(expectedId, it, self, allMissing)) {
 							needRetry = true;
@@ -543,7 +543,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			self->snapshot = Snapshot::True;
 		} else if (self->transactionType == READ_YOUR_WRITES) {
 			self->snapshot = Snapshot::False;
-			const double rand = deterministicRandom()->random01();
+			double const rand = deterministicRandom()->random01();
 			if (rand < 0.1) {
 				co_await self->testSerializableConflicts(self);
 				co_return;

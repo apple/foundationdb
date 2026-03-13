@@ -100,7 +100,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			printUsage(tokens[0]);
 			return UID();
 		}
-		const UID auditId = UID::fromString(tokens[3].toString());
+		UID const auditId = UID::fromString(tokens[3].toString());
 		UID cancelledAuditId = wait(cancelAuditStorage(clusterFile, type, auditId, /*timeoutSeconds=*/60));
 		resAuditId = cancelledAuditId;
 

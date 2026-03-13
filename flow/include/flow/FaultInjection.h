@@ -41,8 +41,8 @@
 #define SHOULD_INJECT_BLOB_FAULT(context)                                                                              \
 	(should_inject_blob_fault && should_inject_blob_fault(context, __FILE__, __LINE__, 0))
 
-extern bool (*should_inject_fault)(const char* context, const char* file, int line, int error_code);
-extern bool (*should_inject_blob_fault)(const char* context, const char* file, int line, int error_code);
+extern bool (*should_inject_fault)(char const* context, char const* file, int line, int error_code);
+extern bool (*should_inject_blob_fault)(char const* context, char const* file, int line, int error_code);
 extern bool faultInjectionActivated;
 extern void enableFaultInjection(bool enabled); // Enable fault injection called from fdbserver actor main function
 #else

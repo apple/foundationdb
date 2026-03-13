@@ -45,7 +45,7 @@
 #include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const char* RecoveryStatus::names[] = { "reading_coordinated_state",
+char const* RecoveryStatus::names[] = { "reading_coordinated_state",
 	                                    "locking_coordinated_state",
 	                                    "locking_old_transaction_servers",
 	                                    "reading_transaction_system_state",
@@ -62,7 +62,7 @@ const char* RecoveryStatus::names[] = { "reading_coordinated_state",
 	                                    "fully_recovered" };
 static_assert(sizeof(RecoveryStatus::names) == sizeof(RecoveryStatus::names[0]) * RecoveryStatus::END,
               "RecoveryStatus::names[] size");
-const char* RecoveryStatus::descriptions[] = {
+char const* RecoveryStatus::descriptions[] = {
 	// reading_coordinated_state
 	"Requesting information from coordination servers. Verify that a majority of coordination server processes are "
 	"active.",
@@ -102,14 +102,14 @@ static_assert(sizeof(RecoveryStatus::descriptions) == sizeof(RecoveryStatus::des
 
 // From Ratekeeper.actor.cpp
 extern int limitReasonEnd;
-extern const char* limitReasonName[];
-extern const char* limitReasonDesc[];
+extern char const* limitReasonName[];
+extern char const* limitReasonDesc[];
 
 typedef std::map<std::string, TraceEventFields> EventMap;
 
 struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	EventMap eventMap;
-	StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
+	StorageServerStatusInfo(StorageServerMetaInfo const& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
@@ -146,7 +146,7 @@ ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEve
 		WorkerEvents results;
 
 		for (int i = 0; i < eventTraces.size(); i++) {
-			const ErrorOr<TraceEventFields>& v = eventTraces[i].get();
+			ErrorOr<TraceEventFields> const& v = eventTraces[i].get();
 			if (v.isError()) {
 				failed.insert(workers[i].interf.address().toString());
 				results[workers[i].interf.address()] = TraceEventFields();
@@ -196,14 +196,14 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	StatusCounter(const std::string& parsableText) { parseText(parsableText); }
+	StatusCounter(std::string const& parsableText) { parseText(parsableText); }
 
-	StatusCounter& parseText(const std::string& parsableText) {
+	StatusCounter& parseText(std::string const& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);
 		return *this;
 	}
 
-	StatusCounter& updateValues(const StatusCounter& statusCounter) {
+	StatusCounter& updateValues(StatusCounter const& statusCounter) {
 		double hzNew = hz + statusCounter.hz;
 		double roughnessNew = (hz + statusCounter.hz) ? (roughness * hz + statusCounter.roughness * statusCounter.hz) /
 		                                                    (hz + statusCounter.hz)
@@ -235,7 +235,7 @@ protected:
 	int64_t counter;
 };
 
-static JsonBuilderObject getError(const TraceEventFields& errorFields) {
+static JsonBuilderObject getError(TraceEventFields const& errorFields) {
 	JsonBuilderObject statusObj;
 	try {
 		if (errorFields.size()) {
@@ -272,7 +272,7 @@ static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 
 namespace {
 
-void reportCgroupCpuStat(JsonBuilderObject& object, const TraceEventFields& eventFields) {
+void reportCgroupCpuStat(JsonBuilderObject& object, TraceEventFields const& eventFields) {
 	JsonBuilderObject cgroupCpuStatObj;
 	std::string val;
 	if (eventFields.tryGetValue("NrPeriods", val)) {
@@ -317,7 +317,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 		}
 
 		JsonBuilderObject statusObj; // Represents the status for a machine
-		const TraceEventFields& event = it->second;
+		TraceEventFields const& event = it->second;
 
 		try {
 			std::string address = it->first.ip.toString();
@@ -787,7 +787,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		if (traceFileErrorsItr->second.size()) {
 			try {
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
-				const TraceEventFields& event = traceFileErrorsItr->second;
+				TraceEventFields const& event = traceFileErrorsItr->second;
 				std::string fileName = event.getValue("Filename");
 				JsonBuilderObject msgObj = JsonString::makeMessage(
 				    "file_open_error",
@@ -815,8 +815,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		        .first;
 		try {
 			ASSERT(pMetrics.contains(workerItr->interf.address()));
-			const TraceEventFields& processMetrics = pMetrics[workerItr->interf.address()];
-			const TraceEventFields& programStart = programStarts[workerItr->interf.address()];
+			TraceEventFields const& processMetrics = pMetrics[workerItr->interf.address()];
+			TraceEventFields const& programStart = programStarts[workerItr->interf.address()];
 
 			if (memInfo->second.valid()) {
 				if (processMetrics.size() > 0 && programStart.size() > 0) {
@@ -874,7 +874,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
-	for (const auto& coordinator : coordinatorAddresses) {
+	for (auto const& coordinator : coordinatorAddresses) {
 		roles.addCoordinatorRole(coordinator);
 	}
 
@@ -926,7 +926,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			ASSERT(pMetrics.contains(workerItr->interf.address()));
 
 			NetworkAddress address = workerItr->interf.address();
-			const TraceEventFields& processMetrics = pMetrics[workerItr->interf.address()];
+			TraceEventFields const& processMetrics = pMetrics[workerItr->interf.address()];
 			statusObj["address"] = address.toString();
 			JsonBuilderObject memoryObj;
 
@@ -1091,7 +1091,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				statusObj["degraded"] = true;
 			}
 
-			const TraceEventFields& networkMetrics = nMetrics[workerItr->interf.address()];
+			TraceEventFields const& networkMetrics = nMetrics[workerItr->interf.address()];
 			double networkMetricsElapsed = networkMetrics.getDouble("Elapsed");
 
 			try {
@@ -1117,10 +1117,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 	return processMap;
 }
 
-static JsonBuilderObject grayFailureStatus(const std::unordered_map<NetworkAddress, double>& excludedDegradedServers) {
+static JsonBuilderObject grayFailureStatus(std::unordered_map<NetworkAddress, double> const& excludedDegradedServers) {
 	JsonBuilderObject status;
 	JsonBuilderArray excludedServers;
-	for (const auto& [excludedServer, time] : excludedDegradedServers) {
+	for (auto const& [excludedServer, time] : excludedDegradedServers) {
 		JsonBuilderObject server;
 		server["address"] = excludedServer.toString();
 		server["time"] = time;
@@ -1146,10 +1146,10 @@ static JsonBuilderObject clientStatusFetcher(
 		}
 
 		clientCount += iter->second.second.clientCount;
-		for (const auto& [version, samples] : iter->second.second.supportedVersions) {
+		for (auto const& [version, samples] : iter->second.second.supportedVersions) {
 			supportedVersions[version] += samples;
 		}
-		for (const auto& [protocol, samples] : iter->second.second.maxProtocolSupported) {
+		for (auto const& [protocol, samples] : iter->second.second.maxProtocolSupported) {
 			maxSupportedProtocol[protocol] += samples;
 		}
 		++iter;
@@ -1158,7 +1158,7 @@ static JsonBuilderObject clientStatusFetcher(
 	clientStatus["count"] = clientCount;
 
 	JsonBuilderArray versionsArray = JsonBuilderArray();
-	for (const auto& [clientVersionRef, samples] : supportedVersions) {
+	for (auto const& [clientVersionRef, samples] : supportedVersions) {
 		JsonBuilderObject ver;
 		ver["count"] = (int64_t)samples.count;
 		ver["client_version"] = clientVersionRef.clientVersion.toString();
@@ -1166,7 +1166,7 @@ static JsonBuilderObject clientStatusFetcher(
 		ver["source_version"] = clientVersionRef.sourceVersion.toString();
 
 		JsonBuilderArray clients = JsonBuilderArray();
-		for (const auto& [networkAddress, trackLogGroup] : samples.samples) {
+		for (auto const& [networkAddress, trackLogGroup] : samples.samples) {
 			JsonBuilderObject cli;
 			cli["address"] = networkAddress.toString();
 			cli["log_group"] = trackLogGroup.toString();
@@ -1176,7 +1176,7 @@ static JsonBuilderObject clientStatusFetcher(
 		auto iter = maxSupportedProtocol.find(clientVersionRef.protocolVersion);
 		if (iter != std::end(maxSupportedProtocol)) {
 			JsonBuilderArray maxClients = JsonBuilderArray();
-			for (const auto& [networkAddress, trackLogGroup] : iter->second.samples) {
+			for (auto const& [networkAddress, trackLogGroup] : iter->second.samples) {
 				JsonBuilderObject cli;
 				cli["address"] = networkAddress.toString();
 				cli["log_group"] = trackLogGroup.toString();
@@ -1224,7 +1224,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 
 		wait(success(mdActiveGensF) && success(mdF) && success(rvF) && success(mDBAvailableF));
 
-		const TraceEventFields& md = mdF.get();
+		TraceEventFields const& md = mdF.get();
 		int mStatusCode = md.getInt("StatusCode");
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -1234,7 +1234,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 		*statusCode = mStatusCode;
 
 		ErrorOr<Version> rv = rvF.get();
-		const TraceEventFields& dbAvailableMsg = mDBAvailableF.get();
+		TraceEventFields const& dbAvailableMsg = mDBAvailableF.get();
 		if (dbAvailableMsg.size() > 0) {
 			int64_t availableAtVersion = dbAvailableMsg.getInt64("AvailableAtVersion");
 			if (!rv.isError()) {
@@ -1266,7 +1266,7 @@ ACTOR static Future<JsonBuilderObject> recoveryStateStatusFetcher(Database cx,
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
 
-		const TraceEventFields& mdActiveGens = mdActiveGensF.get();
+		TraceEventFields const& mdActiveGens = mdActiveGensF.get();
 		if (mdActiveGens.size()) {
 			int activeGenerations = mdActiveGens.getInt("ActiveGenerations");
 			message["active_generations"] = activeGenerations;
@@ -1353,8 +1353,8 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* 
 
 ACTOR static Future<Void> doProbe(Future<double> probe,
                                   int timeoutSeconds,
-                                  const char* prefix,
-                                  const char* description,
+                                  char const* prefix,
+                                  char const* description,
                                   JsonBuilderObject* probeObj,
                                   JsonBuilderArray* messages,
                                   std::set<std::string>* incomplete_reasons,
@@ -1621,7 +1621,7 @@ ACTOR Future<ProtocolVersionData> getNewestProtocolVersion(Database cx, WorkerDe
 		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest("SWVersionCompatibilityChecked"_sr)), 1.0);
 
 		wait(success(swVersionF));
-		const TraceEventFields& swVersionTrace = swVersionF.get();
+		TraceEventFields const& swVersionTrace = swVersionF.get();
 		int64_t newestProtocolVersionValue =
 		    std::stoull(swVersionTrace.getValue("NewestProtocolVersion").c_str(), nullptr, 16);
 		int64_t lowestCompatibleProtocolVersionValue =
@@ -1762,7 +1762,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 				excludedServersArr.push_back(statusObj);
 			}
 			std::set<std::string> excludedLocalities = configuration.getExcludedLocalities();
-			for (const auto& it : excludedLocalities) {
+			for (auto const& it : excludedLocalities) {
 				JsonBuilderObject statusObj;
 				statusObj["locality"] = it;
 				excludedServersArr.push_back(statusObj);
@@ -1845,7 +1845,7 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 
 		JsonBuilderArray teamTrackers;
 		for (int i = 3; i < 5; i++) {
-			const TraceEventFields& inFlight = dataInfo[i];
+			TraceEventFields const& inFlight = dataInfo[i];
 			if (inFlight.size() == 0) {
 				continue;
 			}
@@ -1982,7 +1982,7 @@ static Future<std::vector<std::pair<iface, EventMap>>> getServerMetrics(
 
 namespace {
 
-const std::vector<std::string> STORAGE_SERVER_METRICS_LIST{ "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands",
+std::vector<std::string> const STORAGE_SERVER_METRICS_LIST{ "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands",
 	                                                        "BusiestReadTag", "BusiestWriteTag",    "RocksDBMetrics" };
 
 } // namespace
@@ -1993,7 +1993,7 @@ ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatus
     WorkerDetails rkWorker) {
 	state std::vector<StorageServerStatusInfo> servers;
 	servers.reserve(storageMetadatas.size());
-	for (const auto& meta : storageMetadatas) {
+	for (auto const& meta : storageMetadatas) {
 		servers.push_back(StorageServerStatusInfo(meta));
 	}
 	state std::vector<std::pair<StorageServerStatusInfo, EventMap>> results;
@@ -2038,8 +2038,8 @@ ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvP
 
 // Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
 // replication factor.
-static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
-                                     const DatabaseConfiguration& configuration) {
+static int getExtraTLogEligibleZones(std::vector<WorkerDetails> const& workers,
+                                     DatabaseConfiguration const& configuration) {
 	std::set<StringRef> allZones;
 	std::map<Key, std::set<StringRef>> dcId_zone;
 	for (auto const& worker : workers) {
@@ -2061,14 +2061,14 @@ static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
 	int maxRequiredReplicationFactor =
 	    std::max(configuration.remoteTLogReplicationFactor,
 	             std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize));
-	for (const auto& region : configuration.regions) {
+	for (auto const& region : configuration.regions) {
 		if (region.priority >= 0) {
 			int eligible = dcId_zone[region.dcId].size() - maxRequiredReplicationFactor;
 
 			// FIXME: does not take into account fallback satellite policies
 			if (region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
 				int totalSatelliteEligible = 0;
-				for (const auto& sat : region.satellites) {
+				for (auto const& sat : region.satellites) {
 					totalSatelliteEligible += dcId_zone[sat.dcId].size();
 				}
 				eligible = std::min<int>(eligible, totalSatelliteEligible - region.satelliteTLogReplicationFactor);
@@ -2398,7 +2398,7 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 }
 
 static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
-                                     const std::vector<TLogSet>& tLogs,
+                                     std::vector<TLogSet> const& tLogs,
                                      std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	JsonBuilderObject statusObj;
 	JsonBuilderArray logsObj;
@@ -2409,7 +2409,7 @@ static JsonBuilderObject tlogFetcher(int* logFaultTolerance,
 	int minFaultTolerance = 1000;
 	int localSetsWithNonNegativeFaultTolerance = 0;
 
-	for (const auto& tLogSet : tLogs) {
+	for (auto const& tLogSet : tLogs) {
 		if (tLogSet.tLogs.size() == 0) {
 			// We can have LogSets where there are no tLogs but some LogRouters. It's the way
 			// recruiting is implemented for old LogRouters in TagPartitionedLogSystem, where
@@ -2525,8 +2525,8 @@ static JsonBuilderArray tlogFetcher(int* logFaultTolerance,
 
 static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration configuration,
                                                      ServerCoordinators coordinators,
-                                                     const std::vector<NetworkAddress>& coordinatorAddresses,
-                                                     const std::vector<WorkerDetails>& workers,
+                                                     std::vector<NetworkAddress> const& coordinatorAddresses,
+                                                     std::vector<WorkerDetails> const& workers,
                                                      int extraTlogEligibleZones,
                                                      int minStorageReplicasRemaining,
                                                      int oldLogFaultTolerance,
@@ -2542,18 +2542,18 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 	int maxCoordinatorFailures = (coordinators.clientLeaderServers.size() - 1) / 2;
 
 	std::map<NetworkAddress, StringRef> workerZones;
-	for (const auto& worker : workers) {
+	for (auto const& worker : workers) {
 		workerZones[worker.interf.address()] = worker.interf.locality.zoneId().orDefault(""_sr);
 	}
 	std::map<StringRef, int> coordinatorZoneCounts;
-	for (const auto& coordinator : coordinatorAddresses) {
+	for (auto const& coordinator : coordinatorAddresses) {
 		auto zone = workerZones[coordinator];
 		coordinatorZoneCounts[zone] += 1;
 	}
 	std::vector<std::pair<StringRef, int>> coordinatorZones(coordinatorZoneCounts.begin(), coordinatorZoneCounts.end());
 	std::sort(coordinatorZones.begin(),
 	          coordinatorZones.end(),
-	          [](const std::pair<StringRef, int>& lhs, const std::pair<StringRef, int>& rhs) {
+	          [](std::pair<StringRef, int> const& lhs, std::pair<StringRef, int> const& rhs) {
 		          return lhs.second > rhs.second;
 	          });
 	int lostCoordinators = 0;
@@ -2632,10 +2632,10 @@ static JsonBuilderArray getClientIssuesAsMessages(
 				continue;
 			}
 
-			for (const auto& [issueKey, samples] : iter->second.second.issues) {
+			for (auto const& [issueKey, samples] : iter->second.second.issues) {
 				auto& t = deduplicatedIssues[issueKey.toString()];
 				t.first += samples.count;
-				for (const auto& sample : samples.samples) {
+				for (auto const& sample : samples.samples) {
 					t.second.push_back(formatIpPort(sample.first.ip, sample.first.port));
 				}
 			}
@@ -3438,7 +3438,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	}
 }
 
-StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
+StatusReply clusterGetFaultToleranceStatus(std::string const& statusStr) {
 	double tStart = timer();
 
 	try {
@@ -3468,7 +3468,7 @@ StatusReply clusterGetFaultToleranceStatus(const std::string& statusStr) {
 	}
 }
 
-bool checkAsciiNumber(const char* s) {
+bool checkAsciiNumber(char const* s) {
 	JsonBuilderObject number;
 	number.setKeyRawNumber("number", s);
 	std::string js = number.getJson();
@@ -3485,7 +3485,7 @@ bool checkAsciiNumber(const char* s) {
 	return true;
 }
 
-bool checkJson(const JsonBuilder& j, const char* expected) {
+bool checkJson(JsonBuilder const& j, char const* expected) {
 	std::string js = j.getJson();
 	printf("json:     '%s'\n", js.c_str());
 	printf("expected: '%s'\n\n", expected);
@@ -3594,10 +3594,10 @@ TEST_CASE("/status/json/builder") {
 	return Void();
 }
 
-JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& limit, int level);
-JsonBuilderArray randomArray(const std::vector<std::string>& strings, int& limit, int level);
+JsonBuilderObject randomDocument(std::vector<std::string> const& strings, int& limit, int level);
+JsonBuilderArray randomArray(std::vector<std::string> const& strings, int& limit, int level);
 
-JsonBuilderArray randomArray(const std::vector<std::string>& strings, int& limit, int level) {
+JsonBuilderArray randomArray(std::vector<std::string> const& strings, int& limit, int level) {
 	JsonBuilderArray r;
 	int size = deterministicRandom()->randomInt(0, 50);
 
@@ -3626,7 +3626,7 @@ JsonBuilderArray randomArray(const std::vector<std::string>& strings, int& limit
 	return r;
 }
 
-JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& limit, int level) {
+JsonBuilderObject randomDocument(std::vector<std::string> const& strings, int& limit, int level) {
 	JsonBuilderObject r;
 	int size = deterministicRandom()->randomInt(0, 300);
 
@@ -3634,7 +3634,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& l
 		if (--limit <= 0)
 			break;
 
-		const std::string& key = strings[deterministicRandom()->randomInt(0, strings.size())];
+		std::string const& key = strings[deterministicRandom()->randomInt(0, strings.size())];
 
 		if (level > 0 && deterministicRandom()->coinflip()) {
 			if (deterministicRandom()->coinflip())

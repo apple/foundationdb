@@ -245,16 +245,16 @@ struct UDPWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		unsigned totalReceived = 0, totalSent = 0, totalAcked = 0, totalSuccess = 0;
-		for (const auto& [_destination, sentCount] : sent) {
+		for (auto const& [_destination, sentCount] : sent) {
 			totalSent += sentCount;
 		}
-		for (const auto& [_source, receivedCount] : received) {
+		for (auto const& [_source, receivedCount] : received) {
 			totalReceived += receivedCount;
 		}
-		for (const auto& [_destination, ackedCount] : acked) {
+		for (auto const& [_destination, ackedCount] : acked) {
 			totalAcked += ackedCount;
 		}
-		for (const auto& [_destination, successCount] : successes) {
+		for (auto const& [_destination, successCount] : successes) {
 			totalSuccess += successCount;
 		}
 		m.emplace_back("Sent", totalSent, Averaged::False);

@@ -257,11 +257,11 @@ extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 extern void flushTraceFileVoid();
 
-extern const int MAX_CLUSTER_FILE_BYTES;
+extern int const MAX_CLUSTER_FILE_BYTES;
 
 bool enableFailures = true;
 
@@ -324,7 +324,7 @@ public:
 	boost::interprocess::permissions permission;
 
 private:
-	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
+	WorldReadablePermissions(WorldReadablePermissions const& rhs) {}
 #ifdef _WIN32
 	SECURITY_ATTRIBUTES sa;
 #endif
@@ -452,7 +452,7 @@ void testSerializationSpeed() {
 			for (int i = 0; i < 1; i++) {
 				tstart = timer();
 				Arena arena;
-				StringRef data(arena, StringRef((const uint8_t*)wr.getData(), wr.getLength()));
+				StringRef data(arena, StringRef((uint8_t const*)wr.getData(), wr.getLength()));
 				copy += timer() - tstart;
 
 				tstart = timer();
@@ -478,7 +478,7 @@ void testSerializationSpeed() {
 	printf("\n");
 }
 
-std::string toHTML(const StringRef& binaryString) {
+std::string toHTML(StringRef const& binaryString) {
 	std::string s;
 
 	for (int i = 0; i < binaryString.size(); i++) {
@@ -597,14 +597,14 @@ static void printVersion() {
 #endif
 }
 
-static void printHelpTeaser(const char* name) {
+static void printHelpTeaser(char const* name) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", name);
 }
 
 static void printOptionUsage(std::string option, std::string description) {
-	static const std::string OPTION_INDENT("  ");
-	static const std::string DESCRIPTION_INDENT("                ");
-	static const int WIDTH = 80;
+	static std::string const OPTION_INDENT("  ");
+	static std::string const DESCRIPTION_INDENT("                ");
+	static int const WIDTH = 80;
 
 	boost::algorithm::trim(option);
 	boost::algorithm::trim(description);
@@ -639,7 +639,7 @@ static void printOptionUsage(std::string option, std::string description) {
 	printf("%s", result.c_str());
 }
 
-static void printUsage(const char* name, bool devhelp) {
+static void printUsage(char const* name, bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s -p ADDRESS [OPTIONS]\n\n", name);
 	printOptionUsage("-p ADDRESS, --public-address ADDRESS",
@@ -842,12 +842,12 @@ void operator delete(void* ptr) throw() {
 }
 
 // scalar, nothrow new and it matching delete
-void* operator new(std::size_t size, const std::nothrow_t&) throw() {
+void* operator new(std::size_t size, std::nothrow_t const&) throw() {
 	void* p = malloc(size);
 	recordAllocation(p, size);
 	return p;
 }
-void operator delete(void* ptr, const std::nothrow_t&) throw() {
+void operator delete(void* ptr, std::nothrow_t const&) throw() {
 	recordDeallocation(ptr);
 	free(ptr);
 }
@@ -866,18 +866,18 @@ void operator delete[](void* ptr) throw() {
 }
 
 // array, nothrow new and matching delete[]
-void* operator new[](std::size_t size, const std::nothrow_t&) throw() {
+void* operator new[](std::size_t size, std::nothrow_t const&) throw() {
 	void* p = malloc(size);
 	recordAllocation(p, size);
 	return p;
 }
-void operator delete[](void* ptr, const std::nothrow_t&) throw() {
+void operator delete[](void* ptr, std::nothrow_t const&) throw() {
 	recordDeallocation(ptr);
 	free(ptr);
 }
 #endif
 
-Optional<bool> checkBuggifyOverride(const char* testFile) {
+Optional<bool> checkBuggifyOverride(char const* testFile) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -918,7 +918,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 	return Optional<bool>();
 }
 
-Optional<bool> checkFaultInjectionOverride(const char* testFile) {
+Optional<bool> checkFaultInjectionOverride(char const* testFile) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
@@ -963,7 +963,7 @@ Optional<bool> checkFaultInjectionOverride(const char* testFile) {
 // objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
     IClusterConnectionRecord& connectionRecord,
-    const std::vector<std::string>& publicAddressStrs,
+    std::vector<std::string> const& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
 		fprintf(stderr,
@@ -981,17 +981,17 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList listenNetworkAddresses;
 
 	std::vector<Hostname>& hostnames = connectionRecord.getConnectionString().hostnames;
-	const std::vector<NetworkAddress>& coords = connectionRecord.getConnectionString().coords;
+	std::vector<NetworkAddress> const& coords = connectionRecord.getConnectionString().coords;
 	ASSERT(hostnames.size() + coords.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
-		const std::string& publicAddressStr = publicAddressStrs[ii];
+		std::string const& publicAddressStr = publicAddressStrs[ii];
 		bool autoPublicAddress = StringRef(publicAddressStr).startsWith("auto:"_sr);
 		NetworkAddress currentPublicAddress;
 		if (autoPublicAddress) {
 			try {
-				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = connectionRecord.getConnectionString().determineLocalSourceIP();
+				NetworkAddress const& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
+				IPAddress const publicIP = connectionRecord.getConnectionString().determineLocalSourceIP();
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -1022,7 +1022,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
-		const std::string& listenAddressStr = listenAddressStrs[ii];
+		std::string const& listenAddressStr = listenAddressStrs[ii];
 		NetworkAddress currentListenAddress;
 		if (listenAddressStr == "public") {
 			currentListenAddress = currentPublicAddress;
@@ -1051,7 +1051,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			listenNetworkAddresses.secondaryAddress = currentListenAddress;
 		}
 
-		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](const NetworkAddress& address) {
+		bool matchCoordinatorsTls = std::all_of(coords.begin(), coords.end(), [&](NetworkAddress const& address) {
 			if (address.ip == currentPublicAddress.ip && address.port == currentPublicAddress.port) {
 				return address.isTLS() == currentPublicAddress.isTLS();
 			}
@@ -1090,7 +1090,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 // moves files from 'dirSrc' to 'dirToMove' if their name contains 'role'
 void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::string role) {
 	std::vector<std::string> returnFiles = platform::listFiles(dirSrc, "");
-	for (const auto& fileEntry : returnFiles) {
+	for (auto const& fileEntry : returnFiles) {
 		if (fileEntry != "fdb.cluster" && fileEntry.find(role) != std::string::npos) {
 			// rename files
 			TraceEvent("RenamingSnapFile")
@@ -1141,7 +1141,7 @@ struct CLIOptions {
 	uint32_t randomSeed = platform::getRandomSeed();
 	double reseedTime = -1.0; // Time in seconds when to reset random seed in simulation (-1 = disabled)
 
-	const char* testFile = "tests/default.txt";
+	char const* testFile = "tests/default.txt";
 	std::string kvFile;
 	std::string testServersStr;
 	std::string whitelistBinPaths;
@@ -1149,7 +1149,7 @@ struct CLIOptions {
 	std::vector<std::string> publicAddressStrs, listenAddressStrs, grpcAddressStrs;
 	NetworkAddressList publicAddresses, listenAddresses;
 
-	const char* targetKey = nullptr;
+	char const* targetKey = nullptr;
 	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
@@ -1173,7 +1173,7 @@ struct CLIOptions {
 	uint64_t rsssize = -1;
 	std::vector<std::string> blobCredentials; // used for fast restore workers & backup workers
 	Optional<std::string> proxy;
-	const char* blobCredsFromENV = nullptr;
+	char const* blobCredsFromENV = nullptr;
 
 	std::string mocks3PersistenceDir; // Directory for MockS3 persistence files
 
@@ -1195,7 +1195,7 @@ struct CLIOptions {
 	}
 
 	// Determine publicAddresses and listenAddresses by calling buildNetworkAddresses().
-	void buildNetwork(const char* name) {
+	void buildNetwork(char const* name) {
 		try {
 			if (!publicAddressStrs.empty()) {
 				// For roles without a cluster file, parse addresses directly
@@ -1240,7 +1240,7 @@ private:
 	CLIOptions() = default;
 
 	void parseEnvInternal() {
-		for (const std::string& knob : getEnvironmentKnobOptions()) {
+		for (std::string const& knob : getEnvironmentKnobOptions()) {
 			auto pos = knob.find_first_of("=");
 			if (pos == std::string::npos) {
 				fprintf(stderr,
@@ -1258,7 +1258,7 @@ private:
 	}
 
 	void parseArgsInternal(int argc, char* argv[]) {
-		auto warnDeprecatedOption = [](const char* optionText) {
+		auto warnDeprecatedOption = [](char const* optionText) {
 			fprintf(stderr, "WARNING: option `%s' is deprecated and ignored\n", optionText);
 			TraceEvent(SevWarnAlways, "DeprecatedCommandLineOption").detail("Option", optionText);
 		};
@@ -1302,7 +1302,7 @@ private:
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			const char* sRole;
+			char const* sRole;
 			Optional<uint64_t> ti;
 			std::string argStr;
 			std::vector<std::string> tmpStrings;
@@ -1466,7 +1466,7 @@ private:
 				break;
 			}
 			case OPT_PROFILER_RSS_SIZE: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				char* end;
 				rsssize = strtoull(a, &end, 10);
 				if (*end) {
@@ -1484,7 +1484,7 @@ private:
 				logFolder = args.OptionArg();
 				break;
 			case OPT_NETWORKIMPL: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				if (!strcmp(a, "net2"))
 					useNet2 = true;
 				else if (!strcmp(a, "net2-threadpool")) {
@@ -1498,7 +1498,7 @@ private:
 				break;
 			}
 			case OPT_TRACECLOCK: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				if (!strcmp(a, "realtime"))
 					g_trace_clock.store(TRACE_CLOCK_REALTIME);
 				else if (!strcmp(a, "now"))
@@ -1511,7 +1511,7 @@ private:
 				break;
 			}
 			case OPT_NUMTESTERS: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				if (!sscanf(a, "%d", &minTesterCount)) {
 					fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
 					printHelpTeaser(argv[0]);
@@ -1520,7 +1520,7 @@ private:
 				break;
 			}
 			case OPT_ROLLSIZE: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				ti = parse_with_suffix(a);
 				if (!ti.present()) {
 					fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
@@ -1532,7 +1532,7 @@ private:
 				break;
 			}
 			case OPT_MAXLOGSSIZE: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				ti = parse_with_suffix(a);
 				if (!ti.present()) {
 					fprintf(stderr, "ERROR: Could not parse maxlogssize `%s'\n", a);
@@ -1544,7 +1544,7 @@ private:
 				break;
 			}
 			case OPT_MAXLOGS: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				char* end;
 				maxLogs = strtoull(a, &end, 10);
 				if (*end) {
@@ -1735,7 +1735,7 @@ private:
 				metricsPrefix = args.OptionArg();
 				break;
 			case OPT_IO_TRUST_SECONDS: {
-				const char* a = args.OptionArg();
+				char const* a = args.OptionArg();
 				if (!sscanf(a, "%lf", &fileIoTimeout)) {
 					fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
 					printHelpTeaser(argv[0]);
@@ -1872,7 +1872,7 @@ private:
 
 		// Sets up blob credentials, including one from the environment FDB_BLOB_CREDENTIALS.
 		// Below is top-half of BackupTLSConfig::setupBlobCredentials().
-		const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+		char const* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
 		if (blobCredsFromENV != nullptr) {
 			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 			do {
@@ -1883,7 +1883,7 @@ private:
 		}
 
 		// Sets up proxy from ENV if it is not set by arg.
-		const char* proxyENV = getenv("FDB_PROXY");
+		char const* proxyENV = getenv("FDB_PROXY");
 		if (proxyENV != nullptr && !proxy.present()) {
 			proxy = proxyENV;
 			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
@@ -1927,7 +1927,7 @@ private:
 		}
 
 		bool autoPublicAddress =
-		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](const std::string& addr) {
+		    std::any_of(publicAddressStrs.begin(), publicAddressStrs.end(), [](std::string const& addr) {
 			    return StringRef(addr).startsWith("auto:"_sr);
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
@@ -2044,7 +2044,7 @@ private:
 bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestarting) {
 	std::vector<std::string> files = platform::listFiles(dataFolder);
 	if (!isRestarting) {
-		for (const auto& file : files) {
+		for (auto const& file : files) {
 			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
 				fprintf(stderr,
@@ -2084,7 +2084,7 @@ int main(int argc, char* argv[]) {
 		registerThreadForProfiling();
 
 		auto opts = CLIOptions::parseArgs(argc, argv);
-		const auto role = opts.role;
+		auto const role = opts.role;
 
 		if (role == ServerRole::Simulation) {
 			printf("Random seed is %u...\n", opts.randomSeed);
@@ -2203,7 +2203,7 @@ int main(int argc, char* argv[]) {
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress =
+			bool const expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore ||
 			     role == ServerRole::FlowProcess || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
@@ -2241,12 +2241,12 @@ int main(int argc, char* argv[]) {
 			// MockS3Server uses HTTP, not FlowTransport, so skip FlowTransport binding for it
 			if (expectsPublicAddress && role != ServerRole::MockS3Server) {
 				for (int ii = 0; ii < (opts.publicAddresses.secondaryAddress.present() ? 2 : 1); ++ii) {
-					const NetworkAddress& publicAddress =
+					NetworkAddress const& publicAddress =
 					    ii == 0 ? opts.publicAddresses.address : opts.publicAddresses.secondaryAddress.get();
-					const NetworkAddress& listenAddress =
+					NetworkAddress const& listenAddress =
 					    ii == 0 ? opts.listenAddresses.address : opts.listenAddresses.secondaryAddress.get();
 					try {
-						const Future<Void>& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
+						Future<Void> const& errorF = FlowTransport::transport().bind(publicAddress, listenAddress);
 						listenErrors.push_back(errorF);
 						if (errorF.isReady())
 							errorF.get();
@@ -2282,7 +2282,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		std::string environmentKnobOptions;
-		for (const std::string& knobOption : getEnvironmentKnobOptions()) {
+		for (std::string const& knobOption : getEnvironmentKnobOptions()) {
 			environmentKnobOptions += knobOption + " ";
 		}
 		if (environmentKnobOptions.length()) {
@@ -2343,12 +2343,12 @@ int main(int argc, char* argv[]) {
 
 			auto dataFolder = opts.dataFolder.size() ? opts.dataFolder : "simfdb";
 			std::vector<std::string> directories = platform::listDirectories(dataFolder);
-			const std::set<std::string> allowedDirectories = { ".",       "..",       "backups",  "unittests",
+			std::set<std::string> const allowedDirectories = { ".",       "..",       "backups",  "unittests",
 				                                               "fdbblob", "bulkdump", "bulkload", "mocks3" };
 			// bulkdump and bulkload folders are used by bulkloading and bulkdumping simulation tests
 			// mocks3 folder is used by MockS3 persistence for post-test analysis
 
-			for (const auto& dir : directories) {
+			for (auto const& dir : directories) {
 				if (dir.size() != 32 && !allowedDirectories.contains(dir) && dir.find("snap") == std::string::npos) {
 
 					TraceEvent(SevError, "IncompatibleDirectoryFound")
@@ -2378,10 +2378,10 @@ int main(int argc, char* argv[]) {
 				std::string absDataFolder = abspath(dataFolder);
 				ini.LoadFile(joinPath(absDataFolder, "restartInfo.ini").c_str());
 				int backupFailed = true;
-				const char* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
+				char const* isRestoringStr = ini.GetValue("RESTORE", "isRestoring", nullptr);
 				if (isRestoringStr) {
 					isRestoring = atoi(isRestoringStr);
-					const char* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", nullptr);
+					char const* backupFailedStr = ini.GetValue("RESTORE", "BackupFailed", nullptr);
 					if (isRestoring && backupFailedStr) {
 						backupFailed = atoi(backupFailedStr);
 					}
@@ -2396,7 +2396,7 @@ int main(int argc, char* argv[]) {
 					TraceEvent("RestoreSnapUID").detail("UID", snapStr);
 
 					// delete all files (except fdb.cluster) in non-snap directories
-					for (const auto& dirEntry : returnList) {
+					for (auto const& dirEntry : returnList) {
 						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
@@ -2406,7 +2406,7 @@ int main(int argc, char* argv[]) {
 
 						std::string childf = absDataFolder + "/" + dirEntry;
 						std::vector<std::string> returnFiles = platform::listFiles(childf, ext);
-						for (const auto& fileEntry : returnFiles) {
+						for (auto const& fileEntry : returnFiles) {
 							if (fileEntry != "fdb.cluster" && fileEntry != "fitness") {
 								TraceEvent("DeletingNonSnapfiles").detail("FileBeingDeleted", childf + "/" + fileEntry);
 								deleteFile(childf + "/" + fileEntry);
@@ -2414,7 +2414,7 @@ int main(int argc, char* argv[]) {
 						}
 					}
 					// cleanup unwanted and partial directories
-					for (const auto& dirEntry : returnList) {
+					for (auto const& dirEntry : returnList) {
 						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
@@ -2435,7 +2435,7 @@ int main(int argc, char* argv[]) {
 						}
 					}
 					// move snapshotted files to appropriate locations
-					for (const auto& dirEntry : returnList) {
+					for (auto const& dirEntry : returnList) {
 						if (dirEntry == "." || dirEntry == "..") {
 							continue;
 						}
@@ -2637,7 +2637,7 @@ int main(int argc, char* argv[]) {
 			if (getppid() == 1) /* parent already died before prctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
 #elif defined(__FreeBSD__)
-			const int sig = SIGTERM;
+			int const sig = SIGTERM;
 			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
 			if (getppid() == 1) /* parent already died before procctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
@@ -2729,7 +2729,7 @@ int main(int argc, char* argv[]) {
 			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
 			          << FastAllocator<16384>::pageCount << std::endl;
 
-			std::vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, char const*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 
@@ -2756,7 +2756,7 @@ int main(int argc, char* argv[]) {
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
+				char const* n = typeNames[i].second;
 				auto& f = allocInstr[n];
 				printf("%+d\t%+d\t%d\t%d\t%s\n",
 				       f.allocCount,

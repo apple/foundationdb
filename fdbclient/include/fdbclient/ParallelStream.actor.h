@@ -72,7 +72,7 @@ private:
 public:
 	// A background actor which take results from the oldest fragment and sends them to the main output stream
 	ACTOR static Future<Void> flushToClient(ParallelStream<T>* self) {
-		state const int messagesBetweenYields = 1000;
+		state int const messagesBetweenYields = 1000;
 		state int messagesSinceYield = 0;
 		try {
 			loop {

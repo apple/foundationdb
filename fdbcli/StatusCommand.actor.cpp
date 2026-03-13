@@ -49,10 +49,10 @@ std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
 	return outputString;
 }
 
-std::string lineWrap(const char* text, int col) {
-	const char* iter = text;
-	const char* start = text;
-	const char* space = nullptr;
+std::string lineWrap(char const* text, int col) {
+	char const* iter = text;
+	char const* start = text;
+	char const* space = nullptr;
 	std::string out = "";
 	do {
 		iter++;
@@ -162,7 +162,7 @@ std::string getWorkloadRates(StatusObjectReader statusObj,
 }
 
 void getBackupDRTags(StatusObjectReader& statusObjCluster,
-                     const char* context,
+                     char const* context,
                      std::map<std::string, std::string>& tagMap) {
 	std::string path = format("layers.%s.tags", context);
 	StatusObjectReader tags;
@@ -183,7 +183,7 @@ void getBackupDRTags(StatusObjectReader& statusObjCluster,
 	}
 }
 
-std::string logBackupDR(const char* context, std::map<std::string, std::string> const& tagMap) {
+std::string logBackupDR(char const* context, std::map<std::string, std::string> const& tagMap) {
 	std::string outputString = "";
 	if (tagMap.size() > 0) {
 		outputString += format("\n\n%s:", context);
@@ -681,7 +681,7 @@ void printStatus(StatusObjectReader statusObj,
 						outputString += "\n  Fault Tolerance        - ";
 
 						int minLoss = std::min(availLoss, dataLoss);
-						const char* faultDomain = machinesAreZones ? "machine" : "zone";
+						char const* faultDomain = machinesAreZones ? "machine" : "zone";
 						outputString += format("%d %ss", minLoss, faultDomain);
 
 						if (dataLoss > availLoss) {
@@ -1256,12 +1256,12 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 	return true;
 }
 
-void statusGenerator(const char* text,
-                     const char* line,
+void statusGenerator(char const* text,
+                     char const* line,
                      std::vector<std::string>& lc,
                      std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "minimal", "details", "json", nullptr };
+		char const* opts[] = { "minimal", "details", "json", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	}
 }

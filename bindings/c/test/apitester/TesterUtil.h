@@ -43,7 +43,7 @@ template <typename T>
 struct formatter<std::optional<T>> : fmt::formatter<T> {
 
 	template <typename FormatContext>
-	auto format(const std::optional<T>& opt, FormatContext& ctx) {
+	auto format(std::optional<T> const& opt, FormatContext& ctx) {
 		if (opt) {
 			fmt::formatter<T>::format(*opt, ctx);
 			return ctx.out();
@@ -88,15 +88,15 @@ public:
 
 class TesterError : public std::runtime_error {
 public:
-	explicit TesterError(const char* message) : std::runtime_error(message) {}
-	explicit TesterError(const std::string& message) : std::runtime_error(message) {}
-	TesterError(const TesterError&) = default;
-	TesterError& operator=(const TesterError&) = default;
+	explicit TesterError(char const* message) : std::runtime_error(message) {}
+	explicit TesterError(std::string const& message) : std::runtime_error(message) {}
+	TesterError(TesterError const&) = default;
+	TesterError& operator=(TesterError const&) = default;
 	TesterError(TesterError&&) = default;
 	TesterError& operator=(TesterError&&) = default;
 };
 
-void print_internal_error(const char* msg, const char* file, int line);
+void print_internal_error(char const* msg, char const* file, int line);
 
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
@@ -113,11 +113,11 @@ static inline TimePoint timeNow() {
 	return std::chrono::steady_clock::now();
 }
 
-static inline TimeDuration timeElapsedInUs(const TimePoint& start, const TimePoint& end) {
+static inline TimeDuration timeElapsedInUs(TimePoint const& start, TimePoint const& end) {
 	return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 }
 
-static inline TimeDuration timeElapsedInUs(const TimePoint& start) {
+static inline TimeDuration timeElapsedInUs(TimePoint const& start) {
 	return timeElapsedInUs(start, timeNow());
 }
 
@@ -148,7 +148,7 @@ static T toInteger(fdb::BytesRef value) {
 template <class T, typename = std::enable_if_t<std::is_integral<T>::value>>
 static fdb::ByteString toByteString(T value) {
 	fdb::ByteString output(sizeof(T), 0);
-	memcpy(output.data(), (const uint8_t*)&value, sizeof(value));
+	memcpy(output.data(), (uint8_t const*)&value, sizeof(value));
 	return output;
 }
 
@@ -159,7 +159,7 @@ public:
 	void create(std::string_view dir, std::string_view prefix);
 	void write(std::string_view data);
 	void remove();
-	const std::string& getFileName() const { return filename; }
+	std::string const& getFileName() const { return filename; }
 
 private:
 	std::string filename;

@@ -597,7 +597,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
 
 // return the corresponding error message for the CoordinatorsResult
 // used by special keys and fdbcli
-std::string generateErrorMessage(const CoordinatorsResult& res);
+std::string generateErrorMessage(CoordinatorsResult const& res);
 
 } // namespace ManagementAPI
 

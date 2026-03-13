@@ -32,7 +32,7 @@
 #undef max
 #endif
 
-extern std::string format(const char* form, ...);
+extern std::string format(char const* form, ...);
 
 Event::Event() = default;
 

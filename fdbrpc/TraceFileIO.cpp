@@ -64,7 +64,7 @@ bool debugFileIsSet(uint8_t* storeMask, int64_t offset, int64_t length) {
 }
 
 // Checks that a given block of data is the same as what has been written by a call to debugFileSet
-void debugFileCheck(std::string context, std::string file, const void* data, int64_t offset, int length) {
+void debugFileCheck(std::string context, std::string file, void const* data, int64_t offset, int length) {
 	if (debugFileRegions.empty())
 		debugFileSetup();
 	if (debugFileTrim(file) == debugFileName) {
@@ -123,7 +123,7 @@ void debugFileCheck(std::string context, std::string file, const void* data, int
 }
 
 // Updates the in-memory copy of tracked data at a given offset
-void debugFileSet(std::string context, std::string file, const void* data, int64_t offset, int length) {
+void debugFileSet(std::string context, std::string file, void const* data, int64_t offset, int length) {
 	if (debugFileRegions.empty())
 		debugFileSetup();
 	if (debugFileTrim(file) == debugFileName) {
@@ -189,7 +189,7 @@ void debugFileTruncate(std::string context, std::string file, int64_t offset) {
 }
 
 #else
-void debugFileCheck(std::string context, std::string file, const void* data, int64_t offset, int length) {}
-void debugFileSet(std::string context, std::string file, const void* data, int64_t offset, int length) {}
+void debugFileCheck(std::string context, std::string file, void const* data, int64_t offset, int length) {}
+void debugFileSet(std::string context, std::string file, void const* data, int64_t offset, int length) {}
 void debugFileTruncate(std::string context, std::string file, int64_t offset) {}
 #endif

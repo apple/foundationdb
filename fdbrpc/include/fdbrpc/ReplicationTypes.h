@@ -68,8 +68,8 @@ struct KeyValueMap final : public ReferenceCounted<KeyValueMap> {
 	std::vector<AttribRecord> _keyvaluearray;
 
 	KeyValueMap() {}
-	KeyValueMap(const LocalityData& data);
-	KeyValueMap(const KeyValueMap& entry) : _keyvaluearray(entry._keyvaluearray) {}
+	KeyValueMap(LocalityData const& data);
+	KeyValueMap(KeyValueMap const& entry) : _keyvaluearray(entry._keyvaluearray) {}
 	KeyValueMap& operator=(KeyValueMap const& source) {
 		_keyvaluearray = source._keyvaluearray;
 		return *this;
@@ -97,11 +97,11 @@ struct KeyValueMap final : public ReferenceCounted<KeyValueMap> {
 		return ((lower != _keyvaluearray.end()) && (lower->first == indexKey) && (lower->second == indexValue));
 	}
 
-	static bool compareKeyValue(const AttribRecord& lhs, const AttribRecord& rhs) {
+	static bool compareKeyValue(AttribRecord const& lhs, AttribRecord const& rhs) {
 		return (lhs.first < rhs.first) || (!(rhs.first < lhs.first) && (lhs.second < rhs.second));
 	}
 
-	static bool compareKey(const AttribRecord& lhs, const AttribRecord& rhs) { return (lhs.first < rhs.first); }
+	static bool compareKey(AttribRecord const& lhs, AttribRecord const& rhs) { return (lhs.first < rhs.first); }
 };
 
 // This class stores the information for each entry within the locality map
@@ -190,6 +190,6 @@ struct StringToIntMap final : public ReferenceCounted<StringToIntMap> {
 	}
 };
 
-extern const std::vector<LocalityEntry> emptyEntryArray;
+extern std::vector<LocalityEntry> const emptyEntryArray;
 
 #endif

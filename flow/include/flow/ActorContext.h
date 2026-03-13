@@ -46,9 +46,9 @@ struct ActiveActor {
 	ActorID spawner = INVALID_ACTOR_ID;
 
 	ActiveActor();
-	explicit ActiveActor(const ActorIdentifier& identifier_,
-	                     const ActorID& id_,
-	                     const ActorID& spawnerID_ = INVALID_ACTOR_ID);
+	explicit ActiveActor(ActorIdentifier const& identifier_,
+	                     ActorID const& id_,
+	                     ActorID const& spawnerID_ = INVALID_ACTOR_ID);
 
 	template <typename Ar>
 	void serialize(Ar& ar) {
@@ -63,7 +63,7 @@ struct ActorExecutionContext {
 
 	ActorBlockIdentifier blockIdentifier;
 
-	explicit ActorExecutionContext(const ActorID actorID_, const ActorBlockIdentifier blockIdentifier_)
+	explicit ActorExecutionContext(ActorID const actorID_, ActorBlockIdentifier const blockIdentifier_)
 	  : actorID(actorID_), blockIdentifier(blockIdentifier_) {}
 };
 
@@ -75,13 +75,13 @@ class ActiveActorHelper {
 public:
 	ActorID actorID;
 
-	ActiveActorHelper(const ActorIdentifier& actorIdentifier);
+	ActiveActorHelper(ActorIdentifier const& actorIdentifier);
 	~ActiveActorHelper();
 };
 
 class ActorExecutionContextHelper {
 public:
-	ActorExecutionContextHelper(const ActorID& actorID_, const ActorBlockIdentifier& blockIdentifier_);
+	ActorExecutionContextHelper(ActorID const& actorID_, ActorBlockIdentifier const& blockIdentifier_);
 	~ActorExecutionContextHelper();
 };
 
@@ -92,7 +92,7 @@ enum class ActorContextDumpType : uint8_t {
 };
 
 // Encode the current actor context into a string
-extern std::string encodeActorContext(const ActorContextDumpType dumpType = ActorContextDumpType::FULL_CONTEXT);
+extern std::string encodeActorContext(ActorContextDumpType const dumpType = ActorContextDumpType::FULL_CONTEXT);
 
 // Encode the current actor call backtrace
 extern void dumpActorCallBacktrace();
@@ -103,7 +103,7 @@ struct DecodedActorContext {
 		ActorIdentifier identifier;
 		ActorID spawnerID;
 
-		ActorInfo(const ActorID& _id, const ActorIdentifier& _identifier, const ActorID& _spawnerID)
+		ActorInfo(ActorID const& _id, ActorIdentifier const& _identifier, ActorID const& _spawnerID)
 		  : id(_id), identifier(_identifier), spawnerID(_spawnerID) {}
 	};
 	ActorID currentRunningActor;
@@ -112,7 +112,7 @@ struct DecodedActorContext {
 };
 
 // Decode the serialized actor context to DecodedActorContext
-DecodedActorContext decodeActorContext(const std::string& caller);
+DecodedActorContext decodeActorContext(std::string const& caller);
 
 #else // WITH_ACAC
 
@@ -127,10 +127,10 @@ using ActorBlockIdentifier = UID;
 struct ActorExecutionContext {};
 struct ActiveActor {};
 struct ActiveActorHelper {
-	ActiveActorHelper(const ActorIdentifier&) {}
+	ActiveActorHelper(ActorIdentifier const&) {}
 };
 struct ActorExecutionContextHelper {
-	ActorExecutionContextHelper(const ActorID&, const ActorBlockIdentifier&);
+	ActorExecutionContextHelper(ActorID const&, ActorBlockIdentifier const&);
 };
 
 #endif // WITH_ACAC

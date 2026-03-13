@@ -37,7 +37,7 @@
 
 // To avoid directly access INetworkConnection::net()->removeCachedDNS(), which will require heavy include budget, put
 // the call to FlowTransport.actor.cpp as a external function.
-extern void removeCachedDNS(const std::string& host, const std::string& service);
+extern void removeCachedDNS(std::string const& host, std::string const& service);
 
 ACTOR template <class Req, bool P>
 Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request) {

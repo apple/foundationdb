@@ -34,7 +34,7 @@
 #include <limits>
 
 namespace {
-std::string printValue(const ErrorOr<Optional<Value>>& value) {
+std::string printValue(ErrorOr<Optional<Value>> const& value) {
 	if (value.isError()) {
 		return value.getError().name();
 	}
@@ -48,7 +48,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
-	const bool enabled;
+	bool const enabled;
 	bool pass;
 
 	PhysicalShardMoveWorkLoad(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
@@ -261,19 +261,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			Error err;
 			try {
 				std::vector<Future<Optional<Value>>> checkpointEntries;
-				for (const UID& id : checkpointIds) {
+				for (UID const& id : checkpointIds) {
 					checkpointEntries.push_back(tr.get(checkpointKeyFor(id)));
 				}
 				std::vector<Optional<Value>> checkpointValues = co_await getAll(checkpointEntries);
 
 				for (int i = 0; i < checkpointIds.size(); ++i) {
-					const auto& value = checkpointValues[i];
+					auto const& value = checkpointValues[i];
 					if (!value.present()) {
 						TraceEvent(SevWarnAlways, "CheckpointNotFound");
 						continue;
 					}
 					CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
-					const Key key = checkpointKeyFor(checkpoint.checkpointID);
+					Key const key = checkpointKeyFor(checkpoint.checkpointID);
 					// Setting the state as CheckpointMetaData::Deleting will trigger private mutations to instruct
 					// all storage servers to delete their local checkpoints.
 					checkpoint.setState(CheckpointMetaData::Deleting);
@@ -356,7 +356,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					for (int i = 0; i < records.size(); ++i) {
 						TraceEvent(SevDebug, "TestFetchingCheckpoint")
 						    .detail("Checkpoint", records[i].second.toString());
-						const std::string currentDir =
+						std::string const currentDir =
 						    fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
 						platform::eraseDirectoryRecursive(currentDir);
 						ASSERT(platform::createDirectory(currentDir));
@@ -367,7 +367,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					for (int i = 1; i < records.size(); ++i) {
 						ASSERT(records[i].second.checkpointID == records[i - 1].second.checkpointID);
 					}
-					const std::string currentDir =
+					std::string const currentDir =
 					    fetchedCheckpointDir(checkpointDir, records.front().second.checkpointID);
 					platform::eraseDirectoryRecursive(currentDir);
 					ASSERT(platform::createDirectory(currentDir));
@@ -382,7 +382,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		std::vector<UID> checkpointIds;
-		for (const auto& it : records) {
+		for (auto const& it : records) {
 			checkpointIds.push_back(it.second.checkpointID);
 		}
 		co_await self->deleteCheckpoints(cx, checkpointIds);
@@ -413,7 +413,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		auto containsKey = [](std::vector<KeyRange> ranges, KeyRef key) {
-			for (const auto& range : ranges) {
+			for (auto const& range : ranges) {
 				if (range.contains(key)) {
 					return true;
 				}
@@ -422,7 +422,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		};
 
 		int count = 0;
-		for (const auto& [key, value] : *kvs) {
+		for (auto const& [key, value] : *kvs) {
 			if (containsKey(restoreRanges, key)) {
 				TraceEvent(SevDebug, "TestExpectKeyValueMatch").detail("Key", key).detail("Value", value);
 				auto it = kvsKvs.find(key);
@@ -453,7 +453,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			Error err;
 			try {
 				tr->debugTransaction(debugID);
-				for (const auto& [key, value] : *kvs) {
+				for (auto const& [key, value] : *kvs) {
 					tr->set(key, value);
 				}
 				co_await tr->commit();
@@ -485,7 +485,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				RangeResult res = co_await tr.getRange(range, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
 
-				for (const auto& kv : res) {
+				for (auto const& kv : res) {
 					ASSERT((*kvs)[kv.key] == kv.value);
 				}
 				break;
@@ -513,7 +513,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				Version _readVersion = co_await tr.getReadVersion();
 				readVersion = _readVersion;
 				Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
-				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				bool const equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
@@ -579,7 +579,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		std::vector<StorageServerInterface> interfs = co_await getStorageServers(cx);
 		ASSERT(interfs.size() > teamSize - includes.size());
 		while (includes.size() < teamSize) {
-			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
+			auto const& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
 			if (!excludes.contains(interf.uniqueID) && !includes.contains(interf.uniqueID)) {
 				includes.insert(interf.uniqueID);
 			}

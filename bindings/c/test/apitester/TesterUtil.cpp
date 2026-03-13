@@ -53,7 +53,7 @@ bool Random::randomBool(double trueRatio) {
 	return std::uniform_real_distribution<double>(0.0, 1.0)(random) <= trueRatio;
 }
 
-void print_internal_error(const char* msg, const char* file, int line) {
+void print_internal_error(char const* msg, char const* file, int line) {
 	fprintf(stderr, "Assertion %s failed @ %s %d:\n", msg, file, line);
 	fflush(stderr);
 }

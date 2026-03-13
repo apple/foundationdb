@@ -42,11 +42,11 @@ TEST_CASE("/flow/coro/buggifiedDelay") {
 	loop {
 		double x = deterministicRandom()->random01();
 		int last = 0;
-		Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+		Future<Void> f1 = map(delay(x), [last = &last](Void const&) {
 			*last = 1;
 			return Void();
 		});
-		Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+		Future<Void> f2 = map(delay(x), [last = &last](Void const&) {
 			*last = 2;
 			return Void();
 		});
@@ -146,7 +146,7 @@ Future<int> addOneActor(Future<int> in) {
 }
 
 Future<Void> chooseTwoActor(Future<Void> f, Future<Void> g) {
-	co_return co_await Choose().When(f, [](const Void&) {}).When(g, [](const Void&) {}).run();
+	co_return co_await Choose().When(f, [](Void const&) {}).When(g, [](Void const&) {}).run();
 }
 
 Future<int> consumeOneActor(FutureStream<int> in) {
@@ -235,7 +235,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, char const* name) override {
 		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
@@ -252,7 +252,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return baseNetwork->isAddressOnThisHost(addr);
 	}
-	const TLSConfig& getTLSConfig() const override {
+	TLSConfig const& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
@@ -1117,8 +1117,8 @@ struct Tracker {
 		this->copied = other.copied;
 		return *this;
 	}
-	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
-	Tracker& operator=(const Tracker& other) {
+	Tracker(Tracker const& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(Tracker const& other) {
 		ASSERT(!other.moved);
 		this->moved = false;
 		this->copied = other.copied + 1;
@@ -1160,12 +1160,12 @@ TEST_CASE("/flow/coro/PromiseStream/move") {
 		stream.send(Tracker{});
 		stream.send(Tracker{});
 		{
-			const Tracker& movedTracker = co_await stream.getFuture();
+			Tracker const& movedTracker = co_await stream.getFuture();
 			ASSERT(!movedTracker.moved);
 			ASSERT(movedTracker.copied == 0);
 		}
 		{
-			const Tracker& movedTracker = co_await stream.getFuture();
+			Tracker const& movedTracker = co_await stream.getFuture();
 			ASSERT(!movedTracker.moved);
 			ASSERT(movedTracker.copied == 0);
 		}
@@ -1178,13 +1178,13 @@ TEST_CASE("/flow/coro/PromiseStream/move") {
 		stream.send(namedTracker1);
 		stream.send(namedTracker2);
 		{
-			const Tracker& copiedTracker = co_await stream.getFuture();
+			Tracker const& copiedTracker = co_await stream.getFuture();
 			ASSERT(!copiedTracker.moved);
 			// must copy onto queue
 			ASSERT(copiedTracker.copied == 1);
 		}
 		{
-			const Tracker& copiedTracker = co_await stream.getFuture();
+			Tracker const& copiedTracker = co_await stream.getFuture();
 			ASSERT(!copiedTracker.moved);
 			// must copy onto queue
 			ASSERT(copiedTracker.copied == 1);
@@ -1195,7 +1195,7 @@ TEST_CASE("/flow/coro/PromiseStream/move") {
 TEST_CASE("/flow/coro/PromiseStream/move2") {
 	PromiseStream<Tracker> stream;
 	stream.send(Tracker{});
-	const Tracker& tracker = co_await stream.getFuture();
+	Tracker const& tracker = co_await stream.getFuture();
 	Tracker movedTracker = std::move(const_cast<Tracker&>(tracker));
 	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
@@ -1946,8 +1946,8 @@ TEST_CASE("/flow/coro/chooseCancelWaiting") {
 	Promise<Void> voidPromise;
 	Promise<int> intPromise;
 	Future<Void> chooseFuture = Choose()
-	                                .When(voidPromise.getFuture(), [](const Void&) { ASSERT_ABORT(false); })
-	                                .When(intPromise.getFuture(), [](const int&) { ASSERT_ABORT(false); })
+	                                .When(voidPromise.getFuture(), [](Void const&) { ASSERT_ABORT(false); })
+	                                .When(intPromise.getFuture(), [](int const&) { ASSERT_ABORT(false); })
 	                                .run();
 	chooseFuture.cancel();
 	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);
@@ -1960,7 +1960,7 @@ TEST_CASE("/flow/coro/chooseCancelWaiting") {
 TEST_CASE("/flow/coro/chooseCancelReady") {
 	Promise<int> intPromise;
 	int res = 0;
-	Future<Void> chooseFuture = Choose().When(intPromise.getFuture(), [&](const int& val) { res = val; }).run();
+	Future<Void> chooseFuture = Choose().When(intPromise.getFuture(), [&](int const& val) { res = val; }).run();
 	intPromise.send(5);
 	ASSERT(chooseFuture.isReady());
 	ASSERT(res == 5);
@@ -1973,8 +1973,8 @@ TEST_CASE("/flow/coro/chooseRepeatedCancel") {
 	Promise<Void> voidPromise;
 	Promise<int> intPromise;
 	Future<Void> chooseFuture = Choose()
-	                                .When(voidPromise.getFuture(), [](const Void&) { ASSERT_ABORT(false); })
-	                                .When(intPromise.getFuture(), [](const int&) { ASSERT_ABORT(false); })
+	                                .When(voidPromise.getFuture(), [](Void const&) { ASSERT_ABORT(false); })
+	                                .When(intPromise.getFuture(), [](int const&) { ASSERT_ABORT(false); })
 	                                .run();
 	chooseFuture.cancel();
 	ASSERT(chooseFuture.getError().code() == error_code_actor_cancelled);

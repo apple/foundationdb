@@ -22,18 +22,18 @@
 #include "DirectoryPartition.h"
 
 namespace FDB {
-const uint8_t DirectoryLayer::LITTLE_ENDIAN_LONG_ONE[8] = { 1, 0, 0, 0, 0, 0, 0, 0 };
-const StringRef DirectoryLayer::HIGH_CONTENTION_KEY = "hca"_sr;
-const StringRef DirectoryLayer::LAYER_KEY = "layer"_sr;
-const StringRef DirectoryLayer::VERSION_KEY = "version"_sr;
-const int64_t DirectoryLayer::SUB_DIR_KEY = 0;
+uint8_t const DirectoryLayer::LITTLE_ENDIAN_LONG_ONE[8] = { 1, 0, 0, 0, 0, 0, 0, 0 };
+StringRef const DirectoryLayer::HIGH_CONTENTION_KEY = "hca"_sr;
+StringRef const DirectoryLayer::LAYER_KEY = "layer"_sr;
+StringRef const DirectoryLayer::VERSION_KEY = "version"_sr;
+int64_t const DirectoryLayer::SUB_DIR_KEY = 0;
 
-const uint32_t DirectoryLayer::VERSION[3] = { 1, 0, 0 };
+uint32_t const DirectoryLayer::VERSION[3] = { 1, 0, 0 };
 
-const StringRef DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX = "\xfe"_sr;
-const Subspace DirectoryLayer::DEFAULT_NODE_SUBSPACE = Subspace(DEFAULT_NODE_SUBSPACE_PREFIX);
-const Subspace DirectoryLayer::DEFAULT_CONTENT_SUBSPACE = Subspace();
-const StringRef DirectoryLayer::PARTITION_LAYER = "partition"_sr;
+StringRef const DirectoryLayer::DEFAULT_NODE_SUBSPACE_PREFIX = "\xfe"_sr;
+Subspace const DirectoryLayer::DEFAULT_NODE_SUBSPACE = Subspace(DEFAULT_NODE_SUBSPACE_PREFIX);
+Subspace const DirectoryLayer::DEFAULT_CONTENT_SUBSPACE = Subspace();
+StringRef const DirectoryLayer::PARTITION_LAYER = "partition"_sr;
 
 DirectoryLayer::DirectoryLayer(Subspace nodeSubspace, Subspace contentSubspace, bool allowManualPrefixes)
   : rootNode(nodeSubspace.get(nodeSubspace.key())), nodeSubspace(nodeSubspace), contentSubspace(contentSubspace),
@@ -129,7 +129,7 @@ void DirectoryLayer::initializeDirectory(Reference<Transaction> const& tr) const
 	tr->set(rootNode.pack(VERSION_KEY), StringRef((uint8_t*)VERSION, 12));
 }
 
-ACTOR Future<Void> checkVersionInternal(const DirectoryLayer* dirLayer, Reference<Transaction> tr, bool writeAccess) {
+ACTOR Future<Void> checkVersionInternal(DirectoryLayer const* dirLayer, Reference<Transaction> tr, bool writeAccess) {
 	Optional<FDBStandalone<ValueRef>> versionBytes =
 	    wait(tr->get(dirLayer->rootNode.pack(DirectoryLayer::VERSION_KEY)));
 
@@ -552,11 +552,11 @@ Reference<DirectoryLayer> DirectoryLayer::getDirectoryLayer() {
 	return Reference<DirectoryLayer>::addRef(this);
 }
 
-const Standalone<StringRef> DirectoryLayer::getLayer() const {
+Standalone<StringRef> const DirectoryLayer::getLayer() const {
 	return StringRef();
 }
 
-const IDirectory::Path DirectoryLayer::getPath() const {
+IDirectory::Path const DirectoryLayer::getPath() const {
 	return path;
 }
 } // namespace FDB

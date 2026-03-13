@@ -33,14 +33,14 @@ enum class CompressionFilter {
 };
 
 struct CompressionUtils {
-	static StringRef compress(const CompressionFilter filter, const StringRef& data, Arena& arena);
-	static StringRef compress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena);
-	static StringRef decompress(const CompressionFilter filter, const StringRef& data, Arena& arena);
+	static StringRef compress(CompressionFilter const filter, StringRef const& data, Arena& arena);
+	static StringRef compress(CompressionFilter const filter, StringRef const& data, int level, Arena& arena);
+	static StringRef decompress(CompressionFilter const filter, StringRef const& data, Arena& arena);
 
 	static int getDefaultCompressionLevel(CompressionFilter filter);
 	static CompressionFilter getRandomFilter();
 
-	static CompressionFilter fromFilterString(const std::string& filter) {
+	static CompressionFilter fromFilterString(std::string const& filter) {
 		if (filter == "NONE") {
 			return CompressionFilter::NONE;
 		} else if (filter == "ZSTD") {
@@ -50,7 +50,7 @@ struct CompressionUtils {
 		}
 	}
 
-	static std::string toString(const CompressionFilter filter) {
+	static std::string toString(CompressionFilter const filter) {
 		if (filter == CompressionFilter::NONE) {
 			return "NONE";
 		} else if (filter == CompressionFilter::ZSTD) {
@@ -60,7 +60,7 @@ struct CompressionUtils {
 		}
 	}
 
-	static void checkFilterSupported(const CompressionFilter filter) {
+	static void checkFilterSupported(CompressionFilter const filter) {
 		if (CompressionUtils::supportedFilters.find(filter) == CompressionUtils::supportedFilters.end()) {
 			throw not_implemented();
 		}

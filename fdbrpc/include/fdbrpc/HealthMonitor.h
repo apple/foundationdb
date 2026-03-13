@@ -29,9 +29,9 @@
 
 class HealthMonitor {
 public:
-	void reportPeerClosed(const NetworkAddress& peerAddress);
-	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
-	int closedConnectionsCount(const NetworkAddress& peerAddress);
+	void reportPeerClosed(NetworkAddress const& peerAddress);
+	bool tooManyConnectionsClosed(NetworkAddress const& peerAddress);
+	int closedConnectionsCount(NetworkAddress const& peerAddress);
 	std::unordered_set<NetworkAddress> getRecentClosedPeers();
 
 private:

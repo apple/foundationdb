@@ -55,12 +55,12 @@ concept is_wipe_enabled = requires(Context& context) {
 template <>
 struct dynamic_size_traits<detail::WipedStringSerdesWrapper> : std::true_type {
 	template <class Context>
-	static size_t size(const detail::WipedStringSerdesWrapper& t, Context&) {
+	static size_t size(detail::WipedStringSerdesWrapper const& t, Context&) {
 		return t.get().size();
 	}
 
 	template <class Context>
-	static void save(uint8_t* out, const detail::WipedStringSerdesWrapper& t, Context& context) {
+	static void save(uint8_t* out, detail::WipedStringSerdesWrapper const& t, Context& context) {
 		if (!t.get().empty()) {
 			::memcpy(out, t.get().begin(), t.get().size());
 			if constexpr (detail::is_wipe_enabled<Context>) {
@@ -73,7 +73,7 @@ struct dynamic_size_traits<detail::WipedStringSerdesWrapper> : std::true_type {
 	}
 
 	template <class Context>
-	static void load(const uint8_t* ptr, size_t sz, detail::WipedStringSerdesWrapper& t, Context& context) {
+	static void load(uint8_t const* ptr, size_t sz, detail::WipedStringSerdesWrapper& t, Context& context) {
 		dynamic_size_traits<StringRef>::load(ptr, sz, t.get(), context);
 	}
 };
@@ -110,9 +110,9 @@ public:
 		}
 	}
 
-	WipedString(const WipedString& other) noexcept = default;
+	WipedString(WipedString const& other) noexcept = default;
 	WipedString(WipedString&& other) noexcept = default;
-	WipedString& operator=(const WipedString& other) noexcept = default;
+	WipedString& operator=(WipedString const& other) noexcept = default;
 	WipedString& operator=(WipedString&& other) noexcept = default;
 
 	// Optional::castTo<T>() support

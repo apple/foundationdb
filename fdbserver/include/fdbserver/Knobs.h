@@ -27,7 +27,7 @@
 
 #define SERVER_KNOBS (&IKnobCollection::getGlobalKnobCollection().getServerKnobs())
 
-inline const ServerKnobs& getServerKnobs() {
+inline ServerKnobs const& getServerKnobs() {
 	return *SERVER_KNOBS;
 }
 

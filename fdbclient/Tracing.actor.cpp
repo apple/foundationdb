@@ -61,19 +61,19 @@ struct LogfileTracer : ITracer {
 		    .detail("Status", span.status)
 		    .detail("ParentSpanID", span.parentContext.spanID);
 
-		for (const auto& link : span.links) {
+		for (auto const& link : span.links) {
 			TraceEvent(SevInfo, "TracingSpanLink", span.context.traceID)
 			    .detail("TraceID", link.traceID)
 			    .detail("SpanID", link.spanID);
 		}
-		for (const auto& [key, value] : span.attributes) {
+		for (auto const& [key, value] : span.attributes) {
 			TraceEvent(SevInfo, "TracingSpanTag", span.context.traceID).detail("Key", key).detail("Value", value);
 		}
-		for (const auto& event : span.events) {
+		for (auto const& event : span.events) {
 			TraceEvent(SevInfo, "TracingSpanEvent", span.context.traceID)
 			    .detail("Name", event.name)
 			    .detail("Time", event.time);
-			for (const auto& [key, value] : event.attributes) {
+			for (auto const& [key, value] : event.attributes) {
 				TraceEvent(SevInfo, "TracingSpanEventAttribute", span.context.traceID)
 				    .detail("Key", key)
 				    .detail("Value", value);
@@ -135,7 +135,7 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 struct UDPTracer : public ITracer {
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
-	void serialize_span(const Span& span, MsgpackBuffer& buf) {
+	void serialize_span(Span const& span, MsgpackBuffer& buf) {
 		uint16_t size = 12;
 		buf.write_byte(size | 0b10010000); // write as array
 		serialize_value(span.context.traceID.first(), buf, 0xcf); // trace id
@@ -162,20 +162,20 @@ struct UDPTracer : public ITracer {
 private:
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, MsgpackBuffer& buf) {
+	inline void serialize_vector(SmallVectorRef<SpanContext> const& vec, MsgpackBuffer& buf) {
 		int size = vec.size();
 		if (size <= 15) {
 			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
 			buf.write_byte(0xdc);
-			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+			buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[1]);
+			buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[0]);
 		} else {
 			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
 			ASSERT_WE_THINK(false);
 		}
 
-		for (const auto& link : vec) {
+		for (auto const& link : vec) {
 			serialize_value(link.traceID.first(), buf, 0xcf); // trace id
 			serialize_value(link.traceID.second(), buf, 0xcf); // trace id
 			serialize_value(link.spanID, buf, 0xcf); // spanid
@@ -184,27 +184,27 @@ private:
 
 	// Writes the given vector of linked SpanEventRef's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, MsgpackBuffer& buf) {
+	inline void serialize_vector(SmallVectorRef<SpanEventRef> const& vec, MsgpackBuffer& buf) {
 		int size = vec.size();
 		if (size <= 15) {
 			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
 			buf.write_byte(0xdc);
-			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-			buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+			buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[1]);
+			buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[0]);
 		} else {
 			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
 			ASSERT_WE_THINK(false);
 		}
 
-		for (const auto& event : vec) {
+		for (auto const& event : vec) {
 			serialize_string(event.name.toString(), buf); // event name
 			serialize_value(event.time, buf, 0xcb); // event time
 			serialize_vector(event.attributes, buf);
 		}
 	}
 
-	inline void serialize_vector(const SmallVectorRef<KeyValueRef>& vals, MsgpackBuffer& buf) {
+	inline void serialize_vector(SmallVectorRef<KeyValueRef> const& vals, MsgpackBuffer& buf) {
 		int size = vals.size();
 		if (size <= 15) {
 			// N.B. We're actually writing this out as a fixmap here in messagepack format!
@@ -215,7 +215,7 @@ private:
 			ASSERT_WE_THINK(false);
 		}
 
-		for (const auto& kv : vals) {
+		for (auto const& kv : vals) {
 			serialize_string(kv.key.toString(), buf);
 			serialize_string(kv.value.toString(), buf);
 		}
@@ -685,7 +685,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	request.reset();
 
 	// Test message pack encoding for string >= 256 && <= 65535 chars
-	const char* longString = "yGUtj42gSKfdqib3f0Ri4OVhD7eWyTbKsH/g9+x4UWyXry7NIBFIapPV9f1qdTRl"
+	char const* longString = "yGUtj42gSKfdqib3f0Ri4OVhD7eWyTbKsH/g9+x4UWyXry7NIBFIapPV9f1qdTRl"
 	                         "2jXcZI8Ua/Gp8k9EBn7peaEN1uj4w9kf4FQ2Lalu0VrA4oquQoaKYr+wPsLBak9i"
 	                         "uyZDF9sX/HW4pVvQhPQdXQWME5E7m58XFMpZ3H8HNXuytWInEuh97SRLlI0RhrvG"
 	                         "ixNpYtYlvghsLCrEdZMMGnS2gXgGufIdg1xKJd30fUbZLHcYIC4DTnL5RBpkbQCR"

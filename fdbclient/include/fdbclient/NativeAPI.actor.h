@@ -122,7 +122,7 @@ public:
 	DatabaseContext* operator->() const { return db.getPtr(); }
 	Reference<DatabaseContext> getReference() const { return db; }
 
-	const UniqueOrderedOptionList<FDBTransactionOptions>& getTransactionDefaults() const;
+	UniqueOrderedOptionList<FDBTransactionOptions> const& getTransactionDefaults() const;
 
 	template <std::invocable<Transaction*> Fun>
 	Future<Void> run(Fun fun);
@@ -207,7 +207,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	void logTo(LoggingLocation loc) { logLocation = logLocation | loc; }
 
 	template <typename T>
-	void addLog(const T& event) {
+	void addLog(T const& event) {
 		if (logLocation & TRACE_LOG) {
 			ASSERT(!identifier.empty());
 			event.logEvent(identifier, maxFieldLength);
@@ -323,21 +323,21 @@ public:
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
-	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<Key> getKey(KeySelector const& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
-	                                           const KeySelector& end,
+	[[nodiscard]] Future<RangeResult> getRange(KeySelector const& begin,
+	                                           KeySelector const& end,
 	                                           int limit,
 	                                           Snapshot = Snapshot::False,
 	                                           Reverse = Reverse::False);
-	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
-	                                           const KeySelector& end,
+	[[nodiscard]] Future<RangeResult> getRange(KeySelector const& begin,
+	                                           KeySelector const& end,
 	                                           GetRangeLimits limits,
 	                                           Snapshot = Snapshot::False,
 	                                           Reverse = Reverse::False);
-	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
+	[[nodiscard]] Future<RangeResult> getRange(KeyRange const& keys,
 	                                           int limit,
 	                                           Snapshot snapshot = Snapshot::False,
 	                                           Reverse reverse = Reverse::False) {
@@ -347,7 +347,7 @@ public:
 		                snapshot,
 		                reverse);
 	}
-	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
+	[[nodiscard]] Future<RangeResult> getRange(KeyRange const& keys,
 	                                           GetRangeLimits limits,
 	                                           Snapshot snapshot = Snapshot::False,
 	                                           Reverse reverse = Reverse::False) {
@@ -358,18 +358,18 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
-	                                                       const KeySelector& end,
-	                                                       const Key& mapper,
+	[[nodiscard]] Future<MappedRangeResult> getMappedRange(KeySelector const& begin,
+	                                                       KeySelector const& end,
+	                                                       Key const& mapper,
 	                                                       GetRangeLimits limits,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
-	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           const Key& mapper,
+	Future<RangeResultFamily> getRangeInternal(KeySelector const& begin,
+	                                           KeySelector const& end,
+	                                           Key const& mapper,
 	                                           GetRangeLimits limits,
 	                                           Snapshot snapshot,
 	                                           Reverse reverse);
@@ -378,19 +378,19 @@ public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
-	                                          const KeySelector& begin,
-	                                          const KeySelector& end,
+	                                          KeySelector const& begin,
+	                                          KeySelector const& end,
 	                                          int limit,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
 	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
-	                                          const KeySelector& begin,
-	                                          const KeySelector& end,
+	                                          KeySelector const& begin,
+	                                          KeySelector const& end,
 	                                          GetRangeLimits limits,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
 	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
-	                                          const KeyRange& keys,
+	                                          KeyRange const& keys,
 	                                          int limit,
 	                                          Snapshot snapshot = Snapshot::False,
 	                                          Reverse reverse = Reverse::False) {
@@ -402,7 +402,7 @@ public:
 		                      reverse);
 	}
 	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
-	                                          const KeyRange& keys,
+	                                          KeyRange const& keys,
 	                                          GetRangeLimits limits,
 	                                          Snapshot snapshot = Snapshot::False,
 	                                          Reverse reverse = Reverse::False) {
@@ -414,7 +414,7 @@ public:
 		                      reverse);
 	}
 
-	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
+	[[nodiscard]] Future<Standalone<VectorRef<char const*>>> getAddressesForKey(Key const& key);
 
 	void enableCheckWrites();
 	void addReadConflictRange(KeyRangeRef const& keys);
@@ -428,13 +428,13 @@ public:
 	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize);
 
 	// If checkWriteConflictRanges is true, existing write conflict ranges will be searched for this key
-	void set(const KeyRef& key, const ValueRef& value, AddConflictRange = AddConflictRange::True);
-	void atomicOp(const KeyRef& key,
-	              const ValueRef& value,
+	void set(KeyRef const& key, ValueRef const& value, AddConflictRange = AddConflictRange::True);
+	void atomicOp(KeyRef const& key,
+	              ValueRef const& value,
 	              MutationRef::Type operationType,
 	              AddConflictRange = AddConflictRange::True);
-	void clear(const KeyRangeRef& range, AddConflictRange = AddConflictRange::True);
-	void clear(const KeyRef& key, AddConflictRange = AddConflictRange::True);
+	void clear(KeyRangeRef const& range, AddConflictRange = AddConflictRange::True);
+	void clear(KeyRef const& key, AddConflictRange = AddConflictRange::True);
 
 	// Throws not_committed or commit_unknown_result errors in normal operation
 	[[nodiscard]] Future<Void> commit();
@@ -483,13 +483,13 @@ public:
 	void checkDeferredError() const;
 
 	Database getDatabase() const { return trState->cx; }
-	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
+	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(Database const& cx);
 
 	Transaction& getTransaction() { return *this; }
 	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
-	const std::vector<Future<std::pair<Key, Key>>>& getExtraReadConflictRanges() const { return extraConflictRanges; }
+	std::vector<Future<std::pair<Key, Key>>> const& getExtraReadConflictRanges() const { return extraConflictRanges; }
 	Standalone<VectorRef<KeyRangeRef>> readConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.read_conflict_ranges, tr.arena);
 	}
@@ -508,9 +508,9 @@ public:
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-	Future<RangeResult> getRangeInternal(const KeySelector& begin,
-	                                     const KeySelector& end,
-	                                     const Key& mapper,
+	Future<RangeResult> getRangeInternal(KeySelector const& begin,
+	                                     KeySelector const& end,
+	                                     Key const& mapper,
 	                                     GetRangeLimits limits,
 	                                     Snapshot snapshot,
 	                                     Reverse reverse);
@@ -559,13 +559,13 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 // each and every shards overlapping with `ranges`.
 // All checkpoint(s) will be created at the transaction's commit version.
 Future<Void> createCheckpoint(Transaction* tr,
-                              const std::vector<KeyRange>& ranges,
+                              std::vector<KeyRange> const& ranges,
                               CheckpointFormat format,
                               Optional<UID> dataMoveId = Optional<UID>());
 
 // Same as above.
 Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
-                              const std::vector<KeyRange>& ranges,
+                              std::vector<KeyRange> const& ranges,
                               CheckpointFormat format,
                               Optional<UID> dataMoveId = Optional<UID>());
 

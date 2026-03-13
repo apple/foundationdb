@@ -42,7 +42,7 @@ struct FluentDSocket {
 	virtual ~FluentDSocket() {}
 	virtual void connect(NetworkAddress const& endpoint) = 0;
 	virtual void send(std::shared_ptr<Sample> const& sample) = 0;
-	virtual const boost::system::error_code& failed() const = 0;
+	virtual boost::system::error_code const& failed() const = 0;
 };
 
 template <class Protocol, class Callback>
@@ -55,9 +55,9 @@ class SampleSender : public std::enable_shared_from_this<SampleSender<Protocol, 
 	std::shared_ptr<Sample> sample_; // to keep from being deallocated
 
 	struct Buf {
-		const char* data;
-		const unsigned size;
-		Buf(const char* data, unsigned size) : data(data), size(size) {}
+		char const* data;
+		unsigned const size;
+		Buf(char const* data, unsigned size) : data(data), size(size) {}
 		Buf(Buf const&) = delete;
 		Buf& operator=(Buf const&) = delete;
 		~Buf() { delete[] data; }
@@ -142,7 +142,7 @@ struct FluentDSocketImpl : FluentDSocket, std::enable_shared_from_this<FluentDSo
 	std::deque<std::shared_ptr<Sample>> queue;
 	boost::system::error_code _failed;
 
-	const boost::system::error_code& failed() const override { return _failed; }
+	boost::system::error_code const& failed() const override { return _failed; }
 
 	void sendCompletionHandler(boost::system::error_code const& ec) {
 		if (ec) {
@@ -241,7 +241,7 @@ FluentDIngestor::~FluentDIngestor() {
 FluentDIngestor::FluentDIngestor(Protocol protocol, NetworkAddress& endpoint)
   : impl(new FluentDIngestorImpl(protocol, endpoint)) {}
 
-void FluentDIngestor::ingest(const std::shared_ptr<Sample>& sample) {
+void FluentDIngestor::ingest(std::shared_ptr<Sample> const& sample) {
 	if (!impl->socket) {
 		// the connection failed in the past and we wait for a timeout before we retry
 		return;

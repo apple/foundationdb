@@ -211,7 +211,7 @@ struct RestoreFileFR {
 		return r;
 	}
 
-	bool operator<(const RestoreFileFR& rhs) const {
+	bool operator<(RestoreFileFR const& rhs) const {
 		return std::tie(beginVersion, endVersion, fileIndex, fileName) <
 		       std::tie(rhs.beginVersion, rhs.endVersion, rhs.fileIndex, rhs.fileName);
 	}
@@ -220,11 +220,11 @@ struct RestoreFileFR {
 	  : version(invalidVersion), isRange(false), blockSize(0), fileSize(0), endVersion(invalidVersion),
 	    beginVersion(invalidVersion), cursor(0), fileIndex(0) {}
 
-	explicit RestoreFileFR(const RangeFile& f)
+	explicit RestoreFileFR(RangeFile const& f)
 	  : version(f.version), fileName(f.fileName), isRange(true), blockSize(f.blockSize), fileSize(f.fileSize),
 	    endVersion(f.version), beginVersion(f.version), cursor(0), fileIndex(0) {}
 
-	explicit RestoreFileFR(const LogFile& f)
+	explicit RestoreFileFR(LogFile const& f)
 	  : version(f.beginVersion), fileName(f.fileName), isRange(false), blockSize(f.blockSize), fileSize(f.fileSize),
 	    endVersion(f.endVersion), beginVersion(f.beginVersion), cursor(0), fileIndex(0), partitionId(f.tagId) {}
 
@@ -247,7 +247,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 // Save replies to replies if replies != nullptr
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
                              std::map<UID, Interface> interfaces,
                              std::vector<std::pair<UID, Request>> requests,
                              std::vector<REPLY_TYPE(Request)>* replies,
@@ -332,7 +332,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				double latest = std::numeric_limits<double>::min();
 				UID earliestNode, latestNode;
 
-				for (const auto& [nodeId, endTime] : maxEndTime) {
+				for (auto const& [nodeId, endTime] : maxEndTime) {
 					if (earliest > endTime) {
 						earliest = endTime;
 						earliestNode = nodeId;
@@ -377,7 +377,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 
 // Similar to getBatchReplies except that the caller does not expect to process the reply info.
 ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::* channel,
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel,
                                std::map<UID, Interface> interfaces,
                                std::vector<std::pair<UID, Request>> requests,
                                TaskPriority taskID = TaskPriority::Low,

@@ -42,7 +42,7 @@ void debug_advanceCommittedVersions(UID id, int64_t minVersion, int64_t maxVersi
 	debug_advanceMaxCommittedVersion(id, maxVersion);
 }
 
-void debug_advanceVersion(UID id, int64_t version, const char* suffix) {
+void debug_advanceVersion(UID id, int64_t version, char const* suffix) {
 	if (!disabledMachines.contains(id)) {
 		auto& entry = validationData[id.toString() + suffix];
 		if (version > entry)

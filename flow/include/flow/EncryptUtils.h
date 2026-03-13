@@ -37,9 +37,9 @@
 
 #define DEBUG_ENCRYPT_KEY_CIPHER false
 
-constexpr const int AUTH_TOKEN_HMAC_SHA_SIZE = 32;
-constexpr const int AUTH_TOKEN_AES_CMAC_SIZE = 16;
-constexpr const int AUTH_TOKEN_MAX_SIZE = AUTH_TOKEN_HMAC_SHA_SIZE;
+constexpr int const AUTH_TOKEN_HMAC_SHA_SIZE = 32;
+constexpr int const AUTH_TOKEN_AES_CMAC_SIZE = 16;
+constexpr int const AUTH_TOKEN_MAX_SIZE = AUTH_TOKEN_HMAC_SHA_SIZE;
 
 using EncryptCipherDomainId = int64_t;
 using EncryptCipherBaseKeyId = uint64_t;
@@ -48,23 +48,23 @@ using EncryptCipherKeyCheckValue = uint32_t;
 
 using EncryptCipherDomainIdVec = std::vector<EncryptCipherDomainId>;
 
-constexpr const int MAX_BASE_CIPHER_LEN = EVP_MAX_KEY_LENGTH - sizeof(EncryptCipherRandomSalt);
+constexpr int const MAX_BASE_CIPHER_LEN = EVP_MAX_KEY_LENGTH - sizeof(EncryptCipherRandomSalt);
 
-constexpr const EncryptCipherDomainId INVALID_ENCRYPT_DOMAIN_ID = -1;
-constexpr const EncryptCipherDomainId SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID = -2;
-constexpr const EncryptCipherDomainId ENCRYPT_HEADER_DOMAIN_ID = -3;
-constexpr const EncryptCipherDomainId FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
+constexpr EncryptCipherDomainId const INVALID_ENCRYPT_DOMAIN_ID = -1;
+constexpr EncryptCipherDomainId const SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID = -2;
+constexpr EncryptCipherDomainId const ENCRYPT_HEADER_DOMAIN_ID = -3;
+constexpr EncryptCipherDomainId const FDB_DEFAULT_ENCRYPT_DOMAIN_ID = -4;
 
-constexpr const EncryptCipherBaseKeyId INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
+constexpr EncryptCipherBaseKeyId const INVALID_ENCRYPT_CIPHER_KEY_ID = 0;
 
-constexpr const EncryptCipherRandomSalt INVALID_ENCRYPT_RANDOM_SALT = 0;
+constexpr EncryptCipherRandomSalt const INVALID_ENCRYPT_RANDOM_SALT = 0;
 
-static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_SYSTEM_DOMAINS = {
+static std::unordered_set<EncryptCipherDomainId> const ENCRYPT_CIPHER_SYSTEM_DOMAINS = {
 	SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 	ENCRYPT_HEADER_DOMAIN_ID
 };
 
-static const std::unordered_set<EncryptCipherDomainId> ENCRYPT_CIPHER_DETAULT_DOMAINS = {
+static std::unordered_set<EncryptCipherDomainId> const ENCRYPT_CIPHER_DETAULT_DOMAINS = {
 	SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID,
 	ENCRYPT_HEADER_DOMAIN_ID,
 	FDB_DEFAULT_ENCRYPT_DOMAIN_ID,
@@ -79,7 +79,7 @@ typedef enum {
 static_assert(EncryptCipherMode::ENCRYPT_CIPHER_MODE_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptCipherMode value overflow");
 
-EncryptCipherMode encryptModeFromString(const std::string& modeStr);
+EncryptCipherMode encryptModeFromString(std::string const& modeStr);
 
 // EncryptionHeader authentication modes
 // 1. NONE - No 'authentication token' generation needed for EncryptionHeader i.e. no protection against header OR
@@ -107,10 +107,10 @@ typedef enum {
 static_assert(EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptHeaerAuthTokenAlgo value overflow");
 
-bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode);
-bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo);
-bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo);
-EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode);
+bool isEncryptHeaderAuthTokenModeValid(EncryptAuthTokenMode const mode);
+bool isEncryptHeaderAuthTokenAlgoValid(EncryptAuthTokenAlgo const algo);
+bool isEncryptHeaderAuthTokenDetailsValid(EncryptAuthTokenMode const mode, EncryptAuthTokenAlgo const algo);
+EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(EncryptAuthTokenMode const mode);
 EncryptAuthTokenMode getRandomAuthTokenMode();
 EncryptAuthTokenAlgo getRandomAuthTokenAlgo();
 

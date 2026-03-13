@@ -94,28 +94,28 @@ template <class T, typename = void>
 struct scalar_traits : std::false_type {
 	constexpr static size_t size = 0;
 	template <class Context>
-	static void save(uint8_t*, const T&, Context&);
+	static void save(uint8_t*, T const&, Context&);
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t*, T&, Context&);
+	static void load(uint8_t const*, T&, Context&);
 };
 
 template <class T>
 struct dynamic_size_traits : std::false_type {
 	// May be called multiple times during one serialization. Guaranteed not to be called after save.
 	template <class Context>
-	static size_t size(const T&, Context&);
+	static size_t size(T const&, Context&);
 
 	// Guaranteed to be called only once during serialization
 	template <class Context>
-	static void save(uint8_t*, const T&, Context&);
+	static void save(uint8_t*, T const&, Context&);
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t*, size_t, T&, Context&);
+	static void load(uint8_t const*, size_t, T&, Context&);
 };
 
 template <class T>
@@ -127,7 +127,7 @@ struct serializable_traits : std::false_type {
 template <class T>
 struct serialize_raw : std::false_type {
 	template <class Context>
-	static uint8_t* save_raw(Context& context, const T& obj);
+	static uint8_t* save_raw(Context& context, T const& obj);
 };
 
 template <class VectorLike>
@@ -149,7 +149,7 @@ struct vector_like_traits : std::false_type {
 
 	// Return an iterator to read from this vector.
 	template <class Context>
-	static iterator begin(const VectorLike&, Context&);
+	static iterator begin(VectorLike const&, Context&);
 };
 
 template <class UnionLike>
@@ -157,15 +157,15 @@ struct union_like_traits : std::false_type {
 	using Member = UnionLike;
 	using alternatives = pack<>;
 	template <class Context>
-	static uint8_t index(const Member&, Context&);
+	static uint8_t index(Member const&, Context&);
 	template <class Context>
-	static bool empty(const Member& variant, Context&);
+	static bool empty(Member const& variant, Context&);
 
 	template <int i, class Context>
-	static const index_t<i, alternatives>& get(const Member&, Context&);
+	static index_t<i, alternatives> const& get(Member const&, Context&);
 
 	template <int i, class Alternative, class Context>
-	static void assign(Member&, const Alternative&, Context&);
+	static void assign(Member&, Alternative const&, Context&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -179,10 +179,10 @@ struct struct_like_traits : std::false_type {
 	using types = pack<>;
 
 	template <int i, class Context>
-	static const index_t<i, types>& get(const Member&, Context&);
+	static index_t<i, types> const& get(Member const&, Context&);
 
 	template <int i, class Context>
-	static void assign(Member&, const index_t<i, types>&, Context&);
+	static void assign(Member&, index_t<i, types> const&, Context&);
 
 	template <class Context>
 	static void done(Member&, Context&);
@@ -193,21 +193,21 @@ struct union_like_traits<std::variant<Alternatives...>> : std::true_type {
 	using Member = std::variant<Alternatives...>;
 	using alternatives = pack<Alternatives...>;
 	template <class Context>
-	static uint8_t index(const Member& variant, Context&) {
+	static uint8_t index(Member const& variant, Context&) {
 		return variant.index();
 	}
 	template <class Context>
-	static bool empty(const Member& variant, Context&) {
+	static bool empty(Member const& variant, Context&) {
 		return false;
 	}
 
 	template <int i, class Context>
-	static const index_t<i, alternatives>& get(const Member& variant, Context&) {
+	static index_t<i, alternatives> const& get(Member const& variant, Context&) {
 		return std::get<index_t<i, alternatives>>(variant);
 	}
 
 	template <size_t i, class Alternative, class Context>
-	static void assign(Member& member, const Alternative& a, Context&) {
+	static void assign(Member& member, Alternative const& a, Context&) {
 		static_assert(std::is_same_v<index_t<i, alternatives>, Alternative>);
 		member = a;
 	}

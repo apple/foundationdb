@@ -22,9 +22,9 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-CommonStorageCounters::CommonStorageCounters(const std::string& name,
-                                             const std::string& id,
-                                             const StorageServerMetrics* metrics)
+CommonStorageCounters::CommonStorageCounters(std::string const& name,
+                                             std::string const& id,
+                                             StorageServerMetrics const* metrics)
   : cc(name, id), finishedQueries("FinishedQueries", cc), bytesQueried("BytesQueried", cc),
     bytesFetched("BytesFetched", cc), bytesInput("BytesInput", cc), mutationBytes("MutationBytes", cc),
     kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
@@ -114,7 +114,7 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 
 // Called when metrics should change (IO for a given key)
 // Notifies waiting WaitMetricsRequests through waitMetricsMap, and updates metricsAverageQueue and metricsSampleMap
-void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
+void StorageServerMetrics::notify(Key const& key, StorageMetrics& metrics) {
 	ASSERT(metrics.bytes == 0); // ShardNotifyMetrics
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
@@ -156,7 +156,7 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 
 // Due to the fact that read sampling will be called on all reads, use this specialized function to avoid overhead
 // around branch misses and unnecessary stack allocation which eventually adds up under heavy load.
-void StorageServerMetrics::notifyBytesReadPerKSecond(const Key& key, int64_t in) {
+void StorageServerMetrics::notifyBytesReadPerKSecond(Key const& key, int64_t in) {
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
 	int64_t bytesReadPerKSecond =
 	    bytesReadSample.addAndExpire(key, in, expire) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
@@ -194,7 +194,7 @@ void StorageServerMetrics::notifyBytes(
 }
 
 // Called by StorageServerDisk when the size of a key in byteSample changes, to notify WaitMetricsRequest
-void StorageServerMetrics::notifyBytes(const KeyRef& key, int64_t bytes) {
+void StorageServerMetrics::notifyBytes(KeyRef const& key, int64_t bytes) {
 	if (key >= allKeys.end) // Do not notify on changes to internal storage server state
 		return;
 
@@ -248,7 +248,7 @@ KeyRef StorageServerMetrics::getSplitKey(int64_t remaining,
                                          int64_t used,
                                          int64_t infinity,
                                          bool isLastShard,
-                                         const StorageMetricSample& sample,
+                                         StorageMetricSample const& sample,
                                          double divisor,
                                          KeyRef const& lastKey,
                                          KeyRef const& key,
@@ -412,7 +412,7 @@ void StorageServerMetrics::getStorageMetrics(GetStorageMetricsRequest req,
 std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::getReadHotRanges(KeyRangeRef parentRange,
                                                                             int chunkCount,
                                                                             uint8_t splitType) const {
-	const StorageMetricSample* sampler = nullptr;
+	StorageMetricSample const* sampler = nullptr;
 	switch (splitType) {
 	case ReadHotSubRangeRequest::SplitType::BYTES:
 		sampler = &byteSample;
@@ -529,7 +529,7 @@ std::vector<ReadHotRangeWithMetrics> StorageServerMetrics::_getReadHotRanges(
 	return toReturn;
 }
 
-int64_t StorageServerMetrics::getHotShards(const KeyRange& range) const {
+int64_t StorageServerMetrics::getHotShards(KeyRange const& range) const {
 	auto bytesWrittenPerKSecond =
 	    bytesWriteSample.getEstimate(range) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	return bytesWrittenPerKSecond;
@@ -603,7 +603,7 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 }
 
 // Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
-int64_t TransientStorageMetricSample::addAndExpire(const Key& key, int64_t metric, double expiration) {
+int64_t TransientStorageMetricSample::addAndExpire(Key const& key, int64_t metric, double expiration) {
 	auto x = add(key, metric);
 	if (x)
 		queue.emplace_back(expiration, std::make_pair(key, -x));
@@ -667,7 +667,7 @@ void TransientStorageMetricSample::poll() {
 	}
 }
 
-int64_t TransientStorageMetricSample::add(const Key& key, int64_t metric) {
+int64_t TransientStorageMetricSample::add(Key const& key, int64_t metric) {
 	if (!metric)
 		return 0;
 	int64_t mag = metric < 0 ? -metric : metric;

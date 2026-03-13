@@ -34,7 +34,7 @@
 #include <limits>
 
 namespace {
-std::string printValue(const ErrorOr<Optional<Value>>& value) {
+std::string printValue(ErrorOr<Optional<Value>> const& value) {
 	if (value.isError()) {
 		return value.getError().name();
 	}
@@ -44,7 +44,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 
 struct SSCheckpointRestoreWorkload : TestWorkload {
 	static constexpr auto NAME = "SSCheckpointRestoreWorkload";
-	const bool enabled;
+	bool const enabled;
 	bool pass;
 
 	SSCheckpointRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), enabled(!clientId), pass(true) {}
@@ -213,7 +213,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			Error err;
 			try {
 				Optional<Value> res = co_await timeoutError(tr.get(key), 30.0);
-				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				bool const equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}

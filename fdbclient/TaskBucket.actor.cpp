@@ -865,7 +865,7 @@ public:
 	}
 };
 
-TaskBucket::TaskBucket(const Subspace& subspace,
+TaskBucket::TaskBucket(Subspace const& subspace,
                        AccessSystemKeys sysAccess,
                        PriorityBatch priorityBatch,
                        LockAware lockAware)
@@ -1040,7 +1040,7 @@ public:
 	}
 };
 
-FutureBucket::FutureBucket(const Subspace& subspace, AccessSystemKeys sysAccess, LockAware lockAware)
+FutureBucket::FutureBucket(Subspace const& subspace, AccessSystemKeys sysAccess, LockAware lockAware)
   : prefix(subspace), system_access(sysAccess), lockAware(lockAware) {}
 
 FutureBucket::~FutureBucket() {}
@@ -1274,7 +1274,7 @@ public:
 
 TaskFuture::TaskFuture() {}
 
-TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBucket(bucket), key(k) {
+TaskFuture::TaskFuture(Reference<FutureBucket> const bucket, Key k) : futureBucket(bucket), key(k) {
 	if (k.size() == 0) {
 		key = deterministicRandom()->randomUniqueID().toString();
 	}

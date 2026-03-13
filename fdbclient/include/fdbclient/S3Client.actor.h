@@ -74,7 +74,7 @@ inline Severity s3PerfEventSev() {
 }
 
 // Prefix used to identify blobstore URLs
-const std::string BLOBSTORE_PREFIX = "blobstore://";
+std::string const BLOBSTORE_PREFIX = "blobstore://";
 
 // Copy the directory content from the local filesystem up to s3.
 // Recursively copies all files and subdirectories.
@@ -138,7 +138,7 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth = 1);
 // resource: Output parameter for the resource path
 // parameters: Output parameter for the URL parameters
 // Returns a Reference to the S3BlobStoreEndpoint
-Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
+Reference<S3BlobStoreEndpoint> getEndpoint(std::string const& s3url,
                                            std::string& resource,
                                            S3BlobStoreEndpoint::ParametersT& parameters);
 

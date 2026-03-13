@@ -328,7 +328,7 @@ protected:
 
 	// Continuation to be called after completion of the transaction
 	// Set in constructor, stays immutable
-	const TOpContFct contAfterDone;
+	TOpContFct const contAfterDone;
 
 	// Reference to the scheduler
 	// Set in constructor, stays immutable
@@ -337,7 +337,7 @@ protected:
 
 	// Retry limit
 	// Set in constructor, stays immutable
-	const int retryLimit;
+	int const retryLimit;
 
 	// Transaction execution state
 	// Must be accessed under mutex
@@ -368,13 +368,13 @@ protected:
 	bool databaseCreateErrorInjected;
 
 	// Restart the transaction automatically on timeout errors
-	const bool restartOnTimeout;
+	bool const restartOnTimeout;
 
 	// Specifies whether the operation is transactional
-	const bool transactional;
+	bool const transactional;
 
 	// A randomly generated key for making transaction self-conflicting
-	const fdb::Key selfConflictingKey;
+	fdb::Key const selfConflictingKey;
 };
 
 /**
@@ -640,7 +640,7 @@ protected:
  */
 class TransactionExecutorBase : public ITransactionExecutor {
 public:
-	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
+	TransactionExecutorBase(TransactionExecutorOptions const& options) : options(options), scheduler(nullptr) {}
 
 	~TransactionExecutorBase() {
 		if (tamperClusterFileThread.joinable()) {
@@ -648,7 +648,7 @@ public:
 		}
 	}
 
-	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
+	void init(IScheduler* scheduler, char const* clusterFile, std::string const& bgBasePath) override {
 		this->scheduler = scheduler;
 		this->clusterFile = clusterFile;
 		this->bgBasePath = bgBasePath;
@@ -691,7 +691,7 @@ public:
 		}
 	}
 
-	const TransactionExecutorOptions& getOptions() override { return options; }
+	TransactionExecutorOptions const& getOptions() override { return options; }
 
 	void execute(TOpStartFct startFct, TOpContFct cont, bool transactional, bool restartOnTimeout) override {
 		try {
@@ -752,11 +752,11 @@ protected:
  */
 class DBPoolTransactionExecutor : public TransactionExecutorBase {
 public:
-	DBPoolTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
+	DBPoolTransactionExecutor(TransactionExecutorOptions const& options) : TransactionExecutorBase(options) {}
 
 	~DBPoolTransactionExecutor() override { release(); }
 
-	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
+	void init(IScheduler* scheduler, char const* clusterFile, std::string const& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
 			fdb::Database db(this->clusterFile);
@@ -780,12 +780,12 @@ private:
  */
 class DBPerTransactionExecutor : public TransactionExecutorBase {
 public:
-	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
+	DBPerTransactionExecutor(TransactionExecutorOptions const& options) : TransactionExecutorBase(options) {}
 
 	fdb::Database selectDatabase() override { return fdb::Database(clusterFile.c_str()); }
 };
 
-std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options) {
+std::unique_ptr<ITransactionExecutor> createTransactionExecutor(TransactionExecutorOptions const& options) {
 	if (options.databasePerTransaction) {
 		return std::make_unique<DBPerTransactionExecutor>(options);
 	} else {

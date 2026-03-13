@@ -34,7 +34,7 @@
 
 namespace {
 
-void traceAndThrowDecode(const char* type) {
+void traceAndThrowDecode(char const* type) {
 	auto te = TraceEvent(SevWarnAlways, type);
 	te.suppressFor(10);
 	if (auto err = ::ERR_get_error()) {
@@ -42,12 +42,12 @@ void traceAndThrowDecode(const char* type) {
 			0,
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", static_cast<const char*>(buf));
+		te.detail("OpenSSLError", static_cast<char const*>(buf));
 	}
 	throw pkey_decode_error();
 }
 
-void traceAndThrowEncode(const char* type) {
+void traceAndThrowEncode(char const* type) {
 	auto te = TraceEvent(SevWarnAlways, type);
 	te.suppressFor(10);
 	if (auto err = ::ERR_get_error()) {
@@ -55,12 +55,12 @@ void traceAndThrowEncode(const char* type) {
 			0,
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", static_cast<const char*>(buf));
+		te.detail("OpenSSLError", static_cast<char const*>(buf));
 	}
 	throw pkey_encode_error();
 }
 
-void traceAndThrowDsa(const char* type) {
+void traceAndThrowDsa(char const* type) {
 	auto te = TraceEvent(SevWarnAlways, type);
 	te.suppressFor(10);
 	if (auto err = ::ERR_get_error()) {
@@ -68,12 +68,12 @@ void traceAndThrowDsa(const char* type) {
 			0,
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", static_cast<const char*>(buf));
+		te.detail("OpenSSLError", static_cast<char const*>(buf));
 	}
 	throw digital_signature_ops_error();
 }
 
-inline PKeyAlgorithm getPKeyAlgorithm(const EVP_PKEY* key) noexcept {
+inline PKeyAlgorithm getPKeyAlgorithm(EVP_PKEY const* key) noexcept {
 	auto id = ::EVP_PKEY_base_id(key);
 	if (id == EVP_PKEY_RSA)
 		return PKeyAlgorithm::RSA;
@@ -121,7 +121,7 @@ StringRef doWritePublicKeyDer(Arena& arena, EVP_PKEY* key) {
 	return StringRef(buf, len);
 }
 
-bool doVerifyStringSignature(StringRef data, StringRef signature, const EVP_MD& digest, EVP_PKEY* key) {
+bool doVerifyStringSignature(StringRef data, StringRef signature, EVP_MD const& digest, EVP_PKEY* key) {
 	auto mdctx = AutoCPointer(::EVP_MD_CTX_create(), &::EVP_MD_CTX_free);
 	if (!mdctx) {
 		traceAndThrowDsa("PKeyVerifyInitFail");
@@ -188,7 +188,7 @@ std::string_view PublicKey::algorithmName() const {
 	return pkeyAlgorithmName(this->algorithm());
 }
 
-bool PublicKey::verify(StringRef data, StringRef signature, const EVP_MD& digest) const {
+bool PublicKey::verify(StringRef data, StringRef signature, EVP_MD const& digest) const {
 	return doVerifyStringSignature(data, signature, digest, nativeHandle());
 }
 
@@ -231,7 +231,7 @@ StringRef PrivateKey::writePem(Arena& arena, StringRef password) const {
 		traceAndThrowEncode("PrivateKeyPemWriteInitError");
 
 	std::vector<unsigned char> pwBytes;
-	const EVP_CIPHER* cipher = nullptr;
+	EVP_CIPHER const* cipher = nullptr;
 
 	if (!password.empty()) {
 		pwBytes.assign(password.begin(), password.end());
@@ -279,7 +279,7 @@ std::string_view PrivateKey::algorithmName() const {
 	return pkeyAlgorithmName(this->algorithm());
 }
 
-StringRef PrivateKey::sign(Arena& arena, StringRef data, const EVP_MD& digest) const {
+StringRef PrivateKey::sign(Arena& arena, StringRef data, EVP_MD const& digest) const {
 	auto key = nativeHandle();
 	ASSERT(key);
 	auto mdctx = AutoCPointer(::EVP_MD_CTX_create(), &::EVP_MD_CTX_free);
@@ -298,7 +298,7 @@ StringRef PrivateKey::sign(Arena& arena, StringRef data, const EVP_MD& digest) c
 	return StringRef(sigBuf, sigLen);
 }
 
-bool PrivateKey::verify(StringRef data, StringRef signature, const EVP_MD& digest) const {
+bool PrivateKey::verify(StringRef data, StringRef signature, EVP_MD const& digest) const {
 	return doVerifyStringSignature(data, signature, digest, nativeHandle());
 }
 

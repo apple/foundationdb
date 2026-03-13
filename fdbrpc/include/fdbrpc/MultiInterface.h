@@ -99,7 +99,7 @@ public:
 	// If balanceOnRequests is true, the client will load balance based on the number of GRVs released by each proxy
 	// If balanceOnRequests is false, the client will load balance based on the CPU usage of each proxy
 	// Only requests which take from the GRV budget on the proxy should set balanceOnRequests to true
-	explicit ModelInterface(const std::vector<T>& v, BalanceOnRequests balanceOnRequests = BalanceOnRequests::False)
+	explicit ModelInterface(std::vector<T> const& v, BalanceOnRequests balanceOnRequests = BalanceOnRequests::False)
 	  : balanceOnRequests(balanceOnRequests) {
 		for (int i = 0; i < v.size(); i++) {
 			alternatives.push_back(AlternativeInfo(v[i], 1.0 / v.size(), (i + 1.0) / v.size()));
@@ -165,7 +165,7 @@ public:
 	}
 
 	template <class F>
-	F const& get(int index, F T::* member) const {
+	F const& get(int index, F T::*member) const {
 		return alternatives[index].interf.*member;
 	}
 
@@ -184,7 +184,7 @@ private:
 
 template <class T>
 class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
-	MultiInterface(const std::vector<T>& v, LocalityData const& locality = LocalityData()) {
+	MultiInterface(std::vector<T> const& v, LocalityData const& locality = LocalityData()) {
 		// This version of MultInterface is no longer used, but was kept around because of templating
 		ASSERT(false);
 	}
@@ -195,7 +195,7 @@ class MultiInterface : public ReferenceCounted<MultiInterface<T>> {
 template <class T>
 class MultiInterface<ReferencedInterface<T>> : public ReferenceCounted<MultiInterface<ReferencedInterface<T>>> {
 public:
-	MultiInterface(const std::vector<Reference<ReferencedInterface<T>>>& v) : alternatives(v), bestCount(0) {
+	MultiInterface(std::vector<Reference<ReferencedInterface<T>>> const& v) : alternatives(v), bestCount(0) {
 		deterministicRandom()->randomShuffle(alternatives);
 		if (LBLocalityData<T>::Present) {
 			std::stable_sort(alternatives.begin(), alternatives.end(), ReferencedInterface<T>::sort_by_distance);
@@ -221,7 +221,7 @@ public:
 	bool alwaysFresh() const { return LBLocalityData<T>::alwaysFresh(); }
 
 	template <class F>
-	F const& get(int index, F T::* member) const {
+	F const& get(int index, F T::*member) const {
 		return alternatives[index]->interf.*member;
 	}
 
@@ -229,7 +229,7 @@ public:
 	LBDistance::Type getDistance(int index) const { return (LBDistance::Type)alternatives[index]->distance; }
 	UID getId(int index) const { return alternatives[index]->interf.id(); }
 	bool hasInterface(UID id) const {
-		for (const auto& ref : alternatives) {
+		for (auto const& ref : alternatives) {
 			if (ref->interf.id() == id) {
 				return true;
 			}
@@ -239,7 +239,7 @@ public:
 
 	Reference<ReferencedInterface<T>>& operator[](int i) { return alternatives[i]; }
 
-	const Reference<ReferencedInterface<T>>& operator[](int i) const { return alternatives[i]; }
+	Reference<ReferencedInterface<T>> const& operator[](int i) const { return alternatives[i]; }
 
 	virtual ~MultiInterface() {}
 

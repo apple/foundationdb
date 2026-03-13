@@ -67,7 +67,7 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 			        "command before running `expensive_data_check all’.\n");
 		} else {
 			std::vector<std::string> addressesVec;
-			for (const auto& [address, _] : *address_interface) {
+			for (auto const& [address, _] : *address_interface) {
 				addressesVec.push_back(address.toString());
 			}
 			addressesStr = boost::algorithm::join(addressesVec, ",");

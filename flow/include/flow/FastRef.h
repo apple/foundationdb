@@ -56,8 +56,8 @@ public:
 	int32_t debugGetReferenceCount() const { return referenceCount.load(); }
 
 private:
-	ThreadSafeReferenceCounted(const ThreadSafeReferenceCounted&) /* = delete*/;
-	void operator=(const ThreadSafeReferenceCounted&) /* = delete*/;
+	ThreadSafeReferenceCounted(ThreadSafeReferenceCounted const&) /* = delete*/;
+	void operator=(ThreadSafeReferenceCounted const&) /* = delete*/;
 	mutable std::atomic<int32_t> referenceCount;
 };
 
@@ -76,8 +76,8 @@ public:
 	bool isSoleOwner() const { return referenceCount == 1; }
 
 private:
-	ThreadUnsafeReferenceCounted(const ThreadUnsafeReferenceCounted&) /* = delete*/;
-	void operator=(const ThreadUnsafeReferenceCounted&) /* = delete*/;
+	ThreadUnsafeReferenceCounted(ThreadUnsafeReferenceCounted const&) /* = delete*/;
+	void operator=(ThreadUnsafeReferenceCounted const&) /* = delete*/;
 	mutable int32_t referenceCount;
 };
 
@@ -107,14 +107,14 @@ public:
 		return Reference(ptr);
 	}
 
-	Reference(const Reference& r) : ptr(r.getPtr()) {
+	Reference(Reference const& r) : ptr(r.getPtr()) {
 		if (ptr)
 			addref(ptr);
 	}
 	Reference(Reference&& r) noexcept : ptr(r.getPtr()) { r.ptr = nullptr; }
 
 	template <class Q>
-	Reference(const Reference<Q>& r) : ptr(r.getPtr()) {
+	Reference(Reference<Q> const& r) : ptr(r.getPtr()) {
 		if (ptr)
 			addref(ptr);
 	}
@@ -127,7 +127,7 @@ public:
 		if (ptr)
 			delref(ptr);
 	}
-	Reference& operator=(const Reference& r) {
+	Reference& operator=(Reference const& r) {
 		P* oldPtr = ptr;
 		P* newPtr = r.ptr;
 		if (oldPtr != newPtr) {
@@ -185,7 +185,7 @@ private:
 
 template <class T>
 struct Traceable<Reference<T>> : std::bool_constant<Traceable<T>::value> {
-	static std::string toString(const Reference<T>& value) {
+	static std::string toString(Reference<T> const& value) {
 		return value ? Traceable<T>::toString(*value) : "[not set]";
 	}
 };
@@ -196,11 +196,11 @@ Reference<P> makeReference(Args&&... args) {
 }
 
 template <class P>
-bool operator==(const Reference<P>& lhs, const Reference<P>& rhs) {
+bool operator==(Reference<P> const& lhs, Reference<P> const& rhs) {
 	return lhs.getPtr() == rhs.getPtr();
 }
 template <class P>
-bool operator!=(const Reference<P>& lhs, const Reference<P>& rhs) {
+bool operator!=(Reference<P> const& lhs, Reference<P> const& rhs) {
 	return !(lhs == rhs);
 }
 

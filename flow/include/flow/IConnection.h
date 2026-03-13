@@ -106,18 +106,18 @@ public:
 class DNSCache {
 public:
 	DNSCache() = default;
-	explicit DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache)
+	explicit DNSCache(std::map<std::string, std::vector<NetworkAddress>> const& dnsCache)
 	  : hostnameToAddresses(dnsCache) {}
 
-	Optional<std::vector<NetworkAddress>> find(const std::string& host, const std::string& service);
-	void add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses);
-	void remove(const std::string& host, const std::string& service);
+	Optional<std::vector<NetworkAddress>> find(std::string const& host, std::string const& service);
+	void add(std::string const& host, std::string const& service, std::vector<NetworkAddress> const& addresses);
+	void remove(std::string const& host, std::string const& service);
 	void clear();
 
 	// Convert hostnameToAddresses to string. The format is:
 	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
 	std::string toString();
-	static DNSCache parseFromString(const std::string& s);
+	static DNSCache parseFromString(std::string const& s);
 
 private:
 	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
@@ -140,7 +140,7 @@ public:
 
 	// Make an outgoing connection to the given address with hostname for SNI (TLS Server Name Indication)
 	virtual Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
-	                                                                   const std::string& hostname) {
+	                                                                   std::string const& hostname) {
 		// Default implementation ignores hostname - subclasses can override for SNI support
 		return connectExternal(toAddr);
 	}
@@ -150,32 +150,32 @@ public:
 	// Make an outgoing udp connection without establishing a connection
 	virtual Future<Reference<IUDPSocket>> createUDPSocket(bool isV6 = false) = 0;
 
-	virtual void addMockTCPEndpoint(const std::string& host,
-	                                const std::string& service,
-	                                const std::vector<NetworkAddress>& addresses) = 0;
-	virtual void removeMockTCPEndpoint(const std::string& host, const std::string& service) = 0;
-	virtual void parseMockDNSFromString(const std::string& s) = 0;
+	virtual void addMockTCPEndpoint(std::string const& host,
+	                                std::string const& service,
+	                                std::vector<NetworkAddress> const& addresses) = 0;
+	virtual void removeMockTCPEndpoint(std::string const& host, std::string const& service) = 0;
+	virtual void parseMockDNSFromString(std::string const& s) = 0;
 	virtual std::string convertMockDNSToString() = 0;
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more
 	// NetworkAddresses
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
-	                                                               const std::string& service) = 0;
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string const& host,
+	                                                               std::string const& service) = 0;
 	// Similar to resolveTCPEndpoint(), except that this one uses DNS cache.
-	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
-	                                                                           const std::string& service) = 0;
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(std::string const& host,
+	                                                                           std::string const& service) = 0;
 	// Resolve host name and service name. This one should only be used when resolving asynchronously is impossible. For
 	// all other cases, resolveTCPEndpoint() should be preferred.
-	virtual std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
-	                                                               const std::string& service) = 0;
+	virtual std::vector<NetworkAddress> resolveTCPEndpointBlocking(std::string const& host,
+	                                                               std::string const& service) = 0;
 	// Resolve host name and service name with DNS cache. This one should only be used when resolving asynchronously is
 	// impossible. For all other cases, resolveTCPEndpointWithDNSCache() should be preferred.
-	virtual std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
-	                                                                           const std::string& service) = 0;
+	virtual std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(std::string const& host,
+	                                                                           std::string const& service) = 0;
 
 	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
 	// isTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
-	virtual Future<Reference<IConnection>> connect(const std::string& host,
-	                                               const std::string& service,
+	virtual Future<Reference<IConnection>> connect(std::string const& host,
+	                                               std::string const& service,
 	                                               bool isTLS = false);
 
 	// Listen for connections on the given local address
@@ -189,10 +189,10 @@ public:
 	// clusters on IPv6.
 	// This function takes a vector of addresses and return a random one, preferring IPv6 over IPv4.
 	// To prefer IPv4 addresses instead, set knob RESOLVE_PREFER_IPV4_ADDR to true.
-	static NetworkAddress pickOneAddress(const std::vector<NetworkAddress>& addresses) {
+	static NetworkAddress pickOneAddress(std::vector<NetworkAddress> const& addresses) {
 		std::vector<NetworkAddress> ipV6Addresses;
 		std::vector<NetworkAddress> ipV4Addresses;
-		for (const NetworkAddress& addr : addresses) {
+		for (NetworkAddress const& addr : addresses) {
 			if (addr.isV6()) {
 				ipV6Addresses.push_back(addr);
 			} else {
@@ -208,7 +208,7 @@ public:
 		return addresses[deterministicRandom()->randomInt(0, addresses.size())];
 	}
 
-	void removeCachedDNS(const std::string& host, const std::string& service) { dnsCache.remove(host, service); }
+	void removeCachedDNS(std::string const& host, std::string const& service) { dnsCache.remove(host, service); }
 
 	DNSCache dnsCache;
 

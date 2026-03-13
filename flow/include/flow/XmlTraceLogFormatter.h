@@ -31,12 +31,12 @@ struct XmlTraceLogFormatter final : public ITraceLogFormatter, ReferenceCounted<
 	void addref() override;
 	void delref() override;
 
-	const char* getExtension() const override;
-	const char* getHeader() const override;
-	const char* getFooter() const override;
+	char const* getExtension() const override;
+	char const* getHeader() const override;
+	char const* getFooter() const override;
 
 	void escape(std::ostringstream& oss, std::string source) const;
-	std::string formatEvent(const TraceEventFields& fields) const override;
+	std::string formatEvent(TraceEventFields const& fields) const override;
 };
 
 #endif

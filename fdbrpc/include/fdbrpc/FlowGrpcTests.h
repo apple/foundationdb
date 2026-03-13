@@ -50,13 +50,13 @@ using fdbrpc::test::TestEchoService;
 
 // Service implementation
 class TestEchoServiceImpl final : public TestEchoService::Service {
-	Status Echo(ServerContext* context, const EchoRequest* request, EchoResponse* reply) override {
+	Status Echo(ServerContext* context, EchoRequest const* request, EchoResponse* reply) override {
 		reply->set_message("Echo: " + request->message());
 		return Status::OK;
 	}
 
 	Status EchoRecvStream10(ServerContext* context,
-	                        const EchoRequest* request,
+	                        EchoRequest const* request,
 	                        ServerWriter<EchoResponse>* writer) override {
 		for (int ii = 0; ii < 10; ii++) {
 			if (context->IsCancelled()) {
@@ -86,9 +86,9 @@ class TestEchoServiceImpl final : public TestEchoService::Service {
 
 class EchoClient {
 public:
-	EchoClient(const shared_ptr<Channel>& channel) : stub_(TestEchoService::NewStub(channel)) {}
+	EchoClient(shared_ptr<Channel> const& channel) : stub_(TestEchoService::NewStub(channel)) {}
 
-	std::string Echo(const std::string& message) {
+	std::string Echo(std::string const& message) {
 		EchoRequest request;
 		request.set_message(message);
 

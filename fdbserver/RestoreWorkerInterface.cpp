@@ -19,16 +19,16 @@
  */
 
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-const KeyRef restoreLeaderKey = "\xff\x02/restoreLeader"_sr;
-const KeyRangeRef restoreWorkersKeys("\xff\x02/restoreWorkers/"_sr, "\xff\x02/restoreWorkers0"_sr);
-const KeyRef restoreStatusKey = "\xff\x02/restoreStatus/"_sr;
-const KeyRangeRef restoreApplierKeys("\xff\x02/restoreApplier/"_sr, "\xff\x02/restoreApplier0"_sr);
-const KeyRef restoreApplierTxnValue = "1"_sr;
+KeyRef const restoreLeaderKey = "\xff\x02/restoreLeader"_sr;
+KeyRangeRef const restoreWorkersKeys("\xff\x02/restoreWorkers/"_sr, "\xff\x02/restoreWorkers0"_sr);
+KeyRef const restoreStatusKey = "\xff\x02/restoreStatus/"_sr;
+KeyRangeRef const restoreApplierKeys("\xff\x02/restoreApplier/"_sr, "\xff\x02/restoreApplier0"_sr);
+KeyRef const restoreApplierTxnValue = "1"_sr;
 
 // restoreApplierKeys: track atomic transaction progress to ensure applying atomicOp exactly once
 // Version and batchIndex are passed in as LittleEndian,
 // they must be converted to BigEndian to maintain ordering in lexical order
-const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
+Key const restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreApplierKeys.begin);
 	wr << applierID << bigEndian64(batchIndex) << bigEndian64(version);
@@ -45,7 +45,7 @@ std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key) {
 }
 
 // Encode restore worker key for workerID
-const Key restoreWorkerKeyFor(UID const& workerID) {
+Key const restoreWorkerKeyFor(UID const& workerID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreWorkersKeys.begin);
 	wr << workerID;
@@ -53,7 +53,7 @@ const Key restoreWorkerKeyFor(UID const& workerID) {
 }
 
 // Encode restore agent value
-const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
+Value const restoreWorkerInterfaceValue(RestoreWorkerInterface const& cmdInterf) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreWorkerInterfaceValue()));
 	wr << cmdInterf;
 	return wr.toValue();
@@ -86,14 +86,14 @@ RestoreRequest decodeRestoreRequestValue(ValueRef const& value) {
 }
 
 // TODO: Register restore performance data to restoreStatus key
-const Key restoreStatusKeyFor(StringRef statusType) {
+Key const restoreStatusKeyFor(StringRef statusType) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(restoreStatusKey);
 	wr << statusType;
 	return wr.toValue();
 }
 
-const Value restoreStatusValue(double val) {
+Value const restoreStatusValue(double val) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withRestoreStatusValue()));
 	wr << StringRef(std::to_string(val));
 	return wr.toValue();

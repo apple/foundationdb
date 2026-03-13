@@ -32,22 +32,22 @@
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h"
 
-const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
-const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
-const StringRef FETCH_KEYS_BYTES_HISTOGRAM = "FetchKeysSize"_sr;
-const StringRef FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = "FetchKeysBandwidth"_sr;
-const StringRef FETCH_KEYS_BYTES_PER_COMMIT_HISTOGRAM = "FetchKeysBytesPerCommit"_sr;
-const StringRef TLOG_CURSOR_READS_LATENCY_HISTOGRAM = "TLogCursorReadsLatency"_sr;
-const StringRef SS_VERSION_LOCK_LATENCY_HISTOGRAM = "SSVersionLockLatency"_sr;
-const StringRef EAGER_READS_LATENCY_HISTOGRAM = "EagerReadsLatency"_sr;
-const StringRef FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM = "FetchKeysPTreeUpdatesLatency"_sr;
-const StringRef TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM = "TLogMsgsPTreeUpdatesLatency"_sr;
-const StringRef STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM = "StorageUpdatesDurableLatency"_sr;
-const StringRef STORAGE_COMMIT_LATENCY_HISTOGRAM = "StorageCommitLatency"_sr;
-const StringRef SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = "SSDurableVersionUpdateLatency"_sr;
-const StringRef SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM = "SSReadRangeBytesReturned"_sr;
-const StringRef SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM = "SSReadRangeBytesLimit"_sr;
-const StringRef SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = "SSReadRangeKVPairsReturned"_sr;
+StringRef const STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
+StringRef const FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
+StringRef const FETCH_KEYS_BYTES_HISTOGRAM = "FetchKeysSize"_sr;
+StringRef const FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = "FetchKeysBandwidth"_sr;
+StringRef const FETCH_KEYS_BYTES_PER_COMMIT_HISTOGRAM = "FetchKeysBytesPerCommit"_sr;
+StringRef const TLOG_CURSOR_READS_LATENCY_HISTOGRAM = "TLogCursorReadsLatency"_sr;
+StringRef const SS_VERSION_LOCK_LATENCY_HISTOGRAM = "SSVersionLockLatency"_sr;
+StringRef const EAGER_READS_LATENCY_HISTOGRAM = "EagerReadsLatency"_sr;
+StringRef const FETCH_KEYS_PTREE_UPDATES_LATENCY_HISTOGRAM = "FetchKeysPTreeUpdatesLatency"_sr;
+StringRef const TLOG_MSGS_PTREE_UPDATES_LATENCY_HISTOGRAM = "TLogMsgsPTreeUpdatesLatency"_sr;
+StringRef const STORAGE_UPDATES_DURABLE_LATENCY_HISTOGRAM = "StorageUpdatesDurableLatency"_sr;
+StringRef const STORAGE_COMMIT_LATENCY_HISTOGRAM = "StorageCommitLatency"_sr;
+StringRef const SS_DURABLE_VERSION_UPDATE_LATENCY_HISTOGRAM = "SSDurableVersionUpdateLatency"_sr;
+StringRef const SS_READ_RANGE_BYTES_RETURNED_HISTOGRAM = "SSReadRangeBytesReturned"_sr;
+StringRef const SS_READ_RANGE_BYTES_LIMIT_HISTOGRAM = "SSReadRangeBytesLimit"_sr;
+StringRef const SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = "SSReadRangeKVPairsReturned"_sr;
 
 struct StorageMetricSample {
 	IndexedSet<Key, int64_t> sample;
@@ -64,7 +64,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 
 	explicit TransientStorageMetricSample(int64_t metricUnitsPerSample) : StorageMetricSample(metricUnitsPerSample) {}
 
-	int64_t addAndExpire(const Key& key, int64_t metric, double expiration);
+	int64_t addAndExpire(Key const& key, int64_t metric, double expiration);
 
 	int64_t erase(KeyRef key);
 	void erase(KeyRangeRef keys);
@@ -77,7 +77,7 @@ private:
 	bool roll(int64_t metric) const;
 
 	// return the sampled metric delta
-	int64_t add(const Key& key, int64_t metric);
+	int64_t add(Key const& key, int64_t metric);
 };
 
 struct StorageServerMetrics {
@@ -97,14 +97,14 @@ struct StorageServerMetrics {
 
 	StorageMetrics getMetrics(KeyRangeRef const& keys) const;
 
-	void notify(const Key& key, StorageMetrics& metrics);
+	void notify(Key const& key, StorageMetrics& metrics);
 
-	void notifyBytesReadPerKSecond(const Key& key, int64_t in);
+	void notifyBytesReadPerKSecond(Key const& key, int64_t in);
 
 	void notifyBytes(RangeMap<Key, std::vector<PromiseStream<StorageMetrics>>, KeyRangeRef>::iterator shard,
 	                 int64_t bytes);
 
-	void notifyBytes(const KeyRef& key, int64_t bytes);
+	void notifyBytes(KeyRef const& key, int64_t bytes);
 
 	void notifyNotReadable(KeyRangeRef keys);
 
@@ -118,7 +118,7 @@ struct StorageServerMetrics {
 	                   int64_t used,
 	                   int64_t infinity,
 	                   bool isLastShard,
-	                   const StorageMetricSample& sample,
+	                   StorageMetricSample const& sample,
 	                   double divisor,
 	                   KeyRef const& lastKey,
 	                   KeyRef const& key,
@@ -141,7 +141,7 @@ struct StorageServerMetrics {
 
 	void getReadHotRanges(ReadHotSubRangeRequest req) const;
 
-	int64_t getHotShards(const KeyRange& range) const;
+	int64_t getHotShards(KeyRange const& range) const;
 
 	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<KeyRef> prefixToRemove) const;
 
@@ -217,9 +217,9 @@ struct CommonStorageCounters {
 
 	// name and id are the inputs to CounterCollection initialization. If metrics provided, the caller should guarantee
 	// the lifetime of metrics is longer than this counter
-	CommonStorageCounters(const std::string& name,
-	                      const std::string& id,
-	                      const StorageServerMetrics* metrics = nullptr);
+	CommonStorageCounters(std::string const& name,
+	                      std::string const& id,
+	                      StorageServerMetrics const* metrics = nullptr);
 };
 
 class IStorageMetricsService {
@@ -233,20 +233,20 @@ public:
 
 	virtual void addActor(Future<Void> future) = 0;
 
-	virtual void getSplitPoints(const SplitRangeRequest& req) = 0;
+	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
 
 	// The following method name suffix of `ForReal` replaces something
 	// that used to reference the now-deleted tenant feature.  We need
 	// *some suffix* to refer to the method that does the work.
-	virtual Future<Void> waitMetricsForReal(const WaitMetricsRequest& req) = 0;
+	virtual Future<Void> waitMetricsForReal(WaitMetricsRequest const& req) = 0;
 
-	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
+	virtual void getStorageMetrics(GetStorageMetricsRequest const& req) = 0;
 
-	virtual void getSplitMetrics(const SplitMetricsRequest& req) = 0;
+	virtual void getSplitMetrics(SplitMetricsRequest const& req) = 0;
 
-	virtual void getHotRangeMetrics(const ReadHotSubRangeRequest& req) = 0;
+	virtual void getHotRangeMetrics(ReadHotSubRangeRequest const& req) = 0;
 
-	virtual int64_t getHotShardsMetrics(const KeyRange& range) = 0;
+	virtual int64_t getHotShardsMetrics(KeyRange const& range) = 0;
 
 	// NOTE: also need to have this function but template can't be a virtual so...
 	// template <class Reply>

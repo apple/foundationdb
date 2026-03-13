@@ -121,7 +121,7 @@ struct DatabaseConfiguration {
 
 	// Given a JSON object representing a DatabaseConfiguration, generate a configuration command
 	// that would set a database to those options.
-	static std::string configureStringFromJSON(const StatusObject& json);
+	static std::string configureStringFromJSON(StatusObject const& json);
 
 	RegionInfo getRegion(Optional<Key> dcId) const {
 		if (!dcId.present()) {
@@ -226,8 +226,8 @@ struct DatabaseConfiguration {
 	EncryptionAtRestModeDeprecated encryptionAtRestModeDeprecated;
 
 	// Excluded servers (no state should be here)
-	bool isExcludedServer(NetworkAddressList, const LocalityData& locality) const;
-	bool isExcludedLocality(const LocalityData& locality) const;
+	bool isExcludedServer(NetworkAddressList, LocalityData const& locality) const;
+	bool isExcludedLocality(LocalityData const& locality) const;
 	std::set<AddressExclusion> getExcludedServers() const;
 	std::set<std::string> getExcludedLocalities() const;
 

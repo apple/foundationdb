@@ -50,10 +50,10 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	KeyValueStoreType getType() const override { return store->getType(); }
 	StorageBytes getStorageBytes() const override { return store->getStorageBytes(); }
 
-	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
+	void set(KeyValueRef keyValue, Arena const* arena = nullptr) override {
 		store->set(KeyValueRef(keyValue.key, pack(keyValue.value)), arena);
 	}
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
+	void clear(KeyRangeRef range, Arena const* arena = nullptr) override { store->clear(range, arena); }
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {

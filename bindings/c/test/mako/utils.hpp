@@ -137,7 +137,7 @@ template <typename Char>
 void genKey(Char* str, std::string_view prefix, Arguments const& args, int num) {
 	static_assert(sizeof(Char) == 1);
 	memset(str, 'x', args.key_length);
-	const auto prefix_len = static_cast<int>(prefix.size());
+	auto const prefix_len = static_cast<int>(prefix.size());
 	auto pos = args.prefixpadding ? (args.key_length - prefix_len - args.row_digits) : 0;
 	memcpy(&str[pos], prefix.data(), prefix_len);
 	pos += prefix_len;
@@ -149,10 +149,10 @@ force_inline void prepareKeys(int op,
                               std::basic_string<Char>& key1,
                               std::basic_string<Char>& key2,
                               Arguments const& args) {
-	const auto key1_num = nextKey(args);
+	auto const key1_num = nextKey(args);
 	genKey(key1.data(), KEY_PREFIX, args, key1_num);
 	if (args.txnspec.ops[op][OP_RANGE] > 0) {
-		const auto key2_num = std::min(key1_num + args.txnspec.ops[op][OP_RANGE] - 1, args.rows - 1);
+		auto const key2_num = std::min(key1_num + args.txnspec.ops[op][OP_RANGE] - 1, args.rows - 1);
 		genKey(key2.data(), KEY_PREFIX, args, key2_num);
 	}
 }
@@ -184,8 +184,8 @@ public:
 };
 
 // trace helpers
-constexpr const int STATS_TITLE_WIDTH = 12;
-constexpr const int STATS_FIELD_WIDTH = 12;
+constexpr int const STATS_TITLE_WIDTH = 12;
+constexpr int const STATS_FIELD_WIDTH = 12;
 
 template <typename Value>
 void putTitle(Value&& value) {

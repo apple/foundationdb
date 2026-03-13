@@ -57,7 +57,7 @@ FDB_BOOLEAN_PARAM(UpdateParams);
 class Task : public ReferenceCounted<Task> {
 public:
 	Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
-	~Task() {};
+	~Task(){};
 
 	// Methods that safely read values from task's params
 	uint32_t getVersion() const;
@@ -106,7 +106,7 @@ public:
 	T get(Reference<Task> task) const { return TupleCodec<T>::unpack(task->params[key]); }
 	void set(Reference<Task> task, T const& val) const { task->params[key] = TupleCodec<T>::pack(val); }
 	bool exists(Reference<Task> task) const { return task->params.find(key) != task->params.end(); }
-	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
+	T getOrDefault(Reference<Task> task, T const defaultValue = T()) const {
 		if (!exists(task))
 			return defaultValue;
 		return get(task);
@@ -139,7 +139,7 @@ class FutureBucket;
 // instance may declare the Task a failure and move it back to the available subspace.
 class TaskBucket : public ReferenceCounted<TaskBucket> {
 public:
-	TaskBucket(const Subspace& subspace,
+	TaskBucket(Subspace const& subspace,
 	           AccessSystemKeys = AccessSystemKeys::False,
 	           PriorityBatch = PriorityBatch::False,
 	           LockAware = LockAware::False);
@@ -311,7 +311,7 @@ class TaskFuture;
 
 class FutureBucket : public ReferenceCounted<FutureBucket> {
 public:
-	FutureBucket(const Subspace& subspace, AccessSystemKeys = AccessSystemKeys::False, LockAware = LockAware::False);
+	FutureBucket(Subspace const& subspace, AccessSystemKeys = AccessSystemKeys::False, LockAware = LockAware::False);
 	virtual ~FutureBucket();
 
 	void setOptions(Reference<ReadYourWritesTransaction> tr) {
@@ -350,7 +350,7 @@ private:
 class TaskFuture : public ReferenceCounted<TaskFuture> {
 public:
 	TaskFuture();
-	TaskFuture(const Reference<FutureBucket> bucket, Standalone<StringRef> key = Standalone<StringRef>());
+	TaskFuture(Reference<FutureBucket> const bucket, Standalone<StringRef> key = Standalone<StringRef>());
 	virtual ~TaskFuture();
 
 	Future<bool> isSet(Reference<ReadYourWritesTransaction> tr);
@@ -439,7 +439,7 @@ public:
 
 struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::function<TaskFuncBase*()>>,
                       ReferenceCounted<TaskFuncBase> {
-	virtual ~TaskFuncBase() {};
+	virtual ~TaskFuncBase(){};
 	static Reference<TaskFuncBase> create(Standalone<StringRef> const& taskFuncType) {
 		return Reference<TaskFuncBase>(dispatch(taskFuncType)());
 	}
@@ -481,7 +481,7 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 #define REGISTER_TASKFUNC(TaskFunc) REGISTER_FACTORY(TaskFuncBase, TaskFunc, name)
 #define REGISTER_TASKFUNC_ALIAS(TaskFunc, Alias)                                                                       \
 	REGISTER_DISPATCHED_ALIAS(                                                                                         \
-	    TaskFunc, Alias, TaskFunc::name, StringRef(reinterpret_cast<const uint8_t*>(#Alias), sizeof(#Alias) - 1))
+	    TaskFunc, Alias, TaskFunc::name, StringRef(reinterpret_cast<uint8_t const*>(#Alias), sizeof(#Alias) - 1))
 
 struct TaskCompletionKey {
 	Future<Key> get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket);

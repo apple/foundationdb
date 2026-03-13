@@ -26,7 +26,7 @@ struct SerializableClassInfo {
 		std::string name;
 		std::string type;
 
-		SerializableClassMemberVariable(const std::string& name_, const std::string& type_)
+		SerializableClassMemberVariable(std::string const& name_, std::string const& type_)
 		  : name(name_), type(type_) {}
 	};
 	std::string className;
@@ -37,18 +37,18 @@ struct SerializableClassInfo {
 };
 
 // Pretty print SerializableClassInfo
-std::ostream& operator<<(std::ostream& ostream, const SerializableClassInfo& serializableClassInfo) {
+std::ostream& operator<<(std::ostream& ostream, SerializableClassInfo const& serializableClassInfo) {
 	ostream << "[" << serializableClassInfo.className << "]  (" << serializableClassInfo.sourceFilePath << ":"
 	        << serializableClassInfo.lineNumber << ")" << std::endl;
 	std::cout << "Variables: " << serializableClassInfo.variables.size() << std::endl;
-	for (const auto& variable : serializableClassInfo.variables) {
+	for (auto const& variable : serializableClassInfo.variables) {
 		std::cout << "  " << std::setw(20) << variable.name << "  " << variable.type << std::endl;
 	}
 
 	return ostream;
 }
 
-std::string toJson(const SerializableClassInfo& classInfo) {
+std::string toJson(SerializableClassInfo const& classInfo) {
 	using namespace boost::json;
 	object jsonObject;
 	jsonObject.emplace("className", classInfo.className);
@@ -56,7 +56,7 @@ std::string toJson(const SerializableClassInfo& classInfo) {
 	jsonObject.emplace("lineNumber", classInfo.lineNumber);
 
 	array variables;
-	for (const auto& var_ : classInfo.variables) {
+	for (auto const& var_ : classInfo.variables) {
 		object variable;
 		variable.emplace("name", var_.name);
 		variable.emplace("type", var_.type);
@@ -102,9 +102,9 @@ public:
 };
 
 class SerializableClassMatchCallback : public clang::ast_matchers::MatchFinder::MatchCallback {
-	bool checkParameterType(const clang::ast_matchers::BoundNodes& nodes) {
-		const auto* templateParm = nodes.getNodeAs<clang::TemplateTypeParmDecl>("archiverType");
-		const auto* paramVar = nodes.getNodeAs<clang::ParmVarDecl>("archiver");
+	bool checkParameterType(clang::ast_matchers::BoundNodes const& nodes) {
+		auto const* templateParm = nodes.getNodeAs<clang::TemplateTypeParmDecl>("archiverType");
+		auto const* paramVar = nodes.getNodeAs<clang::ParmVarDecl>("archiver");
 
 		auto templateName = templateParm->getDeclName().getAsString();
 		auto paramVarType = paramVar->getType();
@@ -118,17 +118,17 @@ class SerializableClassMatchCallback : public clang::ast_matchers::MatchFinder::
 	}
 
 	void initializeClassInfo(SerializableClassInfo& classInfo,
-	                         const clang::CXXRecordDecl* classDecl,
-	                         const clang::SourceManager* sourceManager) {
+	                         clang::CXXRecordDecl const* classDecl,
+	                         clang::SourceManager const* sourceManager) {
 		classInfo.className = classDecl->getDeclName().getAsString();
-		const auto location = classDecl->getLocation();
-		const auto sourceFile = sourceManager->getFilename(location);
+		auto const location = classDecl->getLocation();
+		auto const sourceFile = sourceManager->getFilename(location);
 		classInfo.sourceFilePath = sourceFile.str();
-		const auto sourceFileLineNumber = sourceManager->getSpellingLineNumber(location);
+		auto const sourceFileLineNumber = sourceManager->getSpellingLineNumber(location);
 		classInfo.lineNumber = sourceFileLineNumber;
 	}
 
-	void tryParseSerializeFuncBody(const clang::CompoundStmt* serializeFuncBody,
+	void tryParseSerializeFuncBody(clang::CompoundStmt const* serializeFuncBody,
 	                               SerializableClassInfo& classInfo,
 	                               clang::SourceManager* sourceManager) {
 		// At this stage, we will just store the body of the serialize code
@@ -152,8 +152,8 @@ class SerializableClassMatchCallback : public clang::ast_matchers::MatchFinder::
 	}
 
 public:
-	virtual void run(const clang::ast_matchers::MatchFinder::MatchResult& result) override {
-		const clang::CXXRecordDecl* classDecl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("serializableClass");
+	virtual void run(clang::ast_matchers::MatchFinder::MatchResult const& result) override {
+		clang::CXXRecordDecl const* classDecl = result.Nodes.getNodeAs<clang::CXXRecordDecl>("serializableClass");
 		if (classDecl == nullptr) {
 			return;
 		}
@@ -168,7 +168,7 @@ public:
 		// XXX: Understand why const_cast is required, and figure out if there is a better way of doing this
 		memberVariableCollector.TraverseCXXRecordDecl(const_cast<clang::CXXRecordDecl*>(classDecl));
 
-		const auto* serializeFuncBody = result.Nodes.getNodeAs<clang::CompoundStmt>("serializeFuncBody");
+		auto const* serializeFuncBody = result.Nodes.getNodeAs<clang::CompoundStmt>("serializeFuncBody");
 		tryParseSerializeFuncBody(serializeFuncBody, classInfo, result.SourceManager);
 
 		std::cout << toJson(classInfo) << std::endl;
@@ -188,7 +188,7 @@ clang::ast_matchers::MatchFinder* getSerializableClassMatchFinder() {
 }
 
 // Entry point
-int main(int argc, const char* argv[]) {
+int main(int argc, char const* argv[]) {
 	auto expectedParser = clang::tooling::CommonOptionsParser::create(argc, argv, toolCategory);
 	if (!expectedParser) {
 		llvm::errs() << expectedParser.takeError();
@@ -197,7 +197,7 @@ int main(int argc, const char* argv[]) {
 	auto& optionsParser = expectedParser.get();
 	clang::tooling::ClangTool tool(optionsParser.getCompilations(), optionsParser.getSourcePathList());
 
-	const auto retVal = tool.run(clang::tooling::newFrontendActionFactory(getSerializableClassMatchFinder()).get());
+	auto const retVal = tool.run(clang::tooling::newFrontendActionFactory(getSerializableClassMatchFinder()).get());
 
 	return retVal;
 }

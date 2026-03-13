@@ -33,7 +33,7 @@
 #include <limits>
 
 namespace {
-std::string printValue(const ErrorOr<Optional<Value>>& value) {
+std::string printValue(ErrorOr<Optional<Value>> const& value) {
 	if (value.isError()) {
 		return value.getError().name();
 	}
@@ -51,20 +51,20 @@ std::vector<KeyRange> shuffleRanges(std::vector<KeyRange> inputRanges) {
 	return outputRanges;
 }
 
-const KeyRangeRef partialKeys1 = KeyRangeRef(KeyRef(), "\x01"_sr);
-const KeyRangeRef partialKeys2 = KeyRangeRef("\x01"_sr, "\x02"_sr);
-const KeyRangeRef partialKeys3 = KeyRangeRef("\x02"_sr, "\x03"_sr);
-const KeyRangeRef partialKeys4 = KeyRangeRef("\x03"_sr, "\xfe"_sr);
-const KeyRangeRef partialKeys5 = KeyRangeRef("\xfe"_sr, "\xff"_sr);
-const KeyRangeRef partialKeys6 = KeyRangeRef("\x05"_sr, "\xaa"_sr);
-const KeyRangeRef partialKeys7 = KeyRangeRef(KeyRef(), KeyRef());
+KeyRangeRef const partialKeys1 = KeyRangeRef(KeyRef(), "\x01"_sr);
+KeyRangeRef const partialKeys2 = KeyRangeRef("\x01"_sr, "\x02"_sr);
+KeyRangeRef const partialKeys3 = KeyRangeRef("\x02"_sr, "\x03"_sr);
+KeyRangeRef const partialKeys4 = KeyRangeRef("\x03"_sr, "\xfe"_sr);
+KeyRangeRef const partialKeys5 = KeyRangeRef("\xfe"_sr, "\xff"_sr);
+KeyRangeRef const partialKeys6 = KeyRangeRef("\x05"_sr, "\xaa"_sr);
+KeyRangeRef const partialKeys7 = KeyRangeRef(KeyRef(), KeyRef());
 struct ValidateStorage : TestWorkload {
 	static constexpr auto NAME = "ValidateStorageWorkload";
 
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
-	const bool enabled;
+	bool const enabled;
 	bool pass;
 
 	// We disable failure injection because there is an irrelevant issue:
@@ -336,7 +336,7 @@ struct ValidateStorage : TestWorkload {
 			Error err;
 			try {
 				tr->debugTransaction(debugID);
-				for (const auto& [key, value] : *kvs) {
+				for (auto const& [key, value] : *kvs) {
 					tr->set(key, value);
 				}
 				co_await tr->commit();
@@ -414,10 +414,10 @@ struct ValidateStorage : TestWorkload {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					const int idx = deterministicRandom()->randomInt(0, src.size());
+					int const idx = deterministicRandom()->randomInt(0, src.size());
 					Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(src[idx]));
 					ASSERT(serverListValue.present());
-					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
+					StorageServerInterface const ssi = decodeServerListValue(serverListValue.get());
 					TraceEvent("TestSSUserDataValidationSendingRequest")
 					    .detail("Range", range)
 					    .detail("StorageServer", ssi.toString());
@@ -529,7 +529,7 @@ struct ValidateStorage : TestWorkload {
 		}
 		std::vector<AuditStorageState> res4 =
 		    co_await getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Complete);
-		for (const auto& auditState : res4) {
+		for (auto const& auditState : res4) {
 			if (auditState.getPhase() != AuditPhase::Complete) {
 				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
 				    .detail("ActualPhase", auditState.getPhase())
@@ -538,7 +538,7 @@ struct ValidateStorage : TestWorkload {
 		}
 		std::vector<AuditStorageState> res5 =
 		    co_await getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Failed);
-		for (const auto& auditState : res5) {
+		for (auto const& auditState : res5) {
 			if (auditState.getPhase() != AuditPhase::Failed) {
 				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
 				    .detail("ActualPhase", auditState.getPhase())
@@ -547,7 +547,7 @@ struct ValidateStorage : TestWorkload {
 		}
 		std::vector<AuditStorageState> res6 =
 		    co_await getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Error);
-		for (const auto& auditState : res6) {
+		for (auto const& auditState : res6) {
 			if (auditState.getPhase() != AuditPhase::Error) {
 				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
 				    .detail("ActualPhase", auditState.getPhase())
@@ -634,7 +634,7 @@ struct ValidateStorage : TestWorkload {
 		co_await waitForAll(fs);
 		std::vector<AuditStorageState> currentAuditStates1 =
 		    co_await getAuditStates(cx, AuditType::ValidateHA, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY);
-		for (const auto& auditState : currentAuditStates1) {
+		for (auto const& auditState : currentAuditStates1) {
 			if (auditState.id == auditId && auditState.getPhase() != AuditPhase::Failed) {
 				TraceEvent(SevError, "TestAuditStorageCancellation1Error")
 				    .detail("AuditType", auditState.getType())
@@ -644,7 +644,7 @@ struct ValidateStorage : TestWorkload {
 		}
 		std::vector<AuditStorageState> currentAuditStates2 =
 		    co_await getAuditStates(cx, AuditType::ValidateReplica, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY);
-		for (const auto& auditState : currentAuditStates2) {
+		for (auto const& auditState : currentAuditStates2) {
 			if (auditState.id == auditId && auditState.getPhase() != AuditPhase::Failed) {
 				TraceEvent(SevError, "TestAuditStorageCancellation2Error")
 				    .detail("AuditType", auditState.getType())
@@ -707,15 +707,15 @@ struct ValidateStorage : TestWorkload {
 				std::vector<KeyRange> unCoveredRanges;
 				unCoveredRanges.push_back(toCompare);
 				// check if toCompare is overlapped/fullyCovered by alreadyPersisteRanges
-				for (const auto& persistedRange : alreadyPersisteRanges) {
+				for (auto const& persistedRange : alreadyPersisteRanges) {
 					KeyRange overlappedRange = toCompare & persistedRange;
 					if (!overlappedRange.empty()) {
 						overlapped = true;
 					}
 					std::vector<KeyRange> unCoveredRangesNow;
-					for (const auto& unCoveredRange : unCoveredRanges) {
+					for (auto const& unCoveredRange : unCoveredRanges) {
 						std::vector<KeyRangeRef> tmp = unCoveredRange - persistedRange;
-						for (const auto& item : tmp) {
+						for (auto const& item : tmp) {
 							unCoveredRangesNow.push_back(item);
 						}
 					}

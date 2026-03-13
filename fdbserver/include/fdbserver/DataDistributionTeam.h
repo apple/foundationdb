@@ -81,11 +81,11 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() const = 0;
 	virtual bool isWrongConfiguration() const = 0;
 	virtual void setWrongConfiguration(bool) = 0;
-	virtual void addServers(const std::vector<UID>& servers) = 0;
+	virtual void addServers(std::vector<UID> const& servers) = 0;
 	virtual std::string getTeamID() const = 0;
 
 	std::string getDesc() const {
-		const auto& servers = getLastKnownServerInterfaces();
+		auto const& servers = getLastKnownServerInterfaces();
 		std::string s = format("TeamID %s; ", getTeamID().c_str());
 		s += format("Size %d; ", servers.size());
 		for (int i = 0; i < servers.size(); i++) {
@@ -131,7 +131,7 @@ public:
 		return "";
 	}
 
-	bool operator==(const TeamSelect& tmpTeamSelect) { return value == tmpTeamSelect.value; }
+	bool operator==(TeamSelect const& tmpTeamSelect) { return value == tmpTeamSelect.value; }
 
 private:
 	Value value;
@@ -203,7 +203,7 @@ struct GetTeamRequest {
 		   << " teamMustHaveShards:" << teamMustHaveShards << " forReadBalance:" << forReadBalance
 		   << " inflightPenalty:" << inflightPenalty << " findTeamByServers:" << findTeamByServers << ";";
 		ss << "CompleteSources:";
-		for (const auto& cs : completeSources) {
+		for (auto const& cs : completeSources) {
 			ss << cs.toString() << ",";
 		}
 

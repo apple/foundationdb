@@ -38,7 +38,7 @@ struct Tuple {
 		Standalone<StringRef> str;
 		UserTypeStr(uint8_t code, StringRef str) : code(code), str(str) {}
 
-		bool operator==(const UserTypeStr& other) const { return (code == other.code && str == other.str); }
+		bool operator==(UserTypeStr const& other) const { return (code == other.code && str == other.str); }
 	};
 
 	Tuple() {}
@@ -121,7 +121,7 @@ struct Tuple {
 	}
 
 private:
-	Tuple(const StringRef& data, bool exclude_incomplete = false, bool exclude_user_type = false);
+	Tuple(StringRef const& data, bool exclude_incomplete = false, bool exclude_user_type = false);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;
 };

@@ -34,7 +34,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 namespace {
-std::string printValue(const ErrorOr<Optional<Value>>& value) {
+std::string printValue(ErrorOr<Optional<Value>> const& value) {
 	if (value.isError()) {
 		return value.getError().name();
 	}
@@ -46,7 +46,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 	static constexpr auto NAME = "DataLossRecovery";
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
-	const bool enabled;
+	bool const enabled;
 	bool pass;
 	NetworkAddress addr;
 
@@ -119,7 +119,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 			try {
 				// add timeout to read so test fails faster if something goes wrong
 				Optional<Value> res = co_await timeoutError(tr.get(key), 90.0);
-				const bool equal = !expectedValue.isError() && res == expectedValue.get();
+				bool const equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
 				}
@@ -294,7 +294,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				Standalone<VectorRef<const char*>> addresses = co_await validateTr.getAddressesForKey(keys.begin);
+				Standalone<VectorRef<char const*>> addresses = co_await validateTr.getAddressesForKey(keys.begin);
 				// The move function is not what we are testing here, crash the test if the move fails.
 				ASSERT(addresses.size() == 1);
 				ASSERT(std::string(addresses[0]) == addr.toString());
@@ -308,7 +308,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		co_return addr;
 	}
 
-	void killProcess(DataLossRecoveryWorkload* self, const NetworkAddress& addr) {
+	void killProcess(DataLossRecoveryWorkload* self, NetworkAddress const& addr) {
 		ISimulator::ProcessInfo* process = g_simulator->getProcessByAddress(addr);
 		ASSERT(process->addresses.contains(addr));
 		g_simulator->killProcess(process, ISimulator::KillType::KillInstantly);

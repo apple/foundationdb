@@ -58,8 +58,8 @@ struct FDBLoggerImpl : FDBLogger {
 		return &impl;
 	}
 	void trace(FDBSeverity sev,
-	           const std::string& name,
-	           const std::vector<std::pair<std::string, std::string>>& details) override {
+	           std::string const& name,
+	           std::vector<std::pair<std::string, std::string>> const& details) override {
 		auto traceFun = [=]() -> Future<Void> {
 			Severity severity;
 			switch (sev) {
@@ -80,7 +80,7 @@ struct FDBLoggerImpl : FDBLogger {
 				break;
 			}
 			TraceEvent evt(severity, name.c_str());
-			for (const auto& p : details) {
+			for (auto const& p : details) {
 				evt.detail(p.first.c_str(), p.second);
 			}
 			return Void();
@@ -160,8 +160,8 @@ capi::FDBPromise wrap(GenericPromise<bool> promise) {
 namespace context {
 void trace(capi::OpaqueWorkloadContext* c_context,
            capi::FDBSeverity c_severity,
-           const char* name,
-           const capi::FDBStringPair* c_details,
+           char const* name,
+           capi::FDBStringPair const* c_details,
            int n) {
 	auto context = (FDBWorkloadContext*)c_context;
 	FDBSeverity severity;
@@ -205,9 +205,9 @@ uint32_t rnd(capi::OpaqueWorkloadContext* c_context) {
 	auto context = (FDBWorkloadContext*)c_context;
 	return context->rnd();
 }
-capi::FDBString getOption(capi::OpaqueWorkloadContext* c_context, const char* name, const char* defaultValue) {
+capi::FDBString getOption(capi::OpaqueWorkloadContext* c_context, char const* name, char const* defaultValue) {
 	static capi::FDBString::FDBString_VT vt{
-		.free = (void (*)(const char*))free,
+		.free = (void (*)(char const*))free,
 	};
 	auto context = (FDBWorkloadContext*)c_context;
 	std::string value = context->getOption(name, std::string(defaultValue));
@@ -296,7 +296,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		return abspath(joinPath(joinPath(popPath(popPath(self)), "share"), "foundationdb"));
 	}
 
-	static std::string toLibName(const std::string& name) {
+	static std::string toLibName(std::string const& name) {
 #if defined(__unixish__) && !defined(__APPLE__)
 		return format("lib%s.so", name.c_str());
 #elif defined(__APPLE__)
@@ -326,7 +326,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 
 		if (useCAPI) {
-			capi::FDBWorkload (*workloadCFactory)(const char*, capi::FDBWorkloadContext);
+			capi::FDBWorkload (*workloadCFactory)(char const*, capi::FDBWorkloadContext);
 			workloadCFactory = reinterpret_cast<decltype(workloadCFactory)>(loadFunction(library, "workloadCFactory"));
 			if (workloadCFactory == nullptr) {
 				TraceEvent(SevError, "ExternalCFactoryNotFound").log();
@@ -417,7 +417,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 		std::vector<FDBPerfMetric> metrics;
 		workloadImpl->getMetrics(metrics);
-		for (const auto& m : metrics) {
+		for (auto const& m : metrics) {
 			out.emplace_back(m.name, m.value, Averaged{ m.averaged }, m.format_code);
 		}
 	}
@@ -431,8 +431,8 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 
 	// context implementation
 	void trace(FDBSeverity sev,
-	           const std::string& name,
-	           const std::vector<std::pair<std::string, std::string>>& details) override {
+	           std::string const& name,
+	           std::vector<std::pair<std::string, std::string>> const& details) override {
 		return FDBLoggerImpl::instance()->trace(sev, name, details);
 	}
 	uint64_t getProcessID() const override {
@@ -449,19 +449,19 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 	double now() const override { return g_network->now(); }
 	uint32_t rnd() const override { return deterministicRandom()->randomUInt32(); }
-	bool getOption(const std::string& name, bool defaultValue) override {
+	bool getOption(std::string const& name, bool defaultValue) override {
 		return ::getOption(options, Value(name), defaultValue);
 	}
-	long getOption(const std::string& name, long defaultValue) override {
+	long getOption(std::string const& name, long defaultValue) override {
 		return ::getOption(options, Value(name), int64_t(defaultValue));
 	}
-	unsigned long getOption(const std::string& name, unsigned long defaultValue) override {
+	unsigned long getOption(std::string const& name, unsigned long defaultValue) override {
 		return ::getOption(options, Value(name), uint64_t(defaultValue));
 	}
-	double getOption(const std::string& name, double defaultValue) override {
+	double getOption(std::string const& name, double defaultValue) override {
 		return ::getOption(options, Value(name), defaultValue);
 	}
-	std::string getOption(const std::string& name, std::string defaultValue) override {
+	std::string getOption(std::string const& name, std::string defaultValue) override {
 		return ::getOption(options, Value(name), Value(defaultValue)).toString();
 	}
 

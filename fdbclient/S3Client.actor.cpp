@@ -127,7 +127,7 @@ ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int6
 
 // Get the endpoint for the given s3url.
 // Populates parameters and resource with parse of s3url.
-Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
+Reference<S3BlobStoreEndpoint> getEndpoint(std::string const& s3url,
                                            std::string& resource,
                                            S3BlobStoreEndpoint::ParametersT& parameters) {
 	try {
@@ -489,7 +489,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 
 			// Verify all parts completed and prepare etag map
 			std::map<int, S3BlobStoreEndpoint::PartInfo> etagMap;
-			for (const auto& part : parts) {
+			for (auto const& part : parts) {
 				if (!part.completed) {
 					TraceEvent(SevWarnAlways, "S3ClientCopyUpFilePartNotCompleted")
 					    .detail("PartNumber", part.partNumber)
@@ -519,7 +519,7 @@ ACTOR static Future<Void> copyUpFile(Reference<S3BlobStoreEndpoint> endpoint,
 			    .detail("Object", objectName)
 			    .detail("NumParts", parts.size());
 
-			for (const auto& part : parts) {
+			for (auto const& part : parts) {
 				if (!part.partData.empty()) {
 					XXH64_update(hashState, part.partData.data(), part.partData.size());
 				}
@@ -650,7 +650,7 @@ ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url) {
 	    .detail("Filecount", files.size())
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		std::string filepath = file;
 		std::string s3path = resource + "/" + file.substr(dirpath.size() + 1);
 		wait(copyUpFile(endpoint, bucket, s3path, filepath));
@@ -905,7 +905,7 @@ ACTOR static Future<Void> copyDownFile(Reference<S3BlobStoreEndpoint> endpoint,
 			}
 
 			// Verify all parts completed
-			for (const auto& part : parts) {
+			for (auto const& part : parts) {
 				if (!part.completed) {
 					TraceEvent(SevError, "S3ClientCopyDownFilePartNotCompleted").detail("PartNumber", part.partNumber);
 					throw http_bad_response();
@@ -1024,7 +1024,7 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath) {
 	    .detail("Filecount", objects.size())
 	    .detail("Bucket", bucket)
 	    .detail("Resource", resource);
-	for (const auto& object : objects) {
+	for (auto const& object : objects) {
 		std::string filepath = dirpath + "/" + object.name.substr(resource.size());
 		std::string s3path = object.name;
 		wait(copyDownFile(endpoint, bucket, s3path, filepath));
@@ -1081,7 +1081,7 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 
 		// Helper function to format size in human-readable format
 		auto formatSize = [](int64_t size) -> std::string {
-			const char* units[] = { "B", "KB", "MB", "GB", "TB", "PB" };
+			char const* units[] = { "B", "KB", "MB", "GB", "TB", "PB" };
 			int unit = 0;
 			double value = static_cast<double>(size);
 			while (value >= 1024.0 && unit < 5) {
@@ -1094,7 +1094,7 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 		};
 
 		// First print common prefixes (directories)
-		for (const auto& prefix : result.commonPrefixes) {
+		for (auto const& prefix : result.commonPrefixes) {
 			std::string dirName = prefix;
 			// Remove trailing slash if present
 			if (!dirName.empty() && dirName.back() == '/') {
@@ -1105,11 +1105,11 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth) {
 		}
 
 		// Then print objects, skipping those in directories we've already printed
-		for (const auto& object : result.objects) {
+		for (auto const& object : result.objects) {
 			std::string objectName = object.name;
 			// Skip if this object is in a directory we've already printed
 			bool skip = false;
-			for (const auto& dir : directories) {
+			for (auto const& dir : directories) {
 				if (objectName.find(dir + "/") == 0) {
 					skip = true;
 					break;
@@ -1177,7 +1177,7 @@ ACTOR Future<std::vector<std::string>> listFiles_impl(Reference<S3BlobStoreEndpo
 		std::vector<std::string> files;
 		rapidxml::xml_node<>* n = result->first_node();
 		while (n != nullptr) {
-			const char* name = n->name();
+			char const* name = n->name();
 			if (strcmp(name, "Contents") == 0) {
 				rapidxml::xml_node<>* key = n->first_node("Key");
 				if (key == nullptr) {

@@ -41,7 +41,7 @@ PacketBuffer* PacketWriter::finish() {
 	return buffer;
 }
 
-void PacketWriter::serializeBytesAcrossBoundary(const void* data, int bytes) {
+void PacketWriter::serializeBytesAcrossBoundary(void const* data, int bytes) {
 	while (true) {
 		int b = std::min(bytes, buffer->bytes_unwritten());
 		memcpy(buffer->data() + buffer->bytes_written, data, b);
@@ -91,11 +91,11 @@ void PacketWriter::writeAhead(int bytes, struct SplitBuffer* buf) {
 	}
 }
 
-void SplitBuffer::write(const void* data, int len) {
+void SplitBuffer::write(void const* data, int len) {
 	write(data, len, 0);
 }
 
-void SplitBuffer::write(const void* data, int len, int offset) {
+void SplitBuffer::write(void const* data, int len, int offset) {
 	if (len + offset <= first_length)
 		memcpy(begin + offset, data, len);
 	else {
@@ -108,7 +108,7 @@ void SplitBuffer::write(const void* data, int len, int offset) {
 	}
 }
 
-void SplitBuffer::writeAndShrink(const void* data, int len) {
+void SplitBuffer::writeAndShrink(void const* data, int len) {
 	if (len <= first_length) {
 		memcpy(begin, data, len);
 		begin += len;

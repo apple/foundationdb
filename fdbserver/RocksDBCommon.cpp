@@ -28,11 +28,11 @@
 namespace RocksDBCommon {
 
 rocksdb::Slice toSlice(StringRef s) {
-	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
+	return rocksdb::Slice(reinterpret_cast<char const*>(s.begin()), s.size());
 }
 
 StringRef toStringRef(rocksdb::Slice s) {
-	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+	return StringRef(reinterpret_cast<uint8_t const*>(s.data()), s.size());
 }
 
 std::string getErrorReason(rocksdb::BackgroundErrorReason reason) {

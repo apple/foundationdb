@@ -73,9 +73,9 @@ struct IdempotencyIdRef {
 		ASSERT(id.size() < 256);
 		if (id.size() == 16 &&
 		    /* If it's 16 bytes but first < 256 we still need to use an indirection to avoid ambiguity. */
-		    reinterpret_cast<const uint64_t*>(id.begin())[0] >= 256) {
-			first = reinterpret_cast<const uint64_t*>(id.begin())[0];
-			second.id = reinterpret_cast<const uint64_t*>(id.begin())[1];
+		    reinterpret_cast<uint64_t const*>(id.begin())[0] >= 256) {
+			first = reinterpret_cast<uint64_t const*>(id.begin())[0];
+			second.id = reinterpret_cast<uint64_t const*>(id.begin())[1];
 		} else {
 			first = id.size();
 			second.ptr = id.begin();
@@ -92,12 +92,12 @@ struct IdempotencyIdRef {
 		return 0;
 	}
 
-	bool operator==(const IdempotencyIdRef& other) const { return asStringRefUnsafe() == other.asStringRefUnsafe(); }
+	bool operator==(IdempotencyIdRef const& other) const { return asStringRefUnsafe() == other.asStringRefUnsafe(); }
 
 	IdempotencyIdRef(IdempotencyIdRef&& other) = default;
 	IdempotencyIdRef& operator=(IdempotencyIdRef&& other) = default;
-	IdempotencyIdRef(const IdempotencyIdRef& other) = default;
-	IdempotencyIdRef& operator=(const IdempotencyIdRef& other) = default;
+	IdempotencyIdRef(IdempotencyIdRef const& other) = default;
+	IdempotencyIdRef& operator=(IdempotencyIdRef const& other) = default;
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -115,7 +115,7 @@ struct IdempotencyIdRef {
 		if (indirect()) {
 			return StringRef(second.ptr, first);
 		} else {
-			return StringRef(reinterpret_cast<const uint8_t*>(this), sizeof(*this));
+			return StringRef(reinterpret_cast<uint8_t const*>(this), sizeof(*this));
 		}
 	}
 
@@ -127,7 +127,7 @@ private:
 	uint64_t first;
 	union {
 		uint64_t id;
-		const uint8_t* ptr;
+		uint8_t const* ptr;
 	} second; // If first < 256, then ptr is valid. Otherwise id is valid.
 };
 
@@ -136,28 +136,28 @@ using IdempotencyId = Standalone<IdempotencyIdRef>;
 namespace std {
 template <>
 struct hash<IdempotencyIdRef> {
-	std::size_t operator()(const IdempotencyIdRef& id) const { return std::hash<StringRef>{}(id.asStringRefUnsafe()); }
+	std::size_t operator()(IdempotencyIdRef const& id) const { return std::hash<StringRef>{}(id.asStringRefUnsafe()); }
 };
 template <>
 struct hash<IdempotencyId> {
-	std::size_t operator()(const IdempotencyId& id) const { return std::hash<StringRef>{}(id.asStringRefUnsafe()); }
+	std::size_t operator()(IdempotencyId const& id) const { return std::hash<StringRef>{}(id.asStringRefUnsafe()); }
 };
 } // namespace std
 
 template <>
 struct dynamic_size_traits<IdempotencyIdRef> : std::true_type {
 	template <class Context>
-	static size_t size(const IdempotencyIdRef& t, Context&) {
+	static size_t size(IdempotencyIdRef const& t, Context&) {
 		return t.asStringRefUnsafe().size();
 	}
 	template <class Context>
-	static void save(uint8_t* out, const IdempotencyIdRef& t, Context&) {
+	static void save(uint8_t* out, IdempotencyIdRef const& t, Context&) {
 		StringRef s = t.asStringRefUnsafe();
 		std::copy(s.begin(), s.end(), out);
 	}
 
 	template <class Context>
-	static void load(const uint8_t* ptr, size_t sz, IdempotencyIdRef& id, Context& context) {
+	static void load(uint8_t const* ptr, size_t sz, IdempotencyIdRef& id, Context& context) {
 		id = IdempotencyIdRef(StringRef(context.tryReadZeroCopy(ptr, sz), sz));
 	}
 };
@@ -170,7 +170,7 @@ struct IdempotencyIdKVBuilder : NonCopyable {
 	IdempotencyIdKVBuilder();
 	void setCommitVersion(Version commitVersion);
 	// All calls to add must share the same high order byte of batchIndex (until the next call to buildAndClear)
-	void add(const IdempotencyIdRef& id, uint16_t batchIndex);
+	void add(IdempotencyIdRef const& id, uint16_t batchIndex);
 	// Must call setCommitVersion before calling buildAndClear. After calling buildAndClear, this object is ready to
 	// start a new kv pair for the high order byte of batchIndex.
 	Optional<KeyValue> buildAndClear();
@@ -182,7 +182,7 @@ private:
 };
 
 // Check if id is present in kv, and if so return the commit version and batchIndex
-Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const IdempotencyIdRef& id);
+Optional<CommitResult> kvContainsIdempotencyId(KeyValueRef const& kv, IdempotencyIdRef const& id);
 
 // Make a range containing only the idempotency key associated with version and highOrderBatchIndex
 KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t highOrderBatchIndex);

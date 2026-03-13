@@ -50,9 +50,9 @@ public:
 	constexpr static IndexType capacity = CAPACITY;
 
 	explicit WriteOnlySet();
-	WriteOnlySet(const WriteOnlySet&) = delete;
+	WriteOnlySet(WriteOnlySet const&) = delete;
 	WriteOnlySet(WriteOnlySet&&) = delete;
-	WriteOnlySet& operator=(const WriteOnlySet&) = delete;
+	WriteOnlySet& operator=(WriteOnlySet const&) = delete;
 	WriteOnlySet& operator=(WriteOnlySet&&) = delete;
 
 	/**
@@ -63,7 +63,7 @@ public:
 	 * \ret An index that can later be used to erase the value again or \ref npos if the insert failed.
 	 * \pre lineage.getPtr() % 2 == 0 (the memory for lineage has to be at least 2 byte aligned)
 	 */
-	[[nodiscard]] Index insert(const Reference<T>& lineage);
+	[[nodiscard]] Index insert(Reference<T> const& lineage);
 
 	/**
 	 * Erases the object associated with \p idx from the set.
@@ -82,7 +82,7 @@ public:
 	 *      wasn't called, it will be called later. Note that at the time the return value is checked, \ref delref
 	 *      might already have been called.
 	 */
-	bool replace(Index idx, const Reference<T>& lineage);
+	bool replace(Index idx, Reference<T> const& lineage);
 
 	/**
 	 * Copies all elements that are stored in the set into a vector. This copy operation does NOT provide a snapshot of
@@ -154,7 +154,7 @@ public:
 	 * valid, it will be called later. Note that at the time the return value is checked, \ref delref might already have
 	 *      been called.
 	 */
-	bool replace(const Reference<T>& element);
+	bool replace(Reference<T> const& element);
 };
 
 class ActorLineage;

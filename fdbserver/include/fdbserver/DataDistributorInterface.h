@@ -48,8 +48,8 @@ struct DataDistributorInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
-	bool operator==(const DataDistributorInterface& r) const { return id() == r.id(); }
-	bool operator!=(const DataDistributorInterface& r) const { return !(*this == r); }
+	bool operator==(DataDistributorInterface const& r) const { return id() == r.id(); }
+	bool operator!=(DataDistributorInterface const& r) const { return !(*this == r); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -105,7 +105,7 @@ struct PrepareBlobRestoreRequest {
 	KeyRange keys;
 
 	PrepareBlobRestoreRequest() = default;
-	PrepareBlobRestoreRequest(const UID& id, StorageServerInterface ssi, KeyRangeRef keyRange)
+	PrepareBlobRestoreRequest(UID const& id, StorageServerInterface ssi, KeyRangeRef keyRange)
 	  : requesterID(id), ssi(std::move(ssi)), keys(keyRange) {}
 
 	template <class Ar>
@@ -149,7 +149,7 @@ struct GetDataDistributorMetricsRequest {
 	bool midOnly = false;
 
 	GetDataDistributorMetricsRequest() = default;
-	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false)
+	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, int const shardLimit, bool midOnly = false)
 	  : keys(keys), shardLimit(shardLimit), midOnly(midOnly) {}
 
 	template <class Ar>

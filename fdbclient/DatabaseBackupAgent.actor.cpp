@@ -39,12 +39,12 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-const Key DatabaseBackupAgent::keyAddPrefix = "add_prefix"_sr;
-const Key DatabaseBackupAgent::keyRemovePrefix = "remove_prefix"_sr;
-const Key DatabaseBackupAgent::keyRangeVersions = "range_versions"_sr;
-const Key DatabaseBackupAgent::keyCopyStop = "copy_stop"_sr;
-const Key DatabaseBackupAgent::keyDatabasesInSync = "databases_in_sync"_sr;
-const int DatabaseBackupAgent::LATEST_DR_VERSION = 1;
+Key const DatabaseBackupAgent::keyAddPrefix = "add_prefix"_sr;
+Key const DatabaseBackupAgent::keyRemovePrefix = "remove_prefix"_sr;
+Key const DatabaseBackupAgent::keyRangeVersions = "range_versions"_sr;
+Key const DatabaseBackupAgent::keyCopyStop = "copy_stop"_sr;
+Key const DatabaseBackupAgent::keyDatabasesInSync = "databases_in_sync"_sr;
+int const DatabaseBackupAgent::LATEST_DR_VERSION = 1;
 
 DatabaseBackupAgent::DatabaseBackupAgent()
   : subspace(Subspace(databaseBackupPrefixRange.begin)), states(subspace.get(BackupAgentBase::keyStates)),
@@ -141,8 +141,8 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 	} Params;
 
-	static const Key keyAddBackupRangeTasks;
-	static const Key keyBackupRangeBeginKey;
+	static Key const keyAddBackupRangeTasks;
+	static Key const keyBackupRangeBeginKey;
 
 	StringRef getName() const override { return name; };
 
@@ -482,7 +482,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		state Key nextKey = task->params[BackupAgentBase::keyBeginKey];
 
 		std::vector<Future<Key>> addTaskVector;
-		for (const auto& splitKey : keys) {
+		for (auto const& splitKey : keys) {
 			if (nextKey != splitKey) {
 				addTaskVector.push_back(
 				    addTask(tr, taskBucket, task, nextKey, splitKey, TaskCompletionKey::joinWith(onDone)));
@@ -545,8 +545,8 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 	}
 };
 StringRef BackupRangeTaskFunc::name = "dr_backup_range"_sr;
-const Key BackupRangeTaskFunc::keyAddBackupRangeTasks = "addBackupRangeTasks"_sr;
-const Key BackupRangeTaskFunc::keyBackupRangeBeginKey = "backupRangeBeginKey"_sr;
+Key const BackupRangeTaskFunc::keyAddBackupRangeTasks = "addBackupRangeTasks"_sr;
+Key const BackupRangeTaskFunc::keyBackupRangeBeginKey = "backupRangeBeginKey"_sr;
 REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
 struct FinishFullBackupTaskFunc : TaskFuncBase {
@@ -716,7 +716,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 	} Params;
 
-	static const Key keyNextBeginVersion;
+	static Key const keyNextBeginVersion;
 
 	StringRef getName() const override { return name; };
 
@@ -999,7 +999,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 	}
 };
 StringRef CopyLogRangeTaskFunc::name = "dr_copy_log_range"_sr;
-const Key CopyLogRangeTaskFunc::keyNextBeginVersion = "nextBeginVersion"_sr;
+Key const CopyLogRangeTaskFunc::keyNextBeginVersion = "nextBeginVersion"_sr;
 REGISTER_TASKFUNC(CopyLogRangeTaskFunc);
 
 struct CopyLogsTaskFunc : TaskFuncBase {
@@ -1158,7 +1158,7 @@ REGISTER_TASKFUNC(CopyLogsTaskFunc);
 struct FinishedFullBackupTaskFunc : TaskFuncBase {
 	static StringRef name;
 	static constexpr uint32_t version = 1;
-	static const Key keyInsertTask;
+	static Key const keyInsertTask;
 
 	StringRef getName() const override { return name; };
 
@@ -1293,7 +1293,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 	};
 };
 StringRef FinishedFullBackupTaskFunc::name = "dr_finished_full_backup"_sr;
-const Key FinishedFullBackupTaskFunc::keyInsertTask = "insertTask"_sr;
+Key const FinishedFullBackupTaskFunc::keyInsertTask = "insertTask"_sr;
 REGISTER_TASKFUNC(FinishedFullBackupTaskFunc);
 
 struct CopyDiffLogsTaskFunc : TaskFuncBase {
@@ -1468,7 +1468,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		static TaskParam<int64_t> bytesWritten() { return __FUNCTION__sr; }
 	} Params;
 
-	static const Key keyNextBeginVersion;
+	static Key const keyNextBeginVersion;
 
 	StringRef getName() const override { return name; };
 
@@ -1694,7 +1694,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 	}
 };
 StringRef OldCopyLogRangeTaskFunc::name = "db_copy_log_range"_sr;
-const Key OldCopyLogRangeTaskFunc::keyNextBeginVersion = "nextBeginVersion"_sr;
+Key const OldCopyLogRangeTaskFunc::keyNextBeginVersion = "nextBeginVersion"_sr;
 REGISTER_TASKFUNC(OldCopyLogRangeTaskFunc);
 
 struct AbortOldBackupTaskFunc : TaskFuncBase {
@@ -2341,7 +2341,7 @@ StringRef StartFullBackupTaskFunc::name = "dr_start_full_backup"_sr;
 REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 } // namespace dbBackup
 
-std::set<std::string> getDRAgentsIds(StatusObjectReader statusObj, const char* context) {
+std::set<std::string> getDRAgentsIds(StatusObjectReader statusObj, char const* context) {
 	std::set<std::string> drBackupAgents;
 	try {
 		StatusObjectReader statusObjLayers;
@@ -2360,7 +2360,7 @@ std::set<std::string> getDRAgentsIds(StatusObjectReader statusObj, const char* c
 	return drBackupAgents;
 }
 
-std::string getDRMutationStreamId(StatusObjectReader statusObj, const char* context, Key tagName) {
+std::string getDRMutationStreamId(StatusObjectReader statusObj, char const* context, Key tagName) {
 	try {
 		StatusObjectReader statusObjLayers;
 		statusObj.get("cluster.layers", statusObjLayers);

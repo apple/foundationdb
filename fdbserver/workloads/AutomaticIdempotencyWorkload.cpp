@@ -155,7 +155,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		RangeResult result = co_await tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!result.more);
-		for (const auto& [k, v] : result) {
+		for (auto const& [k, v] : result) {
 			Version commitVersion;
 			uint8_t highOrderBatchIndex;
 			decodeIdempotencyKey(k, commitVersion, highOrderBatchIndex);
@@ -165,7 +165,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			while (!valReader.empty()) {
 				uint8_t length;
 				valReader >> length;
-				StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+				StringRef id{ reinterpret_cast<uint8_t const*>(valReader.readBytes(length)), length };
 				uint8_t lowOrderBatchIndex;
 				valReader >> lowOrderBatchIndex;
 				TraceEvent("IdempotencyIdWorkloadIdCommitted")
@@ -182,10 +182,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		ASSERT(!result.more);
 		std::unordered_set<Value> ids;
 		// Make sure they're all unique - ie no transaction committed twice
-		for (const auto& [k, v] : result) {
+		for (auto const& [k, v] : result) {
 			ids.emplace(v);
 		}
-		for (const auto& [k, rawValue] : result) {
+		for (auto const& [k, rawValue] : result) {
 			auto v = ObjectReader::fromStringRef<ValueType>(rawValue, Unversioned());
 			BinaryReader reader(k, Unversioned());
 			reader.readBytes(keyPrefix.size());
@@ -218,7 +218,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		while (!valReader.empty()) {
 			uint8_t length;
 			valReader >> length;
-			StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+			StringRef id{ reinterpret_cast<uint8_t const*>(valReader.readBytes(length)), length };
 			uint8_t lowOrderBatchIndex;
 			valReader >> lowOrderBatchIndex;
 
@@ -248,7 +248,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 		ASSERT(!result.more);
 
-		for (const auto& kv : result) {
+		for (auto const& kv : result) {
 			Version commitVersion;
 			int64_t timestamp;
 			std::vector<Key> decodedKeys = idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp);
@@ -329,7 +329,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	                                     ActorCollection* actors,
 	                                     int64_t minAgeSeconds,
 	                                     int64_t maxTimestampDelta,
-	                                     const std::vector<int64_t>* createdTimes) {
+	                                     std::vector<int64_t> const* createdTimes) {
 		Future<Void> cleaner = recurringAsync(
 		    [db = db, minAgeSeconds = minAgeSeconds]() { return cleanIdempotencyIds(db, minAgeSeconds); },
 		    pollingInterval,
@@ -401,7 +401,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		RangeResult result = co_await tr->getRange(prefixRange(keyPrefix), CLIENT_KNOBS->TOO_MANY);
 		ASSERT(!result.more);
 		std::vector<int64_t> createdTimes;
-		for (const auto& [k, v] : result) {
+		for (auto const& [k, v] : result) {
 			auto e = ObjectReader::fromStringRef<ValueType>(v, Unversioned());
 			createdTimes.emplace_back(e.createdTime);
 		}

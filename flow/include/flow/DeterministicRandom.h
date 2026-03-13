@@ -66,7 +66,7 @@ public:
 	char randomAlphaNumeric() override;
 	std::string randomAlphaNumeric(int length) override;
 	void randomBytes(uint8_t* buf, int length) override;
-	bool truePercent(const int percent) override;
+	bool truePercent(int const percent) override;
 	uint64_t peek() const override;
 	void resetSeed(uint32_t seed) override; // Reset the random number generator with a new seed
 	void addref() override;

@@ -104,10 +104,10 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 
 namespace fdb_cli {
 
-const KeyRangeRef processClassSourceSpecialKeyRange =
+KeyRangeRef const processClassSourceSpecialKeyRange =
     KeyRangeRef("\xff\xff/configuration/process/class_source/"_sr, "\xff\xff/configuration/process/class_source0"_sr);
 
-const KeyRangeRef processClassTypeSpecialKeyRange =
+KeyRangeRef const processClassTypeSpecialKeyRange =
     KeyRangeRef("\xff\xff/configuration/process/class_type/"_sr, "\xff\xff/configuration/process/class_type0"_sr);
 
 ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {

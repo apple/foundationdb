@@ -22,7 +22,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "flow/UnitTest.h"
 
-const RYWIterator::SEGMENT_TYPE RYWIterator::typeMap[12] = {
+RYWIterator::SEGMENT_TYPE const RYWIterator::typeMap[12] = {
 	// UNMODIFIED_RANGE
 	RYWIterator::UNKNOWN_RANGE,
 	RYWIterator::EMPTY_RANGE,
@@ -71,7 +71,7 @@ ExtStringRef RYWIterator::endKey() {
 	return end_key_cmp <= 0 ? cache.endKey() : writes.endKey();
 }
 
-const KeyValueRef* RYWIterator::kv(Arena& arena) {
+KeyValueRef const* RYWIterator::kv(Arena& arena) {
 	if (is_unreadable() && !bypassUnreadable)
 		throw accessed_unreadable();
 
@@ -111,10 +111,10 @@ RYWIterator& RYWIterator::operator--() {
 	return *this;
 }
 
-bool RYWIterator::operator==(const RYWIterator& r) const {
+bool RYWIterator::operator==(RYWIterator const& r) const {
 	return cache == r.cache && writes == r.writes;
 }
-bool RYWIterator::operator!=(const RYWIterator& r) const {
+bool RYWIterator::operator!=(RYWIterator const& r) const {
 	return !(*this == r);
 }
 
@@ -444,7 +444,7 @@ TEST_CASE("/fdbclient/WriteMap/VersionstampedvalueAfterSet") {
 	it.skip("apple"_sr);
 	ASSERT(it.is_unreadable());
 	ASSERT(it.is_kv());
-	const KeyValueRef* kv = it.kv(arena);
+	KeyValueRef const* kv = it.kv(arena);
 	ASSERT(kv->key == "apple"_sr);
 	ASSERT(kv->value == metadataVersionRequiredValue);
 

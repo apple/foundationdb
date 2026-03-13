@@ -26,7 +26,7 @@
 
 struct NameLineage : LineageProperties<NameLineage> {
 	static constexpr std::string_view name = "Actor"sv;
-	const char* actorName;
+	char const* actorName;
 };
 
 struct NameLineageCollector : IALPCollector<NameLineage> {

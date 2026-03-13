@@ -80,21 +80,21 @@ void replaceLineage(LineageReference* lineage) {
 
 using namespace std::literals;
 
-const std::string_view StackLineage::name = "StackLineage"sv;
+std::string_view const StackLineage::name = "StackLineage"sv;
 
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER) && !DEBUG_DETERMINISM
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
-void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
+void* rte_memcpy_noinline(void* __restrict __dest, void const* __restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
 }
 
 // This compilation unit will be linked in to the main binary, so this should override glibc memcpy
-__attribute__((visibility("default"))) void* memcpy(void* __restrict __dest, const void* __restrict __src, size_t __n) {
+__attribute__((visibility("default"))) void* memcpy(void* __restrict __dest, void const* __restrict __src, size_t __n) {
 	// folly_memcpy is faster for small copies, but rte seems to win out in most other circumstances
 	return rte_memcpy(__dest, __src, __n);
 }
 #else
-void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
+void* rte_memcpy_noinline(void* __restrict __dest, void const* __restrict __src, size_t __n) {
 	return memcpy(__dest, __src, __n);
 }
 #endif // (defined (__linux__) || defined (__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
@@ -247,7 +247,7 @@ Optional<uint64_t> parseDuration(std::string const& str, std::string const& defa
 	return ret;
 }
 
-int vsformat(std::string& outputString, const char* form, va_list args) {
+int vsformat(std::string& outputString, char const* form, va_list args) {
 	char buf[200];
 
 	va_list args2;
@@ -284,7 +284,7 @@ int vsformat(std::string& outputString, const char* form, va_list args) {
 	return size;
 }
 
-std::string format(const char* form, ...) {
+std::string format(char const* form, ...) {
 	va_list args;
 	va_start(args, form);
 
@@ -345,9 +345,9 @@ Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {
 void bindDeterministicRandomToOpenssl() {
 	// TODO: implement ifdef branch for 3.x using provider API
 #ifndef OPENSSL_IS_BORINGSSL
-	static const RAND_METHOD method = {
+	static RAND_METHOD const method = {
 		// replacement for RAND_seed(), which reseeds OpenSSL RNG
-		[](const void*, int) -> int { return 1; },
+		[](void const*, int) -> int { return 1; },
 		// replacement for RAND_bytes(), which fills given buffer with random byte sequence
 		[](unsigned char* buf, int length) -> int {
 		    if (g_network)
@@ -358,7 +358,7 @@ void bindDeterministicRandomToOpenssl() {
 		// replacement for RAND_cleanup(), a no-op for simulation
 		[]() -> void {},
 		// replacement for RAND_add(), which reseeds OpenSSL RNG with randomness hint
-		[](const void*, int, double) -> int { return 1; },
+		[](void const*, int, double) -> int { return 1; },
 		// replacement for default pseudobytes getter (same as RAND_bytes by default)
 		[](unsigned char* buf, int length) -> int {
 		    if (g_network)
@@ -387,8 +387,8 @@ void bindDeterministicRandomToOpenssl() {
 		printf("DeterministicRandom successfully bound to OpenSSL RNG\n");
 	}
 #else // OPENSSL_IS_BORINGSSL
-	static const RAND_METHOD method = {
-		[](const void*, int) -> void {},
+	static RAND_METHOD const method = {
+		[](void const*, int) -> void {},
 		[](unsigned char* buf, unsigned long length) -> int {
 		    if (g_network)
 			    ASSERT_ABORT(g_network->isSimulated());
@@ -397,7 +397,7 @@ void bindDeterministicRandomToOpenssl() {
 		    return 1;
 		},
 		[]() -> void {},
-		[](const void*, int, double) -> void {},
+		[](void const*, int, double) -> void {},
 		[](unsigned char* buf, unsigned long length) -> int {
 		    if (g_network)
 			    ASSERT_ABORT(g_network->isSimulated());
@@ -532,8 +532,8 @@ struct TestErrorOrMapClass {
 	StringRef value;
 	ErrorOr<StringRef> errorOrValue;
 
-	const StringRef constValue;
-	const ErrorOr<StringRef> constErrorOrValue;
+	StringRef const constValue;
+	ErrorOr<StringRef> const constErrorOrValue;
 
 	StringRef getValue() const { return value; }
 	ErrorOr<StringRef> getErrorOrValue() const { return errorOrValue; }

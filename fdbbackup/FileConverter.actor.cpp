@@ -63,17 +63,17 @@ void printBuildInformation() {
 	printf("%s", jsonBuildInformation().c_str());
 }
 
-void printLogFiles(std::string msg, const std::vector<LogFile>& files) {
+void printLogFiles(std::string msg, std::vector<LogFile> const& files) {
 	std::cout << msg << " " << files.size() << " log files\n";
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		std::cout << file.toString() << "\n";
 	}
 	std::cout << std::endl;
 }
 
-std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Version begin, Version end) {
+std::vector<LogFile> getRelevantLogFiles(std::vector<LogFile> const& files, Version begin, Version end) {
 	std::vector<LogFile> filtered;
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		if (file.beginVersion <= end && file.endVersion >= begin && file.tagId >= 0 && file.fileSize > 0) {
 			filtered.push_back(file);
 		}
@@ -152,14 +152,14 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	struct FileProgress : public ReferenceCounted<FileProgress> {
 		FileProgress(Reference<IAsyncFile> f, int index) : fd(f), idx(index), offset(0), eof(false) {}
 
-		bool operator<(const FileProgress& rhs) const {
+		bool operator<(FileProgress const& rhs) const {
 			if (rhs.mutations.empty())
 				return true;
 			if (mutations.empty())
 				return false;
 			return mutations[0].version < rhs.mutations[0].version;
 		}
-		bool operator<=(const FileProgress& rhs) const {
+		bool operator<=(FileProgress const& rhs) const {
 			if (rhs.mutations.empty())
 				return true;
 			if (mutations.empty())
@@ -170,7 +170,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 		// Decodes the block into mutations and save them if >= minVersion and < maxVersion.
 		// Returns true if new mutations has been saved.
-		bool decodeBlock(const Standalone<StringRef>& buf, int len, Version minVersion, Version maxVersion) {
+		bool decodeBlock(Standalone<StringRef> const& buf, int len, Version minVersion, Version maxVersion) {
 			StringRef block(buf.begin(), len);
 			StringRefReader reader(block, restore_corrupted_data());
 			int count = 0, inserted = 0;
@@ -190,7 +190,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 					msgVersion = bigEndian64(reader.consume<Version>());
 					uint32_t sub = bigEndian32(reader.consume<uint32_t>());
 					int msgSize = bigEndian32(reader.consume<int>());
-					const uint8_t* message = reader.consume(msgSize);
+					uint8_t const* message = reader.consume(msgSize);
 
 					ArenaReader rd(
 					    buf.arena(), StringRef(message, msgSize), AssumeVersion(g_network->protocolVersion()));
@@ -243,7 +243,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	};
 
 	bool hasMutations() {
-		for (const auto& fp : fileProgress) {
+		for (auto const& fp : fileProgress) {
 			if (!fp->empty())
 				return true;
 		}
@@ -252,7 +252,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 
 	void dumpProgress(std::string msg) {
 		std::cout << msg << "\n  ";
-		for (const auto& fp : fileProgress) {
+		for (auto const& fp : fileProgress) {
 			std::cout << fp->fd->getFilename() << " " << fp->mutations.size() << " mutations";
 			if (fp->mutations.size() > 0) {
 				std::cout << ", range " << fp->mutations[0].version.toString() << " "
@@ -267,7 +267,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	void sortAndRemoveEmpty() {
 		std::sort(fileProgress.begin(),
 		          fileProgress.end(),
-		          [](const Reference<FileProgress>& a, const Reference<FileProgress>& b) { return (*a) < (*b); });
+		          [](Reference<FileProgress> const& a, Reference<FileProgress> const& b) { return (*a) < (*b); });
 		while (!fileProgress.empty() && fileProgress.back()->empty()) {
 			fileProgress.pop_back();
 		}
@@ -310,7 +310,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	ACTOR static Future<Void> openLogFilesImpl(MutationFilesReadProgress* progress,
 	                                           Reference<IBackupContainer> container) {
 		state std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
-		for (const auto& file : progress->files) {
+		for (auto const& file : progress->files) {
 			asyncFiles.push_back(container->readFile(file.fileName));
 		}
 		wait(waitForAll(asyncFiles)); // open all files
@@ -377,7 +377,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	}
 
 	std::vector<LogFile> files;
-	const Version beginVersion, endVersion;
+	Version const beginVersion, endVersion;
 	std::vector<Reference<FileProgress>> fileProgress;
 };
 
@@ -390,7 +390,7 @@ struct LogFileWriter {
 	// Returns the block key, i.e., `Param1`, in the back file. The format is
 	// `hash_value|commitVersion|part`.
 	static Standalone<StringRef> getBlockKey(Version commitVersion, int part) {
-		const int32_t version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+		int32_t const version = commitVersion / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 
 		BinaryWriter wr(Unversioned());
 		wr << (uint8_t)hashlittle(&version, sizeof(version), 0);
@@ -521,7 +521,7 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 		}
 
 		int optId = args->OptionId();
-		const char* arg = args->OptionArg();
+		char const* arg = args->OptionArg();
 		switch (optId) {
 		case OPT_HELP:
 			printConvertUsage();

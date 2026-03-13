@@ -26,15 +26,15 @@
 #include <cstddef>
 #include <string>
 
-alignas(8) const StringRef BaseEventMetric::metricType = "Event"_sr;
+alignas(8) StringRef const BaseEventMetric::metricType = "Event"_sr;
 template <>
-alignas(8) const StringRef Int64Metric::metricType = "Int64"_sr;
+alignas(8) StringRef const Int64Metric::metricType = "Int64"_sr;
 template <>
-alignas(8) const StringRef DoubleMetric::metricType = "Double"_sr;
+alignas(8) StringRef const DoubleMetric::metricType = "Double"_sr;
 template <>
-alignas(8) const StringRef BoolMetric::metricType = "Bool"_sr;
+alignas(8) StringRef const BoolMetric::metricType = "Bool"_sr;
 template <>
-alignas(8) const StringRef StringMetric::metricType = "String"_sr;
+alignas(8) StringRef const StringMetric::metricType = "String"_sr;
 
 std::string reduceFilename(std::string const& filename) {
 	std::string r = filename;
@@ -46,7 +46,7 @@ std::string reduceFilename(std::string const& filename) {
 
 	// Look for sequences of 8 or more hex chars and remove them if found
 	size_t pos = 0;
-	static const char* hexchars = "0123456789abcdef";
+	static char const* hexchars = "0123456789abcdef";
 	while (pos < r.size()) {
 		size_t first = r.find_first_of(hexchars, pos);
 		if (first == r.npos)
@@ -235,14 +235,14 @@ std::string MetricData::toString() const {
 	              writer.getLength());
 }
 
-std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val) {
+std::string createStatsdMessage(std::string const& name, StatsDMetric type, std::string const& val) {
 	return createStatsdMessage(name, type, val, {});
 }
 
-std::string createStatsdMessage(const std::string& name,
+std::string createStatsdMessage(std::string const& name,
                                 StatsDMetric type,
-                                const std::string& val,
-                                const std::vector<std::pair<std::string, std::string>>& tags) {
+                                std::string const& val,
+                                std::vector<std::pair<std::string, std::string>> const& tags) {
 	ASSERT(!name.empty());
 	std::string msg = name + ":" + val;
 	switch (type) {
@@ -269,7 +269,7 @@ std::string createStatsdMessage(const std::string& name,
 	return msg;
 }
 
-MetricsDataModel knobToMetricModel(const std::string& knob) {
+MetricsDataModel knobToMetricModel(std::string const& knob) {
 	if (knob == "statsd") {
 		return MetricsDataModel::STATSD;
 	} else if (knob == "otel") {
@@ -281,7 +281,7 @@ MetricsDataModel knobToMetricModel(const std::string& knob) {
 	return MetricsDataModel::NONE;
 }
 
-std::vector<std::string> splitString(const std::string& str, const std::string& delimit) {
+std::vector<std::string> splitString(std::string const& str, std::string const& delimit) {
 	std::vector<std::string> splitted;
 	size_t pos = 0;
 	std::string s = str;
@@ -299,7 +299,7 @@ std::vector<std::string> splitString(const std::string& str, const std::string& 
     Ex: "123", "123.65" both return true
     "124.532.13", "t4fr", "102g" all return false
 */
-bool isNumber(const std::string& num) {
+bool isNumber(std::string const& num) {
 	if (num.empty()) {
 		return false;
 	}
@@ -341,7 +341,7 @@ bool isNumber(const std::string& num) {
     type is one of "g", "c",
 
 */
-bool verifyStatsdMessage(const std::string& msg) {
+bool verifyStatsdMessage(std::string const& msg) {
 	auto tokens = splitString(msg, "|");
 	std::vector<std::string> statsdTypes{ "c", "g" };
 
@@ -378,7 +378,7 @@ bool verifyStatsdMessage(const std::string& msg) {
 	return true;
 }
 
-void createOtelGauge(UID id, const std::string& name, double value) {
+void createOtelGauge(UID id, std::string const& name, double value) {
 	MetricCollection* metrics = MetricCollection::getMetricCollection();
 	if (metrics != nullptr) {
 		NetworkAddress addr = g_network->getLocalAddress();
@@ -394,11 +394,11 @@ void createOtelGauge(UID id, const std::string& name, double value) {
 	}
 }
 
-void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>& attrs) {
+void createOtelGauge(UID id, std::string const& name, double value, std::vector<OTEL::Attribute> const& attrs) {
 	MetricCollection* metrics = MetricCollection::getMetricCollection();
 	createOtelGauge(id, name, value);
 	if (metrics != nullptr) {
-		for (const auto& attr : attrs) {
+		for (auto const& attr : attrs) {
 			metrics->gaugeMap[id].points.back().addAttribute(attr.key, attr.value);
 		}
 	}

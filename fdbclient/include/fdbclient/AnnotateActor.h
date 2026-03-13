@@ -42,9 +42,9 @@ struct AnnotateActor {
 #endif
 	}
 
-	AnnotateActor(const AnnotateActor& other) = delete;
+	AnnotateActor(AnnotateActor const& other) = delete;
 	AnnotateActor(AnnotateActor&& other) = delete;
-	AnnotateActor& operator=(const AnnotateActor& other) = delete;
+	AnnotateActor& operator=(AnnotateActor const& other) = delete;
 
 	AnnotateActor& operator=(AnnotateActor&& other) {
 		if (this == &other) {

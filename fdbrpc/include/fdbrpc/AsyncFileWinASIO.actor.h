@@ -99,7 +99,7 @@ public:
 
 	int64_t debugFD() const override { return (int64_t)(const_cast<decltype(file)&>(file).native_handle()); }
 
-	static void onReadReady(Promise<int> onReady, const boost::system::error_code& error, size_t bytesRead) {
+	static void onReadReady(Promise<int> onReady, boost::system::error_code const& error, size_t bytesRead) {
 		if (error) {
 			Error e = io_error();
 			TraceEvent("AsyncReadError")
@@ -114,7 +114,7 @@ public:
 	}
 	static void onWriteReady(Promise<Void> onReady,
 	                         size_t bytesExpected,
-	                         const boost::system::error_code& error,
+	                         boost::system::error_code const& error,
 	                         size_t bytesWritten) {
 		if (error) {
 			Error e = io_error();

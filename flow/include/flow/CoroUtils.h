@@ -109,7 +109,7 @@ struct ChooseImplActor final : Actor<Void>,
 	}
 
 	void cancel() override {
-		const auto waitState = actor_wait_state;
+		auto const waitState = actor_wait_state;
 		actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 		if (actorWaitStateIsWaiting(waitState)) {
 			ChooseImplCallback<ChooseImplActor<Args...>, 0, Args...>::removeCallbacks();
@@ -133,13 +133,13 @@ class ChooseClause {
 	}
 
 	template <class T>
-	auto getNoop(const Future<T>& future) {
+	auto getNoop(Future<T> const& future) {
 		return ChooseClause<Args..., Future<T> const&>(
 		    std::tuple_cat(std::move(futures), std::make_tuple(std::cref(future))), true);
 	}
 
 	template <class T>
-	auto getNoop(const FutureStream<T>& future) {
+	auto getNoop(FutureStream<T> const& future) {
 		return ChooseClause<Args..., FutureStream<T> const&>(
 		    std::tuple_cat(std::move(futures), std::make_tuple(std::cref(future))), true);
 	}
@@ -312,7 +312,7 @@ struct RaceImplActor final : Actor<Result>,
 	}
 
 	void cancel() override {
-		const auto waitState = this->actor_wait_state;
+		auto const waitState = this->actor_wait_state;
 		this->actor_wait_state = ACTOR_WAIT_STATE_CANCELLED;
 		if (actorWaitStateIsWaiting(waitState)) {
 			RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();

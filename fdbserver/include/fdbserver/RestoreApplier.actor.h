@@ -59,7 +59,7 @@ struct StagingKey {
 
 	// Add mutation m at newVersion to stagingKey
 	// Assume: SetVersionstampedKey and SetVersionstampedValue have been converted to set
-	void add(const MutationRef& m, LogMessageVersion newVersion) {
+	void add(MutationRef const& m, LogMessageVersion newVersion) {
 		ASSERT(m.type != MutationRef::SetVersionstampedKey && m.type != MutationRef::SetVersionstampedValue);
 		DEBUG_MUTATION("StagingKeyAdd", newVersion.version, m)
 		    .detail("SubVersion", version.toString())
@@ -113,7 +113,7 @@ struct StagingKey {
 
 	// Precompute the final value of the key.
 	// TODO: Look at the last LogMessageVersion, if it set or clear, we can ignore the rest of versions.
-	void precomputeResult(const char* context, UID applierID, int batchIndex) {
+	void precomputeResult(char const* context, UID applierID, int batchIndex) {
 		TraceEvent(SevFRMutationInfo, "FastRestoreApplierPrecomputeResult", applierID)
 		    .detail("BatchIndex", batchIndex)
 		    .detail("Context", context)
@@ -209,7 +209,7 @@ struct StagingKeyRange {
 
 	explicit StagingKeyRange(MutationRef m, LogMessageVersion newVersion) : mutation(m), version(newVersion) {}
 
-	bool operator<(const StagingKeyRange& rhs) const {
+	bool operator<(StagingKeyRange const& rhs) const {
 		return std::tie(version, mutation.type, mutation.param1, mutation.param2) <
 		       std::tie(rhs.version, rhs.mutation.type, rhs.mutation.param1, rhs.mutation.param2);
 	}
@@ -218,12 +218,12 @@ struct StagingKeyRange {
 // Applier state in each version batch
 class ApplierVersionBatchState : RoleVersionBatchState {
 public:
-	static const int NOT_INIT = 0;
-	static const int INIT = 1;
-	static const int RECEIVE_MUTATIONS = 2;
-	static const int WRITE_TO_DB = 3;
-	static const int DONE = 4;
-	static const int INVALID = 5;
+	static int const NOT_INIT = 0;
+	static int const INIT = 1;
+	static int const RECEIVE_MUTATIONS = 2;
+	static int const WRITE_TO_DB = 3;
+	static int const DONE = 4;
+	static int const INVALID = 5;
 
 	explicit ApplierVersionBatchState(int newState) { vbState = newState; }
 

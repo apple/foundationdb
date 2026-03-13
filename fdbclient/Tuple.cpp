@@ -21,9 +21,9 @@
 #include "fdbclient/Tuple.h"
 #include "flow/UnitTest.h"
 
-const uint8_t VERSIONSTAMP_96_CODE = 0x33;
-const uint8_t USER_TYPE_START = 0x40;
-const uint8_t USER_TYPE_END = 0x4f;
+uint8_t const VERSIONSTAMP_96_CODE = 0x33;
+uint8_t const USER_TYPE_START = 0x40;
+uint8_t const USER_TYPE_END = 0x4f;
 
 // TODO: Many functions copied from bindings/flow/Tuple.cpp. Merge at some point.
 static float bigEndianFloat(float orig) {
@@ -38,7 +38,7 @@ static double bigEndianDouble(double orig) {
 	return *(double*)&big;
 }
 
-static size_t findStringTerminator(const StringRef data, size_t offset) {
+static size_t findStringTerminator(StringRef const data, size_t offset) {
 	size_t i = offset;
 	while (i < data.size() - 1 && !(data[i] == '\x00' && data[i + 1] != (uint8_t)'\xff')) {
 		i += (data[i] == '\x00' ? 2 : 1);
@@ -97,7 +97,7 @@ Tuple Tuple::unpack(StringRef const& str, bool exclude_incomplete) {
 	return Tuple(str, exclude_incomplete);
 }
 
-std::string Tuple::tupleToString(const Tuple& tuple) {
+std::string Tuple::tupleToString(Tuple const& tuple) {
 	std::string str;
 	if (tuple.size() > 1) {
 		str += "(";
@@ -169,7 +169,7 @@ Tuple& Tuple::append(TupleVersionstamp const& vs) {
 Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	offsets.push_back(data.size());
 
-	const uint8_t utfChar = uint8_t(utf8 ? '\x02' : '\x01');
+	uint8_t const utfChar = uint8_t(utf8 ? '\x02' : '\x01');
 	data.append(data.arena(), &utfChar, 1);
 
 	size_t lastPos = 0;
@@ -215,7 +215,7 @@ Tuple& Tuple::append(int64_t value) {
 	for (int i = 0; i < 8; i++) {
 		if (((uint8_t*)&swap)[i] != (neg ? 255 : 0)) {
 			data.push_back(data.arena(), (uint8_t)(20 + (8 - i) * (neg ? -1 : 1)));
-			data.append(data.arena(), ((const uint8_t*)&swap) + i, 8 - i);
+			data.append(data.arena(), ((uint8_t const*)&swap) + i, 8 - i);
 			return *this;
 		}
 	}

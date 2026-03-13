@@ -60,9 +60,9 @@ struct MapHarness {
 			return *this;
 		}
 
-		const K& operator*() const { return (*it).first; }
+		K const& operator*() const { return (*it).first; }
 
-		const K& operator->() const { return it->first; }
+		K const& operator->() const { return it->first; }
 
 		bool operator==(result const& k) const { return it == k.it; }
 		bool operator!=(result const& k) const { return it != k.it; }

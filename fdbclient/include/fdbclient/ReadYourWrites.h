@@ -75,10 +75,10 @@ public:
 	void setVersion(Version v) { tr.setVersion(v); }
 	Future<Version> getReadVersion();
 	Optional<Version> getCachedReadVersion() const { return tr.getCachedReadVersion(); }
-	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False);
-	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
-	Future<RangeResult> getRange(const KeySelector& begin,
-	                             const KeySelector& end,
+	Future<Optional<Value>> get(Key const& key, Snapshot = Snapshot::False);
+	Future<Key> getKey(KeySelector const& key, Snapshot = Snapshot::False);
+	Future<RangeResult> getRange(KeySelector const& begin,
+	                             KeySelector const& end,
 	                             int limit,
 	                             Snapshot = Snapshot::False,
 	                             Reverse = Reverse::False);
@@ -87,7 +87,7 @@ public:
 	                             GetRangeLimits limits,
 	                             Snapshot = Snapshot::False,
 	                             Reverse = Reverse::False);
-	Future<RangeResult> getRange(const KeyRange& keys,
+	Future<RangeResult> getRange(KeyRange const& keys,
 	                             int limit,
 	                             Snapshot snapshot = Snapshot::False,
 	                             Reverse reverse = Reverse::False) {
@@ -97,7 +97,7 @@ public:
 		                snapshot,
 		                reverse);
 	}
-	Future<RangeResult> getRange(const KeyRange& keys,
+	Future<RangeResult> getRange(KeyRange const& keys,
 	                             GetRangeLimits limits,
 	                             Snapshot snapshot = Snapshot::False,
 	                             Reverse reverse = Reverse::False) {
@@ -114,19 +114,19 @@ public:
 	                                         Snapshot = Snapshot::False,
 	                                         Reverse = Reverse::False);
 
-	[[nodiscard]] Future<Standalone<VectorRef<const char*>>> getAddressesForKey(const Key& key);
-	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize);
-	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys);
+	[[nodiscard]] Future<Standalone<VectorRef<char const*>>> getAddressesForKey(Key const& key);
+	Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize);
+	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys);
 
 	void addReadConflictRange(KeyRangeRef const& keys);
 	void makeSelfConflicting() { tr.makeSelfConflicting(); }
 
-	void atomicOp(const KeyRef& key, const ValueRef& operand, uint32_t operationType);
-	void set(const KeyRef& key, const ValueRef& value);
-	void clear(const KeyRangeRef& range);
-	void clear(const KeyRef& key);
+	void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType);
+	void set(KeyRef const& key, ValueRef const& value);
+	void clear(KeyRangeRef const& range);
+	void clear(KeyRef const& key);
 
-	[[nodiscard]] Future<Void> watch(const Key& key);
+	[[nodiscard]] Future<Void> watch(Key const& key);
 
 	void addWriteConflictRange(KeyRangeRef const& keys);
 
@@ -170,7 +170,7 @@ public:
 
 	Database getDatabase() const { return tr.getDatabase(); }
 
-	Reference<const TransactionState> getTransactionState() const { return tr.trState; }
+	Reference<TransactionState const> getTransactionState() const { return tr.trState; }
 
 	void setTransactionID(UID id);
 	void setToken(uint64_t token);
@@ -185,8 +185,8 @@ public:
 
 	KeyRangeMap<std::pair<bool, Optional<Value>>>& getSpecialKeySpaceWriteMap() { return specialKeySpaceWriteMap; }
 	bool readYourWritesDisabled() const { return options.readYourWritesDisabled; }
-	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
-	void setSpecialKeySpaceErrorMsg(const std::string& msg) {
+	Optional<std::string> const& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
+	void setSpecialKeySpaceErrorMsg(std::string const& msg) {
 		if (g_network && g_network->isSimulated()) {
 			try {
 				readJSONStrictly(msg);

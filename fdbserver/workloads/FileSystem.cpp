@@ -38,7 +38,7 @@ struct FileSystemWorkload : TestWorkload {
 	class FileSystemOp {
 	public:
 		virtual Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) = 0;
-		virtual const char* name() = 0;
+		virtual char const* name() = 0;
 		virtual ~FileSystemOp() {}
 	};
 
@@ -218,7 +218,7 @@ struct FileSystemWorkload : TestWorkload {
 		}
 	}
 
-	static int testKeyToInt(const KeyRef& p) {
+	static int testKeyToInt(KeyRef const& p) {
 		int x = 0;
 		sscanf(p.toString().c_str(), "%d", &x);
 		return x;
@@ -320,14 +320,14 @@ struct FileSystemWorkload : TestWorkload {
 		Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) override {
 			return self->modificationQuery(self, tr);
 		}
-		const char* name() override { return "RecentUserModifications"; }
+		char const* name() override { return "RecentUserModifications"; }
 	};
 
 	class ServerDeletionCountQuery : public FileSystemOp {
 		Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) override {
 			return self->deletionQuery(self, tr);
 		}
-		const char* name() override { return "ServerDeletions"; }
+		char const* name() override { return "ServerDeletions"; }
 	};
 };
 

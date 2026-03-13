@@ -42,9 +42,9 @@ public:
 
 class IRocksDBSstFileWriter {
 public:
-	virtual void open(const std::string localFile) = 0;
+	virtual void open(std::string const localFile) = 0;
 
-	virtual void write(const KeyRef key, const ValueRef value) = 0;
+	virtual void write(KeyRef const key, ValueRef const value) = 0;
 
 	virtual bool finish() = 0;
 
@@ -53,13 +53,13 @@ public:
 
 class IRocksDBSstFileReader {
 public:
-	virtual void open(const std::string localFile) = 0;
+	virtual void open(std::string const localFile) = 0;
 
 	virtual KeyValue next() = 0;
 
 	virtual bool hasNext() const = 0;
 
-	virtual RangeResult getRange(const KeyRange& range) = 0;
+	virtual RangeResult getRange(KeyRange const& range) = 0;
 
 	virtual ~IRocksDBSstFileReader() {}
 };
@@ -94,8 +94,8 @@ struct SstFileMetaData {
 	    num_reads_sampled(0), being_compacted(false), num_entries(0), num_deletions(0), oldest_blob_file_number(0),
 	    oldest_ancester_time(0), file_creation_time(0), epoch_number(0) {}
 
-	SstFileMetaData(const std::string& _relative_filename,
-	                const std::string& _directory,
+	SstFileMetaData(std::string const& _relative_filename,
+	                std::string const& _directory,
 	                uint64_t _file_number,
 	                int _file_type,
 	                uint64_t _size,
@@ -104,8 +104,8 @@ struct SstFileMetaData {
 	                std::string& _file_checksum_func_name,
 	                uint64_t _smallest_seqno,
 	                uint64_t _largest_seqno,
-	                const std::string& _smallestkey,
-	                const std::string& _largestkey,
+	                std::string const& _smallestkey,
+	                std::string const& _largestkey,
 	                uint64_t _num_reads_sampled,
 	                bool _being_compacted,
 	                uint64_t _num_entries,
@@ -114,8 +114,8 @@ struct SstFileMetaData {
 	                uint64_t _oldest_ancester_time,
 	                uint64_t _file_creation_time,
 	                uint64_t _epoch_number,
-	                const std::string& _name,
-	                const std::string& _db_path)
+	                std::string const& _name,
+	                std::string const& _db_path)
 	  : relative_filename(_relative_filename), directory(_directory), file_number(_file_number), file_type(_file_type),
 	    size(_size), temperature(_temperature), file_checksum(_file_checksum),
 	    file_checksum_func_name(_file_checksum_func_name), smallest_seqno(_smallest_seqno),
@@ -273,7 +273,7 @@ struct RocksDBColumnFamilyCheckpoint {
 
 	std::string toString() const {
 		std::string res = "RocksDBColumnFamilyCheckpoint:\nSST Files:\n";
-		for (const auto& file : sstFiles) {
+		for (auto const& file : sstFiles) {
 			res += file.db_path + file.name + "\n";
 		}
 		return res;
@@ -297,11 +297,11 @@ struct RocksDBCheckpoint {
 
 	std::string toString() const {
 		std::string res = "RocksDBCheckpoint:\nCheckpoint dir: " + checkpointDir + "\nFiles: ";
-		for (const std::string& file : sstFiles) {
+		for (std::string const& file : sstFiles) {
 			res += (file + " ");
 		}
 		res += "\nFetched files:\n";
-		for (const auto& file : fetchedFiles) {
+		for (auto const& file : fetchedFiles) {
 			res += file.toString();
 		}
 		return res;
@@ -325,7 +325,7 @@ struct RocksDBCheckpointKeyValues {
 
 	std::string toString() const {
 		std::string res = "RocksDBKeyValuesCheckpoint: [Target Ranges]: " + describe(ranges) + " [Fetched Files]: ";
-		for (const auto& file : fetchedFiles) {
+		for (auto const& file : fetchedFiles) {
 			res += file.toString();
 		}
 		return res;
@@ -343,33 +343,33 @@ struct RocksDBCheckpointKeyValues {
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun);
+                                                        std::function<Future<Void>(CheckpointMetaData const&)> cFun);
 
 // Returns the total logical bytes of all *fetched* checkpoints.
-int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints);
+int64_t getTotalFetchedBytes(std::vector<CheckpointMetaData> const& checkpoints);
 
 // Clean up on-disk files associated with checkpoint.
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 
-ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
-                                              const CheckpointAsKeyValues checkpointAsKeyValues,
+ICheckpointReader* newRocksDBCheckpointReader(CheckpointMetaData const& checkpoint,
+                                              CheckpointAsKeyValues const checkpointAsKeyValues,
                                               UID logID);
 
-std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
+std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(CheckpointMetaData const& checkpoint);
 
 std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
 
 std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader();
 
-std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(const KeyRange& range,
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(KeyRange const& range,
                                                                size_t rowLimit,
                                                                size_t byteLimit);
 
-RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
+RocksDBColumnFamilyCheckpoint getRocksCF(CheckpointMetaData const& checkpoint);
 
-RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint);
+RocksDBCheckpoint getRocksCheckpoint(CheckpointMetaData const& checkpoint);
 
-RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint);
+RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(CheckpointMetaData const& checkpoint);
 
 #include "flow/unactorcompiler.h"
 

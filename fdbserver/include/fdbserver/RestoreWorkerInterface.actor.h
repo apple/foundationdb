@@ -65,7 +65,7 @@ struct RestoreSysInfo {
 	std::map<UID, RestoreApplierInterface> appliers;
 
 	RestoreSysInfo() = default;
-	explicit RestoreSysInfo(const std::map<UID, RestoreApplierInterface> appliers) : appliers(appliers) {}
+	explicit RestoreSysInfo(std::map<UID, RestoreApplierInterface> const appliers) : appliers(appliers) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -111,7 +111,7 @@ struct RestoreRoleInterface {
 
 	RestoreRoleInterface() { role = RestoreRole::Invalid; }
 
-	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role) {};
+	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role){};
 
 	UID id() const { return nodeID; }
 
@@ -275,13 +275,13 @@ struct RestoreAsset {
 
 	// Q: Can we simply use uid for == and use different comparison rule for less than operator.
 	// The ordering of RestoreAsset may change, will that affect correctness or performance?
-	bool operator==(const RestoreAsset& r) const {
+	bool operator==(RestoreAsset const& r) const {
 		return batchIndex == r.batchIndex && beginVersion == r.beginVersion && endVersion == r.endVersion &&
 		       range == r.range && fileIndex == r.fileIndex && partitionId == r.partitionId && filename == r.filename &&
 		       offset == r.offset && len == r.len && addPrefix == r.addPrefix && removePrefix == r.removePrefix;
 	}
-	bool operator!=(const RestoreAsset& r) const { return !(*this == r); }
-	bool operator<(const RestoreAsset& r) const {
+	bool operator!=(RestoreAsset const& r) const { return !(*this == r); }
+	bool operator<(RestoreAsset const& r) const {
 		return std::make_tuple(batchIndex,
 		                       fileIndex,
 		                       filename,
@@ -377,9 +377,9 @@ struct LoadingParam {
 	LoadingParam() = default;
 
 	// TODO: Compare all fields for loadingParam
-	bool operator==(const LoadingParam& r) const { return isRangeFile == r.isRangeFile && asset == r.asset; }
-	bool operator!=(const LoadingParam& r) const { return isRangeFile != r.isRangeFile || asset != r.asset; }
-	bool operator<(const LoadingParam& r) const {
+	bool operator==(LoadingParam const& r) const { return isRangeFile == r.isRangeFile && asset == r.asset; }
+	bool operator!=(LoadingParam const& r) const { return isRangeFile != r.isRangeFile || asset != r.asset; }
+	bool operator<(LoadingParam const& r) const {
 		return (isRangeFile < r.isRangeFile) || (isRangeFile == r.isRangeFile && asset < r.asset);
 	}
 
@@ -482,8 +482,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "RestoreSysInfoRequest "
-		   << "rangeVersions.size:" << rangeVersions.size();
+		ss << "RestoreSysInfoRequest " << "rangeVersions.size:" << rangeVersions.size();
 		return ss.str();
 	}
 };
@@ -543,7 +542,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param) {};
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
 
 	bool operator<(RestoreLoadFileRequest const& rhs) const { return batchIndex > rhs.batchIndex; }
 
@@ -601,7 +600,7 @@ struct RestoreSendVersionedMutationsRequest : TimedRequest {
 
 	RestoreSendVersionedMutationsRequest() = default;
 	explicit RestoreSendVersionedMutationsRequest(int batchIndex,
-	                                              const RestoreAsset& asset,
+	                                              RestoreAsset const& asset,
 	                                              Version msgIndex,
 	                                              bool isRangeFile,
 	                                              VersionedMutationsVec versionedMutations)
@@ -717,22 +716,22 @@ ACTOR Future<Void> restoreWorker(Reference<IClusterConnectionRecord> ccr,
                                  LocalityData locality,
                                  std::string coordFolder);
 
-extern const KeyRef restoreLeaderKey;
-extern const KeyRangeRef restoreWorkersKeys;
-extern const KeyRef restoreStatusKey; // To be used when we measure fast restore performance
-extern const KeyRangeRef restoreRequestKeys;
-extern const KeyRangeRef restoreApplierKeys;
-extern const KeyRef restoreApplierTxnValue;
+extern KeyRef const restoreLeaderKey;
+extern KeyRangeRef const restoreWorkersKeys;
+extern KeyRef const restoreStatusKey; // To be used when we measure fast restore performance
+extern KeyRangeRef const restoreRequestKeys;
+extern KeyRangeRef const restoreApplierKeys;
+extern KeyRef const restoreApplierTxnValue;
 
-const Key restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
+Key const restoreApplierKeyFor(UID const& applierID, int64_t batchIndex, Version version);
 std::tuple<UID, int64_t, Version> decodeRestoreApplierKey(ValueRef const& key);
-const Key restoreWorkerKeyFor(UID const& workerID);
-const Value restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
+Key const restoreWorkerKeyFor(UID const& workerID);
+Value const restoreWorkerInterfaceValue(RestoreWorkerInterface const& server);
 RestoreWorkerInterface decodeRestoreWorkerInterfaceValue(ValueRef const& value);
 Version decodeRestoreRequestDoneVersionValue(ValueRef const& value);
 RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
-const Key restoreStatusKeyFor(StringRef statusType);
-const Value restoreStatusValue(double val);
+Key const restoreStatusKeyFor(StringRef statusType);
+Value const restoreStatusValue(double val);
 Value restoreRequestDoneVersionValue(Version readVersion);
 
 #include "flow/unactorcompiler.h"

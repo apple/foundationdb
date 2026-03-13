@@ -52,7 +52,7 @@ struct IndexScanWorkload : KVWorkload {
 		return _start(cx);
 	}
 
-	Future<bool> check(const Database&) override { return true; }
+	Future<bool> check(Database const&) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		if (singleProcess && clientId != 0)

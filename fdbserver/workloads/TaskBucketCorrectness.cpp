@@ -337,7 +337,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 WorkloadFactory<TaskBucketCorrectnessWorkload> TaskBucketCorrectnessWorkloadFactory;
 
-void print_subspace_key(const Subspace& subspace, int id) {
+void print_subspace_key(Subspace const& subspace, int id) {
 	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
 }
 

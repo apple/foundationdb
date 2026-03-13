@@ -34,9 +34,9 @@ static constexpr int PID_USED_AMP_FOR_NON_SINGLETON = 100;
 template <class Interface>
 class Singleton {
 protected:
-	const Optional<Interface>& interface;
+	Optional<Interface> const& interface;
 
-	explicit Singleton(const Optional<Interface>& interface) : interface(interface) {}
+	explicit Singleton(Optional<Interface> const& interface) : interface(interface) {}
 
 public:
 	Interface const& getInterface() const { return interface.get(); }
@@ -45,7 +45,7 @@ public:
 
 struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 
-	RatekeeperSingleton(const Optional<RatekeeperInterface>& interface) : Singleton(interface) {}
+	RatekeeperSingleton(Optional<RatekeeperInterface> const& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::RATEKEEPER; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::Ratekeeper; }
@@ -70,7 +70,7 @@ struct RatekeeperSingleton : Singleton<RatekeeperInterface> {
 
 struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 
-	DataDistributorSingleton(const Optional<DataDistributorInterface>& interface) : Singleton(interface) {}
+	DataDistributorSingleton(Optional<DataDistributorInterface> const& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::DATA_DISTRIBUTOR; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::DataDistributor; }
@@ -95,7 +95,7 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 
 struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 
-	ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
+	ConsistencyScanSingleton(Optional<ConsistencyScanInterface> const& interface) : Singleton(interface) {}
 
 	Role getRole() const { return Role::CONSISTENCYSCAN; }
 	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }

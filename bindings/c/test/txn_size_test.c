@@ -28,7 +28,7 @@
 #include <foundationdb/fdb_c_options.g.h>
 
 pthread_t netThread;
-const int numKeys = 100;
+int const numKeys = 100;
 uint8_t** keys = NULL;
 
 #define KEY_SIZE 16

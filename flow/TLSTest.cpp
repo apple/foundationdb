@@ -104,7 +104,7 @@ struct fmt::formatter<tcp::endpoint> {
 	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 
 	template <class FormatContext>
-	auto format(const tcp::endpoint& ep, FormatContext& ctx) -> decltype(ctx.out()) {
+	auto format(tcp::endpoint const& ep, FormatContext& ctx) -> decltype(ctx.out()) {
 		return fmt::format_to(ctx.out(), "{}:{}", ep.address().to_string(), ep.port());
 	}
 };
@@ -172,7 +172,7 @@ void runTlsTest(int serverChainLen, int clientChainLen) {
 		// if untrusted connection passes preverify, they are considered trusted
 		return true;
 	});
-	acceptor.async_accept(serverSock, [&serverSslSock, &serverWorkGuard, &handshakeOk](const ec_type& ec) {
+	acceptor.async_accept(serverSock, [&serverSslSock, &serverWorkGuard, &handshakeOk](ec_type const& ec) {
 		if (ec) {
 			logs("accept error: {}", ec.message());
 			handshakeOk = false;
@@ -180,7 +180,7 @@ void runTlsTest(int serverChainLen, int clientChainLen) {
 		} else {
 			logs("accepted connection from {}", serverSslSock.next_layer().remote_endpoint());
 			serverSslSock.async_handshake(ssl::stream_base::handshake_type::server,
-			                              [&serverWorkGuard, &handshakeOk](const ec_type& ec) {
+			                              [&serverWorkGuard, &handshakeOk](ec_type const& ec) {
 				                              if (ec) {
 					                              logs("server handshake returned {}", ec.message());
 					                              handshakeOk = false;
@@ -212,7 +212,7 @@ void runTlsTest(int serverChainLen, int clientChainLen) {
 		return true;
 	});
 	clientSock.async_connect(serverAddr,
-	                         [&clientWorkGuard, &clientSock, &clientSslSock, &handshakeOk](const ec_type& ec) {
+	                         [&clientWorkGuard, &clientSock, &clientSslSock, &handshakeOk](ec_type const& ec) {
 		                         if (ec) {
 			                         logc("connect error: {}", ec.message());
 			                         handshakeOk = false;
@@ -220,7 +220,7 @@ void runTlsTest(int serverChainLen, int clientChainLen) {
 		                         } else {
 			                         logc("connected to {}", clientSock.remote_endpoint());
 			                         clientSslSock.async_handshake(ssl::stream_base::handshake_type::client,
-			                                                       [&clientWorkGuard, &handshakeOk](const ec_type& ec) {
+			                                                       [&clientWorkGuard, &handshakeOk](ec_type const& ec) {
 				                                                       if (ec) {
 					                                                       logc("handshake returned: {}", ec.message());
 					                                                       handshakeOk = false;

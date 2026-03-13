@@ -53,7 +53,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-bool isInteger(const std::string& s) {
+bool isInteger(std::string const& s) {
 	if (s.empty())
 		return false;
 	char* p;
@@ -1320,13 +1320,13 @@ struct AutoQuorumChange final : IQuorumChange {
 	// (2) prefer workers at a locality where less workers has been chosen than other localities: evenly distribute
 	// workers.
 	void addDesiredWorkers(std::vector<NetworkAddress>& chosen,
-	                       const std::vector<ProcessData>& workers,
+	                       std::vector<ProcessData> const& workers,
 	                       int desiredCount,
-	                       const std::set<AddressExclusion>& excluded) {
+	                       std::set<AddressExclusion> const& excluded) {
 		std::vector<ProcessData> remainingWorkers(workers);
 		deterministicRandom()->randomShuffle(remainingWorkers);
 
-		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](const ProcessData& data) {
+		std::partition(remainingWorkers.begin(), remainingWorkers.end(), [](ProcessData const& data) {
 			return (data.processClass == ProcessClass::CoordinatorClass);
 		});
 
@@ -1493,7 +1493,7 @@ ACTOR Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::st
 	std::vector<std::string> excl = wait(failed ? getExcludedFailedLocalityList(tr) : getExcludedLocalityList(tr));
 	std::set<std::string> exclusion(excl.begin(), excl.end());
 	bool containNewExclusion = false;
-	for (const auto& l : localities) {
+	for (auto const& l : localities) {
 		if (exclusion.find(l) != exclusion.end()) {
 			continue;
 		}
@@ -1529,7 +1529,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 				ryw.set(SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 				            failed ? "failed_locality" : "excluded_locality", "force"),
 				        ValueRef());
-				for (const auto& l : localities) {
+				for (auto const& l : localities) {
 					Key addr = failed
 					               ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
 					               : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
@@ -1679,7 +1679,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
 					}
 				} else {
-					for (const auto& l : localities) {
+					for (auto const& l : localities) {
 						Key locality =
 						    failed ? SpecialKeySpace::getManagementApiCommandPrefix("failedlocality").withSuffix(l)
 						           : SpecialKeySpace::getManagementApiCommandPrefix("excludedlocality").withSuffix(l);
@@ -1725,7 +1725,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 						tr.clear(excludedLocalityKeys);
 					}
 				} else {
-					for (const auto& l : localities) {
+					for (auto const& l : localities) {
 						if (failed) {
 							tr.clear(encodeFailedLocalityKey(l));
 						} else {
@@ -1839,7 +1839,7 @@ ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* t
 		wait(success(fWorkers));
 		state std::vector<ProcessData> workers = fWorkers.get();
 
-		for (const auto& locality : excludedLocalities) {
+		for (auto const& locality : excludedLocalities) {
 			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality);
 			if (!localityAddresses.empty()) {
 				// Add all the server ipaddresses that belong to the given localities to the exclusionSet.
@@ -1872,7 +1872,7 @@ ACTOR Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr) 
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<std::string> excludedLocalities;
-	for (const auto& i : r) {
+	for (auto const& i : r) {
 		auto a = decodeExcludedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
 	}
@@ -1885,7 +1885,7 @@ ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<std::string> excludedLocalities;
-	for (const auto& i : r) {
+	for (auto const& i : r) {
 		auto a = decodeFailedLocalityKey(i.key);
 		excludedLocalities.push_back(a);
 	}
@@ -1928,8 +1928,8 @@ ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Database cx) {
 
 // Decodes the locality string to a pair of locality prefix and its value.
 // The prefix could be dcid, processid, machineid, processid.
-std::pair<std::string, std::string> decodeLocality(const std::string& locality) {
-	StringRef localityRef((const uint8_t*)(locality.c_str()), locality.size());
+std::pair<std::string, std::string> decodeLocality(std::string const& locality) {
+	StringRef localityRef((uint8_t const*)(locality.c_str()), locality.size());
 
 	std::string localityKeyValue = localityRef.removePrefix(LocalityData::ExcludeLocalityPrefix).toString();
 	int split = localityKeyValue.find(':');
@@ -1943,8 +1943,8 @@ std::pair<std::string, std::string> decodeLocality(const std::string& locality) 
 // Returns the list of IPAddresses of the servers that match the given locality.
 // Example: locality="dcid:primary" returns all the ip addresses of the servers in the primary dc.
 std::set<AddressExclusion> getServerAddressesByLocality(
-    const std::map<std::string, StorageServerInterface> server_interfaces,
-    const std::string& locality) {
+    std::map<std::string, StorageServerInterface> const server_interfaces,
+    std::string const& locality) {
 	std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
 	std::set<AddressExclusion> locality_addresses;
 
@@ -1971,8 +1971,8 @@ std::set<AddressExclusion> getServerAddressesByLocality(
 
 // Returns the list of IPAddresses of the workers that match the given locality.
 // Example: locality="locality_dcid:primary" returns all the ip addresses of the workers in the primary dc.
-std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers,
-                                                  const std::string& locality) {
+std::set<AddressExclusion> getAddressesByLocality(std::vector<ProcessData> const& workers,
+                                                  std::string const& locality) {
 	std::pair<std::string, std::string> locality_key_value = decodeLocality(locality);
 	std::set<AddressExclusion> locality_addresses;
 
@@ -2155,13 +2155,13 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 		Optional<Standalone<StringRef>> value = wait(tr->get(logsKey));
 		ASSERT(value.present());
 		auto logs = decodeLogsValue(value.get());
-		for (const auto& [_logId, logAddress] : logs.first) {
+		for (auto const& [_logId, logAddress] : logs.first) {
 			if (logAddress == NetworkAddress() || addressExcluded(*exclusions, logAddress)) {
 				ok = false;
 				inProgressExclusion->insert(logAddress);
 			}
 		}
-		for (const auto& [_logId, logAddress] : logs.second) {
+		for (auto const& [_logId, logAddress] : logs.second) {
 			if (logAddress == NetworkAddress() || addressExcluded(*exclusions, logAddress)) {
 				ok = false;
 				inProgressExclusion->insert(logAddress);
@@ -3305,7 +3305,7 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult result = wait(tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY));
-			for (const auto& kv : result) {
+			for (auto const& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
 				ASSERT(owner.isValid());
 				res.push_back(owner);
@@ -3771,7 +3771,7 @@ bool schemaMatch(json_spirit::mValue const& schemaValue,
 	}
 }
 
-std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
+std::string ManagementAPI::generateErrorMessage(CoordinatorsResult const& res) {
 	// Note: the error message here should not be changed if possible
 	// If you do change the message here,
 	// please update the corresponding fdbcli code to support both the old and the new message

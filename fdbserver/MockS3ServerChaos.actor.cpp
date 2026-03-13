@@ -41,7 +41,7 @@ void clearMockS3ChaosRegistry() {
 }
 
 // Helper function to classify S3 operations
-S3Operation classifyS3Operation(const std::string& method, const std::string& resource) {
+S3Operation classifyS3Operation(std::string const& method, std::string const& resource) {
 	if (method == "GET" || method == "HEAD") {
 		return S3Operation::READ;
 	} else if (method == "PUT") {
@@ -81,7 +81,7 @@ double getOperationMultiplier(S3Operation op) {
 }
 
 // Generate S3-compatible error XML
-std::string generateS3ErrorXML(const std::string& code, const std::string& message, const std::string& resource) {
+std::string generateS3ErrorXML(std::string const& code, std::string const& message, std::string const& resource) {
 	return format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
 	              "<Error>\n"
 	              "  <Code>%s</Code>\n"

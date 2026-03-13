@@ -21,6 +21,6 @@
 #ifndef FLOW_GETSOURCEVERSION_H
 #define FLOW_GETSOURCEVERSION_H
 
-const char* getSourceVersion();
+char const* getSourceVersion();
 
 #endif // FLOW_GETSOURCEVERSION_H

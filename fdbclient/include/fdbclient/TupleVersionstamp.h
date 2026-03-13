@@ -25,11 +25,11 @@
 
 #include "flow/Arena.h"
 
-const size_t VERSIONSTAMP_TUPLE_SIZE = 12;
+size_t const VERSIONSTAMP_TUPLE_SIZE = 12;
 
 struct TupleVersionstamp {
 	// Version = invalid version, batch/user version = 0
-	static inline const Standalone<StringRef> DEFAULT_VERSIONSTAMP =
+	static inline Standalone<StringRef> const DEFAULT_VERSIONSTAMP =
 	    "\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x00"_sr;
 
 	TupleVersionstamp() : data(DEFAULT_VERSIONSTAMP) {}
@@ -40,8 +40,8 @@ struct TupleVersionstamp {
 	int16_t getBatchNumber() const;
 	int16_t getUserVersion() const;
 	size_t size() const;
-	const uint8_t* begin() const;
-	bool operator==(const TupleVersionstamp&) const;
+	uint8_t const* begin() const;
+	bool operator==(TupleVersionstamp const&) const;
 
 private:
 	Standalone<StringRef> data;

@@ -124,9 +124,9 @@ private:
 };
 
 struct Resolver : ReferenceCounted<Resolver> {
-	const UID dbgid;
-	const int commitProxyCount;
-	const int resolverCount;
+	UID const dbgid;
+	int const commitProxyCount;
+	int const resolverCount;
 	NotifiedVersion version;
 	AsyncVar<Version> neededVersion;
 
@@ -247,7 +247,7 @@ ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Ve
 // Check if the given set of tags contain any tags other than the log router tags.
 // Used to check if a given "ResolveTransactionBatchRequest" corresponds to an
 // empty commit message or not.
-static bool hasNonLogRouterTags(const std::set<Tag>& allTags) {
+static bool hasNonLogRouterTags(std::set<Tag> const& allTags) {
 	for (auto& versionTag : allTags) {
 		if (versionTag.locality != tagLocalityLogRouter) {
 			return true;
@@ -312,7 +312,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 	    req.prevVersion) { // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
 		// This is the beginning of the compute phase of the
 		// resolver. There's no wait before it's done.
-		const double beginComputeTime = g_network->timer();
+		double const beginComputeTime = g_network->timer();
 
 		++self->resolveBatchStart;
 		self->resolvedTransactions += req.transactions.size();
@@ -338,7 +338,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
-		const Version newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+		Version const newOldestVersion = req.version - SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 		for (int t = 0; t < req.transactions.size(); t++) {
 			conflictBatch.addTransaction(req.transactions[t], newOldestVersion);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
@@ -376,7 +376,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		auto& stateTransactions = stateTransactionsPair.second;
 		int64_t stateMutations = 0;
 		int64_t stateBytes = 0;
-		const bool shouldApplyResolverPrivateMutations =
+		bool const shouldApplyResolverPrivateMutations =
 		    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && !req.txnStateTransactions.empty();
 
 		std::unique_ptr<LogPushData> toCommit; // For accumulating private mutations
@@ -442,7 +442,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		// Adds private mutation messages to the reply message.
 		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
 			auto privateMutations = toCommit->getAllMessages();
-			for (const auto& mutations : privateMutations) {
+			for (auto const& mutations : privateMutations) {
 				reply.privateMutations.push_back(reply.arena, mutations);
 				reply.arena.dependsOn(mutations.arena());
 			}
@@ -525,7 +525,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		}
 
 		// Measure the time spent doing actual work in the resolver.
-		const double endComputeTime = g_network->timer();
+		double const endComputeTime = g_network->timer();
 		self->computeTimeDist->sampleSeconds(endComputeTime - beginComputeTime);
 
 		if (req.debugID.present())
@@ -554,7 +554,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 	// Measure server-side RPC latency from the time a request was
 	// received to time the response was sent.
-	const double endTime = g_network->timer();
+	double const endTime = g_network->timer();
 	self->resolverLatencyDist->sampleSeconds(endTime - req.requestTime());
 
 	++self->resolveBatchOut;
@@ -600,7 +600,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> se
 	state std::map<Tag, UID> tag_uid;
 
 	RangeResult UIDtoTagMap = pContext->pTxnStateStore->readRange(serverTagKeys).get();
-	for (const KeyValueRef& kv : UIDtoTagMap) {
+	for (KeyValueRef const& kv : UIDtoTagMap) {
 		tag_uid[decodeServerTagValue(kv.value)] = decodeServerTagKey(kv.key);
 	}
 
@@ -621,10 +621,10 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(Reference<Resolver> se
 		std::vector<UID> src, dest;
 		ServerCacheInfo info;
 		// NOTE: An ACTOR will be compiled into several classes, the this pointer is from one of them.
-		auto updateTagInfo = [pContext = pContext](const std::vector<UID>& uids,
+		auto updateTagInfo = [pContext = pContext](std::vector<UID> const& uids,
 		                                           std::vector<Tag>& tags,
 		                                           std::vector<Reference<StorageInfo>>& storageInfoItems) {
-			for (const auto& id : uids) {
+			for (auto const& id : uids) {
 				auto storageInfo = getStorageInfo(id, &pContext->pResolverData->storageCache, pContext->pTxnStateStore);
 				ASSERT(storageInfo->tag != invalidTag);
 				tags.push_back(storageInfo->tag);

@@ -30,7 +30,7 @@ namespace FdbApiTester {
 
 using TTaskFct = std::function<void(void)>;
 
-extern const TTaskFct NO_OP_TASK;
+extern TTaskFct const NO_OP_TASK;
 
 /**
  * Handle to a scheduled timer

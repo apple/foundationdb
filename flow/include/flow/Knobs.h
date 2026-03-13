@@ -52,7 +52,7 @@ protected:
 	void initKnob(double& knob, double value, std::string const& name);
 	void initKnob(int64_t& knob, int64_t value, std::string const& name);
 	void initKnob(int& knob, int value, std::string const& name);
-	void initKnob(std::string& knob, const std::string& value, const std::string& name);
+	void initKnob(std::string& knob, std::string const& value, std::string const& name);
 	void initKnob(bool& knob, bool value, std::string const& name);
 
 	std::map<std::string, KnobValue<double>> double_knobs;
@@ -79,7 +79,7 @@ public:
 	bool setKnob(std::string const& name, std::string const& value);
 
 	// Gets the value of knob
-	ParsedKnobValue getKnob(const std::string& name) const;
+	ParsedKnobValue getKnob(std::string const& name) const;
 
 	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
 	void trace() const;

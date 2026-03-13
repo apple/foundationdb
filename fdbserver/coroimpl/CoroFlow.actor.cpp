@@ -224,7 +224,7 @@ public:
 	WorkPool() : pool(new Pool) { m_stopOnError = stopOnError(this); }
 
 	Future<Void> getError() const override { return pool->anyError.getResult(); }
-	void addThread(IThreadPoolReceiver* userData, const char*) override {
+	void addThread(IThreadPoolReceiver* userData, char const*) override {
 		checkError();
 
 		auto w = new Worker(pool.getPtr(), userData);

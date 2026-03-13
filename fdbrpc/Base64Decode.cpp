@@ -79,9 +79,9 @@ inline uint8_t decodeValue(uint8_t valueIn) noexcept {
 }
 
 template <bool UrlDecode>
-int doDecode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __restrict plaintextOut) noexcept {
-	const uint8_t* codechar = codeIn;
-	const uint8_t* const codeEnd = codeIn + lengthIn;
+int doDecode(uint8_t const* __restrict codeIn, int const lengthIn, uint8_t* __restrict plaintextOut) noexcept {
+	uint8_t const* codechar = codeIn;
+	uint8_t const* const codeEnd = codeIn + lengthIn;
 	uint8_t* plainchar = plaintextOut;
 	uint8_t fragment = 0;
 
@@ -127,7 +127,7 @@ int doDecode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __re
 
 // assumes codeLength after padding stripped
 int getDecodedLength(int codeLength) noexcept {
-	const auto r = (codeLength % 4);
+	auto const r = (codeLength % 4);
 	if (r == 1)
 		return -1;
 	else if (r == 0)
@@ -172,7 +172,7 @@ int decodedLength(int codeLength) noexcept {
 	return (codeLength / 4) * 3;
 }
 
-int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __restrict plaintextOut) noexcept {
+int decode(uint8_t const* __restrict codeIn, int const lengthIn, uint8_t* __restrict plaintextOut) noexcept {
 	if (lengthIn % 4) {
 		return -1;
 	} else {
@@ -195,7 +195,7 @@ int decodedLength(int codeLength) noexcept {
 	return getDecodedLength(codeLength);
 }
 
-int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __restrict plaintextOut) noexcept {
+int decode(uint8_t const* __restrict codeIn, int const lengthIn, uint8_t* __restrict plaintextOut) noexcept {
 	return doDecode<true>(codeIn, lengthIn, plaintextOut);
 }
 
@@ -316,7 +316,7 @@ static Void runTest(std::function<StringRef(Arena&, StringRef)> conversionFn,
                     StringRef (&stringEncodeFn)(Arena&, StringRef),
                     Optional<StringRef> (&stringDecodeFn)(Arena&, StringRef),
                     std::function<void(StringRef, int)> encodeOutputCheckFn) {
-	const int testSetLen = sizeof(urlEncodedTestData) / sizeof(urlEncodedTestData[0]);
+	int const testSetLen = sizeof(urlEncodedTestData) / sizeof(urlEncodedTestData[0]);
 	for (auto i = 0; i < testSetLen; i++) {
 		auto tmpArena = Arena();
 		auto [decodeOutputExpected, encodeOutputExpected] = urlEncodedTestData[i];
@@ -387,7 +387,7 @@ TEST_CASE("/fdbrpc/Base64UrlEncode") {
 static StringRef transformBase64UrlToBase64(Arena& arena, StringRef input) {
 	if (input.empty())
 		return StringRef();
-	const int len = ((input.size() + 3) / 4) * 4; // ceil_align(input.size(), 4)
+	int const len = ((input.size() + 3) / 4) * 4; // ceil_align(input.size(), 4)
 	auto output = new (arena) uint8_t[len];
 	for (auto i = 0; i < input.size(); i++) {
 		if (input[i] == '-') {

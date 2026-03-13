@@ -49,14 +49,14 @@ IPAddress ClusterConnectionString::determineLocalSourceIP() const {
 			if (index < coords.size()) {
 				coordAddr = coords[index];
 			} else {
-				const Hostname& h = hostnames[index - coords.size()];
+				Hostname const& h = hostnames[index - coords.size()];
 				Optional<NetworkAddress> resolvedAddr = h.resolveBlocking();
 				if (!resolvedAddr.present()) {
 					throw lookup_failed();
 				}
 				coordAddr = resolvedAddr.get();
 			}
-			const auto boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
+			auto const boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
 			                                         : ip::address(ip::address_v4(coordAddr.ip.toV4()));
 
 			ip::udp::endpoint endpoint(boostIp, coordAddr.port);

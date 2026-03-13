@@ -24,6 +24,6 @@
 
 #define CLIENT_KNOBS (&IKnobCollection::getGlobalKnobCollection().getClientKnobs())
 
-inline const ClientKnobs& getClientKnobs() {
+inline ClientKnobs const& getClientKnobs() {
 	return *CLIENT_KNOBS;
 }

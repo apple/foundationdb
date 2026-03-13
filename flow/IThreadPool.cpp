@@ -70,7 +70,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 	boost::asio::io_service ios;
 	boost::asio::io_service::work dontstop;
 	enum Mode { Run = 0, Shutdown = 2 };
-	volatile int mode;
+	int volatile mode;
 	int stackSize;
 	int pri;
 
@@ -128,7 +128,7 @@ public:
 			delete this;
 		}
 	}
-	void addThread(IThreadPoolReceiver* userData, const char* name) override {
+	void addThread(IThreadPoolReceiver* userData, char const* name) override {
 		threads.push_back(new Thread(this, userData));
 		threads.back()->handle = g_network->startThread(start, threads.back(), stackSize, name);
 	}

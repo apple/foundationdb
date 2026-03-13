@@ -27,7 +27,7 @@
 #include "fdbserver/workloads/AsyncFile.actor.h"
 #include "flow/DeterministicRandom.h"
 
-static const double ROLL_TIME = 5.0;
+static double const ROLL_TIME = 5.0;
 
 struct IOLog {
 	struct ProcessLog {
@@ -37,7 +37,7 @@ struct IOLog {
 
 		bool logLatency; // when false, log times and compute elapsed, else, interpret the log'd time as a latency
 
-		ProcessLog() : logLatency(false) {};
+		ProcessLog() : logLatency(false){};
 
 		virtual void reset() {
 			startTime = now();

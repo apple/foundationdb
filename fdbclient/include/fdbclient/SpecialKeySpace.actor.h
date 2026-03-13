@@ -69,7 +69,7 @@ protected:
 
 class ManagementAPIError {
 public:
-	static std::string toJsonString(bool retriable, const std::string& command, const std::string& msg) {
+	static std::string toJsonString(bool retriable, std::string const& command, std::string const& msg) {
 		json_spirit::mObject errorObj;
 		errorObj["retriable"] = retriable;
 		errorObj["command"] = command;
@@ -78,31 +78,31 @@ public:
 	}
 
 private:
-	ManagementAPIError() {};
+	ManagementAPIError(){};
 };
 
 class SpecialKeyRangeRWImpl : public SpecialKeyRangeReadImpl {
 public:
-	virtual void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) {
+	virtual void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) {
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>(value)));
 	}
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
+	virtual void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) {
 		ryw->getSpecialKeySpaceWriteMap().insert(range, std::make_pair(true, Optional<Value>()));
 	}
-	virtual void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
+	virtual void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) {
 		ryw->getSpecialKeySpaceWriteMap().insert(key, std::make_pair(true, Optional<Value>()));
 	}
 	// all delayed async operations of writes in special-key-space
 	virtual Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) = 0;
 
 	// Given the special key to write, return the real key that needs to be modified
-	virtual Key decode(const KeyRef& key) const {
+	virtual Key decode(KeyRef const& key) const {
 		// Default implementation should never be used
 		ASSERT(false);
 		return key;
 	}
 	// Given the read key, return the corresponding special key
-	virtual Key encode(const KeyRef& key) const {
+	virtual Key encode(KeyRef const& key) const {
 		// Default implementation should never be used
 		ASSERT(false);
 		return key;
@@ -131,7 +131,7 @@ public:
 
 	bool isAsync() const override { return true; }
 
-	ACTOR static Future<RangeResult> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
+	ACTOR static Future<RangeResult> getRangeAsyncActor(SpecialKeyRangeReadImpl const* skrAyncImpl,
 	                                                    ReadYourWritesTransaction* ryw,
 	                                                    KeyRangeRef kr,
 	                                                    GetRangeLimits limits,
@@ -146,7 +146,7 @@ public:
 			RangeResult result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange(), limits));
 			cache->insert(skrAyncImpl->getKeyRange(), result_);
 		}
-		const auto& allResults = (*cache)[kr.begin].get();
+		auto const& allResults = (*cache)[kr.begin].get();
 		int start = 0, end = allResults.size();
 		while (start < allResults.size() && allResults[start].key < kr.begin)
 			++start;
@@ -189,7 +189,7 @@ public:
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
 
-	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
+	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, Key const& key);
 
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeySelector begin,
@@ -197,42 +197,42 @@ public:
 	                             GetRangeLimits limits,
 	                             Reverse = Reverse::False);
 
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value);
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value);
 
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range);
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range);
 
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key);
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key);
 
 	Future<Void> commit(ReadYourWritesTransaction* ryw);
 
 	void registerKeyRange(SpecialKeySpace::MODULE module,
 	                      SpecialKeySpace::IMPLTYPE type,
-	                      const KeyRangeRef& kr,
+	                      KeyRangeRef const& kr,
 	                      SpecialKeyRangeReadImpl* impl);
 
-	Key decode(const KeyRef& key);
-	KeyRange decode(const KeyRangeRef& kr);
+	Key decode(KeyRef const& key);
+	KeyRange decode(KeyRangeRef const& kr);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*>& getReadImpls() { return readImpls; }
 	KeyRangeMap<SpecialKeyRangeRWImpl*>& getRWImpls() { return writeImpls; }
 	KeyRangeMap<SpecialKeySpace::MODULE>& getModules() { return modules; }
 	KeyRangeRef getKeyRange() const { return range; }
 	static KeyRangeRef getModuleRange(SpecialKeySpace::MODULE module) { return moduleToBoundary.at(module); }
-	static KeyRangeRef getManagementApiCommandRange(const std::string& command) {
+	static KeyRangeRef getManagementApiCommandRange(std::string const& command) {
 		return managementApiCommandToRange.at(command);
 	}
-	static KeyRef getManagementApiCommandPrefix(const std::string& command) {
+	static KeyRef getManagementApiCommandPrefix(std::string const& command) {
 		return managementApiCommandToRange.at(command).begin;
 	}
-	static KeyRangeRef getActorLineageApiCommandRange(const std::string& command) {
+	static KeyRangeRef getActorLineageApiCommandRange(std::string const& command) {
 		return actorLineageApiCommandToRange.at(command);
 	}
-	static KeyRef getActorLineageApiCommandPrefix(const std::string& command) {
+	static KeyRef getActorLineageApiCommandPrefix(std::string const& command) {
 		return actorLineageApiCommandToRange.at(command).begin;
 	}
-	static Key getManagementApiCommandOptionSpecialKey(const std::string& command, const std::string& option);
-	static const std::set<std::string>& getManagementApiOptionsSet() { return options; }
-	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
+	static Key getManagementApiCommandOptionSpecialKey(std::string const& command, std::string const& option);
+	static std::set<std::string> const& getManagementApiOptionsSet() { return options; }
+	static std::set<std::string> const& getTracingOptions() { return tracingOptions; }
 
 private:
 	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
@@ -333,9 +333,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -346,9 +346,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	Key decode(const KeyRef& key) const override;
-	Key encode(const KeyRef& key) const override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
+	Key decode(KeyRef const& key) const override;
+	Key encode(KeyRef const& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -359,9 +359,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	Key decode(const KeyRef& key) const override;
-	Key encode(const KeyRef& key) const override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
+	Key decode(KeyRef const& key) const override;
+	Key encode(KeyRef const& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -371,9 +371,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	Key decode(const KeyRef& key) const override;
-	Key encode(const KeyRef& key) const override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
+	Key decode(KeyRef const& key) const override;
+	Key encode(KeyRef const& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -383,9 +383,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	Key decode(const KeyRef& key) const override;
-	Key encode(const KeyRef& key) const override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
+	Key decode(KeyRef const& key) const override;
+	Key encode(KeyRef const& key) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
@@ -404,8 +404,8 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 };
 
 class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
@@ -440,10 +440,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 };
 
 class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
@@ -452,10 +452,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 };
 
 class CoordinatorsImpl : public SpecialKeyRangeRWImpl {
@@ -465,8 +465,8 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 };
 
 class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
@@ -503,8 +503,8 @@ public:
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 };
 
 class ActorLineageImpl : public SpecialKeyRangeReadImpl {
@@ -524,9 +524,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
+	void set(ReadYourWritesTransaction* ryw, KeyRef const& key, ValueRef const& value) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRangeRef const& range) override;
+	void clear(ReadYourWritesTransaction* ryw, KeyRef const& key) override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 

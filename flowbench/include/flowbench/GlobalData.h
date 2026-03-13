@@ -44,7 +44,7 @@ struct InputGenerator {
 		lastIndex = -1;
 	}
 
-	const T& next() {
+	T const& next() {
 		if (++lastIndex == data.size()) {
 			lastIndex = 0;
 		}

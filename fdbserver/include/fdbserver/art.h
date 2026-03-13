@@ -100,9 +100,9 @@ struct art_tree {
 		art_leaf* next = nullptr;
 		KeyRef key;
 
-		art_leaf(const KeyRef& k, void* v) : type(ART_LEAF), value(v), key(k.begin(), k.size()) {}
+		art_leaf(KeyRef const& k, void* v) : type(ART_LEAF), value(v), key(k.begin(), k.size()) {}
 
-		art_leaf(const uint8_t* ptr, int len, void* v) : type(ART_LEAF), value(v), key(ptr, len) {}
+		art_leaf(uint8_t const* ptr, int len, void* v) : type(ART_LEAF), value(v), key(ptr, len) {}
 	};
 
 	/**
@@ -181,19 +181,19 @@ private:
 	static int fat_leaf_offset[9];
 	static int node_sizes[9];
 
-	static int check_bound_node(art_node* n, const KeyRef& k, int* depth_p, art_leaf** result, bool strict);
+	static int check_bound_node(art_node* n, KeyRef const& k, int* depth_p, art_leaf** result, bool strict);
 
-	static int art_bound_leaf(art_node* n, const KeyRef& k, int depth, art_leaf** result);
+	static int art_bound_leaf(art_node* n, KeyRef const& k, int depth, art_leaf** result);
 
 	static art_leaf* minimum(art_node* n);
 
 	static art_leaf* maximum(art_node* n);
 
-	static int leaf_matches_signed(art_leaf* n, const KeyRef& k, int depth);
+	static int leaf_matches_signed(art_leaf* n, KeyRef const& k, int depth);
 
-	static int leaf_matches(const art_leaf* n, const KeyRef& k, int depth);
+	static int leaf_matches(art_leaf const* n, KeyRef const& k, int depth);
 
-	static int signed_prefix_mismatch(art_node* n, const KeyRef& k, int depth, art_leaf** min_leaf, bool find_min);
+	static int signed_prefix_mismatch(art_node* n, KeyRef const& k, int depth, art_leaf** min_leaf, bool find_min);
 
 	static int prefix_mismatch(art_node* n, KeyRef& k, int depth, art_leaf** minout);
 
@@ -207,7 +207,7 @@ private:
 
 	static int art_next_prev(art_node* n, unsigned char c, art_node** out);
 
-	void art_bound_iterative(art_node* n, const KeyRef& k, int depth, art_leaf** result, bool strict);
+	void art_bound_iterative(art_node* n, KeyRef const& k, int depth, art_leaf** result, bool strict);
 
 	static inline int min(int a, int b) { return (a < b) ? a : b; }
 
@@ -216,9 +216,9 @@ private:
 		return x;
 	}
 
-	static int check_prefix(const art_node* n, const KeyRef& k, int depth);
+	static int check_prefix(art_node const* n, KeyRef const& k, int depth);
 
-	void recursive_delete_binary(art_node* n, art_node** ref, const KeyRef& k, int depth);
+	void recursive_delete_binary(art_node* n, art_node** ref, KeyRef const& k, int depth);
 
 	void remove_child(art_node* n, art_node** ref, unsigned char c, art_node** l, int depth);
 
@@ -227,7 +227,7 @@ private:
 
 	art_node* alloc_kv_node(ART_NODE_TYPE type);
 
-	art_leaf* make_leaf(const KeyRef& k, void* value);
+	art_leaf* make_leaf(KeyRef const& k, void* value);
 
 	static void remove_fat_child(art_node* n, art_node** ref, int depth);
 
@@ -258,11 +258,11 @@ private:
 	                           int replace_existing);
 
 	art_leaf*
-	insert_leaf(art_node* n, art_node** ref, const KeyRef& k, void* value, int depth, int* old, int replace_existing);
+	insert_leaf(art_node* n, art_node** ref, KeyRef const& k, void* value, int depth, int* old, int replace_existing);
 
 	art_leaf* insert_fat_node(art_node* n,
 	                          art_node** ref,
-	                          const KeyRef& k,
+	                          KeyRef const& k,
 	                          void* value,
 	                          int depth,
 	                          int* old,
@@ -271,7 +271,7 @@ private:
 
 	art_leaf* insert_internal_node(art_node* n,
 	                               art_node** ref,
-	                               const KeyRef& k,
+	                               KeyRef const& k,
 	                               void* value,
 	                               int depth,
 	                               int* old,
@@ -280,9 +280,9 @@ private:
 	                               int replace_existing);
 
 	art_leaf*
-	insert_child(art_node* n, art_node** ref, const KeyRef& k, void* value, int depth, int* old, int replace_existing);
+	insert_child(art_node* n, art_node** ref, KeyRef const& k, void* value, int depth, int* old, int replace_existing);
 
-	static inline int longest_common_prefix(const KeyRef& k1, const KeyRef& k2, int depth);
+	static inline int longest_common_prefix(KeyRef const& k1, KeyRef const& k2, int depth);
 
 	static void insert_after(art_leaf* l_new, art_leaf* l_existing);
 
@@ -305,15 +305,15 @@ public:
 		this->size = 0;
 	}
 
-	art_iterator lower_bound(const KeyRef& k);
+	art_iterator lower_bound(KeyRef const& k);
 
-	art_iterator upper_bound(const KeyRef& k);
+	art_iterator upper_bound(KeyRef const& k);
 
 	art_iterator insert(KeyRef& key, void* value);
 
 	art_iterator insert_if_absent(KeyRef& key, void* value, int* replaced);
 
-	void erase(const art_iterator& it);
+	void erase(art_iterator const& it);
 }; // art_tree
 
 struct art_iterator {
@@ -324,7 +324,7 @@ private:
 public:
 	art_iterator(art_tree::art_leaf* l) { leaf = l; }
 
-	art_iterator(const art_iterator& i) { leaf = i.leaf; }
+	art_iterator(art_iterator const& i) { leaf = i.leaf; }
 
 	art_iterator() { leaf = nullptr; }
 
@@ -338,11 +338,11 @@ public:
 		return (*this);
 	}
 
-	bool operator==(const art_iterator& other) const { return leaf == other.leaf; }
+	bool operator==(art_iterator const& other) const { return leaf == other.leaf; }
 
-	bool operator!=(const art_iterator& other) const { return leaf != other.leaf; }
+	bool operator!=(art_iterator const& other) const { return leaf != other.leaf; }
 
-	const KeyRef& key() const { return leaf->key; }
+	KeyRef const& key() const { return leaf->key; }
 
 	void* value() const { return leaf->value; }
 

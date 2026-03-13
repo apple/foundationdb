@@ -42,7 +42,7 @@ ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	return Void();
 }
 
-void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self) {
+void handleFinishRestoreRequest(RestoreFinishRequest const& req, Reference<RestoreRoleData> self) {
 	self->resetPerRestoreRequest();
 	TraceEvent("FastRestoreRolePhaseFinishRestoreRequest", self->id())
 	    .detail("FinishRestoreRequest", req.terminate)

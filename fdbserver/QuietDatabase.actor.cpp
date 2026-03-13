@@ -130,7 +130,7 @@ ACTOR Future<int64_t> getDataInFlight(Database cx, Reference<AsyncVar<ServerDBIn
 }
 
 // Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
-int64_t getQueueSize(const TraceEventFields& md) {
+int64_t getQueueSize(TraceEventFields const& md) {
 	double inputRate, durableRate;
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
@@ -141,12 +141,12 @@ int64_t getQueueSize(const TraceEventFields& md) {
 	return inputBytes - durableBytes;
 }
 
-int64_t getDurableVersion(const TraceEventFields& md) {
+int64_t getDurableVersion(TraceEventFields const& md) {
 	return boost::lexical_cast<int64_t>(md.getValue("DurableVersion"));
 }
 
 // Computes the popped version lag for tlogs
-int64_t getPoppedVersionLag(const TraceEventFields& md) {
+int64_t getPoppedVersionLag(TraceEventFields const& md) {
 	int64_t persistentDataDurableVersion = boost::lexical_cast<int64_t>(md.getValue("PersistentDataDurableVersion"));
 	int64_t queuePoppedVersion = boost::lexical_cast<int64_t>(md.getValue("QueuePoppedVersion"));
 
@@ -169,13 +169,13 @@ ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
 	ClusterConnectionString ccs(coordinators.get().toString());
 	std::vector<NetworkAddress> coordinatorsAddr = wait(ccs.tryResolveHostnames());
 	std::set<NetworkAddress> coordinatorsAddrSet;
-	for (const auto& addr : coordinatorsAddr) {
+	for (auto const& addr : coordinatorsAddr) {
 		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
 		coordinatorsAddrSet.insert(addr);
 	}
 
 	std::vector<WorkerInterface> result;
-	for (const auto& worker : workers) {
+	for (auto const& worker : workers) {
 		NetworkAddress primary = worker.interf.address();
 		Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
 		if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
@@ -262,7 +262,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
 	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
-	for (const auto& worker : workers) {
+	for (auto const& worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}
 	Optional<Value> regionsValue =
@@ -280,7 +280,7 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	std::pair<std::vector<WorkerInterface>, int> result;
 	auto& [workerInterfaces, failures] = result;
 	failures = 0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		TraceEvent(SevDebug, "DcIdInfo")
 		    .detail("ServerLocalityID", server.locality.dcId())
 		    .detail("MasterDcID", masterDcId);
@@ -301,8 +301,8 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 
 // Helper function to extract he maximum SQ size of all provided messages. All futures in the
 // messages vector have to be ready.
-int64_t extractMaxQueueSize(const std::vector<Future<TraceEventFields>>& messages,
-                            const std::vector<StorageServerInterface>& servers) {
+int64_t extractMaxQueueSize(std::vector<Future<TraceEventFields>> const& messages,
+                            std::vector<StorageServerInterface> const& servers) {
 
 	int64_t maxQueueSize = 0;
 	UID maxQueueServer;
@@ -643,9 +643,9 @@ ACTOR Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBI
 		state Optional<TLogInterface> primaryLog;
 		state Optional<TLogInterface> remoteLog;
 		if (dbInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
-			for (const auto& logset : dbInfo->get().logSystemConfig.tLogs) {
+			for (auto const& logset : dbInfo->get().logSystemConfig.tLogs) {
 				if (logset.isLocal && logset.locality != tagLocalitySatellite) {
-					for (const auto& tlog : logset.tLogs) {
+					for (auto const& tlog : logset.tLogs) {
 						if (tlog.present()) {
 							primaryLog = tlog.interf();
 							break;
@@ -653,7 +653,7 @@ ACTOR Future<Version> getDatacenterLag(Database cx, Reference<AsyncVar<ServerDBI
 					}
 				}
 				if (!logset.isLocal) {
-					for (const auto& tlog : logset.tLogs) {
+					for (auto const& tlog : logset.tLogs) {
 						if (tlog.present()) {
 							remoteLog = tlog.interf();
 							break;
@@ -774,12 +774,12 @@ struct QuietDatabaseChecker {
 		double maxDDRunTime;
 		std::vector<std::string>& failReasons;
 
-		Impl(double start, const std::string& phase, const double maxDDRunTime, std::vector<std::string>& failReasons)
+		Impl(double start, std::string const& phase, double const maxDDRunTime, std::vector<std::string>& failReasons)
 		  : start(start), phase(phase), maxDDRunTime(maxDDRunTime), failReasons(failReasons) {}
 
 		template <class T, class Comparison = std::less_equal<>>
 		Impl& add(BaseTraceEvent& evt,
-		          const char* name,
+		          char const* name,
 		          T value,
 		          T expected,
 		          Comparison const& cmp = std::less_equal<>()) {

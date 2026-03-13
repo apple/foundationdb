@@ -31,7 +31,7 @@
 void* allocateLargePages(int total);
 
 bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<int> const&, Future<Void> const&),
-                   const char* desc,
+                   char const* desc,
                    std::vector<int> const& expectedOutput) {
 	// Run the test 5 times with different "timing"
 	int i, outCount;
@@ -104,9 +104,9 @@ bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<
 
 #if 0
 void memoryTest2() {
-	const int Size = 2000 << 20;
-	const int Reads = 4 << 20;
-	const int MaxThreads = 4;
+	int const Size = 2000 << 20;
+	int const Reads = 4 << 20;
+	int const MaxThreads = 4;
 
 	char* block = new char[Size];
 	memset(block, 0, Size);
@@ -156,8 +156,8 @@ void memoryTest() {
 
 	showNumaStatus();
 
-	const int N = 128<<20;	// 128 = 1GB
-	const int N2 = 8<<20;
+	int const N = 128<<20;	// 128 = 1GB
+	int const N2 = 8<<20;
 	std::cout << "Preparing memory test with " << N / 1e6 * sizeof(void*) << " MB" << std::endl;
 	void **x;
 	if (0) {
@@ -201,10 +201,10 @@ void memoryTest() {
 		}
 	}
 
-	const int MT = 16;
+	int const MT = 16;
 	for(int TraversalsPerThread = 1; TraversalsPerThread <= MaxTraversalsPerThread; TraversalsPerThread *= 2)
 	{
-		const int PseudoThreads = MT * TraversalsPerThread;
+		int const PseudoThreads = MT * TraversalsPerThread;
 		void **starts[MT*MaxTraversalsPerThread];
 		for(int t=0; t<PseudoThreads; t++) {
 			starts[t] = &x[ N/PseudoThreads * t ];
@@ -224,7 +224,7 @@ void memoryTest() {
 							for(int j=0; j<TraversalsPerThread; j++) {
 								p[j] = (void**)*p[j];
 								if (TraversalsPerThread > 1)
-									_mm_prefetch( (const char*)p[j], _MM_HINT_T0 );
+									_mm_prefetch( (char const*)p[j], _MM_HINT_T0 );
 							}
 						for(int j=0; j<TraversalsPerThread; j++)
 							if (p[j] == p[(j+1)%TraversalsPerThread])
@@ -292,8 +292,8 @@ public:
 	int size() const { return length; }
 	uint8_t* begin() { return data; }
 	uint8_t* end() { return data + length; }
-	const uint8_t* begin() const { return data; }
-	const uint8_t* end() const { return data + length; }
+	uint8_t const* begin() const { return data; }
+	uint8_t const* end() const { return data + length; }
 
 private:
 	TestBuffer(int length) noexcept : length(length) {}
@@ -314,8 +314,8 @@ public:
 	int size() const { return length; }
 	uint8_t* begin() { return data; }
 	uint8_t* end() { return data + length; }
-	const uint8_t* begin() const { return data; }
-	const uint8_t* end() const { return data + length; }
+	uint8_t const* begin() const { return data; }
+	uint8_t const* end() const { return data + length; }
 
 private:
 	int length;
@@ -400,7 +400,7 @@ void fastAllocTest() {
 	          << std::endl;
 #endif
 
-	volatile int32_t v = 0;
+	int32_t volatile v = 0;
 
 	t = timer();
 	for (int i = 0; i < 10000000; i++)
@@ -450,7 +450,7 @@ void fastAllocTest() {
 		t = timer() - t;
 		std::cout << "copy (2) Reference<Buffer>: " << 10.0 / t << "M/sec " << std::endl;
 
-		std::cout << (const char*)b->begin() << std::endl;
+		std::cout << (char const*)b->begin() << std::endl;
 	}
 	t = timer();
 	for (int i = 0; i < 10000000; i++) {

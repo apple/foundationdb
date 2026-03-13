@@ -35,18 +35,18 @@
 
 enum { invalid_error_code = 0xffff };
 
-class ErrorCodeTable : public std::map<int, std::pair<const char*, const char*>> {
+class ErrorCodeTable : public std::map<int, std::pair<char const*, char const*>> {
 public:
 	ErrorCodeTable();
-	void addCode(int code, const char* name, const char* description);
+	void addCode(int code, char const* name, char const* description);
 };
 
 class Error {
 public:
 	constexpr static FileIdentifier file_identifier = 14065384;
 	int code() const { return error_code; }
-	const char* name() const;
-	const char* what() const;
+	char const* name() const;
+	char const* what() const;
 	bool isInjectedFault() const {
 		return flags & FLAG_INJECTED_FAULT;
 	} // Use as little as possible, so injected faults effectively test real faults!
@@ -81,7 +81,7 @@ private:
 };
 
 Error systemErrorCodeToError();
-extern const std::set<int> transactionRetryableErrors;
+extern std::set<int> const transactionRetryableErrors;
 
 #undef ERROR
 #define ERROR(name, number, description)                                                                               \
@@ -96,12 +96,12 @@ class AttributeNotFoundError : public Error {
 	std::string missingAttribute;
 
 public:
-	AttributeNotFoundError(const std::string&);
+	AttributeNotFoundError(std::string const&);
 
-	const std::string& getMissingAttribute() const;
+	std::string const& getMissingAttribute() const;
 };
 
-inline AttributeNotFoundError attribute_not_found_error(const std::string& attribute) {
+inline AttributeNotFoundError attribute_not_found_error(std::string const& attribute) {
 	return AttributeNotFoundError(attribute);
 }
 
@@ -111,14 +111,14 @@ inline Error actor_cancelled() {
 }
 enum { error_code_actor_cancelled = error_code_operation_cancelled };
 
-extern Error internal_error_impl(const char* file, int line);
-extern Error internal_error_impl(const char* msg, const char* file, int line);
-extern Error internal_error_impl(const char* a_nm,
+extern Error internal_error_impl(char const* file, int line);
+extern Error internal_error_impl(char const* msg, char const* file, int line);
+extern Error internal_error_impl(char const* a_nm,
                                  std::string const& a,
-                                 const char* op_nm,
-                                 const char* b_nm,
+                                 char const* op_nm,
+                                 char const* b_nm,
                                  std::string const& b,
-                                 const char* file,
+                                 char const* file,
                                  int line);
 
 #define internal_error() internal_error_impl(__FILE__, __LINE__)
@@ -146,15 +146,13 @@ extern bool isAssertDisabled(int line);
 		}                                                                                                              \
 	} while (false)
 #define UNREACHABLE()                                                                                                  \
-	{                                                                                                                  \
-		throw internal_error_impl("unreachable", __FILE__, __LINE__);                                                  \
-	}
+	{ throw internal_error_impl("unreachable", __FILE__, __LINE__); }
 
 // TODO: magic so this works even if const-ness doesn't not match.
 template <typename T, typename U>
 void assert_impl(char const* a_nm,
                  T const& a,
-                 const char* opName,
+                 char const* opName,
                  char const* b_nm,
                  U const& b,
                  bool (*compare)(T const&, U const&),

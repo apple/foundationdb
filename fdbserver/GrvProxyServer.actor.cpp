@@ -302,13 +302,13 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 				// The value doesn't matter too much, as long as the key is set.
 				tr->set(migratedKey.contents(), "1"_sr);
 				if (sampleRate.present()) {
-					const double sampleRateDbl =
+					double const sampleRateDbl =
 					    BinaryReader::fromStringRef<double>(sampleRate.get().contents(), Unversioned());
 					Tuple rate = Tuple::makeTuple(sampleRateDbl);
 					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
 				}
 				if (sizeLimit.present()) {
-					const int64_t sizeLimitInt =
+					int64_t const sizeLimitInt =
 					    BinaryReader::fromStringRef<int64_t>(sizeLimit.get().contents(), Unversioned());
 					Tuple size = Tuple::makeTuple(sizeLimitInt);
 					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
@@ -486,7 +486,7 @@ ACTOR Future<Void> getRate(UID myID,
 }
 
 // Respond with an error to the GetReadVersion request when the GRV limit is hit.
-void proxyGRVThresholdExceeded(const GetReadVersionRequest* req, GrvProxyStats* stats) {
+void proxyGRVThresholdExceeded(GetReadVersionRequest const* req, GrvProxyStats* stats) {
 	++stats->txnRequestErrors;
 	req->reply.sendError(grv_proxy_memory_limit_exceeded());
 	if (req->priority == TransactionPriority::IMMEDIATE) {
@@ -668,7 +668,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContex
 	// before this request was received, because then its committedVersion would have been higher,
 	//     and no other proxy could have already committed anything without first ending the epoch
 	state Span span("GP:getLiveCommittedVersion"_loc);
-	for (const SpanContext& spanContext : spanContexts) {
+	for (SpanContext const& spanContext : spanContexts) {
 		span.addLink(spanContext);
 	}
 	++grvProxyData->stats.txnStartBatch;
@@ -1076,7 +1076,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			if (start[i].size()) {
 				std::vector<SpanContext> spanContexts;
 				spanContexts.reserve(start[i].size());
-				for (const GetReadVersionRequest& request : start[i]) {
+				for (GetReadVersionRequest const& request : start[i]) {
 					spanContexts.push_back(request.spanContext);
 				}
 

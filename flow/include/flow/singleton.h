@@ -64,8 +64,8 @@ public:
 		}
 	}
 
-	WinLockGuard(const WinLockGuard&) = delete;
-	WinLockGuard& operator=(const WinLockGuard&) = delete;
+	WinLockGuard(WinLockGuard const&) = delete;
+	WinLockGuard& operator=(WinLockGuard const&) = delete;
 };
 #define MUTEX_GUARD WinLockGuard
 #define MUTEX_TYPE HANDLE
@@ -91,7 +91,7 @@ struct create_static {
 		double double_;
 		long double longDouble_;
 		struct Test;
-		int Test::* pMember_;
+		int Test::*pMember_;
 		int (Test::*pMemberFn_)(int);
 	};
 
@@ -189,8 +189,8 @@ class singleton {
 public:
 	typedef Type value_type;
 	typedef Type* pointer;
-	typedef const Type* const_pointer;
-	typedef const Type& const_reference;
+	typedef Type const* const_pointer;
+	typedef Type const& const_reference;
 	typedef Type& reference;
 
 private:

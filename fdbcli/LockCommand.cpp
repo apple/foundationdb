@@ -58,7 +58,7 @@ Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 
 namespace fdb_cli {
 
-const KeyRef lockSpecialKey = "\xff\xff/management/db_locked"_sr;
+KeyRef const lockSpecialKey = "\xff\xff/management/db_locked"_sr;
 
 Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
 	if (tokens.size() != 1) {

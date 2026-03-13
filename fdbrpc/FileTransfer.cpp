@@ -31,22 +31,22 @@ uint32_t crc32_checksum_ifstream(std::ifstream* input_file) {
 	uint32_t crc = 0;
 	std::vector<char> buffer(8192);
 	while (input_file->read(buffer.data(), buffer.size()) || input_file->gcount() > 0) {
-		crc = crc32c_append(crc, reinterpret_cast<const uint8_t*>(buffer.data()), input_file->gcount());
+		crc = crc32c_append(crc, reinterpret_cast<uint8_t const*>(buffer.data()), input_file->gcount());
 	}
 	return crc;
 }
 
 grpc::Status FileTransferServiceImpl::DownloadFile(grpc::ServerContext* context,
-                                                   const fdbrpc::DownloadRequest* request,
+                                                   fdbrpc::DownloadRequest const* request,
                                                    grpc::ServerWriter<fdbrpc::DownloadChunk>* writer) {
 	std::ifstream input_file(request->file_name(), std::ios::binary | std::ios::ate);
 	if (!input_file.is_open()) {
 		return grpc::Status(grpc::StatusCode::NOT_FOUND, "File found not");
 	}
 
-	const std::streamsize file_size = input_file.tellg();
-	const size_t buffer_size = request->chunk_size() > 0 ? request->chunk_size() : DEFAULT_CHUNK_SIZE;
-	const size_t start_chunk_index = request->first_chunk_index();
+	std::streamsize const file_size = input_file.tellg();
+	size_t const buffer_size = request->chunk_size() > 0 ? request->chunk_size() : DEFAULT_CHUNK_SIZE;
+	size_t const start_chunk_index = request->first_chunk_index();
 	int64_t offset = buffer_size * start_chunk_index;
 
 	if (offset > file_size) {
@@ -87,7 +87,7 @@ grpc::Status FileTransferServiceImpl::DownloadFile(grpc::ServerContext* context,
 }
 
 grpc::Status FileTransferServiceImpl::GetFileInfo(grpc::ServerContext* context,
-                                                  const fdbrpc::GetFileInfoRequest* request,
+                                                  fdbrpc::GetFileInfoRequest const* request,
                                                   fdbrpc::GetFileInfoReply* response) {
 
 	std::ifstream input_file(request->file_name(), std::ios::binary | std::ios::ate);
@@ -107,7 +107,7 @@ grpc::Status FileTransferServiceImpl::GetFileInfo(grpc::ServerContext* context,
 	return grpc::Status::OK;
 }
 
-std::optional<fdbrpc::GetFileInfoReply> FileTransferClient::GetFileInfo(const std::string& filename,
+std::optional<fdbrpc::GetFileInfoReply> FileTransferClient::GetFileInfo(std::string const& filename,
                                                                         bool get_crc_checksum) {
 	grpc::ClientContext context;
 	fdbrpc::GetFileInfoRequest request;
@@ -140,8 +140,8 @@ std::optional<fdbrpc::GetFileInfoReply> FileTransferClient::GetFileInfo(const st
 // Returns:
 //  std::optional<size_t> The size of the downloaded file in bytes if successful, or std::nullopt if the download
 //  failed. `output_filename` is deleted on failure.
-std::optional<size_t> FileTransferClient::DownloadFile(const std::string& filename,
-                                                       const std::string& output_filename,
+std::optional<size_t> FileTransferClient::DownloadFile(std::string const& filename,
+                                                       std::string const& output_filename,
                                                        bool verify) {
 
 	uint32_t expected_crc = 0;

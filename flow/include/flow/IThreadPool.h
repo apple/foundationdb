@@ -61,7 +61,7 @@ class IThreadPool {
 public:
 	virtual ~IThreadPool() {}
 	virtual Future<Void> getError() const = 0; // asynchronously throws an error if there is an internal error
-	virtual void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) = 0;
+	virtual void addThread(IThreadPoolReceiver* userData, char const* name = nullptr) = 0;
 	virtual void post(PThreadAction action) = 0;
 	virtual Future<Void> stop(Error const& e = success()) = 0;
 	virtual bool isCoro() const { return false; }
@@ -84,7 +84,7 @@ template <class T>
 class ThreadReturnPromise : NonCopyable {
 public:
 	ThreadReturnPromise() {}
-	ThreadReturnPromise(const ThreadReturnPromise& p) = delete;
+	ThreadReturnPromise(ThreadReturnPromise const& p) = delete;
 	ThreadReturnPromise(ThreadReturnPromise&& other) : promise(std::move(other.promise)) {}
 
 	~ThreadReturnPromise() {
@@ -133,7 +133,7 @@ public:
 	~DummyThreadPool() override {}
 	DummyThreadPool() : thread(nullptr) {}
 	Future<Void> getError() const override { return errors.getFuture(); }
-	void addThread(IThreadPoolReceiver* userData, const char* name = nullptr) override {
+	void addThread(IThreadPoolReceiver* userData, char const* name = nullptr) override {
 		ASSERT(!thread);
 		thread = userData;
 		userData->init();

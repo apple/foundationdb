@@ -27,7 +27,7 @@ std::map<std::string, IFDBWorkloadFactory*>& FDBWorkloadFactoryImpl::factories()
 	return _factories;
 }
 
-std::shared_ptr<FDBWorkload> FDBWorkloadFactoryImpl::create(const std::string& name) {
+std::shared_ptr<FDBWorkload> FDBWorkloadFactoryImpl::create(std::string const& name) {
 	auto res = factories().find(name);
 	if (res == factories().end()) {
 		return nullptr;

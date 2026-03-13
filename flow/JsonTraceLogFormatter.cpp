@@ -31,21 +31,21 @@ void JsonTraceLogFormatter::delref() {
 	ReferenceCounted<JsonTraceLogFormatter>::delref();
 }
 
-const char* JsonTraceLogFormatter::getExtension() const {
+char const* JsonTraceLogFormatter::getExtension() const {
 	return "json";
 }
 
-const char* JsonTraceLogFormatter::getHeader() const {
+char const* JsonTraceLogFormatter::getHeader() const {
 	return "";
 }
 
-const char* JsonTraceLogFormatter::getFooter() const {
+char const* JsonTraceLogFormatter::getFooter() const {
 	return "";
 }
 
 namespace {
 
-void escapeString(std::ostringstream& oss, const std::string& source) {
+void escapeString(std::ostringstream& oss, std::string const& source) {
 	for (auto c : source) {
 		if (c == '"') {
 			oss << "\\\"";
@@ -67,7 +67,7 @@ void escapeString(std::ostringstream& oss, const std::string& source) {
 
 } // namespace
 
-std::string JsonTraceLogFormatter::formatEvent(const TraceEventFields& fields) const {
+std::string JsonTraceLogFormatter::formatEvent(TraceEventFields const& fields) const {
 	std::ostringstream oss;
 	oss << "{  ";
 	for (auto iter = fields.begin(); iter != fields.end(); ++iter) {

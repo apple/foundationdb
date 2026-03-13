@@ -30,7 +30,7 @@ typedef TupleVersionstamp Versionstamp;
 
 namespace FDB {
 struct Uuid {
-	const static size_t SIZE;
+	static size_t const SIZE;
 
 	Uuid(StringRef const& data);
 
@@ -102,23 +102,23 @@ struct Tuple {
 	bool operator>=(Tuple const& other) const;
 
 private:
-	static const uint8_t NULL_CODE;
-	static const uint8_t BYTES_CODE;
-	static const uint8_t STRING_CODE;
-	static const uint8_t NESTED_CODE;
-	static const uint8_t INT_ZERO_CODE;
-	static const uint8_t POS_INT_END;
-	static const uint8_t NEG_INT_START;
-	static const uint8_t FLOAT_CODE;
-	static const uint8_t DOUBLE_CODE;
-	static const uint8_t FALSE_CODE;
-	static const uint8_t TRUE_CODE;
-	static const uint8_t UUID_CODE;
+	static uint8_t const NULL_CODE;
+	static uint8_t const BYTES_CODE;
+	static uint8_t const STRING_CODE;
+	static uint8_t const NESTED_CODE;
+	static uint8_t const INT_ZERO_CODE;
+	static uint8_t const POS_INT_END;
+	static uint8_t const NEG_INT_START;
+	static uint8_t const FLOAT_CODE;
+	static uint8_t const DOUBLE_CODE;
+	static uint8_t const FALSE_CODE;
+	static uint8_t const TRUE_CODE;
+	static uint8_t const UUID_CODE;
 	// Java Tuple layer VERSIONSTAMP has 96 bits(12 bytes).
 	// It has additional 2 bytes user code than the internal VERSIONTAMP of size 10 bytes
-	static const uint8_t VERSIONSTAMP_96_CODE;
+	static uint8_t const VERSIONSTAMP_96_CODE;
 
-	Tuple(const StringRef& data);
+	Tuple(StringRef const& data);
 	Tuple(Standalone<VectorRef<uint8_t>> data, std::vector<size_t> offsets);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;

@@ -111,7 +111,7 @@ ACTOR Future<Void> actorCollection(FutureStream<Future<Void>> addActor,
 template <class T, class U>
 struct Traceable<std::pair<T, U>> {
 	static constexpr bool value = Traceable<T>::value && Traceable<U>::value;
-	static std::string toString(const std::pair<T, U>& p) {
+	static std::string toString(std::pair<T, U> const& p) {
 		auto tStr = Traceable<T>::toString(p.first);
 		auto uStr = Traceable<U>::toString(p.second);
 		std::string result(tStr.size() + uStr.size() + 3, 'x');

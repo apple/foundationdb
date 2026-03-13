@@ -172,7 +172,7 @@ struct AtomicOpsWorkload : TestWorkload {
 					for (int i = 0; i < self->nodeCount / 100; i++) {
 						uint64_t intValue = 0;
 						tr.set(StringRef(format("ops%08x%08x", g, i)),
-						       StringRef((const uint8_t*)&intValue, sizeof(intValue)));
+						       StringRef((uint8_t const*)&intValue, sizeof(intValue)));
 					}
 					co_await tr.commit();
 					break;
@@ -192,7 +192,7 @@ struct AtomicOpsWorkload : TestWorkload {
 			while (true) {
 				int group = deterministicRandom()->randomInt(0, 100);
 				uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-				Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+				Key val = StringRef((uint8_t const*)&intValue, sizeof(intValue));
 				std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 				int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
 				Key opsKey(format("ops%08x%08x", group, nodeIndex));
@@ -377,7 +377,7 @@ struct AtomicOpsWorkload : TestWorkload {
 						    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 						log = log_;
 						uint64_t zeroValue = 0;
-						tr.set("xlogResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+						tr.set("xlogResult"_sr, StringRef((uint8_t const*)&zeroValue, sizeof(zeroValue)));
 						for (auto& kv : log) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());
@@ -391,7 +391,7 @@ struct AtomicOpsWorkload : TestWorkload {
 						RangeResult ops =
 						    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 						uint64_t zeroValue = 0;
-						tr.set("xopsResult"_sr, StringRef((const uint8_t*)&zeroValue, sizeof(zeroValue)));
+						tr.set("xopsResult"_sr, StringRef((uint8_t const*)&zeroValue, sizeof(zeroValue)));
 						for (auto& kv : ops) {
 							uint64_t intValue = 0;
 							memcpy(&intValue, kv.value.begin(), kv.value.size());

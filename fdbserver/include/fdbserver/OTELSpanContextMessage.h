@@ -59,7 +59,7 @@ struct OTELSpanContextMessage {
 	}
 	template <class Ar>
 	static bool isNextIn(Ar& ar) {
-		return startsOTELSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
+		return startsOTELSpanContextMessage(*(uint8_t const*)ar.peekBytes(1));
 	}
 };
 

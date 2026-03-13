@@ -43,11 +43,11 @@
 
 namespace mako {
 
-constexpr const int MODE_INVALID = -1;
-constexpr const int MODE_CLEAN = 0;
-constexpr const int MODE_BUILD = 1;
-constexpr const int MODE_RUN = 2;
-constexpr const int MODE_REPORT = 3;
+constexpr int const MODE_INVALID = -1;
+constexpr int const MODE_CLEAN = 0;
+constexpr int const MODE_BUILD = 1;
+constexpr int const MODE_RUN = 2;
+constexpr int const MODE_REPORT = 3;
 
 /* for long arguments */
 enum ArgKind {
@@ -90,9 +90,9 @@ enum ArgKind {
 	ARG_TRANSACTION_TIMEOUT_DB,
 };
 
-constexpr const int OP_COUNT = 0;
-constexpr const int OP_RANGE = 1;
-constexpr const int OP_REVERSE = 2;
+constexpr int const OP_COUNT = 0;
+constexpr int const OP_RANGE = 1;
+constexpr int const OP_REVERSE = 2;
 
 /* transaction specification */
 enum OpKind {
@@ -128,14 +128,14 @@ struct WorkloadSpec {
 	int ops[MAX_OP][3];
 };
 
-constexpr const int LOGGROUP_MAX = 256;
-constexpr const int KNOB_MAX = 256;
-constexpr const int TAGPREFIXLENGTH_MAX = 8;
-constexpr const int NUM_CLUSTERS_MAX = 3;
-constexpr const int NUM_DATABASES_MAX = 10;
-constexpr const std::string_view KEY_PREFIX{ "mako" };
-constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
-constexpr const int MAX_REPORT_FILES = 200;
+constexpr int const LOGGROUP_MAX = 256;
+constexpr int const KNOB_MAX = 256;
+constexpr int const TAGPREFIXLENGTH_MAX = 8;
+constexpr int const NUM_CLUSTERS_MAX = 3;
+constexpr int const NUM_DATABASES_MAX = 10;
+constexpr std::string_view const KEY_PREFIX{ "mako" };
+constexpr std::string_view const TEMP_DATA_STORE{ "/tmp/makoTemp" };
+constexpr int const MAX_REPORT_FILES = 200;
 
 /* benchmark parameters */
 struct Arguments {
@@ -206,7 +206,7 @@ struct Arguments {
 };
 
 // helper functions
-inline void setTransactionTimeoutIfEnabled(const Arguments& args, fdb::Transaction& tx) {
+inline void setTransactionTimeoutIfEnabled(Arguments const& args, fdb::Transaction& tx) {
 	if (args.transaction_timeout_tx > 0) {
 		tx.setOption(FDB_TR_OPTION_TIMEOUT, args.transaction_timeout_tx);
 	}

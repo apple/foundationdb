@@ -67,8 +67,8 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 	// Clog or unclog (based on argument "clog") connections between remote tlogs ("tlogs") and
 	// remote storages ("storages").
 	void clogUnclogRemoteStorages(bool clog, double seconds = 0) {
-		for (const auto& tlog : tlogs) {
-			for (const auto& storage : storages) {
+		for (auto const& tlog : tlogs) {
+			for (auto const& storage : storages) {
 				if (clog) {
 					g_simulator->clogPair(tlog, storage, seconds);
 					g_simulator->clogPair(storage, tlog, seconds);
@@ -85,11 +85,11 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		ASSERT(dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
 
 		// Find all remote tlogs (including remote satellite tlogs).
-		for (const auto& tlogset : dbInfo->get().logSystemConfig.tLogs) {
+		for (auto const& tlogset : dbInfo->get().logSystemConfig.tLogs) {
 			if (tlogset.isLocal) {
 				continue;
 			}
-			for (const auto& tlog : tlogset.tLogs) {
+			for (auto const& tlog : tlogset.tLogs) {
 				tlogs.push_back(tlog.interf().address().ip);
 			}
 		}
@@ -99,7 +99,7 @@ struct FailoverWithSSLagWorkload : TestWorkload {
 		}
 
 		// Find all remote storage servers.
-		for (const auto& process : g_simulator->getAllProcesses()) {
+		for (auto const& process : g_simulator->getAllProcesses()) {
 			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId &&
 			    g_simulator->hasRole(process->address, "StorageServer")) {
 				storages.push_back(process->address.ip);

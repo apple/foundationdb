@@ -121,8 +121,8 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	}
 
 	bool shouldInject(DeterministicRandom& random,
-	                  const WorkloadRequest& work,
-	                  const unsigned alreadyAdded) const override {
+	                  WorkloadRequest const& work,
+	                  unsigned const alreadyAdded) const override {
 		if (g_network->isSimulated() && !g_simulator->extraDatabases.empty()) {
 			// Remove this as soon as we track extra databases properly
 			return false;
@@ -217,7 +217,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 	                               std::vector<std::string> targets,
 	                               RebootRequest rbReq,
 	                               Proc idAccess) {
-		for (const auto& worker : workers) {
+		for (auto const& worker : workers) {
 			// kill all matching workers
 			if (idAccess(worker).present() &&
 			    std::find(targets.begin(), targets.end(), idAccess(worker).get().toString()) != targets.end()) {
@@ -241,7 +241,7 @@ struct MachineAttritionWorkload : FailureInjectionWorkload {
 		}
 		std::vector<WorkerDetails> workers;
 		// Pre-processing step: remove all testers from list of workers
-		for (const auto& worker : allWorkers) {
+		for (auto const& worker : allWorkers) {
 			if (noSimIsViableKill(worker)) {
 				workers.push_back(worker);
 			}

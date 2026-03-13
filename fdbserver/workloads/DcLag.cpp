@@ -73,8 +73,8 @@ struct DcLagWorkload : TestWorkload {
 		ASSERT(dbInfo->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION);
 
 		std::vector<IPAddress> ips; // all remote process IPs
-		for (const auto& process : g_simulator->getAllProcesses()) {
-			const auto& ip = process->address.ip;
+		for (auto const& process : g_simulator->getAllProcesses()) {
+			auto const& ip = process->address.ip;
 			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId) {
 				ips.push_back(ip);
 			}
@@ -83,11 +83,11 @@ struct DcLagWorkload : TestWorkload {
 
 		// Find all primary satellite tlogs
 		std::vector<NetworkAddress> logs; // all primary satellite logs
-		for (const auto& tlogset : dbInfo->get().logSystemConfig.tLogs) {
+		for (auto const& tlogset : dbInfo->get().logSystemConfig.tLogs) {
 			if (!tlogset.isLocal || tlogset.locality != tagLocalitySatellite)
 				continue;
-			for (const auto& log : tlogset.tLogs) {
-				const NetworkAddress& addr = log.interf().address();
+			for (auto const& log : tlogset.tLogs) {
+				NetworkAddress const& addr = log.interf().address();
 				logs.push_back(addr);
 			}
 		}
@@ -98,7 +98,7 @@ struct DcLagWorkload : TestWorkload {
 
 		// clog pairs
 		auto tlog = logs[0].ip;
-		for (const auto& ip : ips) {
+		for (auto const& ip : ips) {
 			if (tlog != ip) {
 				// Clog TLogReply messages, but allow peek/pop requests
 				// g_simulator->clogPair(ip, tlog, seconds);
@@ -111,7 +111,7 @@ struct DcLagWorkload : TestWorkload {
 
 	void unclogAll() {
 		// unclog previously clogged connections
-		for (const auto& pair : cloggedPairs) {
+		for (auto const& pair : cloggedPairs) {
 			g_simulator->unclogPair(pair.first, pair.second);
 		}
 		cloggedPairs.clear();

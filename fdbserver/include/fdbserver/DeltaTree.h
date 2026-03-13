@@ -71,7 +71,7 @@ static inline int perfectSubtreeSplitPoint(int subtree_size) {
 
 static inline int perfectSubtreeSplitPointCached(int subtree_size) {
 	static uint16_t* points = nullptr;
-	static const int max = 500;
+	static int const max = 500;
 	if (points == nullptr) {
 		points = new uint16_t[max];
 		for (int i = 0; i < max; ++i)
@@ -147,8 +147,8 @@ struct DeltaTree {
 			return large ? *(DeltaT*)(&largeOffsets + 1) : *(DeltaT*)(&smallOffsets + 1);
 		};
 
-		inline const DeltaT& delta(bool large) const {
-			return large ? *(const DeltaT*)(&largeOffsets + 1) : *(const DeltaT*)(&smallOffsets + 1);
+		inline DeltaT const& delta(bool large) const {
+			return large ? *(DeltaT const*)(&largeOffsets + 1) : *(DeltaT const*)(&smallOffsets + 1);
 		};
 
 		Node* resolvePointer(int offset) const { return offset == 0 ? nullptr : (Node*)((uint8_t*)this + offset); }
@@ -191,7 +191,7 @@ struct DeltaTree {
 
 	inline Node& root() { return *(Node*)(this + 1); }
 
-	inline const Node& root() const { return *(const Node*)(this + 1); }
+	inline Node const& root() const { return *(Node const*)(this + 1); }
 
 	int size() const { return sizeof(DeltaTree) + nodeBytesUsed; }
 
@@ -204,7 +204,7 @@ public:
 		DecodedNode() {}
 
 		// construct root node
-		DecodedNode(Node* raw, const T* prev, const T* next, Arena& arena, bool large)
+		DecodedNode(Node* raw, T const* prev, T const* next, Arena& arena, bool large)
 		  : large(large), raw(raw), parent(nullptr), otherAncestor(nullptr), leftChild(nullptr), rightChild(nullptr),
 		    prev(prev), next(next),
 		    item(raw->delta(large).apply(raw->delta(large).getPrefixSource() ? *prev : *next, arena)) {
@@ -290,8 +290,8 @@ public:
 		DecodedNode* otherAncestor;
 		DecodedNode* leftChild;
 		DecodedNode* rightChild;
-		const T* prev; // greatest ancestor to the left, or tree lower bound
-		const T* next; // least ancestor to the right, or tree upper bound
+		T const* prev; // greatest ancestor to the left, or tree lower bound
+		T const* next; // least ancestor to the right, or tree upper bound
 		T item;
 
 		DecodedNode* getRightChild(Arena& arena) {
@@ -324,7 +324,7 @@ public:
 	struct Mirror : FastAllocated<Mirror> {
 		friend class Cursor;
 
-		Mirror(const void* treePtr = nullptr, const T* lowerBound = nullptr, const T* upperBound = nullptr)
+		Mirror(void const* treePtr = nullptr, T const* lowerBound = nullptr, T const* upperBound = nullptr)
 		  : tree((DeltaTree*)treePtr), lower(lowerBound), upper(upperBound) {
 			lower = new (arena) T(arena, *lower);
 			upper = new (arena) T(arena, *upper);
@@ -334,17 +334,17 @@ public:
 			                                        DecodedNode(&tree->root(), lower, upper, arena, tree->largeNodes);
 		}
 
-		const T* lowerBound() const { return lower; }
+		T const* lowerBound() const { return lower; }
 
-		const T* upperBound() const { return upper; }
+		T const* upperBound() const { return upper; }
 
 		DeltaTree* tree;
 		Arena arena;
 
 	private:
 		DecodedNode* root;
-		const T* lower;
-		const T* upper;
+		T const* lower;
+		T const* upper;
 
 	public:
 		Cursor getCursor() { return Cursor(this); }
@@ -354,7 +354,7 @@ public:
 		// Returns true if successful, false if k does not fit in the space available
 		// or if k is already in the tree (and was not already deleted).
 		// Insertion on an empty tree returns false as well.
-		bool insert(const T& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
+		bool insert(T const& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
 			if (root == nullptr) {
 				return false;
 			}
@@ -405,8 +405,8 @@ public:
 
 			// Insert k as the left or right child of n, depending on the value of addLeftChild
 			// First, see if it will fit.
-			const T* prev = addLeftChild ? n->prev : &n->item;
-			const T* next = addLeftChild ? &n->item : n->next;
+			T const* prev = addLeftChild ? n->prev : &n->item;
+			T const* next = addLeftChild ? &n->item : n->next;
 
 			int common = prev->getCommonPrefixLen(*next, skipLen);
 			int commonWithPrev = k.getCommonPrefixLen(*prev, common);
@@ -414,7 +414,7 @@ public:
 			bool basePrev = commonWithPrev >= commonWithNext;
 
 			int commonPrefix = basePrev ? commonWithPrev : commonWithNext;
-			const T* base = basePrev ? prev : next;
+			T const* base = basePrev ? prev : next;
 
 			int deltaSize = k.deltaSize(*base, commonPrefix, false);
 			int nodeSpace = deltaSize + Node::headerSize(tree->largeNodes);
@@ -467,7 +467,7 @@ public:
 		}
 
 		// Erase k by setting its deleted flag to true.  Returns true only if k existed
-		bool erase(const T& k, int skipLen = 0) {
+		bool erase(T const& k, int skipLen = 0) {
 			Cursor c = getCursor();
 			int cmp = c.seek(k);
 			// If exactly k is found
@@ -492,17 +492,17 @@ public:
 
 		bool valid() const { return node != nullptr; }
 
-		const T& get() const { return node->item; }
+		T const& get() const { return node->item; }
 
-		const T& getOrUpperBound() const { return valid() ? node->item : *mirror->upperBound(); }
+		T const& getOrUpperBound() const { return valid() ? node->item : *mirror->upperBound(); }
 
-		const T& lowerBound() const { return *mirror->lowerBound(); }
+		T const& lowerBound() const { return *mirror->lowerBound(); }
 
-		const T& upperBound() const { return *mirror->upperBound(); }
+		T const& upperBound() const { return *mirror->upperBound(); }
 
-		bool operator==(const Cursor& rhs) const { return node == rhs.node; }
+		bool operator==(Cursor const& rhs) const { return node == rhs.node; }
 
-		bool operator!=(const Cursor& rhs) const { return node != rhs.node; }
+		bool operator!=(Cursor const& rhs) const { return node != rhs.node; }
 
 		void erase() {
 			node->setDeleted(true);
@@ -512,7 +512,7 @@ public:
 
 		// TODO:  Make hint-based seek() use the hint logic in this, which is better and actually improves seek times,
 		// then remove this function.
-		bool seekLessThanOrEqualOld(const T& s, int skipLen, const Cursor* pHint, int initialCmp) {
+		bool seekLessThanOrEqualOld(T const& s, int skipLen, Cursor const* pHint, int initialCmp) {
 			DecodedNode* n;
 
 			// If there's a hint position, use it
@@ -628,7 +628,7 @@ public:
 		// added to the tree. If the tree was empty, the cursor will be invalid and the return value will be 0.
 		// Otherwise, returns the result of s.compare(item at cursor position)
 		// Does not skip/avoid deleted nodes.
-		int seek(const T& s, int skipLen = 0) {
+		int seek(T const& s, int skipLen = 0) {
 			DecodedNode* n = mirror->root;
 			node = nullptr;
 			int cmp = 0;
@@ -652,7 +652,7 @@ public:
 		// TODO:  This is broken, it's not faster than not using a hint.  See Make thisUnfortunately in a microbenchmark
 		// attempting to approximate a common use case, this version of using a cursor hint is actually slower than not
 		// using a hint.
-		int seek(const T& s, int skipLen, const Cursor* pHint, int initialCmp = 0) {
+		int seek(T const& s, int skipLen, Cursor const* pHint, int initialCmp = 0) {
 			DecodedNode* n = mirror->root;
 			node = nullptr;
 			int cmp;
@@ -796,7 +796,7 @@ public:
 	};
 
 	// Returns number of bytes written
-	int build(int spaceAvailable, const T* begin, const T* end, const T* prev, const T* next) {
+	int build(int spaceAvailable, T const* begin, T const* end, T const* prev, T const* next) {
 		largeNodes = spaceAvailable > SmallSizeLimit;
 		int count = end - begin;
 		numItems = count;
@@ -815,7 +815,7 @@ public:
 	}
 
 private:
-	int buildSubtree(Node& node, const T* begin, const T* end, const T* prev, const T* next, int subtreeCommon) {
+	int buildSubtree(Node& node, T const* begin, T const* end, T const* prev, T const* next, int subtreeCommon) {
 		// printf("build: %s to %s\n", begin->toString().c_str(), (end - 1)->toString().c_str());
 		// printf("build: root at %p  Node::headerSize %d  delta at %p  \n", &root, Node::headerSize(largeNodes),
 		// &node.delta(largeNodes));
@@ -824,14 +824,14 @@ private:
 
 		// Find key to be stored in root
 		int mid = perfectSubtreeSplitPointCached(count);
-		const T& item = begin[mid];
+		T const& item = begin[mid];
 
 		int commonWithPrev = item.getCommonPrefixLen(*prev, subtreeCommon);
 		int commonWithNext = item.getCommonPrefixLen(*next, subtreeCommon);
 
 		bool prefixSourcePrev;
 		int commonPrefix;
-		const T* base;
+		T const* base;
 		if (commonWithPrev >= commonWithNext) {
 			prefixSourcePrev = true;
 			commonPrefix = commonWithPrev;
@@ -977,7 +977,7 @@ struct DeltaTree2 {
 		DeltaT& delta(bool large) { return large ? *(DeltaT*)(&largeOffsets + 1) : *(DeltaT*)(&smallOffsets + 1); };
 
 		// Delta is located after the offsets, which differs by node size
-		const DeltaT& delta(bool large) const {
+		DeltaT const& delta(bool large) const {
 			return large ? *(DeltaT*)(&largeOffsets + 1) : *(DeltaT*)(&smallOffsets + 1);
 		};
 
@@ -1011,7 +1011,7 @@ struct DeltaTree2 {
 	static constexpr int SmallSizeLimit = std::numeric_limits<uint16_t>::max();
 	static constexpr int LargeTreePerNodeExtraOverhead = sizeof(Node::largeOffsets) - sizeof(Node::smallOffsets);
 
-	int nodeOffset(const Node* n) const { return (uint8_t*)n - (uint8_t*)this; }
+	int nodeOffset(Node const* n) const { return (uint8_t*)n - (uint8_t*)this; }
 	Node* nodeAt(int offset) { return offset == 0 ? nullptr : (Node*)((uint8_t*)this + offset); }
 	Node* root() { return numItems == 0 ? nullptr : (Node*)(this + 1); }
 	int rootOffset() { return sizeof(DeltaTree2); }
@@ -1061,7 +1061,7 @@ public:
 	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
 	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
-		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), int64_t* pMemoryTracker = nullptr)
+		DecodeCache(T const& lowerBound = T(), T const& upperBound = T(), int64_t* pMemoryTracker = nullptr)
 		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound), lastKnownUsedMemory(0),
 		    pMemoryTracker(pMemoryTracker) {
 			decodedNodes.reserve(10);
@@ -1149,7 +1149,7 @@ public:
 		  : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
-		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
+		Cursor(Cursor const& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
 
 		~Cursor() {
 			if (cache.isValid()) {
@@ -1200,7 +1200,7 @@ public:
 		bool valid() const { return nodeIndex != -1; }
 
 		// Get T for Node n, and provide to n's delta the base and local decode cache entries to use/modify
-		const T get(DecodedNode& decoded) const {
+		T const get(DecodedNode& decoded) const {
 			DeltaT& delta = decoded.node(tree)->delta(tree->largeNodes);
 
 			// If this node's cached partial is populated, then the delta can create T from that alone
@@ -1234,7 +1234,7 @@ public:
 		// Behavior is undefined if the cursor is not valid.
 		// If the cursor is moved, the reference object returned will be modified to
 		// the cursor's new current item.
-		const T& get() const {
+		T const& get() const {
 			if (!item.present()) {
 				item = get(cache->get(nodeIndex));
 			}
@@ -1250,10 +1250,10 @@ public:
 
 		// If the cursor is valid, return a reference to the cursor's internal T.
 		// Otherwise, returns a reference to the cache's upper boundary.
-		const T& getOrUpperBound() const { return valid() ? get() : cache->upperBound; }
+		T const& getOrUpperBound() const { return valid() ? get() : cache->upperBound; }
 
-		bool operator==(const Cursor& rhs) const { return nodeIndex == rhs.nodeIndex; }
-		bool operator!=(const Cursor& rhs) const { return nodeIndex != rhs.nodeIndex; }
+		bool operator==(Cursor const& rhs) const { return nodeIndex == rhs.nodeIndex; }
+		bool operator!=(Cursor const& rhs) const { return nodeIndex != rhs.nodeIndex; }
 
 		// The seek methods, of the form seek[Less|Greater][orEqual](...) are very similar.
 		// They attempt move the cursor to the [Greatest|Least] item, based on the name of the function.
@@ -1350,7 +1350,7 @@ public:
 		// added to the tree. If the tree was empty, the cursor will be invalid and the return value will be 0.
 		// Otherwise, returns the result of s.compare(item at cursor position)
 		// Does not skip/avoid deleted nodes.
-		int seek(const T& s, int skipLen = 0) {
+		int seek(T const& s, int skipLen = 0) {
 			nodeIndex = -1;
 			item.reset();
 			deltatree_printf("seek(%s) start %s\n", s.toString().c_str(), toString().c_str());
@@ -1471,7 +1471,7 @@ public:
 		}
 
 		// Erase k by setting its deleted flag to true.  Returns true only if k existed
-		bool erase(const T& k, int skipLen = 0) {
+		bool erase(T const& k, int skipLen = 0) {
 			Cursor c(cache, tree);
 			if (c.seek(k, skipLen) == 0 && !c.isErased()) {
 				c.erase();
@@ -1486,7 +1486,7 @@ public:
 		// or if k is already in the tree (and was not already deleted).
 		// Insertion on an empty tree returns false as well.
 		// Insert does NOT change the cursor position.
-		bool insert(const T& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
+		bool insert(T const& k, int skipLen = 0, int maxHeightAllowed = std::numeric_limits<int>::max()) {
 			deltatree_printf("insert %s\n", k.toString().c_str());
 
 			int nIndex = rootIndex();
@@ -1576,7 +1576,7 @@ public:
 			int commonWithRightParent = k.getCommonPrefixLen(rightBase, common);
 			bool borrowFromLeft = commonWithLeftParent >= commonWithRightParent;
 
-			const T* base;
+			T const* base;
 			int commonPrefix;
 			if (borrowFromLeft) {
 				base = &leftBase;
@@ -1662,7 +1662,7 @@ public:
 	};
 
 	// Returns number of bytes written
-	int build(int spaceAvailable, const T* begin, const T* end, const T* lowerBound, const T* upperBound) {
+	int build(int spaceAvailable, T const* begin, T const* end, T const* lowerBound, T const* upperBound) {
 		largeNodes = spaceAvailable > SmallSizeLimit;
 		int count = end - begin;
 		numItems = count;
@@ -1689,24 +1689,24 @@ public:
 
 private:
 	int buildSubtree(Node& node,
-	                 const T* begin,
-	                 const T* end,
-	                 const T* leftParent,
-	                 const T* rightParent,
+	                 T const* begin,
+	                 T const* end,
+	                 T const* leftParent,
+	                 T const* rightParent,
 	                 int subtreeCommon) {
 
 		int count = end - begin;
 
 		// Find key to be stored in root
 		int mid = perfectSubtreeSplitPointCached(count);
-		const T& item = begin[mid];
+		T const& item = begin[mid];
 
 		int commonWithPrev = item.getCommonPrefixLen(*leftParent, subtreeCommon);
 		int commonWithNext = item.getCommonPrefixLen(*rightParent, subtreeCommon);
 
 		bool prefixSourcePrev;
 		int commonPrefix;
-		const T* base;
+		T const* base;
 		if (commonWithPrev >= commonWithNext) {
 			prefixSourcePrev = true;
 			commonPrefix = commonWithPrev;

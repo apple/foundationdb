@@ -42,7 +42,7 @@ struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType
 	KeyRangeMapSnapshot() {}
 
 	// Initialize map with a single range from min to max with a given ValueType
-	KeyRangeMapSnapshot(const KeyType& min, const KeyType& max, const ValueType& val = {}) {
+	KeyRangeMapSnapshot(KeyType const& min, KeyType const& max, ValueType const& val = {}) {
 		map[min] = val;
 		map[max] = val;
 	}
@@ -61,11 +61,11 @@ struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType
 		using pointer = RangeIter*;
 		using reference = RangeIter&;
 
-		TypedRange<const KeyType&> range() const { return { impl->first, std::next(impl)->first }; }
-		const ValueType& value() const { return impl->second; }
+		TypedRange<KeyType const&> range() const { return { impl->first, std::next(impl)->first }; }
+		ValueType const& value() const { return impl->second; }
 
-		const RangeIter& operator*() const { return *this; }
-		const RangeIter* operator->() const { return this; }
+		RangeIter const& operator*() const { return *this; }
+		RangeIter const* operator->() const { return this; }
 
 		RangeIter operator++(int) { return { impl++ }; }
 		RangeIter operator--(int) { return { impl-- }; }
@@ -78,8 +78,8 @@ struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType
 			return *this;
 		}
 
-		bool operator==(const RangeIter& rhs) const { return impl == rhs.impl; }
-		bool operator!=(const RangeIter& rhs) const { return impl != rhs.impl; }
+		bool operator==(RangeIter const& rhs) const { return impl == rhs.impl; }
+		bool operator!=(RangeIter const& rhs) const { return impl != rhs.impl; }
 	};
 
 	// Range-for compatible object representing a list of contiguous ranges.
@@ -89,7 +89,7 @@ struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType
 		RangeIter end() const { return iEnd; }
 	};
 
-	RangeIter rangeContaining(const KeyType& begin) const {
+	RangeIter rangeContaining(KeyType const& begin) const {
 		ASSERT(map.size() >= 2);
 		auto i = map.upper_bound(begin);
 		ASSERT(i != map.begin());
@@ -98,7 +98,7 @@ struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType
 	}
 
 	// Get a set of Ranges which cover [begin, end)
-	Ranges intersectingRanges(const KeyType& begin, const KeyType& end) const {
+	Ranges intersectingRanges(KeyType const& begin, KeyType const& end) const {
 		return { rangeContaining(begin), { map.lower_bound(end) } };
 	}
 

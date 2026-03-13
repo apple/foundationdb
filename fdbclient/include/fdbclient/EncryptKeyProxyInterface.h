@@ -46,23 +46,21 @@ struct KMSHealthStatus {
 
 	KMSHealthStatus() : canConnectToKms(false), canConnectToEKP(false), lastUpdatedTS(-1), kmsStable(true) {}
 
-	bool operator==(const KMSHealthStatus& other) {
+	bool operator==(KMSHealthStatus const& other) {
 		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
 	}
 
-	bool healthnessChanged(const KMSHealthStatus& other) {
+	bool healthnessChanged(KMSHealthStatus const& other) {
 		return canConnectToKms != other.canConnectToKms || canConnectToEKP != other.canConnectToEKP;
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "CanConnectToKms(" << canConnectToKms << ")"
-		   << ", CanConnectToEKP(" << canConnectToEKP << ")"
-		   << ", LastUpdatedTS(" << lastUpdatedTS << ")"
-		   << ", KMSConnectorType(" << kmsConnectorType << ")"
+		ss << "CanConnectToKms(" << canConnectToKms << ")" << ", CanConnectToEKP(" << canConnectToEKP << ")"
+		   << ", LastUpdatedTS(" << lastUpdatedTS << ")" << ", KMSConnectorType(" << kmsConnectorType << ")"
 		   << ", RESTKmsUrls(";
 		bool firstUrl = true;
-		for (const auto& url : restKMSUrls) {
+		for (auto const& url : restKMSUrls) {
 			if (!firstUrl) {
 				ss << ", ";
 			}
@@ -99,8 +97,8 @@ struct EncryptKeyProxyInterface {
 
 	UID id() const { return myId; }
 
-	bool operator==(const EncryptKeyProxyInterface& toCompare) const { return myId == toCompare.myId; }
-	bool operator!=(const EncryptKeyProxyInterface& toCompare) const { return !(*this == toCompare); }
+	bool operator==(EncryptKeyProxyInterface const& toCompare) const { return myId == toCompare.myId; }
+	bool operator!=(EncryptKeyProxyInterface const& toCompare) const { return !(*this == toCompare); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -187,7 +185,7 @@ struct EKPBaseCipherDetails {
 	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), baseCipherKCV(cipherKCV), refreshAt(refAt),
 	    expireAt(expAt) {}
 
-	bool operator==(const EKPBaseCipherDetails& r) const {
+	bool operator==(EKPBaseCipherDetails const& r) const {
 		return encryptDomainId == r.encryptDomainId && baseCipherId == r.baseCipherId && refreshAt == r.refreshAt &&
 		       expireAt == r.expireAt && baseCipherKey.toString() == r.baseCipherKey.toString();
 	}
@@ -221,10 +219,10 @@ struct EKPGetBaseCipherKeysRequestInfo {
 
 	EKPGetBaseCipherKeysRequestInfo()
 	  : domainId(INVALID_ENCRYPT_DOMAIN_ID), baseCipherId(INVALID_ENCRYPT_CIPHER_KEY_ID) {}
-	EKPGetBaseCipherKeysRequestInfo(const EncryptCipherDomainId dId, const EncryptCipherBaseKeyId bCId)
+	EKPGetBaseCipherKeysRequestInfo(EncryptCipherDomainId const dId, EncryptCipherBaseKeyId const bCId)
 	  : domainId(dId), baseCipherId(bCId) {}
 
-	bool operator==(const EKPGetBaseCipherKeysRequestInfo& info) const {
+	bool operator==(EKPGetBaseCipherKeysRequestInfo const& info) const {
 		return domainId == info.domainId && baseCipherId == info.baseCipherId;
 	}
 
@@ -255,7 +253,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 	Optional<Error> error;
 
 	EKPGetLatestBaseCipherKeysReply() : numHits(0) {}
-	explicit EKPGetLatestBaseCipherKeysReply(const std::vector<EKPBaseCipherDetails>& cipherDetails)
+	explicit EKPGetLatestBaseCipherKeysReply(std::vector<EKPBaseCipherDetails> const& cipherDetails)
 	  : baseCipherDetails(cipherDetails), numHits(0) {}
 
 	template <class Ar>
@@ -265,7 +263,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 };
 
 struct EKPGetBaseCipherKeysRequestInfo_Hash {
-	std::size_t operator()(const EKPGetBaseCipherKeysRequestInfo& info) const {
+	std::size_t operator()(EKPGetBaseCipherKeysRequestInfo const& info) const {
 		boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>> hasher;
 		return hasher(std::make_pair(info.domainId, info.baseCipherId));
 	}
@@ -278,7 +276,7 @@ struct EKPGetLatestBaseCipherKeysRequest {
 	ReplyPromise<EKPGetLatestBaseCipherKeysReply> reply;
 
 	EKPGetLatestBaseCipherKeysRequest() {}
-	explicit EKPGetLatestBaseCipherKeysRequest(const std::vector<EncryptCipherDomainId>& ids) : encryptDomainIds(ids) {}
+	explicit EKPGetLatestBaseCipherKeysRequest(std::vector<EncryptCipherDomainId> const& ids) : encryptDomainIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

@@ -29,7 +29,7 @@ struct AtomicOpsApiCorrectnessWorkload : TestWorkload {
 	uint32_t opType;
 
 private:
-	static int getApiVersion(const Database& cx) { return cx->apiVersion.version(); }
+	static int getApiVersion(Database const& cx) { return cx->apiVersion.version(); }
 
 	static void setApiVersion(Database* cx, int version) { (*cx)->apiVersion = ApiVersion(version); }
 
@@ -94,7 +94,7 @@ public:
 	                                             uint32_t opType,
 	                                             Key key) {
 		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+		Value val = StringRef((uint8_t const*)&intValue, sizeof(intValue));
 
 		// Do operation on Storage Server
 		while (true) {
@@ -160,7 +160,7 @@ public:
 	                                               uint32_t opType,
 	                                               Key key) {
 		uint64_t intValue = deterministicRandom()->randomInt(0, 10000000);
-		Value val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
+		Value val = StringRef((uint8_t const*)&intValue, sizeof(intValue));
 
 		// Do operation on Storage Server
 		while (true) {
@@ -232,10 +232,10 @@ public:
 		Value otherVal;
 		uint64_t val = deterministicRandom()->randomInt(0, 10000000);
 		if (deterministicRandom()->random01() < 0.5) {
-			existingVal = StringRef((const uint8_t*)&val, sizeof(val));
+			existingVal = StringRef((uint8_t const*)&val, sizeof(val));
 			otherVal = StringRef();
 		} else {
-			otherVal = StringRef((const uint8_t*)&val, sizeof(val));
+			otherVal = StringRef((uint8_t const*)&val, sizeof(val));
 			existingVal = StringRef();
 		}
 		// Do operation on Storage Server
@@ -304,8 +304,8 @@ public:
 	                             DoAtomicOpFunction opFunc) {
 		uint64_t intValue1 = deterministicRandom()->randomInt(0, 10000000);
 		uint64_t intValue2 = deterministicRandom()->randomInt(0, 10000000);
-		Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
-		Value val2 = StringRef((const uint8_t*)&intValue2, sizeof(intValue2));
+		Value val1 = StringRef((uint8_t const*)&intValue1, sizeof(intValue1));
+		Value val2 = StringRef((uint8_t const*)&intValue2, sizeof(intValue2));
 
 		// Do operation on Storage Server
 		while (true) {
@@ -382,8 +382,8 @@ public:
 		uint64_t intValue2 =
 		    deterministicRandom()->coinflip() ? intValue1 : deterministicRandom()->randomInt(0, 10000000);
 
-		Value val1 = StringRef((const uint8_t*)&intValue1, sizeof(intValue1));
-		Value val2 = StringRef((const uint8_t*)&intValue2, sizeof(intValue2));
+		Value val1 = StringRef((uint8_t const*)&intValue1, sizeof(intValue1));
+		Value val2 = StringRef((uint8_t const*)&intValue2, sizeof(intValue2));
 		std::function<Optional<uint64_t>(uint64_t, uint64_t)> opFunc = [keySet](uint64_t val1, uint64_t val2) {
 			if (!keySet || val1 == val2) {
 				return Optional<uint64_t>();
@@ -494,7 +494,7 @@ public:
 			if (v2.size() == 0)
 				return StringRef();
 			else
-				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
+				return StringRef((uint8_t const*)&zeroVal, sizeof(zeroVal));
 		});
 
 		// Current API Version
@@ -509,7 +509,7 @@ public:
 			if (v2.size() == 0)
 				return StringRef();
 			else
-				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
+				return StringRef((uint8_t const*)&zeroVal, sizeof(zeroVal));
 		});
 	}
 
@@ -540,7 +540,7 @@ public:
 			if (v2.size() == 0)
 				return StringRef();
 			else
-				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
+				return StringRef((uint8_t const*)&zeroVal, sizeof(zeroVal));
 		});
 
 		// Current API Version
@@ -555,7 +555,7 @@ public:
 			if (v2.size() == 0)
 				return StringRef();
 			else
-				return StringRef((const uint8_t*)&zeroVal, sizeof(zeroVal));
+				return StringRef((uint8_t const*)&zeroVal, sizeof(zeroVal));
 		});
 	}
 
@@ -605,7 +605,7 @@ public:
 		TraceEvent(SevInfo, "Running Atomic Op BYTE_MIN Correctness Current Api Version").log();
 		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMin, key);
 		co_await self->testAtomicOpApi(cx, self, MutationRef::ByteMin, key, [](uint64_t val1, uint64_t val2) {
-			return StringRef((const uint8_t*)&val1, sizeof(val1)) < StringRef((const uint8_t*)&val2, sizeof(val2))
+			return StringRef((uint8_t const*)&val1, sizeof(val1)) < StringRef((uint8_t const*)&val2, sizeof(val2))
 			           ? val1
 			           : val2;
 		});
@@ -619,7 +619,7 @@ public:
 		TraceEvent(SevInfo, "Running Atomic Op BYTE_MAX Correctness Current Api Version").log();
 		co_await self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::ByteMax, key);
 		co_await self->testAtomicOpApi(cx, self, MutationRef::ByteMax, key, [](uint64_t val1, uint64_t val2) {
-			return StringRef((const uint8_t*)&val1, sizeof(val1)) > StringRef((const uint8_t*)&val2, sizeof(val2))
+			return StringRef((uint8_t const*)&val1, sizeof(val1)) > StringRef((uint8_t const*)&val2, sizeof(val2))
 			           ? val1
 			           : val2;
 		});

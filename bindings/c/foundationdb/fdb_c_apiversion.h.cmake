@@ -24,15 +24,15 @@
  */
 
 /* The latest FDB C API version */
-#define FDB_LATEST_API_VERSION @FDB_AV_LATEST_VERSION@
+#define FDB_LATEST_API_VERSION @FDB_AV_LATEST_VERSION @
 
 /* The latest FDB API version supported by bindings. It may lag behind the latest C API version */
-#define FDB_LATEST_BINDINGS_API_VERSION @FDB_AV_LATEST_BINDINGS_VERSION@
+#define FDB_LATEST_BINDINGS_API_VERSION @FDB_AV_LATEST_BINDINGS_VERSION @
 
 /* API version introducing client_tmp_dir option */
-#define FDB_API_VERSION_CLIENT_TMP_DIR @FDB_AV_CLIENT_TMP_DIR@
+#define FDB_API_VERSION_CLIENT_TMP_DIR @FDB_AV_CLIENT_TMP_DIR @
 
 /* API version introducing disable_client_bypass option */
-#define FDB_API_VERSION_DISABLE_CLIENT_BYPASS @FDB_AV_DISABLE_CLIENT_BYPASS@
+#define FDB_API_VERSION_DISABLE_CLIENT_BYPASS @FDB_AV_DISABLE_CLIENT_BYPASS @
 
 #endif

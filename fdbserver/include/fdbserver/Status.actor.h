@@ -54,7 +54,7 @@ Future<StatusReply> clusterGetStatus(
     std::unordered_map<NetworkAddress, double /* latest time at which address was excluded */> const&
         excludedDegradedServers);
 
-StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);
+StatusReply clusterGetFaultToleranceStatus(std::string const& statusString);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(

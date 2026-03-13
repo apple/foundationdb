@@ -25,7 +25,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
-const int keyBytes = 16;
+int const keyBytes = 16;
 
 struct QueuePushWorkload : TestWorkload {
 	static constexpr auto NAME = "QueuePush";

@@ -46,7 +46,7 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
+			for (auto const& i : r) {
 				auto addr = i.key.removePrefix(special_keys::excludedServersSpecialKeyRange.begin).toString();
 				exclusions.push_back(addr);
 			}
@@ -75,7 +75,7 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> exclusions;
-			for (const auto& i : r) {
+			for (auto const& i : r) {
 				auto addr = i.key.removePrefix(special_keys::failedServersSpecialKeyRange.begin).toString();
 				exclusions.push_back(addr);
 			}
@@ -105,7 +105,7 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
+			for (auto const& i : r) {
 				auto locality = i.key.removePrefix(special_keys::excludedLocalitySpecialKeyRange.begin).toString();
 				excludedLocalities.push_back(locality);
 			}
@@ -128,7 +128,7 @@ Future<std::set<NetworkAddress>> getInProgressExclusion(Reference<ITransaction> 
 	RangeResult result = co_await safeThreadFutureToFuture(resultFuture);
 	ASSERT(!result.more && result.size() < CLIENT_KNOBS->TOO_MANY);
 	std::set<NetworkAddress> inProgressExclusion;
-	for (const auto& addr : result) {
+	for (auto const& addr : result) {
 		inProgressExclusion.insert(NetworkAddress::parse(
 		    addr.key.removePrefix(fdbctl::special_keys::exclusionInProgressSpecialKeyRange.begin).toString()));
 	}
@@ -146,7 +146,7 @@ Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 			ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<std::string> excludedLocalities;
-			for (const auto& i : r) {
+			for (auto const& i : r) {
 				auto locality = i.key.removePrefix(special_keys::failedLocalitySpecialKeyRange.begin).toString();
 				excludedLocalities.push_back(locality);
 			}
@@ -181,7 +181,7 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 				tr->set(failed ? special_keys::failedForceOptionSpecialKey
 				               : special_keys::excludedForceOptionSpecialKey,
 				        ValueRef());
-			for (const auto& s : servers) {
+			for (auto const& s : servers) {
 				Key addr = failed ? special_keys::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
 				                  : special_keys::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
 				tr->set(addr, ValueRef());
@@ -190,7 +190,7 @@ Future<Void> excludeServersAndLocalities(Reference<IDatabase> db,
 				tr->set(failed ? special_keys::failedLocalityForceOptionSpecialKey
 				               : special_keys::excludedLocalityForceOptionSpecialKey,
 				        ValueRef());
-			for (const auto& l : localities) {
+			for (auto const& l : localities) {
 				Key addr = failed ? special_keys::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 				                  : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
 				tr->set(addr, ValueRef());
@@ -238,12 +238,12 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 
 			// Check if all of the specified exclusions are done.
 			bool allExcluded = true;
-			for (const auto& inProgressAddr : inProgressExclusion) {
+			for (auto const& inProgressAddr : inProgressExclusion) {
 				if (!allExcluded) {
 					break;
 				}
 
-				for (const auto& exclusion : exclusions) {
+				for (auto const& exclusion : exclusions) {
 					// We found an exclusion that is still in progress
 					if (exclusion.excludes(inProgressAddr)) {
 						allExcluded = false;
@@ -276,7 +276,7 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 	co_return inProgressExclusion;
 }
 
-Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req, ExcludeReply* rep) {
+Future<grpc::Status> exclude(Reference<IDatabase> db, ExcludeRequest const* req, ExcludeReply* rep) {
 	try {
 		std::vector<ProcessData> workers;
 		std::map<std::string, StorageServerInterface> server_interfaces;
@@ -342,18 +342,18 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		rep->set_data_movement_complete(notExcludedServers.empty());
 
 		// Populate the list of excluded addresses
-		for (const auto& addr : exclusionSet) {
+		for (auto const& addr : exclusionSet) {
 			rep->add_excluded_addresses(addr.toString());
 		}
 
 		// Build a map of worker addresses for quick lookup
 		std::map<IPAddress, std::set<uint16_t>> workerPorts;
-		for (const auto& addr : workers)
+		for (auto const& addr : workers)
 			workerPorts[addr.address.ip].insert(addr.address.port);
 
 		// Find all excluded addresses that don't have a corresponding worker
 		std::set<AddressExclusion> absentExclusions;
-		for (const auto& addr : exclusionSet) {
+		for (auto const& addr : exclusionSet) {
 			auto worker = workerPorts.find(addr.ip);
 			if (worker == workerPorts.end())
 				absentExclusions.insert(addr);
@@ -362,7 +362,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		}
 
 		// Populate absent_addresses field
-		for (const auto& addr : absentExclusions) {
+		for (auto const& addr : absentExclusions) {
 			rep->add_absent_addresses(addr.toString());
 		}
 
@@ -374,43 +374,43 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		}
 
 		co_return grpc::Status::OK;
-	} catch (const Error& e) {
+	} catch (Error const& e) {
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
 		                       fmt::format("Error getting worker information: {}", e.what()));
 	}
 }
 
-Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusRequest* req, ExcludeStatusReply* rep) {
+Future<grpc::Status> excludeStatus(Reference<IDatabase> db, ExcludeStatusRequest const* req, ExcludeStatusReply* rep) {
 	try {
 		std::vector<std::string> excludedAddresses = co_await fdbctl::utils::getExcludedServers(db);
 		std::vector<std::string> excludedLocalities = co_await fdbctl::utils::getExcludedLocalities(db);
 		std::vector<std::string> failedAddresses = co_await fdbctl::utils::getFailedServers(db);
 		std::vector<std::string> failedLocalities = co_await fdbctl::utils::getFailedLocalities(db);
 
-		for (const auto& e : excludedAddresses) {
+		for (auto const& e : excludedAddresses) {
 			rep->add_excluded_addresses(e);
 		}
 
-		for (const auto& e : excludedLocalities) {
+		for (auto const& e : excludedLocalities) {
 			rep->add_excluded_localities(e);
 		}
 
-		for (const auto& f : failedAddresses) {
+		for (auto const& f : failedAddresses) {
 			rep->add_failed_addresses(f);
 		}
 
-		for (const auto& f : failedLocalities) {
+		for (auto const& f : failedLocalities) {
 			rep->add_failed_localities(f);
 		}
 
 		Reference<ITransaction> tr = db->createTransaction();
 		std::set<NetworkAddress> inProgressExclusion = co_await utils::getInProgressExclusion(tr);
-		for (const auto& addr : inProgressExclusion) {
+		for (auto const& addr : inProgressExclusion) {
 			rep->add_in_progress_excludes(addr.toString());
 		}
 
 		co_return grpc::Status::OK;
-	} catch (const Error& e) {
+	} catch (Error const& e) {
 		co_return grpc::Status(grpc::StatusCode::INTERNAL,
 		                       fmt::format("Error getting worker information: {}", e.what()));
 	}

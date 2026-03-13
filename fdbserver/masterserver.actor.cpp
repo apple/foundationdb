@@ -287,7 +287,7 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 #ifdef WITH_SWIFT
 	using namespace fdbserver_swift;
 	// FIXME(swift): can we make a cleaner init?
-	swiftImpl.reset(new MasterDataActor((const MasterDataActor&)MasterDataActor::init()));
+	swiftImpl.reset(new MasterDataActor((MasterDataActor const&)MasterDataActor::init()));
 #endif
 }
 

@@ -33,7 +33,7 @@
 #include "flow/ThreadHelper.actor.h"
 namespace {
 
-ReadHotSubRangeRequest::SplitType parseSplitType(const std::string& typeStr) {
+ReadHotSubRangeRequest::SplitType parseSplitType(std::string const& typeStr) {
 	auto type = ReadHotSubRangeRequest::SplitType::BYTES;
 	if (typeStr == "bytes") {
 		type = ReadHotSubRangeRequest::BYTES;
@@ -61,7 +61,7 @@ Future<bool> hotRangeCommandActor(Database localdb,
 		storage_interface->clear();
 		co_await getStorageServerInterfaces(db, storage_interface);
 		fmt::print("\nThe following {} storage servers can be queried:\n", storage_interface->size());
-		for (const auto& [addr, _] : *storage_interface) {
+		for (auto const& [addr, _] : *storage_interface) {
 			fmt::print("{}\n", addr);
 		}
 		fmt::print("\n");
@@ -90,7 +90,7 @@ Future<bool> hotRangeCommandActor(Database localdb,
 		    (*storage_interface)[address.toString()], range, splitType, splitCount);
 		// next parse the result and form a json array for each object
 		json_spirit::mArray resultArray;
-		for (const auto& metric : metrics) {
+		for (auto const& metric : metrics) {
 			json_spirit::mObject metricObj;
 			metricObj["begin"] = metric.keys.begin.toString();
 			metricObj["end"] = metric.keys.end.toString();
@@ -100,7 +100,7 @@ Future<bool> hotRangeCommandActor(Database localdb,
 			resultArray.push_back(metricObj);
 		}
 		// print out the json array
-		const std::string result =
+		std::string const result =
 		    json_spirit::write_string(json_spirit::mValue(resultArray), json_spirit::pretty_print);
 		fmt::print("\n{}\n", result);
 	} else {

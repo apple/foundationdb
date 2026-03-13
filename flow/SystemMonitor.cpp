@@ -99,7 +99,7 @@ void systemMonitor() {
 
 SystemStatistics getSystemStatistics() {
 	static StatisticsState statState = StatisticsState();
-	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
+	IPAddress const ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	return getSystemStatistics(
 	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState.systemState, false);
 }
@@ -120,12 +120,12 @@ namespace {
 
 #ifdef __linux__
 // Converts cgroup key, e.g. nr_periods, to NrPeriods
-std::string capitalizeCgroupKey(const std::string& key) {
+std::string capitalizeCgroupKey(std::string const& key) {
 	bool wordStart = true;
 	std::string result;
 	result.reserve(key.size());
 
-	for (const char ch : key) {
+	for (char const ch : key) {
 		if (std::isalnum(ch)) {
 			if (wordStart) {
 				result.push_back(std::toupper(ch));
@@ -146,7 +146,7 @@ std::string capitalizeCgroupKey(const std::string& key) {
 } // anonymous namespace
 
 SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsState* statState, bool machineMetrics) {
-	const IPAddress ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
+	IPAddress const ipAddr = machineState.ip.present() ? machineState.ip.get() : IPAddress();
 	SystemStatistics currentStats = getSystemStatistics(
 	    machineState.folder.present() ? machineState.folder.get() : "", &ipAddr, &statState->systemState, true);
 	NetworkData netData;
@@ -383,7 +383,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DatahallID", machineState.datahallId)
 			    .trackLatest("MachineMetrics");
 #ifdef __linux__
-			for (const auto& [k, v] : linux_os::reportCGroupCpuStat()) {
+			for (auto const& [k, v] : linux_os::reportCGroupCpuStat()) {
 				traceEvent.detail(capitalizeCgroupKey(k).c_str(), v);
 			}
 #endif // __linux__
@@ -397,7 +397,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			firstTime = now();
 		if (now() - firstTime > 10 || g_network->isSimulated()) {
 			firstTime = now();
-			std::vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, char const*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 #ifdef __linux__
@@ -422,7 +422,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
+				char const* n = typeNames[i].second;
 				auto& f = allocInstr[n];
 				if (f.maxAllocated > 10000)
 					TraceEvent("AllocInstrument")

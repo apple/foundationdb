@@ -183,7 +183,7 @@ typedef union ALIGN_STRUCT(16) SIMDVec {
 // Older gcc does not define vld1q_u8_x4 type
 #if defined(__GNUC__) && !defined(__clang__)
 #if __GNUC__ < 9 || (__GNUC__ == 9 && (__GNUC_MINOR__ <= 2))
-FORCE_INLINE uint8x16x4_t vld1q_u8_x4(const uint8_t* p) {
+FORCE_INLINE uint8x16x4_t vld1q_u8_x4(uint8_t const* p) {
 	uint8x16x4_t ret;
 	ret.val[0] = vld1q_u8(p + 0);
 	ret.val[1] = vld1q_u8(p + 16);
@@ -200,7 +200,7 @@ FORCE_INLINE uint8x16x4_t vld1q_u8_x4(const uint8_t* p) {
 
 // Loads one cache line of data from address p to a location closer to the
 // processor. https://msdn.microsoft.com/en-us/library/84szxsww(v=vs.100).aspx
-FORCE_INLINE void _mm_prefetch(const void* p, int i) {
+FORCE_INLINE void _mm_prefetch(void const* p, int i) {
 	(void)i;
 	__builtin_prefetch(p);
 }
@@ -455,7 +455,7 @@ FORCE_INLINE void _mm_storeh_pi(__m64* p, __m128 a) {
 // Loads a single single-precision, floating-point value, copying it into all
 // four words
 // https://msdn.microsoft.com/en-us/library/vstudio/5cdkf716(v=vs.100).aspx
-FORCE_INLINE __m128 _mm_load1_ps(const float* p) {
+FORCE_INLINE __m128 _mm_load1_ps(float const* p) {
 	return vreinterpretq_m128_f32(vld1q_dup_f32(p));
 }
 #define _mm_load_ps1 _mm_load1_ps
@@ -472,7 +472,7 @@ FORCE_INLINE __m128 _mm_load1_ps(const float* p) {
 //
 // https://msdn.microsoft.com/en-us/library/s57cyak2(v=vs.100).aspx
 FORCE_INLINE __m128 _mm_loadl_pi(__m128 a, __m64 const* p) {
-	return vreinterpretq_m128_f32(vcombine_f32(vld1_f32((const float32_t*)p), vget_high_f32(a)));
+	return vreinterpretq_m128_f32(vcombine_f32(vld1_f32((float32_t const*)p), vget_high_f32(a)));
 }
 
 // Sets the upper two single-precision, floating-point values with 64
@@ -486,18 +486,18 @@ FORCE_INLINE __m128 _mm_loadl_pi(__m128 a, __m64 const* p) {
 //
 // https://msdn.microsoft.com/en-us/library/w92wta0x(v%3dvs.100).aspx
 FORCE_INLINE __m128 _mm_loadh_pi(__m128 a, __m64 const* p) {
-	return vreinterpretq_m128_f32(vcombine_f32(vget_low_f32(a), vld1_f32((const float32_t*)p)));
+	return vreinterpretq_m128_f32(vcombine_f32(vget_low_f32(a), vld1_f32((float32_t const*)p)));
 }
 
 // Loads four single-precision, floating-point values.
 // https://msdn.microsoft.com/en-us/library/vstudio/zzd50xxt(v=vs.100).aspx
-FORCE_INLINE __m128 _mm_load_ps(const float* p) {
+FORCE_INLINE __m128 _mm_load_ps(float const* p) {
 	return vreinterpretq_m128_f32(vld1q_f32(p));
 }
 
 // Loads four single-precision, floating-point values.
 // https://msdn.microsoft.com/en-us/library/x1b16s7z%28v=vs.90%29.aspx
-FORCE_INLINE __m128 _mm_loadu_ps(const float* p) {
+FORCE_INLINE __m128 _mm_loadu_ps(float const* p) {
 	// for neon, alignment doesn't matter, so _mm_load_ps and _mm_loadu_ps are
 	// equivalent for neon
 	return vreinterpretq_m128_f32(vld1q_f32(p));
@@ -506,7 +506,7 @@ FORCE_INLINE __m128 _mm_loadu_ps(const float* p) {
 // Loads an single - precision, floating - point value into the low word and
 // clears the upper three words.
 // https://msdn.microsoft.com/en-us/library/548bb9h4%28v=vs.90%29.aspx
-FORCE_INLINE __m128 _mm_load_ss(const float* p) {
+FORCE_INLINE __m128 _mm_load_ss(float const* p) {
 	return vreinterpretq_m128_f32(vsetq_lane_f32(*p, vdupq_n_f32(0), 0));
 }
 
@@ -2628,14 +2628,14 @@ FORCE_INLINE __m128 _mm_castsi128_ps(__m128i a) {
 
 // Loads 128-bit value. :
 // https://msdn.microsoft.com/en-us/library/atzzad1h(v=vs.80).aspx
-FORCE_INLINE __m128i _mm_load_si128(const __m128i* p) {
-	return vreinterpretq_m128i_s32(vld1q_s32((const int32_t*)p));
+FORCE_INLINE __m128i _mm_load_si128(__m128i const* p) {
+	return vreinterpretq_m128i_s32(vld1q_s32((int32_t const*)p));
 }
 
 // Loads 128-bit value. :
 // https://msdn.microsoft.com/zh-cn/library/f4k12ae8(v=vs.90).aspx
-FORCE_INLINE __m128i _mm_loadu_si128(const __m128i* p) {
-	return vreinterpretq_m128i_s32(vld1q_s32((const int32_t*)p));
+FORCE_INLINE __m128i _mm_loadu_si128(__m128i const* p) {
+	return vreinterpretq_m128i_s32(vld1q_s32((int32_t const*)p));
 }
 
 // _mm_lddqu_si128 functions the same as _mm_loadu_si128.
@@ -2666,7 +2666,7 @@ FORCE_INLINE __m128i _mm_packs_epi16(__m128i a, __m128i b) {
 //   r15 := UnsignedSaturate(b7)
 //
 // https://msdn.microsoft.com/en-us/library/07ad1wx4(v=vs.100).aspx
-FORCE_INLINE __m128i _mm_packus_epi16(const __m128i a, const __m128i b) {
+FORCE_INLINE __m128i _mm_packus_epi16(__m128i const a, __m128i const b) {
 	return vreinterpretq_m128i_u8(
 	    vcombine_u8(vqmovun_s16(vreinterpretq_s16_m128i(a)), vqmovun_s16(vreinterpretq_s16_m128i(b))));
 }
@@ -3044,7 +3044,7 @@ static uint64x2_t _sse2neon_vmull_p64(uint64x1_t _a, uint64x1_t _b) {
 }
 
 #endif // ARMv7 polyfill
-FORCE_INLINE __m128i _mm_clmulepi64_si128(__m128i _a, __m128i _b, const int imm) {
+FORCE_INLINE __m128i _mm_clmulepi64_si128(__m128i _a, __m128i _b, int const imm) {
 	uint64x2_t a = vreinterpretq_u64_m128i(_a);
 	uint64x2_t b = vreinterpretq_u64_m128i(_b);
 	switch (imm & 0x11) {
@@ -3069,7 +3069,7 @@ FORCE_INLINE __m128i _mm_clmulepi64_si128(__m128i _a, __m128i _b, const int imm)
 // https://github.com/ColinIanKing/linux-next-mirror/blob/b5f466091e130caaf0735976648f72bd5e09aa84/crypto/aegis128-neon-inner.c#L52
 // for more information Reproduced with permission of the author.
 FORCE_INLINE __m128i _mm_aesenc_si128(__m128i EncBlock, __m128i RoundKey) {
-	static const uint8_t crypto_aes_sbox[256] = {
+	static uint8_t const crypto_aes_sbox[256] = {
 		0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76, 0xca, 0x82,
 		0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0, 0xb7, 0xfd, 0x93, 0x26,
 		0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15, 0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96,
@@ -3086,10 +3086,10 @@ FORCE_INLINE __m128i _mm_aesenc_si128(__m128i EncBlock, __m128i RoundKey) {
 		0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf, 0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f,
 		0xb0, 0x54, 0xbb, 0x16
 	};
-	static const uint8_t shift_rows[] = {
+	static uint8_t const shift_rows[] = {
 		0x0, 0x5, 0xa, 0xf, 0x4, 0x9, 0xe, 0x3, 0x8, 0xd, 0x2, 0x7, 0xc, 0x1, 0x6, 0xb
 	};
-	static const uint8_t ror32by8[] = {
+	static uint8_t const ror32by8[] = {
 		0x1, 0x2, 0x3, 0x0, 0x5, 0x6, 0x7, 0x4, 0x9, 0xa, 0xb, 0x8, 0xd, 0xe, 0xf, 0xc
 	};
 

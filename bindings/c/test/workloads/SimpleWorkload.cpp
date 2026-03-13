@@ -31,8 +31,8 @@
 namespace {
 
 struct SimpleWorkload final : FDBWorkload {
-	static const std::string name;
-	static const std::string KEY_PREFIX;
+	static std::string const name;
+	static std::string const KEY_PREFIX;
 	std::mt19937 random;
 	bool success = true;
 	FDBWorkloadContext* context = nullptr;
@@ -52,11 +52,11 @@ struct SimpleWorkload final : FDBWorkload {
 		FDBFuture* currentFuture = nullptr;
 		int numWaiters = 0;
 
-		ActorBase(const Callback& done, SimpleWorkload& self, FDBDatabase* db) : done(done), self(self), db(db) {}
+		ActorBase(Callback const& done, SimpleWorkload& self, FDBDatabase* db) : done(done), self(self), db(db) {}
 
 		Actor* super() { return static_cast<Actor*>(this); }
 
-		const Actor* super() const { return static_cast<const Actor*>(this); }
+		Actor const* super() const { return static_cast<Actor const*>(this); }
 
 		template <class State>
 		void wait(FDBFuture* future, State state) {
@@ -104,7 +104,7 @@ struct SimpleWorkload final : FDBWorkload {
 		unsigned long from, to, lastTx = 0;
 		std::unordered_map<State, ActorCallback> callbacks;
 
-		PopulateActor(const Callback& promise,
+		PopulateActor(Callback const& promise,
 		              SimpleWorkload& self,
 		              FDBDatabase* db,
 		              unsigned long from,
@@ -134,9 +134,9 @@ struct SimpleWorkload final : FDBWorkload {
 				std::string value = std::to_string(from);
 				std::string key = KEY_PREFIX + value;
 				fdb_transaction_set(tx,
-				                    reinterpret_cast<const uint8_t*>(key.c_str()),
+				                    reinterpret_cast<uint8_t const*>(key.c_str()),
 				                    key.size(),
-				                    reinterpret_cast<const uint8_t*>(value.c_str()),
+				                    reinterpret_cast<uint8_t const*>(value.c_str()),
 				                    value.size());
 			}
 			lastTx = ops;
@@ -183,7 +183,7 @@ struct SimpleWorkload final : FDBWorkload {
 		unsigned numGets = 0;
 		double startTime;
 
-		ClientActor(const Callback& promise, SimpleWorkload& self, FDBDatabase* db)
+		ClientActor(Callback const& promise, SimpleWorkload& self, FDBDatabase* db)
 		  : ActorBase(promise, self, db), random(0, self.numTuples - 1), startTime(self.context->now()) {
 			error = fdb_database_create_transaction(db, &tx);
 			if (error) {
@@ -206,7 +206,7 @@ struct SimpleWorkload final : FDBWorkload {
 				return;
 			}
 			auto key = KEY_PREFIX + std::to_string(random(self.random));
-			auto f = fdb_transaction_get(tx, reinterpret_cast<const uint8_t*>(key.c_str()), key.size(), false);
+			auto f = fdb_transaction_get(tx, reinterpret_cast<uint8_t const*>(key.c_str()), key.size(), false);
 			wait(f, State::Get);
 		}
 
@@ -357,7 +357,7 @@ struct SimpleWorkload final : FDBWorkload {
 	void check(FDBDatabase* db, GenericPromise<bool> done) override { done.send(success); }
 
 	template <class Vec>
-	double accumulateMetric(const Vec& v) const {
+	double accumulateMetric(Vec const& v) const {
 		double res = 0.0;
 		for (auto val : v) {
 			res += val;
@@ -372,8 +372,8 @@ struct SimpleWorkload final : FDBWorkload {
 	}
 };
 
-const std::string SimpleWorkload::name = "SimpleWorkload";
-const std::string SimpleWorkload::KEY_PREFIX = "csimple/";
+std::string const SimpleWorkload::name = "SimpleWorkload";
+std::string const SimpleWorkload::KEY_PREFIX = "csimple/";
 
 } // namespace
 

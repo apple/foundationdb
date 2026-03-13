@@ -40,8 +40,8 @@
 
 template <typename T>
 typename std::enable_if<std::is_integral<T>::value, int>::type compare(T l, T r) {
-	const int gt = l > r;
-	const int lt = l < r;
+	int const gt = l > r;
+	int const lt = l < r;
 	return gt - lt;
 	// GCC also emits branchless code for the following, but the above performs
 	// slightly better in benchmarks as of this writing.
@@ -72,18 +72,18 @@ public:
 	std::string shortString() const;
 	bool isValid() const { return part[0] || part[1]; }
 
-	int compare(const UID& r) const {
+	int compare(UID const& r) const {
 		if (int cmp = ::compare(part[0], r.part[0])) {
 			return cmp;
 		}
 		return ::compare(part[1], r.part[1]);
 	}
-	bool operator==(const UID& r) const { return part[0] == r.part[0] && part[1] == r.part[1]; }
-	bool operator!=(const UID& r) const { return part[0] != r.part[0] || part[1] != r.part[1]; }
-	bool operator<(const UID& r) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
-	bool operator>(const UID& r) const { return r < *this; }
-	bool operator<=(const UID& r) const { return !(*this > r); }
-	bool operator>=(const UID& r) const { return !(*this < r); }
+	bool operator==(UID const& r) const { return part[0] == r.part[0] && part[1] == r.part[1]; }
+	bool operator!=(UID const& r) const { return part[0] != r.part[0] || part[1] != r.part[1]; }
+	bool operator<(UID const& r) const { return part[0] < r.part[0] || (part[0] == r.part[0] && part[1] < r.part[1]); }
+	bool operator>(UID const& r) const { return r < *this; }
+	bool operator<=(UID const& r) const { return !(*this > r); }
+	bool operator>=(UID const& r) const { return !(*this < r); }
 
 	uint64_t hash() const { return first(); }
 	uint64_t first() const { return part[0]; }
@@ -112,22 +112,22 @@ template <>
 struct scalar_traits<UID> : std::true_type {
 	constexpr static size_t size = sizeof(uint64_t[2]);
 	template <class Context>
-	static void save(uint8_t* out, const UID& uid, Context&) {
+	static void save(uint8_t* out, UID const& uid, Context&) {
 		uint64_t* outI = reinterpret_cast<uint64_t*>(out);
 		outI[0] = uid.first();
 		outI[1] = uid.second();
 	}
 
 	template <class Context>
-	static void load(const uint8_t* i, UID& out, Context& context) {
-		const uint64_t* in = reinterpret_cast<const uint64_t*>(i);
+	static void load(uint8_t const* i, UID& out, Context& context) {
+		uint64_t const* in = reinterpret_cast<uint64_t const*>(i);
 		out = UID(in[0], in[1]);
 	}
 };
 
 template <>
 struct Traceable<UID> : std::true_type {
-	static std::string toString(const UID& value) { return format("%016llx", value.first()); }
+	static std::string toString(UID const& value) { return format("%016llx", value.first()); }
 };
 
 namespace std {
@@ -158,7 +158,7 @@ public:
 	// 1 percent -> returns true with a probability of 1% (0.01)
 	// 50 percent -> returns true with a probability of 50% (0.5)
 	// 99 percent -> returns true with a probability of 99% (0.99)
-	virtual bool truePercent(const int percent) = 0;
+	virtual bool truePercent(int const percent) = 0;
 
 	virtual uint64_t peek() const = 0; // returns something that is probably different for different random states.
 	                                   // Deterministic (and idempotent) for a deterministic generator.
@@ -171,7 +171,7 @@ public:
 
 	// The following functions have fixed implementations for now:
 	template <class C>
-	decltype((std::declval<const C>()[0])) randomChoice(const C& c) {
+	decltype((std::declval<C const>()[0])) randomChoice(C const& c) {
 		return c[randomInt(0, (int)c.size())];
 	}
 

@@ -36,7 +36,7 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 	// if not used for backup, don't prefix paths with fdbbackup-specific logic
 	bool isBackup;
 
-	std::string dataPath(const std::string& path);
+	std::string dataPath(std::string const& path);
 
 	// Get the path of the backups's index entry
 	std::string indexEntry();
@@ -45,9 +45,9 @@ class BackupContainerS3BlobStore final : public BackupContainerFileSystem,
 
 public:
 	BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
-	                           const std::string& name,
-	                           const S3BlobStoreEndpoint::ParametersT& params,
-	                           const Optional<std::string>& encryptionKeyFileName,
+	                           std::string const& name,
+	                           S3BlobStoreEndpoint::ParametersT const& params,
+	                           Optional<std::string> const& encryptionKeyFileName,
 	                           bool isBackup);
 
 	void addref() override;
@@ -55,17 +55,17 @@ public:
 
 	static std::string getURLFormat();
 
-	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
+	Future<Reference<IAsyncFile>> readFile(std::string const& path) final;
 
-	static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, const std::string& bucket);
+	static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, std::string const& bucket);
 
-	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
+	Future<Reference<IBackupFile>> writeFile(std::string const& path) final;
 
-	Future<Void> writeEntireFile(const std::string& path, const std::string& contents) final;
+	Future<Void> writeEntireFile(std::string const& path, std::string const& contents) final;
 
-	Future<Void> deleteFile(const std::string& path) final;
+	Future<Void> deleteFile(std::string const& path) final;
 
-	Future<FilesAndSizesT> listFiles(const std::string& path, std::function<bool(std::string const&)> pathFilter) final;
+	Future<FilesAndSizesT> listFiles(std::string const& path, std::function<bool(std::string const&)> pathFilter) final;
 
 	Future<Void> create() final;
 

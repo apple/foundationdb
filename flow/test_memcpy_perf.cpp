@@ -17,10 +17,10 @@
 #include <sys/time.h>
 
 extern "C" {
-void* folly_memcpy(void* dst, const void* src, uint32_t length);
+void* folly_memcpy(void* dst, void const* src, uint32_t length);
 }
 
-void* rte_memcpy_noinline(void* dst, const void* src, size_t length); // for performance comparisons
+void* rte_memcpy_noinline(void* dst, void const* src, size_t length); // for performance comparisons
 
 /*
  * Set this to the maximum buffer size you want to test. If it is 0, then the
@@ -159,7 +159,7 @@ static inline void fill_addr_arrays(size_t* dst_addr,
  * takes a very long time (~25 times longer than is expected). So we do
  * it once without timing.
  */
-static void do_uncached_write(uint8_t* dst, int is_dst_cached, const uint8_t* src, int is_src_cached, size_t size) {
+static void do_uncached_write(uint8_t* dst, int is_dst_cached, uint8_t const* src, int is_src_cached, size_t size) {
 	unsigned i, j;
 	size_t dst_addrs[TEST_BATCH_SIZE], src_addrs[TEST_BATCH_SIZE];
 

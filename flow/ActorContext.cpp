@@ -45,15 +45,15 @@ using ActiveActorsCount_t = uint32_t;
 
 ActiveActor::ActiveActor() : identifier(), id(), spawnTime(0.0), spawner(INVALID_ACTOR_ID) {}
 
-ActiveActor::ActiveActor(const ActorIdentifier& identifier_, const ActorID& id_, const ActorID& spawnerID_)
+ActiveActor::ActiveActor(ActorIdentifier const& identifier_, ActorID const& id_, ActorID const& spawnerID_)
   : identifier(identifier_), id(id_), spawnTime(g_network != nullptr ? g_network->now() : 0.0), spawner(spawnerID_) {}
 
-ActiveActorHelper::ActiveActorHelper(const ActorIdentifier& actorIdentifier) {
+ActiveActorHelper::ActiveActorHelper(ActorIdentifier const& actorIdentifier) {
 	if (!isActorOnMainThread()) [[unlikely]] {
 		return;
 	}
-	const auto actorID_ = getActorID();
-	const auto spawnerActorID = getActorSpawnerID();
+	auto const actorID_ = getActorID();
+	auto const spawnerActorID = getActorSpawnerID();
 	actorID = actorID_;
 	g_activeActors[actorID] = ActiveActor(actorIdentifier, actorID, spawnerActorID);
 }
@@ -65,8 +65,8 @@ ActiveActorHelper::~ActiveActorHelper() {
 	g_activeActors.erase(actorID);
 }
 
-ActorExecutionContextHelper::ActorExecutionContextHelper(const ActorID& actorID_,
-                                                         const ActorBlockIdentifier& blockIdentifier_) {
+ActorExecutionContextHelper::ActorExecutionContextHelper(ActorID const& actorID_,
+                                                         ActorBlockIdentifier const& blockIdentifier_) {
 	if (!isActorOnMainThread()) [[unlikely]] {
 		return;
 	}
@@ -87,7 +87,7 @@ ActorExecutionContextHelper::~ActorExecutionContextHelper() {
 // TODO: Rewrite this function for better display
 void dumpActors(std::ostream& stream) {
 	stream << "Current active ACTORs:" << std::endl;
-	for (const auto& [actorID, activeActor] : g_activeActors) {
+	for (auto const& [actorID, activeActor] : g_activeActors) {
 		stream << std::setw(10) << actorID << "  " << activeActor.identifier.toString() << std::endl;
 		if (activeActor.spawner != INVALID_ACTOR_ID) {
 			stream << "        Spawn by " << std::setw(10) << activeActor.spawner << std::endl;
@@ -97,7 +97,7 @@ void dumpActors(std::ostream& stream) {
 
 namespace {
 
-std::vector<ActiveActor> getCallBacktraceOfActor(const ActorID& actorID) {
+std::vector<ActiveActor> getCallBacktraceOfActor(ActorID const& actorID) {
 	std::vector<ActiveActor> actorBacktrace;
 	auto currentActorID = actorID;
 	for (;;) {
@@ -127,9 +127,9 @@ void dumpActorCallBacktrace() {
 	std::cout << backtrace << std::endl;
 }
 
-std::string encodeActorContext(const ActorContextDumpType dumpType) {
+std::string encodeActorContext(ActorContextDumpType const dumpType) {
 	BinaryWriter writer(Unversioned());
-	auto writeActorInfo = [&writer](const ActiveActor& actor) {
+	auto writeActorInfo = [&writer](ActiveActor const& actor) {
 		writer << actor.id << actor.identifier << actor.spawner;
 	};
 
@@ -139,7 +139,7 @@ std::string encodeActorContext(const ActorContextDumpType dumpType) {
 	switch (dumpType) {
 	case ActorContextDumpType::FULL_CONTEXT:
 		writer << static_cast<ActiveActorsCount_t>(g_activeActors.size());
-		for (const auto& [actorID, activeActor] : g_activeActors) {
+		for (auto const& [actorID, activeActor] : g_activeActors) {
 			writeActorInfo(activeActor);
 		}
 		break;
@@ -151,7 +151,7 @@ std::string encodeActorContext(const ActorContextDumpType dumpType) {
 				break;
 			}
 			writer << static_cast<ActiveActorsCount_t>(g_currentExecutionContext.size());
-			for (const auto& context : g_currentExecutionContext) {
+			for (auto const& context : g_currentExecutionContext) {
 				writeActorInfo(g_activeActors.at(context.actorID));
 			}
 		}
@@ -163,9 +163,9 @@ std::string encodeActorContext(const ActorContextDumpType dumpType) {
 				writer << static_cast<ActiveActorsCount_t>(0);
 				break;
 			}
-			const auto actors = getCallBacktraceOfActor(g_currentExecutionContext.back().actorID);
+			auto const actors = getCallBacktraceOfActor(g_currentExecutionContext.back().actorID);
 			writer << static_cast<ActiveActorsCount_t>(actors.size());
-			for (const auto& item : actors) {
+			for (auto const& item : actors) {
 				writeActorInfo(item);
 			}
 		}
@@ -174,13 +174,13 @@ std::string encodeActorContext(const ActorContextDumpType dumpType) {
 		UNREACHABLE();
 	}
 
-	const std::string data = writer.toValue().toString();
+	std::string const data = writer.toValue().toString();
 	return base64::encoder::from_string(data);
 }
 
-DecodedActorContext decodeActorContext(const std::string& caller) {
+DecodedActorContext decodeActorContext(std::string const& caller) {
 	DecodedActorContext result;
-	const auto decoded = base64::decoder::from_string(caller);
+	auto const decoded = base64::decoder::from_string(caller);
 	BinaryReader reader(decoded, Unversioned());
 
 	std::underlying_type_t<ActorContextDumpType> dumpTypeRaw;

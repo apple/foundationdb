@@ -52,7 +52,7 @@ struct RangeResultBlock {
 
 	bool empty() { return indexToRead == result.size(); }
 
-	bool operator<(const RangeResultBlock& r) const {
+	bool operator<(RangeResultBlock const& r) const {
 		// We want a min heap. The standard C++ priority queue is a max heap.
 		return firstVersion > r.firstVersion;
 	}

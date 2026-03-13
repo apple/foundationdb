@@ -99,7 +99,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 			co_await ThrottleApi::enableAuto(cx.getReference(), true);
 		}
 	}
-	Future<Void> setup(const Database& cx) override {
+	Future<Void> setup(Database const& cx) override {
 		if (CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION < MIN_TAGS_PER_TRANSACTION ||
 		    CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < MIN_TRANSACTION_TAG_LENGTH) {
 			fastSuccess = true;
@@ -311,7 +311,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		}
 	}
 
-	static std::string setToString(const std::set<std::string>& myset) {
+	static std::string setToString(std::set<std::string> const& myset) {
 		std::string res;
 		for (auto& s : myset) {
 			res.append(s).push_back(' ');

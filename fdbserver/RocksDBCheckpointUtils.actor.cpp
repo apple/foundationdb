@@ -57,13 +57,13 @@ namespace {
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
-const KeyRef persistVersion = "\xff\xffVersion"_sr;
-const KeyRef readerInitialized = "\xff\xff/ReaderInitialized"_sr;
-const std::string checkpointCf = "RocksDBCheckpoint";
-const std::string checkpointReaderSubDir = "/reader";
-const std::string rocksDefaultCf = "default";
+KeyRef const persistVersion = "\xff\xffVersion"_sr;
+KeyRef const readerInitialized = "\xff\xff/ReaderInitialized"_sr;
+std::string const checkpointCf = "RocksDBCheckpoint";
+std::string const checkpointReaderSubDir = "/reader";
+std::string const rocksDefaultCf = "default";
 
-rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
+rocksdb::ExportImportFilesMetaData getMetaData(CheckpointMetaData const& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
 	if (checkpoint.getFormat() != DataMoveRocksCF) {
 		return metaData;
@@ -72,7 +72,7 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 	metaData.db_comparator_name = rocksCF.dbComparatorName;
 
-	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
+	for (LiveFileMetaData const& fileMetaData : rocksCF.sstFiles) {
 		rocksdb::LiveFileMetaData liveFileMetaData;
 		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
 		liveFileMetaData.directory = fileMetaData.directory;
@@ -108,11 +108,11 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 }
 
 rocksdb::Slice toSlice(StringRef s) {
-	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
+	return rocksdb::Slice(reinterpret_cast<char const*>(s.begin()), s.size());
 }
 
 StringRef toStringRef(rocksdb::Slice s) {
-	return StringRef(reinterpret_cast<const uint8_t*>(s.data()), s.size());
+	return StringRef(reinterpret_cast<uint8_t const*>(s.data()), s.size());
 }
 
 rocksdb::ColumnFamilyOptions getCFOptions() {
@@ -135,7 +135,7 @@ rocksdb::ReadOptions getReadOptions() {
 	return options;
 }
 
-void logRocksDBError(const rocksdb::Status& status, const std::string& method, const UID& logId) {
+void logRocksDBError(rocksdb::Status const& status, std::string const& method, UID const& logId) {
 	auto level = status.IsTimedOut() ? SevWarn : SevError;
 	TraceEvent e(level, "RocksDBCheckpointReaderError", logId);
 	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
@@ -144,7 +144,7 @@ void logRocksDBError(const rocksdb::Status& status, const std::string& method, c
 	}
 }
 
-Error statusToError(const rocksdb::Status& s) {
+Error statusToError(rocksdb::Status const& s) {
 	if (s.IsIOError()) {
 		return io_error();
 	} else if (s.IsTimedOut()) {
@@ -193,7 +193,7 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 			    .detail("Attempt", attempt);
 
 			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
-			const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
+			int64_t const flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
 			                      IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
 			wait(store(asyncFile, IAsyncFileSystem::filesystem()->open(localFile, flags, 0666)));
 
@@ -244,7 +244,7 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 ACTOR Future<Void> fetchCheckpointBytesSampleFile(Database cx,
                                                   std::shared_ptr<CheckpointMetaData> metaData,
                                                   std::string dir,
-                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                                  std::function<Future<Void>(CheckpointMetaData const&)> cFun,
                                                   int maxRetries = 3) {
 	ASSERT(metaData->bytesSampleFile.present());
 	state std::string localFile = joinPath(dir, metaData->checkpointID.toString() + "_metadata_bytes.sst");
@@ -268,7 +268,7 @@ class RocksDBColumnFamilyReader : public ICheckpointReader {
 public:
 	class RocksCfCheckpointIterator : public ICheckpointIterator {
 	public:
-		RocksCfCheckpointIterator(RocksDBColumnFamilyReader* reader, const KeyRange& range, const UID& logId)
+		RocksCfCheckpointIterator(RocksDBColumnFamilyReader* reader, KeyRange const& range, UID const& logId)
 		  : reader(reader), range(range), logId(logId) {
 			ASSERT(reader != nullptr);
 			ASSERT(reader->db != nullptr);
@@ -283,7 +283,7 @@ public:
 			// Note: ROCKSDB_SET_READ_TIMEOUT is false in simulation. If turned on, this code could lead to
 			// non-deterministic simulation because of db->GetEnv()->NowMicros().
 			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
-				const uint64_t deadlineMicros =
+				uint64_t const deadlineMicros =
 				    reader->db->GetEnv()->NowMicros() + SERVER_KNOBS->ROCKSDB_READ_CHECKPOINT_TIMEOUT * 1000000;
 				options.deadline = std::chrono::microseconds(deadlineMicros);
 			}
@@ -293,40 +293,40 @@ public:
 
 		~RocksCfCheckpointIterator() { this->reader->numIter--; }
 
-		Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) override;
+		Future<RangeResult> nextBatch(int const rowLimit, int const ByteLimit) override;
 
 		rocksdb::Iterator* getIterator() { return iterator.get(); }
 
-		const rocksdb::Slice& end() const { return this->endSlice; }
+		rocksdb::Slice const& end() const { return this->endSlice; }
 
 	private:
 		RocksDBColumnFamilyReader* const reader;
-		const KeyRange range;
+		KeyRange const range;
 		rocksdb::Slice beginSlice;
 		rocksdb::Slice endSlice;
 		std::unique_ptr<rocksdb::Iterator> iterator;
-		const UID logId;
+		UID const logId;
 	};
 
 	class DummyRocksDBCheckpointIterator : public ICheckpointIterator {
 	public:
-		DummyRocksDBCheckpointIterator(const UID& logId) : logId(logId) {}
+		DummyRocksDBCheckpointIterator(UID const& logId) : logId(logId) {}
 
 		~DummyRocksDBCheckpointIterator() {}
 
-		Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) override { throw end_of_stream(); }
+		Future<RangeResult> nextBatch(int const rowLimit, int const ByteLimit) override { throw end_of_stream(); }
 
 	private:
-		const UID logId;
+		UID const logId;
 	};
 
-	RocksDBColumnFamilyReader(const CheckpointMetaData& checkpoint, UID logId);
+	RocksDBColumnFamilyReader(CheckpointMetaData const& checkpoint, UID logId);
 
 	Future<Void> init(StringRef token) override;
 
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
+	Future<RangeResult> nextKeyValues(int const rowLimit, int const byteLimit) override { throw not_implemented(); }
 
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override { throw not_implemented(); }
+	Future<Standalone<StringRef>> nextChunk(int const byteLimit) override { throw not_implemented(); }
 
 	Future<Void> close() override { return doClose(this); }
 
@@ -341,7 +341,7 @@ private:
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
-			const CheckpointMetaData checkpoint;
+			CheckpointMetaData const checkpoint;
 			ThreadReturnPromise<Void> done;
 		};
 
@@ -360,13 +360,13 @@ private:
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_RANGE_TIME_ESTIMATE; }
 
-			const int rowLimit, byteLimit;
+			int const rowLimit, byteLimit;
 			RocksCfCheckpointIterator* const iterator;
-			const double startTime;
+			double const startTime;
 			ThreadReturnPromise<RangeResult> result;
 		};
 
-		explicit Reader(DB& db, CF& cf, std::vector<rocksdb::ColumnFamilyHandle*>& handles, const UID& logId);
+		explicit Reader(DB& db, CF& cf, std::vector<rocksdb::ColumnFamilyHandle*>& handles, UID const& logId);
 		~Reader() override {}
 
 		void init() override {}
@@ -377,20 +377,20 @@ private:
 
 		void action(ReadRangeAction& a);
 
-		rocksdb::Status tryOpenForRead(const std::string& path);
+		rocksdb::Status tryOpenForRead(std::string const& path);
 
-		rocksdb::Status importCheckpoint(const std::string& path, const CheckpointMetaData& checkpoint);
+		rocksdb::Status importCheckpoint(std::string const& path, CheckpointMetaData const& checkpoint);
 
-		rocksdb::Status closeInternal(const std::string& path, const bool deleteOnClose);
+		rocksdb::Status closeInternal(std::string const& path, bool const deleteOnClose);
 
 		DB& db;
 		CF& cf;
 		std::vector<rocksdb::ColumnFamilyHandle*>& handles;
 		double readRangeTimeout;
-		const UID logId;
+		UID const logId;
 	};
 
-	Future<RangeResult> nextBatch(const int rowLimit, const int byteLimit, RocksCfCheckpointIterator* iterator);
+	Future<RangeResult> nextBatch(int const rowLimit, int const byteLimit, RocksCfCheckpointIterator* iterator);
 
 	ACTOR static Future<Void> doClose(RocksDBColumnFamilyReader* self);
 
@@ -398,7 +398,7 @@ private:
 	CF cf = nullptr;
 	std::vector<rocksdb::ColumnFamilyHandle*> handles;
 	std::string path;
-	const UID logId;
+	UID const logId;
 	Version version;
 	CheckpointMetaData checkpoint;
 	Reference<IThreadPool> threads;
@@ -407,12 +407,12 @@ private:
 	bool empty;
 };
 
-Future<RangeResult> RocksDBColumnFamilyReader::RocksCfCheckpointIterator::nextBatch(const int rowLimit,
-                                                                                    const int ByteLimit) {
+Future<RangeResult> RocksDBColumnFamilyReader::RocksCfCheckpointIterator::nextBatch(int const rowLimit,
+                                                                                    int const ByteLimit) {
 	return this->reader->nextBatch(rowLimit, ByteLimit, this);
 }
 
-RocksDBColumnFamilyReader::RocksDBColumnFamilyReader(const CheckpointMetaData& checkpoint, UID logId)
+RocksDBColumnFamilyReader::RocksDBColumnFamilyReader(CheckpointMetaData const& checkpoint, UID logId)
   : logId(logId), checkpoint(checkpoint), numIter(0) {
 	if (g_network->isSimulated()) {
 		threads = CoroThreadPool::createThreadPool();
@@ -423,7 +423,7 @@ RocksDBColumnFamilyReader::RocksDBColumnFamilyReader(const CheckpointMetaData& c
 		threads->addThread(new Reader(db, cf, handles, logId), "fdb-rocks-cr");
 	}
 	if (checkpoint.getFormat() == DataMoveRocksCF) {
-		const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+		RocksDBColumnFamilyCheckpoint const rocksCF = getRocksCF(checkpoint);
 		this->empty = rocksCF.sstFiles.empty();
 	} else {
 		this->empty = false;
@@ -445,8 +445,8 @@ Future<Void> RocksDBColumnFamilyReader::init(StringRef token) {
 	return openFuture;
 }
 
-Future<RangeResult> RocksDBColumnFamilyReader::nextBatch(const int rowLimit,
-                                                         const int byteLimit,
+Future<RangeResult> RocksDBColumnFamilyReader::nextBatch(int const rowLimit,
+                                                         int const byteLimit,
                                                          RocksCfCheckpointIterator* iterator) {
 	auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit, iterator);
 	auto res = a->result.getFuture();
@@ -466,15 +466,15 @@ std::unique_ptr<ICheckpointIterator> RocksDBColumnFamilyReader::getIterator(KeyR
 RocksDBColumnFamilyReader::Reader::Reader(DB& db,
                                           CF& cf,
                                           std::vector<rocksdb::ColumnFamilyHandle*>& handles,
-                                          const UID& logId)
+                                          UID const& logId)
   : db(db), cf(cf), handles(handles), logId(logId) {}
 
 void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader::OpenAction& a) {
 	TraceEvent(SevDebug, "RocksDBCheckpointReaderInitBegin", logId).detail("Checkpoint", a.checkpoint.toString());
 	ASSERT(cf == nullptr);
 
-	const CheckpointMetaData& checkpoint = a.checkpoint;
-	const CheckpointFormat format = checkpoint.getFormat();
+	CheckpointMetaData const& checkpoint = a.checkpoint;
+	CheckpointFormat const format = checkpoint.getFormat();
 	if (format != DataMoveRocksCF) {
 		TraceEvent(SevDebug, "RocksDBCheckpointReaderError", logId).detail("InvalidFormat", checkpoint.toString());
 		a.done.sendError(not_implemented());
@@ -483,9 +483,9 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 	ASSERT(!rocksCF.sstFiles.empty());
-	const std::vector<std::string> files = platform::listFiles(rocksCF.sstFiles.front().db_path);
+	std::vector<std::string> const files = platform::listFiles(rocksCF.sstFiles.front().db_path);
 	TraceEvent(SevDebug, "RocksDBColumnFamilyReaderInputFiles", logId).detail("Files", describe(files));
-	const std::string path = joinPath(rocksCF.sstFiles.front().db_path, checkpointReaderSubDir);
+	std::string const path = joinPath(rocksCF.sstFiles.front().db_path, checkpointReaderSubDir);
 
 	// Try to read the existing DB, the checkpoint could have been imported already.
 	rocksdb::Status status = tryOpenForRead(path);
@@ -559,18 +559,18 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 	}
 }
 
-rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(const std::string& path) {
+rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(std::string const& path) {
 	std::vector<std::string> columnFamilies;
-	const rocksdb::Options options = getOptions();
+	rocksdb::Options const options = getOptions();
 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
 	if (std::find(columnFamilies.begin(), columnFamilies.end(), rocksDefaultCf) == columnFamilies.end() ||
 	    std::find(columnFamilies.begin(), columnFamilies.end(), checkpointCf) == columnFamilies.end()) {
 		return rocksdb::Status::Aborted();
 	}
 
-	const rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
+	rocksdb::ColumnFamilyOptions const cfOptions = getCFOptions();
 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-	for (const std::string& name : columnFamilies) {
+	for (std::string const& name : columnFamilies) {
 		descriptors.emplace_back(name, cfOptions);
 	}
 	status = rocksdb::DB::OpenForReadOnly(options, path, descriptors, &handles, &db);
@@ -617,22 +617,22 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::tryOpenForRead(const std::str
 	return rocksdb::Status::OK();
 }
 
-rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::string& path,
-                                                                    const CheckpointMetaData& checkpoint) {
+rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(std::string const& path,
+                                                                    CheckpointMetaData const& checkpoint) {
 	TraceEvent(SevInfo, "CheckpointReaderImportCheckpointBegin", logId)
 	    .detail("Path", path)
 	    .detail("Checkpoint", checkpoint.toString());
 	std::vector<std::string> columnFamilies;
-	const rocksdb::Options options = getOptions();
+	rocksdb::Options const options = getOptions();
 	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, path, &columnFamilies);
 	if (std::find(columnFamilies.begin(), columnFamilies.end(), rocksDefaultCf) == columnFamilies.end()) {
 		columnFamilies.push_back(rocksDefaultCf);
 	}
 	ASSERT(std::find(columnFamilies.begin(), columnFamilies.end(), checkpointCf) == columnFamilies.end());
 
-	const rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
+	rocksdb::ColumnFamilyOptions const cfOptions = getCFOptions();
 	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-	for (const std::string& name : columnFamilies) {
+	for (std::string const& name : columnFamilies) {
 		descriptors.emplace_back(name, cfOptions);
 	}
 
@@ -672,7 +672,7 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 	return closeInternal(path, /*deleteOnClose=*/false);
 }
 
-rocksdb::Status RocksDBColumnFamilyReader::Reader::closeInternal(const std::string& path, const bool deleteOnClose) {
+rocksdb::Status RocksDBColumnFamilyReader::Reader::closeInternal(std::string const& path, bool const deleteOnClose) {
 	if (db == nullptr) {
 		return rocksdb::Status::OK();
 	}
@@ -733,11 +733,11 @@ ACTOR Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader*
 class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
 public:
 	RocksDBSstFileWriter()
-	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false) {};
+	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
 
-	void open(const std::string localFile) override;
+	void open(std::string const localFile) override;
 
-	void write(const KeyRef key, const ValueRef value) override;
+	void write(KeyRef const key, ValueRef const value) override;
 
 	bool finish() override;
 
@@ -747,7 +747,7 @@ private:
 	bool hasData;
 };
 
-void RocksDBSstFileWriter::open(const std::string localFile) {
+void RocksDBSstFileWriter::open(std::string const localFile) {
 	this->localFile = abspath(localFile);
 	rocksdb::Status status = this->writer->Open(this->localFile);
 	if (!status.ok()) {
@@ -758,7 +758,7 @@ void RocksDBSstFileWriter::open(const std::string localFile) {
 	}
 }
 
-void RocksDBSstFileWriter::write(const KeyRef key, const ValueRef value) {
+void RocksDBSstFileWriter::write(KeyRef const key, ValueRef const value) {
 	rocksdb::Status status = this->writer->Put(toSlice(key), toSlice(value));
 	if (!status.ok()) {
 		TraceEvent(SevError, "RocksDBSstFileWriterWrapperWriteError")
@@ -789,9 +789,9 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
-	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
+	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())){};
 
-	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
+	RocksDBSstFileReader(KeyRange const& rangeBoundary, size_t rowLimit, size_t byteLimit)
 	  : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())), rowLimit(rowLimit),
 	    byteLimit(byteLimit) {
 		beginSlice = toSlice(rangeBoundary.begin);
@@ -800,13 +800,13 @@ public:
 
 	~RocksDBSstFileReader() {}
 
-	void open(const std::string localFile) override;
+	void open(std::string const localFile) override;
 
 	KeyValue next() override;
 
 	bool hasNext() const override;
 
-	RangeResult getRange(const KeyRange& range) override;
+	RangeResult getRange(KeyRange const& range) override;
 
 private:
 	std::unique_ptr<rocksdb::SstFileReader> sstReader;
@@ -818,7 +818,7 @@ private:
 	size_t rowLimit = -1;
 };
 
-void RocksDBSstFileReader::open(const std::string localFile) {
+void RocksDBSstFileReader::open(std::string const localFile) {
 	this->localFile = abspath(localFile);
 	rocksdb::Status status = sstReader->Open(this->localFile);
 	if (status.ok()) {
@@ -857,7 +857,7 @@ KeyValue RocksDBSstFileReader::next() {
 // TODO(BulkLoad): current the bulkload is the only place using the method.
 // This is implemented as the sync call for the simplicity. In the future
 // we will implement this as async call using action.
-RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
+RangeResult RocksDBSstFileReader::getRange(KeyRange const& range) {
 	RangeResult rep;
 	size_t expectedSize = 0;
 	size_t keyCount = 0;
@@ -895,7 +895,7 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
 public:
-	RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
+	RocksDBCheckpointByteSampleReader(CheckpointMetaData const& checkpoint);
 	~RocksDBCheckpointByteSampleReader() {}
 
 	KeyValue next() override;
@@ -907,7 +907,7 @@ private:
 	std::unique_ptr<rocksdb::Iterator> iter;
 };
 
-RocksDBCheckpointByteSampleReader::RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint)
+RocksDBCheckpointByteSampleReader::RocksDBCheckpointByteSampleReader(CheckpointMetaData const& checkpoint)
   : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {
 	ASSERT(checkpoint.bytesSampleFile.present());
 	rocksdb::Status status = sstReader->Open(checkpoint.bytesSampleFile.get());
@@ -938,14 +938,14 @@ KeyValue RocksDBCheckpointByteSampleReader::next() {
 // serialized checkpoint via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
 public:
-	RocksDBCFCheckpointReader(const CheckpointMetaData& checkpoint, UID logId)
+	RocksDBCFCheckpointReader(CheckpointMetaData const& checkpoint, UID logId)
 	  : checkpoint_(checkpoint), id_(logId), file_(Reference<IAsyncFile>()), offset_(0) {}
 
 	Future<Void> init(StringRef token) override;
 
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
+	Future<RangeResult> nextKeyValues(int const rowLimit, int const byteLimit) override { throw not_implemented(); }
 
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
+	Future<Standalone<StringRef>> nextChunk(int const byteLimit) override;
 
 	Future<Void> close() override;
 
@@ -995,11 +995,11 @@ private:
 
 Future<Void> RocksDBCFCheckpointReader::init(StringRef token) {
 	ASSERT_EQ(this->checkpoint_.getFormat(), DataMoveRocksCF);
-	const std::string name = token.toString();
+	std::string const name = token.toString();
 	this->offset_ = 0;
 	this->path_.clear();
-	const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(this->checkpoint_);
-	for (const auto& sstFile : rocksCF.sstFiles) {
+	RocksDBColumnFamilyCheckpoint const rocksCF = getRocksCF(this->checkpoint_);
+	for (auto const& sstFile : rocksCF.sstFiles) {
 		if (sstFile.name == name) {
 			this->path_ = sstFile.db_path + sstFile.name;
 			break;
@@ -1019,7 +1019,7 @@ Future<Void> RocksDBCFCheckpointReader::init(StringRef token) {
 	return doInit(this);
 }
 
-Future<Standalone<StringRef>> RocksDBCFCheckpointReader::nextChunk(const int byteLimit) {
+Future<Standalone<StringRef>> RocksDBCFCheckpointReader::nextChunk(int const byteLimit) {
 	return getNextChunk(this, byteLimit);
 }
 
@@ -1032,7 +1032,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
                                        std::shared_ptr<CheckpointMetaData> metaData,
                                        int idx,
                                        std::string dir,
-                                       std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                       std::function<Future<Void>(CheckpointMetaData const&)> cFun,
                                        int maxRetries = 3) {
 	state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(*metaData);
 
@@ -1041,10 +1041,10 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 		return Void();
 	}
 
-	const std::string remoteFile = rocksCF.sstFiles[idx].name;
-	const std::string localFile = joinPath(dir, rocksCF.sstFiles[idx].name);
+	std::string const remoteFile = rocksCF.sstFiles[idx].name;
+	std::string const localFile = joinPath(dir, rocksCF.sstFiles[idx].name);
 	ASSERT_EQ(metaData->src.size(), 1);
-	const UID ssId = metaData->src.front();
+	UID const ssId = metaData->src.front();
 
 	wait(success(doFetchCheckpointFile(cx, remoteFile, localFile, ssId, metaData->checkpointID)));
 	rocksCF.sstFiles[idx].db_path = dir;
@@ -1062,7 +1062,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
                                         KeyRange range,
                                         std::string dir,
                                         std::shared_ptr<rocksdb::SstFileWriter> writer,
-                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                        std::function<Future<Void>(CheckpointMetaData const&)> cFun,
                                         int maxRetries = 3) {
 	state std::string localFile =
 	    joinPath(dir, UID(metaData->checkpointID.first(), deterministicRandom()->randomUInt64()).toString() + ".sst");
@@ -1072,7 +1072,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 	    .detail("RocksCheckpointKeyValues", rkv.toString())
 	    .detail("FilePath", localFile);
 
-	for (const auto& file : rkv.fetchedFiles) {
+	for (auto const& file : rkv.fetchedFiles) {
 		ASSERT(!file.range.intersects(range));
 	}
 
@@ -1222,19 +1222,19 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 ACTOR Future<Void> fetchCheckpointRanges(Database cx,
                                          std::shared_ptr<CheckpointMetaData> metaData,
                                          std::string dir,
-                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+                                         std::function<Future<Void>(CheckpointMetaData const&)> cFun) {
 	RocksDBCheckpointKeyValues rkv = getRocksKeyValuesCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRanges")
 	    .detail("InitialState", metaData->toString())
 	    .detail("RocksCheckpointKeyValues", rkv.toString());
 
 	KeyRangeMap<CheckpointFile> fileMap;
-	for (const auto& file : rkv.fetchedFiles) {
+	for (auto const& file : rkv.fetchedFiles) {
 		fileMap.insert(file.range, file);
 	}
 
 	std::vector<Future<Void>> fs;
-	for (const auto& range : rkv.ranges) {
+	for (auto const& range : rkv.ranges) {
 		auto ranges = fileMap.intersectingRanges(range);
 		for (auto r = ranges.begin(); r != ranges.end(); ++r) {
 			CheckpointFile& file = r->value();
@@ -1258,7 +1258,7 @@ ACTOR Future<Void> fetchCheckpointRanges(Database cx,
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+                                                        std::function<Future<Void>(CheckpointMetaData const&)> cFun) {
 	TraceEvent(SevInfo, "FetchRocksCheckpointBegin")
 	    .detail("InitialState", initialState.toString())
 	    .detail("CheckpointDir", dir);
@@ -1311,7 +1311,7 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		    .detail("CheckpointID", checkpoint.checkpointID)
 		    .detail("RocksCF", rocksCF.toString());
 
-		for (const LiveFileMetaData& file : rocksCF.sstFiles) {
+		for (LiveFileMetaData const& file : rocksCF.sstFiles) {
 			dirs.insert(file.db_path);
 		}
 	} else if (format == RocksDB) {
@@ -1326,7 +1326,7 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		    .detail("CheckpointID", checkpoint.checkpointID)
 		    .detail("RocksCF", rocksKv.toString());
 
-		for (const CheckpointFile& file : rocksKv.fetchedFiles) {
+		for (CheckpointFile const& file : rocksKv.fetchedFiles) {
 			if (file.path != emptySstFilePath) {
 				dirs.insert(file.path);
 			}
@@ -1337,7 +1337,7 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 
 	state std::unordered_set<std::string>::iterator it = dirs.begin();
 	for (; it != dirs.end(); ++it) {
-		const std::string dir = *it;
+		std::string const dir = *it;
 		platform::eraseDirectoryRecursive(dir);
 		TraceEvent(SevInfo, "DeleteCheckpointRemovedDir", checkpoint.checkpointID)
 		    .detail("CheckpointID", checkpoint.checkpointID)
@@ -1351,7 +1351,7 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+                                                        std::function<Future<Void>(CheckpointMetaData const&)> cFun) {
 	wait(delay(0));
 	return initialState;
 }
@@ -1362,23 +1362,23 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 }
 #endif // WITH_ROCKSDB
 
-int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints) {
+int64_t getTotalFetchedBytes(std::vector<CheckpointMetaData> const& checkpoints) {
 	int64_t totalBytes = 0;
-	for (const auto& checkpoint : checkpoints) {
-		const CheckpointFormat format = checkpoint.getFormat();
+	for (auto const& checkpoint : checkpoints) {
+		CheckpointFormat const format = checkpoint.getFormat();
 		if (format == DataMoveRocksCF) {
-			const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-			for (const auto& file : rocksCF.sstFiles) {
+			RocksDBColumnFamilyCheckpoint const rocksCF = getRocksCF(checkpoint);
+			for (auto const& file : rocksCF.sstFiles) {
 				totalBytes += file.size;
 			}
 		} else if (format == RocksDB) {
 			auto rcp = getRocksCheckpoint(checkpoint);
-			for (const auto& file : rcp.fetchedFiles) {
+			for (auto const& file : rcp.fetchedFiles) {
 				totalBytes += file.size;
 			}
 		} else if (format == RocksDBKeyValues) {
-			const RocksDBCheckpointKeyValues rkv = getRocksKeyValuesCheckpoint(checkpoint);
-			for (const auto& file : rkv.fetchedFiles) {
+			RocksDBCheckpointKeyValues const rkv = getRocksKeyValuesCheckpoint(checkpoint);
+			for (auto const& file : rkv.fetchedFiles) {
 				totalBytes += file.size;
 			}
 		}
@@ -1386,11 +1386,11 @@ int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints)
 	return totalBytes;
 }
 
-ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
-                                              const CheckpointAsKeyValues checkpointAsKeyValues,
+ICheckpointReader* newRocksDBCheckpointReader(CheckpointMetaData const& checkpoint,
+                                              CheckpointAsKeyValues const checkpointAsKeyValues,
                                               UID logId) {
 #ifdef WITH_ROCKSDB
-	const CheckpointFormat format = checkpoint.getFormat();
+	CheckpointFormat const format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF && !checkpointAsKeyValues) {
 		return new RocksDBCFCheckpointReader(checkpoint, logId);
 	} else {
@@ -1416,7 +1416,7 @@ std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader() {
 	return nullptr;
 }
 
-std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(const KeyRange& range,
+std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(KeyRange const& range,
                                                                size_t rowLimit,
                                                                size_t byteLimit) {
 #ifdef WITH_ROCKSDB
@@ -1427,28 +1427,28 @@ std::unique_ptr<IRocksDBSstFileReader> newRocksDBSstFileReader(const KeyRange& r
 	return nullptr;
 }
 
-std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint) {
+std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(CheckpointMetaData const& checkpoint) {
 #ifdef WITH_ROCKSDB
 	return std::make_unique<RocksDBCheckpointByteSampleReader>(checkpoint);
 #endif // WITH_ROCKSDB
 	return nullptr;
 }
 
-RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
+RocksDBColumnFamilyCheckpoint getRocksCF(CheckpointMetaData const& checkpoint) {
 	RocksDBColumnFamilyCheckpoint rocksCF;
 	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCF);
 	return rocksCF;
 }
 
-RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint) {
+RocksDBCheckpoint getRocksCheckpoint(CheckpointMetaData const& checkpoint) {
 	RocksDBCheckpoint rocksCheckpoint;
 	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);
 	return rocksCheckpoint;
 }
 
-RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(const CheckpointMetaData& checkpoint) {
+RocksDBCheckpointKeyValues getRocksKeyValuesCheckpoint(CheckpointMetaData const& checkpoint) {
 	RocksDBCheckpointKeyValues rocksCheckpoint;
 	ObjectReader reader(checkpoint.getSerializedCheckpoint().begin(), IncludeVersion());
 	reader.deserialize(rocksCheckpoint);

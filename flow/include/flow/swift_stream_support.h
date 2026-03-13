@@ -43,7 +43,7 @@ class FlowSingleCallbackForSwiftContinuation : SingleCallback<T> {
 	SwiftCC continuationInstance;
 
 public:
-	void set(const void* _Nonnull pointerToContinuationInstance, FutureStream<T> fs, const void* _Nonnull thisPointer) {
+	void set(void const* _Nonnull pointerToContinuationInstance, FutureStream<T> fs, void const* _Nonnull thisPointer) {
 		// Verify Swift did not make a copy of the `self` value for this method
 		// call.
 		assert(this == thisPointer);
@@ -51,9 +51,9 @@ public:
 		// FIXME: Propagate `SwiftCC` to Swift using forward
 		// 		  interop, without relying on passing it via a `void *`
 		// 	 	  here. That will let us avoid this hack.
-		const void* _Nonnull opaqueStorage = pointerToContinuationInstance;
-		static_assert(sizeof(SwiftCC) == sizeof(const void*));
-		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC*>(&opaqueStorage));
+		void const* _Nonnull opaqueStorage = pointerToContinuationInstance;
+		static_assert(sizeof(SwiftCC) == sizeof(void const*));
+		SwiftCC const ccCopy(*reinterpret_cast<SwiftCC const*>(&opaqueStorage));
 		// Set the continuation instance.
 		continuationInstance.set(ccCopy);
 		// Add this callback to the future.

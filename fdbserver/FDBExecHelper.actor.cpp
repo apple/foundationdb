@@ -249,7 +249,7 @@ ACTOR Future<int> spawnProcess(std::string binPath,
 }
 #else
 
-static auto fork_child(const std::string& path, std::vector<char*>& paramList) {
+static auto fork_child(std::string const& path, std::vector<char*>& paramList) {
 	int pipefd[2];
 	if (pipe(pipefd) != 0) {
 		return std::make_pair(-1, Optional<int>{});
@@ -421,7 +421,7 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 		// get additional arguments
 		paramList.push_back("--path");
 		paramList.push_back(folder);
-		const char* version = FDB_VT_VERSION;
+		char const* version = FDB_VT_VERSION;
 		paramList.push_back("--version");
 		paramList.push_back(version);
 		paramList.push_back("--role");

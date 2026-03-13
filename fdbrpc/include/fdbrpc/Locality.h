@@ -133,11 +133,11 @@ public:
 	ClassType classType() const { return (ClassType)_class; }
 	ClassSource classSource() const { return (ClassSource)_source; }
 
-	bool operator==(const ClassType& rhs) const { return _class == rhs; }
-	bool operator!=(const ClassType& rhs) const { return _class != rhs; }
+	bool operator==(ClassType const& rhs) const { return _class == rhs; }
+	bool operator!=(ClassType const& rhs) const { return _class != rhs; }
 
-	bool operator==(const ProcessClass& rhs) const { return _class == rhs._class && _source == rhs._source; }
-	bool operator!=(const ProcessClass& rhs) const { return _class != rhs._class || _source != rhs._source; }
+	bool operator==(ProcessClass const& rhs) const { return _class == rhs._class && _source == rhs._source; }
+	bool operator!=(ProcessClass const& rhs) const { return _class != rhs._class || _source != rhs._source; }
 
 	std::string toString() const;
 
@@ -156,11 +156,11 @@ public:
 struct LocalityData {
 	std::map<Standalone<StringRef>, Optional<Standalone<StringRef>>> _data;
 
-	alignas(8) static const StringRef keyProcessId;
-	alignas(8) static const StringRef keyZoneId;
-	alignas(8) static const StringRef keyDcId;
-	alignas(8) static const StringRef keyMachineId;
-	alignas(8) static const StringRef keyDataHallId;
+	alignas(8) static StringRef const keyProcessId;
+	alignas(8) static StringRef const keyZoneId;
+	alignas(8) static StringRef const keyDcId;
+	alignas(8) static StringRef const keyMachineId;
+	alignas(8) static StringRef const keyDataHallId;
 
 public:
 	LocalityData() {}
@@ -268,7 +268,7 @@ public:
 
 	std::map<std::string, std::string> getAllData() const {
 		std::map<std::string, std::string> data;
-		for (const auto& d : _data) {
+		for (auto const& d : _data) {
 			if (d.second.present()) {
 				data[d.first.toString()] = d.second.get().toString();
 			}
@@ -276,8 +276,8 @@ public:
 		return data;
 	}
 
-	static const UID UNSET_ID;
-	alignas(8) static const StringRef ExcludeLocalityPrefix;
+	static UID const UNSET_ID;
+	alignas(8) static StringRef const ExcludeLocalityPrefix;
 };
 
 static std::string describe(std::vector<LocalityData> const& items, StringRef const key, int max_items = -1) {

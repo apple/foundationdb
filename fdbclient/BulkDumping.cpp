@@ -20,9 +20,9 @@
 
 #include "fdbclient/BulkDumping.h"
 
-BulkDumpState createBulkDumpJob(const KeyRange& range,
-                                const std::string& jobRoot,
-                                const BulkLoadType& type,
-                                const BulkLoadTransportMethod& transportMethod) {
+BulkDumpState createBulkDumpJob(KeyRange const& range,
+                                std::string const& jobRoot,
+                                BulkLoadType const& type,
+                                BulkLoadTransportMethod const& transportMethod) {
 	return BulkDumpState(range, type, transportMethod, jobRoot);
 }

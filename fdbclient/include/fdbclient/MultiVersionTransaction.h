@@ -46,13 +46,13 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 #pragma pack(push, 4)
 	typedef struct key {
-		const uint8_t* key;
+		uint8_t const* key;
 		int keyLength;
 	} FDBKey;
 	typedef struct keyvalue {
-		const void* key;
+		void const* key;
 		int keyLength;
-		const void* value;
+		void const* value;
 		int valueLength;
 	} FDBKeyValue;
 
@@ -85,9 +85,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 #pragma pack(push, 4)
 	typedef struct keyrange {
-		const void* beginKey;
+		void const* beginKey;
 		int beginKeyLength;
-		const void* endKey;
+		void const* endKey;
 		int endKeyLength;
 	} FDBKeyRange;
 
@@ -97,15 +97,15 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 
 	// Network
 	fdb_error_t (*selectApiVersion)(int runtimeVersion, int headerVersion);
-	const char* (*getClientVersion)();
+	char const* (*getClientVersion)();
 	void (*useFutureProtocolVersion)();
 
 	fdb_error_t (*setNetworkOption)(FDBNetworkOption option, uint8_t const* value, int valueLength);
 	fdb_error_t (*setupNetwork)();
 	fdb_error_t (*runNetwork)();
 	fdb_error_t (*stopNetwork)();
-	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
-	fdb_error_t (*createDatabaseFromConnectionString)(const char* connectionString, FDBDatabase** db);
+	fdb_error_t (*createDatabase)(char const* clusterFilePath, FDBDatabase** db);
+	fdb_error_t (*createDatabaseFromConnectionString)(char const* connectionString, FDBDatabase** db);
 
 	// Database
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
@@ -242,8 +242,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetError)(FDBFuture* f);
 	fdb_error_t (*futureGetKey)(FDBFuture* f, uint8_t const** outKey, int* outKeyLength);
 	fdb_error_t (*futureGetValue)(FDBFuture* f, fdb_bool_t* outPresent, uint8_t const** outValue, int* outValueLength);
-	fdb_error_t (*futureGetStringArray)(FDBFuture* f, const char*** outStrings, int* outCount);
-	fdb_error_t (*futureGetKeyRangeArray)(FDBFuture* f, const FDBKeyRange** out_keyranges, int* outCount);
+	fdb_error_t (*futureGetStringArray)(FDBFuture* f, char const*** outStrings, int* outCount);
+	fdb_error_t (*futureGetKeyRangeArray)(FDBFuture* f, FDBKeyRange const** out_keyranges, int* outCount);
 	fdb_error_t (*futureGetKeyArray)(FDBFuture* f, FDBKey const** outKeys, int* outCount);
 	fdb_error_t (*futureGetKeyValueArray)(FDBFuture* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
 	fdb_error_t (*futureGetMappedKeyValueArray)(FDBFuture* f,
@@ -260,7 +260,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	void (*resultDestroy)(FDBResult* f);
 
 	// Legacy Support
-	FDBFuture* (*createCluster)(const char* clusterFilePath);
+	FDBFuture* (*createCluster)(char const* clusterFilePath);
 	FDBFuture* (*clusterCreateDatabase)(FDBCluster* cluster, uint8_t* dbName, int dbNameLength);
 	void (*clusterDestroy)(FDBCluster* cluster);
 	fdb_error_t (*futureGetCluster)(FDBFuture* f, FDBCluster** outCluster);
@@ -277,49 +277,49 @@ public:
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
+	ThreadFuture<Optional<Value>> get(KeyRef const& key, bool snapshot = false) override;
+	ThreadFuture<Key> getKey(KeySelectorRef const& key, bool snapshot = false) override;
+	ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                   KeySelectorRef const& end,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
+	ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                   KeySelectorRef const& end,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               const StringRef& mapper,
+	ThreadFuture<MappedRangeResult> getMappedRange(KeySelectorRef const& begin,
+	                                               KeySelectorRef const& end,
+	                                               StringRef const& mapper,
 	                                               GetRangeLimits limits,
 	                                               bool snapshot,
 	                                               bool reverse) override;
-	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
+	ThreadFuture<Standalone<VectorRef<char const*>>> getAddressesForKey(KeyRef const& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
-	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
-	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(KeyRangeRef const& keys) override;
+	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRangeRef const& range,
 	                                                                int64_t chunkSize) override;
 
-	void addReadConflictRange(const KeyRangeRef& keys) override;
+	void addReadConflictRange(KeyRangeRef const& keys) override;
 
-	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
-	void set(const KeyRef& key, const ValueRef& value) override;
-	void clear(const KeyRef& begin, const KeyRef& end) override;
-	void clear(const KeyRangeRef& range) override;
-	void clear(const KeyRef& key) override;
+	void atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) override;
+	void set(KeyRef const& key, ValueRef const& value) override;
+	void clear(KeyRef const& begin, KeyRef const& end) override;
+	void clear(KeyRangeRef const& range) override;
+	void clear(KeyRef const& key) override;
 
-	ThreadFuture<Void> watch(const KeyRef& key) override;
+	ThreadFuture<Void> watch(KeyRef const& key) override;
 
-	void addWriteConflictRange(const KeyRangeRef& keys) override;
+	void addWriteConflictRange(KeyRangeRef const& keys) override;
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
@@ -341,7 +341,7 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
 
 private:
-	const Reference<FdbCApi> api;
+	Reference<FdbCApi> const api;
 	FdbCApi::FDBTransaction* const tr;
 };
 
@@ -372,9 +372,9 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
-	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<int64_t> rebootWorker(StringRef const& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(StringRef const& dcid) override;
+	ThreadFuture<Void> createSnapshot(StringRef const& uid, StringRef const& snapshot_command) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -383,7 +383,7 @@ public:
 	ThreadFuture<Standalone<StringRef>> getClientStatus() override;
 
 private:
-	const Reference<FdbCApi> api;
+	Reference<FdbCApi> const api;
 	FdbCApi::FDBDatabase*
 	    db; // Always set if API version >= 610, otherwise guaranteed to be set when onReady future is set
 	ThreadFuture<Void> ready;
@@ -396,7 +396,7 @@ public:
 	DLApi(std::string fdbCPath, bool unlinkOnLoad = false);
 
 	void selectApiVersion(int apiVersion) override;
-	const char* getClientVersion() override;
+	char const* getClientVersion() override;
 	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -404,17 +404,17 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char* clusterFile) override;
-	Reference<IDatabase> createDatabase609(const char* clusterFilePath); // legacy database creation
+	Reference<IDatabase> createDatabase(char const* clusterFile) override;
+	Reference<IDatabase> createDatabase609(char const* clusterFilePath); // legacy database creation
 
-	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
+	Reference<IDatabase> createDatabaseFromConnectionString(char const* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 
 private:
-	const std::string fdbCPath;
-	const Reference<FdbCApi> api;
-	const bool unlinkOnLoad;
+	std::string const fdbCPath;
+	Reference<FdbCApi> const api;
+	bool const unlinkOnLoad;
 	int headerVersion;
 	bool networkSetup;
 
@@ -440,50 +440,50 @@ public:
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
+	ThreadFuture<Optional<Value>> get(KeyRef const& key, bool snapshot = false) override;
+	ThreadFuture<Key> getKey(KeySelectorRef const& key, bool snapshot = false) override;
+	ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                   KeySelectorRef const& end,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
+	ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                   KeySelectorRef const& end,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               const StringRef& mapper,
+	ThreadFuture<MappedRangeResult> getMappedRange(KeySelectorRef const& begin,
+	                                               KeySelectorRef const& end,
+	                                               StringRef const& mapper,
 	                                               GetRangeLimits limits,
 	                                               bool snapshot,
 	                                               bool reverse) override;
-	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
+	ThreadFuture<Standalone<VectorRef<char const*>>> getAddressesForKey(KeyRef const& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 
-	void addReadConflictRange(const KeyRangeRef& keys) override;
-	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
+	void addReadConflictRange(KeyRangeRef const& keys) override;
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(KeyRangeRef const& keys) override;
 
-	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
+	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRangeRef const& range,
 	                                                                int64_t chunkSize) override;
 
-	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
-	void set(const KeyRef& key, const ValueRef& value) override;
-	void clear(const KeyRef& begin, const KeyRef& end) override;
-	void clear(const KeyRangeRef& range) override;
-	void clear(const KeyRef& key) override;
+	void atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) override;
+	void set(KeyRef const& key, ValueRef const& value) override;
+	void clear(KeyRef const& begin, KeyRef const& end) override;
+	void clear(KeyRangeRef const& range) override;
+	void clear(KeyRef const& key) override;
 
-	ThreadFuture<Void> watch(const KeyRef& key) override;
+	ThreadFuture<Void> watch(KeyRef const& key) override;
 
-	void addWriteConflictRange(const KeyRangeRef& keys) override;
+	void addWriteConflictRange(KeyRangeRef const& keys) override;
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
@@ -511,7 +511,7 @@ public:
 	void debugPrint(std::string const& message) override;
 
 private:
-	const Reference<MultiVersionDatabase> db;
+	Reference<MultiVersionDatabase> const db;
 	ThreadSpinLock lock;
 
 	struct TransactionInfo {
@@ -594,7 +594,7 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 	void loadVersion();
 	bool canReplace(Reference<ClientInfo> other) const;
-	std::string getTraceFileIdentifier(const std::string& baseIdentifier);
+	std::string getTraceFileIdentifier(std::string const& baseIdentifier);
 };
 
 class MultiVersionApi;
@@ -684,9 +684,9 @@ public:
 	template <class T, class... Args>
 	ThreadFuture<T> executeOperation(ThreadFuture<T> (IDatabase::*func)(Args...), Args&&... args);
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
-	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<int64_t> rebootWorker(StringRef const& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(StringRef const& dcid) override;
+	ThreadFuture<Void> createSnapshot(StringRef const& uid, StringRef const& snapshot_command) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -731,7 +731,7 @@ public:
 		void close();
 
 		Reference<IDatabase> db;
-		const Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> dbVar;
+		Reference<ThreadSafeAsyncVar<Reference<IDatabase>>> const dbVar;
 		ClusterConnectionRecord connectionRecord;
 		std::string clusterId;
 
@@ -764,7 +764,7 @@ public:
 		Mutex optionLock;
 	};
 
-	const Reference<DatabaseState> dbState;
+	Reference<DatabaseState> const dbState;
 	friend class MultiVersionTransaction;
 };
 
@@ -775,7 +775,7 @@ public:
 class MultiVersionApi : public IClientApi {
 public:
 	void selectApiVersion(int apiVersion) override;
-	const char* getClientVersion() override;
+	char const* getClientVersion() override;
 	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -786,8 +786,8 @@ public:
 
 	// Creates an IDatabase object that represents a connection to the cluster
 	Reference<IDatabase> createDatabase(ClusterConnectionRecord const& connectionRecord);
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
-	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
+	Reference<IDatabase> createDatabase(char const* clusterFilePath) override;
+	Reference<IDatabase> createDatabaseFromConnectionString(char const* connectionString) override;
 
 	static MultiVersionApi* api;
 
@@ -842,10 +842,10 @@ private:
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
 
 	bool networkStartSetup;
-	volatile bool networkSetup;
+	bool volatile networkSetup;
 	bool disableBypass;
-	volatile bool bypassMultiClientApi;
-	volatile bool externalClient;
+	bool volatile bypassMultiClientApi;
+	bool volatile externalClient;
 	bool ignoreExternalClientFailures;
 	bool failIncompatibleClient;
 	bool retainClientLibCopies;
@@ -860,7 +860,7 @@ private:
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
-	volatile bool envOptionsLoaded;
+	bool volatile envOptionsLoaded;
 
 	friend struct MultiVersionDatabase::DatabaseState;
 };

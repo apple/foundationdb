@@ -66,7 +66,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		state int throttleListLimit = defaultThrottleListLimit;
 		if (tokens.size() >= 4) {
 			char* end;
-			throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
+			throttleListLimit = std::strtol((char const*)tokens[3].begin(), &end, 10);
 			if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
 				fprintf(stderr, "ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
 				return false;
@@ -139,7 +139,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 
 		if (tokens.size() >= 5) {
 			char* end;
-			tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
+			tpsRate = std::strtod((char const*)tokens[4].begin(), &end);
 			if ((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
 				fprintf(stderr, "ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
 				return false;
@@ -254,7 +254,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		}
 
 		if (!is_error) {
-			state const char* throttleTypeString =
+			state char const* throttleTypeString =
 			    !throttleType.present() ? "" : (throttleType.get() == TagThrottleType::AUTO ? "auto-" : "manually ");
 			state std::string priorityString =
 			    priority.present() ? format(" at %s priority", transactionPriorityToString(priority.get(), false)) : "";
@@ -310,47 +310,47 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 	return true;
 }
 
-void throttleGenerator(const char* text,
-                       const char* line,
+void throttleGenerator(char const* text,
+                       char const* line,
                        std::vector<std::string>& lc,
                        std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "on tag", "off", "enable auto", "disable auto", "list", nullptr };
+		char const* opts[] = { "on tag", "off", "enable auto", "disable auto", "list", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "on")) {
 		if (tokens.size() == 2) {
-			const char* opts[] = { "tag", nullptr };
+			char const* opts[] = { "tag", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		} else if (tokens.size() == 6) {
-			const char* opts[] = { "default", "immediate", "batch", nullptr };
+			char const* opts[] = { "default", "immediate", "batch", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		}
 	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "off") && !tokencmp(tokens[tokens.size() - 1], "tag")) {
-		const char* opts[] = { "all", "auto", "manual", "tag", "default", "immediate", "batch", nullptr };
+		char const* opts[] = { "all", "auto", "manual", "tag", "default", "immediate", "batch", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 2 && (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable"))) {
-		const char* opts[] = { "auto", nullptr };
+		char const* opts[] = { "auto", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() >= 2 && tokencmp(tokens[1], "list")) {
 		if (tokens.size() == 2) {
-			const char* opts[] = { "throttled", "recommended", "all", nullptr };
+			char const* opts[] = { "throttled", "recommended", "all", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		} else if (tokens.size() == 3) {
-			const char* opts[] = { "LIMITS", nullptr };
+			char const* opts[] = { "LIMITS", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		}
 	}
 }
 
-std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
+std::vector<char const*> throttleHintGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
 		return { "<on|off|enable auto|disable auto|list>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "on")) {
-		std::vector<const char*> opts = { "tag", "<TAG>", "[RATE]", "[DURATION]", "[default|immediate|batch]" };
+		std::vector<char const*> opts = { "tag", "<TAG>", "[RATE]", "[DURATION]", "[default|immediate|batch]" };
 		if (tokens.size() == 2) {
 			return opts;
 		} else if (((tokens.size() == 3 && inArgument) || tokencmp(tokens[2], "tag")) && tokens.size() < 7) {
-			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+			return std::vector<char const*>(opts.begin() + tokens.size() - 2, opts.end());
 		}
 	} else if (tokencmp(tokens[1], "off")) {
 		if (tokencmp(tokens[tokens.size() - 1], "tag")) {
@@ -373,7 +373,7 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 				}
 			}
 
-			std::vector<const char*> options;
+			std::vector<char const*> options;
 			if (!hasType) {
 				options.push_back("[all|auto|manual]");
 			}
@@ -399,7 +399,7 @@ std::vector<const char*> throttleHintGenerator(std::vector<StringRef> const& tok
 		return { "[ARGS]" };
 	}
 
-	return std::vector<const char*>();
+	return std::vector<char const*>();
 }
 
 CommandFactory throttleFactory(

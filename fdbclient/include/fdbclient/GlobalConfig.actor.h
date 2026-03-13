@@ -44,14 +44,14 @@
 // an excessive amount of data can cause synchronization slowness.
 
 // Keys
-extern const KeyRef fdbClientInfoTxnSampleRate;
-extern const KeyRef fdbClientInfoTxnSizeLimit;
+extern KeyRef const fdbClientInfoTxnSampleRate;
+extern KeyRef const fdbClientInfoTxnSizeLimit;
 
-extern const KeyRef transactionTagSampleRate;
-extern const KeyRef transactionTagSampleCost;
+extern KeyRef const transactionTagSampleRate;
+extern KeyRef const transactionTagSampleCost;
 
-extern const KeyRef samplingFrequency;
-extern const KeyRef samplingWindow;
+extern KeyRef const samplingFrequency;
+extern KeyRef const samplingWindow;
 
 // Structure used to hold the values stored by global configuration. The arena
 // is used as memory to store both the key and the value (the value is only
@@ -77,7 +77,7 @@ public:
 	// to allow global configuration to run transactions on the latest
 	// database.
 	template <class T>
-	void init(Reference<AsyncVar<T> const> db, const ClientDBInfo* dbInfo) {
+	void init(Reference<AsyncVar<T> const> db, ClientDBInfo const* dbInfo) {
 		_updater = updater(this, dbInfo);
 		// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
 		// TODO: Change AsyncTrigger to a Reference
@@ -90,8 +90,8 @@ public:
 	// prefix (`\xff\xff/global_config/`). The caller must still commit the
 	// given transaction in order to persist the changes.
 	static void applyChanges(Transaction& tr,
-	                         const VectorRef<KeyValueRef>& insertions,
-	                         const VectorRef<KeyRangeRef>& clears);
+	                         VectorRef<KeyValueRef> const& insertions,
+	                         VectorRef<KeyRangeRef> const& clears);
 
 	// Use this function to turn a global configuration key defined above into
 	// the full path needed to set the value in the database.
@@ -103,14 +103,14 @@ public:
 	// reference which also contains the arena holding the object. As long as
 	// the caller keeps the ConfigValue reference, the value is guaranteed to
 	// be readable. An empty reference is returned if the value does not exist.
-	const Reference<ConfigValue> get(KeyRef name);
-	const std::map<KeyRef, Reference<ConfigValue>> get(KeyRangeRef range);
+	Reference<ConfigValue> const get(KeyRef name);
+	std::map<KeyRef, Reference<ConfigValue>> const get(KeyRangeRef range);
 
 	// For arithmetic value types, returns a copy of the value for the given
 	// key, or the supplied default value if the framework does not know about
 	// the key.
 	template <typename T, typename std::enable_if<std::is_arithmetic<T>{}, bool>::type = true>
-	const T get(KeyRef name, T defaultVal) {
+	T const get(KeyRef name, T defaultVal) {
 		try {
 			auto configValue = get(name);
 			if (configValue.isValid()) {
@@ -167,7 +167,7 @@ private:
 	// from storage (proxied through the GrvProxies). Returns the version of the
 	// refreshed data.
 	ACTOR static Future<Version> refresh(GlobalConfig* self, Version lastKnown, Version largestSeen);
-	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
+	ACTOR static Future<Void> updater(GlobalConfig* self, ClientDBInfo const* dbInfo);
 
 	DatabaseContext* cx;
 	AsyncTrigger dbInfoChanged;

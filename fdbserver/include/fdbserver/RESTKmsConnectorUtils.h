@@ -33,34 +33,34 @@
 
 namespace RESTKmsConnectorUtils {
 
-extern const char* BASE_CIPHER_ID_TAG;
-extern const char* BASE_CIPHER_TAG;
-extern const char* CIPHER_KEY_DETAILS_TAG;
-extern const char* ENCRYPT_DOMAIN_ID_TAG;
-extern const char* REFRESH_AFTER_SEC;
-extern const char* EXPIRE_AFTER_SEC;
-extern const char* ERROR_TAG;
-extern const char* ERROR_MSG_TAG;
-extern const char* ERROR_CODE_TAG;
-extern const char* KMS_URLS_TAG;
-extern const char* REFRESH_KMS_URLS_TAG;
-extern const char* REQUEST_VERSION_TAG;
-extern const char* VALIDATION_TOKENS_TAG;
-extern const char* VALIDATION_TOKEN_NAME_TAG;
-extern const char* VALIDATION_TOKEN_VALUE_TAG;
-extern const char* DEBUG_UID_TAG;
+extern char const* BASE_CIPHER_ID_TAG;
+extern char const* BASE_CIPHER_TAG;
+extern char const* CIPHER_KEY_DETAILS_TAG;
+extern char const* ENCRYPT_DOMAIN_ID_TAG;
+extern char const* REFRESH_AFTER_SEC;
+extern char const* EXPIRE_AFTER_SEC;
+extern char const* ERROR_TAG;
+extern char const* ERROR_MSG_TAG;
+extern char const* ERROR_CODE_TAG;
+extern char const* KMS_URLS_TAG;
+extern char const* REFRESH_KMS_URLS_TAG;
+extern char const* REQUEST_VERSION_TAG;
+extern char const* VALIDATION_TOKENS_TAG;
+extern char const* VALIDATION_TOKEN_NAME_TAG;
+extern char const* VALIDATION_TOKEN_VALUE_TAG;
+extern char const* DEBUG_UID_TAG;
 
-extern const char* TOKEN_NAME_FILE_SEP;
-extern const char* TOKEN_TUPLE_SEP;
-extern const char DISCOVER_URL_FILE_URL_SEP;
+extern char const* TOKEN_NAME_FILE_SEP;
+extern char const* TOKEN_TUPLE_SEP;
+extern char const DISCOVER_URL_FILE_URL_SEP;
 
-extern const char* BLOB_METADATA_DETAILS_TAG;
-extern const char* BLOB_METADATA_DOMAIN_ID_TAG;
-extern const char* BLOB_METADATA_LOCATIONS_TAG;
-extern const char* BLOB_METADATA_LOCATION_ID_TAG;
-extern const char* BLOB_METADATA_LOCATION_PATH_TAG;
+extern char const* BLOB_METADATA_DETAILS_TAG;
+extern char const* BLOB_METADATA_DOMAIN_ID_TAG;
+extern char const* BLOB_METADATA_LOCATIONS_TAG;
+extern char const* BLOB_METADATA_LOCATION_ID_TAG;
+extern char const* BLOB_METADATA_LOCATION_PATH_TAG;
 
-extern const int INVALID_REQUEST_VERSION;
+extern int const INVALID_REQUEST_VERSION;
 
 enum class ValidationTokenSource {
 	VALIDATION_TOKEN_SOURCE_FILE = 1,
@@ -72,9 +72,9 @@ struct ErrorDetail {
 	std::string errorMsg;
 
 	ErrorDetail() {}
-	ErrorDetail(const std::string& code, const std::string& msg) : errorCode(code), errorMsg(msg) {}
+	ErrorDetail(std::string const& code, std::string const& msg) : errorCode(code), errorMsg(msg) {}
 
-	bool isEqual(const ErrorDetail& toCompare) const {
+	bool isEqual(ErrorDetail const& toCompare) const {
 		return errorCode.compare(toCompare.errorCode) == 0 && errorMsg.compare(toCompare.errorMsg) == 0;
 	}
 };
@@ -85,7 +85,7 @@ struct ValidationTokenCtx {
 	ValidationTokenSource source;
 	Optional<std::string> filePath;
 
-	explicit ValidationTokenCtx(const std::string& n, ValidationTokenSource s)
+	explicit ValidationTokenCtx(std::string const& n, ValidationTokenSource s)
 	  : name(n), value(""), source(s), filePath(Optional<std::string>()), readTS(now()) {}
 	double getReadTS() const { return readTS; }
 
@@ -96,20 +96,20 @@ using ValidationTokenMap = std::unordered_map<std::string, ValidationTokenCtx>;
 
 HTTP::Headers getHTTPHeaders();
 
-void addVersionToDoc(rapidjson::Document& doc, const int requestVersion);
+void addVersionToDoc(rapidjson::Document& doc, int const requestVersion);
 void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
-                                 const char* rootTagName,
-                                 const char* idTagName,
-                                 const EncryptCipherDomainIdVec& domainIds);
+                                 char const* rootTagName,
+                                 char const* idTagName,
+                                 EncryptCipherDomainIdVec const& domainIds);
 void addBaseCipherIdDomIdToDoc(rapidjson::Document& doc,
                                rapidjson::Value& keyIdDetails,
-                               const EncryptCipherBaseKeyId baseCipherId,
-                               const Optional<EncryptCipherDomainId> domainId);
-void addValidationTokensSectionToJsonDoc(rapidjson::Document& doc, const ValidationTokenMap& tokenMap);
-void addRefreshKmsUrlsSectionToJsonDoc(rapidjson::Document& doc, const bool refreshKmsUrls);
+                               EncryptCipherBaseKeyId const baseCipherId,
+                               Optional<EncryptCipherDomainId> const domainId);
+void addValidationTokensSectionToJsonDoc(rapidjson::Document& doc, ValidationTokenMap const& tokenMap);
+void addRefreshKmsUrlsSectionToJsonDoc(rapidjson::Document& doc, bool const refreshKmsUrls);
 void addDebugUidSectionToJsonDoc(rapidjson::Document& doc, Optional<UID> dbgId);
 
-Optional<ErrorDetail> getError(const rapidjson::Document& doc);
+Optional<ErrorDetail> getError(rapidjson::Document const& doc);
 
 } // namespace RESTKmsConnectorUtils
 

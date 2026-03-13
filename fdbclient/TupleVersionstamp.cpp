@@ -16,7 +16,7 @@ TupleVersionstamp::TupleVersionstamp(int64_t version, uint16_t batchNumber, uint
 }
 
 int16_t TupleVersionstamp::getBatchNumber() const {
-	const uint8_t* begin = data.begin();
+	uint8_t const* begin = data.begin();
 	begin += 8;
 	int16_t batchNumber = *(int16_t*)(begin);
 	batchNumber = bigEndian16(batchNumber);
@@ -24,19 +24,19 @@ int16_t TupleVersionstamp::getBatchNumber() const {
 }
 
 int16_t TupleVersionstamp::getUserVersion() const {
-	const uint8_t* begin = data.begin();
+	uint8_t const* begin = data.begin();
 	begin += 10;
 	int16_t userVersion = *(int16_t*)(begin);
 	userVersion = bigEndian16(userVersion);
 	return userVersion;
 }
 
-const uint8_t* TupleVersionstamp::begin() const {
+uint8_t const* TupleVersionstamp::begin() const {
 	return data.begin();
 }
 
 int64_t TupleVersionstamp::getVersion() const {
-	const uint8_t* begin = data.begin();
+	uint8_t const* begin = data.begin();
 	int64_t version = *(int64_t*)begin;
 	version = bigEndian64(version);
 	return version;
@@ -46,7 +46,7 @@ size_t TupleVersionstamp::size() const {
 	return VERSIONSTAMP_TUPLE_SIZE;
 }
 
-bool TupleVersionstamp::operator==(const TupleVersionstamp& other) const {
+bool TupleVersionstamp::operator==(TupleVersionstamp const& other) const {
 	return getVersion() == other.getVersion() && getBatchNumber() == other.getBatchNumber() &&
 	       getUserVersion() == other.getUserVersion();
 }

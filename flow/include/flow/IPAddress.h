@@ -36,7 +36,7 @@ public:
 	// Represents both IPv4 and IPv6 address. For IPv4 addresses,
 	// only the first 32bits are relevant and rest are initialized to 0.
 	IPAddress() : addr(uint32_t(0)) {}
-	explicit IPAddress(const IPAddressStore& v6addr) : addr(v6addr) {}
+	explicit IPAddress(IPAddressStore const& v6addr) : addr(v6addr) {}
 	explicit IPAddress(uint32_t v4addr) : addr(v4addr) {}
 
 	bool isV6() const { return std::holds_alternative<IPAddressStore>(addr); }
@@ -46,14 +46,14 @@ public:
 	// Returns raw v4/v6 representation of address. Caller is responsible
 	// to call these functions safely.
 	uint32_t toV4() const { return std::get<uint32_t>(addr); }
-	const IPAddressStore& toV6() const { return std::get<IPAddressStore>(addr); }
+	IPAddressStore const& toV6() const { return std::get<IPAddressStore>(addr); }
 
 	std::string toString() const;
 	static Optional<IPAddress> parse(std::string const& str);
 
-	bool operator==(const IPAddress& addr) const;
-	bool operator!=(const IPAddress& addr) const;
-	bool operator<(const IPAddress& addr) const;
+	bool operator==(IPAddress const& addr) const;
+	bool operator!=(IPAddress const& addr) const;
+	bool operator<(IPAddress const& addr) const;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -92,7 +92,7 @@ private:
 
 template <>
 struct Traceable<IPAddress> : std::true_type {
-	static std::string toString(const IPAddress& value) { return value.toString(); }
+	static std::string toString(IPAddress const& value) { return value.toString(); }
 };
 
 #endif // FLOW_IPADDRESS_H

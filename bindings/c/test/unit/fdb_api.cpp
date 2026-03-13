@@ -68,37 +68,37 @@ void Future::cancel() {
 
 // ValueFuture
 
-[[nodiscard]] fdb_error_t ValueFuture::get(fdb_bool_t* out_present, const uint8_t** out_value, int* out_value_length) {
+[[nodiscard]] fdb_error_t ValueFuture::get(fdb_bool_t* out_present, uint8_t const** out_value, int* out_value_length) {
 	return fdb_future_get_value(future_, out_present, out_value, out_value_length);
 }
 
 // KeyFuture
 
-[[nodiscard]] fdb_error_t KeyFuture::get(const uint8_t** out_key, int* out_key_length) {
+[[nodiscard]] fdb_error_t KeyFuture::get(uint8_t const** out_key, int* out_key_length) {
 	return fdb_future_get_key(future_, out_key, out_key_length);
 }
 
 // StringArrayFuture
 
-[[nodiscard]] fdb_error_t StringArrayFuture::get(const char*** out_strings, int* out_count) {
+[[nodiscard]] fdb_error_t StringArrayFuture::get(char const*** out_strings, int* out_count) {
 	return fdb_future_get_string_array(future_, out_strings, out_count);
 }
 
 // KeyRangeArrayFuture
 
-[[nodiscard]] fdb_error_t KeyRangeArrayFuture::get(const FDBKeyRange** out_keyranges, int* out_count) {
+[[nodiscard]] fdb_error_t KeyRangeArrayFuture::get(FDBKeyRange const** out_keyranges, int* out_count) {
 	return fdb_future_get_keyrange_array(future_, out_keyranges, out_count);
 }
 
 // KeyValueArrayFuture
 
-[[nodiscard]] fdb_error_t KeyValueArrayFuture::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
+[[nodiscard]] fdb_error_t KeyValueArrayFuture::get(FDBKeyValue const** out_kv, int* out_count, fdb_bool_t* out_more) {
 	return fdb_future_get_keyvalue_array(future_, out_kv, out_count, out_more);
 }
 
 // MappedKeyValueArrayFuture
 
-[[nodiscard]] fdb_error_t MappedKeyValueArrayFuture::get(const FDBMappedKeyValue** out_kv,
+[[nodiscard]] fdb_error_t MappedKeyValueArrayFuture::get(FDBMappedKeyValue const** out_kv,
                                                          int* out_count,
                                                          fdb_bool_t* out_more) {
 	return fdb_future_get_mappedkeyvalue_array(future_, out_kv, out_count, out_more);
@@ -111,27 +111,27 @@ Result::~Result() {
 }
 
 // KeyValueArrayResult
-[[nodiscard]] fdb_error_t KeyValueArrayResult::get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more) {
+[[nodiscard]] fdb_error_t KeyValueArrayResult::get(FDBKeyValue const** out_kv, int* out_count, fdb_bool_t* out_more) {
 	return fdb_result_get_keyvalue_array(result_, out_kv, out_count, out_more);
 }
 
 // Database
 Int64Future Database::reboot_worker(FDBDatabase* db,
-                                    const uint8_t* address,
+                                    uint8_t const* address,
                                     int address_length,
                                     fdb_bool_t check,
                                     int duration) {
 	return Int64Future(fdb_database_reboot_worker(db, address, address_length, check, duration));
 }
 
-EmptyFuture Database::force_recovery_with_data_loss(FDBDatabase* db, const uint8_t* dcid, int dcid_length) {
+EmptyFuture Database::force_recovery_with_data_loss(FDBDatabase* db, uint8_t const* dcid, int dcid_length) {
 	return EmptyFuture(fdb_database_force_recovery_with_data_loss(db, dcid, dcid_length));
 }
 
 EmptyFuture Database::create_snapshot(FDBDatabase* db,
-                                      const uint8_t* uid,
+                                      uint8_t const* uid,
                                       int uid_length,
-                                      const uint8_t* snap_command,
+                                      uint8_t const* snap_command,
                                       int snap_command_length) {
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
 }
@@ -156,7 +156,7 @@ void Transaction::cancel() {
 	fdb_transaction_cancel(tr_);
 }
 
-[[nodiscard]] fdb_error_t Transaction::set_option(FDBTransactionOption option, const uint8_t* value, int value_length) {
+[[nodiscard]] fdb_error_t Transaction::set_option(FDBTransactionOption option, uint8_t const* value, int value_length) {
 	return fdb_transaction_set_option(tr_, option, value, value_length);
 }
 
@@ -185,10 +185,10 @@ KeyFuture Transaction::get_versionstamp() {
 }
 
 ValueFuture Transaction::get(std::string_view key, fdb_bool_t snapshot) {
-	return ValueFuture(fdb_transaction_get(tr_, (const uint8_t*)key.data(), key.size(), snapshot));
+	return ValueFuture(fdb_transaction_get(tr_, (uint8_t const*)key.data(), key.size(), snapshot));
 }
 
-KeyFuture Transaction::get_key(const uint8_t* key_name,
+KeyFuture Transaction::get_key(uint8_t const* key_name,
                                int key_name_length,
                                fdb_bool_t or_equal,
                                int offset,
@@ -197,14 +197,14 @@ KeyFuture Transaction::get_key(const uint8_t* key_name,
 }
 
 StringArrayFuture Transaction::get_addresses_for_key(std::string_view key) {
-	return StringArrayFuture(fdb_transaction_get_addresses_for_key(tr_, (const uint8_t*)key.data(), key.size()));
+	return StringArrayFuture(fdb_transaction_get_addresses_for_key(tr_, (uint8_t const*)key.data(), key.size()));
 }
 
-KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
+KeyValueArrayFuture Transaction::get_range(uint8_t const* begin_key_name,
                                            int begin_key_name_length,
                                            fdb_bool_t begin_or_equal,
                                            int begin_offset,
-                                           const uint8_t* end_key_name,
+                                           uint8_t const* end_key_name,
                                            int end_key_name_length,
                                            fdb_bool_t end_or_equal,
                                            int end_offset,
@@ -231,15 +231,15 @@ KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
 	                                                     reverse));
 }
 
-MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key_name,
+MappedKeyValueArrayFuture Transaction::get_mapped_range(uint8_t const* begin_key_name,
                                                         int begin_key_name_length,
                                                         fdb_bool_t begin_or_equal,
                                                         int begin_offset,
-                                                        const uint8_t* end_key_name,
+                                                        uint8_t const* end_key_name,
                                                         int end_key_name_length,
                                                         fdb_bool_t end_or_equal,
                                                         int end_offset,
-                                                        const uint8_t* mapper_name,
+                                                        uint8_t const* mapper_name,
                                                         int mapper_name_length,
                                                         int limit,
                                                         int target_bytes,
@@ -267,7 +267,7 @@ MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key
 }
 
 EmptyFuture Transaction::watch(std::string_view key) {
-	return EmptyFuture(fdb_transaction_watch(tr_, (const uint8_t*)key.data(), key.size()));
+	return EmptyFuture(fdb_transaction_watch(tr_, (uint8_t const*)key.data(), key.size()));
 }
 
 EmptyFuture Transaction::commit() {
@@ -279,23 +279,23 @@ EmptyFuture Transaction::on_error(fdb_error_t err) {
 }
 
 void Transaction::clear(std::string_view key) {
-	return fdb_transaction_clear(tr_, (const uint8_t*)key.data(), key.size());
+	return fdb_transaction_clear(tr_, (uint8_t const*)key.data(), key.size());
 }
 
 void Transaction::clear_range(std::string_view begin_key, std::string_view end_key) {
 	fdb_transaction_clear_range(
-	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size());
+	    tr_, (uint8_t const*)begin_key.data(), begin_key.size(), (uint8_t const*)end_key.data(), end_key.size());
 }
 
 void Transaction::set(std::string_view key, std::string_view value) {
-	fdb_transaction_set(tr_, (const uint8_t*)key.data(), key.size(), (const uint8_t*)value.data(), value.size());
+	fdb_transaction_set(tr_, (uint8_t const*)key.data(), key.size(), (uint8_t const*)value.data(), value.size());
 }
 
 void Transaction::atomic_op(std::string_view key,
-                            const uint8_t* param,
+                            uint8_t const* param,
                             int param_length,
                             FDBMutationType operationType) {
-	return fdb_transaction_atomic_op(tr_, (const uint8_t*)key.data(), key.size(), param, param_length, operationType);
+	return fdb_transaction_atomic_op(tr_, (uint8_t const*)key.data(), key.size(), param, param_length, operationType);
 }
 
 [[nodiscard]] fdb_error_t Transaction::get_committed_version(int64_t* out_version) {
@@ -306,7 +306,7 @@ fdb_error_t Transaction::add_conflict_range(std::string_view begin_key,
                                             std::string_view end_key,
                                             FDBConflictRangeType type) {
 	return fdb_transaction_add_conflict_range(
-	    tr_, (const uint8_t*)begin_key.data(), begin_key.size(), (const uint8_t*)end_key.data(), end_key.size(), type);
+	    tr_, (uint8_t const*)begin_key.data(), begin_key.size(), (uint8_t const*)end_key.data(), end_key.size(), type);
 }
 
 } // namespace fdb

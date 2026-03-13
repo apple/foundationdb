@@ -30,7 +30,7 @@ namespace mako {
 
 using namespace fdb;
 
-const std::array<Operation, MAX_OP> opTable{ {
+std::array<Operation, MAX_OP> const opTable{ {
 	{ "GRV",
 	  { { StepKind::READ,
 	      [](Transaction& tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
@@ -146,10 +146,10 @@ const std::array<Operation, MAX_OP> opTable{ {
 	          randomString(value.data(), args.value_length);
 
 	          // key[0..args.key_length] := concat(prefix, random_string, num[0..range_digits])
-	          const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
+	          auto const range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
 	          assert(range > 0);
-	          const auto range_digits = digits(range);
-	          const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
+	          auto const range_digits = digits(range);
+	          auto const random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
 	          randomString(&key[intSize(KEY_PREFIX)], random_len);
 	          for (auto i = 0; i < range; i++) {
 		          numericWithFill(&key[args.key_length - range_digits], range_digits, i);
@@ -205,10 +205,10 @@ const std::array<Operation, MAX_OP> opTable{ {
 	          randomString(value.data(), args.value_length);
 
 	          // key[0..args.key_length] := concat(prefix, random_string, num[0..range_digits])
-	          const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
+	          auto const range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
 	          assert(range > 0);
-	          const auto range_digits = digits(range);
-	          const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
+	          auto const range_digits = digits(range);
+	          auto const random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
 	          randomString(&key[KEY_PREFIX.size()], random_len);
 	          for (auto i = 0; i < range; i++) {
 		          numericWithFill(&key[args.key_length - range_digits], range_digits, i);

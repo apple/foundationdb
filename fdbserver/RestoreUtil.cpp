@@ -22,7 +22,7 @@
 
 #include "fdbserver/RestoreUtil.h"
 
-const std::vector<std::string> RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
+std::vector<std::string> const RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
 
 // Similar to debugMutation(), we use debugFRMutation to track mutations for fast restore systems only.
@@ -30,7 +30,7 @@ int numRoles = RestoreRoleStr.size();
 StringRef debugFRKey = "\xff\xff\xff\xff"_sr;
 
 // Track any mutation in fast restore that has overlap with debugFRKey
-bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
+bool debugFRMutation(char const* context, Version version, MutationRef const& mutation) {
 	if (mutation.type != mutation.ClearRange && mutation.param1 == debugFRKey) { // Single key mutation
 		TraceEvent("FastRestoreMutationTracking")
 		    .detail("At", context)
@@ -53,7 +53,7 @@ bool debugFRMutation(const char* context, Version version, MutationRef const& mu
 }
 #else
 // Default implementation.
-bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
+bool debugFRMutation(char const* context, Version version, MutationRef const& mutation) {
 	return false;
 }
 #endif

@@ -139,13 +139,13 @@ void hugeArenaSample(int size) {
 }
 
 #ifdef ALLOC_INSTRUMENTATION
-INIT_SEG std::map<const char*, AllocInstrInfo> allocInstr;
+INIT_SEG std::map<char const*, AllocInstrInfo> allocInstr;
 INIT_SEG std::unordered_map<int64_t, std::pair<uint32_t, size_t>> memSample;
 INIT_SEG std::unordered_map<uint32_t, BackTraceAccount> backTraceLookup;
 INIT_SEG ThreadSpinLock memLock;
-const size_t SAMPLE_BYTES = 1e7;
+size_t const SAMPLE_BYTES = 1e7;
 template <int Size>
-volatile int32_t FastAllocator<Size>::pageCount;
+int32_t volatile FastAllocator<Size>::pageCount;
 thread_local bool memSample_entered = false;
 #endif
 
@@ -313,7 +313,7 @@ namespace detail {
 
 std::set<void*> g_allocatedSet;
 std::set<void*> g_freedSet;
-std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
+std::vector<std::pair<uint8_t const*, int>> g_wipedSet;
 bool g_active = false;
 
 } // namespace detail
@@ -359,12 +359,12 @@ void invalidate(void* ptr) {
 	detail::g_freedSet.insert(ptr);
 }
 
-void trackWipedArea(const uint8_t* begin, int size) {
+void trackWipedArea(uint8_t const* begin, int size) {
 	ASSERT_ABORT(detail::g_active);
 	detail::g_wipedSet.emplace_back(begin, size);
 }
 
-std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet() {
+std::vector<std::pair<uint8_t const*, int>> const& getWipedAreaSet() {
 	ASSERT_ABORT(detail::g_active);
 	return detail::g_wipedSet;
 }
@@ -629,9 +629,9 @@ void FastAllocator<Size>::getMagazine() {
 	}
 #endif
 #ifdef VALGRIND
-	const bool includeGuardPages = false;
+	bool const includeGuardPages = false;
 #else
-	const bool includeGuardPages = true;
+	bool const includeGuardPages = true;
 #endif
 	// NOTE: rely on lower level metrics in allocate() (and whatever it calls)
 	// for accounting the allocations it does.

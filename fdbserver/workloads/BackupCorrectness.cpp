@@ -124,7 +124,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			std::vector<std::string> sortedEndpoints(rangeEndpoints.begin(), rangeEndpoints.end());
 			sort(sortedEndpoints.begin(), sortedEndpoints.end());
 			for (auto i = sortedEndpoints.begin(); i != sortedEndpoints.end(); ++i) {
-				const std::string& start = *i++;
+				std::string const& start = *i++;
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(start, *i));
 
 				// Track the added range

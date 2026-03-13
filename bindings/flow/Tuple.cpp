@@ -25,22 +25,22 @@ namespace FDB {
 static_assert(std::numeric_limits<float>::is_iec559);
 static_assert(std::numeric_limits<double>::is_iec559);
 
-const size_t Uuid::SIZE = 16;
-const size_t VERSIONSTAMP_TUPLE_SIZE = 12;
+size_t const Uuid::SIZE = 16;
+size_t const VERSIONSTAMP_TUPLE_SIZE = 12;
 
-const uint8_t Tuple::NULL_CODE = 0x00;
-const uint8_t Tuple::BYTES_CODE = 0x01;
-const uint8_t Tuple::STRING_CODE = 0x02;
-const uint8_t Tuple::NESTED_CODE = 0x05;
-const uint8_t Tuple::INT_ZERO_CODE = 0x14;
-const uint8_t Tuple::POS_INT_END = 0x1c;
-const uint8_t Tuple::NEG_INT_START = 0x0c;
-const uint8_t Tuple::FLOAT_CODE = 0x20;
-const uint8_t Tuple::DOUBLE_CODE = 0x21;
-const uint8_t Tuple::FALSE_CODE = 0x26;
-const uint8_t Tuple::TRUE_CODE = 0x27;
-const uint8_t Tuple::UUID_CODE = 0x30;
-const uint8_t Tuple::VERSIONSTAMP_96_CODE = 0x33;
+uint8_t const Tuple::NULL_CODE = 0x00;
+uint8_t const Tuple::BYTES_CODE = 0x01;
+uint8_t const Tuple::STRING_CODE = 0x02;
+uint8_t const Tuple::NESTED_CODE = 0x05;
+uint8_t const Tuple::INT_ZERO_CODE = 0x14;
+uint8_t const Tuple::POS_INT_END = 0x1c;
+uint8_t const Tuple::NEG_INT_START = 0x0c;
+uint8_t const Tuple::FLOAT_CODE = 0x20;
+uint8_t const Tuple::DOUBLE_CODE = 0x21;
+uint8_t const Tuple::FALSE_CODE = 0x26;
+uint8_t const Tuple::TRUE_CODE = 0x27;
+uint8_t const Tuple::UUID_CODE = 0x30;
+uint8_t const Tuple::VERSIONSTAMP_96_CODE = 0x33;
 
 static float bigEndianFloat(float orig) {
 	int32_t big = *(int32_t*)&orig;
@@ -54,7 +54,7 @@ static double bigEndianDouble(double orig) {
 	return *(double*)&big;
 }
 
-static size_t find_string_terminator(const StringRef data, size_t offset) {
+static size_t find_string_terminator(StringRef const data, size_t offset) {
 	size_t i = offset;
 	while (i < data.size() - 1 && !(data[i] == (uint8_t)'\x00' && data[i + 1] != (uint8_t)'\xff')) {
 		i += (data[i] == '\x00' ? 2 : 1);
@@ -63,7 +63,7 @@ static size_t find_string_terminator(const StringRef data, size_t offset) {
 	return i;
 }
 
-static size_t find_string_terminator(const Standalone<VectorRef<unsigned char>> data, size_t offset) {
+static size_t find_string_terminator(Standalone<VectorRef<unsigned char>> const data, size_t offset) {
 	size_t i = offset;
 	while (i < data.size() - 1 && !(data[i] == '\x00' && data[i + 1] != (uint8_t)'\xff')) {
 		i += (data[i] == '\x00' ? 2 : 1);
@@ -155,7 +155,7 @@ Tuple& Tuple::append(Tuple const& tuple) {
 Tuple& Tuple::append(StringRef const& str, bool utf8) {
 	offsets.push_back(data.size());
 
-	const uint8_t utfChar = utf8 ? STRING_CODE : BYTES_CODE;
+	uint8_t const utfChar = utf8 ? STRING_CODE : BYTES_CODE;
 	data.append(data.arena(), &utfChar, 1);
 
 	size_t lastPos = 0;
@@ -203,7 +203,7 @@ Tuple& Tuple::append(int64_t value) {
 	for (int i = 0; i < 8; i++) {
 		if (((uint8_t*)&swap)[i] != (neg ? 255 : 0)) {
 			data.push_back(data.arena(), (uint8_t)(INT_ZERO_CODE + (8 - i) * (neg ? -1 : 1)));
-			data.append(data.arena(), ((const uint8_t*)&swap) + i, 8 - i);
+			data.append(data.arena(), ((uint8_t const*)&swap) + i, 8 - i);
 			return *this;
 		}
 	}
@@ -622,7 +622,7 @@ bool Tuple::operator>=(Tuple const& other) const {
 }
 
 // UUID implementation
-Uuid::Uuid(const StringRef& data) {
+Uuid::Uuid(StringRef const& data) {
 	if (data.size() != Uuid::SIZE) {
 		throw invalid_uuid_size();
 	}

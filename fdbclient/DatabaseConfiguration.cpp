@@ -245,7 +245,7 @@ int32_t DatabaseConfiguration::maxZoneFailuresTolerated(int fullyReplicatedRegio
 
 bool DatabaseConfiguration::isValid() const {
 	// enable this via `fdbcli --knob_cli_print_invalid_configuration=1` command line parameter
-	auto log_test = [](const char* text, bool val) {
+	auto log_test = [](char const* text, bool val) {
 		if (!val && CLIENT_KNOBS->CLI_PRINT_INVALID_CONFIGURATION) {
 			fprintf(stderr, "%s: false\n", text);
 		}
@@ -439,7 +439,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	return result;
 }
 
-std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& json) {
+std::string DatabaseConfiguration::configureStringFromJSON(StatusObject const& json) {
 	std::string result;
 
 	for (auto kv : json) {
@@ -578,9 +578,9 @@ void DatabaseConfiguration::overwriteProxiesCount() {
 	Optional<ValueRef> optGrvProxies = DatabaseConfiguration::get(grvProxiesKey);
 	Optional<ValueRef> optProxies = DatabaseConfiguration::get(proxiesKey);
 
-	const int mutableGrvProxyCount = optGrvProxies.present() ? toInt(optGrvProxies.get()) : -1;
-	const int mutableCommitProxyCount = optCommitProxies.present() ? toInt(optCommitProxies.get()) : -1;
-	const int mutableProxiesCount = optProxies.present() ? toInt(optProxies.get()) : -1;
+	int const mutableGrvProxyCount = optGrvProxies.present() ? toInt(optGrvProxies.get()) : -1;
+	int const mutableCommitProxyCount = optCommitProxies.present() ? toInt(optCommitProxies.get()) : -1;
+	int const mutableProxiesCount = optProxies.present() ? toInt(optProxies.get()) : -1;
 
 	if (mutableProxiesCount > 1) {
 		TraceEvent(SevDebug, "OverwriteProxiesCount")
@@ -608,7 +608,7 @@ void DatabaseConfiguration::overwriteProxiesCount() {
 			}
 		} else if (mutableGrvProxyCount == -1 && mutableCommitProxyCount == -1) {
 			// Use DEFAULT_COMMIT_GRV_PROXIES_RATIO to split proxies between Grv & Commit proxies
-			const int derivedGrvProxyCount =
+			int const derivedGrvProxyCount =
 			    std::max(1,
 			             std::min(CLIENT_KNOBS->DEFAULT_MAX_GRV_PROXIES,
 			                      mutableProxiesCount / (CLIENT_KNOBS->DEFAULT_COMMIT_GRV_PROXIES_RATIO + 1)));
@@ -782,7 +782,7 @@ Optional<ValueRef> DatabaseConfiguration::get(KeyRef key) const {
 	}
 }
 
-bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a, const LocalityData& locality) const {
+bool DatabaseConfiguration::isExcludedServer(NetworkAddressList a, LocalityData const& locality) const {
 	return get(encodeExcludedServersKey(AddressExclusion(a.address.ip, a.address.port))).present() ||
 	       get(encodeExcludedServersKey(AddressExclusion(a.address.ip))).present() ||
 	       get(encodeFailedServersKey(AddressExclusion(a.address.ip, a.address.port))).present() ||
@@ -817,9 +817,9 @@ std::set<AddressExclusion> DatabaseConfiguration::getExcludedServers() const {
 }
 
 // checks if the locality is excluded or not by checking if the key is present.
-bool DatabaseConfiguration::isExcludedLocality(const LocalityData& locality) const {
+bool DatabaseConfiguration::isExcludedLocality(LocalityData const& locality) const {
 	std::map<std::string, std::string> localityData = locality.getAllData();
-	for (const auto& l : localityData) {
+	for (auto const& l : localityData) {
 		if (get(StringRef(encodeExcludedLocalityKey(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
 		                                            l.second)))
 		        .present() ||
@@ -891,11 +891,11 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 		return mutableConfiguration.get().find(key) != mutableConfiguration.get().end();
 	}
 
-	const int keyLen = key.size();
+	int const keyLen = key.size();
 	for (auto iter = rawConfiguration.begin(); iter != rawConfiguration.end(); ++iter) {
-		const auto& rawConfKey = iter->key;
+		auto const& rawConfKey = iter->key;
 		if (keyLen == rawConfKey.size() &&
-		    strncmp(key.c_str(), reinterpret_cast<const char*>(rawConfKey.begin()), keyLen) == 0) {
+		    strncmp(key.c_str(), reinterpret_cast<char const*>(rawConfKey.begin()), keyLen) == 0) {
 			return true;
 		}
 	}

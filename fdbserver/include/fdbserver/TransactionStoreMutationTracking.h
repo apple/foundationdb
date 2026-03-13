@@ -29,9 +29,9 @@
 
 #define DEBUG_TRANSACTION_STATE_STORE(...)                                                                             \
 	DEBUG_TRANSACTION_STATE_STORE_ENABLED&& transactionStoreDebugMutation(__VA_ARGS__)
-TraceEvent transactionStoreDebugMutation(const char* context,
+TraceEvent transactionStoreDebugMutation(char const* context,
                                          StringRef const& mutation,
-                                         const UID id,
-                                         const std::string loc = "");
+                                         UID const id,
+                                         std::string const loc = "");
 
 #endif

@@ -54,7 +54,7 @@ ACTOR Future<Void> cancelOnly(std::vector<Future<Void>> futures) {
 	return Void();
 }
 
-ACTOR Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logDelay, const char* context, UID id) {
+ACTOR Future<Void> timeoutWarningCollector(FutureStream<Void> input, double logDelay, char const* context, UID id) {
 	state uint64_t counter = 0;
 	state Future<Void> end = delay(logDelay);
 	loop choose {
@@ -77,7 +77,7 @@ ACTOR Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
 	state std::vector<Future<bool>> successFutures;
 	state double startTime = now();
 	successFutures.reserve(futures.size());
-	for (const auto& future : futures) {
+	for (auto const& future : futures) {
 		successFutures.push_back(fmap([](auto const& result) { return result.present(); }, future));
 	}
 	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
@@ -120,7 +120,7 @@ ACTOR Future<bool> shortCircuitAny(std::vector<Future<bool>> f) {
 			// Handle a possible race condition? If the _last_ term to
 			// be evaluated triggers the waitForAll before bubbling
 			// out of the returnIfTrue quorum
-			for (const auto& fut : f) {
+			for (auto const& fut : f) {
 				if (fut.get()) {
 					return true;
 				}

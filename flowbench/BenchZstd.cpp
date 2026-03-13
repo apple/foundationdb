@@ -38,8 +38,8 @@
 //  # bin/flowbench --benchmark_filter=bench_zstd
 
 // Compress with raw ZSTD API
-static inline std::pair<std::unique_ptr<char[]>, size_t> compress(const std::string& data, int level) {
-	const char* srcBegin = data.data();
+static inline std::pair<std::unique_ptr<char[]>, size_t> compress(std::string const& data, int level) {
+	char const* srcBegin = data.data();
 	size_t destSize = ZSTD_compressBound(data.size());
 	std::unique_ptr<char[]> dest = std::make_unique<char[]>(destSize);
 	size_t bytes = ZSTD_compress(dest.get(), destSize, srcBegin, data.size(), level);
@@ -47,8 +47,8 @@ static inline std::pair<std::unique_ptr<char[]>, size_t> compress(const std::str
 }
 
 // Compress with raw ZSTD API ZSTD_compress2
-static inline std::pair<std::unique_ptr<char[]>, size_t> compress2(const std::string& data, ZSTD_CCtx* cctx) {
-	const char* srcBegin = data.data();
+static inline std::pair<std::unique_ptr<char[]>, size_t> compress2(std::string const& data, ZSTD_CCtx* cctx) {
+	char const* srcBegin = data.data();
 	size_t destSize = ZSTD_compressBound(data.size());
 	std::unique_ptr<char[]> dest = std::make_unique<char[]>(destSize);
 	size_t bytes = ZSTD_compress2(cctx, dest.get(), destSize, srcBegin, data.size());
@@ -56,7 +56,7 @@ static inline std::pair<std::unique_ptr<char[]>, size_t> compress2(const std::st
 }
 
 // Deompress with raw ZSTD API
-static inline std::pair<std::unique_ptr<char[]>, size_t> decompress(const std::string& data) {
+static inline std::pair<std::unique_ptr<char[]>, size_t> decompress(std::string const& data) {
 	size_t destSize = ZSTD_decompressBound(data.data(), data.size());
 	std::unique_ptr<char[]> dest = std::make_unique<char[]>(destSize);
 	size_t bytes = ZSTD_decompress(dest.get(), destSize, data.data(), data.size());
@@ -64,7 +64,7 @@ static inline std::pair<std::unique_ptr<char[]>, size_t> decompress(const std::s
 }
 
 // Compress with raw ZSTD stream API
-static inline std::pair<std::unique_ptr<char[]>, size_t> compressAsStream(const std::string& data,
+static inline std::pair<std::unique_ptr<char[]>, size_t> compressAsStream(std::string const& data,
                                                                           ZSTD_CStream* cstream) {
 	size_t dstSize = ZSTD_compressBound(data.size());
 	std::unique_ptr<char[]> dst = std::make_unique<char[]>(dstSize);
@@ -84,7 +84,7 @@ static inline std::pair<std::unique_ptr<char[]>, size_t> compressAsStream(const 
 }
 
 // Decompress with raw ZSTD stream API
-static inline std::pair<std::unique_ptr<char[]>, size_t> decompressAsStream(const std::string& data,
+static inline std::pair<std::unique_ptr<char[]>, size_t> decompressAsStream(std::string const& data,
                                                                             ZSTD_DStream* dstream) {
 	size_t destSize = ZSTD_decompressBound(data.data(), data.size());
 	std::unique_ptr<char[]> dest = std::make_unique<char[]>(destSize);

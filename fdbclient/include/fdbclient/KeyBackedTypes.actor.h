@@ -540,18 +540,18 @@ struct TypedKeySelector {
 
 	TypedKeySelector operator-(int delta) { return { key, orEqual, offset - delta }; }
 
-	KeySelector pack(const KeyRef& prefix) const {
+	KeySelector pack(KeyRef const& prefix) const {
 		Key packed = KeyCodec::pack(key).withPrefix(prefix);
 		return KeySelector(KeySelectorRef(packed, orEqual, offset), packed.arena());
 	}
 
-	static TypedKeySelector lastLessThan(const KeyType& k) { return { k, false, 0 }; }
+	static TypedKeySelector lastLessThan(KeyType const& k) { return { k, false, 0 }; }
 
-	static TypedKeySelector lastLessOrEqual(const KeyType& k) { return { k, true, 0 }; }
+	static TypedKeySelector lastLessOrEqual(KeyType const& k) { return { k, true, 0 }; }
 
-	static TypedKeySelector firstGreaterThan(const KeyType& k) { return { k, true, +1 }; }
+	static TypedKeySelector firstGreaterThan(KeyType const& k) { return { k, true, +1 }; }
 
-	static TypedKeySelector firstGreaterOrEqual(const KeyType& k) { return { k, false, +1 }; }
+	static TypedKeySelector firstGreaterOrEqual(KeyType const& k) { return { k, false, +1 }; }
 };
 
 // Convenient read/write access to a sorted map of KeyType to ValueType under prefix
@@ -600,7 +600,7 @@ public:
 			    map(safeThreadFutureToFuture(getRangeFuture),
 			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
 				        RangeResultType rangeResult;
-				        for (const auto& keyValue : kvs) {
+				        for (auto const& keyValue : kvs) {
 					        KeyType key = KeyCodec::unpack(keyValue.key.removePrefix(prefix));
 					        ValueType val = valueCodec.unpack(keyValue.value);
 					        rangeResult.results.push_back(PairType(key, val));

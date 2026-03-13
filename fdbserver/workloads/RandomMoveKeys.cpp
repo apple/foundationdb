@@ -52,8 +52,8 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	bool shouldInject(DeterministicRandom& random,
-	                  const WorkloadRequest& work,
-	                  const unsigned alreadyAdded) const override {
+	                  WorkloadRequest const& work,
+	                  unsigned const alreadyAdded) const override {
 		return alreadyAdded < 1 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 	}
 

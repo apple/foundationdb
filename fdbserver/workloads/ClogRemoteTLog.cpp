@@ -35,7 +35,7 @@ struct ClogRemoteTLog : TestWorkload {
 		std::vector<TestState> path;
 		bool prefixMatch{ true };
 	};
-	const std::vector<StatePath> expectedStatePaths{
+	std::vector<StatePath> const expectedStatePaths{
 		{ .path = { TEST_INIT, SS_LAG_NORMAL, SS_LAG_HIGH, SS_LAG_NORMAL } },
 		// For some topology and process placements, it's possible that the lag does not recover. However, we still
 		// allow the test to pass as long as the bad/clogged remote tlog was excluded by gray failure.
@@ -51,7 +51,7 @@ struct ClogRemoteTLog : TestWorkload {
 	    cloggedRemoteTLog; // set after clogging is done, we use this state to ensure that it's
 	                       // eventually not present in dbInfo (which implies it was excluded by gray failure)
 
-	ClogRemoteTLog(const WorkloadContext& wctx) : TestWorkload(wctx) {
+	ClogRemoteTLog(WorkloadContext const& wctx) : TestWorkload(wctx) {
 		enabled =
 		    (clientId == 0); // only run this workload for a single client, and that too the first client (by its id)
 		testDuration = getOption(options, "testDuration"_sr, 120);
@@ -60,21 +60,21 @@ struct ClogRemoteTLog : TestWorkload {
 		lagThreshold = getOption(options, "lagThreshold"_sr, 20);
 	}
 
-	Future<Void> setup(const Database& db) override { return Void(); }
+	Future<Void> setup(Database const& db) override { return Void(); }
 
-	Future<Void> start(const Database& db) override {
+	Future<Void> start(Database const& db) override {
 		if (!g_network->isSimulated() || !enabled) {
 			return Void();
 		}
 		return timeout(reportErrors(workload(this, db), "ClogRemoteTLogError"), testDuration, Void());
 	}
 
-	Future<bool> check(const Database& db) override {
+	Future<bool> check(Database const& db) override {
 		if (!g_network->isSimulated() || !enabled) {
 			return true;
 		}
 		// First, emit trace event for potential debugging if test fails
-		auto stateToStr = [](const TestState testState) -> std::string {
+		auto stateToStr = [](TestState const testState) -> std::string {
 			switch (testState) {
 			case (TEST_INIT): {
 				return "TEST_INIT";
@@ -94,10 +94,10 @@ struct ClogRemoteTLog : TestWorkload {
 			}
 			};
 		};
-		auto print = [&stateToStr](const std::vector<TestState>& path) {
+		auto print = [&stateToStr](std::vector<TestState> const& path) {
 			std::string ret;
 			for (size_t i = 0; i < path.size(); ++i) {
-				const auto pathState = path[i];
+				auto const pathState = path[i];
 				ret += stateToStr(pathState) + (i < path.size() - 1 ? std::string{ " -> " } : std::string{ "" });
 			}
 			return ret;
@@ -109,9 +109,9 @@ struct ClogRemoteTLog : TestWorkload {
 
 		// Then, do the actual check
 		auto match =
-		    [](const std::vector<TestState>& actualPath,
-		       const std::vector<TestState>& expectedPath,
-		       const bool
+		    [](std::vector<TestState> const& actualPath,
+		       std::vector<TestState> const& expectedPath,
+		       bool const
 		           allowPrefix /* when true, relaxes match as long as a prefix of actualPath matches expectedPath */)
 		    -> bool {
 			if (!allowPrefix && actualPath.size() != expectedPath.size()) {
@@ -126,7 +126,7 @@ struct ClogRemoteTLog : TestWorkload {
 			}
 			return true;
 		};
-		for (const auto& expectedPath : expectedStatePaths) {
+		for (auto const& expectedPath : expectedStatePaths) {
 			if (match(actualStatePath, expectedPath.path, expectedPath.prefixMatch)) {
 				return true;
 			}
@@ -185,9 +185,9 @@ struct ClogRemoteTLog : TestWorkload {
 	// Returns true if and only if there's a general error in fetching status json
 	// An example failure is network issue from client to CC (server)
 	static bool statusError(StatusObjectReader reader) {
-		static const auto errors{ []() {
+		static auto const errors{ []() {
 			std::unordered_set<std::string> errors;
-			std::for_each(messageTypeToName.begin(), messageTypeToName.end(), [&errors](const auto& kvPair) {
+			std::for_each(messageTypeToName.begin(), messageTypeToName.end(), [&errors](auto const& kvPair) {
 				errors.insert(kvPair.second);
 			});
 			return errors;
@@ -276,11 +276,11 @@ struct ClogRemoteTLog : TestWorkload {
 
 	static std::vector<NetworkAddress> getRemoteTLogs(ClogRemoteTLog* self) {
 		std::vector<NetworkAddress> remoteTLogIPs;
-		for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
+		for (auto const& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
 			if (tLogSet.isLocal) {
 				continue;
 			}
-			for (const auto& tLog : tLogSet.tLogs) {
+			for (auto const& tLog : tLogSet.tLogs) {
 				remoteTLogIPs.push_back(tLog.interf().address());
 			}
 		}
@@ -305,7 +305,7 @@ struct ClogRemoteTLog : TestWorkload {
 
 		// Then, attempt to find a remote tlog that is not on the same machine as a remote SS
 		Optional<NetworkAddress> isolatedRemoteTLog;
-		for (const auto& addr : remoteTLogs) {
+		for (auto const& addr : remoteTLogs) {
 			if (std::find(remoteSSIPs.begin(), remoteSSIPs.end(), addr.ip) == remoteSSIPs.end()) {
 				isolatedRemoteTLog = addr;
 			}
@@ -323,8 +323,8 @@ struct ClogRemoteTLog : TestWorkload {
 		// Then, find all processes that the remote tlog will have degraded connection with
 		IPAddress cc = self->dbInfo->get().clusterInterface.address().ip;
 		std::vector<IPAddress> processes;
-		for (const auto& process : g_simulator->getAllProcesses()) {
-			const auto& ip = process->address.ip;
+		for (auto const& process : g_simulator->getAllProcesses()) {
+			auto const& ip = process->address.ip;
 			if (process->startingClass != ProcessClass::TesterClass && ip != cc) {
 				processes.push_back(ip);
 			}
@@ -333,7 +333,7 @@ struct ClogRemoteTLog : TestWorkload {
 
 		// Finally, start the clogging between the remote tlog and the processes calculated above
 		int numClogged{ 0 };
-		for (const auto& ip : processes) {
+		for (auto const& ip : processes) {
 			if (self->cloggedRemoteTLog.get().ip == ip) {
 				continue;
 			}
@@ -355,12 +355,12 @@ struct ClogRemoteTLog : TestWorkload {
 	}
 
 	// Returns true if and only if the provided remote tlog `addr` is not in dbInfo
-	static bool remoteTLogNotInDbInfo(const NetworkAddress& addr, const ServerDBInfo& dbInfo) {
-		for (const auto& tLogSet : dbInfo.logSystemConfig.tLogs) {
+	static bool remoteTLogNotInDbInfo(NetworkAddress const& addr, ServerDBInfo const& dbInfo) {
+		for (auto const& tLogSet : dbInfo.logSystemConfig.tLogs) {
 			if (tLogSet.isLocal) {
 				continue;
 			}
-			for (const auto& tLog : tLogSet.tLogs) {
+			for (auto const& tLog : tLogSet.tLogs) {
 				if (tLog.present() && tLog.interf().addresses().contains(addr)) {
 					return false;
 				}
@@ -385,7 +385,7 @@ struct ClogRemoteTLog : TestWorkload {
 			bool stateTransition = localState != testState;
 			// If ss lag state did not change, see if clogged remote tlog got excluded
 			if (!stateTransition) {
-				const bool acceptingCommits = self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS;
+				bool const acceptingCommits = self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS;
 				TraceEvent("ClogRemoteTLogMoreInfo")
 				    .detail("CloggedRemoteTLogPresent", self->cloggedRemoteTLog.present())
 				    .detail("Addr",

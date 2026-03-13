@@ -110,11 +110,11 @@ ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction
 
 // Decodes the locality string to a pair of locality prefix and its value.
 // The prefix could be dcid, processid, machineid, processid.
-std::pair<std::string, std::string> decodeLocality(const std::string& locality);
+std::pair<std::string, std::string> decodeLocality(std::string const& locality);
 std::set<AddressExclusion> getServerAddressesByLocality(
-    const std::map<std::string, StorageServerInterface> server_interfaces,
-    const std::string& locality);
-std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>& workers, const std::string& locality);
+    std::map<std::string, StorageServerInterface> const server_interfaces,
+    std::string const& locality);
+std::set<AddressExclusion> getAddressesByLocality(std::vector<ProcessData> const& workers, std::string const& locality);
 
 // Check for the given, previously excluded servers to be evacuated (no longer used for state).  If waitForExclusion
 // is true, this actor returns once it is safe to shut down all such machines without impacting fault tolerance,

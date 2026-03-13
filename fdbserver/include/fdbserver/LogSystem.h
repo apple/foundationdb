@@ -81,8 +81,8 @@ public:
 	LogSet()
 	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid),
 	    startVersion(invalidVersion) {}
-	LogSet(const TLogSet& tlogSet);
-	LogSet(const CoreTLogSet& coreSet);
+	LogSet(TLogSet const& tlogSet);
+	LogSet(CoreTLogSet const& coreSet);
 
 	std::string logRouterString();
 
@@ -100,14 +100,14 @@ public:
 
 	void updateLocalitySet(std::vector<LocalityData> const& localities);
 
-	bool satisfiesPolicy(const std::vector<LocalityEntry>& locations);
+	bool satisfiesPolicy(std::vector<LocalityEntry> const& locations);
 
 	void getPushLocations(
 	    VectorRef<Tag> tags,
 	    std::vector<int>& locations,
 	    int locationOffset,
 	    bool allLocations = false,
-	    const Optional<Reference<LocalitySet>>& restrictedLogSet = Optional<Reference<LocalitySet>>());
+	    Optional<Reference<LocalitySet>> const& restrictedLogSet = Optional<Reference<LocalitySet>>());
 
 private:
 	std::vector<LocalityEntry> alsoServers, resultEntries;
@@ -179,7 +179,7 @@ struct ILogSystem {
 
 		// Returns the smallest possible message version which the current message (if any) or a subsequent message
 		// might have (If hasMessage(), this is therefore the message version of the current message)
-		virtual const LogMessageVersion& version() const = 0;
+		virtual LogMessageVersion const& version() const = 0;
 
 		// So far, the cursor has returned all messages which both satisfy the criteria passed to peek() to create the
 		// cursor AND have (popped(),0) <= message version number <= version() Other messages might have been skipped
@@ -202,7 +202,7 @@ struct ILogSystem {
 
 	struct ServerPeekCursor final : IPeekCursor, ReferenceCounted<ServerPeekCursor> {
 		Reference<AsyncVar<OptionalInterface<TLogInterface>>> interf;
-		const Tag tag;
+		Tag const tag;
 
 		TLogPeekReply results;
 		ArenaReader rd;
@@ -261,7 +261,7 @@ struct ILogSystem {
 		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
-		const LogMessageVersion& version() const override;
+		LogMessageVersion const& version() const override;
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
@@ -299,7 +299,7 @@ struct ILogSystem {
 		                 std::vector<LocalityData> const& tLogLocalities,
 		                 Reference<IReplicationPolicy> const tLogPolicy,
 		                 int tLogReplicationFactor,
-		                 const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
+		                 Optional<std::vector<uint16_t>> const& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 		MergedPeekCursor(std::vector<Reference<IPeekCursor>> const& serverCursors,
 		                 LogMessageVersion const& messageVersion,
 		                 int bestServer,
@@ -324,7 +324,7 @@ struct ILogSystem {
 		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
-		const LogMessageVersion& version() const override;
+		LogMessageVersion const& version() const override;
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
@@ -357,7 +357,7 @@ struct ILogSystem {
 		              Version begin,
 		              Version end,
 		              bool parallelGetMore,
-		              const Optional<std::vector<uint16_t>>& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
+		              Optional<std::vector<uint16_t>> const& knownLockedTLogIds = Optional<std::vector<uint16_t>>());
 		SetPeekCursor(std::vector<Reference<LogSet>> const& logSets,
 		              std::vector<std::vector<Reference<IPeekCursor>>> const& serverCursors,
 		              LogMessageVersion const& messageVersion,
@@ -382,7 +382,7 @@ struct ILogSystem {
 		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
-		const LogMessageVersion& version() const override;
+		LogMessageVersion const& version() const override;
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
@@ -414,7 +414,7 @@ struct ILogSystem {
 		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
-		const LogMessageVersion& version() const override;
+		LogMessageVersion const& version() const override;
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
@@ -436,8 +436,8 @@ struct ILogSystem {
 			explicit BufferedMessage(Version version) : version(version) {}
 			BufferedMessage(Arena arena,
 			                StringRef message,
-			                const VectorRef<Tag>& tags,
-			                const LogMessageVersion& version)
+			                VectorRef<Tag> const& tags,
+			                LogMessageVersion const& version)
 			  : arena(arena), message(message), tags(tags), version(version) {}
 
 			bool operator<(BufferedMessage const& r) const { return version < r.version; }
@@ -487,7 +487,7 @@ struct ILogSystem {
 		Future<Void> onFailed() const override;
 		bool isActive() const override;
 		bool isExhausted() const override;
-		const LogMessageVersion& version() const override;
+		LogMessageVersion const& version() const override;
 		Version popped() const override;
 		Version getMinKnownCommittedVersion() const override;
 		Optional<UID> getPrimaryPeekLocation() const override;
@@ -509,7 +509,7 @@ struct ILogSystem {
 	virtual bool remoteStorageRecovered() const = 0;
 
 	virtual void purgeOldRecoveredGenerationsCoreState(DBCoreState&) = 0;
-	virtual void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) = 0;
+	virtual void purgeOldRecoveredGenerationsInMemory(DBCoreState const&) = 0;
 
 	virtual Future<Void> onCoreStateChanged() const = 0;
 	// Returns if and when the output of toCoreState() would change (for example, when older logs can be discarded from
@@ -528,7 +528,7 @@ struct ILogSystem {
 		Version minKnownCommittedVersion;
 	};
 
-	virtual Future<Version> push(const PushVersionSet& verisonSet,
+	virtual Future<Version> push(PushVersionSet const& verisonSet,
 	                             LogPushData& data,
 	                             SpanContext const& spanContext,
 	                             Optional<UID> debugID = Optional<UID>(),
@@ -571,7 +571,7 @@ struct ILogSystem {
 	    Tag tag,
 	    bool useSatellite,
 	    Optional<Version> end = Optional<Version>(),
-	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds =
+	    Optional<std::map<uint8_t, std::vector<uint16_t>>> const& knownStoppedTLogIds =
 	        Optional<std::map<uint8_t, std::vector<uint16_t>>>()) = 0;
 	// Same contract as peek(), but can only peek from the logs elected in the same generation.
 	// If the preferred log server is down, a different log from the same generation will merge results locally before
@@ -725,11 +725,11 @@ struct ILogSystem {
 	// are multiple pseudo tags, the returned version is the min(all pseudo tags' "upTo" versions).
 	virtual Version popPseudoLocalityTag(Tag tag, Version upTo) = 0;
 
-	virtual void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) = 0;
+	virtual void setBackupWorkers(std::vector<InitializeBackupReply> const& replies) = 0;
 
 	// Removes a finished backup worker from log system and returns true. Returns false
 	// if the worker is not found.
-	virtual bool removeBackupWorker(const BackupWorkerDoneRequest& req) = 0;
+	virtual bool removeBackupWorker(BackupWorkerDoneRequest const& req) = 0;
 
 	virtual LogEpoch getOldestBackupEpoch() const = 0;
 	virtual void setOldestBackupEpoch(LogEpoch epoch) = 0;
@@ -790,14 +790,14 @@ struct LogPushData : NonCopyable {
 
 	// copy written_tags, after filtering, into given set
 	void saveTags(std::set<Tag>& filteredTags) const {
-		for (const auto& tag : written_tags) {
+		for (auto const& tag : written_tags) {
 			filteredTags.insert(tag);
 		}
 	}
 
-	void addWrittenTags(const std::set<Tag>& tags) { written_tags.insert(tags.begin(), tags.end()); }
+	void addWrittenTags(std::set<Tag> const& tags) { written_tags.insert(tags.begin(), tags.end()); }
 
-	void getLocations(const std::set<Tag>& tags, std::set<uint16_t>& writtenTLogs) {
+	void getLocations(std::set<Tag> const& tags, std::set<uint16_t>& writtenTLogs) {
 		std::vector<Tag> vtags(tags.begin(), tags.end());
 		std::vector<int> msg_locations;
 		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
@@ -828,7 +828,7 @@ struct LogPushData : NonCopyable {
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
-	void recordEmptyMessage(int loc, const Standalone<StringRef>& value);
+	void recordEmptyMessage(int loc, Standalone<StringRef> const& value);
 
 	// Returns the ratio of empty messages in this version batch.
 	// MUST be called after getMessages() and recordEmptyMessage().

@@ -56,12 +56,12 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			}
 			std::string sampleRateStr = "default";
 			std::string sizeLimitStr = "default";
-			const double sampleRateDbl =
+			double const sampleRateDbl =
 			    db->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 			if (!std::isinf(sampleRateDbl)) {
 				sampleRateStr = std::to_string(sampleRateDbl);
 			}
-			const int64_t sizeLimit = db->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+			int64_t const sizeLimit = db->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 			if (sizeLimit != -1) {
 				sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 			}
@@ -78,7 +78,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 				sampleRate = std::numeric_limits<double>::infinity();
 			} else {
 				char* end;
-				sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
+				sampleRate = std::strtod((char const*)tokens[3].begin(), &end);
 				if (!std::isspace(*end)) {
 					fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
 					return false;
@@ -119,7 +119,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 		    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
 		RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
 		ASSERT(!kvs.more);
-		for (const auto& pair : kvs) {
+		for (auto const& pair : kvs) {
 			auto ip_port = (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)
 			                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 			printf("%s\n", printable(ip_port).c_str());

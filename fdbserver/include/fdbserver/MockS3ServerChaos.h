@@ -105,7 +105,7 @@ private:
 };
 
 // Public interface
-Future<Void> startMockS3ServerChaos(const NetworkAddress& listenAddress);
+Future<Void> startMockS3ServerChaos(NetworkAddress const& listenAddress);
 
 // Clear the chaos server registry (for testing/debugging only)
 // NOTE: In production simulation tests, the registry should NOT be cleared between tests,

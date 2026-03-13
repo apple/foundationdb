@@ -60,7 +60,7 @@
 #define SevDecodeInfo SevVerbose
 
 extern bool g_crashOnError;
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 namespace file_converter {
 
@@ -141,14 +141,14 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 
 	void updateRangeMap() { filters.updateFilters(prefixes); }
 
-	bool matchFilters(const MutationRef& m) const {
+	bool matchFilters(MutationRef const& m) const {
 		bool match = filters.match(m);
 		if (!validate_filters) {
 			return match;
 		}
 
 		// If we choose to validate the filters, go through filters one by one
-		for (const auto& prefix : prefixes) {
+		for (auto const& prefix : prefixes) {
 			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 				if (m.param1.startsWith(StringRef(prefix))) {
 					ASSERT(match);
@@ -169,13 +169,13 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		return false;
 	}
 
-	bool matchFilters(const KeyRange& range) const {
+	bool matchFilters(KeyRange const& range) const {
 		bool match = filters.match(range);
 		if (!validate_filters) {
 			return match;
 		}
 
-		for (const auto& prefix : prefixes) {
+		for (auto const& prefix : prefixes) {
 			if (range.intersects(prefixRange(StringRef(prefix)))) {
 				ASSERT(match);
 				return true;
@@ -191,7 +191,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 			return match;
 		}
 
-		for (const auto& prefix : prefixes) {
+		for (auto const& prefix : prefixes) {
 			if (kv.key.startsWith(StringRef(prefix))) {
 				ASSERT(match);
 				return true;
@@ -233,7 +233,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 		if (!prefixes.empty()) {
 			s.append(", KeyPrefixes: ").append(printable(describe(prefixes)));
 		}
-		for (const auto& [knob, value] : knobs) {
+		for (auto const& [knob, value] : knobs) {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
 		}
 		s.append(", SaveFile: ").append(save_file_locally ? "true" : "false");
@@ -251,7 +251,7 @@ struct DecodeParams : public ReferenceCounted<DecodeParams> {
 // Parses and returns a ";" separated HEX encoded strings. So the ";" in
 // the string should be escaped as "\;".
 // Sets "err" to true if there is any parsing error.
-std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
+std::vector<std::string> parsePrefixesLine(std::string const& line, bool& err) {
 	std::vector<std::string> results;
 	err = false;
 
@@ -271,7 +271,7 @@ std::vector<std::string> parsePrefixesLine(const std::string& line, bool& err) {
 	return results;
 }
 
-std::vector<std::string> parsePrefixFile(const std::string& filename, bool& err) {
+std::vector<std::string> parsePrefixFile(std::string const& filename, bool& err) {
 	std::string line = readFileBytes(filename, 64 * 1024 * 1024);
 	return parsePrefixesLine(line, err);
 }
@@ -428,17 +428,17 @@ int parseDecodeCommandLine(Reference<DecodeParams> param, CSimpleOpt* args) {
 }
 
 template <class BackupFile>
-void printLogFiles(std::string msg, const std::vector<BackupFile>& files) {
+void printLogFiles(std::string msg, std::vector<BackupFile> const& files) {
 	std::cout << msg << " " << files.size() << " total\n";
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		std::cout << file.toString() << "\n";
 	}
 	std::cout << std::endl;
 }
 
-std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, const Reference<DecodeParams> params) {
+std::vector<LogFile> getRelevantLogFiles(std::vector<LogFile> const& files, Reference<DecodeParams> const params) {
 	std::vector<LogFile> filtered;
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		if (file.fileName.find(params->fileFilter) != std::string::npos &&
 		    params->overlap(file.beginVersion, file.endVersion + 1)) {
 			filtered.push_back(file);
@@ -447,10 +447,10 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, cons
 	return filtered;
 }
 
-std::vector<RangeFile> getRelevantRangeFiles(const std::vector<RangeFile>& files,
-                                             const Reference<DecodeParams> params) {
+std::vector<RangeFile> getRelevantRangeFiles(std::vector<RangeFile> const& files,
+                                             Reference<DecodeParams> const params) {
 	std::vector<RangeFile> filtered;
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		if (file.fileName.find(params->fileFilter) != std::string::npos && params->overlap(file.version)) {
 			filtered.push_back(file);
 		}
@@ -487,7 +487,7 @@ class DecodeProgress {
 
 public:
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file, bool save) : file(file), save(save) {}
+	DecodeProgress(LogFile const& file, bool save) : file(file), save(save) {}
 
 	~DecodeProgress() {
 		if (lfd != -1) {
@@ -569,7 +569,7 @@ public:
 	}
 
 	// Reads a file a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
-	void decodeFile(const Standalone<StringRef>& buf) {
+	void decodeFile(Standalone<StringRef> const& buf) {
 		try {
 			loop {
 				int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - offset);
@@ -607,7 +607,7 @@ public:
 	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
 
 	DecodeRangeProgress() = default;
-	DecodeRangeProgress(const RangeFile& file, bool save) : file(file), save(save) {}
+	DecodeRangeProgress(RangeFile const& file, bool save) : file(file), save(save) {}
 	~DecodeRangeProgress() {
 		if (lfd != -1) {
 			close(lfd);
@@ -658,7 +658,7 @@ public:
 	}
 
 	// Reads a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
-	void decodeFile(const Standalone<StringRef>& buf) {
+	void decodeFile(Standalone<StringRef> const& buf) {
 		try {
 			loop {
 				// process one block at a time
@@ -689,7 +689,7 @@ public:
 };
 
 // convert a StringRef to Hex string
-std::string hexStringRef(const StringRef& s) {
+std::string hexStringRef(StringRef const& s) {
 	std::string result;
 	result.reserve(s.size() * 2);
 	for (int i = 0; i < s.size(); i++) {
@@ -712,7 +712,7 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 	wait(progress.openFile(container));
 
 	for (auto& block : progress.blocks) {
-		for (const auto& kv : block) {
+		for (auto const& kv : block) {
 			bool print = params->prefixes.empty(); // no filtering
 
 			if (!print) {
@@ -750,14 +750,14 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 		if (!batch.present())
 			break;
 
-		const VersionedMutations& vms = batch.get();
+		VersionedMutations const& vms = batch.get();
 		if (vms.version < params->beginVersionFilter || vms.version >= params->endVersionFilter) {
 			TraceEvent("SkipVersion").detail("Version", vms.version);
 			continue;
 		}
 
 		int sub = 0;
-		for (const auto& m : vms.mutations) {
+		for (auto const& m : vms.mutations) {
 			sub++; // sub sequence number starts at 1
 			bool print = params->prefixes.empty(); // no filtering
 
@@ -790,8 +790,8 @@ ACTOR Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> b
 		try {
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
 			    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]));
-			for (const auto& rangeFile : results.first) {
-				const auto& keyRange = results.second.at(rangeFile.fileName);
+			for (auto const& rangeFile : results.first) {
+				auto const& keyRange = results.second.at(rangeFile.fileName);
 				if (params->matchFilters(keyRange)) {
 					files.push_back(rangeFile);
 				}
@@ -814,7 +814,7 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	// remove partitioned logs
 	listing.logs.erase(std::remove_if(listing.logs.begin(),
 	                                  listing.logs.end(),
-	                                  [](const LogFile& file) {
+	                                  [](LogFile const& file) {
 		                                  std::string prefix("plogs/");
 		                                  return file.fileName.substr(0, prefix.size()) == prefix;
 	                                  }),

@@ -27,9 +27,9 @@
 #include "stats.hpp"
 
 /* shared memory */
-constexpr const int SIGNAL_RED = 0;
-constexpr const int SIGNAL_GREEN = 1;
-constexpr const int SIGNAL_OFF = 2;
+constexpr int const SIGNAL_RED = 0;
+constexpr int const SIGNAL_GREEN = 1;
+constexpr int const SIGNAL_OFF = 2;
 
 // controlled, safer access to shared memory
 namespace mako::shared_memory {
@@ -102,9 +102,9 @@ public:
 
 	Access() noexcept : Access(nullptr, 0, 0, 0) {}
 
-	Access(const Access&) noexcept = default;
+	Access(Access const&) noexcept = default;
 
-	Access& operator=(const Access&) noexcept = default;
+	Access& operator=(Access const&) noexcept = default;
 
 	size_t size() const noexcept { return storageSize(num_processes, num_threads, num_workers); }
 

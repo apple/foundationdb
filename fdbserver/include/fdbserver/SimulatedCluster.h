@@ -30,7 +30,7 @@
 
 // The function at present is only called through "fdbserver -r simulation"
 void simulationSetupAndRun(std::string const& dataFolder,
-                           const char* const& testFile,
+                           char const* const& testFile,
                            bool const& rebooting,
                            bool const& restoring,
                            std::string const& whitelistBinPath,
@@ -71,5 +71,5 @@ struct BasicSimulationConfig {
 	DatabaseConfiguration db;
 };
 
-BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig);
+BasicSimulationConfig generateBasicSimulationConfig(BasicTestConfig const& testConfig);
 #endif

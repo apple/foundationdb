@@ -69,7 +69,7 @@ public:
 	enum class BackupAgentType { NoBackupAgents, WaitForType, BackupToFile, BackupToDB };
 	enum class ExtraDatabaseMode { Disabled, LocalOrSingle, Single, Local, Multiple };
 
-	static ExtraDatabaseMode stringToExtraDatabaseMode(const std::string& databaseMode) {
+	static ExtraDatabaseMode stringToExtraDatabaseMode(std::string const& databaseMode) {
 		if (databaseMode == "Disabled") {
 			return ExtraDatabaseMode::Disabled;
 		} else if (databaseMode == "LocalOrSingle") {
@@ -99,15 +99,15 @@ public:
 	virtual Future<Void> onProcess(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;
 	virtual Future<Void> onMachine(ISimulator::ProcessInfo* process, TaskPriority taskID = TaskPriority::Zero) = 0;
 
-	virtual ProcessInfo* newProcess(const char* name,
+	virtual ProcessInfo* newProcess(char const* name,
 	                                IPAddress ip,
 	                                uint16_t port,
 	                                bool sslEnabled,
 	                                uint16_t listenPerProcess,
 	                                LocalityData locality,
 	                                ProcessClass startingClass,
-	                                const char* dataFolder,
-	                                const char* coordinationFolder,
+	                                char const* dataFolder,
+	                                char const* coordinationFolder,
 	                                ProtocolVersion protocol,
 	                                bool drProcess) = 0;
 	virtual void killProcess(ProcessInfo* machine, KillType) = 0;
@@ -282,11 +282,11 @@ public:
 		allSwapsDisabled = true;
 	}
 
-	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
-	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
-	virtual void unclogPair(const IPAddress& from, const IPAddress& to) = 0;
-	virtual void disconnectPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
-	virtual void reconnectPair(const IPAddress& from, const IPAddress& to) = 0;
+	virtual void clogInterface(IPAddress const& ip, double seconds, ClogMode mode = ClogDefault) = 0;
+	virtual void clogPair(IPAddress const& from, IPAddress const& to, double seconds) = 0;
+	virtual void unclogPair(IPAddress const& from, IPAddress const& to) = 0;
+	virtual void disconnectPair(IPAddress const& from, IPAddress const& to, double seconds) = 0;
+	virtual void reconnectPair(IPAddress const& from, IPAddress const& to) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
@@ -421,9 +421,9 @@ public:
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
 
-	void disableFor(const std::string& desc, double time);
+	void disableFor(std::string const& desc, double time);
 
-	double checkDisabled(const std::string& desc) const;
+	double checkDisabled(std::string const& desc) const;
 
 	// FIXME: simulation is generally discussed as being deterministic and single-threaded. So
 	// explain why we need thread_local variables here and a mutex just below.
@@ -487,13 +487,13 @@ void extendConnectionFailures(std::string const& context, double duration);
 class Sim2FileSystem : public IAsyncFileSystem {
 public:
 	// Opens a file for asynchronous I/O
-	Future<Reference<class IAsyncFile>> open(const std::string& filename, int64_t flags, int64_t mode) override;
+	Future<Reference<class IAsyncFile>> open(std::string const& filename, int64_t flags, int64_t mode) override;
 
 	// Deletes the given file. If mustBeDurable, returns only when the file is guaranteed to be deleted even after a
 	// power failure.
-	Future<Void> deleteFile(const std::string& filename, bool mustBeDurable) override;
+	Future<Void> deleteFile(std::string const& filename, bool mustBeDurable) override;
 
-	Future<std::time_t> lastWriteTime(const std::string& filename) override;
+	Future<std::time_t> lastWriteTime(std::string const& filename) override;
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet& getActorLineageSet() override;

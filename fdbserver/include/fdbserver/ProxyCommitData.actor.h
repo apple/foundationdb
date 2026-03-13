@@ -259,7 +259,7 @@ struct ProxyCommitData {
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to
 	// signify they must be repopulated. We do not repopulate them immediately to avoid a slow task.
-	const std::vector<Tag>& tagsForKey(StringRef key) {
+	std::vector<Tag> const& tagsForKey(StringRef key) {
 		auto& tags = keyInfo[key].tags;
 		if (!tags.size()) {
 			auto& r = keyInfo.rangeContaining(key).value();
@@ -285,7 +285,7 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
-	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, uint64_t cost) {
+	void updateSSTagCost(UID const& id, TagSet const& tagSet, MutationRef m, uint64_t cost) {
 		auto [it, _] = ssTrTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
 
 		for (auto& tag : tagSet) {
@@ -344,7 +344,7 @@ public:
 
 	bool pendingRequest() const { return currentRangeLockStartKey.present(); }
 
-	void initKeyPoint(const Key& key, const Value& value) {
+	void initKeyPoint(Key const& key, Value const& value) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		// TraceEvent(SevDebug, "RangeLockRangeOps").detail("Ops", "Init").detail("Key", key);
 		if (!value.empty()) {
@@ -355,14 +355,14 @@ public:
 		return;
 	}
 
-	void setPendingRequest(const Key& startKey, const RangeLockStateSet& lockSetState) {
+	void setPendingRequest(Key const& startKey, RangeLockStateSet const& lockSetState) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		ASSERT(!pendingRequest());
 		currentRangeLockStartKey = std::make_pair(startKey, lockSetState);
 		return;
 	}
 
-	void consumePendingRequest(const Key& endKey) {
+	void consumePendingRequest(Key const& endKey) {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		ASSERT(pendingRequest());
 		ASSERT(endKey <= normalKeys.end);
@@ -379,7 +379,7 @@ public:
 		return;
 	}
 
-	bool isLocked(const KeyRange& range) const {
+	bool isLocked(KeyRange const& range) const {
 		ASSERT(pProxyCommitData != nullptr && pProxyCommitData->rangeLockEnabled());
 		if (range.end >= normalKeys.end) {
 			return false;

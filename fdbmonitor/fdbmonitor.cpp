@@ -46,7 +46,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONFFILE, "--conffile", SO_REQ_SEP }
 	                                  { OPT_HELP, "--help", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
 
-volatile int exit_signal = 0;
+int volatile exit_signal = 0;
 
 #ifdef __linux__
 void signal_handler(int sig) {
@@ -55,7 +55,7 @@ void signal_handler(int sig) {
 }
 #endif
 
-volatile bool child_exited = false;
+bool volatile child_exited = false;
 
 #ifdef __linux__
 void child_handler(int sig) {
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
 	std::string _confpath = "/etc/foundationdb/foundationdb.conf";
 #endif
 
-	std::vector<const char*> additional_watch_paths;
+	std::vector<char const*> additional_watch_paths;
 
 	CSimpleOpt args(argc, argv, g_rgOptions, SO_O_NOERR | SO_O_HYPHEN_TO_UNDERSCORE);
 
@@ -597,7 +597,7 @@ int main(int argc, char** argv) {
 							conffile = confpath.substr(confdir.size());
 
 							// Remove all the old watches
-							for (const auto& wd : additional_watch_wds) {
+							for (auto const& wd : additional_watch_wds) {
 								if (inotify_rm_watch(ifd, wd.first) < 0) {
 									// log_err("inotify_rm_watch", errno, "Unable to remove symlink watch %d",
 									// wd.first); exit(1);

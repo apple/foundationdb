@@ -63,11 +63,11 @@ TEST_CASE("/flow/buggifiedDelay") {
 	loop {
 		state double x = deterministicRandom()->random01();
 		state int last = 0;
-		state Future<Void> f1 = map(delay(x), [last = &last](const Void&) {
+		state Future<Void> f1 = map(delay(x), [last = &last](Void const&) {
 			*last = 1;
 			return Void();
 		});
-		state Future<Void> f2 = map(delay(x), [last = &last](const Void&) {
+		state Future<Void> f2 = map(delay(x), [last = &last](Void const&) {
 			*last = 2;
 			return Void();
 		});
@@ -278,7 +278,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 		return baseNetwork->onMainThread(std::move(signal), taskID);
 	}
 	bool isOnMainThread() const override { return baseNetwork->isOnMainThread(); }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, char const* name) override {
 		return baseNetwork->startThread(func, arg, stackSize, name);
 	}
 	Future<Reference<class IAsyncFile>> open(std::string filename, int64_t flags, int64_t mode) {
@@ -295,7 +295,7 @@ struct YieldMockNetwork final : INetwork, ReferenceCounted<YieldMockNetwork> {
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override {
 		return baseNetwork->isAddressOnThisHost(addr);
 	}
-	const TLSConfig& getTLSConfig() const override {
+	TLSConfig const& getTLSConfig() const override {
 		static TLSConfig emptyConfig;
 		return emptyConfig;
 	}
@@ -1408,8 +1408,8 @@ struct Tracker {
 		this->copied = other.copied;
 		return *this;
 	}
-	Tracker(const Tracker& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
-	Tracker& operator=(const Tracker& other) {
+	Tracker(Tracker const& other) : Tracker(other.copied + 1) { ASSERT(!other.moved); }
+	Tracker& operator=(Tracker const& other) {
 		ASSERT(!other.moved);
 		this->moved = false;
 		this->copied = other.copied + 1;

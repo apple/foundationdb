@@ -59,7 +59,7 @@ public:
 	Optional() = default;
 
 	template <class U>
-	Optional(const U& t) : impl(std::in_place, t) {}
+	Optional(U const& t) : impl(std::in_place, t) {}
 	Optional(T&& t) : impl(std::in_place, std::move(t)) {}
 
 	/* This conversion constructor was nice, but combined with the prior constructor it means that Optional<int> can be
@@ -72,7 +72,7 @@ public:
 	}
 	*/
 
-	Optional(Arena& a, const Optional<T>& o) {
+	Optional(Arena& a, Optional<T> const& o) {
 		if (o.present())
 			impl = std::make_optional<T>(a, o.get());
 	}
@@ -80,7 +80,7 @@ public:
 
 	template <class R>
 	Optional<R> castTo() const {
-		return map([](const T& v) { return (R)v; });
+		return map([](T const& v) { return (R)v; });
 	}
 
 private:
@@ -95,11 +95,11 @@ public:
 	// If the optional is set, calls the function f on the value and returns the value. Otherwise, returns an empty
 	// optional.
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	Optional<MapRet<F>> map(const F& f) const& {
+	Optional<MapRet<F>> map(F const& f) const& {
 		return present() ? Optional<MapRet<F>>(f(get())) : Optional<MapRet<F>>();
 	}
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	Optional<MapRet<F>> map(const F& f) && {
+	Optional<MapRet<F>> map(F const& f) && {
 		return present() ? Optional<MapRet<F>>(f(std::move(*this).get())) : Optional<MapRet<F>>();
 	}
 
@@ -108,12 +108,12 @@ public:
 	// v.map(&T::member) is equivalent to v.map([](T v) { return v.member; })
 	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::* member) const& {
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) const& {
 		return present() ? Optional<Rp>(get().*member) : Optional<Rp>();
 	}
 	template <class R, class Rp = std::decay_t<R>>
 	std::enable_if_t<std::is_class_v<T>, Optional<Rp>> map(
-	    R std::conditional_t<std::is_class_v<T>, T, Void>::* member) && {
+	    R std::conditional_t<std::is_class_v<T>, T, Void>::*member) && {
 		return present() ? Optional<Rp>(std::move(*this).get().*member) : Optional<Rp>();
 	}
 
@@ -141,7 +141,7 @@ public:
 	//
 	// v.mapRef(&P::member) is equivalent to Optional<R>(v.get()->member) if v is present and non-null
 	template <class P, class R, class Rp = std::decay_t<R>>
-	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::* member) const& {
+	std::enable_if_t<std::is_class_v<T> || std::is_pointer_v<T>, Optional<Rp>> mapRef(R P::*member) const& {
 		if (!present() || !get()) {
 			return Optional<Rp>();
 		}
@@ -262,9 +262,9 @@ public:
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
-	const T* operator->() const { return &get(); }
+	T const* operator->() const { return &get(); }
 	T* operator->() { return &get(); }
-	const T& operator*() const& { return get(); }
+	T const& operator*() const& { return get(); }
 	T& operator*() & { return get(); }
 	T&& operator*() && { return get(); }
 
@@ -278,7 +278,7 @@ private:
 
 template <class T>
 struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Optional<T>& value) {
+	static std::string toString(Optional<T> const& value) {
 		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
 	}
 };

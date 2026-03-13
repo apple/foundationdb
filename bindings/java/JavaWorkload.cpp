@@ -42,7 +42,7 @@ auto error = FDBSeverity::Error;
 void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring message, jobject details) {
 	auto log = reinterpret_cast<FDBLogger*>(logger);
 	jboolean isCopy;
-	const char* msg = env->GetStringUTFChars(message, &isCopy);
+	char const* msg = env->GetStringUTFChars(message, &isCopy);
 	std::vector<std::pair<std::string, std::string>> detailsMap;
 	if (details != nullptr) {
 		jclass mapClass = env->FindClass("java/util/Map");
@@ -102,7 +102,7 @@ void setProcessID(JNIEnv* env, jclass, jlong self, jlong processID) {
 jboolean getOptionBool(JNIEnv* env, jclass, jlong self, jstring name, jboolean defaultValue) {
 	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy = true;
-	const char* utf = env->GetStringUTFChars(name, &isCopy);
+	char const* utf = env->GetStringUTFChars(name, &isCopy);
 	auto res = jboolean(context->getOption(utf, bool(defaultValue)));
 	if (isCopy) {
 		env->ReleaseStringUTFChars(name, utf);
@@ -113,7 +113,7 @@ jboolean getOptionBool(JNIEnv* env, jclass, jlong self, jstring name, jboolean d
 jlong getOptionLong(JNIEnv* env, jclass, jlong self, jstring name, jlong defaultValue) {
 	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy = true;
-	const char* utf = env->GetStringUTFChars(name, &isCopy);
+	char const* utf = env->GetStringUTFChars(name, &isCopy);
 	auto res = jlong(context->getOption(utf, long(defaultValue)));
 	if (isCopy) {
 		env->ReleaseStringUTFChars(name, utf);
@@ -124,7 +124,7 @@ jlong getOptionLong(JNIEnv* env, jclass, jlong self, jstring name, jlong default
 jdouble getOptionDouble(JNIEnv* env, jclass, jlong self, jstring name, jdouble defaultValue) {
 	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy = true;
-	const char* utf = env->GetStringUTFChars(name, &isCopy);
+	char const* utf = env->GetStringUTFChars(name, &isCopy);
 	auto res = jdouble(context->getOption(utf, double(defaultValue)));
 	if (isCopy) {
 		env->ReleaseStringUTFChars(name, utf);
@@ -136,8 +136,8 @@ jstring getOptionString(JNIEnv* env, jclass, jlong self, jstring name, jstring d
 	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy;
 	jboolean defIsCopy;
-	const char* nameStr = env->GetStringUTFChars(name, &isCopy);
-	const char* defStr = env->GetStringUTFChars(defaultValue, &defIsCopy);
+	char const* nameStr = env->GetStringUTFChars(name, &isCopy);
+	char const* defStr = env->GetStringUTFChars(defaultValue, &defIsCopy);
 	auto res = context->getOption(nameStr, std::string(defStr));
 	if (isCopy) {
 		env->ReleaseStringUTFChars(name, nameStr);
@@ -181,7 +181,7 @@ void promiseSend(JNIEnv, jclass, jlong self, jboolean value) {
 struct JNIError {
 	JNIEnv* env;
 	jthrowable throwable{ nullptr };
-	const char* file{ nullptr };
+	char const* file{ nullptr };
 	int line{ 0 };
 
 	std::string location() const {
@@ -200,7 +200,7 @@ struct JNIError {
 			jmethodID toStringM =
 			    env->GetMethodID(env->FindClass("java/lang/Object"), "toString", "()Ljava/lang/String;");
 			jstring s = (jstring)env->CallObjectMethod(throwable, toStringM);
-			const char* utf = env->GetStringUTFChars(s, &isCopy);
+			char const* utf = env->GetStringUTFChars(s, &isCopy);
 			std::string res(utf);
 			env->ReleaseStringUTFChars(s, utf);
 			return res;
@@ -220,7 +220,7 @@ struct JVM {
 	// char*  not const char *
 	std::vector<char*> charArrays;
 
-	void checkExceptionImpl(const char* file, int line) {
+	void checkExceptionImpl(char const* file, int line) {
 		if (env->ExceptionCheck()) {
 			throw JNIError{ env, env->ExceptionOccurred(), file, line };
 		}
@@ -263,13 +263,13 @@ struct JVM {
 	}
 
 	void setNativeMethods(jclass clazz,
-	                      const std::initializer_list<std::tuple<std::string_view, std::string_view, void*>>& methods) {
+	                      std::initializer_list<std::tuple<std::string_view, std::string_view, void*>> const& methods) {
 		charArrays.reserve(charArrays.size() + 2 * methods.size());
 		std::unique_ptr<JNINativeMethod[]> nativeMethods;
 		int numNativeMethods = methods.size();
 		nativeMethods.reset(new JNINativeMethod[numNativeMethods]);
 		int i = 0;
-		for (const auto& t : methods) {
+		for (auto const& t : methods) {
 			auto& w = nativeMethods[i];
 			auto nameStr = std::get<0>(t);
 			auto sigStr = std::get<1>(t);
@@ -295,7 +295,7 @@ struct JVM {
 		checkException();
 	}
 
-	jclass getClassImpl(const char* file, int line, const char* name) {
+	jclass getClassImpl(char const* file, int line, char const* name) {
 		auto res = env->FindClass(name);
 		checkExceptionImpl(file, line);
 		return res;
@@ -303,7 +303,7 @@ struct JVM {
 
 #define getClass(name) getClassImpl(__FILE__, __LINE__, name)
 
-	jmethodID getMethodImpl(const char* file, int line, jclass clazz, const char* name, const char* signature) {
+	jmethodID getMethodImpl(char const* file, int line, jclass clazz, char const* name, char const* signature) {
 		auto res = env->GetMethodID(clazz, name, signature);
 		checkExceptionImpl(file, line);
 		return res;
@@ -311,7 +311,7 @@ struct JVM {
 
 #define getMethod(clazz, name, signature) getMethodImpl(__FILE__, __LINE__, clazz, name, signature)
 
-	jfieldID getFieldImpl(const char* file, int line, jclass clazz, const char* name, const char* signature) {
+	jfieldID getFieldImpl(char const* file, int line, jclass clazz, char const* name, char const* signature) {
 		auto res = env->GetFieldID(clazz, name, signature);
 		checkException();
 		return res;
@@ -319,7 +319,7 @@ struct JVM {
 
 #define getField(clazz, name, signature) getFieldImpl(__FILE__, __LINE__, clazz, name, signature)
 
-	void addToClassPath(const std::string& path) {
+	void addToClassPath(std::string const& path) {
 		log->trace(info, "TryAddToClassPath", { { "Path", path } });
 		if (!env) {
 			throw JNIError{};
@@ -405,7 +405,7 @@ struct JVM {
 		return res;
 	}
 
-	jobject createWorkload(jobject context, const std::string& workloadName) {
+	jobject createWorkload(jobject context, std::string const& workloadName) {
 		auto clazz = getClass(workloadName.c_str());
 		if (!env->IsAssignableFrom(clazz, abstractWorkloadClass)) {
 			log->trace(error, "ClassNotAWorkload", { { "Class", workloadName } });
@@ -427,7 +427,7 @@ struct JVM {
 		return res;
 	}
 
-	void shutdownWorkload(jobject workload, const std::string& workloadName) {
+	void shutdownWorkload(jobject workload, std::string const& workloadName) {
 		auto clazz = getClass(workloadName.c_str());
 		env->CallVoidMethod(workload, getMethod(clazz, "shutdown", "()V"));
 		checkException();
@@ -443,7 +443,7 @@ struct JVM {
 		return res;
 	}
 
-	void getMetrics(jobject workload, const std::string& workloadName, std::vector<FDBPerfMetric>& result) {
+	void getMetrics(jobject workload, std::string const& workloadName, std::vector<FDBPerfMetric>& result) {
 		auto clazz = getClass(workloadName.c_str());
 		auto perfMetricClass = getClass("Lcom/apple/foundationdb/testing/PerfMetric;");
 		auto nameId = getField(perfMetricClass, "name", "Ljava/lang/String;");
@@ -492,7 +492,7 @@ struct JVM {
 		return javaDatabase;
 	}
 
-	void callWorkload(jobject workload, FDBDatabase* db, const char* method, GenericPromise<bool>&& promise) {
+	void callWorkload(jobject workload, FDBDatabase* db, char const* method, GenericPromise<bool>&& promise) {
 		jobject jPromise = nullptr;
 		try {
 			auto clazz = getClass("com/apple/foundationdb/testing/AbstractWorkload");
@@ -524,7 +524,7 @@ struct JavaWorkload final : FDBWorkload {
 	std::string name;
 	bool failed = false;
 	jobject workload = nullptr;
-	JavaWorkload(const std::shared_ptr<JVM>& jvm, FDBLogger& log, const std::string& name)
+	JavaWorkload(std::shared_ptr<JVM> const& jvm, FDBLogger& log, std::string const& name)
 	  : jvm(jvm), log(log), name(name) {
 		boost::replace_all(this->name, ".", "/");
 	}
@@ -546,7 +546,7 @@ struct JavaWorkload final : FDBWorkload {
 			std::string classPath = context->getOption("classPath", std::string(""));
 			std::vector<std::string> paths;
 			boost::split(paths, classPath, boost::is_any_of(";,"), boost::token_compress_on);
-			for (const auto& path : paths) {
+			for (auto const& path : paths) {
 				jvm->addToClassPath(path);
 			}
 			jvm->init();
@@ -605,9 +605,9 @@ struct JavaWorkloadFactory : FDBWorkloadFactory {
 	FDBLogger* log;
 	std::weak_ptr<JVM> jvm;
 	JavaWorkloadFactory(FDBLogger* log) : log(log) {}
-	JavaWorkloadFactory(const JavaWorkloadFactory&) = delete;
-	JavaWorkloadFactory& operator=(const JavaWorkloadFactory&) = delete;
-	std::shared_ptr<FDBWorkload> create(const std::string& name) override {
+	JavaWorkloadFactory(JavaWorkloadFactory const&) = delete;
+	JavaWorkloadFactory& operator=(JavaWorkloadFactory const&) = delete;
+	std::shared_ptr<FDBWorkload> create(std::string const& name) override {
 		auto jvmPtr = jvm.lock();
 		if (!jvmPtr) {
 			jvmPtr = std::make_shared<JVM>(log);

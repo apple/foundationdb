@@ -28,7 +28,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 
-std::string describe(const DDShardInfo& a) {
+std::string describe(DDShardInfo const& a) {
 	std::string res = "key: " + a.key.toString() + "\n";
 	res += "\tprimarySrc: " + describe(a.primarySrc) + "\n";
 	res += "\tprimaryDest: " + describe(a.primaryDest) + "\n";
@@ -36,7 +36,7 @@ std::string describe(const DDShardInfo& a) {
 	res += "\tremoteDest: " + describe(a.remoteDest) + "\n";
 	return res;
 }
-bool compareShardInfo(const DDShardInfo& a, const DDShardInfo& other) {
+bool compareShardInfo(DDShardInfo const& a, DDShardInfo const& other) {
 	// Mock DD just care about the server<->key mapping in DDShardInfo
 	bool result = a.key == other.key && a.hasDest == other.hasDest && a.primaryDest == other.primaryDest &&
 	              a.primarySrc == other.primarySrc && a.remoteSrc == other.remoteSrc &&
@@ -85,7 +85,7 @@ public:
 	}
 
 	Future<Void> testRawFinishMovement(MoveKeysParams& params,
-	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	                                   std::map<UID, StorageServerInterface> const& tssMapping) {
 		for (auto& id : params.destinationTeam) {
 			mgs->allServers.at(id)->setShardStatus(params.keys.get(), MockShardStatus::FETCHED);
 		}
@@ -102,7 +102,7 @@ public:
 	}
 
 	Future<Void> testRawFinishMovement(MoveKeysParams& params,
-	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+	                                   std::map<UID, StorageServerInterface> const& tssMapping) {
 		return rawFinishMovement(params, tssMapping);
 	}
 };
@@ -343,7 +343,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		KeyRange keys = self->getRandomKeys();
 		std::vector<UID> destTeam = self->getRandomTeam();
 		std::sort(destTeam.begin(), destTeam.end());
-		const UID dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+		UID const dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                     AssignEmptyRange(false),
 		                                     DataMoveType::LOGICAL,
 		                                     DataMovementReason::INVALID,

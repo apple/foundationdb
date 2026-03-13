@@ -23,9 +23,9 @@
 #define PERSIST_PREFIX "\xff\xff"
 
 namespace {
-const KeyRangeRef persistMoveInShardKeys =
+KeyRangeRef const persistMoveInShardKeys =
     KeyRangeRef(PERSIST_PREFIX "MoveInShards/"_sr, PERSIST_PREFIX "MoveInShards0"_sr);
-const KeyRef persistMoveInUpdatesPrefix = PERSIST_PREFIX "MoveInShardUpdates/"_sr;
+KeyRef const persistMoveInUpdatesPrefix = PERSIST_PREFIX "MoveInShardUpdates/"_sr;
 } // namespace
 
 ThroughputLimiter::ThroughputLimiter(int64_t cap)
@@ -46,12 +46,12 @@ void ThroughputLimiter::settle() {
 	if (cap <= 0) {
 		return;
 	}
-	const double ts = now();
+	double const ts = now();
 	if (ts < this->nextAvailableSec) {
 		return;
 	}
 
-	const double delta = static_cast<double>(this->bytes) / cap;
+	double const delta = static_cast<double>(this->bytes) / cap;
 	this->nextAvailableSec = delta + this->lastSettleSec;
 
 	this->bytes = 0;
@@ -62,7 +62,7 @@ KeyRange persistMoveInShardsKeyRange() {
 	return persistMoveInShardKeys;
 }
 
-KeyRange persistUpdatesKeyRange(const UID& id) {
+KeyRange persistUpdatesKeyRange(UID const& id) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistMoveInUpdatesPrefix);
 	wr << id;
@@ -70,7 +70,7 @@ KeyRange persistUpdatesKeyRange(const UID& id) {
 	return prefixRange(wr.toValue());
 }
 
-Key persistUpdatesKey(const UID& id, const Version version) {
+Key persistUpdatesKey(UID const& id, Version const version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistMoveInUpdatesPrefix);
 	wr << id;
@@ -88,25 +88,25 @@ Version decodePersistUpdateVersion(KeyRef versionKey) {
 	return static_cast<Version>(fromBigEndian64(uv));
 }
 
-Key persistMoveInShardKey(const UID& id) {
+Key persistMoveInShardKey(UID const& id) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistMoveInShardKeys.begin);
 	wr << id;
 	return wr.toValue();
 }
 
-UID decodeMoveInShardKey(const KeyRef& key) {
+UID decodeMoveInShardKey(KeyRef const& key) {
 	UID id;
 	BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
 	rd >> id;
 	return id;
 }
 
-Value moveInShardValue(const MoveInShardMetaData& meta) {
+Value moveInShardValue(MoveInShardMetaData const& meta) {
 	return ObjectWriter::toValue(meta, IncludeVersion());
 }
 
-MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value) {
+MoveInShardMetaData decodeMoveInShardValue(ValueRef const& value) {
 	MoveInShardMetaData shard;
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(shard);

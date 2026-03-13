@@ -38,7 +38,7 @@ bool LatencyBandConfig::RequestConfig::isEqual(RequestConfig const& r) const {
 void LatencyBandConfig::RequestConfig::fromJson(JSONDoc json) {
 	json_spirit::mArray bandsArray;
 	if (json.get("bands", bandsArray)) {
-		for (const auto& b : bandsArray) {
+		for (auto const& b : bandsArray) {
 			bands.insert(b.get_real());
 		}
 	}

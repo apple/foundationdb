@@ -62,9 +62,9 @@ struct ExceptionContract {
 	std::map<int, occurance_t> expected;
 	std::function<void(TraceEvent&)> augment;
 
-	ExceptionContract(const char* func_, const std::function<void(TraceEvent&)>& augment_)
+	ExceptionContract(char const* func_, std::function<void(TraceEvent&)> const& augment_)
 	  : func(func_), augment(augment_) {}
-	ExceptionContract& operator=(const std::map<int, occurance_t>& e) {
+	ExceptionContract& operator=(std::map<int, occurance_t> const& e) {
 		expected = e;
 		return *this;
 	}
@@ -73,7 +73,7 @@ struct ExceptionContract {
 	static occurance_t requiredIf(bool in) { return in ? Always : Never; }
 	static occurance_t possibleIf(bool in) { return in ? Possible : Never; }
 
-	void handleException(const Error& e, Reference<ITransaction> tr) const {
+	void handleException(Error const& e, Reference<ITransaction> tr) const {
 		// We should always ignore these.
 		if (e.code() == error_code_used_during_commit || e.code() == error_code_transaction_too_old ||
 		    e.code() == error_code_future_version || e.code() == error_code_transaction_cancelled ||
@@ -558,7 +558,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		ExceptionContract contract;
 		std::vector<ThreadFuture<Void>> pre_steps;
 
-		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload* wl, const char* func)
+		BaseTest(unsigned int id_, FuzzApiCorrectnessWorkload* wl, char const* func)
 		  : id(id_), workload(wl), contract(func, std::bind(&BaseTest::augmentTrace, this, ph::_1)) {}
 
 		static Key makeKey() {
@@ -651,15 +651,15 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			return GetRangeLimits(rowlimit, bytelimit);
 		}
 
-		static bool isOverlapping(const Key& begin, const Key& end, const KeyRangeRef& range) {
+		static bool isOverlapping(Key const& begin, Key const& end, KeyRangeRef const& range) {
 			return ((range.begin >= begin && range.begin < end) || (range.end >= begin && range.end < end) ||
 			        (begin >= range.begin && begin < range.end) || (end >= range.begin && end < range.end));
 		}
-		static bool isOverlapping(const Key& begin, const Key& end, const KeyRef& key) {
+		static bool isOverlapping(Key const& begin, Key const& end, KeyRef const& key) {
 			return (key >= begin && key < end);
 		}
 
-		static std::string slashToEnd(const KeyRef& key) { return key.toString().replace(key.size() - 1, 1, 1, '0'); }
+		static std::string slashToEnd(KeyRef const& key) { return key.toString().replace(key.size() - 1, 1, 1, '0'); }
 
 		static KeyRangeRef& getServerKeys() {
 			static std::string serverKeysEnd = slashToEnd(serverKeysPrefix);
@@ -674,7 +674,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			return globalKeys;
 		}
 
-		static bool isProtectedKey(const Key& begin, const Key& end) {
+		static bool isProtectedKey(Key const& begin, Key const& end) {
 			if (end < begin)
 				return false;
 
@@ -686,7 +686,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			        isOverlapping(begin, end, backupVersionKey));
 		}
 
-		static bool isProtectedKey(const Key& k) {
+		static bool isProtectedKey(Key const& k) {
 			return (isOverlapping(keyServersKeys.begin, keyServersKeys.end, k) ||
 			        isOverlapping(serverListKeys.begin, serverListKeys.end, k) ||
 			        isOverlapping(processClassKeys.begin, processClassKeys.end, k) ||
@@ -703,7 +703,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	struct BaseTestCallback : BaseTest<Subclass, Void> {
 		typedef typename BaseTest<Subclass, Void>::value_type value_type;
 
-		BaseTestCallback(unsigned int id, FuzzApiCorrectnessWorkload* wl, const char* func)
+		BaseTestCallback(unsigned int id, FuzzApiCorrectnessWorkload* wl, char const* func)
 		  : BaseTest<Subclass, Void>(id, wl, func) {}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
@@ -1028,8 +1028,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetAddressesForKey : public BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>> {
-		typedef BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>> base_type;
+	struct TestGetAddressesForKey : public BaseTest<TestGetAddressesForKey, Standalone<VectorRef<char const*>>> {
+		typedef BaseTest<TestGetAddressesForKey, Standalone<VectorRef<char const*>>> base_type;
 		Key key;
 
 		TestGetAddressesForKey(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)

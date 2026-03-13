@@ -50,7 +50,7 @@ typedef uint64_t CoordinatorsHash;
 // invalidKey is intentionally far beyond the system space.  It is meant to be used as a safe initial value for a key
 // before it is set to something meaningful to avoid mistakes where a default constructed key is written to instead of
 // the intended target.
-static const KeyRef invalidKey = "\xff\xff\xff\xff\xff\xff\xff\xff"_sr;
+static KeyRef const invalidKey = "\xff\xff\xff\xff\xff\xff\xff\xff"_sr;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0) or txsTag (id=1)
@@ -81,9 +81,9 @@ struct Tag {
 	Tag() : locality(tagLocalitySpecial), id(0) {}
 	Tag(int8_t locality, uint16_t id) : locality(locality), id(id) {}
 
-	bool operator==(const Tag& r) const { return locality == r.locality && id == r.id; }
-	bool operator!=(const Tag& r) const { return locality != r.locality || id != r.id; }
-	bool operator<(const Tag& r) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+	bool operator==(Tag const& r) const { return locality == r.locality && id == r.id; }
+	bool operator!=(Tag const& r) const { return locality != r.locality || id != r.id; }
+	bool operator<(Tag const& r) const { return locality < r.locality || (locality == r.locality && id < r.id); }
 
 	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
 
@@ -117,7 +117,7 @@ struct struct_like_traits<Tag> : std::true_type {
 	using types = pack<uint16_t, int8_t>;
 
 	template <int i, class Context>
-	static const index_t<i, types>& get(const Member& m, Context&) {
+	static index_t<i, types> const& get(Member const& m, Context&) {
 		if constexpr (i == 0) {
 			return m.id;
 		} else {
@@ -127,7 +127,7 @@ struct struct_like_traits<Tag> : std::true_type {
 	}
 
 	template <int i, class Type, class Context>
-	static void assign(Member& m, const Type& t, Context&) {
+	static void assign(Member& m, Type const& t, Context&) {
 		if constexpr (i == 0) {
 			m.id = t;
 		} else {
@@ -139,13 +139,13 @@ struct struct_like_traits<Tag> : std::true_type {
 
 template <>
 struct Traceable<Tag> : std::true_type {
-	static std::string toString(const Tag& value) { return value.toString(); }
+	static std::string toString(Tag const& value) { return value.toString(); }
 };
 
 namespace std {
 template <>
 struct hash<Tag> {
-	std::size_t operator()(const Tag& tag) const {
+	std::size_t operator()(Tag const& tag) const {
 		std::size_t seed = 0;
 		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
 		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
@@ -154,8 +154,8 @@ struct hash<Tag> {
 };
 } // namespace std
 
-static const Tag invalidTag{ tagLocalitySpecial, 0 };
-static const Tag txsTag{ tagLocalitySpecial, 1 }; // obsolete now
+static Tag const invalidTag{ tagLocalitySpecial, 0 };
+static Tag const txsTag{ tagLocalitySpecial, 1 }; // obsolete now
 
 struct TagsAndMessage {
 	StringRef message;
@@ -178,10 +178,10 @@ struct TagsAndMessage {
 		if (messageVersionSub)
 			*messageVersionSub = sub;
 		tags = VectorRef<Tag>((Tag*)rd->readBytes(tagCount * sizeof(Tag)), tagCount);
-		const int32_t rawLength = messageLength + sizeof(messageLength);
+		int32_t const rawLength = messageLength + sizeof(messageLength);
 		rd->rewind();
 		rd->checkpoint();
-		message = StringRef((const uint8_t*)rd->readBytes(rawLength), rawLength);
+		message = StringRef((uint8_t const*)rd->readBytes(rawLength), rawLength);
 	}
 
 	// Returns the size of the header, including: msg_length, version.sub, tag_count, tags.
@@ -204,20 +204,20 @@ void uniquify(Collection& c) {
 	c.resize(std::unique(c.begin(), c.end()) - c.begin());
 }
 
-inline std::string describe(const Tag item) {
+inline std::string describe(Tag const item) {
 	return format("%d:%d", item.locality, item.id);
 }
 
-inline std::string describe(const int item) {
+inline std::string describe(int const item) {
 	return format("%d", item);
 }
 
-inline std::string describe(const Version item) {
+inline std::string describe(Version const item) {
 	return format("%ld", item);
 }
 
 // Allows describeList to work on a vector of std::string
-std::string describe(const std::string& s);
+std::string describe(std::string const& s);
 
 template <class T>
 std::string describe(Reference<T> const& item) {
@@ -277,7 +277,7 @@ std::string describe(std::unordered_set<T> const& items, int max_items = -1) {
 
 template <typename T>
 struct Traceable<std::vector<T>> : std::true_type {
-	static std::string toString(const std::vector<T>& value) { return describe(value); }
+	static std::string toString(std::vector<T> const& value) { return describe(value); }
 };
 
 template <class T>
@@ -287,48 +287,48 @@ std::string describe(std::set<T> const& items, int max_items = -1) {
 
 template <typename T>
 struct Traceable<std::set<T>> : std::true_type {
-	static std::string toString(const std::set<T>& value) { return describe(value); }
+	static std::string toString(std::set<T> const& value) { return describe(value); }
 };
 
-std::string printable(const StringRef& val);
-std::string printable(const std::string& val);
-std::string printable(const KeyRangeRef& range);
-std::string printable(const VectorRef<KeyRangeRef>& val);
-std::string printable(const VectorRef<StringRef>& val);
-std::string printable(const VectorRef<KeyValueRef>& val);
-std::string printable(const KeyValueRef& val);
+std::string printable(StringRef const& val);
+std::string printable(std::string const& val);
+std::string printable(KeyRangeRef const& range);
+std::string printable(VectorRef<KeyRangeRef> const& val);
+std::string printable(VectorRef<StringRef> const& val);
+std::string printable(VectorRef<KeyValueRef> const& val);
+std::string printable(KeyValueRef const& val);
 std::string unprintable(std::string const& val);
 
 template <class T>
-std::string printable(const Optional<T>& val) {
+std::string printable(Optional<T> const& val) {
 	if (val.present())
 		return printable(val.get());
 	return "[not set]";
 }
 
-inline bool equalsKeyAfter(const KeyRef& key, const KeyRef& compareKey) {
+inline bool equalsKeyAfter(KeyRef const& key, KeyRef const& compareKey) {
 	if (key.size() + 1 != compareKey.size() || compareKey[compareKey.size() - 1] != 0)
 		return false;
 	return compareKey.startsWith(key);
 }
 
 struct KeyRangeRef {
-	const KeyRef begin, end;
+	KeyRef const begin, end;
 	KeyRangeRef() {}
-	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
+	KeyRangeRef(KeyRef const& begin, KeyRef const& end) : begin(begin), end(end) {
 		if (begin > end) {
 			TraceEvent("InvertedRange").detail("Begin", begin).detail("End", end).backtrace();
 			throw inverted_range();
 		}
 	}
-	KeyRangeRef(Arena& a, const KeyRangeRef& copyFrom) : begin(a, copyFrom.begin), end(a, copyFrom.end) {}
-	bool operator==(const KeyRangeRef& r) const { return begin == r.begin && end == r.end; }
-	bool operator!=(const KeyRangeRef& r) const { return begin != r.begin || end != r.end; }
-	bool contains(const KeyRef& key) const { return begin <= key && key < end; }
-	bool contains(const KeyRangeRef& keys) const { return begin <= keys.begin && keys.end <= end; }
-	bool intersects(const KeyRangeRef& keys) const { return begin < keys.end && keys.begin < end; }
-	bool intersects(const VectorRef<KeyRangeRef>& keysVec) const {
-		for (const auto& keys : keysVec) {
+	KeyRangeRef(Arena& a, KeyRangeRef const& copyFrom) : begin(a, copyFrom.begin), end(a, copyFrom.end) {}
+	bool operator==(KeyRangeRef const& r) const { return begin == r.begin && end == r.end; }
+	bool operator!=(KeyRangeRef const& r) const { return begin != r.begin || end != r.end; }
+	bool contains(KeyRef const& key) const { return begin <= key && key < end; }
+	bool contains(KeyRangeRef const& keys) const { return begin <= keys.begin && keys.end <= end; }
+	bool intersects(KeyRangeRef const& keys) const { return begin < keys.end && keys.begin < end; }
+	bool intersects(VectorRef<KeyRangeRef> const& keysVec) const {
+		for (auto const& keys : keysVec) {
 			if (intersects(keys)) {
 				return true;
 			}
@@ -358,19 +358,19 @@ struct KeyRangeRef {
 		return false;
 	}
 
-	Standalone<KeyRangeRef> withPrefix(const StringRef& prefix) const {
+	Standalone<KeyRangeRef> withPrefix(StringRef const& prefix) const {
 		return KeyRangeRef(begin.withPrefix(prefix), end.withPrefix(prefix));
 	}
 
-	KeyRangeRef withPrefix(const StringRef& prefix, Arena& arena) const {
+	KeyRangeRef withPrefix(StringRef const& prefix, Arena& arena) const {
 		return KeyRangeRef(begin.withPrefix(prefix, arena), end.withPrefix(prefix, arena));
 	}
 
-	KeyRangeRef removePrefix(const StringRef& prefix) const {
+	KeyRangeRef removePrefix(StringRef const& prefix) const {
 		return KeyRangeRef(begin.removePrefix(prefix), end.removePrefix(prefix));
 	}
 
-	const KeyRangeRef& operator=(const KeyRangeRef& rhs) {
+	KeyRangeRef const& operator=(KeyRangeRef const& rhs) {
 		const_cast<KeyRef&>(begin) = rhs.begin;
 		const_cast<KeyRef&>(end) = rhs.end;
 		return *this;
@@ -413,7 +413,7 @@ struct KeyRangeRef {
 
 template <>
 struct Traceable<KeyRangeRef> : std::true_type {
-	static std::string toString(const KeyRangeRef& value) {
+	static std::string toString(KeyRangeRef const& value) {
 		auto begin = Traceable<StringRef>::toString(value.begin);
 		auto end = Traceable<StringRef>::toString(value.end);
 		std::string result;
@@ -427,7 +427,7 @@ struct Traceable<KeyRangeRef> : std::true_type {
 	}
 };
 
-inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+inline KeyRangeRef operator&(KeyRangeRef const& lhs, KeyRangeRef const& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
 	if (e < b)
 		return KeyRangeRef();
@@ -435,7 +435,7 @@ inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 }
 
 // Calculates the complement of `lhs` from `rhs`.
-inline std::vector<KeyRangeRef> operator-(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+inline std::vector<KeyRangeRef> operator-(KeyRangeRef const& lhs, KeyRangeRef const& rhs) {
 	if ((lhs & rhs).empty()) {
 		return { lhs };
 	}
@@ -454,10 +454,10 @@ struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
 	KeyValueRef() {}
-	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
-	KeyValueRef(Arena& a, const KeyValueRef& copyFrom) : key(a, copyFrom.key), value(a, copyFrom.value) {}
-	bool operator==(const KeyValueRef& r) const { return key == r.key && value == r.value; }
-	bool operator!=(const KeyValueRef& r) const { return key != r.key || value != r.value; }
+	KeyValueRef(KeyRef const& key, ValueRef const& value) : key(key), value(value) {}
+	KeyValueRef(Arena& a, KeyValueRef const& copyFrom) : key(a, copyFrom.key), value(a, copyFrom.value) {}
+	bool operator==(KeyValueRef const& r) const { return key == r.key && value == r.value; }
+	bool operator!=(KeyValueRef const& r) const { return key != r.key || value != r.value; }
 
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
@@ -493,11 +493,11 @@ struct KeyValueRef {
 
 template <>
 struct string_serialized_traits<KeyValueRef> : std::true_type {
-	int32_t getSize(const KeyValueRef& item) const {
+	int32_t getSize(KeyValueRef const& item) const {
 		return 2 * sizeof(uint32_t) + item.key.size() + item.value.size();
 	}
 
-	uint32_t save(uint8_t* out, const KeyValueRef& item) const {
+	uint32_t save(uint8_t* out, KeyValueRef const& item) const {
 		auto begin = out;
 		uint32_t sz = item.key.size();
 		*reinterpret_cast<decltype(sz)*>(out) = sz;
@@ -513,7 +513,7 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 	}
 
 	template <class Context>
-	uint32_t load(const uint8_t* data, KeyValueRef& t, Context& context) {
+	uint32_t load(uint8_t const* data, KeyValueRef& t, Context& context) {
 		auto begin = data;
 		uint32_t sz;
 		memcpy(&sz, data, sizeof(sz));
@@ -530,7 +530,7 @@ struct string_serialized_traits<KeyValueRef> : std::true_type {
 
 template <>
 struct Traceable<KeyValueRef> : std::true_type {
-	static std::string toString(const KeyValueRef& value) {
+	static std::string toString(KeyValueRef const& value) {
 		return Traceable<KeyRef>::toString(value.key) + format(":%d", value.value.size());
 	}
 };
@@ -576,9 +576,9 @@ enum {
 	MAX_VERSION = std::numeric_limits<int64_t>::max()
 };
 
-inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
+inline KeyRef keyAfter(KeyRef const& key, Arena& arena) {
 	// Don't include fdbclient/SystemData.h for the allKeys symbol to avoid a cyclic include
-	static const auto allKeysEnd = "\xff\xff"_sr;
+	static auto const allKeysEnd = "\xff\xff"_sr;
 	if (key == allKeysEnd) {
 		return allKeysEnd;
 	}
@@ -589,7 +589,7 @@ inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
 	t[key.size()] = 0;
 	return KeyRef(t, key.size() + 1);
 }
-inline Key keyAfter(const KeyRef& key) {
+inline Key keyAfter(KeyRef const& key) {
 	Key result;
 	result.contents() = keyAfter(key, result.arena());
 	return result;
@@ -602,7 +602,7 @@ inline KeyRangeRef singleKeyRange(KeyRef const& key, Arena& arena) {
 	t[key.size()] = 0;
 	return KeyRangeRef(KeyRef(t, key.size()), KeyRef(t, key.size() + 1));
 }
-inline KeyRange singleKeyRange(const KeyRef& a) {
+inline KeyRange singleKeyRange(KeyRef const& a) {
 	KeyRange result;
 	result.contents() = singleKeyRange(a, result.arena());
 	return result;
@@ -619,10 +619,10 @@ inline KeyRange prefixRange(KeyRef prefix) {
 // assuming its length is no more than CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT. If the length of
 // the shortest key exceeds that limit, then the end key is returned.
 // The returned reference is valid as long as keys is valid.
-KeyRef keyBetween(const KeyRangeRef& keys);
+KeyRef keyBetween(KeyRangeRef const& keys);
 
 // Returns a randomKey between keys. If it's impossible, return keys.end.
-Key randomKeyBetween(const KeyRangeRef& keys);
+Key randomKeyBetween(KeyRangeRef const& keys);
 
 KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix);
 
@@ -634,9 +634,9 @@ public:
 	bool orEqual; // (or equal to key, if this is true)
 	int offset; // and then move forward this many items (or backward if negative)
 	KeySelectorRef() : orEqual(false), offset(0) {}
-	KeySelectorRef(const KeyRef& key, bool orEqual, int offset) : orEqual(orEqual), offset(offset) { setKey(key); }
+	KeySelectorRef(KeyRef const& key, bool orEqual, int offset) : orEqual(orEqual), offset(offset) { setKey(key); }
 
-	KeySelectorRef(Arena& arena, const KeySelectorRef& copyFrom)
+	KeySelectorRef(Arena& arena, KeySelectorRef const& copyFrom)
 	  : key(arena, copyFrom.key), orEqual(copyFrom.orEqual), offset(copyFrom.offset) {}
 	int expectedSize() const { return key.expectedSize(); }
 
@@ -672,25 +672,25 @@ public:
 	}
 };
 
-inline bool operator==(const KeySelectorRef& lhs, const KeySelectorRef& rhs) {
+inline bool operator==(KeySelectorRef const& lhs, KeySelectorRef const& rhs) {
 	return lhs.getKey() == rhs.getKey() && lhs.orEqual == rhs.orEqual && lhs.offset == rhs.offset;
 }
-inline KeySelectorRef lastLessThan(const KeyRef& k) {
+inline KeySelectorRef lastLessThan(KeyRef const& k) {
 	return KeySelectorRef(k, false, 0);
 }
-inline KeySelectorRef lastLessOrEqual(const KeyRef& k) {
+inline KeySelectorRef lastLessOrEqual(KeyRef const& k) {
 	return KeySelectorRef(k, true, 0);
 }
-inline KeySelectorRef firstGreaterThan(const KeyRef& k) {
+inline KeySelectorRef firstGreaterThan(KeyRef const& k) {
 	return KeySelectorRef(k, true, +1);
 }
-inline KeySelectorRef firstGreaterOrEqual(const KeyRef& k) {
+inline KeySelectorRef firstGreaterOrEqual(KeyRef const& k) {
 	return KeySelectorRef(k, false, +1);
 }
-inline KeySelectorRef operator+(const KeySelectorRef& s, int off) {
+inline KeySelectorRef operator+(KeySelectorRef const& s, int off) {
 	return KeySelectorRef(s.getKey(), s.orEqual, s.offset + off);
 }
-inline KeySelectorRef operator-(const KeySelectorRef& s, int off) {
+inline KeySelectorRef operator-(KeySelectorRef const& s, int off) {
 	return KeySelectorRef(s.getKey(), s.orEqual, s.offset - off);
 }
 inline bool selectorInRange(KeySelectorRef const& sel, KeyRangeRef const& range) {
@@ -700,15 +700,15 @@ inline bool selectorInRange(KeySelectorRef const& sel, KeyRangeRef const& range)
 
 template <>
 struct Traceable<KeySelectorRef> : std::true_type {
-	static std::string toString(const KeySelectorRef& value) { return value.toString(); }
+	static std::string toString(KeySelectorRef const& value) { return value.toString(); }
 };
 
 template <class Val>
 struct KeyRangeWith : KeyRange {
 	Val value;
 	KeyRangeWith() {}
-	KeyRangeWith(const KeyRangeRef& range, const Val& value) : KeyRange(range), value(value) {}
-	bool operator==(const KeyRangeWith& r) const { return KeyRangeRef::operator==(r) && value == r.value; }
+	KeyRangeWith(KeyRangeRef const& range, Val const& value) : KeyRange(range), value(value) {}
+	bool operator==(KeyRangeWith const& r) const { return KeyRangeRef::operator==(r) && value == r.value; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -716,7 +716,7 @@ struct KeyRangeWith : KeyRange {
 	}
 };
 template <class Val>
-KeyRangeWith<Val> keyRangeWith(const KeyRangeRef& range, const Val& value) {
+KeyRangeWith<Val> keyRangeWith(KeyRangeRef const& range, Val const& value) {
 	return KeyRangeWith<Val>(range, value);
 }
 
@@ -816,11 +816,11 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	bool readThroughEnd;
 
 	RangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
-	RangeResultRef(Arena& p, const RangeResultRef& toCopy)
+	RangeResultRef(Arena& p, RangeResultRef const& toCopy)
 	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
 	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
-	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
+	RangeResultRef(VectorRef<KeyValueRef> const& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
 	}
 	RangeResultRef(bool readToBegin, bool readThroughEnd)
@@ -844,7 +844,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 
 template <>
 struct Traceable<RangeResultRef> : std::true_type {
-	static std::string toString(const RangeResultRef& value) {
+	static std::string toString(RangeResultRef const& value) {
 		return Traceable<VectorRef<KeyValueRef>>::toString(value);
 	}
 };
@@ -855,11 +855,11 @@ struct GetValueReqAndResultRef {
 	Optional<ValueRef> result;
 
 	GetValueReqAndResultRef() {}
-	GetValueReqAndResultRef(Arena& a, const GetValueReqAndResultRef& copyFrom)
+	GetValueReqAndResultRef(Arena& a, GetValueReqAndResultRef const& copyFrom)
 	  : key(a, copyFrom.key), result(a, copyFrom.result) {}
 
-	bool operator==(const GetValueReqAndResultRef& rhs) const { return key == rhs.key && result == rhs.result; }
-	bool operator!=(const GetValueReqAndResultRef& rhs) const { return !(rhs == *this); }
+	bool operator==(GetValueReqAndResultRef const& rhs) const { return key == rhs.key && result == rhs.result; }
+	bool operator!=(GetValueReqAndResultRef const& rhs) const { return !(rhs == *this); }
 	int expectedSize() const { return key.expectedSize() + result.expectedSize(); }
 
 	template <class Ar>
@@ -874,13 +874,13 @@ struct GetRangeReqAndResultRef {
 
 	GetRangeReqAndResultRef() {}
 	//	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
-	GetRangeReqAndResultRef(Arena& a, const GetRangeReqAndResultRef& copyFrom)
+	GetRangeReqAndResultRef(Arena& a, GetRangeReqAndResultRef const& copyFrom)
 	  : begin(a, copyFrom.begin), end(a, copyFrom.end), result(a, copyFrom.result) {}
 
-	bool operator==(const GetRangeReqAndResultRef& rhs) const {
+	bool operator==(GetRangeReqAndResultRef const& rhs) const {
 		return begin == rhs.begin && end == rhs.end && result == rhs.result;
 	}
-	bool operator!=(const GetRangeReqAndResultRef& rhs) const { return !(rhs == *this); }
+	bool operator!=(GetRangeReqAndResultRef const& rhs) const { return !(rhs == *this); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -896,8 +896,8 @@ struct MappedKeyValueRef : KeyValueRef {
 	MappedReqAndResultRef reqAndResult;
 
 	MappedKeyValueRef() = default;
-	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
-		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+	MappedKeyValueRef(Arena& a, MappedKeyValueRef const& copyFrom) : KeyValueRef(a, copyFrom) {
+		auto const& reqAndResultCopyFrom = copyFrom.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
 			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
 			reqAndResult = GetValueReqAndResultRef(a, getValue);
@@ -909,11 +909,11 @@ struct MappedKeyValueRef : KeyValueRef {
 		}
 	}
 
-	bool operator==(const MappedKeyValueRef& rhs) const {
-		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
+	bool operator==(MappedKeyValueRef const& rhs) const {
+		return static_cast<KeyValueRef const&>(*this) == static_cast<KeyValueRef const&>(rhs) &&
 		       reqAndResult == rhs.reqAndResult;
 	}
-	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
+	bool operator!=(MappedKeyValueRef const& rhs) const { return !(rhs == *this); }
 
 	// It relies on the base to provide the expectedSize. TODO: Consider add the underlying request and key values into
 	// expected size?
@@ -939,11 +939,11 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	}
 
 	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
-	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)
+	MappedRangeResultRef(Arena& p, MappedRangeResultRef const& toCopy)
 	  : VectorRef<MappedKeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
 	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
-	MappedRangeResultRef(const VectorRef<MappedKeyValueRef>& value,
+	MappedRangeResultRef(VectorRef<MappedKeyValueRef> const& value,
 	                     bool more,
 	                     Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<MappedKeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false),
@@ -995,11 +995,11 @@ struct KeyValueStoreType {
 
 	// Get string representation of engine type.  Each enum has one canonical string
 	// representation, but the reverse is not true (see fromString() below)
-	static std::string getStoreTypeStr(const StoreType& storeType);
+	static std::string getStoreTypeStr(StoreType const& storeType);
 
 	// Convert a string to a KeyValueStoreType
 	// This is a many-to-one mapping as there are aliases for some storage engines
-	static KeyValueStoreType fromString(const std::string& str);
+	static KeyValueStoreType fromString(std::string const& str);
 	std::string toString() const { return getStoreTypeStr((StoreType)type); }
 
 	// Whether the storage type is a valid storage type.
@@ -1289,7 +1289,7 @@ struct HealthMetrics {
 	  : worstStorageQueue(0), limitingStorageQueue(0), worstStorageDurabilityLag(0), limitingStorageDurabilityLag(0),
 	    worstTLogQueue(0), tpsLimit(0.0), batchLimited(false) {}
 
-	void update(const HealthMetrics& hm, bool detailedInput, bool detailedOutput) {
+	void update(HealthMetrics const& hm, bool detailedInput, bool detailedOutput) {
 		worstStorageQueue = hm.worstStorageQueue;
 		limitingStorageQueue = hm.limitingStorageQueue;
 		worstStorageDurabilityLag = hm.worstStorageDurabilityLag;
@@ -1337,7 +1337,7 @@ struct DDMetricsRef {
 	DDMetricsRef() : shardBytes(0), shardBytesPerKSecond(0) {}
 	DDMetricsRef(int64_t bytes, int64_t bytesPerKSecond, KeyRef begin)
 	  : shardBytes(bytes), shardBytesPerKSecond(bytesPerKSecond), beginKey(begin) {}
-	DDMetricsRef(Arena& a, const DDMetricsRef& copyFrom)
+	DDMetricsRef(Arena& a, DDMetricsRef const& copyFrom)
 	  : shardBytes(copyFrom.shardBytes), shardBytesPerKSecond(copyFrom.shardBytesPerKSecond),
 	    beginKey(a, copyFrom.beginKey) {}
 
@@ -1366,13 +1366,13 @@ struct WorkerBackupStatus {
 
 enum class TransactionPriority : uint8_t { BATCH, DEFAULT, IMMEDIATE, MIN = BATCH, MAX = IMMEDIATE };
 
-const std::array<TransactionPriority, (int)TransactionPriority::MAX + 1> allTransactionPriorities = {
+std::array<TransactionPriority, (int)TransactionPriority::MAX + 1> const allTransactionPriorities = {
 	TransactionPriority::BATCH,
 	TransactionPriority::DEFAULT,
 	TransactionPriority::IMMEDIATE
 };
 
-inline const char* transactionPriorityToString(TransactionPriority priority, bool capitalize = true) {
+inline char const* transactionPriorityToString(TransactionPriority priority, bool capitalize = true) {
 	switch (priority) {
 	case TransactionPriority::BATCH:
 		return capitalize ? "Batch" : "batch";
@@ -1478,10 +1478,10 @@ struct EncryptionAtRestModeDeprecated {
 
 	Value toValue() const { return ValueRef(format("%d", (int)mode)); }
 
-	bool isEquals(const EncryptionAtRestModeDeprecated& e) const { return this->mode == e.mode; }
+	bool isEquals(EncryptionAtRestModeDeprecated const& e) const { return this->mode == e.mode; }
 
-	bool operator==(const EncryptionAtRestModeDeprecated& e) const { return isEquals(e); }
-	bool operator!=(const EncryptionAtRestModeDeprecated& e) const { return !isEquals(e); }
+	bool operator==(EncryptionAtRestModeDeprecated const& e) const { return isEquals(e); }
+	bool operator!=(EncryptionAtRestModeDeprecated const& e) const { return !isEquals(e); }
 	bool operator==(Mode m) const { return mode == m; }
 	bool operator!=(Mode m) const { return mode != m; }
 
@@ -1514,7 +1514,7 @@ struct EncryptionAtRestModeDeprecated {
 
 template <>
 struct Traceable<EncryptionAtRestModeDeprecated> : std::true_type {
-	static std::string toString(const EncryptionAtRestModeDeprecated& mode) { return mode.toString(); }
+	static std::string toString(EncryptionAtRestModeDeprecated const& mode) { return mode.toString(); }
 };
 
 typedef StringRef ClusterNameRef;
@@ -1536,7 +1536,7 @@ struct DatabaseSharedState {
 	// This is to preserve compatibility with future updates of this shared state
 	// and ensures the MVC does not attempt to access methods incorrectly
 	// due to newly introduced offsets in the structure.
-	const ProtocolVersion protocolVersion;
+	ProtocolVersion const protocolVersion;
 	void (*delRef)(DatabaseSharedState*);
 
 	Mutex mutexLock;
@@ -1547,7 +1547,7 @@ struct DatabaseSharedState {
 	  : protocolVersion(currentProtocolVersion()), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
-const static std::regex wiggleLocalityValidation("([\\w_]+:[\\w\\-_\\.0-9]+)(;[\\w_]+:[\\w\\-_\\.0-9]+)*");
+static std::regex const wiggleLocalityValidation("([\\w_]+:[\\w\\-_\\.0-9]+)(;[\\w_]+:[\\w\\-_\\.0-9]+)*");
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	if (locality == "0") {
 		return true;
@@ -1557,12 +1557,12 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 
 // Parses `perpetual_storage_wiggle_locality` database option.
 std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
-    const std::string& localityKeyValues);
+    std::string const& localityKeyValues);
 
 // Whether the locality matches any locality filter in `localityKeyValues` (which is supposed to be parsed from
 // ParsePerpetualStorageWiggleLocality).
-bool localityMatchInList(const std::vector<std::pair<Optional<Value>, Optional<Value>>>& localityKeyValues,
-                         const LocalityData& locality);
+bool localityMatchInList(std::vector<std::pair<Optional<Value>, Optional<Value>>> const& localityKeyValues,
+                         LocalityData const& locality);
 
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage
 // wiggle.
@@ -1586,12 +1586,12 @@ struct StorageMetadataType {
 
 	static double currentTime() { return g_network->timer(); }
 
-	bool operator==(const StorageMetadataType& b) const {
+	bool operator==(StorageMetadataType const& b) const {
 		return createdTime == b.createdTime && storeType == b.storeType &&
 		       wrongConfiguredForWiggle == b.wrongConfiguredForWiggle;
 	}
 
-	bool operator<(const StorageMetadataType& b) const {
+	bool operator<(StorageMetadataType const& b) const {
 		if (wrongConfiguredForWiggle == b.wrongConfiguredForWiggle) {
 			// the older SS has smaller createdTime
 			return createdTime < b.createdTime;
@@ -1599,7 +1599,7 @@ struct StorageMetadataType {
 		return wrongConfiguredForWiggle > b.wrongConfiguredForWiggle;
 	}
 
-	bool operator>(const StorageMetadataType& b) const { return b < *this; }
+	bool operator>(StorageMetadataType const& b) const { return b < *this; }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered
@@ -1681,21 +1681,21 @@ struct Versionstamp {
 	Version version = invalidVersion;
 	uint16_t batchNumber = 0;
 
-	bool operator==(const Versionstamp& r) const { return version == r.version && batchNumber == r.batchNumber; }
-	bool operator!=(const Versionstamp& r) const { return !(*this == r); }
-	bool operator<(const Versionstamp& r) const {
+	bool operator==(Versionstamp const& r) const { return version == r.version && batchNumber == r.batchNumber; }
+	bool operator!=(Versionstamp const& r) const { return !(*this == r); }
+	bool operator<(Versionstamp const& r) const {
 		return version < r.version || (version == r.version && batchNumber < r.batchNumber);
 	}
-	bool operator>(const Versionstamp& r) const { return r < *this; }
-	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
-	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
+	bool operator>(Versionstamp const& r) const { return r < *this; }
+	bool operator<=(Versionstamp const& r) const { return !(*this > r); }
+	bool operator>=(Versionstamp const& r) const { return !(*this < r); }
 
 	Versionstamp() {}
 	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
 	Versionstamp(Standalone<StringRef> str) {
 		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));
-		version = bigEndian64(*reinterpret_cast<const Version*>(str.begin()));
-		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));
+		version = bigEndian64(*reinterpret_cast<Version const*>(str.begin()));
+		batchNumber = bigEndian16(*reinterpret_cast<uint16_t const*>(str.begin() + sizeof(Version)));
 	}
 
 	std::string toString() const { return fmt::format("{}.{}", version, batchNumber); }
@@ -1720,7 +1720,7 @@ struct Versionstamp {
 };
 
 template <class Ar>
-inline void save(Ar& ar, const Versionstamp& value) {
+inline void save(Ar& ar, Versionstamp const& value) {
 	return const_cast<Versionstamp&>(value).serialize(ar);
 }
 
@@ -1731,7 +1731,7 @@ inline void load(Ar& ar, Versionstamp& value) {
 
 template <>
 struct Traceable<Versionstamp> : std::true_type {
-	static std::string toString(const Versionstamp& v) { return v.toString(); }
+	static std::string toString(Versionstamp const& v) { return v.toString(); }
 };
 
 #endif

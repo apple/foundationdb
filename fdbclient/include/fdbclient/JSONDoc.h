@@ -71,7 +71,7 @@ struct JSONDoc {
 
 	// Construction from const json_spirit::mObject, trivial and will never throw.
 	// Resulting JSONDoc will not allow modifications.
-	JSONDoc(const json_spirit::mObject& o) : pObj(&o), wpObj(nullptr) {}
+	JSONDoc(json_spirit::mObject const& o) : pObj(&o), wpObj(nullptr) {}
 
 	// Construction from json_spirit::mObject.  Allows modifications.
 	JSONDoc(json_spirit::mObject& o) : pObj(&o), wpObj(&o) {}
@@ -79,7 +79,7 @@ struct JSONDoc {
 	// Construction from const json_spirit::mValue (which is a Variant type) which will try to
 	// convert it to an mObject.  This will throw if that fails, just as it would
 	// if the caller called get_obj() itself and used the previous constructor instead.
-	JSONDoc(const json_spirit::mValue& v) : pObj(&v.get_obj()), wpObj(nullptr) {}
+	JSONDoc(json_spirit::mValue const& v) : pObj(&v.get_obj()), wpObj(nullptr) {}
 
 	// Construction from non-const json_spirit::mValue - will convert the mValue to
 	// an object if it isn't already and then attach to it.
@@ -104,7 +104,7 @@ struct JSONDoc {
 		if (path.empty())
 			return false;
 		size_t start = 0;
-		const json_spirit::mValue* curVal = nullptr;
+		json_spirit::mValue const* curVal = nullptr;
 		while (start < path.size()) {
 			// If a path segment is found then curVal must be an object
 			size_t dot;
@@ -119,7 +119,7 @@ struct JSONDoc {
 
 			// Get pointer to the current Object that the key has to be in
 			// This will throw if the value is not an Object
-			const json_spirit::mObject* curObj = curVal ? &curVal->get_obj() : pObj;
+			json_spirit::mObject const* curObj = curVal ? &curVal->get_obj() : pObj;
 
 			// Make sure key exists, if not then return false
 			if (!curObj->count(key))
@@ -184,7 +184,7 @@ struct JSONDoc {
 
 	// Creates the path given, puts a value at it, and returns a reference to the value
 	template <typename T>
-	T& put(std::string path, const T& value, bool split = true) {
+	T& put(std::string path, T const& value, bool split = true) {
 		json_spirit::mValue& v = create(path, split);
 		v = value;
 		return v.get_value<T>();
@@ -200,9 +200,9 @@ struct JSONDoc {
 
 	// Apply a merge operation to two values.  Works for int, double, and string
 	template <typename T>
-	static json_spirit::mObject mergeOperator(const std::string& op,
-	                                          const json_spirit::mObject& op_a,
-	                                          const json_spirit::mObject& op_b,
+	static json_spirit::mObject mergeOperator(std::string const& op,
+	                                          json_spirit::mObject const& op_a,
+	                                          json_spirit::mObject const& op_b,
 	                                          T const& a,
 	                                          T const& b) {
 		if (op == "$max")
@@ -216,16 +216,16 @@ struct JSONDoc {
 
 	// This is just a convenience function to make calling mergeOperator look cleaner
 	template <typename T>
-	static json_spirit::mObject mergeOperatorWrapper(const std::string& op,
-	                                                 const json_spirit::mObject& op_a,
-	                                                 const json_spirit::mObject& op_b,
-	                                                 const json_spirit::mValue& a,
-	                                                 const json_spirit::mValue& b) {
+	static json_spirit::mObject mergeOperatorWrapper(std::string const& op,
+	                                                 json_spirit::mObject const& op_a,
+	                                                 json_spirit::mObject const& op_b,
+	                                                 json_spirit::mValue const& a,
+	                                                 json_spirit::mValue const& b) {
 		return mergeOperator<T>(op, op_a, op_b, a.get_value<T>(), b.get_value<T>());
 	}
 
-	static inline const std::string& getOperator(const json_spirit::mObject& obj) {
-		static const std::string empty;
+	static inline std::string const& getOperator(json_spirit::mObject const& obj) {
+		static std::string const empty;
 		for (auto& k : obj)
 			if (!k.first.empty() && k.first[0] == '$')
 				return k.first;
@@ -233,8 +233,8 @@ struct JSONDoc {
 	}
 
 	// Merge src into dest, applying merge operators
-	static void mergeInto(json_spirit::mObject& dst, const json_spirit::mObject& src);
-	static void mergeValueInto(json_spirit::mValue& d, const json_spirit::mValue& s);
+	static void mergeInto(json_spirit::mObject& dst, json_spirit::mObject const& src);
+	static void mergeValueInto(json_spirit::mValue& d, json_spirit::mValue const& s);
 
 	// Remove any merge operators that never met any mates.
 	static void cleanOps(json_spirit::mObject& obj);
@@ -245,7 +245,7 @@ struct JSONDoc {
 		return cleanOps(*wpObj);
 	}
 
-	void absorb(const JSONDoc& doc) {
+	void absorb(JSONDoc const& doc) {
 		if (wpObj == nullptr)
 			throw std::runtime_error("JSON Object not writable");
 
@@ -262,7 +262,7 @@ struct JSONDoc {
 	// Will throw if a non-terminating path element exists BUT is not a JSON Object.
 	// Will throw if all elements along path exists but T is an incompatible type
 	template <typename T>
-	bool get(const std::string path, T& out, bool split = true) {
+	bool get(std::string const path, T& out, bool split = true) {
 		bool r = has(path, split);
 		if (r)
 			out = pLast->get_value<T>();
@@ -271,7 +271,7 @@ struct JSONDoc {
 
 	// For convenience, wraps get() in a try/catch and returns false UNLESS the path existed and was a compatible type.
 	template <typename T>
-	bool tryGet(const std::string path, T& out, bool split = true) {
+	bool tryGet(std::string const path, T& out, bool split = true) {
 		try {
 			return get(path, out, split);
 		} catch (...) {
@@ -279,23 +279,23 @@ struct JSONDoc {
 		return false;
 	}
 
-	const json_spirit::mValue& at(const std::string path, bool split = true) {
+	json_spirit::mValue const& at(std::string const path, bool split = true) {
 		if (has(path, split))
 			return last();
 		throw std::runtime_error("JSON path doesn't exist");
 	}
 
-	const json_spirit::mValue& operator[](const std::string path) { return at(path); }
+	json_spirit::mValue const& operator[](std::string const path) { return at(path); }
 
-	const json_spirit::mValue& last() const { return *pLast; }
+	json_spirit::mValue const& last() const { return *pLast; }
 	bool valid() const { return pObj != nullptr; }
 
-	const json_spirit::mObject& obj() {
+	json_spirit::mObject const& obj() {
 		// This dummy object is necessary to make working with obj() easier when this does not currently
 		// point to a valid mObject.  valid() can be called to explicitly check for this scenario, but
 		// calling obj() at least will not seg fault and instead return a const reference to an empty mObject.
 		// This is very useful when iterating using obj() to access the underlying mObject.
-		static const json_spirit::mObject dummy;
+		static json_spirit::mObject const dummy;
 		return pObj ? *pObj : dummy;
 	}
 
@@ -313,8 +313,8 @@ struct JSONDoc {
 	static uint64_t expires_reference_version;
 
 private:
-	const json_spirit::mObject* pObj;
+	json_spirit::mObject const* pObj;
 	// Writeable pointer to the same object.  Will be nullptr if initialized from a const object.
 	json_spirit::mObject* wpObj;
-	const json_spirit::mValue* pLast;
+	json_spirit::mValue const* pLast;
 };

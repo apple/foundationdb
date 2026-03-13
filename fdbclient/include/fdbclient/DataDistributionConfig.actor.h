@@ -86,7 +86,7 @@ struct DDRangeConfig {
 
 template <>
 struct Traceable<DDRangeConfig> : std::true_type {
-	static std::string toString(const DDRangeConfig& c) { return c.toString(); }
+	static std::string toString(DDRangeConfig const& c) { return c.toString(); }
 };
 
 template <>

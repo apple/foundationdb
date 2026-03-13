@@ -100,27 +100,27 @@ void StorageServerInterface::initEndpoints() {
 
 // if size + hex of checksum is shorter than value, record that instead of actual value. break-even point is 12
 // characters
-std::string traceChecksumValue(const ValueRef& s) {
+std::string traceChecksumValue(ValueRef const& s) {
 	return s.size() > 12 ? format("(%d)%08x", s.size(), crc32c_append(0, s.begin(), s.size())) : s.toString();
 }
 
 // point reads
 template <>
-bool TSS_doCompare(const GetValueReply& src, const GetValueReply& tss) {
+bool TSS_doCompare(GetValueReply const& src, GetValueReply const& tss) {
 	return src.value.present() == tss.value.present() && (!src.value.present() || src.value.get() == tss.value.get());
 }
 
 template <>
-const char* LB_mismatchTraceName(const GetValueRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(GetValueRequest const& req, ComparisonType const& type) {
 	return type == TSS_COMPARISON ? "TSSMismatchGetValue" : "ReplicaMismatchGetValue";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetValueRequest& req,
-                       const GetValueReply& src,
-                       const GetValueReply& tss,
-                       const ComparisonType& type) {
+                       GetValueRequest const& req,
+                       GetValueReply const& src,
+                       GetValueReply const& tss,
+                       ComparisonType const& type) {
 	event.detail("Key", req.key)
 	    .detail("Version", req.version)
 	    .detail(type == TSS_COMPARISON ? "SSReply" : "SourceSSReply",
@@ -131,7 +131,7 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // key selector reads
 template <>
-bool TSS_doCompare(const GetKeyReply& src, const GetKeyReply& tss) {
+bool TSS_doCompare(GetKeyReply const& src, GetKeyReply const& tss) {
 	// This process is a bit complicated. Since the tss and ss can return different results if neighboring shards to
 	// req.sel.key are currently being moved, We validate that the results are the same IF the returned key selectors
 	// are final. Otherwise, we only mark the request as a mismatch if the difference between the two returned key
@@ -172,16 +172,16 @@ bool TSS_doCompare(const GetKeyReply& src, const GetKeyReply& tss) {
 }
 
 template <>
-const char* LB_mismatchTraceName(const GetKeyRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(GetKeyRequest const& req, ComparisonType const& type) {
 	return type == TSS_COMPARISON ? "TSSMismatchGetKey" : "ReplicaMismatchGetKey";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetKeyRequest& req,
-                       const GetKeyReply& src,
-                       const GetKeyReply& tss,
-                       const ComparisonType& type) {
+                       GetKeyRequest const& req,
+                       GetKeyReply const& src,
+                       GetKeyReply const& tss,
+                       ComparisonType const& type) {
 	event
 	    .detail("KeySelector",
 	            format("%s%s:%d", req.sel.orEqual ? "=" : "", req.sel.getKey().printable().c_str(), req.sel.offset))
@@ -194,18 +194,18 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // range reads
 template <>
-bool TSS_doCompare(const GetKeyValuesReply& src, const GetKeyValuesReply& tss) {
+bool TSS_doCompare(GetKeyValuesReply const& src, GetKeyValuesReply const& tss) {
 	return src.more == tss.more && src.data == tss.data;
 }
 
 template <>
-const char* LB_mismatchTraceName(const GetKeyValuesRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(GetKeyValuesRequest const& req, ComparisonType const& type) {
 	return type == TSS_COMPARISON ? "TSSMismatchGetKeyValues" : "ReplicaMismatchGetKeyValues";
 }
 
 static void traceKeyValuesSummary(TraceEvent& event,
-                                  const KeySelectorRef& begin,
-                                  const KeySelectorRef& end,
+                                  KeySelectorRef const& begin,
+                                  KeySelectorRef const& end,
                                   Version version,
                                   int limit,
                                   int limitBytes,
@@ -213,7 +213,7 @@ static void traceKeyValuesSummary(TraceEvent& event,
                                   bool ssMore,
                                   size_t tssSize,
                                   bool tssMore,
-                                  const ComparisonType& type) {
+                                  ComparisonType const& type) {
 	std::string ssSummaryString = format("(%d)%s", ssSize, ssMore ? "+" : "");
 	std::string tssSummaryString = format("(%d)%s", tssSize, tssMore ? "+" : "");
 	event.detail("Begin", format("%s%s:%d", begin.orEqual ? "=" : "", begin.getKey().printable().c_str(), begin.offset))
@@ -226,7 +226,7 @@ static void traceKeyValuesSummary(TraceEvent& event,
 }
 
 // convert a StringRef to Hex string
-static std::string hexStringRef(const StringRef& s) {
+static std::string hexStringRef(StringRef const& s) {
 	std::string result;
 	result.reserve(s.size() * 2);
 	for (int i = 0; i < s.size(); i++) {
@@ -236,16 +236,16 @@ static std::string hexStringRef(const StringRef& s) {
 }
 
 static void traceKeyValuesDiff(TraceEvent& event,
-                               const KeySelectorRef& begin,
-                               const KeySelectorRef& end,
+                               KeySelectorRef const& begin,
+                               KeySelectorRef const& end,
                                Version version,
                                int limit,
                                int limitBytes,
-                               const VectorRef<KeyValueRef>& ssKV,
+                               VectorRef<KeyValueRef> const& ssKV,
                                bool ssMore,
-                               const VectorRef<KeyValueRef>& tssKV,
+                               VectorRef<KeyValueRef> const& tssKV,
                                bool tssMore,
-                               const ComparisonType& type) {
+                               ComparisonType const& type) {
 	traceKeyValuesSummary(
 	    event, begin, end, version, limit, limitBytes, ssKV.size(), ssMore, tssKV.size(), tssMore, type);
 	bool mismatchFound = false;
@@ -275,10 +275,10 @@ static void traceKeyValuesDiff(TraceEvent& event,
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetKeyValuesRequest& req,
-                       const GetKeyValuesReply& src,
-                       const GetKeyValuesReply& tss,
-                       const ComparisonType& type) {
+                       GetKeyValuesRequest const& req,
+                       GetKeyValuesReply const& src,
+                       GetKeyValuesReply const& tss,
+                       ComparisonType const& type) {
 	traceKeyValuesDiff(event,
 	                   req.begin,
 	                   req.end,
@@ -294,21 +294,21 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // range reads and flat map
 template <>
-bool TSS_doCompare(const GetMappedKeyValuesReply& src, const GetMappedKeyValuesReply& tss) {
+bool TSS_doCompare(GetMappedKeyValuesReply const& src, GetMappedKeyValuesReply const& tss) {
 	return src.more == tss.more && src.data == tss.data;
 }
 
 template <>
-const char* LB_mismatchTraceName(const GetMappedKeyValuesRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(GetMappedKeyValuesRequest const& req, ComparisonType const& type) {
 	return type == TSS_COMPARISON ? "TSSMismatchGetMappedKeyValues" : "ReplicaMismatchGetMappedKeyValues";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetMappedKeyValuesRequest& req,
-                       const GetMappedKeyValuesReply& src,
-                       const GetMappedKeyValuesReply& tss,
-                       const ComparisonType& type) {
+                       GetMappedKeyValuesRequest const& req,
+                       GetMappedKeyValuesReply const& src,
+                       GetMappedKeyValuesReply const& tss,
+                       ComparisonType const& type) {
 	traceKeyValuesSummary(event,
 	                      req.begin,
 	                      req.end,
@@ -325,22 +325,22 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // streaming range reads
 template <>
-bool TSS_doCompare(const GetKeyValuesStreamReply& src, const GetKeyValuesStreamReply& tss) {
+bool TSS_doCompare(GetKeyValuesStreamReply const& src, GetKeyValuesStreamReply const& tss) {
 	return src.more == tss.more && src.data == tss.data;
 }
 
 template <>
-const char* LB_mismatchTraceName(const GetKeyValuesStreamRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(GetKeyValuesStreamRequest const& req, ComparisonType const& type) {
 	return type == TSS_COMPARISON ? "TSSMismatchGetKeyValuesStream" : "ReplicaMismatchGetKeyValuesStream";
 }
 
 // TODO this is all duplicated from above, simplify?
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetKeyValuesStreamRequest& req,
-                       const GetKeyValuesStreamReply& src,
-                       const GetKeyValuesStreamReply& tss,
-                       const ComparisonType& type) {
+                       GetKeyValuesStreamRequest const& req,
+                       GetKeyValuesStreamReply const& src,
+                       GetKeyValuesStreamReply const& tss,
+                       ComparisonType const& type) {
 	traceKeyValuesDiff(event,
 	                   req.begin,
 	                   req.end,
@@ -355,108 +355,108 @@ void TSS_traceMismatch(TraceEvent& event,
 }
 
 template <>
-bool TSS_doCompare(const WatchValueReply& src, const WatchValueReply& tss) {
+bool TSS_doCompare(WatchValueReply const& src, WatchValueReply const& tss) {
 	// We duplicate watches just for load, no need to validate replies.
 	return true;
 }
 
 template <>
-const char* LB_mismatchTraceName(const WatchValueRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(WatchValueRequest const& req, ComparisonType const& type) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const WatchValueRequest& req,
-                       const WatchValueReply& src,
-                       const WatchValueReply& tss,
-                       const ComparisonType& type) {
+                       WatchValueRequest const& req,
+                       WatchValueReply const& src,
+                       WatchValueReply const& tss,
+                       ComparisonType const& type) {
 	ASSERT(false);
 }
 
 template <>
-bool TSS_doCompare(const SplitMetricsReply& src, const SplitMetricsReply& tss) {
+bool TSS_doCompare(SplitMetricsReply const& src, SplitMetricsReply const& tss) {
 	// We duplicate split metrics just for load, no need to validate replies.
 	return true;
 }
 
 template <>
-const char* LB_mismatchTraceName(const SplitMetricsRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(SplitMetricsRequest const& req, ComparisonType const& type) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const SplitMetricsRequest& req,
-                       const SplitMetricsReply& src,
-                       const SplitMetricsReply& tss,
-                       const ComparisonType& type) {
+                       SplitMetricsRequest const& req,
+                       SplitMetricsReply const& src,
+                       SplitMetricsReply const& tss,
+                       ComparisonType const& type) {
 	ASSERT(false);
 }
 
 template <>
-bool TSS_doCompare(const ReadHotSubRangeReply& src, const ReadHotSubRangeReply& tss) {
+bool TSS_doCompare(ReadHotSubRangeReply const& src, ReadHotSubRangeReply const& tss) {
 	// We duplicate read hot sub range metrics just for load, no need to validate replies.
 	return true;
 }
 
 template <>
-const char* LB_mismatchTraceName(const ReadHotSubRangeRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(ReadHotSubRangeRequest const& req, ComparisonType const& type) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const ReadHotSubRangeRequest& req,
-                       const ReadHotSubRangeReply& src,
-                       const ReadHotSubRangeReply& tss,
-                       const ComparisonType& type) {
+                       ReadHotSubRangeRequest const& req,
+                       ReadHotSubRangeReply const& src,
+                       ReadHotSubRangeReply const& tss,
+                       ComparisonType const& type) {
 	ASSERT(false);
 }
 
 template <>
-bool TSS_doCompare(const SplitRangeReply& src, const SplitRangeReply& tss) {
+bool TSS_doCompare(SplitRangeReply const& src, SplitRangeReply const& tss) {
 	// We duplicate read hot sub range metrics just for load, no need to validate replies.
 	return true;
 }
 
 template <>
-const char* LB_mismatchTraceName(const SplitRangeRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(SplitRangeRequest const& req, ComparisonType const& type) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const SplitRangeRequest& req,
-                       const SplitRangeReply& src,
-                       const SplitRangeReply& tss,
-                       const ComparisonType& type) {
+                       SplitRangeRequest const& req,
+                       SplitRangeReply const& src,
+                       SplitRangeReply const& tss,
+                       ComparisonType const& type) {
 	ASSERT(false);
 }
 
 // change feed
 template <>
-bool TSS_doCompare(const OverlappingChangeFeedsReply& src, const OverlappingChangeFeedsReply& tss) {
+bool TSS_doCompare(OverlappingChangeFeedsReply const& src, OverlappingChangeFeedsReply const& tss) {
 	// We duplicate for load, no need to validate replies
 	return true;
 }
 
 template <>
-const char* LB_mismatchTraceName(const OverlappingChangeFeedsRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(OverlappingChangeFeedsRequest const& req, ComparisonType const& type) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const OverlappingChangeFeedsRequest& req,
-                       const OverlappingChangeFeedsReply& src,
-                       const OverlappingChangeFeedsReply& tss,
-                       const ComparisonType& type) {
+                       OverlappingChangeFeedsRequest const& req,
+                       OverlappingChangeFeedsReply const& src,
+                       OverlappingChangeFeedsReply const& tss,
+                       ComparisonType const& type) {
 	ASSERT(false);
 }
 
@@ -464,72 +464,72 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // storage metrics
 template <>
-bool TSS_doCompare(const StorageMetrics& src, const StorageMetrics& tss) {
+bool TSS_doCompare(StorageMetrics const& src, StorageMetrics const& tss) {
 	ASSERT(false);
 	return true;
 }
 
 template <>
-const char* LB_mismatchTraceName(const WaitMetricsRequest& req, const ComparisonType& type) {
+char const* LB_mismatchTraceName(WaitMetricsRequest const& req, ComparisonType const& type) {
 	ASSERT(false);
 	return "";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const WaitMetricsRequest& req,
-                       const StorageMetrics& src,
-                       const StorageMetrics& tss,
-                       const ComparisonType& type) {
+                       WaitMetricsRequest const& req,
+                       StorageMetrics const& src,
+                       StorageMetrics const& tss,
+                       ComparisonType const& type) {
 	ASSERT(false);
 }
 
 // only record metrics for data reads
 
 template <>
-void TSSMetrics::recordLatency(const GetValueRequest& req, double ssLatency, double tssLatency) {
+void TSSMetrics::recordLatency(GetValueRequest const& req, double ssLatency, double tssLatency) {
 	SSgetValueLatency.addSample(ssLatency);
 	TSSgetValueLatency.addSample(tssLatency);
 }
 
 template <>
-void TSSMetrics::recordLatency(const GetKeyRequest& req, double ssLatency, double tssLatency) {
+void TSSMetrics::recordLatency(GetKeyRequest const& req, double ssLatency, double tssLatency) {
 	SSgetKeyLatency.addSample(ssLatency);
 	TSSgetKeyLatency.addSample(tssLatency);
 }
 
 template <>
-void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency, double tssLatency) {
+void TSSMetrics::recordLatency(GetKeyValuesRequest const& req, double ssLatency, double tssLatency) {
 	SSgetKeyValuesLatency.addSample(ssLatency);
 	TSSgetKeyValuesLatency.addSample(tssLatency);
 }
 
 template <>
-void TSSMetrics::recordLatency(const GetMappedKeyValuesRequest& req, double ssLatency, double tssLatency) {
+void TSSMetrics::recordLatency(GetMappedKeyValuesRequest const& req, double ssLatency, double tssLatency) {
 	SSgetMappedKeyValuesLatency.addSample(ssLatency);
 	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
 }
 
 template <>
-void TSSMetrics::recordLatency(const WatchValueRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(WatchValueRequest const& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const WaitMetricsRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(WaitMetricsRequest const& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const SplitMetricsRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(SplitMetricsRequest const& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const ReadHotSubRangeRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(ReadHotSubRangeRequest const& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const SplitRangeRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(SplitRangeRequest const& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const GetKeyValuesStreamRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(GetKeyValuesStreamRequest const& req, double ssLatency, double tssLatency) {}
 
 template <>
-void TSSMetrics::recordLatency(const OverlappingChangeFeedsRequest& req, double ssLatency, double tssLatency) {}
+void TSSMetrics::recordLatency(OverlappingChangeFeedsRequest const& req, double ssLatency, double tssLatency) {}
 
 // -------------------
 

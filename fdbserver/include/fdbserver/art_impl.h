@@ -58,7 +58,7 @@ VersionedBTree::art_iterator art_tree::insert_if_absent(KeyRef& k, void* value, 
 	return VersionedBTree::art_iterator(l);
 }
 
-VersionedBTree::art_iterator art_tree::lower_bound(const KeyRef& key) {
+VersionedBTree::art_iterator art_tree::lower_bound(KeyRef const& key) {
 	if (!size)
 		return art_iterator(nullptr);
 	art_node* n = root;
@@ -70,7 +70,7 @@ VersionedBTree::art_iterator art_tree::lower_bound(const KeyRef& key) {
 	return art_iterator(res);
 }
 
-VersionedBTree::art_iterator art_tree::upper_bound(const KeyRef& key) {
+VersionedBTree::art_iterator art_tree::upper_bound(KeyRef const& key) {
 	if (!size)
 		return art_iterator(nullptr);
 	art_node* n = root;
@@ -162,7 +162,7 @@ art_leaf* art_tree::maximum(art_node* n) {
 	}
 }
 
-void art_tree::art_bound_iterative(art_node* n, const KeyRef& k, int depth, art_leaf** result, bool strict) {
+void art_tree::art_bound_iterative(art_node* n, KeyRef const& k, int depth, art_leaf** result, bool strict) {
 
 	static stack_entry arena[ART_MAX_KEY_LEN]; // Single threaded implementation.
 
@@ -203,7 +203,7 @@ void art_tree::art_bound_iterative(art_node* n, const KeyRef& k, int depth, art_
 	}
 }
 
-int art_tree::check_bound_node(art_node* n, const KeyRef& k, int* depth_p, art_leaf** result, bool strict) {
+int art_tree::check_bound_node(art_node* n, KeyRef const& k, int* depth_p, art_leaf** result, bool strict) {
 	if (ART_IS_LEAF(n)) {
 		int ret = art_bound_leaf(n, k, *depth_p, result);
 		*result = ART_LEAF_RAW(n);
@@ -213,9 +213,9 @@ int art_tree::check_bound_node(art_node* n, const KeyRef& k, int* depth_p, art_l
 		return ART_I_FOUND;
 	}
 	int depth = *depth_p;
-	const int key_len = k.size();
+	int const key_len = k.size();
 	if (n->type < ART_NODE4_KV) {
-		const uint32_t n_partial_len = n->partial_len;
+		uint32_t const n_partial_len = n->partial_len;
 		// Case 1: the search ends on this node
 		if (key_len <= (depth + n_partial_len)) {
 			// Easy case w/o checking prefix:
@@ -315,7 +315,7 @@ int art_tree::check_bound_node(art_node* n, const KeyRef& k, int* depth_p, art_l
 	}
 }
 
-int art_tree::art_bound_leaf(art_node* n, const KeyRef& k, int depth, art_leaf** result) {
+int art_tree::art_bound_leaf(art_node* n, KeyRef const& k, int depth, art_leaf** result) {
 	n = (art_node*)ART_LEAF_RAW(n);
 	// Check if the expanded path matches
 	int m = leaf_matches_signed((art_leaf*)n, k, depth);
@@ -326,10 +326,10 @@ int art_tree::art_bound_leaf(art_node* n, const KeyRef& k, int depth, art_leaf**
 	return ART_LEAF_LARGER_KEY;
 }
 
-int art_tree::leaf_matches_signed(art_leaf* n, const KeyRef& k, int depth) {
+int art_tree::leaf_matches_signed(art_leaf* n, KeyRef const& k, int depth) {
 
-	const int key_len = k.size();
-	const unsigned char* key = k.begin();
+	int const key_len = k.size();
+	unsigned char const* key = k.begin();
 	int common_length = min(n->key.size() - depth, key_len - depth);
 
 	// Compare the keys starting at the depth
@@ -339,19 +339,19 @@ int art_tree::leaf_matches_signed(art_leaf* n, const KeyRef& k, int depth) {
 	return n->key.size() - key_len;
 }
 
-int art_tree::leaf_matches(const art_leaf* n, const KeyRef& k, int depth) {
-	const int key_len = k.size();
+int art_tree::leaf_matches(art_leaf const* n, KeyRef const& k, int depth) {
+	int const key_len = k.size();
 	// Fail if the key lengths are different
 	if (n->key.size() != (uint32_t)key_len)
 		return 1;
 
-	const unsigned char* key = k.begin();
+	unsigned char const* key = k.begin();
 
 	// Compare the keys starting at the depth
 	return memcmp(((unsigned char*)(n->key).begin()) + depth, key + depth, key_len - depth);
 }
 
-int art_tree::signed_prefix_mismatch(art_node* n, const KeyRef& k, int depth, art_leaf** min_leaf, bool find_min) {
+int art_tree::signed_prefix_mismatch(art_node* n, KeyRef const& k, int depth, art_leaf** min_leaf, bool find_min) {
 	int all_to_check = min(n->partial_len, k.size() - depth);
 	int max_cmp = min(ART_MAX_PREFIX_LEN, all_to_check);
 	// Mark the leaf as unset right away, so that if you don't return in the first loop AND you don't enter the
@@ -629,7 +629,7 @@ void art_tree::find_next(art_node* n, unsigned char c, art_node** out) {
 	}
 }
 
-void art_tree::recursive_delete_binary(art_node* n, art_node** ref, const KeyRef& k, int depth) {
+void art_tree::recursive_delete_binary(art_node* n, art_node** ref, KeyRef const& k, int depth) {
 	// Bail if the prefix does not match
 	unsigned char* key = (unsigned char*)k.begin();
 	unsigned int key_len = (unsigned int)k.size();
@@ -692,7 +692,7 @@ void art_tree::recursive_delete_binary(art_node* n, art_node** ref, const KeyRef
 	}
 }
 
-int art_tree::check_prefix(const art_node* n, const KeyRef& k, int depth) {
+int art_tree::check_prefix(art_node const* n, KeyRef const& k, int depth) {
 	int max_cmp = min(min(n->partial_len, ART_MAX_PREFIX_LEN), k.size() - depth);
 	int idx;
 	for (idx = 0; idx < max_cmp; idx++) {
@@ -931,7 +931,7 @@ void art_tree::copy_header(art_node* dest, art_node* src) {
 	memcpy(dest->partial, src->partial, min(ART_MAX_PREFIX_LEN, src->partial_len));
 }
 
-void art_tree::erase(const art_iterator& it) {
+void art_tree::erase(art_iterator const& it) {
 	recursive_delete_binary(this->root, &this->root, it.key(), 0);
 }
 
@@ -983,14 +983,14 @@ art_leaf* art_tree::iterative_insert(art_node* root,
 
 art_leaf* art_tree::insert_child(art_node* n,
                                  art_node** ref,
-                                 const KeyRef& k,
+                                 KeyRef const& k,
                                  void* value,
                                  int depth,
                                  int* old,
                                  int replace_existing) {
 	// No child, node goes within us
 	art_leaf* l = make_leaf(k, value);
-	const unsigned char* key = (const unsigned char*)k.begin();
+	unsigned char const* key = (unsigned char const*)k.begin();
 	add_child(n, ref, key[depth], SET_LEAF(l));
 	// After adding a child, the node might have grown (and old pointer n becomes invalid)
 	art_node* new_node = *ref;
@@ -1035,7 +1035,7 @@ int art_tree::art_next_prev(art_node* n, unsigned char c, art_node** out) {
 
 art_leaf* art_tree::insert_internal_node(art_node* n,
                                          art_node** ref,
-                                         const KeyRef& k,
+                                         KeyRef const& k,
                                          void* value,
                                          int depth,
                                          int* old,
@@ -1123,7 +1123,7 @@ art_leaf* art_tree::insert_internal_node(art_node* n,
 
 art_leaf* art_tree::insert_fat_node(art_node* n,
                                     art_node** ref,
-                                    const KeyRef& k,
+                                    KeyRef const& k,
                                     void* value,
                                     int depth,
                                     int* old,
@@ -1159,7 +1159,7 @@ art_leaf* art_tree::insert_fat_node(art_node* n,
 
 art_leaf* art_tree::insert_leaf(art_node* n,
                                 art_node** ref,
-                                const KeyRef& k,
+                                KeyRef const& k,
                                 void* value,
                                 int depth,
                                 int* old,
@@ -1175,8 +1175,8 @@ art_leaf* art_tree::insert_leaf(art_node* n,
 		}
 		return l;
 	}
-	const unsigned char* key = (const unsigned char*)k.begin();
-	const int key_len = k.size();
+	unsigned char const* key = (unsigned char const*)k.begin();
+	int const key_len = k.size();
 
 	int longest_prefix = longest_common_prefix(k, l->key, depth);
 	int kv_creat = (longest_prefix == (min(key_len, l->key.size()) - depth));
@@ -1246,7 +1246,7 @@ art_leaf* art_tree::insert_leaf(art_node* n,
 	}
 }
 
-int art_tree::longest_common_prefix(const KeyRef& k1, const KeyRef& k2, int depth) {
+int art_tree::longest_common_prefix(KeyRef const& k1, KeyRef const& k2, int depth) {
 	int max_cmp = min(k1.size(), k2.size()) - depth;
 	int idx;
 	for (idx = 0; idx < max_cmp; idx++) {
@@ -1418,7 +1418,7 @@ void art_tree::add_child4(art_node4* n, art_node** ref, unsigned char c, void* c
 
 // Every node is actually a kv node, but the type is <= NODE256
 art_node* art_tree::alloc_node(ART_NODE_TYPE type) {
-	const int offset = type > ART_NODE256 ? 0 : ART_NODE256;
+	int const offset = type > ART_NODE256 ? 0 : ART_NODE256;
 	art_node* n = (art_node*)new ((Arena&)*this->arena) uint8_t[node_sizes[offset + type]]();
 	n->type = type;
 	return n;
@@ -1430,13 +1430,13 @@ art_node* art_tree::alloc_kv_node(ART_NODE_TYPE type) {
 	return n;
 }
 
-art_leaf* art_tree::make_leaf(const KeyRef& k, void* value) {
-	const int key_len = k.size();
+art_leaf* art_tree::make_leaf(KeyRef const& k, void* value) {
+	int const key_len = k.size();
 	// Allocate contiguous buffer to hold the leaf and the key pointed by the KeyRef
 	art_leaf* v = (art_leaf*)new ((Arena&)*this->arena) uint8_t[sizeof(art_leaf) + key_len];
 	// copy the key to the proper offset in the buffer
 	memcpy(v + 1, k.begin(), key_len);
-	KeyRef nkr = KeyRef((const uint8_t*)(v + 1), key_len);
+	KeyRef nkr = KeyRef((uint8_t const*)(v + 1), key_len);
 	// create the art_leaf, allocating it on the buffer
 	// The KeyRef& passed as argument is the new one, allocated in the buffer
 	art_leaf* l = new (v) art_leaf(nkr, value);
@@ -1447,8 +1447,8 @@ art_leaf* art_tree::make_leaf(const KeyRef& k, void* value) {
 }
 
 int art_tree::prefix_mismatch(art_node* n, KeyRef& k, int depth, art_leaf** minout) {
-	const int key_len = k.size();
-	const unsigned char* key = (const unsigned char*)k.begin();
+	int const key_len = k.size();
+	unsigned char const* key = (unsigned char const*)k.begin();
 	int max_cmp = min(min(ART_MAX_PREFIX_LEN, n->partial_len), key_len - depth);
 	int idx;
 	for (idx = 0; idx < max_cmp; idx++) {

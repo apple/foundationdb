@@ -31,7 +31,7 @@
 namespace {
 ACTOR Future<std::string> describeServers(Reference<ReadYourWritesTransaction> tr, std::vector<UID> ids) {
 	std::vector<Future<Optional<Value>>> serverListEntries;
-	for (const UID& id : ids) {
+	for (UID const& id : ids) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
 	}
 	std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
@@ -272,7 +272,7 @@ ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringR
 			printUsage(tokens[0]);
 			return false;
 		}
-		const bool physical = tokens.size() == 4;
+		bool const physical = tokens.size() == 4;
 		wait(printRandomShards(cx, std::stoi(tokens[2].toString()), physical));
 	} else {
 		printUsage(tokens[0]);

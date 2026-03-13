@@ -791,7 +791,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 	double logSize = 0;
 	*minRangeVersion = MAX_VERSION;
 	if (SERVER_KNOBS->FASTRESTORE_USE_RANGE_FILE) {
-		for (const RangeFile& f : restorable.get().ranges) {
+		for (RangeFile const& f : restorable.get().ranges) {
 			TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles")
 			    .detail("RangeFile", f.toString());
 			if (f.fileSize <= 0) {
@@ -810,7 +810,7 @@ ACTOR static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
 	}
 
 	if (SERVER_KNOBS->FASTRESTORE_USE_LOG_FILE) {
-		for (const LogFile& f : restorable.get().logs) {
+		for (LogFile const& f : restorable.get().logs) {
 			TraceEvent(SevFRDebugInfo, "FastRestoreControllerPhaseCollectBackupFiles").detail("LogFile", f.toString());
 			if (f.fileSize <= 0) {
 				continue;

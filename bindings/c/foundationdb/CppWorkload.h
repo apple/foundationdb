@@ -46,8 +46,8 @@ enum class FDBSeverity { Debug, Info, Warn, WarnAlways, Error };
 class FDBLogger {
 public:
 	virtual void trace(FDBSeverity sev,
-	                   const std::string& name,
-	                   const std::vector<std::pair<std::string, std::string>>& details) = 0;
+	                   std::string const& name,
+	                   std::vector<std::pair<std::string, std::string>> const& details) = 0;
 };
 
 class FDBWorkloadContext : public FDBLogger {
@@ -56,11 +56,11 @@ public:
 	virtual void setProcessID(uint64_t processID) = 0;
 	virtual double now() const = 0;
 	virtual uint32_t rnd() const = 0;
-	virtual bool getOption(const std::string& name, bool defaultValue) = 0;
-	virtual long getOption(const std::string& name, long defaultValue) = 0;
-	virtual unsigned long getOption(const std::string& name, unsigned long defaultValue) = 0;
-	virtual double getOption(const std::string& name, double defaultValue) = 0;
-	virtual std::string getOption(const std::string& name, std::string defaultValue) = 0;
+	virtual bool getOption(std::string const& name, bool defaultValue) = 0;
+	virtual long getOption(std::string const& name, long defaultValue) = 0;
+	virtual unsigned long getOption(std::string const& name, unsigned long defaultValue) = 0;
+	virtual double getOption(std::string const& name, double defaultValue) = 0;
+	virtual std::string getOption(std::string const& name, std::string defaultValue) = 0;
 	virtual int clientId() const = 0;
 	virtual int clientCount() const = 0;
 	virtual int64_t sharedRandomNumber() const = 0;
@@ -102,7 +102,7 @@ public:
 
 class DLLEXPORT FDBWorkloadFactory {
 public:
-	virtual std::shared_ptr<FDBWorkload> create(const std::string& name) = 0;
+	virtual std::shared_ptr<FDBWorkload> create(std::string const& name) = 0;
 };
 
 #endif

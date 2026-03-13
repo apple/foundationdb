@@ -164,8 +164,8 @@ private:
 	ActorCollection
 	    responses; // cannot call getResult on this actor collection, since the actors will be on different processes
 
-	AsyncFileNonDurable(const std::string& filename,
-	                    const std::string& initialFilename,
+	AsyncFileNonDurable(std::string const& filename,
+	                    std::string const& initialFilename,
 	                    Reference<IAsyncFile> file,
 	                    Reference<DiskParameters> diskParameters,
 	                    NetworkAddress openedAddress,

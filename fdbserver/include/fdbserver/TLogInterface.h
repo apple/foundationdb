@@ -52,13 +52,13 @@ struct TLogInterface {
 	RequestStream<struct TrackTLogRecoveryRequest> trackRecovery;
 
 	TLogInterface() {}
-	explicit TLogInterface(const LocalityData& locality)
+	explicit TLogInterface(LocalityData const& locality)
 	  : filteredLocality(locality), uniqueID(deterministicRandom()->randomUniqueID()) {
 		sharedTLogID = uniqueID;
 	}
-	TLogInterface(UID sharedTLogID, const LocalityData& locality)
+	TLogInterface(UID sharedTLogID, LocalityData const& locality)
 	  : filteredLocality(locality), uniqueID(deterministicRandom()->randomUniqueID()), sharedTLogID(sharedTLogID) {}
-	TLogInterface(UID uniqueID, UID sharedTLogID, const LocalityData& locality)
+	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData const& locality)
 	  : filteredLocality(locality), uniqueID(uniqueID), sharedTLogID(sharedTLogID) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
@@ -178,11 +178,11 @@ struct VerUpdateRef {
 	bool isPrivateData;
 
 	VerUpdateRef() : version(invalidVersion), isPrivateData(false) {}
-	VerUpdateRef(Arena& to, const VerUpdateRef& from)
+	VerUpdateRef(Arena& to, VerUpdateRef const& from)
 	  : version(from.version), mutations(to, from.mutations), isPrivateData(from.isPrivateData) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
-	MutationRef push_back_deep(Arena& arena, const MutationRef& m) {
+	MutationRef push_back_deep(Arena& arena, MutationRef const& m) {
 		mutations.push_back_deep(arena, m);
 		return mutations.back();
 	}
@@ -244,7 +244,7 @@ struct TLogPeekStreamReply : public ReplyPromiseStreamReply {
 	TLogPeekReply rep;
 
 	TLogPeekStreamReply() = default;
-	explicit TLogPeekStreamReply(const TLogPeekReply& rep) : rep(rep) {}
+	explicit TLogPeekStreamReply(TLogPeekReply const& rep) : rep(rep) {}
 
 	int expectedSize() const { return rep.messages.expectedSize() + sizeof(TLogPeekStreamReply); }
 
@@ -302,7 +302,7 @@ struct TagMessagesRef {
 	VectorRef<int> messageOffsets;
 
 	TagMessagesRef() {}
-	TagMessagesRef(Arena& a, const TagMessagesRef& from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
+	TagMessagesRef(Arena& a, TagMessagesRef const& from) : tag(from.tag), messageOffsets(a, from.messageOffsets) {}
 
 	size_t expectedSize() const { return messageOffsets.expectedSize(); }
 
@@ -339,8 +339,8 @@ struct TLogCommitRequest : TimedRequest {
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest(const SpanContext& context,
-	                  const Arena& a,
+	TLogCommitRequest(SpanContext const& context,
+	                  Arena const& a,
 	                  Version prevVersion,
 	                  Version version,
 	                  Version knownCommittedVersion,
@@ -403,7 +403,7 @@ struct TLogDisablePopRequest {
 	Optional<UID> debugID;
 
 	TLogDisablePopRequest() = default;
-	TLogDisablePopRequest(const UID uid) : snapUID(uid) {}
+	TLogDisablePopRequest(UID const uid) : snapUID(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -418,7 +418,7 @@ struct TLogEnablePopRequest {
 	Optional<UID> debugID;
 
 	TLogEnablePopRequest() = default;
-	TLogEnablePopRequest(const UID uid) : snapUID(uid) {}
+	TLogEnablePopRequest(UID const uid) : snapUID(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

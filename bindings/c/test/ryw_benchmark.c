@@ -47,7 +47,7 @@ void insertData(FDBTransaction* tr) {
 int runTest(int (*testFxn)(FDBTransaction*, struct ResultSet*),
             FDBTransaction* tr,
             struct ResultSet* rs,
-            const char* kpiName) {
+            char const* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
 	int i = 0;
@@ -109,7 +109,7 @@ int getManySequential(FDBTransaction* tr, struct ResultSet* rs) {
 
 int getRangeBasic(FDBTransaction* tr, struct ResultSet* rs) {
 	int count;
-	const FDBKeyValue* kvs;
+	FDBKeyValue const* kvs;
 	int more;
 	int i;
 
@@ -143,7 +143,7 @@ int getRangeBasic(FDBTransaction* tr, struct ResultSet* rs) {
 
 int singleClearGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 	int count;
-	const FDBKeyValue* kvs;
+	FDBKeyValue const* kvs;
 	int more;
 	int i;
 
@@ -185,7 +185,7 @@ int singleClearGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 
 int clearRangeGetRange(FDBTransaction* tr, struct ResultSet* rs) {
 	int count;
-	const FDBKeyValue* kvs;
+	FDBKeyValue const* kvs;
 	int more;
 	int i;
 

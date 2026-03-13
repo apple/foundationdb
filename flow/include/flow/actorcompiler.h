@@ -27,10 +27,10 @@
 // common identifier that `wait` calls outside ACTORs might accidentally
 // compile.
 template <class T>
-T wait(const Future<T>&) = delete;
-void wait(const Never&) = delete;
+T wait(Future<T> const&) = delete;
+void wait(Never const&) = delete;
 template <class T>
-T waitNext(const FutureStream<T>&) = delete;
+T waitNext(FutureStream<T> const&) = delete;
 
 #endif
 #endif
@@ -53,10 +53,10 @@ class FutureStream;
 #define choose if (1)
 #define when(...) for (__VA_ARGS__;;)
 template <class T>
-T wait(const Future<T>&);
-void wait(const Never&);
+T wait(Future<T> const&);
+void wait(Never const&);
 template <class T>
-T waitNext(const FutureStream<T>&);
+T waitNext(FutureStream<T> const&);
 #endif
 
 #endif

@@ -53,16 +53,16 @@ typedef enum FDBSeverity {
 
 // Key-value pair for logging additional details.
 typedef struct FDBStringPair {
-	const char* key;
-	const char* val;
+	char const* key;
+	char const* val;
 } FDBStringPair;
 
 // Metric entry for simulation statistics.
 // Values are either averaged or summed across clients based on the `avg` flag.
 // `fmt` is used to format the value, defaults to "%.3g" if null.
 typedef struct FDBMetric {
-	const char* key;
-	const char* fmt;
+	char const* key;
+	char const* fmt;
 	double val;
 	bool avg;
 } FDBMetric;
@@ -70,9 +70,9 @@ typedef struct FDBMetric {
 // Wrapper around an owned C++ `string`.
 // The `free` function must be called on `inner` before releasing the string.
 typedef struct FDBString {
-	const char* inner;
+	char const* inner;
 	struct FDBString_VT {
-		void (*free)(const char* inner);
+		void (*free)(char const* inner);
 	}* vt;
 } FDBString;
 
@@ -106,8 +106,8 @@ typedef struct FDBWorkloadContext {
 		// `details` is an array of key-value pairs, and `n` specifies the array size.
 		void (*trace)(OpaqueWorkloadContext* inner,
 		              FDBSeverity sev,
-		              const char* name,
-		              const FDBStringPair* details,
+		              char const* name,
+		              FDBStringPair const* details,
 		              int n);
 		uint64_t (*getProcessID)(OpaqueWorkloadContext* inner);
 		void (*setProcessID)(OpaqueWorkloadContext* inner, uint64_t processID);
@@ -117,7 +117,7 @@ typedef struct FDBWorkloadContext {
 		uint32_t (*rnd)(OpaqueWorkloadContext* inner);
 		// Return an option by name, returning `defaultValue` if the option is not found.
 		// Return an option, consumming it, querying it again returns the empty string.
-		FDBString (*getOption)(OpaqueWorkloadContext* inner, const char* name, const char* defaultValue);
+		FDBString (*getOption)(OpaqueWorkloadContext* inner, char const* name, char const* defaultValue);
 		int (*clientId)(OpaqueWorkloadContext* inner);
 		int (*clientCount)(OpaqueWorkloadContext* inner);
 		// Return a random seed (same each time and for all clients).
@@ -155,6 +155,6 @@ typedef struct FDBWorkload {
 // The client C workload must be allocated, initialized and passed as pointer
 // in `inner`. It is advised to store the context alongside the workload as
 // it can't be retrieved later. No function pointer can be left null.
-FDBWorkload workloadCFactory(const char* name, FDBWorkloadContext context);
+FDBWorkload workloadCFactory(char const* name, FDBWorkloadContext context);
 
 #endif

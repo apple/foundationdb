@@ -48,7 +48,7 @@ static void bench_add_idempotency_ids(benchmark::State& state) {
 	bool locked = getRuntimeFalse();
 	for (auto _ : state) {
 		buildIdempotencyIdMutations(
-		    trs, idempotencyKVBuilder, commitVersion++, committed, committedValue, locked, [](const KeyValue&) {
+		    trs, idempotencyKVBuilder, commitVersion++, committed, committedValue, locked, [](KeyValue const&) {
 			    benchmark::DoNotOptimize(0);
 		    });
 	}

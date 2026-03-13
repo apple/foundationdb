@@ -62,10 +62,10 @@ public:
 	virtual Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path()) = 0;
 
 	virtual Reference<DirectoryLayer> getDirectoryLayer() = 0;
-	virtual const Standalone<StringRef> getLayer() const = 0;
-	virtual const Path getPath() const = 0;
+	virtual Standalone<StringRef> const getLayer() const = 0;
+	virtual Path const getPath() const = 0;
 
-	virtual ~IDirectory() {};
+	virtual ~IDirectory(){};
 };
 } // namespace FDB
 

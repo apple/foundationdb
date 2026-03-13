@@ -55,9 +55,9 @@ __attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
 
 	// Sets resolver interfaces. Trigger resolutionBalancing() actor if more
 	// than one resolvers are present.
-	void setResolvers(const std::vector<ResolverInterface>& resolvers);
+	void setResolvers(std::vector<ResolverInterface> const& resolvers);
 
-	void setCommitProxies(const std::vector<CommitProxyInterface>& proxies) { commitProxies = proxies; }
+	void setCommitProxies(std::vector<CommitProxyInterface> const& proxies) { commitProxies = proxies; }
 
 	void setChangesInReply(UID requestingProxy, GetCommitVersionReply& rep);
 };

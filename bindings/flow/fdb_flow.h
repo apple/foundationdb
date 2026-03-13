@@ -57,30 +57,30 @@ private:
 
 class ReadTransaction : public ReferenceCounted<ReadTransaction> {
 public:
-	virtual ~ReadTransaction() {};
+	virtual ~ReadTransaction(){};
 	virtual void setReadVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
 
-	virtual Future<Optional<FDBStandalone<ValueRef>>> get(const Key& key, bool snapshot = false) = 0;
-	virtual Future<FDBStandalone<KeyRef>> getKey(const KeySelector& key, bool snapshot = false) = 0;
-	virtual Future<Void> watch(const Key& key) = 0;
+	virtual Future<Optional<FDBStandalone<ValueRef>>> get(Key const& key, bool snapshot = false) = 0;
+	virtual Future<FDBStandalone<KeyRef>> getKey(KeySelector const& key, bool snapshot = false) = 0;
+	virtual Future<Void> watch(Key const& key) = 0;
 
 	virtual Future<FDBStandalone<RangeResultRef>> getRange(
-	    const KeySelector& begin,
-	    const KeySelector& end,
+	    KeySelector const& begin,
+	    KeySelector const& end,
 	    GetRangeLimits limits = GetRangeLimits(),
 	    bool snapshot = false,
 	    bool reverse = false,
 	    FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) = 0;
-	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                                       const KeySelector& end,
+	virtual Future<FDBStandalone<RangeResultRef>> getRange(KeySelector const& begin,
+	                                                       KeySelector const& end,
 	                                                       int limit,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false,
 	                                                       FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) {
 		return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse, streamingMode);
 	}
-	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeyRange& keys,
+	virtual Future<FDBStandalone<RangeResultRef>> getRange(KeyRange const& keys,
 	                                                       int limit,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false,
@@ -92,7 +92,7 @@ public:
 		                reverse,
 		                streamingMode);
 	}
-	virtual Future<FDBStandalone<RangeResultRef>> getRange(const KeyRange& keys,
+	virtual Future<FDBStandalone<RangeResultRef>> getRange(KeyRange const& keys,
 	                                                       GetRangeLimits limits = GetRangeLimits(),
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false,
@@ -105,8 +105,8 @@ public:
 		                streamingMode);
 	}
 
-	virtual Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) = 0;
-	virtual Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) = 0;
+	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;
+	virtual Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 
 	virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
 	virtual void addReadConflictKey(KeyRef const& key) = 0;
@@ -124,10 +124,10 @@ public:
 	virtual void addWriteConflictRange(KeyRangeRef const& keys) = 0;
 	virtual void addWriteConflictKey(KeyRef const& key) = 0;
 
-	virtual void atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) = 0;
-	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
-	virtual void clear(const KeyRangeRef& range) = 0;
-	virtual void clear(const KeyRef& key) = 0;
+	virtual void atomicOp(KeyRef const& key, ValueRef const& operand, FDBMutationType operationType) = 0;
+	virtual void set(KeyRef const& key, ValueRef const& value) = 0;
+	virtual void clear(KeyRangeRef const& range) = 0;
+	virtual void clear(KeyRef const& key) = 0;
 
 	virtual Future<Void> commit() = 0;
 	virtual Version getCommittedVersion() = 0;
@@ -137,12 +137,12 @@ public:
 
 class Database : public ReferenceCounted<Database> {
 public:
-	virtual ~Database() {};
+	virtual ~Database(){};
 	virtual Reference<Transaction> createTransaction() = 0;
 	virtual void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) = 0;
-	virtual Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) = 0;
-	virtual Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
-	virtual Future<Void> createSnapshot(const StringRef& uid, const StringRef& snap_command) = 0;
+	virtual Future<int64_t> rebootWorker(StringRef const& address, bool check = false, int duration = 0) = 0;
+	virtual Future<Void> forceRecoveryWithDataLoss(StringRef const& dcid) = 0;
+	virtual Future<Void> createSnapshot(StringRef const& uid, StringRef const& snap_command) = 0;
 };
 
 class API {

@@ -29,60 +29,62 @@ constexpr int noBackwardsCompatibility = 13;
 
 // The first check second expression version doesn't need to change because it's just for earlier API versions.
 #define API_VERSION_FEATURE(v, x)                                                                                      \
-	static_assert(v <= @FDB_AV_LATEST_VERSION@, "Feature API version too large");                                   \
+	static_assert(v <= @FDB_AV_LATEST_VERSION @, "Feature API version too large");                                     \
 	struct x {                                                                                                         \
 		static constexpr uint64_t apiVersion = v;                                                                      \
 	};                                                                                                                 \
-	constexpr bool has##x() const { return this->version() >= x ::apiVersion; }                                        \
-	static constexpr ApiVersion with##x() { return ApiVersion(x ::apiVersion); }
+	constexpr bool has##x() const {                                                                                    \
+		return this->version() >= x ::apiVersion;                                                                      \
+	}                                                                                                                  \
+	static constexpr ApiVersion with##x() {                                                                            \
+		return ApiVersion(x ::apiVersion);                                                                             \
+	}
 
 class ApiVersion {
 	int _version;
 
 public:
 	// Static members.
-	constexpr static int LATEST_VERSION = @FDB_AV_LATEST_VERSION@;
+	constexpr static int LATEST_VERSION = @FDB_AV_LATEST_VERSION @;
 
 	constexpr explicit ApiVersion(int version) : _version(version) {}
 	constexpr ApiVersion() : _version(0) {}
 
-	constexpr bool isValid() const {
-		return version() > noBackwardsCompatibility && version() <= LATEST_VERSION;
-	}
+	constexpr bool isValid() const { return version() > noBackwardsCompatibility && version() <= LATEST_VERSION; }
 
 	constexpr int version() const { return _version; }
 
 	// comparison operators
-	constexpr bool operator==(const ApiVersion other) const { return version() == other.version(); }
-	constexpr bool operator!=(const ApiVersion other) const { return version() != other.version(); }
-	constexpr bool operator<=(const ApiVersion other) const { return version() <= other.version(); }
-	constexpr bool operator>=(const ApiVersion other) const { return version() >= other.version(); }
-	constexpr bool operator<(const ApiVersion other) const { return version() < other.version(); }
-	constexpr bool operator>(const ApiVersion other) const { return version() > other.version(); }
+	constexpr bool operator==(ApiVersion const other) const { return version() == other.version(); }
+	constexpr bool operator!=(ApiVersion const other) const { return version() != other.version(); }
+	constexpr bool operator<=(ApiVersion const other) const { return version() <= other.version(); }
+	constexpr bool operator>=(ApiVersion const other) const { return version() >= other.version(); }
+	constexpr bool operator<(ApiVersion const other) const { return version() < other.version(); }
+	constexpr bool operator>(ApiVersion const other) const { return version() > other.version(); }
 
 public: // introduced features
-    API_VERSION_FEATURE(@FDB_AV_SNAPSHOT_RYW@, SnapshotRYW);
-    API_VERSION_FEATURE(@FDB_AV_INLINE_UPDATE_DATABASE@, InlineUpdateDatabase);
-    API_VERSION_FEATURE(@FDB_AV_PERSISTENT_OPTIONS@, PersistentOptions);
-    API_VERSION_FEATURE(@FDB_AV_TRACE_FILE_IDENTIFIER@, TraceFileIdentifier);
-    API_VERSION_FEATURE(@FDB_AV_CLUSTER_SHARED_STATE_MAP@, ClusterSharedStateMap);
-    API_VERSION_FEATURE(@FDB_AV_BLOB_RANGE_API@, BlobRangeApi);
-    API_VERSION_FEATURE(@FDB_AV_CREATE_DB_FROM_CONN_STRING@, CreateDBFromConnString);
-    API_VERSION_FEATURE(@FDB_AV_FUTURE_GET_BOOL@, FutureGetBool);
-    API_VERSION_FEATURE(@FDB_AV_FUTURE_PROTOCOL_VERSION_API@, FutureProtocolVersionApi);
-    API_VERSION_FEATURE(@FDB_AV_TENANT_BLOB_RANGE_API@, TenantBlobRangeApi);
-    API_VERSION_FEATURE(@FDB_AV_CLIENT_TMP_DIR@, ClientTmpDir);
-    API_VERSION_FEATURE(@FDB_AV_DISABLE_CLIENT_BYPASS@, DisableClientBypass)
-    API_VERSION_FEATURE(@FDB_AV_GRV_CACHE@, GrvCache);
-    API_VERSION_FEATURE(@FDB_AV_CLIENT_RROFILING_DEPRECATED@, ClientProfilingDeprecated);
-    API_VERSION_FEATURE(@FDB_AV_TENANT_API_RELEASED@, TenantApiReleased);
-    API_VERSION_FEATURE(@FDB_AV_GET_TOTAL_COST@, GetTotalCost);
-    API_VERSION_FEATURE(@FDB_AV_FAIL_ON_EXTERNAL_CLIENT_ERRORS@, FailOnExternalClientErrors);
-    API_VERSION_FEATURE(@FDB_AV_GET_TAG_THROTTLED_DURATION@, GetTagThrottledDuration);
-    API_VERSION_FEATURE(@FDB_AV_FUTURE_GET_DOUBLE@, FutureGetDouble);
-    API_VERSION_FEATURE(@FDB_AV_GET_CLIENT_STATUS@, GetClientStatus);
-    API_VERSION_FEATURE(@FDB_AV_INITIALIZE_TRACE_ON_SETUP@, InitializeTraceOnSetup);
-    API_VERSION_FEATURE(@FDB_AV_TENANT_GET_ID@, TenantGetId);
+	API_VERSION_FEATURE(@FDB_AV_SNAPSHOT_RYW @, SnapshotRYW);
+	API_VERSION_FEATURE(@FDB_AV_INLINE_UPDATE_DATABASE @, InlineUpdateDatabase);
+	API_VERSION_FEATURE(@FDB_AV_PERSISTENT_OPTIONS @, PersistentOptions);
+	API_VERSION_FEATURE(@FDB_AV_TRACE_FILE_IDENTIFIER @, TraceFileIdentifier);
+	API_VERSION_FEATURE(@FDB_AV_CLUSTER_SHARED_STATE_MAP @, ClusterSharedStateMap);
+	API_VERSION_FEATURE(@FDB_AV_BLOB_RANGE_API @, BlobRangeApi);
+	API_VERSION_FEATURE(@FDB_AV_CREATE_DB_FROM_CONN_STRING @, CreateDBFromConnString);
+	API_VERSION_FEATURE(@FDB_AV_FUTURE_GET_BOOL @, FutureGetBool);
+	API_VERSION_FEATURE(@FDB_AV_FUTURE_PROTOCOL_VERSION_API @, FutureProtocolVersionApi);
+	API_VERSION_FEATURE(@FDB_AV_TENANT_BLOB_RANGE_API @, TenantBlobRangeApi);
+	API_VERSION_FEATURE(@FDB_AV_CLIENT_TMP_DIR @, ClientTmpDir);
+	API_VERSION_FEATURE(@FDB_AV_DISABLE_CLIENT_BYPASS @, DisableClientBypass)
+	API_VERSION_FEATURE(@FDB_AV_GRV_CACHE @, GrvCache);
+	API_VERSION_FEATURE(@FDB_AV_CLIENT_RROFILING_DEPRECATED @, ClientProfilingDeprecated);
+	API_VERSION_FEATURE(@FDB_AV_TENANT_API_RELEASED @, TenantApiReleased);
+	API_VERSION_FEATURE(@FDB_AV_GET_TOTAL_COST @, GetTotalCost);
+	API_VERSION_FEATURE(@FDB_AV_FAIL_ON_EXTERNAL_CLIENT_ERRORS @, FailOnExternalClientErrors);
+	API_VERSION_FEATURE(@FDB_AV_GET_TAG_THROTTLED_DURATION @, GetTagThrottledDuration);
+	API_VERSION_FEATURE(@FDB_AV_FUTURE_GET_DOUBLE @, FutureGetDouble);
+	API_VERSION_FEATURE(@FDB_AV_GET_CLIENT_STATUS @, GetClientStatus);
+	API_VERSION_FEATURE(@FDB_AV_INITIALIZE_TRACE_ON_SETUP @, InitializeTraceOnSetup);
+	API_VERSION_FEATURE(@FDB_AV_TENANT_GET_ID @, TenantGetId);
 };
 
 #endif // FLOW_CODE_API_VERSION_H

@@ -132,9 +132,9 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 	}
 	std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
 	    keyServersPromise.getFuture().get();
-	for (const auto& [range, servers] : keyServers) {
+	for (auto const& [range, servers] : keyServers) {
 		fmt::println("Key range: {}", printable(range));
-		for (const auto& server : servers) {
+		for (auto const& server : servers) {
 			fmt::println("  {}", server.address().toString());
 		}
 	}
@@ -182,13 +182,13 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 // hidden commands, no help text for now
 CommandFactory getallCommandFactory("getall");
 
-std::string printStorageServerMachineInfo(const StorageServerInterface& server) {
+std::string printStorageServerMachineInfo(StorageServerInterface const& server) {
 	std::string serverIp = server.address().toString();
 	std::string serverLocality = server.locality.toString();
 	return serverLocality + " " + serverIp;
 }
 
-std::string printAllStorageServerMachineInfo(const std::vector<StorageServerInterface>& servers) {
+std::string printAllStorageServerMachineInfo(std::vector<StorageServerInterface> const& servers) {
 	std::string res;
 	for (int i = 0; i < servers.size(); i++) {
 		if (i == 0) {
@@ -210,8 +210,8 @@ std::string printAllStorageServerMachineInfo(const std::vector<StorageServerInte
 bool checkResults(Version version,
                   bool hasMore,
                   Key claimEndKey,
-                  const std::vector<StorageServerInterface>& servers,
-                  const std::vector<GetKeyValuesReply>& replies) {
+                  std::vector<StorageServerInterface> const& servers,
+                  std::vector<GetKeyValuesReply> const& replies) {
 	// Compare servers
 	bool allSame = true;
 	int firstValidServer = -1;
@@ -336,10 +336,10 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringR
 				if (rangeToCheck.empty()) {
 					continue; // Skip the shard if it is outside of the inputRange
 				}
-				const auto& servers = keyServers[i].second;
+				auto const& servers = keyServers[i].second;
 				state Key beginKeyToCheck = rangeToCheck.begin;
 				fmt::println("Key range to check: {}", printable(rangeToCheck));
-				for (const auto& server : servers) {
+				for (auto const& server : servers) {
 					fmt::println("\t{}", server.address().toString());
 				}
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> replies;
@@ -350,7 +350,7 @@ ACTOR Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringR
 					wait(store(version, getVersion(cx)));
 					replies.clear();
 					fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
-					for (const auto& s : keyServers[i].second) { // for each storage server
+					for (auto const& s : keyServers[i].second) { // for each storage server
 						GetKeyValuesRequest req;
 						req.begin = firstGreaterOrEqual(beginKeyToCheck);
 						req.end = firstGreaterOrEqual(rangeToCheck.end);

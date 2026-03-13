@@ -33,7 +33,7 @@ extern "C" void stackSignalHandler(int sig) {
 	while (!stack.empty()) {
 		auto s = stack.back();
 		stack.pop_back();
-		std::string_view n(reinterpret_cast<const char*>(s.begin()), s.size());
+		std::string_view n(reinterpret_cast<char const*>(s.begin()), s.size());
 		std::cout << i << ": " << n << std::endl;
 		++i;
 	}

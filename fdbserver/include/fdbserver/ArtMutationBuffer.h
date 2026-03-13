@@ -37,14 +37,14 @@ public:
 
 		const_iterator(art_iterator i) { artIterator = i; }
 
-		const_iterator(const const_iterator& i) { artIterator = i.artIterator; }
+		const_iterator(const_iterator const& i) { artIterator = i.artIterator; }
 
-		const KeyRef& key() { return artIterator.key(); }
+		KeyRef const& key() { return artIterator.key(); }
 
-		const RangeMutation& mutation() { return (const RangeMutation&)(*((RangeMutation*)artIterator.value())); }
+		RangeMutation const& mutation() { return (RangeMutation const&)(*((RangeMutation*)artIterator.value())); }
 
-		bool operator==(const const_iterator& other) const { return (artIterator) == (other.artIterator); }
-		bool operator!=(const const_iterator& other) const { return !(*this == other); }
+		bool operator==(const_iterator const& other) const { return (artIterator) == (other.artIterator); }
+		bool operator!=(const_iterator const& other) const { return !(*this == other); }
 
 		const_iterator& operator++() {
 			++(artIterator);
@@ -65,17 +65,17 @@ public:
 
 		iterator(art_iterator i) { artIterator = i; }
 
-		iterator(const iterator& i) { artIterator = i.artIterator; }
+		iterator(iterator const& i) { artIterator = i.artIterator; }
 
-		const KeyRef& key() { return artIterator.key(); }
+		KeyRef const& key() { return artIterator.key(); }
 
 		RangeMutation& mutation() { return (RangeMutation&)(*((RangeMutation*)artIterator.value())); }
 
 		void** value_ptr() { return artIterator.value_ptr(); }
 
-		bool operator==(const iterator& other) const { return (artIterator) == (other.artIterator); }
+		bool operator==(iterator const& other) const { return (artIterator) == (other.artIterator); }
 
-		bool operator==(const const_iterator& other) const { return (artIterator) == (other.artIterator); }
+		bool operator==(const_iterator const& other) const { return (artIterator) == (other.artIterator); }
 
 		iterator& operator++() {
 			++(artIterator);
@@ -108,16 +108,16 @@ public:
 
 	// Return a T constructed in arena
 	template <typename T>
-	T copyToArena(const T& object) {
+	T copyToArena(T const& object) {
 		return T(arena, object);
 	}
 
-	const_iterator upper_bound(const KeyRef& k) const { return const_iterator(mutations->upper_bound(k)); }
+	const_iterator upper_bound(KeyRef const& k) const { return const_iterator(mutations->upper_bound(k)); }
 
-	const_iterator lower_bound(const KeyRef& k) const { return const_iterator(mutations->lower_bound(k)); }
+	const_iterator lower_bound(KeyRef const& k) const { return const_iterator(mutations->lower_bound(k)); }
 
 	// erase [begin, end) from the mutation map
-	void erase(const const_iterator& begin, const const_iterator& end) {
+	void erase(const_iterator const& begin, const_iterator const& end) {
 		art_iterator it = begin.artIterator;
 		art_iterator next = it;
 		++next;

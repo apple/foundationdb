@@ -38,7 +38,7 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 
 		template <class T>
 		static void any_visitor(std::any const& val, Packer& packer) {
-			const T& v = std::any_cast<const T&>(val);
+			T const& v = std::any_cast<T const&>(val);
 			packer.pack(v);
 		}
 
@@ -72,7 +72,7 @@ class Packer : public msgpack::packer<msgpack::sbuffer> {
 			                     std::vector<std::map<std::string_view, std::any>>>::populate(visitorMap);
 		}
 
-		void visit(const std::any& val, Packer& packer) {
+		void visit(std::any const& val, Packer& packer) {
 			auto iter = visitorMap.find(val.type());
 			if (iter == visitorMap.end()) {
 				TraceEvent(SevError, "PackerTypeNotFound").detail("Type", val.type().name());
@@ -141,7 +141,7 @@ public:
 	template <class K, class V>
 	void pack(std::map<K, V> const& map) {
 		pack_map(map.size());
-		for (const auto& p : map) {
+		for (auto const& p : map) {
 			pack(p.first);
 			pack(p.second);
 		}
@@ -150,7 +150,7 @@ public:
 	template <class T>
 	void pack(std::vector<T> const& val) {
 		pack_array(val.size());
-		for (const auto& v : val) {
+		for (auto const& v : val) {
 			pack(v);
 		}
 	}
@@ -199,7 +199,7 @@ std::shared_ptr<Sample> SampleCollectorT::collect() {
 	return sample;
 }
 
-void SampleCollection_t::collect(const Reference<ActorLineage>& lineage) {
+void SampleCollection_t::collect(Reference<ActorLineage> const& lineage) {
 	ASSERT(lineage.isValid());
 	_currentLineage = lineage;
 	auto sample = _collector->collect();
@@ -228,7 +228,7 @@ std::vector<std::shared_ptr<Sample>> SampleCollection_t::get(double from /*= 0.0
                                                              double to /*= std::numeric_limits<double>::max()*/) const {
 	Lock _{ mutex };
 	std::vector<std::shared_ptr<Sample>> res;
-	for (const auto& sample : data) {
+	for (auto const& sample : data) {
 		if (sample->time > to) {
 			break;
 		} else if (sample->time >= from) {

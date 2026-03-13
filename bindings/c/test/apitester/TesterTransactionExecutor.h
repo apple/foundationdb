@@ -113,15 +113,15 @@ struct TransactionExecutorOptions {
 class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
-	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
+	virtual void init(IScheduler* sched, char const* clusterFile, std::string const& bgBasePath) = 0;
 	virtual void execute(TOpStartFct start, TOpContFct cont, bool transactional, bool restartOnTimeout) = 0;
 	virtual fdb::Database selectDatabase() = 0;
 	virtual std::string getClusterFileForErrorInjection() = 0;
-	virtual const TransactionExecutorOptions& getOptions() = 0;
+	virtual TransactionExecutorOptions const& getOptions() = 0;
 };
 
 // Create a transaction executor for the given options
-std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options);
+std::unique_ptr<ITransactionExecutor> createTransactionExecutor(TransactionExecutorOptions const& options);
 
 } // namespace FdbApiTester
 

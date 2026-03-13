@@ -62,7 +62,7 @@ struct MonitorLeaderInfo {
 	  : hasConnected(false), intermediateConnRecord(intermediateConnRecord) {}
 };
 
-Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<LeaderInfo>>& nominees);
+Optional<std::pair<LeaderInfo, bool>> getLeader(std::vector<Optional<LeaderInfo>> const& nominees);
 
 // This is one place where the leader election algorithm is run. The coodinator contacts all coodinators to collect
 // nominees, the nominee with the most nomination is the leader. This function also monitors the change of the leader.
@@ -104,19 +104,19 @@ Future<Void> monitorLeaderInternal(Reference<IClusterConnectionRecord> const& co
 
 template <class LeaderInterface>
 struct LeaderDeserializer {
-	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
-	                        const Reference<AsyncVar<Optional<LeaderInterface>>>& outKnownLeader) {
+	Future<Void> operator()(Reference<AsyncVar<Value>> const& serializedInfo,
+	                        Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader) {
 		return asyncDeserialize(serializedInfo, outKnownLeader);
 	}
 };
 
-Future<Void> asyncDeserializeClusterInterface(const Reference<AsyncVar<Value>>& serializedInfo,
-                                              const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader);
+Future<Void> asyncDeserializeClusterInterface(Reference<AsyncVar<Value>> const& serializedInfo,
+                                              Reference<AsyncVar<Optional<ClusterInterface>>> const& outKnownLeader);
 
 template <>
 struct LeaderDeserializer<ClusterInterface> {
-	Future<Void> operator()(const Reference<AsyncVar<Value>>& serializedInfo,
-	                        const Reference<AsyncVar<Optional<ClusterInterface>>>& outKnownLeader) {
+	Future<Void> operator()(Reference<AsyncVar<Value>> const& serializedInfo,
+	                        Reference<AsyncVar<Optional<ClusterInterface>>> const& outKnownLeader) {
 		return asyncDeserializeClusterInterface(serializedInfo, outKnownLeader);
 	}
 };

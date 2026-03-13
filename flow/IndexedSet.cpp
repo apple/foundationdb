@@ -113,10 +113,10 @@ std::pair<int, int> IndexedSet<T, Metric>::testonly_assertBalanced(typename Inde
 	return std::make_pair(std::max(lh, rh) + 1, n->total);
 }
 
-bool operator<(std::string const& l, const char* r) {
+bool operator<(std::string const& l, char const* r) {
 	return strcmp(l.c_str(), r) < 0;
 }
-bool operator<(const char* l, std::string const& r) {
+bool operator<(char const* l, std::string const& r) {
 	return strcmp(l, r.c_str()) < 0;
 }
 
@@ -431,10 +431,10 @@ TEST_CASE("/flow/IndexedSet/data constructor and destructor calls match") {
 		int value;
 		Counter(int value) : value(value) { count++; }
 		~Counter() { count--; }
-		Counter(const Counter& r) : value(r.value) { count++; }
-		void operator=(const Counter& r) { value = r.value; }
-		int compare(const Counter& r) const { return ::compare(value, r.value); }
-		bool operator<(const Counter& r) const { return value < r.value; }
+		Counter(Counter const& r) : value(r.value) { count++; }
+		void operator=(Counter const& r) { value = r.value; }
+		int compare(Counter const& r) const { return ::compare(value, r.value); }
+		bool operator<(Counter const& r) const { return value < r.value; }
 	};
 	IndexedSet<Counter, NoMetric> mySet;
 	for (int i = 0; i < 1000000; i++) {
@@ -553,7 +553,7 @@ TEST_CASE("/flow/IndexedSet/const_iterator") {
 	static_assert(!is_const_ref_v<decltype(*ncis.lastLessOrEqual(Key{ 5 }))>);
 	static_assert(!is_const_ref_v<decltype(*ncis.lastItem())>);
 
-	const IndexedSet<int, int64_t>& cis = is;
+	IndexedSet<int, int64_t> const& cis = is;
 	static_assert(is_const_ref_v<decltype(cis)>);
 	static_assert(is_const_ref_v<decltype(*cis.begin())>);
 	static_assert(is_const_ref_v<decltype(*cis.cbegin())>);
@@ -571,7 +571,7 @@ TEST_CASE("/flow/IndexedSet/const_iterator") {
 	for (auto& val : ncis) {
 		static_assert(!is_const_ref_v<decltype(val)>);
 	}
-	for (const auto& val : ncis) {
+	for (auto const& val : ncis) {
 		static_assert(is_const_ref_v<decltype(val)>);
 	}
 	for (auto& val : cis) {

@@ -25,7 +25,7 @@
 
 namespace FdbApiTester {
 
-ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
+ApiWorkload::ApiWorkload(WorkloadConfig const& config) : WorkloadBase(config) {
 	minKeyLength = config.getIntOption("minKeyLength", 1);
 	maxKeyLength = config.getIntOption("maxKeyLength", 64);
 	minValueLength = config.getIntOption("minValueLength", 1);
@@ -187,13 +187,13 @@ void ApiWorkload::populateDataTx(TTaskFct cont, std::optional<int> tenantId) {
 	execTransaction(
 	    [kvPairs](auto ctx) {
 		    ctx->makeSelfConflicting();
-		    for (const fdb::KeyValue& kv : *kvPairs) {
+		    for (fdb::KeyValue const& kv : *kvPairs) {
 			    ctx->tx().set(kv.key, kv.value);
 		    }
 		    ctx->commit();
 	    },
 	    [this, tenantId, kvPairs, cont]() {
-		    for (const fdb::KeyValue& kv : *kvPairs) {
+		    for (fdb::KeyValue const& kv : *kvPairs) {
 			    stores[tenantId].set(kv.key, kv.value);
 		    }
 		    schedule(cont);
@@ -272,13 +272,13 @@ void ApiWorkload::randomInsertOp(TTaskFct cont, std::optional<int> tenantId) {
 	execTransaction(
 	    [kvPairs](auto ctx) {
 		    ctx->makeSelfConflicting();
-		    for (const fdb::KeyValue& kv : *kvPairs) {
+		    for (fdb::KeyValue const& kv : *kvPairs) {
 			    ctx->tx().set(kv.key, kv.value);
 		    }
 		    ctx->commit();
 	    },
 	    [this, kvPairs, cont, tenantId]() {
-		    for (const fdb::KeyValue& kv : *kvPairs) {
+		    for (fdb::KeyValue const& kv : *kvPairs) {
 			    stores[tenantId].set(kv.key, kv.value);
 		    }
 		    schedule(cont);
@@ -294,14 +294,14 @@ void ApiWorkload::randomClearOp(TTaskFct cont, std::optional<int> tenantId) {
 	}
 	execTransaction(
 	    [keys](auto ctx) {
-		    for (const auto& key : *keys) {
+		    for (auto const& key : *keys) {
 			    ctx->makeSelfConflicting();
 			    ctx->tx().clear(key);
 		    }
 		    ctx->commit();
 	    },
 	    [this, keys, cont, tenantId]() {
-		    for (const auto& key : *keys) {
+		    for (auto const& key : *keys) {
 			    stores[tenantId].clear(key);
 		    }
 		    schedule(cont);

@@ -28,7 +28,7 @@ namespace FdbApiTester {
 
 namespace {
 
-void processIntOption(const std::string& value, const std::string& optionName, int& res, int minVal, int maxVal) {
+void processIntOption(std::string const& value, std::string const& optionName, int& res, int minVal, int maxVal) {
 	char* endptr;
 	res = strtol(value.c_str(), &endptr, 10);
 	if (*endptr != '\0') {
@@ -40,84 +40,84 @@ void processIntOption(const std::string& value, const std::string& optionName, i
 	}
 }
 
-std::unordered_map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
+std::unordered_map<std::string, std::function<void(std::string const& value, TestSpec* spec)>> testSpecTestKeys = {
 	{ "title",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->title = value;
 	  } },
 	{ "blockOnFutures",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->blockOnFutures = (value == "true");
 	  } },
 	{ "buggify",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->buggify = (value == "true");
 	  } },
 	{ "multiThreaded",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->multiThreaded = (value == "true");
 	  } },
 	{ "fdbCallbacksOnExternalThreads",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->fdbCallbacksOnExternalThreads = (value == "true");
 	  } },
 	{ "databasePerTransaction",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->databasePerTransaction = (value == "true");
 	  } },
 	{ "tamperClusterFile",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->tamperClusterFile = (value == "true");
 	  } },
 	{ "minFdbThreads",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "minFdbThreads", spec->minFdbThreads, 1, 1000);
 	  } },
 	{ "maxFdbThreads",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "maxFdbThreads", spec->maxFdbThreads, 1, 1000);
 	  } },
 	{ "minClientThreads",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "minClientThreads", spec->minClientThreads, 1, 1000);
 	  } },
 	{ "maxClientThreads",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "maxClientThreads", spec->maxClientThreads, 1, 1000);
 	  } },
 	{ "minDatabases",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "minDatabases", spec->minDatabases, 1, 1000);
 	  } },
 	{ "maxDatabases",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "maxDatabases", spec->maxDatabases, 1, 1000);
 	  } },
 	{ "minClients",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "minClients", spec->minClients, 1, 1000);
 	  } },
 	{ "maxClients",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      processIntOption(value, "maxClients", spec->maxClients, 1, 1000);
 	  } },
 	{ "disableClientBypass",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->disableClientBypass = (value == "true");
 	  } },
 	{ "runLoopProfiler",
-	  [](const std::string& value, TestSpec* spec) { //
+	  [](std::string const& value, TestSpec* spec) { //
 	      spec->runLoopProfiler = (value == "true");
 	  } }
 };
 
 template <typename T>
-std::string toml_to_string(const T& value) {
+std::string toml_to_string(T const& value) {
 	// TOML formatting converts numbers to strings exactly how they're in the file
 	// and thus, is equivalent to testspec.  However, strings are quoted, so we
 	// must remove the quotes.
 	if (value.type() == toml::value_t::string) {
-		const std::string& formatted = toml::format(value);
+		std::string const& formatted = toml::format(value);
 		return formatted.substr(1, formatted.size() - 2);
 	} else {
 		return toml::format(value);
@@ -127,26 +127,26 @@ std::string toml_to_string(const T& value) {
 } // namespace
 
 // In the current TOML scope, look for "knobs" field. If exists, store all options as knob key-value pairs
-void getOverriddenKnobKeyValues(const toml::value& context, TestSpec::KnobKeyValues& result) {}
+void getOverriddenKnobKeyValues(toml::value const& context, TestSpec::KnobKeyValues& result) {}
 
 TestSpec readTomlTestSpec(std::string fileName) {
 	TestSpec spec;
 	WorkloadSpec workloadSpec;
 
-	const toml::value& conf = toml::parse(fileName);
+	toml::value const& conf = toml::parse(fileName);
 
 	// Then parse each test
-	const toml::array& tests = toml::find(conf, "test").as_array();
+	toml::array const& tests = toml::find(conf, "test").as_array();
 	if (tests.empty()) {
 		throw TesterError("Invalid test file. No [test] section found");
 	} else if (tests.size() > 1) {
 		throw TesterError("Invalid test file. More than one [test] section found");
 	}
 
-	const toml::value& test = tests[0];
+	toml::value const& test = tests[0];
 
 	// First handle all test-level settings
-	for (const auto& [k, v] : test.as_table()) {
+	for (auto const& [k, v] : test.as_table()) {
 		if (k == "workload") {
 			continue;
 		}
@@ -160,23 +160,23 @@ TestSpec readTomlTestSpec(std::string fileName) {
 
 	// Look for "knobs" section. If exists, store all options as knob key-value pairs
 	try {
-		const toml::array& overrideKnobs = toml::find(conf, "knobs").as_array();
-		for (const toml::value& knob : overrideKnobs) {
-			for (const auto& [key, value_] : knob.as_table()) {
-				const std::string& value = toml_to_string(value_);
+		toml::array const& overrideKnobs = toml::find(conf, "knobs").as_array();
+		for (toml::value const& knob : overrideKnobs) {
+			for (auto const& [key, value_] : knob.as_table()) {
+				std::string const& value = toml_to_string(value_);
 				spec.knobs.emplace_back(key, value);
 			}
 		}
-	} catch (const std::out_of_range&) {
+	} catch (std::out_of_range const&) {
 		// Not an error because "knobs" section is optional
 	}
 
 	// And then copy the workload attributes to spec.options
-	const toml::array& workloads = toml::find(test, "workload").as_array();
-	for (const toml::value& workload : workloads) {
+	toml::array const& workloads = toml::find(test, "workload").as_array();
+	for (toml::value const& workload : workloads) {
 		workloadSpec = WorkloadSpec();
 		auto& options = workloadSpec.options;
-		for (const auto& [attrib, v] : workload.as_table()) {
+		for (auto const& [attrib, v] : workload.as_table()) {
 			options[attrib] = toml_to_string(v);
 		}
 		auto itr = options.find("name");

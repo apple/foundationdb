@@ -50,7 +50,7 @@ private:
 	Net2* network;
 	boost::asio::deadline_timer firstTimer;
 
-	static void nullWaitHandler(const boost::system::error_code&) {}
+	static void nullWaitHandler(boost::system::error_code const&) {}
 	static void nullCompletionHandler() {}
 
 #ifdef __linux__
@@ -61,7 +61,7 @@ private:
 
 		static void handle_read(Promise<int64_t> p,
 		                        int64_t* pVal,
-		                        const boost::system::error_code& ec,
+		                        boost::system::error_code const& ec,
 		                        std::size_t bytes_transferred) {
 			if (ec)
 				return; // Presumably, the EventFD was destroyed?

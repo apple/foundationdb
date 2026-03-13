@@ -69,7 +69,7 @@ struct GcGenerationsWorkload : TestWorkload {
 	void unclogAll() {
 		TraceEvent("GcGenerationsUnclogRemote").detail("UnclogConnectionCount", cloggedPairs.size());
 		// unclog previously clogged connections
-		for (const auto& pair : cloggedPairs) {
+		for (auto const& pair : cloggedPairs) {
 			g_simulator->unclogPair(pair.first, pair.second);
 		}
 		cloggedPairs.clear();
@@ -83,8 +83,8 @@ struct GcGenerationsWorkload : TestWorkload {
 			co_await store(coordinators, cs.tryResolveHostnames());
 		}
 
-		auto isCoordinator = [](const std::vector<NetworkAddress>& coordinators, const IPAddress& ip) {
-			for (const auto& c : coordinators) {
+		auto isCoordinator = [](std::vector<NetworkAddress> const& coordinators, IPAddress const& ip) {
+			for (auto const& c : coordinators) {
 				if (c.ip == ip) {
 					return true;
 				}
@@ -94,8 +94,8 @@ struct GcGenerationsWorkload : TestWorkload {
 
 		std::vector<IPAddress> ips; // all non-remote process IPs
 		std::vector<IPAddress> remoteIps; // all remote process IPs
-		for (const auto& process : g_simulator->getAllProcesses()) {
-			const auto& ip = process->address.ip;
+		for (auto const& process : g_simulator->getAllProcesses()) {
+			auto const& ip = process->address.ip;
 			if (process->locality.dcId().present() && process->locality.dcId() == g_simulator->remoteDcId &&
 			    !isCoordinator(coordinators, ip)) {
 				remoteIps.push_back(ip);
@@ -106,8 +106,8 @@ struct GcGenerationsWorkload : TestWorkload {
 		ASSERT(ips.size() > 0);
 		ASSERT(remoteIps.size() > 0);
 
-		for (const auto& ip : ips) {
-			for (const auto& remoteIp : remoteIps) {
+		for (auto const& ip : ips) {
+			for (auto const& remoteIp : remoteIps) {
 				g_simulator->clogPair(ip, remoteIp, 10000);
 				g_simulator->clogPair(remoteIp, ip, 10000);
 				self->cloggedPairs.emplace_back(ip, remoteIp);

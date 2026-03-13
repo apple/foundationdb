@@ -25,8 +25,8 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tuple.h"
 
-static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
-static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
+static Key const CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
+static Key const CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
 /*
 FF               - 2 bytes \xff\x02
@@ -37,11 +37,11 @@ TTTT             - 4 Bytes Total number of chunks (Big Endian)
 XXXX             - Variable length user provided transaction identifier
 */
 StringRef sampleTrInfoKey = "\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/"_sr;
-static const auto chunkNumStartIndex = sampleTrInfoKey.toString().find('N');
-static const auto numChunksStartIndex = sampleTrInfoKey.toString().find('T');
-static const int chunkFormatSize = 4;
-static const auto trIdStartIndex = sampleTrInfoKey.toString().find('R');
-static const int trIdFormatSize = 16;
+static auto const chunkNumStartIndex = sampleTrInfoKey.toString().find('N');
+static auto const numChunksStartIndex = sampleTrInfoKey.toString().find('T');
+static int const chunkFormatSize = 4;
+static auto const trIdStartIndex = sampleTrInfoKey.toString().find('R');
+static int const trIdFormatSize = 16;
 
 namespace ClientLogEventsParser {
 
@@ -236,7 +236,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	std::string getTrId(KeyRef key) const { return key.substr(trIdStartIndex, trIdFormatSize).toString(); }
 
-	bool checkTxInfoEntriesFormat(const RangeResult& txInfoEntries) {
+	bool checkTxInfoEntriesFormat(RangeResult const& txInfoEntries) {
 		std::string val;
 		std::map<std::string, std::vector<ValueRef>> trInfoChunks;
 		for (auto kv : txInfoEntries) {

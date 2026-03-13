@@ -55,10 +55,10 @@
 #include "flow/serialize.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
-static const std::string ddServerBulkLoadFolder = "ddBulkLoadFiles";
+static std::string const ddServerBulkDumpFolder = "ddBulkDumpFiles";
+static std::string const ddServerBulkLoadFolder = "ddBulkLoadFiles";
 
-DataMoveType getDataMoveTypeFromDataMoveId(const UID& dataMoveId) {
+DataMoveType getDataMoveTypeFromDataMoveId(UID const& dataMoveId) {
 	bool assigned, emptyRange;
 	DataMoveType dataMoveType;
 	DataMovementReason dataMoveReason;
@@ -148,7 +148,7 @@ struct DDAudit {
 	bool isCancelled() const { return cancelled; }
 };
 
-void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
+void DataMove::validateShard(DDShardInfo const& shard, KeyRangeRef range, int priority) {
 	if (!valid) {
 		if (shard.hasDest && shard.destId != anonymousShardId) {
 			TraceEvent(SevError, "DataMoveValidationError")
@@ -225,14 +225,14 @@ Future<Void> StorageWiggler::onCheck() const {
 }
 
 // add server to wiggling queue
-void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
+void StorageWiggler::addServer(UID const& serverId, StorageMetadataType const& metadata) {
 	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
 	//           << teamCollection->isPrimary() << std::endl;
 	ASSERT(!pq_handles.contains(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
 }
 
-void StorageWiggler::removeServer(const UID& serverId) {
+void StorageWiggler::removeServer(UID const& serverId) {
 	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "
 	//           << teamCollection->isPrimary() << std::endl;
 	if (contains(serverId)) { // server haven't been popped
@@ -242,7 +242,7 @@ void StorageWiggler::removeServer(const UID& serverId) {
 	}
 }
 
-void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
+void StorageWiggler::updateMetadata(UID const& serverId, StorageMetadataType const& metadata) {
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
 	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
 	auto handle = pq_handles.at(serverId);
@@ -252,7 +252,7 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
 }
 
-bool StorageWiggler::necessary(const UID& serverId, const StorageMetadataType& metadata) const {
+bool StorageWiggler::necessary(UID const& serverId, StorageMetadataType const& metadata) const {
 	return metadata.wrongConfiguredForWiggle ||
 	       (now() - metadata.createdTime > SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC);
 }
@@ -408,7 +408,7 @@ struct DDBulkLoadJobManager {
 	bool allTaskSubmitted = false;
 
 	DDBulkLoadJobManager() = default;
-	DDBulkLoadJobManager(const BulkLoadJobState& jobState, const std::string& manifestLocalTempFolder)
+	DDBulkLoadJobManager(BulkLoadJobState const& jobState, std::string const& manifestLocalTempFolder)
 	  : jobState(jobState), manifestLocalTempFolder(manifestLocalTempFolder), allTaskSubmitted(false) {
 		manifestEntryMap = std::make_shared<BulkLoadManifestFileMap>();
 	}
@@ -421,7 +421,7 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 
 	DDBulkDumpJobManager() = default;
-	DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
+	DDBulkDumpJobManager(BulkDumpState const& jobState) : jobState(jobState) {}
 
 	bool isValid() const { return jobState.isValid(); }
 };
@@ -533,7 +533,7 @@ public:
 	void initDcInfo() {
 		primaryDcId.clear();
 		remoteDcIds.clear();
-		const std::vector<RegionInfo>& regions = configuration.regions;
+		std::vector<RegionInfo> const& regions = configuration.regions;
 		if (configuration.regions.size() > 0) {
 			primaryDcId.push_back(regions[0].dcId);
 		}
@@ -548,7 +548,7 @@ public:
 
 	// Resume in-memory audit instances and issue background audit metadata cleanup
 	void resumeAuditStorage(Reference<DataDistributor> self, std::vector<AuditStorageState> auditStates) {
-		for (const auto& auditState : auditStates) {
+		for (auto const& auditState : auditStates) {
 			if (auditState.getPhase() != AuditPhase::Running) {
 				TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "WrongAuditStateToResume")
 				    .detail("AuditState", auditState.toString());
@@ -768,7 +768,7 @@ public:
 		// All physicalShard init must be completed before issuing data move
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 			for (int i = 0; i < self->initData->shards.size() - 1; i++) {
-				const DDShardInfo& iShard = self->initData->shards[i];
+				DDShardInfo const& iShard = self->initData->shards[i];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, self->initData->shards[i + 1].key);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
 				teams.emplace_back(iShard.primarySrc, /*primary=*/true);
@@ -797,7 +797,7 @@ public:
 		state int customBoundary = 0;
 		state int overreplicatedCount = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
-			const DDShardInfo& iShard = self->initData->shards[shard];
+			DDShardInfo const& iShard = self->initData->shards[shard];
 			std::vector<KeyRangeRef> ranges;
 
 			Key beginKey = iShard.key;
@@ -880,7 +880,7 @@ public:
 		wait(readyToStart);
 
 		for (; it != self->initData->dataMoveMap.ranges().end(); ++it) {
-			const DataMoveMetaData& meta = it.value()->meta;
+			DataMoveMetaData const& meta = it.value()->meta;
 			DataMoveType dataMoveType = getDataMoveTypeFromDataMoveId(meta.id);
 			if (meta.ranges.empty()) {
 				TraceEvent(SevInfo, "EmptyDataMoveRange", self->ddId).detail("DataMoveMetaData", meta.toString());
@@ -965,12 +965,12 @@ public:
 		return txnProcessor->isDataDistributionEnabled(context->ddEnabledState.get());
 	}
 
-	Future<Void> removeKeysFromFailedServer(const UID& serverID, const std::vector<UID>& teamForDroppedRange) const {
+	Future<Void> removeKeysFromFailedServer(UID const& serverID, std::vector<UID> const& teamForDroppedRange) const {
 		return txnProcessor->removeKeysFromFailedServer(
 		    serverID, teamForDroppedRange, lock, context->ddEnabledState.get());
 	}
 
-	Future<Void> removeStorageServer(const UID& serverID, const Optional<UID>& tssPairID = Optional<UID>()) const {
+	Future<Void> removeStorageServer(UID const& serverID, Optional<UID> const& tssPairID = Optional<UID>()) const {
 		return txnProcessor->removeStorageServer(serverID, tssPairID, lock, context->ddEnabledState.get());
 	}
 
@@ -1379,7 +1379,7 @@ ACTOR Future<Void> bulkLoadTaskCore(Reference<DataDistributor> self, Future<Void
 	}
 }
 
-void explainBulkLoadJobGetRangeResult(const RangeResult& rangeResult) {
+void explainBulkLoadJobGetRangeResult(RangeResult const& rangeResult) {
 	TraceEvent(SevInfo, "DDBulkLoadJobExplainRangeResult").detail("Size", rangeResult.size());
 	for (int i = 0; i < rangeResult.size(); i++) {
 		TraceEvent e(SevInfo, "DDBulkLoadJobExplainRangeResultKV");
@@ -1554,7 +1554,7 @@ ACTOR Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistrib
 // A bulkload job can contain multiple tasks. Each task can contain multiple manifests.
 // Given a job range, the bulkload task range is defined as the range between the min begin key and the max end key of
 // all manifests, overlapping with the maxRange (i.e. the job range).
-KeyRange generateBulkLoadTaskRange(const BulkLoadManifestSet& manifests, const KeyRange& maxRange) {
+KeyRange generateBulkLoadTaskRange(BulkLoadManifestSet const& manifests, KeyRange const& maxRange) {
 	KeyRange manifestsRange = Standalone(KeyRangeRef(manifests.getMinBeginKey(), manifests.getMaxEndKey()));
 	return manifestsRange & maxRange; // ensure the task range is within the maxRange
 }
@@ -2827,7 +2827,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
-				const UID serverID = removeFailedServer.getFuture().get();
+				UID const serverID = removeFailedServer.getFuture().get();
 				std::vector<UID> pTeam = self->context->primaryTeamCollection->getRandomHealthyTeam(serverID);
 				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
 				if (self->configuration.usableRegions > 1) {
@@ -2955,7 +2955,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 
 			// get workers
 			state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
-			for (const auto& worker : workers) {
+			for (auto const& worker : workers) {
 				workersMap[worker.interf.address()] = worker.interf;
 			}
 
@@ -2966,7 +2966,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			}
 			auto masterDcId = dbInfo->get().master.locality.dcId();
 			int storageFailures = 0;
-			for (const auto& server : storageServers) {
+			for (auto const& server : storageServers) {
 				TraceEvent(SevDebug, "StorageServerDcIdInfo")
 				    .detail("Address", server.address().toString())
 				    .detail("ServerLocalityID", server.locality.dcId())
@@ -2998,7 +2998,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				throw snap_storage_failed();
 			}
 
-			for (const auto& tlog : *tlogs) {
+			for (auto const& tlog : *tlogs) {
 				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
 				if (workersMap.find(tlog.address()) == workersMap.end()) {
 					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
@@ -3020,7 +3020,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			ClusterConnectionString ccs(coordinators.get().toString());
 			std::vector<NetworkAddress> coordinatorsAddr = wait(ccs.tryResolveHostnames());
 			std::set<NetworkAddress> coordinatorsAddrSet(coordinatorsAddr.begin(), coordinatorsAddr.end());
-			for (const auto& worker : workers) {
+			for (auto const& worker : workers) {
 				// Note : only considers second address for coordinators,
 				// as we use primary addresses from storage and tlog interfaces above
 				NetworkAddress primary = worker.interf.address();
@@ -3036,12 +3036,12 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				}
 			}
 			if (SERVER_KNOBS->SNAPSHOT_ALL_STATEFUL_PROCESSES) {
-				for (const auto& worker : workers) {
-					const auto& processAddress = worker.interf.address();
+				for (auto const& worker : workers) {
+					auto const& processAddress = worker.interf.address();
 					// skip processes that are already included
 					if (result.contains(processAddress))
 						continue;
-					const auto& processClassType = worker.processClass.classType();
+					auto const& processClassType = worker.processClass.classType();
 					// coordinators are always configured to be recruited
 					if (processClassType == ProcessClass::StorageClass) {
 						result[processAddress] = std::make_pair(worker.interf, "storage");
@@ -3088,7 +3088,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		state std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
 		std::vector<Future<Void>> disablePops;
 		disablePops.reserve(tlogs.size());
-		for (const auto& tlog : tlogs) {
+		for (auto const& tlog : tlogs) {
 			disablePops.push_back(sendSnapReq(
 			    tlog.disablePopRequest, TLogDisablePopRequest{ snapReq.snapUID }, snap_disable_tlog_pop_failed()));
 		}
@@ -3110,7 +3110,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		// we need to snapshot storage nodes before snapshot any tlogs
 		// FIXME: if it's non-obvious enough to comment about, then also explain why
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
-		for (const auto& [addr, entry] : statefulWorkers) {
+		for (auto const& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
 			if (role.find("storage") != std::string::npos)
 				storageSnapReqs.push_back(trySendSnapReq(
@@ -3123,7 +3123,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 
 		std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
 		tLogSnapReqs.reserve(tlogs.size());
-		for (const auto& [addr, entry] : statefulWorkers) {
+		for (auto const& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
 			if (role.find("tlog") != std::string::npos)
 				tLogSnapReqs.push_back(trySendSnapReq(
@@ -3137,7 +3137,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 
 		std::vector<Future<Void>> enablePops;
 		enablePops.reserve(tlogs.size());
-		for (const auto& tlog : tlogs) {
+		for (auto const& tlog : tlogs) {
 			enablePops.push_back(sendSnapReq(
 			    tlog.enablePopRequest, TLogEnablePopRequest{ snapReq.snapUID }, snap_enable_tlog_pop_failed()));
 		}
@@ -3148,7 +3148,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapUID", snapReq.snapUID);
 
 		std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
-		for (const auto& [addr, entry] : statefulWorkers) {
+		for (auto const& [addr, entry] : statefulWorkers) {
 			auto& [interf, role] = entry;
 			if (role.find("coord") != std::string::npos)
 				coordSnapReqs.push_back(trySendSnapReq(
@@ -3193,7 +3193,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 			try {
 				std::vector<Future<Void>> enablePops;
 				enablePops.reserve(tlogs.size());
-				for (const auto& tlog : tlogs) {
+				for (auto const& tlog : tlogs) {
 					enablePops.push_back(transformErrors(
 					    throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))),
 					    snap_enable_tlog_pop_failed()));
@@ -3294,8 +3294,8 @@ ACTOR Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest
 	}
 	std::vector<UID> excludeServerIDs;
 	// Go through storage server interfaces and translate Address -> server ID (UID)
-	for (const AddressExclusion& excl : req.exclusions) {
-		for (const auto& ssi : ssis) {
+	for (AddressExclusion const& excl : req.exclusions) {
+		for (auto const& ssi : ssis) {
 			if (excl.excludes(ssi.address()) ||
 			    (ssi.secondaryAddress().present() && excl.excludes(ssi.secondaryAddress().get()))) {
 				excludeServerIDs.push_back(ssi.id());
@@ -3312,7 +3312,7 @@ static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
 	std::nth_element(metricVec.begin(),
 	                 metricVec.begin() + metricVec.size() / 2,
 	                 metricVec.end(),
-	                 [](const DDMetricsRef& d1, const DDMetricsRef& d2) { return d1.shardBytes < d2.shardBytes; });
+	                 [](DDMetricsRef const& d1, DDMetricsRef const& d2) { return d1.shardBytes < d2.shardBytes; });
 	return metricVec[metricVec.size() / 2].shardBytes;
 }
 
@@ -3393,7 +3393,7 @@ ACTOR Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared
 		                     cx, audit->coreState.getType(), audit->coreState.id, allKeys, serverId, remainingBudget)));
 	}
 	wait(actors.getResult());
-	for (const auto& [serverId, finish] : res) {
+	for (auto const& [serverId, finish] : res) {
 		TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardRes")
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("ServerId", serverId)
@@ -3937,7 +3937,7 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 ACTOR Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self,
                                                  std::shared_ptr<DDAudit> audit,
                                                  KeyRange range) {
-	state const AuditType auditType = audit->coreState.getType();
+	state AuditType const auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateLocationMetadata);
 	TraceEvent(SevInfo, "DDdispatchAuditLocationMetadataBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
@@ -4012,7 +4012,7 @@ ACTOR Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self
 // This function dedicates to audit ssshard
 // For each of storage servers, audits allKeys
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
-	state const AuditType auditType = audit->coreState.getType();
+	state AuditType const auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
 	TraceEvent(SevInfo, "DDDispatchAuditStorageServerShardBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
@@ -4060,7 +4060,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
                                                      std::shared_ptr<DDAudit> audit,
                                                      StorageServerInterface ssi) {
 	state UID serverId = ssi.uniqueID;
-	state const AuditType auditType = audit->coreState.getType();
+	state AuditType const auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
 	TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerBegin", self->ddId)
 	    .detail("ServerID", serverId)
@@ -4163,8 +4163,8 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 // This function is for ha/replica/restore audits
 // Schedule audit task on the input range
 ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
-	state const AuditType auditType = audit->coreState.getType();
-	state const KeyRange range = audit->coreState.range;
+	state AuditType const auditType = audit->coreState.getType();
+	state KeyRange const range = audit->coreState.range;
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateRestore);
 	TraceEvent(SevInfo, "DDDispatchAuditStorageBegin", self->ddId)
@@ -4281,7 +4281,7 @@ ACTOR Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange rangeToSchedule) {
-	state const AuditType auditType = audit->coreState.getType();
+	state AuditType const auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateRestore);
 	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
@@ -4381,13 +4381,13 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							}
 							// pick a server from primary DC
 							auto it = rangeLocations[rangeLocationIndex].servers.begin();
-							const int idx = deterministicRandom()->randomInt(0, it->second.size());
+							int const idx = deterministicRandom()->randomInt(0, it->second.size());
 							targetServer = it->second[idx];
 							storageServersToCheck.push_back(it->second[idx]);
 							++it;
 							// pick a server from each remote DC
 							for (; it != rangeLocations[rangeLocationIndex].servers.end(); ++it) {
-								const int idx = deterministicRandom()->randomInt(0, it->second.size());
+								int const idx = deterministicRandom()->randomInt(0, it->second.size());
 								req.targetServers.push_back(it->second[idx].id());
 								storageServersToCheck.push_back(it->second[idx]);
 							}
@@ -4395,10 +4395,10 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							// select a server from primary DC to do audit
 							// check all servers from each DC
 							int dcid = 0;
-							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
+							for (auto const& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
 								if (dcid == 0) {
 									// in primary DC randomly select a server to do the audit task
-									const int idx = deterministicRandom()->randomInt(0, dcServers.size());
+									int const idx = deterministicRandom()->randomInt(0, dcServers.size());
 									targetServer = dcServers[idx];
 								}
 								for (int i = 0; i < dcServers.size(); i++) {
@@ -4437,7 +4437,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							}
 							int dcid = 0;
 							bool targetServerSet = false;
-							for (const auto& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
+							for (auto const& [_, dcServers] : rangeLocations[rangeLocationIndex].servers) {
 								if (dcServers.empty()) {
 									// Skip empty server lists for this DC
 									dcid++;
@@ -4445,7 +4445,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 								}
 								if (!targetServerSet) {
 									// On first non-empty DC, randomly select a server to do the audit task
-									const int idx = deterministicRandom()->randomInt(0, dcServers.size());
+									int const idx = deterministicRandom()->randomInt(0, dcServers.size());
 									targetServer = dcServers[idx];
 									targetServerSet = true;
 								}

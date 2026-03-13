@@ -294,11 +294,11 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	return ret;
 }
 
-void configureGenerator(const char* text,
-                        const char* line,
+void configureGenerator(char const* text,
+                        char const* line,
                         std::vector<std::string>& lc,
                         std::vector<StringRef> const& tokens) {
-	const char* opts[] = { "new",
+	char const* opts[] = { "new",
 		                   "single",
 		                   "double",
 		                   "triple",

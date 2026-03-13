@@ -37,7 +37,7 @@ void ChaosMetrics::clear() {
 }
 
 void ChaosMetrics::getFields(TraceEvent* e) {
-	std::pair<const char*, unsigned int> metrics[] = {
+	std::pair<char const*, unsigned int> metrics[] = {
 		{ "DiskDelays", diskDelays },   { "BitFlips", bitFlips }, { "S3Errors", s3Errors },
 		{ "S3Throttles", s3Throttles }, { "S3Delays", s3Delays }, { "S3Corruptions", s3Corruptions }
 	};
@@ -119,15 +119,15 @@ S3FaultInjector* S3FaultInjector::injector() {
 	return static_cast<S3FaultInjector*>(res);
 }
 
-bool IPAddress::operator==(const IPAddress& rhs) const {
+bool IPAddress::operator==(IPAddress const& rhs) const {
 	return addr == rhs.addr;
 }
 
-bool IPAddress::operator!=(const IPAddress& addr) const {
+bool IPAddress::operator!=(IPAddress const& addr) const {
 	return !(*this == addr);
 }
 
-bool IPAddress::operator<(const IPAddress& rhs) const {
+bool IPAddress::operator<(IPAddress const& rhs) const {
 	return addr < rhs.addr;
 }
 
@@ -151,7 +151,7 @@ Optional<IPAddress> IPAddress::parse(std::string const& str) {
 
 bool IPAddress::isValid() const {
 	if (isV6()) {
-		const auto& ip = std::get<IPAddressStore>(addr);
+		auto const& ip = std::get<IPAddressStore>(addr);
 		return std::any_of(ip.begin(), ip.end(), [](uint8_t part) { return part != 0; });
 	}
 	return std::get<uint32_t>(addr) != 0;
@@ -165,7 +165,7 @@ NetworkAddress NetworkAddress::parse(std::string const& s) {
 	bool isTLS = false;
 	NetworkAddressFromHostname fromHostname = NetworkAddressFromHostname::False;
 	std::string f = s;
-	const auto& pos = f.find("(fromHostname)");
+	auto const& pos = f.find("(fromHostname)");
 	if (pos != std::string::npos) {
 		fromHostname = NetworkAddressFromHostname::True;
 		f = f.substr(0, pos);
@@ -228,19 +228,19 @@ std::string NetworkAddress::toString() const {
 	return ipString;
 }
 
-std::string toIPVectorString(const std::vector<uint32_t>& ips) {
+std::string toIPVectorString(std::vector<uint32_t> const& ips) {
 	std::string output;
-	const char* space = "";
-	for (const auto& ip : ips) {
+	char const* space = "";
+	for (auto const& ip : ips) {
 		output += format("%s%d.%d.%d.%d", space, (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, ip & 0xff);
 		space = " ";
 	}
 	return output;
 }
 
-std::string toIPVectorString(const std::vector<IPAddress>& ips) {
+std::string toIPVectorString(std::vector<IPAddress> const& ips) {
 	std::string output;
-	const char* space = "";
+	char const* space = "";
 	for (auto ip : ips) {
 		output += format("%s%s", space, ip.toString().c_str());
 		space = " ";
@@ -248,12 +248,12 @@ std::string toIPVectorString(const std::vector<IPAddress>& ips) {
 	return output;
 }
 
-std::string formatIpPort(const IPAddress& ip, uint16_t port) {
-	const char* patt = ip.isV6() ? "[%s]:%d" : "%s:%d";
+std::string formatIpPort(IPAddress const& ip, uint16_t port) {
+	char const* patt = ip.isV6() ? "[%s]:%d" : "%s:%d";
 	return format(patt, ip.toString().c_str(), port);
 }
 
-Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, const std::string& service) {
+Optional<std::vector<NetworkAddress>> DNSCache::find(std::string const& host, std::string const& service) {
 	auto it = hostnameToAddresses.find(host + ":" + service);
 	if (it != hostnameToAddresses.end()) {
 		return it->second;
@@ -261,11 +261,11 @@ Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, co
 	return {};
 }
 
-void DNSCache::add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses) {
+void DNSCache::add(std::string const& host, std::string const& service, std::vector<NetworkAddress> const& addresses) {
 	hostnameToAddresses[host + ":" + service] = addresses;
 }
 
-void DNSCache::remove(const std::string& host, const std::string& service) {
+void DNSCache::remove(std::string const& host, std::string const& service) {
 	auto it = hostnameToAddresses.find(host + ":" + service);
 	if (it != hostnameToAddresses.end()) {
 		hostnameToAddresses.erase(it);
@@ -283,7 +283,7 @@ std::string DNSCache::toString() {
 			ret += ';';
 		}
 		ret += it->first + ',';
-		const std::vector<NetworkAddress>& addresses = it->second;
+		std::vector<NetworkAddress> const& addresses = it->second;
 		for (int i = 0; i < addresses.size(); ++i) {
 			ret += addresses[i].toString();
 			if (i != addresses.size() - 1) {
@@ -294,7 +294,7 @@ std::string DNSCache::toString() {
 	return ret;
 }
 
-DNSCache DNSCache::parseFromString(const std::string& s) {
+DNSCache DNSCache::parseFromString(std::string const& s) {
 	std::map<std::string, std::vector<NetworkAddress>> dnsCache;
 
 	for (int p = 0; p < s.length();) {
@@ -365,8 +365,8 @@ TEST_CASE("/flow/DNSCacheParsing") {
 	return Void();
 }
 
-Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
-                                                            const std::string& service,
+Future<Reference<IConnection>> INetworkConnections::connect(std::string const& host,
+                                                            std::string const& service,
                                                             bool isTLS) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint =
@@ -392,7 +392,7 @@ Future<Reference<IConnection>> INetworkConnections::connect(const std::string& h
 
 IUDPSocket::~IUDPSocket() {}
 
-const std::vector<int> NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
+std::vector<int> const NetworkMetrics::starvationBins = { 1, 3500, 7000, 7500, 8500, 8900, 10500 };
 
 TEST_CASE("/flow/network/ipaddress") {
 	ASSERT(NetworkAddress::parse("[::1]:4800").toString() == "[::1]:4800");

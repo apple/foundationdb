@@ -27,7 +27,7 @@
 // These benchmarks test the performance of different checks methods
 // of checking for metadata mutations in applyMetadataMutations
 
-static const std::array<MutationRef, 5> mutations = {
+static std::array<MutationRef, 5> const mutations = {
 	MutationRef(MutationRef::Type::ClearRange, normalKeys.begin, normalKeys.end),
 	MutationRef(MutationRef::Type::ClearRange, "a"_sr, "b"_sr),
 	MutationRef(MutationRef::Type::ClearRange, "aaaaaaaaaa"_sr, "bbbbbbbbbb"_sr),
@@ -38,7 +38,7 @@ static const std::array<MutationRef, 5> mutations = {
 };
 
 static void bench_check_metadata1(benchmark::State& state) {
-	const auto& m = mutations[state.range(0)];
+	auto const& m = mutations[state.range(0)];
 	for (auto _ : state) {
 		benchmark::DoNotOptimize(KeyRangeRef(m.param1, m.param2).intersects(systemKeys));
 	}
@@ -46,7 +46,7 @@ static void bench_check_metadata1(benchmark::State& state) {
 }
 
 static void bench_check_metadata2(benchmark::State& state) {
-	const auto& m = mutations[state.range(0)];
+	auto const& m = mutations[state.range(0)];
 	for (auto _ : state) {
 		benchmark::DoNotOptimize(m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0]);
 	}

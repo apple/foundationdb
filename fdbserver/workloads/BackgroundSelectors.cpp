@@ -22,7 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
-KeySelector randomizedSelector(const KeyRef& key, bool orEqual, int offset) {
+KeySelector randomizedSelector(KeyRef const& key, bool orEqual, int offset) {
 	if (orEqual && deterministicRandom()->random01() > 0.5)
 		return KeySelectorRef(keyAfter(key), false, offset);
 	return KeySelectorRef(key, orEqual, offset);

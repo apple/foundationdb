@@ -30,7 +30,7 @@ using namespace boost::asio;
 
 namespace FdbApiTester {
 
-const TTaskFct NO_OP_TASK = []() {};
+TTaskFct const NO_OP_TASK = []() {};
 
 class AsioTimer : public ITimer {
 public:
@@ -56,7 +56,7 @@ public:
 
 	std::unique_ptr<ITimer> scheduleWithDelay(int delayMs, TTaskFct task) override {
 		auto timer = std::make_unique<AsioTimer>(io_ctx, boost::asio::chrono::milliseconds(delayMs));
-		timer->impl.async_wait([task](const boost::system::error_code& e) {
+		timer->impl.async_wait([task](boost::system::error_code const& e) {
 			if (!e) {
 				task();
 			}

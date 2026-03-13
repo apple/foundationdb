@@ -57,7 +57,7 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	std::string getConfigMode(const std::string& mode, bool existingDB) {
+	std::string getConfigMode(std::string const& mode, bool existingDB) {
 		std::string res = mode;
 		if (existingDB) {
 			size_t pos = res.find("new ");
@@ -97,7 +97,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	Future<Void> configureExtraDatabases() {
 		std::vector<Future<Void>> futures;
 		if (g_network->isSimulated()) {
-			for (const auto& extraDatabase : g_simulator->extraDatabases) {
+			for (auto const& extraDatabase : g_simulator->extraDatabases) {
 				Database db = Database::createSimulatedExtraDatabase(extraDatabase);
 				futures.push_back(configureExtraDatabase(db));
 			}

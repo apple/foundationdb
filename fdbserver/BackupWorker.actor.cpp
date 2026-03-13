@@ -47,7 +47,7 @@ struct VersionedMessage {
 	Arena arena; // Keep a reference to the memory containing the message
 	Arena decryptArena; // Arena used for decrypt buffer.
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
+	VersionedMessage(LogMessageVersion v, StringRef m, VectorRef<Tag> const& t, Arena const& a)
 	  : version(v), message(m), tags(t), arena(a) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
@@ -102,13 +102,13 @@ struct VersionedMessage {
 };
 
 struct BackupData {
-	const UID myId;
-	const Tag tag; // LogRouter tag for this worker, i.e., (-2, i)
-	const int totalTags; // Total log router tags
-	const Version startVersion; // This worker's start version
-	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
-	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
-	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	UID const myId;
+	Tag const tag; // LogRouter tag for this worker, i.e., (-2, i)
+	int const totalTags; // Total log router tags
+	Version const startVersion; // This worker's start version
+	Optional<Version> const endVersion; // old epoch's end version (inclusive), or empty for current epoch
+	LogEpoch const recruitedEpoch; // current epoch whose tLogs are receiving mutations
+	LogEpoch const backupEpoch; // the epoch workers should pull mutations
 	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
@@ -196,7 +196,7 @@ struct BackupData {
 						std::vector<std::pair<int64_t, int64_t>>& v = workers.get();
 						v.erase(std::remove_if(v.begin(),
 						                       v.end(),
-						                       [epoch = self->recruitedEpoch](const std::pair<int64_t, int64_t>& p) {
+						                       [epoch = self->recruitedEpoch](std::pair<int64_t, int64_t> const& p) {
 							                       return p.first != epoch;
 						                       }),
 						        v.end());
@@ -263,7 +263,7 @@ struct BackupData {
 	CounterCollection cc;
 	Future<Void> logger;
 
-	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, const InitializeBackupRequest& req)
+	explicit BackupData(UID id, Reference<AsyncVar<ServerDBInfo> const> db, InitializeBackupRequest const& req)
 	  : myId(id), tag(req.routerTag), totalTags(req.totalTags), startVersion(req.startVersion),
 	    endVersion(req.endVersion), recruitedEpoch(req.recruitedEpoch), backupEpoch(req.backupEpoch),
 	    minKnownCommittedVersion(invalidVersion), savedVersion(req.startVersion - 1), db(db), pulledVersion(0),
@@ -302,12 +302,12 @@ struct BackupData {
 
 	// Inserts a backup's ranges into rangeMap.
 	template <class T>
-	void insertRanges(KeyRangeMap<std::set<T>>& keyRangeMap, const Optional<std::vector<KeyRange>>& ranges, T value) {
+	void insertRanges(KeyRangeMap<std::set<T>>& keyRangeMap, Optional<std::vector<KeyRange>> const& ranges, T value) {
 		if (!ranges.present() || ranges.get().empty()) {
 			// insert full ranges of normal keys
 			return insertRange(keyRangeMap, normalKeys, value);
 		}
-		for (const auto& range : ranges.get()) {
+		for (auto const& range : ranges.get()) {
 			insertRange(keyRangeMap, range, value);
 		}
 	}
@@ -327,7 +327,7 @@ struct BackupData {
 			return;
 		}
 		ASSERT_WE_THINK(backupEpoch == oldestBackupEpoch);
-		const Tag popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
+		Tag const popTag = logSystem.get()->getPseudoPopTag(tag, ProcessClass::BackupClass);
 		DisabledTraceEvent("BackupWorkerPop", myId).detail("Tag", popTag).detail("SavedVersion", savedVersion);
 		logSystem.get()->pop(savedVersion, popTag);
 	}
@@ -363,7 +363,7 @@ struct BackupData {
 
 	void eraseMessagesAfterEndVersion() {
 		ASSERT(endVersion.present());
-		const Version ver = endVersion.get();
+		Version const ver = endVersion.get();
 		while (!messages.empty()) {
 			if (messages.back().getVersion() > ver) {
 				size_t bytes = messages.back().getEstimatedSize();
@@ -378,7 +378,7 @@ struct BackupData {
 
 	// Give a list of current active backups, compare with current list and decide
 	// to start new backups and stop ones not in the active state.
-	void onBackupChanges(const std::vector<std::pair<UID, Version>>& uidVersions) {
+	void onBackupChanges(std::vector<std::pair<UID, Version>> const& uidVersions) {
 		std::set<UID> stopList;
 		for (auto it : backups) {
 			stopList.insert(it.first);
@@ -387,7 +387,7 @@ struct BackupData {
 		bool modified = false;
 		bool minVersionChanged = false;
 		Version minVersion = std::numeric_limits<Version>::max();
-		for (const auto& [uid, version] : uidVersions) {
+		for (auto const& [uid, version] : uidVersions) {
 			auto it = backups.find(uid);
 			if (it == backups.end()) {
 				modified = true;
@@ -436,7 +436,7 @@ struct BackupData {
 	Future<Void> waitAllInfoReady() { return _waitAllInfoReady(this); }
 
 	bool isAllInfoReady() const {
-		for (const auto& [uid, info] : backups) {
+		for (auto const& [uid, info] : backups) {
 			if (!info.isReady())
 				return false;
 		}
@@ -530,7 +530,7 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 			state std::vector<Future<Optional<Version>>> prevVersions;
 			state std::vector<BackupConfig> versionConfigs;
 			state std::vector<Future<Optional<bool>>> allWorkersReady;
-			for (const auto& [uid, version] : savedLogVersions) {
+			for (auto const& [uid, version] : savedLogVersions) {
 				versionConfigs.emplace_back(uid);
 				prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
 				allWorkersReady.push_back(versionConfigs.back().allWorkerStarted().get(tr));
@@ -542,9 +542,9 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get())
 					continue;
 
-				const Version current = savedLogVersions[versionConfigs[i].getUid()];
+				Version const current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevVersions[i].get().present()) {
-					const Version prev = prevVersions[i].get().get();
+					Version const prev = prevVersions[i].get().get();
 					if (prev > current) {
 						TraceEvent(SevWarn, "BackupWorkerVersionInverse", self->myId)
 						    .detail("Prev", prev)
@@ -596,7 +596,7 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 			if (self->recruitedEpoch == self->oldestBackupEpoch) {
 				// update update progress so far if previous epochs are done
 				Version v = std::numeric_limits<Version>::max();
-				for (const auto& [tag, version] : tagVersions) {
+				for (auto const& [tag, version] : tagVersions) {
 					v = std::min(v, version);
 				}
 				savedLogVersions.emplace(uid, v);
@@ -660,7 +660,7 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	// Start a new block if needed
 	if (logFile->size() + bytes > *blockEnd) {
 		// Write padding if needed
-		const int bytesLeft = *blockEnd - logFile->size();
+		int const bytesLeft = *blockEnd - logFile->size();
 		if (bytesLeft > 0) {
 			state Value paddingFFs = fileBackup::makePadding(bytesLeft);
 			wait(logFile->append(paddingFFs.begin(), bytesLeft));
@@ -725,7 +725,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			it = self->backups.erase(it);
 			continue;
 		}
-		const int index = logFileFutures.size();
+		int const index = logFileFutures.size();
 		activeUids.push_back(it->first);
 		self->insertRanges(keyRangeMap, it->second.ranges.get(), index);
 
@@ -753,7 +753,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	std::transform(logFileFutures.begin(),
 	               logFileFutures.end(),
 	               std::back_inserter(logFiles),
-	               [](const Future<Reference<IBackupFile>>& f) { return f.get(); });
+	               [](Future<Reference<IBackupFile>> const& f) { return f.get(); });
 
 	ASSERT(activeUids.size() == logFiles.size() && beginVersions.size() == logFiles.size());
 	for (int i = 0; i < logFiles.size(); i++) {
@@ -789,7 +789,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 
 			// Find intersection ranges and create mutations for sub-ranges
 			for (auto range : keyRangeMap.intersectingRanges(mutationRange)) {
-				const auto& subrange = range.range();
+				auto const& subrange = range.range();
 				intersectionRange = mutationRange & subrange;
 				MutationRef subm(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
 				BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
@@ -808,19 +808,19 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	}
 
 	std::vector<Future<Void>> finished;
-	std::transform(logFiles.begin(), logFiles.end(), std::back_inserter(finished), [](const Reference<IBackupFile>& f) {
+	std::transform(logFiles.begin(), logFiles.end(), std::back_inserter(finished), [](Reference<IBackupFile> const& f) {
 		return f->finish();
 	});
 
 	wait(waitForAll(finished));
 
-	for (const auto& file : logFiles) {
+	for (auto const& file : logFiles) {
 		TraceEvent("CloseMutationFile", self->myId)
 		    .detail("FileSize", file->size())
 		    .detail("TagId", self->tag.id)
 		    .detail("File", file->getFileName());
 	}
-	for (const UID& uid : activeUids) {
+	for (UID const& uid : activeUids) {
 		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
 
@@ -844,7 +844,7 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 
 		for (auto& message : self->messages) {
 			// message may be prefetched in peek; uncommitted message should not be uploaded.
-			const Version version = message.getVersion();
+			Version const version = message.getVersion();
 			if (version > self->maxPopVersion()) {
 				break;
 			}

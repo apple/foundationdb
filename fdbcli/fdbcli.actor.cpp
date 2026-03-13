@@ -80,7 +80,7 @@
  */
 #define API ((IClientApi*)MultiVersionApi::api)
 
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 std::vector<std::string> validOptions;
 
@@ -134,10 +134,10 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  TLS_OPTION_FLAGS,
 	                                  SO_END_OF_OPTIONS };
 
-void printAtCol(const char* text, int col, FILE* stream = stdout) {
-	const char* iter = text;
-	const char* start = text;
-	const char* space = nullptr;
+void printAtCol(char const* text, int col, FILE* stream = stdout) {
+	char const* iter = text;
+	char const* start = text;
+	char const* space = nullptr;
 
 	do {
 		iter++;
@@ -176,7 +176,7 @@ public:
 
 	// Applies all enabled transaction options to the given transaction
 	void apply(Reference<ITransaction> tr) {
-		for (const auto& [name, value] : transactionOptions.options) {
+		for (auto const& [name, value] : transactionOptions.options) {
 			tr->setOption(name, value.castTo<StringRef>());
 		}
 	}
@@ -471,7 +471,7 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 }
 // NOLINTEND(bugprone-use-after-move)
 
-static void printProgramUsage(const char* name) {
+static void printProgramUsage(char const* name) {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n"
 	       "usage: %s [OPTIONS]\n"
 	       "\n",
@@ -604,7 +604,7 @@ void printBuildInformation() {
 
 void printHelpOverview() {
 	printf("\nList of commands:\n\n");
-	for (const auto& [command, help] : helpMap) {
+	for (auto const& [command, help] : helpMap) {
 		if (help.short_desc.size())
 			printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
 	}
@@ -648,7 +648,7 @@ int printStatusFromJSON(std::string const& jsonFileName) {
 	}
 }
 
-ACTOR Future<Void> timeWarning(double when, const char* msg) {
+ACTOR Future<Void> timeWarning(double when, char const* msg) {
 	wait(delay(when));
 	fputs(msg, stderr);
 
@@ -745,20 +745,20 @@ Reference<ITransaction> getTransaction(Reference<IDatabase> db,
 	return tr;
 }
 
-std::string newCompletion(const char* base, const char* name) {
+std::string newCompletion(char const* base, char const* name) {
 	return format("%s%s ", base, name);
 }
 
-void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
+void compGenerator(char const* text, bool help, std::vector<std::string>& lc) {
 	std::map<std::string, CommandHelp>::const_iterator iter;
 	int len = strlen(text);
 
-	const char* helpExtra[] = { "escaping", "options", nullptr };
+	char const* helpExtra[] = { "escaping", "options", nullptr };
 
-	const char** he = helpExtra;
+	char const** he = helpExtra;
 
 	for (auto iter = helpMap.begin(); iter != helpMap.end(); ++iter) {
-		const char* name = (*iter).first.c_str();
+		char const* name = (*iter).first.c_str();
 		if (!strncmp(name, text, len)) {
 			lc.push_back(newCompletion(help ? "help " : "", name));
 		}
@@ -766,7 +766,7 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 
 	if (help) {
 		while (*he) {
-			const char* name = *he;
+			char const* name = *he;
 			he++;
 			if (!strncmp(name, text, len))
 				lc.push_back(newCompletion("help ", name));
@@ -774,19 +774,19 @@ void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
 	}
 }
 
-void cmdGenerator(const char* text, std::vector<std::string>& lc) {
+void cmdGenerator(char const* text, std::vector<std::string>& lc) {
 	compGenerator(text, false, lc);
 }
 
-void helpGenerator(const char* text, std::vector<std::string>& lc) {
+void helpGenerator(char const* text, std::vector<std::string>& lc) {
 	compGenerator(text, true, lc);
 }
 
-void optionGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
+void optionGenerator(char const* text, char const* line, std::vector<std::string>& lc) {
 	int len = strlen(text);
 
 	for (auto iter = validOptions.begin(); iter != validOptions.end(); ++iter) {
-		const char* name = (*iter).c_str();
+		char const* name = (*iter).c_str();
 		if (!strncmp(name, text, len)) {
 			lc.push_back(newCompletion(line, name));
 		}
@@ -794,12 +794,12 @@ void optionGenerator(const char* text, const char* line, std::vector<std::string
 }
 
 namespace fdb_cli {
-void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc) {
-	const char** iter = options;
+void arrayGenerator(char const* text, char const* line, char const** options, std::vector<std::string>& lc) {
+	char const** iter = options;
 	int len = strlen(text);
 
 	while (*iter) {
-		const char* name = *iter;
+		char const* name = *iter;
 		iter++;
 		if (!strncmp(name, text, len)) {
 			lc.push_back(newCompletion(line, name));
@@ -808,8 +808,8 @@ void arrayGenerator(const char* text, const char* line, const char** options, st
 }
 } // namespace fdb_cli
 
-void onOffGenerator(const char* text, const char* line, std::vector<std::string>& lc) {
-	const char* opts[] = { "on", "off", nullptr };
+void onOffGenerator(char const* text, char const* line, std::vector<std::string>& lc) {
+	char const* opts[] = { "on", "off", nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 
@@ -1197,7 +1197,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					// Denote via a special token that the command was a parse failure.
 					auto& last_command = parsed.back();
 					last_command.insert(last_command.begin(),
-					                    StringRef((const uint8_t*)"parse_error", strlen("parse_error")));
+					                    StringRef((uint8_t const*)"parse_error", strlen("parse_error")));
 				}
 			}
 
@@ -1962,7 +1962,7 @@ ACTOR Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 		    std::string hintLine = inArgument ? " " : "";
 		    auto itr = CommandFactory::hintGenerators().find(command.toString());
 		    if (itr != CommandFactory::hintGenerators().end()) {
-			    std::vector<const char*> hintItems = itr->second(parsed.back(), inArgument);
+			    std::vector<char const*> hintItems = itr->second(parsed.back(), inArgument);
 			    if (hintItems.empty()) {
 				    return LineNoise::Hint();
 			    }
@@ -2021,20 +2021,20 @@ ACTOR Future<Void> timeExit(double duration) {
 	return Void();
 }
 
-const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) {
+char const* checkTlsConfigAgainstCoordAddrs(ClusterConnectionString const& ccs) {
 	// Resolve TLS config and inspect whether any of the certificate, key, ca bytes has been set
 	extern TLSConfig tlsConfig;
 	auto const loaded = tlsConfig.loadSync();
-	const bool tlsConfigured =
+	bool const tlsConfigured =
 	    !loaded.getCertificateBytes().empty() || !loaded.getKeyBytes().empty() || !loaded.getCABytes().empty();
 	int tlsAddrs = 0;
 	int totalAddrs = 0;
-	for (const auto& addr : ccs.coords) {
+	for (auto const& addr : ccs.coords) {
 		if (addr.isTLS())
 			tlsAddrs++;
 		totalAddrs++;
 	}
-	for (const auto& host : ccs.hostnames) {
+	for (auto const& host : ccs.hostnames) {
 		if (host.isTLS)
 			tlsAddrs++;
 		totalAddrs++;

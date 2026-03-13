@@ -195,7 +195,7 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 
 // This function is called after the cursor received one TLogPeekReply to update its members, which is the common logic
 // in getMore helper functions.
-void updateCursorWithReply(ILogSystem::ServerPeekCursor* self, const TLogPeekReply& res) {
+void updateCursorWithReply(ILogSystem::ServerPeekCursor* self, TLogPeekReply const& res) {
 	self->results = res;
 	self->onlySpilled = res.onlySpilled;
 	if (res.popped.present())
@@ -388,7 +388,7 @@ ACTOR Future<Void> serverPeekStreamGetMore(ILogSystem::ServerPeekCursor* self, T
 			state Version expectedBegin = self->messageVersion.version;
 			state Future<TLogPeekReply> fPeekReply = self->peekReplyStream.present()
 			                                             ? map(waitAndForward(self->peekReplyStream.get().getFuture()),
-			                                                   [](const TLogPeekStreamReply& r) { return r.rep; })
+			                                                   [](TLogPeekStreamReply const& r) { return r.rep; })
 			                                             : Never();
 			choose {
 				when(wait(self->peekReplyStream.present() ? Never() : tryEstablishPeekStream(self))) {}
@@ -552,7 +552,7 @@ bool ILogSystem::ServerPeekCursor::isExhausted() const {
 	return messageVersion >= end;
 }
 
-const LogMessageVersion& ILogSystem::ServerPeekCursor::version() const {
+LogMessageVersion const& ILogSystem::ServerPeekCursor::version() const {
 	return messageVersion;
 } // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned
   // false.
@@ -654,7 +654,7 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor(
     std::vector<LocalityData> const& tLogLocalities,
     Reference<IReplicationPolicy> const tLogPolicy,
     int tLogReplicationFactor,
-    const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
+    Optional<std::vector<uint16_t>> const& knownLockedTLogIds)
   : tag(tag), bestServer(bestServerLogId), currentCursor(0), readQuorum(readQuorum), messageVersion(begin),
     hasNextMessage(false), randomID(deterministicRandom()->randomUniqueID()),
     tLogReplicationFactor(tLogReplicationFactor) {
@@ -912,7 +912,7 @@ bool ILogSystem::MergedPeekCursor::isExhausted() const {
 	return serverCursors[currentCursor]->isExhausted();
 }
 
-const LogMessageVersion& ILogSystem::MergedPeekCursor::version() const {
+LogMessageVersion const& ILogSystem::MergedPeekCursor::version() const {
 	return messageVersion;
 }
 
@@ -949,7 +949,7 @@ ILogSystem::SetPeekCursor::SetPeekCursor(std::vector<Reference<LogSet>> const& l
                                          Version begin,
                                          Version end,
                                          bool parallelGetMore,
-                                         const Optional<std::vector<uint16_t>>& knownLockedTLogIds)
+                                         Optional<std::vector<uint16_t>> const& knownLockedTLogIds)
   : logSets(logSets), tag(tag), bestSet(bestSet), bestServer(bestServerLogId), currentSet(bestSet), currentCursor(0),
     messageVersion(begin), hasNextMessage(false), useBestSet(true), randomID(deterministicRandom()->randomUniqueID()),
     end(end) {
@@ -1286,7 +1286,7 @@ bool ILogSystem::SetPeekCursor::isExhausted() const {
 	return serverCursors[currentSet][currentCursor]->isExhausted();
 }
 
-const LogMessageVersion& ILogSystem::SetPeekCursor::version() const {
+LogMessageVersion const& ILogSystem::SetPeekCursor::version() const {
 	return messageVersion;
 }
 
@@ -1396,7 +1396,7 @@ bool ILogSystem::MultiCursor::isExhausted() const {
 	return cursors.back()->isExhausted();
 }
 
-const LogMessageVersion& ILogSystem::MultiCursor::version() const {
+LogMessageVersion const& ILogSystem::MultiCursor::version() const {
 	return cursors.back()->version();
 }
 
@@ -1640,7 +1640,7 @@ bool ILogSystem::BufferedCursor::isExhausted() const {
 	return false;
 }
 
-const LogMessageVersion& ILogSystem::BufferedCursor::version() const {
+LogMessageVersion const& ILogSystem::BufferedCursor::version() const {
 	if (hasNextMessage) {
 		return messages[messageIndex].version;
 	}

@@ -75,7 +75,7 @@ CSimpleOpt::SOption gOptions[] = { { OPT_HELP, "--help", SO_NONE },
 	                               SO_END_OF_OPTIONS };
 
 template <size_t Len>
-void printOptionUsage(std::string_view option, const char* (&&optionDescLines)[Len]) {
+void printOptionUsage(std::string_view option, char const* (&&optionDescLines)[Len]) {
 	constexpr std::string_view optionIndent{ "  " };
 	constexpr std::string_view descIndent{ "                " };
 	fmt::print(stdout, "{}{}\n", optionIndent, option);
@@ -331,10 +331,10 @@ int main(int argc, char** argv) {
 			fmt::print("OK\n");
 		}
 		return FDB_EXIT_SUCCESS;
-	} catch (const Error& e) {
+	} catch (Error const& e) {
 		fmt::print(stderr, "error: {}\n", e.name());
 		return FDB_EXIT_MAIN_ERROR;
-	} catch (const std::exception& e) {
+	} catch (std::exception const& e) {
 		fmt::print(stderr, "exception: {}\n", e.what());
 		return FDB_EXIT_MAIN_EXCEPTION;
 	}

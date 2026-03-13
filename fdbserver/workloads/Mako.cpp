@@ -68,7 +68,7 @@ struct MakoWorkload : TestWorkload {
 	// key prefix of for all generated keys
 	std::string keyPrefix;
 	int KEYPREFIXLEN;
-	const std::array<std::string, MAX_OP> opNames = { "GRV",       "GET",      "GETRANGE",   "SGET",
+	std::array<std::string, MAX_OP> const opNames = { "GRV",       "GET",      "GETRANGE",   "SGET",
 		                                              "SGETRANGE", "UPDATE",   "INSERT",     "INSERTRANGE",
 		                                              "CLEAR",     "SETCLEAR", "CLEARRANGE", "SETCLEARRANGE",
 		                                              "COMMIT" };
@@ -217,8 +217,8 @@ struct MakoWorkload : TestWorkload {
 			}
 
 			// Meaningful Latency metrics
-			const int opExecutedAtOnce[] = { OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_COMMIT };
-			for (const int& op : opExecutedAtOnce) {
+			int const opExecutedAtOnce[] = { OP_GETREADVERSION, OP_GET, OP_GETRANGE, OP_SGET, OP_SGETRANGE, OP_COMMIT };
+			for (int const& op : opExecutedAtOnce) {
 				m.emplace_back("Mean " + opNames[op] + " Latency (us)", 1e6 * opLatencies[op].mean(), Averaged::True);
 				m.emplace_back(
 				    "Max " + opNames[op] + " Latency (us, averaged)", 1e6 * opLatencies[op].max(), Averaged::True);
@@ -227,8 +227,8 @@ struct MakoWorkload : TestWorkload {
 			}
 			// Latency for local operations if needed
 			if (latencyForLocalOperation) {
-				const int localOp[] = { OP_INSERT, OP_CLEAR, OP_CLEARRANGE };
-				for (const int& op : localOp) {
+				int const localOp[] = { OP_INSERT, OP_CLEAR, OP_CLEARRANGE };
+				for (int const& op : localOp) {
 					TraceEvent(SevDebug, "LocalLatency")
 					    .detail("Name", opNames[op])
 					    .detail("Size", opLatencies[op].getPopulationSize());
@@ -260,9 +260,9 @@ struct MakoWorkload : TestWorkload {
 	}
 
 	Value randomValue() {
-		const int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
+		int const length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
 		std::string valueString = randStr(length);
-		return StringRef(reinterpret_cast<const uint8_t*>(valueString.c_str()), length);
+		return StringRef(reinterpret_cast<uint8_t const*>(valueString.c_str()), length);
 	}
 
 	Key keyForIndex(uint64_t ind) {
@@ -675,7 +675,7 @@ struct MakoWorkload : TestWorkload {
 		return randomKeyIndex;
 	}
 	void parseOperationsSpec() {
-		const char* ptr = operationsSpec.c_str();
+		char const* ptr = operationsSpec.c_str();
 		int op = 0;
 		int rangeop = 0;
 		int num;
@@ -815,7 +815,7 @@ struct MakoWorkload : TestWorkload {
 						csValue = temp.get();
 						ASSERT(csValue.size() == sizeof(uint32_t));
 						uint32_t calculatedCS = co_await calcCheckSum(&tr, self, csIdx);
-						uint32_t existingCS = *(reinterpret_cast<const uint32_t*>(csValue.begin()));
+						uint32_t existingCS = *(reinterpret_cast<uint32_t const*>(csValue.begin()));
 						if (existingCS != calculatedCS) {
 							TraceEvent(SevError, "TestFailure")
 							    .detail("Reason", "ChecksumVerificationFailure")
@@ -863,7 +863,7 @@ struct MakoWorkload : TestWorkload {
 	static Future<Void> updateCheckSum(ReadYourWritesTransaction* tr, MakoWorkload* self, int csIdx) {
 		uint32_t csVal = co_await calcCheckSum(tr, self, csIdx);
 		TraceEvent("UpdateCheckSum").detail("ChecksumIndex", csIdx).detail("Checksum", csVal);
-		tr->set(self->csKeys[csIdx], ValueRef(reinterpret_cast<const uint8_t*>(&csVal), sizeof(uint32_t)));
+		tr->set(self->csKeys[csIdx], ValueRef(reinterpret_cast<uint8_t const*>(&csVal), sizeof(uint32_t)));
 	}
 
 	static Future<Void> updateCSBeforeCommit(ReadYourWritesTransaction* tr,

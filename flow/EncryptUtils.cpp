@@ -26,7 +26,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/format.hpp>
 
-EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
+EncryptCipherMode encryptModeFromString(std::string const& modeStr) {
 	if (modeStr == "NONE") {
 		return ENCRYPT_CIPHER_MODE_NONE;
 	} else if (modeStr == "AES-256-CTR") {
@@ -73,17 +73,17 @@ int getEncryptHeaderAuthTokenSize(int algo) {
 	}
 }
 
-bool isEncryptHeaderAuthTokenAlgoValid(const EncryptAuthTokenAlgo algo) {
+bool isEncryptHeaderAuthTokenAlgoValid(EncryptAuthTokenAlgo const algo) {
 	return algo >= EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE &&
 	       algo < EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_LAST;
 }
 
-bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode) {
+bool isEncryptHeaderAuthTokenModeValid(EncryptAuthTokenMode const mode) {
 	return mode >= EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
 	       mode < EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST;
 }
 
-bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const EncryptAuthTokenAlgo algo) {
+bool isEncryptHeaderAuthTokenDetailsValid(EncryptAuthTokenMode const mode, EncryptAuthTokenAlgo const algo) {
 	if (!isEncryptHeaderAuthTokenModeValid(mode) || !isEncryptHeaderAuthTokenAlgoValid(algo) ||
 	    (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
 	     algo != EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_NONE) ||
@@ -97,7 +97,7 @@ bool isEncryptHeaderAuthTokenDetailsValid(const EncryptAuthTokenMode mode, const
 // Routine enables mapping EncryptHeader authTokenAlgo for a given authTokenMode; rules followed are:
 // 1. AUTH_TOKEN_NONE overrides authTokenAlgo configuration (as expected)
 // 2. AuthToken mode governed by the FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO
-EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(const EncryptAuthTokenMode mode) {
+EncryptAuthTokenAlgo getAuthTokenAlgoFromMode(EncryptAuthTokenMode const mode) {
 	EncryptAuthTokenAlgo algo;
 
 	if (mode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {

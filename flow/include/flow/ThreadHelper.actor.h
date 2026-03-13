@@ -48,7 +48,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f) {
 }
 
 ACTOR template <class F, class T>
-void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
+void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::*member) {
 	wait(signal);
 	if (t && (t->*member).code() != invalid_error_code)
 		return;
@@ -77,7 +77,7 @@ void doOnMainThreadVoid(Future<Void> signal, F f, T* t, Error T::* member) {
 //
 // `onMainThreadVoid` is defined here because of the dependency in `ThreadSingleAssignmentVarBase`.
 template <class F, class T>
-void onMainThreadVoid(F f, T* t, Error T::* member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
+void onMainThreadVoid(F f, T* t, Error T::*member, TaskPriority taskID = TaskPriority::DefaultOnMainThread) {
 	Promise<Void> signal;
 	internal_thread_helper::doOnMainThreadVoid(signal.getFuture(), f, t, member);
 	g_network->onMainThread(std::move(signal), taskID);
@@ -94,8 +94,8 @@ class ThreadMultiCallback;
 
 struct ThreadCallback {
 	virtual bool canFire(int notMadeActive) const = 0;
-	virtual void fire(const Void& unused, int& userParam) = 0;
-	virtual void error(const Error&, int& userParam) = 0;
+	virtual void fire(Void const& unused, int& userParam) = 0;
+	virtual void error(Error const&, int& userParam) = 0;
 	virtual ThreadCallback* addCallback(ThreadCallback* cb);
 
 	virtual bool clearCallback(ThreadCallback* cb) {
@@ -210,7 +210,7 @@ public:
 
 	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void& value, int& loopDepth) override {
+	void fire(Void const& value, int& loopDepth) override {
 		if (callbacks.size() > 10000)
 			TraceEvent(SevWarn, "LargeMultiCallback").detail("CallbacksSize", callbacks.size());
 
@@ -227,7 +227,7 @@ public:
 		}
 	}
 
-	void error(const Error& err, int& loopDepth) override {
+	void error(Error const& err, int& loopDepth) override {
 		if (callbacks.size() > 10000)
 			TraceEvent(SevWarn, "LargeMultiCallback").detail("CallbacksSize", callbacks.size());
 
@@ -307,8 +307,8 @@ public:
 		}
 
 		bool canFire(int notMadeActive) const override { return true; }
-		void fire(const Void& unused, int& userParam) override { ev.set(); }
-		void error(const Error&, int& userParam) override { ev.set(); }
+		void fire(Void const& unused, int& userParam) override { ev.set(); }
+		void error(Error const&, int& userParam) override { ev.set(); }
 	};
 
 	void blockUntilReady() {
@@ -349,7 +349,7 @@ public:
 
 	// Sends an error through the assignment var if it is not already set. Otherwise does nothing.
 	// Returns true if the assignment var was not already set; otherwise returns false.
-	bool trySendError(const Error& err) {
+	bool trySendError(Error const& err) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_sendError").detail("ErrorCode", err.code());
 		this->mutex.enter();
@@ -381,7 +381,7 @@ public:
 	}
 
 	// Like trySendError, except that it is assumed the assignment var is not already set.
-	void sendError(const Error& err) { ASSERT(trySendError(err)); }
+	void sendError(Error const& err) { ASSERT(trySendError(err)); }
 
 	SetCallbackResult::Result callOrSetAsCallback(ThreadCallback* callback, int& userParam1, int notMadeActive) {
 		this->mutex.enter();
@@ -529,7 +529,7 @@ public:
 
 	void delref() override { ThreadSafeReferenceCounted<ThreadSingleAssignmentVar<T>>::delref(); }
 
-	void send(const T& value) {
+	void send(T const& value) {
 		if (TRACE_SAMPLE())
 			TraceEvent(SevSample, "Promise_send").log();
 		this->mutex.enter();
@@ -599,15 +599,15 @@ public:
 	explicit ThreadFuture(ThreadSingleAssignmentVar<T>* sav) : sav(sav) {
 		// sav->addref();
 	}
-	ThreadFuture(const ThreadFuture<T>& rhs) : sav(rhs.sav) {
+	ThreadFuture(ThreadFuture<T> const& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addref();
 	}
 	ThreadFuture(ThreadFuture<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
-	ThreadFuture(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
+	ThreadFuture(T const& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
 	ThreadFuture(Never) : sav(new ThreadSingleAssignmentVar<T>()) {}
-	ThreadFuture(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
-	ThreadFuture(const ErrorOr<T>& errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
+	ThreadFuture(Error const& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
+	ThreadFuture(ErrorOr<T> const& errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
 		if (errorOr.isError()) {
 			sav->sendError(errorOr.getError());
 		} else {
@@ -618,7 +618,7 @@ public:
 		if (sav)
 			sav->delref();
 	}
-	void operator=(const ThreadFuture<T>& rhs) {
+	void operator=(ThreadFuture<T> const& rhs) {
 		if (rhs.sav)
 			rhs.sav->addref();
 		if (sav)
@@ -633,8 +633,8 @@ public:
 			rhs.sav = 0;
 		}
 	}
-	bool operator==(const ThreadFuture& rhs) { return rhs.sav == sav; }
-	bool operator!=(const ThreadFuture& rhs) { return rhs.sav != sav; }
+	bool operator==(ThreadFuture const& rhs) { return rhs.sav == sav; }
+	bool operator!=(ThreadFuture const& rhs) { return rhs.sav != sav; }
 
 	ThreadSingleAssignmentVarBase* getPtr() const { return sav; }
 	ThreadSingleAssignmentVarBase* extractPtr() {
@@ -667,13 +667,13 @@ struct CompletionCallback final : public ThreadCallback, ReferenceCounted<Comple
 	bool canFire(int notMadeActive) const override { return true; }
 
 	// Trigger the promise
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		promise.send(threadFuture.get());
 		self.clear();
 	}
 
 	// Send the error through the promise
-	void error(const Error& e, int& userParam) override {
+	void error(Error const& e, int& userParam) override {
 		promise.sendError(e);
 		self.clear();
 	}
@@ -698,11 +698,11 @@ public:
 	UtilCallback(ThreadFuture<T> f, void* userdata) : f(f), userdata(userdata) {}
 
 	bool canFire(int notMadeActive) const override { return true; }
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
 		delete this;
 	}
-	void error(const Error&, int& userParam) override {
+	void error(Error const&, int& userParam) override {
 		g_network->onMainThread(Promise<Void>((SAV<Void>*)userdata), TaskPriority::DefaultOnMainThread);
 		delete this;
 	}
@@ -781,7 +781,7 @@ struct allow_anonymous_future<Optional<Standalone<T>>> : std::false_type {};
 
 template <class T>
 typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
-    const ThreadFuture<T>& threadFuture) {
+    ThreadFuture<T> const& threadFuture) {
 	return safeThreadFutureToFutureImpl(threadFuture);
 }
 
@@ -797,7 +797,7 @@ typename std::enable_if<!allow_anonymous_future<T>::value, Future<T>>::type safe
 
 template <class T>
 typename std::enable_if<allow_anonymous_future<T>::value, Future<T>>::type safeThreadFutureToFuture(
-    const Future<T>& future) {
+    Future<T> const& future) {
 	// Do nothing
 	return future;
 }
@@ -919,14 +919,14 @@ public:
 		ASSERT(sav->isReady());
 		// sav->addref();
 	}
-	ThreadResult(const ThreadResult<T>& rhs) : sav(rhs.sav) {
+	ThreadResult(ThreadResult<T> const& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addref();
 	}
 	ThreadResult(ThreadResult<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
-	ThreadResult(const T& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
-	ThreadResult(const Error& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
-	ThreadResult(const ErrorOr<T> errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
+	ThreadResult(T const& presentValue) : sav(new ThreadSingleAssignmentVar<T>()) { sav->send(presentValue); }
+	ThreadResult(Error const& error) : sav(new ThreadSingleAssignmentVar<T>()) { sav->sendError(error); }
+	ThreadResult(ErrorOr<T> const errorOr) : sav(new ThreadSingleAssignmentVar<T>()) {
 		if (errorOr.isError()) {
 			sav->sendError(errorOr.getError());
 		} else {
@@ -937,7 +937,7 @@ public:
 		if (sav)
 			sav->delref();
 	}
-	void operator=(const ThreadFuture<T>& rhs) {
+	void operator=(ThreadFuture<T> const& rhs) {
 		if (rhs.sav)
 			rhs.sav->addref();
 		if (sav)
@@ -952,8 +952,8 @@ public:
 			rhs.sav = 0;
 		}
 	}
-	bool operator==(const ThreadResult& rhs) { return rhs.sav == sav; }
-	bool operator!=(const ThreadResult& rhs) { return rhs.sav != sav; }
+	bool operator==(ThreadResult const& rhs) { return rhs.sav == sav; }
+	bool operator!=(ThreadResult const& rhs) { return rhs.sav != sav; }
 
 	ThreadSingleAssignmentVarBase* getPtr() const { return sav; }
 	ThreadSingleAssignmentVarBase* extractPtr() {

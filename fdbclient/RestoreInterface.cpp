@@ -21,9 +21,9 @@
 #include "fdbclient/RestoreInterface.h"
 #include "flow/serialize.h"
 
-const KeyRef restoreRequestDoneKey = "\xff\x02/restoreRequestDone"_sr;
-const KeyRef restoreRequestTriggerKey = "\xff\x02/restoreRequestTrigger"_sr;
-const KeyRangeRef restoreRequestKeys("\xff\x02/restoreRequests/"_sr, "\xff\x02/restoreRequests0"_sr);
+KeyRef const restoreRequestDoneKey = "\xff\x02/restoreRequestDone"_sr;
+KeyRef const restoreRequestTriggerKey = "\xff\x02/restoreRequestTrigger"_sr;
+KeyRangeRef const restoreRequestKeys("\xff\x02/restoreRequests/"_sr, "\xff\x02/restoreRequests0"_sr);
 
 // Encode and decode restore request value
 Value restoreRequestTriggerValue(UID randomID, int numRequests) {

@@ -1329,7 +1329,7 @@ ACTOR Future<bool> getKeyLocations(Database cx,
 
 				// Try getting the shard locations from the key servers
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
-				for (const auto& kv : shards[i].second) {
+				for (auto const& kv : shards[i].second) {
 					resetReply(req);
 					if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 						cx->getLatestCommitVersion(kv, req.version, req.ssLatestCommitVersions);

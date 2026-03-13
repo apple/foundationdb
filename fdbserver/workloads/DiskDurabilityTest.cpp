@@ -49,7 +49,7 @@ struct DiskDurabilityTest : TestWorkload {
 
 	static Value encodeValue(int64_t x) {
 		x = bigEndian64(x);
-		return StringRef((const uint8_t*)&x, sizeof(x));
+		return StringRef((uint8_t const*)&x, sizeof(x));
 	}
 	Key encodeKey(int64_t x) const { return encodeValue(x).withPrefix(range.begin); }
 

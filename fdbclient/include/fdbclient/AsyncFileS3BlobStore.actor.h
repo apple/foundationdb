@@ -81,7 +81,7 @@ public:
 		std::string checksumString; // Contains either MD5 or SHA256 based on use_sha256
 		PacketWriter writer;
 		int length;
-		void write(const uint8_t* buf, int len) {
+		void write(uint8_t const* buf, int len) {
 			writer.serializeBytes(buf, len);
 			if (use_sha256) {
 				::SHA256_Update(&content_sha256_buf, buf, len);
@@ -120,25 +120,25 @@ public:
 
 	Future<int> read(void* data, int length, int64_t offset) override { throw file_not_readable(); }
 
-	ACTOR static Future<Void> write_impl(Reference<AsyncFileS3BlobStoreWrite> f, const uint8_t* data, int length) {
+	ACTOR static Future<Void> write_impl(Reference<AsyncFileS3BlobStoreWrite> f, uint8_t const* data, int length) {
 		state Part* p = f->m_parts.back().getPtr();
 		// If this write will cause the part to cross the min part size boundary then write to the boundary and start a
 		// new part.
 		while (p->length + length >= f->m_bstore->knobs.multipart_min_part_size) {
 			// Finish off this part
 			int finishlen = f->m_bstore->knobs.multipart_min_part_size - p->length;
-			p->write((const uint8_t*)data, finishlen);
+			p->write((uint8_t const*)data, finishlen);
 
 			// Adjust source buffer args
 			length -= finishlen;
-			data = (const uint8_t*)data + finishlen;
+			data = (uint8_t const*)data + finishlen;
 
 			// End current part (and start new one)
 			wait(f->endCurrentPart(f.getPtr(), true));
 			p = f->m_parts.back().getPtr();
 		}
 
-		p->write((const uint8_t*)data, length);
+		p->write((uint8_t const*)data, length);
 		return Void();
 	}
 
@@ -148,7 +148,7 @@ public:
 		m_cursor += length;
 
 		return m_error.getFuture() ||
-		       write_impl(Reference<AsyncFileS3BlobStoreWrite>::addRef(this), (const uint8_t*)data, length);
+		       write_impl(Reference<AsyncFileS3BlobStoreWrite>::addRef(this), (uint8_t const*)data, length);
 	}
 
 	Future<Void> truncate(int64_t size) override {

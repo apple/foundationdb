@@ -9,7 +9,7 @@ void forceLinkDDSketchTests() {}
 TEST_CASE("/fdbrpc/ddsketch/accuracy") {
 
 	int TRY = 100, SIZE = 1e6;
-	const int totalPercentiles = 7;
+	int const totalPercentiles = 7;
 	double targetPercentiles[totalPercentiles] = { .0001, .01, .1, .50, .90, .99, .9999 };
 	double stat[totalPercentiles] = { 0 };
 	for (int t = 0; t < TRY; t++) {

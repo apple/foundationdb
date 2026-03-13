@@ -20,37 +20,37 @@
 
 #include "fdbclient/FDBTypes.h"
 
-std::string printable(const VectorRef<KeyValueRef>& val) {
+std::string printable(VectorRef<KeyValueRef> const& val) {
 	std::string s;
 	for (int i = 0; i < val.size(); i++)
 		s = s + printable(val[i].key) + format(":%d ", val[i].value.size());
 	return s;
 }
 
-std::string printable(const KeyValueRef& val) {
+std::string printable(KeyValueRef const& val) {
 	return printable(val.key) + format(":%d ", val.value.size());
 }
 
-std::string printable(const VectorRef<StringRef>& val) {
+std::string printable(VectorRef<StringRef> const& val) {
 	std::string s;
 	for (int i = 0; i < val.size(); i++)
 		s = s + printable(val[i]) + " ";
 	return s;
 }
 
-std::string printable(const StringRef& val) {
+std::string printable(StringRef const& val) {
 	return val.printable();
 }
 
-std::string printable(const std::string& str) {
+std::string printable(std::string const& str) {
 	return StringRef(str).printable();
 }
 
-std::string printable(const KeyRangeRef& range) {
+std::string printable(KeyRangeRef const& range) {
 	return printable(range.begin) + " - " + printable(range.end);
 }
 
-std::string printable(const VectorRef<KeyRangeRef>& val) {
+std::string printable(VectorRef<KeyRangeRef> const& val) {
 	std::string s;
 	for (int i = 0; i < val.size(); i++)
 		s = s + printable(val[i]) + " ";

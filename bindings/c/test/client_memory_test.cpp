@@ -34,7 +34,7 @@ void fdb_check(fdb_error_t e) {
 	}
 }
 
-FDBDatabase* fdb_open_database(const char* clusterFile) {
+FDBDatabase* fdb_open_database(char const* clusterFile) {
 	FDBDatabase* db;
 	fdb_check(fdb_create_database(clusterFile, &db));
 	return db;
@@ -49,9 +49,9 @@ int main(int argc, char** argv) {
 	std::thread network_thread{ [] { fdb_check(fdb_run_network()); } };
 
 	fdb_check(
-	    fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, reinterpret_cast<const uint8_t*>(""), 0));
+	    fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, reinterpret_cast<uint8_t const*>(""), 0));
 	fdb_check(fdb_network_set_option(
-	    FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, reinterpret_cast<const uint8_t*>("json"), 4));
+	    FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, reinterpret_cast<uint8_t const*>("json"), 4));
 
 	// Use a bunch of memory from different client threads
 	FDBDatabase* db = fdb_open_database(argv[1]);

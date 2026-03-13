@@ -116,7 +116,7 @@ int randomInt(int min, int max) {
 	return dis(gen);
 }
 
-void vlog_process_msg(Severity severity, const char* process, const char* format, va_list args) {
+void vlog_process_msg(Severity severity, char const* process, char const* format, va_list args) {
 	if (daemonize) {
 		char buf[4096];
 		int len = vsnprintf(buf, 4096, format, args);
@@ -137,7 +137,7 @@ void vlog_process_msg(Severity severity, const char* process, const char* format
 	}
 }
 
-void log_msg(Severity severity, const char* format, ...) {
+void log_msg(Severity severity, char const* format, ...) {
 	va_list args;
 	va_start(args, format);
 
@@ -146,7 +146,7 @@ void log_msg(Severity severity, const char* format, ...) {
 	va_end(args);
 }
 
-void log_process_msg(Severity severity, const char* process, const char* format, ...) {
+void log_process_msg(Severity severity, char const* process, char const* format, ...) {
 	va_list args;
 	va_start(args, format);
 
@@ -155,7 +155,7 @@ void log_process_msg(Severity severity, const char* process, const char* format,
 	va_end(args);
 }
 
-void log_err(const char* func, int err, const char* format, ...) {
+void log_err(char const* func, int err, char const* format, ...) {
 	va_list args;
 	va_start(args, format);
 
@@ -190,9 +190,9 @@ void unmonitor_fd(fdb_fd_set list, int fd) {
 #endif
 }
 
-const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
-	const char* ret = nullptr;
-	const char* section = nullptr;
+char const* get_value_multi(CSimpleIni const& ini, char const* key, ...) {
+	char const* ret = nullptr;
+	char const* section = nullptr;
 
 	std::string keyWithUnderscores(key);
 	for (int i = keyWithUnderscores.size() - 1; i >= 0; --i) {
@@ -203,7 +203,7 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 
 	va_list ap;
 	va_start(ap, key);
-	while (!ret && (section = va_arg(ap, const char*))) {
+	while (!ret && (section = va_arg(ap, char const*))) {
 		ret = ini.GetValue(section, key, nullptr);
 		if (!ret) {
 			ret = ini.GetValue(section, keyWithUnderscores.c_str(), nullptr);
@@ -213,7 +213,7 @@ const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
 	return ret;
 }
 
-bool isParameterNameEqual(const char* str, const char* target) {
+bool isParameterNameEqual(char const* str, char const* target) {
 	if (!str || !target) {
 		return false;
 	}
@@ -235,14 +235,14 @@ bool isParameterNameEqual(const char* str, const char* target) {
 }
 
 // Parse size value with same format as parse_with_suffix in flow.h
-uint64_t parseWithSuffix(const char* to_parse, const char* default_unit) {
+uint64_t parseWithSuffix(char const* to_parse, char const* default_unit) {
 	char* end_ptr = nullptr;
 	uint64_t ret = strtoull(to_parse, &end_ptr, 10);
 	if (end_ptr == to_parse) {
 		// failed to parse
 		return 0;
 	}
-	const char* unit = default_unit;
+	char const* unit = default_unit;
 	if (*end_ptr != 0) {
 		unit = end_ptr;
 	}
@@ -328,7 +328,7 @@ std::string cleanPath(std::string const& path) {
 }
 
 // Removes the last component from a path string (if possible) and returns the result with one trailing separator.
-std::string popPath(const std::string& path) {
+std::string popPath(std::string const& path) {
 	int i = path.size() - 1;
 	// Skip over any trailing separators
 	while (i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
@@ -370,7 +370,7 @@ std::string abspath(std::string const& path, bool resolveLinks) {
 
 	char result[PATH_MAX];
 	// Must resolve links, so first try realpath on the whole thing
-	const char* r = realpath(path.c_str(), result);
+	char const* r = realpath(path.c_str(), result);
 	if (r == nullptr) {
 		// If the error was ENOENT and the path doesn't have to exist,
 		// try to resolve symlinks in progressively shorter prefixes of the path
@@ -482,14 +482,14 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		if (!cmd->envvars.empty()) {
 			size_t start = 0;
 			do {
-				const auto keyValueEnd = cmd->envvars.find(' ', start);
-				const auto& keyValue = keyValueEnd != std::string::npos
+				auto const keyValueEnd = cmd->envvars.find(' ', start);
+				auto const& keyValue = keyValueEnd != std::string::npos
 				                           ? cmd->envvars.substr(start, keyValueEnd - start)
 				                           : cmd->envvars.substr(start);
 				if (!EnvVarUtils::keyValueValid(keyValue, cmd->envvars)) {
 					exit(1);
 				}
-				const auto [key, value] = EnvVarUtils::extractKeyAndValue(keyValue);
+				auto const [key, value] = EnvVarUtils::extractKeyAndValue(keyValue);
 				if (setenv(key.c_str(), value.c_str(), /* overwrite */ 1)) {
 					fprintf(stderr, "setenv failed for %s in envvars\n", keyValue.c_str());
 					exit(1);
@@ -506,8 +506,8 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 		if (!cmd->delete_envvars.empty()) {
 			size_t start = 0;
 			do {
-				const size_t bound = cmd->delete_envvars.find(' ', start);
-				const std::string& var = cmd->delete_envvars.substr(start, bound - start);
+				size_t const bound = cmd->delete_envvars.find(' ', start);
+				std::string const& var = cmd->delete_envvars.substr(start, bound - start);
 				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
 				fflush(stdout);
 				if (unsetenv(var.c_str())) {
@@ -534,7 +534,7 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 			exit(0);
 #elif defined(__FreeBSD__)
 		/* death of our parent raises SIGHUP */
-		const int sig = SIGHUP;
+		int const sig = SIGHUP;
 		procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
 		if (getppid() == 1) /* parent already died before procctl */
 			exit(0);
@@ -582,7 +582,7 @@ void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, 
 	id_pid[id] = pid;
 }
 
-void print_usage(const char* name) {
+void print_usage(char const* name) {
 	printf("FoundationDB Process Monitor " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n"
 	       "Usage: %s [OPTIONS]\n"
 	       "\n"
@@ -601,7 +601,7 @@ void print_usage(const char* name) {
 	       name);
 }
 
-bool argv_equal(const char** a1, const char** a2) {
+bool argv_equal(char const** a1, char const** a2) {
 	int i = 0;
 
 	while (a1[i] && a2[i]) {
@@ -631,7 +631,7 @@ void kill_process(ProcessID id, bool wait, bool cleanup) {
 	}
 }
 
-void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd) {
+void load_conf(char const* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd) {
 	log_msg(SevInfo, "Loading configuration %s\n", confpath);
 
 	CSimpleIniA ini;
@@ -647,8 +647,8 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		uid_t _uid;
 		gid_t _gid;
 
-		const char* user = ini.GetValue("fdbmonitor", "user", nullptr);
-		const char* group = ini.GetValue("fdbmonitor", "group", nullptr);
+		char const* user = ini.GetValue("fdbmonitor", "user", nullptr);
+		char const* group = ini.GetValue("fdbmonitor", "group", nullptr);
 
 		if (user) {
 			errno = 0;
@@ -675,12 +675,12 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		/* Any change to uid or gid requires the process to be restarted to take effect */
 		if (uid != _uid || gid != _gid) {
 			std::vector<ProcessID> kill_ids;
-			for (const auto& i : id_pid) {
+			for (auto const& i : id_pid) {
 				if (id_command[i.first]->kill_on_configuration_change) {
 					kill_ids.push_back(i.first);
 				}
 			}
-			for (const auto& i : kill_ids) {
+			for (auto const& i : kill_ids) {
 				kill_process(i);
 				id_command.erase(i);
 			}
@@ -693,7 +693,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 	std::list<ProcessID> kill_ids;
 	std::list<std::pair<ProcessID, Command*>> start_ids;
 
-	for (const auto& i : id_pid) {
+	for (auto const& i : id_pid) {
 		if (!loadedConf || ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
 			/* Process no longer configured; deconfigure it and kill it if required */
 			log_msg(SevInfo, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
@@ -726,10 +726,10 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		}
 	}
 
-	for (const auto& i : kill_ids)
+	for (auto const& i : kill_ids)
 		kill_process(i);
 
-	for (const auto& i : start_ids) {
+	for (auto const& i : start_ids) {
 		start_process(i.second, i.first, uid, gid, 0, mask);
 	}
 
@@ -738,7 +738,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 	if (loadedConf) {
 		CSimpleIniA::TNamesDepend sections;
 		ini.GetAllSections(sections);
-		for (const auto& i : sections) {
+		for (auto const& i : sections) {
 			if (auto dot = strrchr(i.pItem, '.')) {
 				ProcessID id = i.pItem;
 				if (!id_pid.contains(id)) {
@@ -839,7 +839,7 @@ void watch_conf_dir(int kq, int* confd_fd, std::string confdir) {
 	}
 }
 
-void watch_conf_file(int kq, int* conff_fd, const char* confpath) {
+void watch_conf_file(int kq, int* conff_fd, char const* confpath) {
 	struct kevent ev;
 
 	/* If already watching, drop it and close */
@@ -859,7 +859,7 @@ void watch_conf_file(int kq, int* conff_fd, const char* confpath) {
 #endif
 
 #ifdef __linux__
-int fdbmon_stat(const char* path, struct stat* path_stat, bool is_link) {
+int fdbmon_stat(char const* path, struct stat* path_stat, bool is_link) {
 	return is_link ? lstat(path, path_stat) : stat(path, path_stat);
 }
 

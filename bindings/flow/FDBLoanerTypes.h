@@ -30,7 +30,7 @@ typedef int64_t Version;
 typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 
-inline Key keyAfter(const KeyRef& key) {
+inline Key keyAfter(KeyRef const& key) {
 	if (key == "\xff\xff"_sr)
 		return key;
 
@@ -42,7 +42,7 @@ inline Key keyAfter(const KeyRef& key) {
 	return r;
 }
 
-inline KeyRef keyAfter(const KeyRef& key, Arena& arena) {
+inline KeyRef keyAfter(KeyRef const& key, Arena& arena) {
 	if (key == "\xff\xff"_sr)
 		return key;
 	uint8_t* t = new (arena) uint8_t[key.size() + 1];
@@ -56,9 +56,9 @@ struct KeySelectorRef {
 	bool orEqual; // (or equal to key, if this is true)
 	int offset; // and then move forward this many items (or backward if negative)
 	KeySelectorRef() {}
-	KeySelectorRef(const KeyRef& key, bool orEqual, int offset) : key(key), orEqual(orEqual), offset(offset) {}
+	KeySelectorRef(KeyRef const& key, bool orEqual, int offset) : key(key), orEqual(orEqual), offset(offset) {}
 
-	KeySelectorRef(Arena& arena, const KeySelectorRef& copyFrom)
+	KeySelectorRef(Arena& arena, KeySelectorRef const& copyFrom)
 	  : key(arena, copyFrom.key), orEqual(copyFrom.orEqual), offset(copyFrom.offset) {}
 	int expectedSize() const { return key.expectedSize(); }
 
@@ -89,25 +89,25 @@ struct KeySelectorRef {
 		serializer(ar, key, orEqual, offset);
 	}
 };
-inline bool operator==(const KeySelectorRef& lhs, const KeySelectorRef& rhs) {
+inline bool operator==(KeySelectorRef const& lhs, KeySelectorRef const& rhs) {
 	return lhs.key == rhs.key && lhs.orEqual == rhs.orEqual && lhs.offset == rhs.offset;
 }
-inline KeySelectorRef lastLessThan(const KeyRef& k) {
+inline KeySelectorRef lastLessThan(KeyRef const& k) {
 	return KeySelectorRef(k, false, 0);
 }
-inline KeySelectorRef lastLessOrEqual(const KeyRef& k) {
+inline KeySelectorRef lastLessOrEqual(KeyRef const& k) {
 	return KeySelectorRef(k, true, 0);
 }
-inline KeySelectorRef firstGreaterThan(const KeyRef& k) {
+inline KeySelectorRef firstGreaterThan(KeyRef const& k) {
 	return KeySelectorRef(k, true, +1);
 }
-inline KeySelectorRef firstGreaterOrEqual(const KeyRef& k) {
+inline KeySelectorRef firstGreaterOrEqual(KeyRef const& k) {
 	return KeySelectorRef(k, false, +1);
 }
-inline KeySelectorRef operator+(const KeySelectorRef& s, int off) {
+inline KeySelectorRef operator+(KeySelectorRef const& s, int off) {
 	return KeySelectorRef(s.key, s.orEqual, s.offset + off);
 }
-inline KeySelectorRef operator-(const KeySelectorRef& s, int off) {
+inline KeySelectorRef operator-(KeySelectorRef const& s, int off) {
 	return KeySelectorRef(s.key, s.orEqual, s.offset - off);
 }
 
@@ -117,9 +117,9 @@ struct KeyValueRef {
 	KeyRef key;
 	ValueRef value;
 	KeyValueRef() {}
-	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
-	KeyValueRef(Arena& a, const KeyValueRef& copyFrom) : key(a, copyFrom.key), value(a, copyFrom.value) {}
-	bool operator==(const KeyValueRef& r) const { return key == r.key && value == r.value; }
+	KeyValueRef(KeyRef const& key, ValueRef const& value) : key(key), value(value) {}
+	KeyValueRef(Arena& a, KeyValueRef const& copyFrom) : key(a, copyFrom.key), value(a, copyFrom.value) {}
+	bool operator==(KeyValueRef const& r) const { return key == r.key && value == r.value; }
 
 	int expectedSize() const { return key.expectedSize() + value.expectedSize(); }
 
@@ -216,11 +216,11 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	bool readThroughEnd;
 
 	RangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
-	RangeResultRef(Arena& p, const RangeResultRef& toCopy)
+	RangeResultRef(Arena& p, RangeResultRef const& toCopy)
 	  : VectorRef<KeyValueRef>(p, toCopy), more(toCopy.more),
 	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
 	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
-	RangeResultRef(const VectorRef<KeyValueRef>& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
+	RangeResultRef(VectorRef<KeyValueRef> const& value, bool more, Optional<KeyRef> readThrough = Optional<KeyRef>())
 	  : VectorRef<KeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false), readThroughEnd(false) {
 	}
 	RangeResultRef(bool readToBegin, bool readThroughEnd)
@@ -263,26 +263,26 @@ struct GetRangeLimits {
 };
 
 struct KeyRangeRef {
-	const KeyRef begin, end;
+	KeyRef const begin, end;
 	KeyRangeRef() {}
-	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
+	KeyRangeRef(KeyRef const& begin, KeyRef const& end) : begin(begin), end(end) {
 		if (begin > end) {
 			throw inverted_range();
 		}
 	}
-	KeyRangeRef(Arena& a, const KeyRangeRef& copyFrom) : begin(a, copyFrom.begin), end(a, copyFrom.end) {}
-	bool operator==(const KeyRangeRef& r) const { return begin == r.begin && end == r.end; }
-	bool operator!=(const KeyRangeRef& r) const { return begin != r.begin || end != r.end; }
-	bool contains(const KeyRef& key) const { return begin <= key && key < end; }
-	bool contains(const KeyRangeRef& keys) const { return begin <= keys.begin && keys.end <= end; }
-	bool intersects(const KeyRangeRef& keys) const { return begin < keys.end && keys.begin < end; }
+	KeyRangeRef(Arena& a, KeyRangeRef const& copyFrom) : begin(a, copyFrom.begin), end(a, copyFrom.end) {}
+	bool operator==(KeyRangeRef const& r) const { return begin == r.begin && end == r.end; }
+	bool operator!=(KeyRangeRef const& r) const { return begin != r.begin || end != r.end; }
+	bool contains(KeyRef const& key) const { return begin <= key && key < end; }
+	bool contains(KeyRangeRef const& keys) const { return begin <= keys.begin && keys.end <= end; }
+	bool intersects(KeyRangeRef const& keys) const { return begin < keys.end && keys.begin < end; }
 	bool empty() const { return begin == end; }
 
-	Standalone<KeyRangeRef> withPrefix(const StringRef& prefix) const {
+	Standalone<KeyRangeRef> withPrefix(StringRef const& prefix) const {
 		return KeyRangeRef(begin.withPrefix(prefix), end.withPrefix(prefix));
 	}
 
-	const KeyRangeRef& operator=(const KeyRangeRef& rhs) {
+	KeyRangeRef const& operator=(KeyRangeRef const& rhs) {
 		const_cast<KeyRef&>(begin) = rhs.begin;
 		const_cast<KeyRef&>(end) = rhs.end;
 		return *this;
@@ -309,7 +309,7 @@ struct KeyRangeRef {
 	};
 };
 
-inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
+inline KeyRangeRef operator&(KeyRangeRef const& lhs, KeyRangeRef const& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
 	if (e < b)
 		return KeyRangeRef();

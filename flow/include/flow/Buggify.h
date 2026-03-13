@@ -38,7 +38,7 @@ inline double P_EXPENSIVE_VALIDATION{ 0.05 };
 	inline double P_##TYPE##_BUGGIFIED_SECTION_ACTIVATED{ 0.25 };                                                      \
 	inline double P_##TYPE##_BUGGIFIED_SECTION_FIRES{ 0.25 };                                                          \
 	inline double P_##TYPE##_ENABLED{ false };                                                                         \
-	inline std::unordered_map<const char*, bool> Type##_SBVars;                                                        \
+	inline std::unordered_map<char const*, bool> Type##_SBVars;                                                        \
 	inline bool is##Type##BuggifyEnabled() noexcept {                                                                  \
 		return P_##TYPE##_ENABLED;                                                                                     \
 	}                                                                                                                  \
@@ -51,13 +51,13 @@ inline double P_EXPENSIVE_VALIDATION{ 0.05 };
 	inline void clear##Type##BuggifySections() {                                                                       \
 		Type##_SBVars.clear();                                                                                         \
 	}                                                                                                                  \
-	inline bool get##Type##SBVar(const char* file, const int line, const char* combined) {                             \
+	inline bool get##Type##SBVar(char const* file, int const line, char const* combined) {                             \
 		if (Type##_SBVars.count(combined)) [[likely]] {                                                                \
 			return Type##_SBVars[combined];                                                                            \
 		}                                                                                                              \
                                                                                                                        \
-		const double rand = deterministicRandom()->random01();                                                         \
-		const bool activated = rand < P_##TYPE##_BUGGIFIED_SECTION_ACTIVATED;                                          \
+		double const rand = deterministicRandom()->random01();                                                         \
+		bool const activated = rand < P_##TYPE##_BUGGIFIED_SECTION_ACTIVATED;                                          \
 		Type##_SBVars[combined] = activated;                                                                           \
 		g_traceBatch.addBuggify(activated, line, file);                                                                \
 		if (g_network) [[likely]] {                                                                                    \
@@ -91,14 +91,14 @@ namespace SwiftBridging {
 
 inline std::map<std::pair<std::string, int>, bool> SwiftGeneralSBVar;
 
-inline bool getGeneralSBVar(const char* file, const int line) {
-	const auto paired = std::make_pair(std::string(file), line);
+inline bool getGeneralSBVar(char const* file, int const line) {
+	auto const paired = std::make_pair(std::string(file), line);
 	if (SwiftGeneralSBVar.count(paired)) [[likely]] {
 		return SwiftGeneralSBVar[paired];
 	}
 
-	const double rand = deterministicRandom()->random01();
-	const bool activated = rand < P_GENERAL_BUGGIFIED_SECTION_ACTIVATED;
+	double const rand = deterministicRandom()->random01();
+	bool const activated = rand < P_GENERAL_BUGGIFIED_SECTION_ACTIVATED;
 	SwiftGeneralSBVar[paired] = activated;
 	g_traceBatch.addBuggify(activated, line, file);
 	if (g_network) [[likely]] {
@@ -108,7 +108,7 @@ inline bool getGeneralSBVar(const char* file, const int line) {
 	return activated;
 }
 
-inline bool buggify(const char* _Nonnull filename, int line) {
+inline bool buggify(char const* _Nonnull filename, int line) {
 	// SEE: BUGGIFY_WITH_PROB and BUGGIFY macros above.
 	return isGeneralBuggifyEnabled() && getGeneralSBVar(filename, line) &&
 	       deterministicRandom()->random01() < P_GENERAL_BUGGIFIED_SECTION_FIRES;

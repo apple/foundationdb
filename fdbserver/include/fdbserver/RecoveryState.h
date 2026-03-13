@@ -62,8 +62,8 @@ enum RecoveryStatus {
 };
 
 // in Status.actor.cpp
-extern const char* names[];
-extern const char* descriptions[];
+extern char const* names[];
+extern char const* descriptions[];
 }; // namespace RecoveryStatus
 
 #endif

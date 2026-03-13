@@ -42,7 +42,7 @@ public:
 		sumSQ = T();
 	};
 
-	void addSample(const T& x) {
+	void addSample(T const& x) {
 		if (!N) {
 			minSample = maxSample = x;
 		} else {
@@ -66,8 +66,8 @@ public:
 	//	void addHistogram(const Histrogram& h2);
 
 	T mean() const { return sum * (1.0 / N); } // exact
-	const T& min() const { return minSample; }
-	const T& max() const { return maxSample; }
+	T const& min() const { return minSample; }
+	T const& max() const { return maxSample; }
 	T stdDev() const {
 		if (!N)
 			return T();

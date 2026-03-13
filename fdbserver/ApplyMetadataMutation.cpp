@@ -55,17 +55,17 @@ namespace {
 class ApplyMetadataMutationsImpl {
 
 public:
-	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
-	                           const UID& dbgid_,
+	ApplyMetadataMutationsImpl(SpanContext const& spanContext_,
+	                           UID const& dbgid_,
 	                           Arena& arena_,
-	                           const VectorRef<MutationRef>& mutations_,
+	                           VectorRef<MutationRef> const& mutations_,
 	                           IKeyValueStore* txnStateStore_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
 	    confChange(dummyConfChange), epoch(Optional<LogEpoch>()) {}
 
-	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
+	ApplyMetadataMutationsImpl(SpanContext const& spanContext_,
 	                           Arena& arena_,
-	                           const VectorRef<MutationRef>& mutations_,
+	                           VectorRef<MutationRef> const& mutations_,
 	                           ProxyCommitData& proxyCommitData_,
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
@@ -90,9 +90,9 @@ public:
 		ASSERT(toCommit == nullptr || epoch.present());
 	}
 
-	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
+	ApplyMetadataMutationsImpl(SpanContext const& spanContext_,
 	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_)
+	                           VectorRef<MutationRef> const& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
 	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
 	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
@@ -103,13 +103,13 @@ public:
 private:
 	// The following variables are incoming parameters
 
-	const SpanContext& spanContext;
+	SpanContext const& spanContext;
 
-	const UID& dbgid;
+	UID const& dbgid;
 
 	Arena& arena;
 
-	const VectorRef<MutationRef>& mutations;
+	VectorRef<MutationRef> const& mutations;
 
 	// Transaction KV store
 	IKeyValueStore* txnStateStore;
@@ -168,9 +168,9 @@ private:
 	bool dummyConfChange = false;
 
 private:
-	void writeMutation(const MutationRef& m) { toCommit->writeTypedMessage(m); }
+	void writeMutation(MutationRef const& m) { toCommit->writeTypedMessage(m); }
 
-	void checkSetRangeLockPrefix(const MutationRef& m) {
+	void checkSetRangeLockPrefix(MutationRef const& m) {
 		if (!m.param1.startsWith(rangeLockPrefix)) {
 			return;
 		} else if (rangeLock == nullptr) {
@@ -225,14 +225,14 @@ private:
 		info.src_info.reserve(src.size());
 		info.dest_info.reserve(dest.size());
 
-		for (const auto& id : src) {
+		for (auto const& id : src) {
 			auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
 			ASSERT(!storageInfo->interf.isTss());
 			ASSERT(storageInfo->tag != invalidTag);
 			info.tags.push_back(storageInfo->tag);
 			info.src_info.push_back(storageInfo);
 		}
-		for (const auto& id : dest) {
+		for (auto const& id : dest) {
 			auto storageInfo = getStorageInfo(id, storageCache, txnStateStore);
 			ASSERT(!storageInfo->interf.isTss());
 			ASSERT(storageInfo->tag != invalidTag);
@@ -602,7 +602,7 @@ private:
 		}
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-			for (const auto& ssID : checkpoint.src) {
+			for (auto const& ssID : checkpoint.src) {
 				Optional<Value> tagValue = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
 				if (!tagValue.present()) {
 					TraceEvent(SevWarn, "CheckpointServerTagNotFound", dbgid)
@@ -610,7 +610,7 @@ private:
 					    .detail("Checkpoint", checkpoint.toString());
 					continue;
 				}
-				const Tag tag = decodeServerTagValue(tagValue.get());
+				Tag const tag = decodeServerTagValue(tagValue.get());
 				MutationRef privatized = m;
 				privatized.clearChecksumAndAccumulativeIndex();
 				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
@@ -1175,7 +1175,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
-                            const VectorRef<MutationRef>& mutations,
+                            VectorRef<MutationRef> const& mutations,
                             LogPushData* toCommit,
                             bool& confChange,
                             Version version,
@@ -1198,19 +1198,19 @@ void applyMetadataMutations(SpanContext const& spanContext,
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations) {
+                            VectorRef<MutationRef> const& mutations) {
 	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
 }
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            const UID& dbgid,
+                            UID const& dbgid,
                             Arena& arena,
-                            const VectorRef<MutationRef>& mutations,
+                            VectorRef<MutationRef> const& mutations,
                             IKeyValueStore* txnStateStore) {
 	ApplyMetadataMutationsImpl(spanContext, dbgid, arena, mutations, txnStateStore).apply();
 }
 
-bool containsMetadataMutation(const VectorRef<MutationRef>& mutations) {
+bool containsMetadataMutation(VectorRef<MutationRef> const& mutations) {
 	for (auto const& m : mutations) {
 		if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
 			if (m.param1.startsWith(globalKeysPrefix) || (m.param1.startsWith(configKeysPrefix)) ||

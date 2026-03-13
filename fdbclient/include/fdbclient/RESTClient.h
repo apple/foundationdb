@@ -39,9 +39,9 @@
 class RESTClient : public ReferenceCounted<RESTClient> {
 public:
 	struct Stats {
-		explicit Stats(const std::string& hService)
+		explicit Stats(std::string const& hService)
 		  : host_service(hService), requests_successful(0), requests_failed(0), bytes_sent(0) {}
-		Stats operator-(const Stats& rhs);
+		Stats operator-(Stats const& rhs);
 		void clear() { requests_failed = requests_successful = bytes_sent = 0; }
 		json_spirit::mObject getJSON();
 
@@ -59,7 +59,7 @@ public:
 	RESTClient();
 	explicit RESTClient(std::unordered_map<std::string, int>& params);
 
-	void setKnobs(const std::unordered_map<std::string, int>& knobSettings);
+	void setKnobs(std::unordered_map<std::string, int> const& knobSettings);
 	std::unordered_map<std::string, int> getKnobs() const;
 
 	// Supports common REST APIs.
@@ -67,29 +67,29 @@ public:
 	// RESTConnectionPool is used to leverage cached connection if any for 'host:service' pair. API then leverage
 	// HTTP::doRequest to accomplish the specified operation
 
-	Future<Reference<HTTP::IncomingResponse>> doGet(const std::string& fullUrl,
+	Future<Reference<HTTP::IncomingResponse>> doGet(std::string const& fullUrl,
 	                                                Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
-	Future<Reference<HTTP::IncomingResponse>> doHead(const std::string& fullUrl,
+	Future<Reference<HTTP::IncomingResponse>> doHead(std::string const& fullUrl,
 	                                                 Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
-	Future<Reference<HTTP::IncomingResponse>> doDelete(const std::string& fullUrl,
+	Future<Reference<HTTP::IncomingResponse>> doDelete(std::string const& fullUrl,
 	                                                   Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
-	Future<Reference<HTTP::IncomingResponse>> doTrace(const std::string& fullUrl,
+	Future<Reference<HTTP::IncomingResponse>> doTrace(std::string const& fullUrl,
 	                                                  Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
-	Future<Reference<HTTP::IncomingResponse>> doPut(const std::string& fullUrl,
-	                                                const std::string& requestBody,
+	Future<Reference<HTTP::IncomingResponse>> doPut(std::string const& fullUrl,
+	                                                std::string const& requestBody,
 	                                                Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
-	Future<Reference<HTTP::IncomingResponse>> doPost(const std::string& fullUrl,
-	                                                 const std::string& requestBody,
+	Future<Reference<HTTP::IncomingResponse>> doPost(std::string const& fullUrl,
+	                                                 std::string const& requestBody,
 	                                                 Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
 
-	static std::string getStatsKey(const std::string& host, const std::string& service) { return host + ":" + service; }
+	static std::string getStatsKey(std::string const& host, std::string const& service) { return host + ":" + service; }
 
 private:
-	Future<Reference<HTTP::IncomingResponse>> doGetHeadDeleteOrTrace(const std::string& verb,
+	Future<Reference<HTTP::IncomingResponse>> doGetHeadDeleteOrTrace(std::string const& verb,
 	                                                                 Optional<HTTP::Headers> optHeaders,
 	                                                                 RESTUrl& url,
 	                                                                 std::set<unsigned int> successCodes);
-	Future<Reference<HTTP::IncomingResponse>> doPutOrPost(const std::string& verb,
+	Future<Reference<HTTP::IncomingResponse>> doPutOrPost(std::string const& verb,
 	                                                      Optional<HTTP::Headers> headers,
 	                                                      RESTUrl& url,
 	                                                      std::set<unsigned int> successCodes);

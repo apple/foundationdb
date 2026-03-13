@@ -108,7 +108,7 @@ int SimExternalConnection::write(SendBuffer const* buffer, int limit) {
 	ASSERT(!err);
 	ASSERT(bytesSent > 0);
 	threadSleep(0.1);
-	const auto bytesReadable = socket.available();
+	auto const bytesReadable = socket.available();
 	std::vector<uint8_t> tempReadBuffer(bytesReadable);
 	for (int index = 0; index < bytesReadable;) {
 		index += socket.read_some(mutable_buffers_1(&tempReadBuffer[index], bytesReadable), err);
@@ -140,8 +140,8 @@ UID SimExternalConnection::getDebugID() const {
 	return dbgid;
 }
 
-std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
-                                                                              const std::string& service,
+std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(std::string const& host,
+                                                                              std::string const& service,
                                                                               DNSCache* dnsCache) {
 	ip::tcp::resolver resolver(ios);
 	try {
@@ -178,8 +178,8 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::str
 	return SimExternalConnection::resolveTCPEndpointBlocking(host, service, dnsCache);
 }
 
-Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
-                                                                              const std::string& service,
+Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(std::string const& host,
+                                                                              std::string const& service,
                                                                               DNSCache* dnsCache) {
 	return resolveTCPEndpointImpl(host, service, dnsCache);
 }
@@ -212,7 +212,7 @@ static void testEchoServer() {
 }
 
 TEST_CASE("fdbrpc/SimExternalClient") {
-	state const size_t maxDataLength = 10000;
+	state size_t const maxDataLength = 10000;
 	state std::thread serverThread([] { return testEchoServer(); });
 	state UnsentPacketQueue packetQueue;
 	state Reference<IConnection> externalConn;

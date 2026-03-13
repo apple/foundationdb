@@ -6,7 +6,7 @@ FILE* out = nullptr;
 FILE* in = nullptr;
 void loop_forever() {
 	// Try to convince the optimizer not to optimize away this loop
-	static volatile uint64_t x = 0;
+	static uint64_t volatile x = 0;
 	for (;;) {
 		++x;
 	}

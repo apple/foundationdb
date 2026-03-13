@@ -193,7 +193,7 @@ and these came close:
  hashlittle() has to dance around fitting the key bytes into registers.
 --------------------------------------------------------------------
 */
-uint32_t hashword(const uint32_t* k, /* the key, an array of uint32_t values */
+uint32_t hashword(uint32_t const* k, /* the key, an array of uint32_t values */
                   size_t length, /* the length of the key, in uint32_ts */
                   uint32_t initval) /* the previous hash, or an arbitrary value */
 {
@@ -237,7 +237,7 @@ both be initialized with seeds.  If you pass in (*pb)==0, the output
 (*pc) will be the same as the return value from hashword().
 --------------------------------------------------------------------
 */
-void hashword2(const uint32_t* k, /* the key, an array of uint32_t values */
+void hashword2(uint32_t const* k, /* the key, an array of uint32_t values */
                size_t length, /* the length of the key, in uint32_ts */
                uint32_t* pc, /* IN: seed OUT: primary hash value */
                uint32_t* pb) /* IN: more seed OUT: secondary hash value */
@@ -303,10 +303,10 @@ acceptable.  Do NOT use for cryptographic purposes.
 -------------------------------------------------------------------------------
 */
 
-uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
+uint32_t hashlittle(void const* key, size_t length, uint32_t initval) {
 	uint32_t a, b, c; /* internal state */
 	union {
-		const void* ptr;
+		void const* ptr;
 		size_t i;
 	} u; /* needed for Mac Powerbook G4 */
 
@@ -315,9 +315,9 @@ uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
 
 	u.ptr = key;
 	if (HASH_LITTLE_ENDIAN && ((u.i & 0x3) == 0)) {
-		const uint32_t* k = (const uint32_t*)key; /* read 32-bit chunks */
+		uint32_t const* k = (uint32_t const*)key; /* read 32-bit chunks */
 #ifdef VALGRIND
-		const uint8_t* k8;
+		uint8_t const* k8;
 #endif
 
 		/*------ all but last block: aligned reads and affect 32 bits of (a,b,c) */
@@ -397,7 +397,7 @@ uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
 
 #else /* make valgrind happy */
 
-		k8 = (const uint8_t*)k;
+		k8 = (uint8_t const*)k;
 		switch (length) {
 		case 12:
 			c += k[2];
@@ -437,8 +437,8 @@ uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
 #endif /* !valgrind */
 
 	} else if (HASH_LITTLE_ENDIAN && ((u.i & 0x1) == 0)) {
-		const uint16_t* k = (const uint16_t*)key; /* read 16-bit chunks */
-		const uint8_t* k8;
+		uint16_t const* k = (uint16_t const*)key; /* read 16-bit chunks */
+		uint8_t const* k8;
 
 		/*--------------- all but last block: aligned reads and different mixing */
 		while (length > 12) {
@@ -451,7 +451,7 @@ uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
 		}
 
 		/*----------------------------- handle the last (probably partial) block */
-		k8 = (const uint8_t*)k;
+		k8 = (uint8_t const*)k;
 		switch (length) {
 		case 12:
 			c += k[4] + (((uint32_t)k[5]) << 16);
@@ -495,7 +495,7 @@ uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
 		}
 
 	} else { /* need to read the key one byte at a time */
-		const uint8_t* k = (const uint8_t*)key;
+		uint8_t const* k = (uint8_t const*)key;
 
 		/*--------------- all but the last block: affect some 32 bits of (a,b,c) */
 		while (length > 12) {
@@ -563,14 +563,14 @@ uint32_t hashlittle(const void* key, size_t length, uint32_t initval) {
  * the key.  *pc is better mixed than *pb, so use *pc first.  If you want
  * a 64-bit value do something like "*pc + (((uint64_t)*pb)<<32)".
  */
-void hashlittle2(const void* key, /* the key to hash */
+void hashlittle2(void const* key, /* the key to hash */
                  size_t length, /* length of the key */
                  uint32_t* pc, /* IN: primary initval, OUT: primary hash */
                  uint32_t* pb) /* IN: secondary initval, OUT: secondary hash */
 {
 	uint32_t a, b, c; /* internal state */
 	union {
-		const void* ptr;
+		void const* ptr;
 		size_t i;
 	} u; /* needed for Mac Powerbook G4 */
 
@@ -580,9 +580,9 @@ void hashlittle2(const void* key, /* the key to hash */
 
 	u.ptr = key;
 	if (HASH_LITTLE_ENDIAN && ((u.i & 0x3) == 0)) {
-		const uint32_t* k = (const uint32_t*)key; /* read 32-bit chunks */
+		uint32_t const* k = (uint32_t const*)key; /* read 32-bit chunks */
 #if defined(VALGRIND) || defined(ADDRESS_SANITIZER)
-		const uint8_t* k8;
+		uint8_t const* k8;
 #endif
 
 		/*------ all but last block: aligned reads and affect 32 bits of (a,b,c) */
@@ -664,7 +664,7 @@ void hashlittle2(const void* key, /* the key to hash */
 
 #else /* make valgrind happy */
 
-		k8 = (const uint8_t*)k;
+		k8 = (uint8_t const*)k;
 		switch (length) {
 		case 12:
 			c += k[2];
@@ -706,8 +706,8 @@ void hashlittle2(const void* key, /* the key to hash */
 #endif /* !valgrind */
 
 	} else if (HASH_LITTLE_ENDIAN && ((u.i & 0x1) == 0)) {
-		const uint16_t* k = (const uint16_t*)key; /* read 16-bit chunks */
-		const uint8_t* k8;
+		uint16_t const* k = (uint16_t const*)key; /* read 16-bit chunks */
+		uint8_t const* k8;
 
 		/*--------------- all but last block: aligned reads and different mixing */
 		while (length > 12) {
@@ -720,7 +720,7 @@ void hashlittle2(const void* key, /* the key to hash */
 		}
 
 		/*----------------------------- handle the last (probably partial) block */
-		k8 = (const uint8_t*)k;
+		k8 = (uint8_t const*)k;
 		switch (length) {
 		case 12:
 			c += k[4] + (((uint32_t)k[5]) << 16);
@@ -766,7 +766,7 @@ void hashlittle2(const void* key, /* the key to hash */
 		}
 
 	} else { /* need to read the key one byte at a time */
-		const uint8_t* k = (const uint8_t*)key;
+		uint8_t const* k = (uint8_t const*)key;
 
 		/*--------------- all but the last block: affect some 32 bits of (a,b,c) */
 		while (length > 12) {
@@ -833,10 +833,10 @@ void hashlittle2(const void* key, /* the key to hash */
  * from hashlittle() on all machines.  hashbig() takes advantage of
  * big-endian byte ordering.
  */
-uint32_t hashbig(const void* key, size_t length, uint32_t initval) {
+uint32_t hashbig(void const* key, size_t length, uint32_t initval) {
 	uint32_t a, b, c;
 	union {
-		const void* ptr;
+		void const* ptr;
 		size_t i;
 	} u; /* to cast key to (size_t) happily */
 
@@ -845,9 +845,9 @@ uint32_t hashbig(const void* key, size_t length, uint32_t initval) {
 
 	u.ptr = key;
 	if (HASH_BIG_ENDIAN && ((u.i & 0x3) == 0)) {
-		const uint32_t* k = (const uint32_t*)key; /* read 32-bit chunks */
+		uint32_t const* k = (uint32_t const*)key; /* read 32-bit chunks */
 #ifdef VALGRIND
-		const uint8_t* k8;
+		uint8_t const* k8;
 #endif
 
 		/*------ all but last block: aligned reads and affect 32 bits of (a,b,c) */
@@ -927,7 +927,7 @@ uint32_t hashbig(const void* key, size_t length, uint32_t initval) {
 
 #else /* make valgrind happy */
 
-		k8 = (const uint8_t*)k;
+		k8 = (uint8_t const*)k;
 		switch (length) /* all the case statements fall through */
 		{
 		case 12:
@@ -968,7 +968,7 @@ uint32_t hashbig(const void* key, size_t length, uint32_t initval) {
 #endif /* !VALGRIND */
 
 	} else { /* need to read the key one byte at a time */
-		const uint8_t* k = (const uint8_t*)key;
+		uint8_t const* k = (uint8_t const*)key;
 
 		/*--------------- all but the last block: affect some 32 bits of (a,b,c) */
 		while (length > 12) {
@@ -1135,9 +1135,9 @@ void driver3() {
 
 	printf("Endianness.  These lines should all be the same (for values filled in):\n");
 	printf("%.8x                            %.8x                            %.8x\n",
-	       hashword((const uint32_t*)q, (sizeof(q) - 1) / 4, 13),
-	       hashword((const uint32_t*)q, (sizeof(q) - 5) / 4, 13),
-	       hashword((const uint32_t*)q, (sizeof(q) - 9) / 4, 13));
+	       hashword((uint32_t const*)q, (sizeof(q) - 1) / 4, 13),
+	       hashword((uint32_t const*)q, (sizeof(q) - 5) / 4, 13),
+	       hashword((uint32_t const*)q, (sizeof(q) - 9) / 4, 13));
 	p = q;
 	printf("%.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x %.8x\n",
 	       hashlittle(p, sizeof(q) - 1, 13),

@@ -287,11 +287,11 @@ ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
 		std::transform(recr.tLogs.begin(),
 		               recr.tLogs.end(),
 		               std::back_inserter(exclusionWorkerIds),
-		               [](const WorkerInterface& in) { return in.id(); });
+		               [](WorkerInterface const& in) { return in.id(); });
 		std::transform(recr.satelliteTLogs.begin(),
 		               recr.satelliteTLogs.end(),
 		               std::back_inserter(exclusionWorkerIds),
-		               [](const WorkerInterface& in) { return in.id(); });
+		               [](WorkerInterface const& in) { return in.id(); });
 
 		RecruitRemoteFromConfigurationRequest remoteRecruitReq(
 		    self->configuration,
@@ -672,10 +672,10 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 		idsTags.emplace_back(deterministicRandom()->randomUniqueID(), Tag(tagLocalityLogRouter, i));
 	}
 
-	const Version startVersion = self->logSystem->getBackupStartVersion();
+	Version const startVersion = self->logSystem->getBackupStartVersion();
 	state int i = 0;
 	for (; i < logRouterTags; i++) {
-		const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
+		auto const& worker = self->backupWorkers[i % self->backupWorkers.size()];
 		InitializeBackupRequest req(idsTags[i].first);
 		req.recruitedEpoch = epoch;
 		req.backupEpoch = epoch;
@@ -701,8 +701,8 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 
 	std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> toRecruit =
 	    backupProgress->getUnfinishedBackup();
-	for (const auto& [epochVersionTags, tagVersions] : toRecruit) {
-		const Version oldEpochEnd = std::get<1>(epochVersionTags);
+	for (auto const& [epochVersionTags, tagVersions] : toRecruit) {
+		Version const oldEpochEnd = std::get<1>(epochVersionTags);
 		if (!minVersion.present() || minVersion.get() + 1 >= oldEpochEnd) {
 			TraceEvent("SkipBackupRecruitment", self->dbgid)
 			    .detail("MinVersion", minVersion.present() ? minVersion.get() : -1)
@@ -711,8 +711,8 @@ ACTOR static Future<Void> recruitBackupWorkers(Reference<ClusterRecoveryData> se
 			    .detail("OldEpochEnd", oldEpochEnd);
 			continue;
 		}
-		for (const auto& [tag, version] : tagVersions) {
-			const auto& worker = self->backupWorkers[i % self->backupWorkers.size()];
+		for (auto const& [tag, version] : tagVersions) {
+			auto const& worker = self->backupWorkers[i % self->backupWorkers.size()];
 			i++;
 			InitializeBackupRequest req(deterministicRandom()->randomUniqueID());
 			req.recruitedEpoch = epoch;
@@ -944,7 +944,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	// Validate parameters to prevent overflow and ensure exponential backoff works correctly
 	// With growth factor <= 10 and unfinishedRecoveries <= 100, max scaling factor is 10^100
-	const bool validParameters = unfinishedRecoveries >= 1 && SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT > 0 &&
+	bool const validParameters = unfinishedRecoveries >= 1 && SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT > 0 &&
 	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT > 0 &&
 	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR > 1.0 &&
 	                             SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR <= 10.0;
@@ -961,7 +961,7 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 		return Never();
 	}
 
-	const bool tooManyUnfinishedRecoveries =
+	bool const tooManyUnfinishedRecoveries =
 	    unfinishedRecoveries >= SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_UNFINISHED_RECOVERIES;
 	if (tooManyUnfinishedRecoveries) {
 		TraceEvent(SevWarnAlways, "InitializingTxnSystemTimeoutTooMany")
@@ -976,8 +976,8 @@ ACTOR Future<Void> monitorInitializingTxnSystem(int unfinishedRecoveries) {
 	}
 
 	// Calculate timeout with exponential backoff
-	const double scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries);
-	const double scaledTimeout = std::min(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT * scalingFactor,
+	double const scalingFactor = std::pow(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_GROWTH_FACTOR, unfinishedRecoveries);
+	double const scaledTimeout = std::min(SERVER_KNOBS->CC_RECOVERY_INIT_REQ_TIMEOUT * scalingFactor,
 	                                      SERVER_KNOBS->CC_RECOVERY_INIT_REQ_MAX_TIMEOUT);
 
 	TraceEvent("InitializingTxnSystemTimeout")
@@ -1842,7 +1842,7 @@ ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData>
 	return Void();
 }
 
-bool isNormalClusterRecoveryError(const Error& error) {
+bool isNormalClusterRecoveryError(Error const& error) {
 	return normalClusterRecoveryErrors().contains(error.code());
 }
 

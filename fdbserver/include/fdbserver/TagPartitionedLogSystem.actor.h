@@ -47,7 +47,7 @@ struct OldLogData {
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
-	explicit OldLogData(const T& conf)
+	explicit OldLogData(T const& conf)
 	  : logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochBegin(conf.epochBegin), epochEnd(conf.epochEnd),
 	    recoverAt(conf.recoverAt), pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch) {
 		tLogs.resize(conf.tLogs.size());
@@ -89,7 +89,7 @@ struct DurableVersionInfo {
 };
 
 struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
-	const UID dbgid;
+	UID const dbgid;
 	LogSystemType logSystemType;
 	std::vector<Reference<LogSet>> tLogs; // LogSets in different locations: primary, satellite, or remote
 	int expectedLogSets;
@@ -99,7 +99,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	int repopulateRegionAntiQuorum;
 	bool stopped;
 	std::set<int8_t> pseudoLocalities; // Represent special localities that will be mapped to tagLocalityLogRouter
-	const LogEpoch epoch;
+	LogEpoch const epoch;
 	LogEpoch oldestBackupEpoch;
 
 	// new members
@@ -200,7 +200,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	// Checks older TLog generations and remove no longer needed generations from the log system.
 	void purgeOldRecoveredGenerationsCoreState(DBCoreState&) final;
-	void purgeOldRecoveredGenerationsInMemory(const DBCoreState&) final;
+	void purgeOldRecoveredGenerationsInMemory(DBCoreState const&) final;
 
 	Future<Void> onCoreStateChanged() const final;
 
@@ -217,7 +217,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                                       NetworkAddress addr,
 	                                                       Future<TLogCommitReply> in);
 
-	Future<Version> push(const ILogSystem::PushVersionSet& versionSet,
+	Future<Version> push(ILogSystem::PushVersionSet const& versionSet,
 	                     LogPushData& data,
 	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
@@ -227,7 +227,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	void resetBestServerIfNotLocked(int bestSet,
 	                                int& bestServer,
 	                                Optional<Version> end,
-	                                const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds);
+	                                Optional<std::map<uint8_t, std::vector<uint16_t>>> const& knownLockedTLogIds);
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
@@ -270,7 +270,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    Tag tag,
 	    bool useSatellite,
 	    Optional<Version> end,
-	    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds) final;
+	    Optional<std::map<uint8_t, std::vector<uint16_t>>> const& knownStoppedTLogIds) final;
 
 	Version getKnownCommittedVersion() final;
 
@@ -350,9 +350,9 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	inline Reference<LogSet> getEpochLogSet(LogEpoch epoch) const;
 
-	void setBackupWorkers(const std::vector<InitializeBackupReply>& replies) final;
+	void setBackupWorkers(std::vector<InitializeBackupReply> const& replies) final;
 
-	bool removeBackupWorker(const BackupWorkerDoneRequest& req) final;
+	bool removeBackupWorker(BackupWorkerDoneRequest const& req) final;
 
 	LogEpoch getOldestBackupEpoch() const final;
 
@@ -389,9 +389,9 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                               Reference<IReplicationPolicy> tLogPolicy,
 	                                               bool forRemote);
 
-	static Version getMaxLocalStartVersion(const std::vector<Reference<LogSet>>& tLogs);
+	static Version getMaxLocalStartVersion(std::vector<Reference<LogSet>> const& tLogs);
 
-	static std::vector<Tag> getLocalTags(int8_t locality, const std::vector<Tag>& allTags);
+	static std::vector<Tag> getLocalTags(int8_t locality, std::vector<Tag> const& allTags);
 
 	ACTOR static Future<Void> newRemoteEpoch(TagPartitionedLogSystem* self,
 	                                         Reference<TagPartitionedLogSystem> oldLogSystem,
@@ -433,8 +433,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 // Recovery version calculation for version vector unicast
 Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
-    const std::vector<Reference<LogSet>>& logServers,
-    const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
+    std::vector<Reference<LogSet>> const& logServers,
+    std::tuple<int, std::vector<TLogLockResult>, bool> const& logGroupResults,
     Version minDV);
 
 template <class T>

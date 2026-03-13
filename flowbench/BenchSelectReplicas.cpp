@@ -47,7 +47,7 @@ static void bench_select_replicas(int repCount, benchmark::State& state) {
 	    createTestLocalityMap(indexes, dcTotal, szTotal, rackTotal, slotTotal, independentItems, independentTotal);
 	LocalityGroup* fromServersGroup = (LocalityGroup*)fromServersSet.getPtr();
 
-	const Reference<LocalitySet> alreadyServersSet = Reference<LocalitySet>(new LocalityGroup());
+	Reference<LocalitySet> const alreadyServersSet = Reference<LocalitySet>(new LocalityGroup());
 
 	alreadyServersSet->deep_copy(*fromServersGroup);
 	std::vector<LocalityEntry> localityGroupEntries;

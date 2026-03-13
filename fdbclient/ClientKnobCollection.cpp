@@ -54,7 +54,7 @@ bool ClientKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef 
 	// Although today there are no knobs that share their name between flow and client, this was done to be
 	// consistent with ServerKnobCollection, see:
 	// https://github.com/apple/foundationdb/blob/596f4cba6dcac00a14080c57d5ea037272240a08/fdbclient/ServerKnobCollection.cpp#L51-L57
-	const bool setFlowKnob = knobValue.visitSetKnob(knobName, flowKnobs);
-	const bool setClientKnob = knobValue.visitSetKnob(knobName, clientKnobs);
+	bool const setFlowKnob = knobValue.visitSetKnob(knobName, flowKnobs);
+	bool const setClientKnob = knobValue.visitSetKnob(knobName, clientKnobs);
 	return setFlowKnob || setClientKnob;
 }

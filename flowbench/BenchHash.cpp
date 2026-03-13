@@ -33,10 +33,10 @@ enum class HashType {
 };
 
 template <HashType hashType>
-inline void hash(const KeyRef& key, size_t length) {}
+inline void hash(KeyRef const& key, size_t length) {}
 
 template <>
-inline void hash<HashType::HashLittle2>(const KeyRef& key, size_t length) {
+inline void hash<HashType::HashLittle2>(KeyRef const& key, size_t length) {
 	uint32_t part1;
 	uint32_t part2;
 	hashlittle2(key.begin(), length, &part1, &part2);
@@ -45,12 +45,12 @@ inline void hash<HashType::HashLittle2>(const KeyRef& key, size_t length) {
 }
 
 template <>
-inline void hash<HashType::CRC32C>(const KeyRef& key, size_t length) {
+inline void hash<HashType::CRC32C>(KeyRef const& key, size_t length) {
 	benchmark::DoNotOptimize(crc32c_append(0xfdbeefdb, key.begin(), length));
 }
 
 template <>
-inline void hash<HashType::XXHash3>(const KeyRef& key, size_t length) {
+inline void hash<HashType::XXHash3>(KeyRef const& key, size_t length) {
 	benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
 }
 

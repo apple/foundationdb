@@ -26,7 +26,7 @@
 Value uInt64ToValue(uint64_t v) {
 	return StringRef(format("%016llx", v));
 }
-uint64_t valueToUInt64(const StringRef& v) {
+uint64_t valueToUInt64(StringRef const& v) {
 	uint64_t x = 0;
 	sscanf(v.toString().c_str(), "%" SCNx64, &x);
 	return x;

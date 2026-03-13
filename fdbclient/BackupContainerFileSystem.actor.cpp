@@ -111,7 +111,7 @@ public:
 		std::map<std::string, KeyRange> fileKeyRanges;
 		JSONDoc ranges = doc.subDoc("keyRanges"); // Create an empty doc if not existed
 		for (auto i : ranges.obj()) {
-			const std::string& filename = i.first;
+			std::string const& filename = i.first;
 			JSONDoc fields(i.second);
 			std::string begin, end;
 			if (fields.tryGet("beginKey", begin) && fields.tryGet("endKey", end)) {
@@ -135,7 +135,7 @@ public:
 
 	// Find what should be the filename of a path by finding whatever is after the last forward or backward slash, or
 	// failing to find those, the whole string.
-	static std::string fileNameOnly(const std::string& path) {
+	static std::string fileNameOnly(std::string const& path) {
 		// Find the last forward slash position, defaulting to 0 if not found
 		int pos = path.find_last_of('/');
 		if (pos == std::string::npos) {
@@ -149,7 +149,7 @@ public:
 		return path.substr(pos + 1);
 	}
 
-	static bool pathToRangeFile(RangeFile& out, const std::string& path, int64_t size) {
+	static bool pathToRangeFile(RangeFile& out, std::string const& path, int64_t size) {
 		std::string name = fileNameOnly(path);
 		RangeFile f;
 		f.fileName = path;
@@ -185,7 +185,7 @@ public:
 			ASSERT(!fileNames.empty() && fileNames.size() == beginEndKeys.size());
 
 			// Validate each filename, update version range
-			for (const auto& f : fileNames) {
+			for (auto const& f : fileNames) {
 				if (pathToRangeFile(rf, f, 0)) {
 					fileArray.push_back(f);
 					if (rf.version < minVer)
@@ -214,7 +214,7 @@ public:
 
 			// Include the backup ranges
 			json_spirit::mArray rangesArray;
-			for (const auto& range : beginEndKeys) {
+			for (auto const& range : beginEndKeys) {
 				json_spirit::mObject rangeObj;
 				rangeObj["begin"] = range.first.toString();
 				rangeObj["end"] = range.second.toString();
@@ -243,7 +243,7 @@ public:
 			std::vector<KeyspaceSnapshotFile> existingSnapshots = wait(bc->listKeyspaceSnapshots());
 			bool hasRangefileSnapshot = false;
 
-			for (const auto& snapshot : existingSnapshots) {
+			for (auto const& snapshot : existingSnapshots) {
 				if (snapshot.fileName == baseFileName || snapshot.fileName == baseFileName + ",range") {
 					hasRangefileSnapshot = true;
 					break;
@@ -262,7 +262,7 @@ public:
 			std::vector<KeyspaceSnapshotFile> existingSnapshots = wait(bc->listKeyspaceSnapshots());
 			bool hasBulkDumpSnapshot = false;
 
-			for (const auto& snapshot : existingSnapshots) {
+			for (auto const& snapshot : existingSnapshots) {
 				if (snapshot.fileName == baseFileName + ",bulk") {
 					hasBulkDumpSnapshot = true;
 					break;
@@ -299,7 +299,7 @@ public:
 		return BackupFileList({ fRanges.get(), std::move(logs), fSnapshots.get() });
 	}
 
-	static Version resolveRelativeVersion(Optional<Version> max, Version v, const char* name, Error e) {
+	static Version resolveRelativeVersion(Optional<Version> max, Version v, char const* name, Error e) {
 		if (v == invalidVersion) {
 			TraceEvent(SevError, "BackupExpireInvalidVersion").detail(name, v);
 			throw e;
@@ -319,8 +319,8 @@ public:
 	// nullptr, then it will be populated with [begin, end] -> tags, where next
 	// pair's begin <= previous pair's end + 1. On return, the last pair's end
 	// version (inclusive) gives the continuous range from begin.
-	static bool isContinuous(const std::vector<LogFile>& files,
-	                         const std::vector<int>& indices,
+	static bool isContinuous(std::vector<LogFile> const& files,
+	                         std::vector<int> const& indices,
 	                         Version begin,
 	                         Version end,
 	                         std::map<std::pair<Version, Version>, int>* tags) {
@@ -330,7 +330,7 @@ public:
 
 		ASSERT(tags == nullptr || tags->empty());
 		for (int idx : indices) {
-			const LogFile& file = files[idx];
+			LogFile const& file = files[idx];
 			if (lastEnd == invalidVersion) {
 				if (file.beginVersion > begin) {
 					// the first version of the first file must be smaller or equal to the desired beginVersion
@@ -369,7 +369,7 @@ public:
 
 	// Returns the end version such that [begin, end] is continuous.
 	// "logs" should be already sorted.
-	static Version getPartitionedLogsContinuousEndVersion(const std::vector<LogFile>& logs, Version begin) {
+	static Version getPartitionedLogsContinuousEndVersion(std::vector<LogFile> const& logs, Version begin) {
 		Version end = 0;
 
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
@@ -402,7 +402,7 @@ public:
 
 		// for each range in tags, check all partitions from 1 are continuous
 		Version lastEnd = begin;
-		for (const auto& [beginEnd, count] : tags) {
+		for (auto const& [beginEnd, count] : tags) {
 			Version tagEnd = beginEnd.second; // This range's minimum continuous partition version
 			for (int i = 1; i < count; i++) {
 				std::map<std::pair<Version, Version>, int> rangeTags;
@@ -428,9 +428,9 @@ public:
 	// Analyze partitioned logs and set contiguousLogEnd for "desc" if larger
 	// than the "scanBegin" version.
 	static void updatePartitionedLogsContinuousEnd(BackupDescription* desc,
-	                                               const std::vector<LogFile>& logs,
-	                                               const Version scanBegin,
-	                                               const Version scanEnd) {
+	                                               std::vector<LogFile> const& logs,
+	                                               Version const scanBegin,
+	                                               Version const scanEnd) {
 		if (logs.empty())
 			return;
 
@@ -441,7 +441,7 @@ public:
 		    .detail("ScanEnd", scanEnd)
 		    .detail("Begin", begin)
 		    .detail("ContiguousLogEnd", desc->contiguousLogEnd.get());
-		for (const auto& file : logs) {
+		for (auto const& file : logs) {
 			if (file.beginVersion > begin) {
 				if (scanBegin > 0)
 					return;
@@ -465,7 +465,7 @@ public:
 	// Computes the continuous end version for non-partitioned mutation logs up to
 	// the "targetVersion". If "outLogs" is not nullptr, it will be updated with
 	// continuous log files. "*end" is updated with the continuous end version.
-	static void computeRestoreEndVersion(const std::vector<LogFile>& logs,
+	static void computeRestoreEndVersion(std::vector<LogFile> const& logs,
 	                                     std::vector<LogFile>* outLogs,
 	                                     Version* end,
 	                                     Version targetVersion) {
@@ -490,7 +490,7 @@ public:
 	// Which means the sorted log files(have beginVersion and endVersion) should cover
 	// all the versions between snapshotBegingVersion and snapshotEndversion.
 	// Note: logs should be pre-sorted according to version order.
-	static bool hasContinuousLogsForSnapshot(const std::vector<LogFile>& logs,
+	static bool hasContinuousLogsForSnapshot(std::vector<LogFile> const& logs,
 	                                         Version snapshotBeginVersion,
 	                                         Version snapshotEndVersion) {
 		auto it = logs.begin();
@@ -532,7 +532,7 @@ public:
 	// Find the continuous log end version starting from beginVersion in the
 	// given list of sorted logfiles.
 	// Note: logs should be pre-sorted according to version order.
-	static Version findContinuousLogEnd(const std::vector<LogFile>& logs, Version beginVersion) {
+	static Version findContinuousLogEnd(std::vector<LogFile> const& logs, Version beginVersion) {
 		auto it = logs.begin();
 
 		// find the first mutation log file that covers beginVersion
@@ -1048,7 +1048,7 @@ public:
 
 	// Returns true if logs are continuous in the range [begin, end].
 	// "files" should be pre-sorted according to version order.
-	static bool isPartitionedLogsContinuous(const std::vector<LogFile>& files, Version begin, Version end) {
+	static bool isPartitionedLogsContinuous(std::vector<LogFile> const& files, Version begin, Version end) {
 		std::map<int, std::vector<int>> tagIndices; // tagId -> indices in files
 		for (int i = 0; i < files.size(); i++) {
 			ASSERT(files[i].tagId >= 0 && files[i].tagId < files[i].totalTags);
@@ -1067,7 +1067,7 @@ public:
 		}
 
 		// for each range in tags, check all tags from 1 are continouous
-		for (const auto& [beginEnd, count] : tags) {
+		for (auto const& [beginEnd, count] : tags) {
 			for (int i = 1; i < count; i++) {
 				if (!isContinuous(files, tagIndices[i], beginEnd.first, std::min(beginEnd.second - 1, end), nullptr)) {
 					TraceEvent(SevWarn, "BackupFileNotContinuous")
@@ -1086,7 +1086,7 @@ public:
 	// with the same begin version. So we can have a file that contains a subset
 	// of contents in another log file.
 	// PRE-CONDITION: logs are already sorted by (tagId, beginVersion, endVersion).
-	static std::vector<LogFile> filterDuplicates(const std::vector<LogFile>& logs) {
+	static std::vector<LogFile> filterDuplicates(std::vector<LogFile> const& logs) {
 		std::vector<LogFile> filtered;
 		int i = 0;
 		for (int j = 1; j < logs.size(); j++) {
@@ -1105,7 +1105,7 @@ public:
 		return filtered;
 	}
 
-	static Optional<RestorableFileSet> getRestoreSetFromLogs(const std::vector<LogFile>& logs,
+	static Optional<RestorableFileSet> getRestoreSetFromLogs(std::vector<LogFile> const& logs,
 	                                                         Version targetVersion,
 	                                                         RestorableFileSet restorable) {
 		Version end = logs.begin()->beginVersion;
@@ -1130,7 +1130,7 @@ public:
 	                                                               VectorRef<KeyRangeRef> keyRangesFilter,
 	                                                               bool logsOnly = false,
 	                                                               Version beginVersion = invalidVersion) {
-		for (const auto& range : keyRangesFilter) {
+		for (auto const& range : keyRangesFilter) {
 			TraceEvent("BackupContainerGetRestoreSet").detail("RangeFilter", printable(range));
 		}
 
@@ -1171,8 +1171,8 @@ public:
 				minKeyRangeVersion = snapshots[i].beginVersion;
 				maxKeyRangeVersion = snapshots[i].endVersion;
 			} else {
-				for (const auto& rangeFile : results.first) {
-					const auto& keyRange = results.second.at(rangeFile.fileName);
+				for (auto const& rangeFile : results.first) {
+					auto const& keyRange = results.second.at(rangeFile.fileName);
 					if (keyRange.intersects(keyRangesFilter)) {
 						restorable.ranges.push_back(rangeFile);
 						restorable.keyRanges[rangeFile.fileName] = keyRange;
@@ -1213,7 +1213,7 @@ public:
 			if (plogs.size() > 0) {
 				logs.swap(plogs);
 				// sort by tag ID so that filterDuplicates works.
-				std::sort(logs.begin(), logs.end(), [](const LogFile& a, const LogFile& b) {
+				std::sort(logs.begin(), logs.end(), [](LogFile const& a, LogFile const& b) {
 					return std::tie(a.tagId, a.beginVersion, a.endVersion) <
 					       std::tie(b.tagId, b.beginVersion, b.endVersion);
 				});
@@ -1275,7 +1275,7 @@ public:
 	}
 
 	// Extract the snapshot begin version from a path
-	static Version extractSnapshotBeginVersion(const std::string& path) {
+	static Version extractSnapshotBeginVersion(std::string const& path) {
 		Version snapshotBeginVersion;
 		if (sscanf(path.c_str(), "kvranges/snapshot.%018" SCNd64, &snapshotBeginVersion) == 1) {
 			return snapshotBeginVersion;
@@ -1297,7 +1297,7 @@ public:
 		return format("rlogs/%s/", vFixed.c_str());
 	}
 
-	static bool pathToLogFile(LogFile& out, const std::string& path, int64_t size) {
+	static bool pathToLogFile(LogFile& out, std::string const& path, int64_t size) {
 		std::string name = fileNameOnly(path);
 		LogFile f;
 		f.fileName = path;
@@ -1327,7 +1327,7 @@ public:
 		return false;
 	}
 
-	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, const std::string& path) {
+	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile& out, std::string const& path) {
 		std::string name = fileNameOnly(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
@@ -1481,8 +1481,8 @@ BackupContainerFileSystem::readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
 	                                                           snapshot);
 }
 
-Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
-                                                                  const std::vector<std::pair<Key, Key>>& beginEndKeys,
+Future<Void> BackupContainerFileSystem::writeKeyspaceSnapshotFile(std::vector<std::string> const& fileNames,
+                                                                  std::vector<std::pair<Key, Key>> const& beginEndKeys,
                                                                   int64_t totalBytes,
                                                                   IncludeKeyRangeMap includeKeyRangeMap,
                                                                   Optional<SnapshotMetadata> metadata) {
@@ -1510,7 +1510,7 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 	std::string lastPath = BackupContainerFileSystemImpl::cleanFolderString(
 	    BackupContainerFileSystemImpl::logVersionFolderString(targetVersion, partitioned));
 
-	std::function<bool(std::string const&)> pathFilter = [=](const std::string& folderPath) {
+	std::function<bool(std::string const&)> pathFilter = [=](std::string const& folderPath) {
 		// Remove slashes in the given folder path so that the '/' positions in the version folder string do not
 		// matter
 
@@ -1519,7 +1519,7 @@ Future<std::vector<LogFile>> BackupContainerFileSystem::listLogFiles(Version beg
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles((partitioned ? "plogs/" : "logs/"), pathFilter), [=](const FilesAndSizesT& files) {
+	return map(listFiles((partitioned ? "plogs/" : "logs/"), pathFilter), [=](FilesAndSizesT const& files) {
 		std::vector<LogFile> results;
 		LogFile lf;
 		for (auto& f : files) {
@@ -1538,7 +1538,7 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Ver
 	std::string lastPath = BackupContainerFileSystemImpl::cleanFolderString(
 	    BackupContainerFileSystemImpl::old_rangeVersionFolderString(endVersion));
 
-	std::function<bool(std::string const&)> pathFilter = [=](const std::string& folderPath) {
+	std::function<bool(std::string const&)> pathFilter = [=](std::string const& folderPath) {
 		// Remove slashes in the given folder path so that the '/' positions in the version folder string do not
 		// matter
 		std::string cleaned = BackupContainerFileSystemImpl::cleanFolderString(folderPath);
@@ -1547,7 +1547,7 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::old_listRangeFiles(Ver
 		       (cleaned > firstPath && cleaned < lastPath);
 	};
 
-	return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT& files) {
+	return map(listFiles("ranges/", pathFilter), [=](FilesAndSizesT const& files) {
 		std::vector<RangeFile> results;
 		RangeFile rf;
 		for (auto& f : files) {
@@ -1569,7 +1569,7 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 		return BackupContainerFileSystemImpl::extractSnapshotBeginVersion(path) <= endVersion;
 	};
 
-	Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](const FilesAndSizesT& files) {
+	Future<std::vector<RangeFile>> newFiles = map(listFiles("kvranges/", pathFilter), [=](FilesAndSizesT const& files) {
 		std::vector<RangeFile> results;
 		RangeFile rf;
 		for (auto& f : files) {
@@ -1590,7 +1590,7 @@ Future<std::vector<RangeFile>> BackupContainerFileSystem::listRangeFiles(Version
 }
 
 Future<std::vector<KeyspaceSnapshotFile>> BackupContainerFileSystem::listKeyspaceSnapshots(Version begin, Version end) {
-	return map(listFiles("snapshots/"), [=](const FilesAndSizesT& files) {
+	return map(listFiles("snapshots/"), [=](FilesAndSizesT const& files) {
 		std::vector<KeyspaceSnapshotFile> results;
 		KeyspaceSnapshotFile sf;
 		for (auto& f : files) {
@@ -1713,7 +1713,7 @@ ACTOR static Future<Optional<Version>> readVersionProperty(Reference<BackupConta
 	}
 }
 
-Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(const RangeFile& file, Database cx) {
+Future<KeyRange> BackupContainerFileSystem::getSnapshotFileKeyRange(RangeFile const& file, Database cx) {
 	ASSERT(g_network->isSimulated());
 	return getSnapshotFileKeyRange_impl(Reference<BackupContainerFileSystem>::addRef(this), file, cx);
 }
@@ -1762,8 +1762,8 @@ Future<Void> BackupContainerFileSystem::encryptionSetupComplete() const {
 	return encryptionSetupFuture;
 }
 
-Future<Void> BackupContainerFileSystem::writeEntireFileFallback(const std::string& fileName,
-                                                                const std::string& fileContents) {
+Future<Void> BackupContainerFileSystem::writeEntireFileFallback(std::string const& fileName,
+                                                                std::string const& fileContents) {
 	return BackupContainerFileSystemImpl::writeEntireFileFallback(
 	    Reference<BackupContainerFileSystem>::addRef(this), fileName, fileContents);
 }
@@ -1781,9 +1781,9 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 // TODO: refactor to not duplicate IBackupContainer::openContainer. It's the exact same
 // code but returning a different template type because you can't cast between them
 Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
-    const std::string& url,
-    const Optional<std::string>& proxy,
-    const Optional<std::string>& encryptionKeyFileName,
+    std::string const& url,
+    Optional<std::string> const& proxy,
+    Optional<std::string> const& encryptionKeyFileName,
     bool isBackup) {
 	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
 
@@ -2135,7 +2135,7 @@ TEST_CASE("/backup/containers/localdir/encrypted") {
 
 TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
-		const char* url = getenv("FDB_TEST_BACKUP_URL");
+		char const* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
 		wait(testBackupContainer(url, {}, {}));
 	}
@@ -2144,7 +2144,7 @@ TEST_CASE("/backup/containers/url") {
 
 TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
-		state const char* url = getenv("FDB_TEST_BACKUP_URL");
+		state char const* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
 		printf("Listing %s\n", url);
 		std::vector<std::string> urls = wait(IBackupContainer::listContainers(url, {}));

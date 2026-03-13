@@ -51,11 +51,11 @@ public:
 	bool hasTrustedPeer() const override;
 	UID getDebugID() const override;
 	boost::asio::ip::tcp::socket& getSocket() override { return socket; }
-	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
-	                                                              const std::string& service,
+	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string const& host,
+	                                                              std::string const& service,
 	                                                              DNSCache* dnsCache);
-	static std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
-	                                                              const std::string& service,
+	static std::vector<NetworkAddress> resolveTCPEndpointBlocking(std::string const& host,
+	                                                              std::string const& service,
 	                                                              DNSCache* dnsCache);
 	static Future<Reference<IConnection>> connect(NetworkAddress toAddr);
 };

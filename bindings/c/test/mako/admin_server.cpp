@@ -43,7 +43,7 @@ extern thread_local mako::Logger logr;
 
 namespace {
 
-fdb::Database getOrCreateDatabase(std::map<std::string, fdb::Database>& db_map, const std::string& cluster_file) {
+fdb::Database getOrCreateDatabase(std::map<std::string, fdb::Database>& db_map, std::string const& cluster_file) {
 	auto iter = db_map.find(cluster_file);
 	if (iter == db_map.end()) {
 		auto [inserted_iter, _] = db_map.insert({ cluster_file, fdb::Database(cluster_file) });
@@ -125,7 +125,7 @@ void AdminServer::start() {
 				    }
 			    },
 			    req);
-		} catch (const std::exception& e) {
+		} catch (std::exception const& e) {
 			logr.error("fatal exception: {}", e.what());
 			return;
 		}

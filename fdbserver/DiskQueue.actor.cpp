@@ -365,13 +365,13 @@ public:
 				std::swap(self->firstPages[0], self->firstPages[1]);
 				self->files[1].popped = 0;
 				self->writingPos = 0;
-				*self->firstPages[1] = *(const Page*)pageData.begin();
+				*self->firstPages[1] = *(Page const*)pageData.begin();
 
-				const int64_t activeDataVolume = pageCeiling(self->files[0].size - self->files[0].popped +
+				int64_t const activeDataVolume = pageCeiling(self->files[0].size - self->files[0].popped +
 				                                             self->fileExtensionBytes + self->fileShrinkBytes);
-				const int64_t desiredMaxFileSize =
+				int64_t const desiredMaxFileSize =
 				    pageCeiling(std::max(activeDataVolume, SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES * 2));
-				const bool frivolouslyTruncate = BUGGIFY_WITH_PROB(0.1);
+				bool const frivolouslyTruncate = BUGGIFY_WITH_PROB(0.1);
 				if (self->files[1].size > desiredMaxFileSize || frivolouslyTruncate) {
 					// Either shrink self->files[1] to the size of self->files[0], or chop off fileShrinkBytes
 					int64_t maxShrink =
@@ -389,7 +389,7 @@ public:
 						self->files[1].size = self->fileExtensionBytes;
 					} else {
 						CODE_PROBE(true, "Truncating DiskQueue file");
-						const int64_t startingSize = self->files[1].size;
+						int64_t const startingSize = self->files[1].size;
 						self->files[1].size -= std::min(maxShrink, self->files[1].size);
 						self->files[1].size = std::max(self->files[1].size, self->fileExtensionBytes);
 						TraceEvent("DiskQueueTruncate", self->dbgid)
@@ -418,7 +418,7 @@ public:
 			}
 		} else if (self->writingPos == 0) {
 			// If this is the first write to a brand new disk queue file.
-			*self->firstPages[1] = *(const Page*)pageData.begin();
+			*self->firstPages[1] = *(Page const*)pageData.begin();
 		}
 
 		/*TraceEvent("RDQWrite", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
@@ -748,7 +748,7 @@ public:
 	                                                              int pageOffset,
 	                                                              int nPages) {
 		state TrackMe trackMe(self);
-		state const size_t bytesRequested = nPages * sizeof(Page);
+		state size_t const bytesRequested = nPages * sizeof(Page);
 		state Standalone<StringRef> result = makeAlignedString(sizeof(Page), bytesRequested);
 		if (file == 1)
 			ASSERT_WE_THINK(pageOffset * sizeof(Page) + bytesRequested <= self->writingPos);
@@ -1067,7 +1067,7 @@ private:
 	static_assert(sizeof(PageHeader) == 36, "PageHeader must be 36 bytes");
 
 	struct Page : PageHeader {
-		static const int maxPayload = _PAGE_SIZE - sizeof(PageHeader);
+		static int const maxPayload = _PAGE_SIZE - sizeof(PageHeader);
 		uint8_t payload[maxPayload];
 
 		DiskQueueVersion diskQueueVersion() const { return static_cast<DiskQueueVersion>(implementationVersion); }
@@ -1083,7 +1083,7 @@ private:
 			return crc32c_append(0xfdbeefdb, (uint8_t*)&_unused, sizeof(Page) - sizeof(uint32_t));
 		}
 		uint64_t checksum_xxhash3() const {
-			return XXH3_64bits(static_cast<const void*>(&magic), sizeof(Page) - sizeof(uint64_t));
+			return XXH3_64bits(static_cast<void const*>(&magic), sizeof(Page) - sizeof(uint64_t));
 		}
 		void updateHash() {
 			switch (diskQueueVersion()) {
@@ -1174,8 +1174,8 @@ private:
 		try {
 			wait(commitSynced);
 			Standalone<StringRef> pagedData = wait(readPages(self, start, end));
-			const int startOffset = start % _PAGE_SIZE;
-			const int dataLen = end - start;
+			int const startOffset = start % _PAGE_SIZE;
+			int const dataLen = end - start;
 			ASSERT(pagedData.substr(startOffset, dataLen).compare(buffer->get().substr(0, dataLen)) == 0);
 		} catch (Error& e) {
 			if (e.code() != error_code_io_error) {
@@ -1283,7 +1283,7 @@ private:
 
 			// Only start copying from `start` in the first page.
 			if (data->payloadSize > startingOffset) {
-				const int length = data->payloadSize - startingOffset;
+				int const length = data->payloadSize - startingOffset;
 				memmove(buf, data->payload + startingOffset, length);
 				buf += length;
 			}
@@ -1297,7 +1297,7 @@ private:
 			while (data->seq != pageFloor(end.lo - 1)) {
 				// These pages can have varying amounts of data, as pages with partial
 				// data will be zero-filled when commit is called.
-				const int length = data->payloadSize;
+				int const length = data->payloadSize;
 				memmove(buf, data->payload, length);
 				buf += length;
 				data++;
@@ -1308,7 +1308,7 @@ private:
 			}
 
 			// Copy only until `end` in the last page.
-			const int length = data->payloadSize;
+			int const length = data->payloadSize;
 			memmove(buf, data->payload, std::min(endingOffset, length));
 			buf += std::min(endingOffset, length);
 
@@ -1477,7 +1477,7 @@ private:
 		return *(Page*)rawQueue->firstPages[i];
 	}
 
-	void findPhysicalLocation(loc_t loc, int* file, int64_t* page, const char* context) {
+	void findPhysicalLocation(loc_t loc, int* file, int64_t* page, char const* context) {
 		bool ok = false;
 
 		if (context)
@@ -1575,7 +1575,7 @@ public:
 	                         DiskQueueVersion diskQueueVersion,
 	                         int64_t fileSizeWarningLimit)
 	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
-	    popped(0), committed(0) {};
+	    popped(0), committed(0){};
 
 	// IClosable
 	Future<Void> getError() const override { return queue->getError(); }

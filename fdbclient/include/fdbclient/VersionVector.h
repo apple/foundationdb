@@ -29,7 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 
-static const int InvalidEncodedSize = 0;
+static int const InvalidEncodedSize = 0;
 
 struct VersionVector {
 	constexpr static FileIdentifier file_identifier = 5253554;
@@ -48,7 +48,7 @@ struct VersionVector {
 private:
 	// Only invoked by getDelta() and applyDelta(), where tag has been validated
 	// and version is guaranteed to be larger than the existing value.
-	inline void setVersionNoCheck(const Tag& tag, Version version) {
+	inline void setVersionNoCheck(Tag const& tag, Version version) {
 		versions[tag] = version;
 		invalidateCachedEncodedSize();
 	}
@@ -71,7 +71,7 @@ public:
 
 	bool empty() const { return versions.empty(); }
 
-	void setVersion(const Tag& tag, Version version) {
+	void setVersion(Tag const& tag, Version version) {
 		ASSERT(tag != invalidTag);
 		ASSERT(tag.locality > tagLocalityInvalid);
 		ASSERT(version > maxVersion);
@@ -80,7 +80,7 @@ public:
 		invalidateCachedEncodedSize();
 	}
 
-	void setVersion(const std::set<Tag>& tags, Version version, int8_t localityFilter = tagLocalityInvalid) {
+	void setVersion(std::set<Tag> const& tags, Version version, int8_t localityFilter = tagLocalityInvalid) {
 		ASSERT(version > maxVersion);
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
@@ -93,13 +93,13 @@ public:
 		invalidateCachedEncodedSize();
 	}
 
-	bool hasVersion(const Tag& tag) const {
+	bool hasVersion(Tag const& tag) const {
 		ASSERT(tag != invalidTag);
 		return versions.find(tag) != versions.end();
 	}
 
 	// @pre assumes that the given tag has an entry in the version vector.
-	Version getVersion(const Tag& tag) const {
+	Version getVersion(Tag const& tag) const {
 		ASSERT(tag != invalidTag);
 		auto iter = versions.find(tag);
 		ASSERT(iter != versions.end());
@@ -127,7 +127,7 @@ public:
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
 			delta = *this;
 		} else {
-			for (const auto& [tag, version] : versions) {
+			for (auto const& [tag, version] : versions) {
 				if (version > refVersion) {
 					delta.setVersionNoCheck(tag, version);
 				}
@@ -139,7 +139,7 @@ public:
 	// @note this method, together with method getDelta(), helps minimize
 	// the number of version vector entries that get sent from sequencer to
 	// grv proxy (and from grv proxy to client) on the read path.
-	void applyDelta(const VersionVector& delta) {
+	void applyDelta(VersionVector const& delta) {
 		if (delta.maxVersion == invalidVersion) {
 			return;
 		}
@@ -151,7 +151,7 @@ public:
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
 			*this = delta;
 		} else {
-			for (const auto& [tag, version] : delta.versions) {
+			for (auto const& [tag, version] : delta.versions) {
 				if (version > maxVersion) {
 					setVersionNoCheck(tag, version);
 				}
@@ -163,18 +163,18 @@ public:
 	std::string toString() const {
 		std::stringstream vector;
 		vector << "[";
-		for (const auto& [tag, version] : versions) {
+		for (auto const& [tag, version] : versions) {
 			vector << '{' << tag.toString() << "," << version << '}';
 		}
 		vector << " maxversion: " << maxVersion << "]";
 		return vector.str();
 	}
 
-	bool operator==(const VersionVector& vv) const { return maxVersion == vv.maxVersion; }
-	bool operator!=(const VersionVector& vv) const { return maxVersion != vv.maxVersion; }
-	bool operator<(const VersionVector& vv) const { return maxVersion < vv.maxVersion; }
+	bool operator==(VersionVector const& vv) const { return maxVersion == vv.maxVersion; }
+	bool operator!=(VersionVector const& vv) const { return maxVersion != vv.maxVersion; }
+	bool operator<(VersionVector const& vv) const { return maxVersion < vv.maxVersion; }
 
-	bool compare(const VersionVector& vv) {
+	bool compare(VersionVector const& vv) {
 		if (maxVersion != vv.maxVersion) {
 			return false;
 		}
@@ -232,7 +232,7 @@ public:
 
 		// Population
 		int8_t locality = tagLocalityInvalid;
-		for (const auto& [tag, version] : versions) {
+		for (auto const& [tag, version] : versions) {
 			if (locality != tag.locality) {
 				locality = tag.locality;
 				utlCount++;
@@ -300,7 +300,7 @@ public:
 
 		int8_t locality = tagLocalityInvalid;
 		uint16_t localityCount = 0;
-		for (const auto& [tag, version] : versions) {
+		for (auto const& [tag, version] : versions) {
 			if (locality != tag.locality) {
 				if (locality != tagLocalityInvalid) {
 					serialize<int8_t>(out, locality); // tag locality value
@@ -333,7 +333,7 @@ public:
 		// The number of <tagId, commitVersion> pairs.
 		serialize<size_t>(out, (this->size()));
 
-		for (const auto& [tag, version] : versions) {
+		for (auto const& [tag, version] : versions) {
 			// Serialize tag id.
 			serialize<T>(out, (T)tag.id);
 
@@ -378,13 +378,13 @@ public:
 
 	// Extract "value" from the serialization buffer.
 	template <typename T>
-	void deserialize(const uint8_t*& data, T& value) const {
+	void deserialize(uint8_t const*& data, T& value) const {
 		memcpy(&value, data, sizeof(T));
 		data += sizeof(T);
 	}
 
 	// Deserialize RLE encoded tag locality values.
-	void deserializeLocalities(const uint8_t*& data,
+	void deserializeLocalities(uint8_t const*& data,
 	                           size_t& utlCount,
 	                           std::vector<int8_t>& localities,
 	                           std::vector<uint16_t>& localityCounts) {
@@ -416,7 +416,7 @@ public:
 	// T: Type that was used to serialize tag ids (uint8_t/uint16_t)
 	// V: Type that was used to serialize commit version deltas (uint8_t/uint16_t/uint32_t/uint64_t)
 	template <typename T, typename V>
-	void deserializeSizedTagIdsAndSizedCommitVersions(const uint8_t*& data,
+	void deserializeSizedTagIdsAndSizedCommitVersions(uint8_t const*& data,
 	                                                  std::vector<int8_t>& localities,
 	                                                  std::vector<uint16_t>& localityCounts) {
 		Version minCommitVersion;
@@ -445,7 +445,7 @@ public:
 	// method to do the deserialization.
 	// T: Type that was used to serialize tag ids (uint8_t/uint16_t)
 	template <typename T>
-	void deserializeSizedTagIdsAndCommitVersions(const uint8_t*& data,
+	void deserializeSizedTagIdsAndCommitVersions(uint8_t const*& data,
 	                                             std::vector<int8_t>& localities,
 	                                             std::vector<uint16_t>& localityCounts) {
 		uint8_t commitVersionDeltaSize; // number of bytes that were used to serialize an individual commit version
@@ -466,7 +466,7 @@ public:
 
 	// Figure out the types that were used to serialize tag ids and commit version deltas, and
 	// call the above methods to do the deserialization.
-	void deserializeTagIdsAndCommitVersions(const uint8_t*& data,
+	void deserializeTagIdsAndCommitVersions(uint8_t const*& data,
 	                                        std::vector<int8_t>& localities,
 	                                        std::vector<uint16_t>& localityCounts) {
 		uint8_t tagIdSize; // number of bytes that were used to serialize an individual tag id
@@ -501,7 +501,7 @@ struct serializable_traits<VersionVector> : std::false_type {
 template <>
 struct dynamic_size_traits<VersionVector> : std::true_type {
 	template <class Context>
-	static size_t size(const VersionVector& vv, Context&) {
+	static size_t size(VersionVector const& vv, Context&) {
 		size_t encodedSize;
 		if (vv.isEncodedSizeCached()) {
 			encodedSize = vv.getCachedEncodedSize();
@@ -515,7 +515,7 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 	}
 
 	template <class Context>
-	static void save(uint8_t* out, const VersionVector& vv, Context&) {
+	static void save(uint8_t* out, VersionVector const& vv, Context&) {
 		auto* begin = out;
 
 		size_t utlCount; // unique tag locality count
@@ -537,7 +537,7 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 	}
 
 	template <class Context>
-	static void load(const uint8_t* data, size_t size, VersionVector& vv, Context& context) {
+	static void load(uint8_t const* data, size_t size, VersionVector& vv, Context& context) {
 		auto* p = data;
 
 		size_t utlCount;
@@ -557,8 +557,8 @@ struct dynamic_size_traits<VersionVector> : std::true_type {
 	}
 };
 
-static const VersionVector minVersionVector{ 0 };
-static const VersionVector maxVersionVector{ MAX_VERSION };
-static const VersionVector invalidVersionVector{ invalidVersion };
+static VersionVector const minVersionVector{ 0 };
+static VersionVector const maxVersionVector{ MAX_VERSION };
+static VersionVector const invalidVersionVector{ invalidVersion };
 
 #endif /* FDBCLIENT_VERSION_VECTOR_H */

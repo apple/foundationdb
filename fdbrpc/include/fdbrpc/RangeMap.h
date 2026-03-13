@@ -96,7 +96,7 @@ private:
 		using reference = self_t&;
 
 		IteratorImpl() {} // singular
-		explicit IteratorImpl<isConst>(const value_type it) : it(it) {}
+		explicit IteratorImpl<isConst>(value_type const it) : it(it) {}
 
 		Key const& begin() { return it->key; }
 		Key const& end() {
@@ -107,11 +107,11 @@ private:
 
 		Range range() { return Range(begin(), end()); }
 
-		std::conditional_t<isConst, const Val&, Val&> value() {
+		std::conditional_t<isConst, Val const&, Val&> value() {
 			// ASSERT( it->key != allKeys.end );
 			return it->value;
 		}
-		const Val& cvalue() const { return it->value; }
+		Val const& cvalue() const { return it->value; }
 
 		void operator++() { ++it; }
 		void operator--() { it.decrementNonEnd(); }
@@ -139,37 +139,37 @@ public:
 		pair_type endPair(endKey, Val());
 		map.insert(endPair, true, mf(endPair));
 	}
-	Val const& operator[](const Key& k) const { return rangeContaining(k).value(); }
-	Val& operator[](const Key& k) { return rangeContaining(k).value(); }
+	Val const& operator[](Key const& k) const { return rangeContaining(k).value(); }
+	Val& operator[](Key const& k) { return rangeContaining(k).value(); }
 
 	Ranges ranges() { return Ranges(iterator(map.begin()), iterator(map.lastItem())); }
 	ConstRanges ranges() const { return ConstRanges(const_iterator(map.begin()), const_iterator(map.lastItem())); }
 	// intersectingRanges returns [begin, end] where begin <= r.begin and end >= r.end
-	Ranges intersectingRanges(const Range& r) {
+	Ranges intersectingRanges(Range const& r) {
 		return Ranges(rangeContaining(r.begin), iterator(map.lower_bound(r.end)));
 	}
-	ConstRanges intersectingRanges(const Range& r) const {
+	ConstRanges intersectingRanges(Range const& r) const {
 		return ConstRanges(rangeContaining(r.begin), const_iterator(map.lower_bound(r.end)));
 	}
 	// containedRanges() will return all ranges that are fully contained by the passed range (note that a range fully
 	// contains itself)
-	Ranges containedRanges(const Range& r) {
+	Ranges containedRanges(Range const& r) {
 		iterator s(map.lower_bound(r.begin));
 		if (s.begin() >= r.end)
 			return Ranges(s, s);
 		return Ranges(s, rangeContaining(r.end));
 	}
 	template <class ComparableToKey>
-	iterator rangeContaining(const ComparableToKey& k) {
+	iterator rangeContaining(ComparableToKey const& k) {
 		return iterator(map.lastLessOrEqual(k));
 	}
 	template <class ComparableToKey>
-	const_iterator rangeContaining(const ComparableToKey& k) const {
+	const_iterator rangeContaining(ComparableToKey const& k) const {
 		return const_iterator(map.lastLessOrEqual(k));
 	}
 	// Returns the range containing a key infinitesimally before k, or the first range if k==Key()
 	template <class ComparableToKey>
-	iterator rangeContainingKeyBefore(const ComparableToKey& k) {
+	iterator rangeContainingKeyBefore(ComparableToKey const& k) {
 		iterator i(map.lower_bound(k));
 		if (!i->begin().size())
 			return i;
@@ -177,7 +177,7 @@ public:
 		return i;
 	}
 	template <class ComparableToKey>
-	const_iterator rangeContainingKeyBefore(const ComparableToKey& k) const {
+	const_iterator rangeContainingKeyBefore(ComparableToKey const& k) const {
 		const_iterator i(map.lower_bound(k));
 		if (!i->begin().size())
 			return i;
@@ -202,11 +202,11 @@ public:
 	iterator nthRange(int n) { return iterator(map.index(n)); }
 	const_iterator nthRange(int n) const { return const_iterator(map.index(n)); }
 
-	bool allEqual(const Range& r, const Val& v);
+	bool allEqual(Range const& r, Val const& v);
 
 	template <class ComparableToKey>
-	void coalesce(const ComparableToKey& k);
-	void coalesce(const Range& k);
+	void coalesce(ComparableToKey const& k);
+	void coalesce(Range const& k);
 	void validateCoalesced();
 
 	void operator=(RangeMap&& r) noexcept { map = std::move(r.map); }
@@ -215,7 +215,7 @@ public:
 	// void clear( const Val& value ) { ranges.clear(); ranges.insert(std::make_pair(Key(),value)); }
 	void clear() { map.clear(); }
 
-	void insert(const Range& keys, const Val& value);
+	void insert(Range const& keys, Val const& value);
 
 	Future<Void> clearAsync() { return map.clearAsync(); }
 
@@ -228,21 +228,21 @@ public:
 	Metric sumRange(const_iterator begin, const_iterator end) const { return map.sumRange(begin, end); }
 	Metric sumRange(iterator begin, iterator end) const { return map.sumRange(begin, end); }
 	template <class KeyCompatible>
-	Metric sumRange(const KeyCompatible& begin, const KeyCompatible& end) const {
+	Metric sumRange(KeyCompatible const& begin, KeyCompatible const& end) const {
 		return map.sumRange(begin, end);
 	}
 
 protected:
 	Map<Key, Val, pair_type, Metric> map;
-	const MetricFunc mf;
+	MetricFunc const mf;
 };
 
 template <class Key, class Val, class Range, class Metric, class MetricFunc>
 template <class ComparableToKey>
-void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(const ComparableToKey& k) {
+void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(ComparableToKey const& k) {
 	auto begin = map.lastLessOrEqual(k);
 	auto end = begin;
-	const Val& compareVal = begin->value;
+	Val const& compareVal = begin->value;
 	ASSERT(begin != map.end());
 	while (begin != map.begin() && begin->value == compareVal)
 		begin.decrementNonEnd();
@@ -258,7 +258,7 @@ void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(const ComparableToK
 }
 
 template <class Key, class Val, class Range, class Metric, class MetricFunc>
-void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(const Range& k) {
+void RangeMap<Key, Val, Range, Metric, MetricFunc>::coalesce(Range const& k) {
 	coalesce(k.begin);
 	auto it = map.lastLessOrEqual(k.begin);
 	Val* lastVal = &it->value;
@@ -295,7 +295,7 @@ void RangeMap<Key, Val, Range, Metric, MetricFunc>::validateCoalesced() {
 }
 
 template <class Key, class Val, class Range, class Metric, class MetricFunc>
-bool RangeMap<Key, Val, Range, Metric, MetricFunc>::allEqual(const Range& keys, const Val& val) {
+bool RangeMap<Key, Val, Range, Metric, MetricFunc>::allEqual(Range const& keys, Val const& val) {
 	auto r = intersectingRanges(keys);
 	for (auto i = r.begin(); i != r.end(); ++i)
 		if (i.value() != val)
@@ -304,14 +304,14 @@ bool RangeMap<Key, Val, Range, Metric, MetricFunc>::allEqual(const Range& keys, 
 }
 
 template <class Key, class Val, class Range, class Metric, class MetricFunc>
-void RangeMap<Key, Val, Range, Metric, MetricFunc>::insert(const Range& keys, const Val& value) {
+void RangeMap<Key, Val, Range, Metric, MetricFunc>::insert(Range const& keys, Val const& value) {
 	if (keys.begin == keys.end)
 		return;
 
 	auto end = map.lower_bound(keys.end);
 	if (end->key != keys.end) {
 		end.decrementNonEnd();
-		const Val& valueAfterRange = end->value;
+		Val const& valueAfterRange = end->value;
 		pair_type endPair(keys.end, valueAfterRange);
 		end = map.insert(endPair, true, mf(endPair));
 	}

@@ -22,10 +22,10 @@
 #include "flow/Trace.h"
 
 struct JsonTraceLogFormatter final : public ITraceLogFormatter, ReferenceCounted<JsonTraceLogFormatter> {
-	const char* getExtension() const override;
-	const char* getHeader() const override; // Called when starting a new file
-	const char* getFooter() const override; // Called when ending a file
-	std::string formatEvent(const TraceEventFields&) const override; // Called for each event
+	char const* getExtension() const override;
+	char const* getHeader() const override; // Called when starting a new file
+	char const* getFooter() const override; // Called when ending a file
+	std::string formatEvent(TraceEventFields const&) const override; // Called for each event
 
 	void addref() override;
 	void delref() override;

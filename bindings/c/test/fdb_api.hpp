@@ -48,23 +48,23 @@ struct char_traits<uint8_t> {
 	using pos_type = streampos;
 	using state_type = mbstate_t;
 
-	static void assign(char_type& c1, const char_type& c2) noexcept { c1 = c2; }
+	static void assign(char_type& c1, char_type const& c2) noexcept { c1 = c2; }
 	static bool eq(char_type c1, char_type c2) noexcept { return c1 == c2; }
 	static bool lt(char_type c1, char_type c2) noexcept { return c1 < c2; }
 
-	static int compare(const char_type* s1, const char_type* s2, size_t n) { return memcmp(s1, s2, n); }
+	static int compare(char_type const* s1, char_type const* s2, size_t n) { return memcmp(s1, s2, n); }
 
-	static size_t length(const char_type* s) { return strlen(reinterpret_cast<const char*>(s)); }
+	static size_t length(char_type const* s) { return strlen(reinterpret_cast<char const*>(s)); }
 
-	static const char_type* find(const char_type* s, size_t n, const char_type& a) {
-		return reinterpret_cast<const char_type*>(memchr(s, a, n));
+	static char_type const* find(char_type const* s, size_t n, char_type const& a) {
+		return reinterpret_cast<char_type const*>(memchr(s, a, n));
 	}
 
-	static char_type* move(char_type* s1, const char_type* s2, size_t n) {
+	static char_type* move(char_type* s1, char_type const* s2, size_t n) {
 		return reinterpret_cast<char_type*>(memmove(s1, s2, n));
 	}
 
-	static char_type* copy(char_type* s1, const char_type* s2, size_t n) {
+	static char_type* copy(char_type* s1, char_type const* s2, size_t n) {
 		return reinterpret_cast<char_type*>(memcpy(s1, s2, n));
 	}
 
@@ -114,21 +114,21 @@ inline uint8_t const* toBytePtr(char const* ptr) noexcept {
 
 // get bytestring view from charstring: e.g. std::basic_string{_view}<char>
 template <template <class...> class StringLike, class Char>
-BytesRef toBytesRef(const StringLike<Char>& s) noexcept {
+BytesRef toBytesRef(StringLike<Char> const& s) noexcept {
 	static_assert(sizeof(Char) == 1);
 	return BytesRef(reinterpret_cast<uint8_t const*>(s.data()), s.size());
 }
 
 // get charstring view from bytestring: e.g. std::basic_string{_view}<uint8_t>
 template <template <class...> class StringLike, class Char>
-CharsRef toCharsRef(const StringLike<Char>& s) noexcept {
+CharsRef toCharsRef(StringLike<Char> const& s) noexcept {
 	static_assert(sizeof(Char) == 1);
 	return CharsRef(reinterpret_cast<char const*>(s.data()), s.size());
 }
 
 // get charstring view from optional bytestring: e.g. std::optional<std::basic_string{_view}<uint8_t>>
 template <template <class...> class StringLike, class Char>
-CharsRef toCharsRef(const std::optional<StringLike<Char>>& s) noexcept {
+CharsRef toCharsRef(std::optional<StringLike<Char>> const& s) noexcept {
 	static_assert(sizeof(Char) == 1);
 	if (s) {
 		return CharsRef(reinterpret_cast<char const*>(s.value().data()), s.value().size());
@@ -137,7 +137,7 @@ CharsRef toCharsRef(const std::optional<StringLike<Char>>& s) noexcept {
 	}
 }
 
-[[maybe_unused]] constexpr const bool OverflowCheck = false;
+[[maybe_unused]] constexpr bool const OverflowCheck = false;
 
 inline int intSize(BytesRef b) {
 	if constexpr (OverflowCheck) {
@@ -148,7 +148,7 @@ inline int intSize(BytesRef b) {
 }
 
 template <template <class...> class StringLike, class Char>
-StringLike<Char> strinc(const StringLike<Char>& s) {
+StringLike<Char> strinc(StringLike<Char> const& s) {
 	int index = -1;
 	for (index = s.size() - 1; index >= 0; index--)
 		if (static_cast<uint8_t>(s[index]) != 255)
@@ -228,7 +228,7 @@ struct ValueRef {
 	}
 };
 struct StringArray {
-	using Type = std::pair<const char**, int>;
+	using Type = std::pair<char const**, int>;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_strings, out_count] = out;
 		return Error(native::fdb_future_get_string_array(f, &out_strings, &out_count));
@@ -244,7 +244,7 @@ struct KeyValueRefArray {
 		auto& [out_kv, out_count, out_more] = out;
 		auto out_more_native = native::fdb_bool_t{};
 		auto err = native::fdb_future_get_keyvalue_array(
-		    f, reinterpret_cast<const native::FDBKeyValue**>(&out_kv), &out_count, &out_more_native);
+		    f, reinterpret_cast<native::FDBKeyValue const**>(&out_kv), &out_count, &out_more_native);
 		out_more = (out_more_native != 0);
 		return Error(err);
 	}
@@ -258,7 +258,7 @@ struct KeyRangeRefArray {
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_ranges, out_count] = out;
 		auto err = native::fdb_future_get_keyrange_array(
-		    f, reinterpret_cast<const native::FDBKeyRange**>(&out_ranges), &out_count);
+		    f, reinterpret_cast<native::FDBKeyRange const**>(&out_ranges), &out_count);
 		return Error(err);
 	}
 };
@@ -287,7 +287,7 @@ inline Error setOptionNothrow(FDBNetworkOption option, CharsRef str) noexcept {
 
 inline Error setOptionNothrow(FDBNetworkOption option, int64_t value) noexcept {
 	return Error(native::fdb_network_set_option(
-	    option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
+	    option, reinterpret_cast<uint8_t const*>(&value), static_cast<int>(sizeof(value))));
 }
 
 inline Error setOptionNothrow(FDBNetworkOption option) noexcept {
@@ -357,7 +357,7 @@ public:
 		auto out_more_native = native::fdb_bool_t{};
 		auto& [out_kv, out_count, out_more] = out;
 		auto err_raw = native::fdb_result_get_keyvalue_array(
-		    r.get(), reinterpret_cast<const native::FDBKeyValue**>(&out_kv), &out_count, &out_more_native);
+		    r.get(), reinterpret_cast<native::FDBKeyValue const**>(&out_kv), &out_count, &out_more_native);
 		out_more = out_more_native != 0;
 		return Error(err_raw);
 	}
@@ -391,7 +391,7 @@ protected:
 		auto fp = static_cast<Fn*>(param);
 		try {
 			(*fp)();
-		} catch (const std::exception& e) {
+		} catch (std::exception const& e) {
 			fmt::print(stderr, "ERROR: Exception thrown in user callback: {}", e.what());
 		}
 		delete fp;
@@ -410,8 +410,8 @@ protected:
 
 public:
 	Future() noexcept : Future(nullptr) {}
-	Future(const Future&) noexcept = default;
-	Future& operator=(const Future&) noexcept = default;
+	Future(Future const&) noexcept = default;
+	Future& operator=(Future const&) noexcept = default;
 
 	bool valid() const noexcept { return f != nullptr; }
 
@@ -458,8 +458,8 @@ public:
 		then<Future>(std::forward<UserFunc>(fn));
 	}
 
-	bool operator==(const Future& other) const { return nativeHandle() == other.nativeHandle(); }
-	bool operator!=(const Future& other) const { return !(*this == other); }
+	bool operator==(Future const& other) const { return nativeHandle() == other.nativeHandle(); }
+	bool operator!=(Future const& other) const { return !(*this == other); }
 };
 
 template <typename VarTraits>
@@ -473,7 +473,7 @@ class TypedFuture : public Future {
 	using Future::get;
 	using Future::getNothrow;
 	using Future::then;
-	TypedFuture(const Future& f) noexcept : Future(f) {}
+	TypedFuture(Future const& f) noexcept : Future(f) {}
 
 public:
 	using ContainedType = typename VarTraits::Type;
@@ -491,7 +491,7 @@ public:
 };
 
 struct KeySelector {
-	const uint8_t* key;
+	uint8_t const* key;
 	int keyLength;
 	bool orEqual;
 	int offset;
@@ -528,8 +528,8 @@ class Transaction {
 
 public:
 	Transaction() noexcept : Transaction(nullptr) {}
-	Transaction(const Transaction&) noexcept = default;
-	Transaction& operator=(const Transaction&) noexcept = default;
+	Transaction(Transaction const&) noexcept = default;
+	Transaction& operator=(Transaction const&) noexcept = default;
 
 	void atomic_store(Transaction other) { std::atomic_store(&tr, other.tr); }
 
@@ -545,7 +545,7 @@ public:
 
 	Error setOptionNothrow(FDBTransactionOption option, int64_t value) noexcept {
 		return Error(native::fdb_transaction_set_option(
-		    tr.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
+		    tr.get(), option, reinterpret_cast<uint8_t const*>(&value), static_cast<int>(sizeof(value))));
 	}
 
 	Error setOptionNothrow(FDBTransactionOption option, BytesRef str) noexcept {
@@ -683,9 +683,9 @@ class Database : public IDatabaseOps {
 	std::shared_ptr<native::FDBDatabase> db;
 
 public:
-	Database(const Database&) noexcept = default;
-	Database& operator=(const Database&) noexcept = default;
-	Database(const std::string& cluster_file_path) : db(nullptr) {
+	Database(Database const&) noexcept = default;
+	Database& operator=(Database const&) noexcept = default;
+	Database(std::string const& cluster_file_path) : db(nullptr) {
 		auto db_raw = static_cast<native::FDBDatabase*>(nullptr);
 		if (auto err = Error(native::fdb_create_database(cluster_file_path.c_str(), &db_raw)))
 			throwError(fmt::format("Failed to create database with '{}': ", cluster_file_path), err);
@@ -703,7 +703,7 @@ public:
 
 	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
-		    db.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
+		    db.get(), option, reinterpret_cast<uint8_t const*>(&value), static_cast<int>(sizeof(value))));
 	}
 
 	Error setOptionNothrow(FDBDatabaseOption option, BytesRef str) noexcept {
@@ -765,7 +765,7 @@ inline void selectApiVersionCapped(int version) {
 
 template <>
 struct std::hash<fdb::Future> {
-	size_t operator()(const fdb::Future& f) const { return std::hash<fdb::native::FDBFuture*>{}(f.nativeHandle()); }
+	size_t operator()(fdb::Future const& f) const { return std::hash<fdb::native::FDBFuture*>{}(f.nativeHandle()); }
 };
 
 #endif /*FDB_API_HPP*/

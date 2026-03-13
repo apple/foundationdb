@@ -29,20 +29,20 @@
 // Iterate through trs looking for idempotency ids for committed transactions. Call onKvReady for each constructed key
 // value pair.
 template <class OnKVReady>
-void buildIdempotencyIdMutations(const std::vector<CommitTransactionRequest>& trs,
+void buildIdempotencyIdMutations(std::vector<CommitTransactionRequest> const& trs,
                                  IdempotencyIdKVBuilder& idempotencyKVBuilder,
                                  Version commitVersion,
-                                 const std::vector<uint8_t>& committed,
+                                 std::vector<uint8_t> const& committed,
                                  uint8_t committedValue,
                                  bool locked,
-                                 const OnKVReady& onKvReady) {
+                                 OnKVReady const& onKvReady) {
 	idempotencyKVBuilder.setCommitVersion(commitVersion);
 	for (int h = 0; h < trs.size(); h += 256) {
 		int end = std::min<int>(trs.size() - h, 256);
 		for (int l = 0; l < end; ++l) {
 			uint16_t batchIndex = h + l;
 			if ((committed[batchIndex] == committedValue && (!locked || trs[batchIndex].isLockAware()))) {
-				const auto& idempotency_id = trs[batchIndex].idempotencyId;
+				auto const& idempotency_id = trs[batchIndex].idempotencyId;
 				if (idempotency_id.valid()) {
 					idempotencyKVBuilder.add(idempotency_id, batchIndex);
 				}

@@ -66,7 +66,7 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			        "running `kill all’.\n");
 		} else {
 			std::vector<std::string> addressesVec;
-			for (const auto& [address, _] : *address_interface) {
+			for (auto const& [address, _] : *address_interface) {
 				addressesVec.push_back(address.toString());
 			}
 			addressesStr = boost::algorithm::join(addressesVec, ",");
@@ -114,11 +114,11 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 	return result;
 }
 
-void killGenerator(const char* text,
-                   const char* line,
+void killGenerator(char const* text,
+                   char const* line,
                    std::vector<std::string>& lc,
                    std::vector<StringRef> const& tokens) {
-	const char* opts[] = { "all", "list", nullptr };
+	char const* opts[] = { "all", "list", nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
 

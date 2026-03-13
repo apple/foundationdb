@@ -34,11 +34,11 @@
 template <class ServiceType>
 class AsyncGrpcClient {
 	template <class Request, class Response>
-	using UnaryRpcFn = grpc::Status (ServiceType::Stub::*)(grpc::ClientContext*, const Request&, Response*);
+	using UnaryRpcFn = grpc::Status (ServiceType::Stub::*)(grpc::ClientContext*, Request const&, Response*);
 
 	template <class Request, class Response>
 	using ServerStreamingRpcFn =
-	    std::unique_ptr<grpc::ClientReader<Response>> (ServiceType::Stub::*)(grpc::ClientContext*, const Request&);
+	    std::unique_ptr<grpc::ClientReader<Response>> (ServiceType::Stub::*)(grpc::ClientContext*, Request const&);
 
 	template <class Request, class Response>
 	using ClientStreamingRpcFn =
@@ -51,11 +51,11 @@ public:
 		// Isn't necessary unless initialized mid-block using Flow actor compiler.
 	}
 
-	AsyncGrpcClient(const std::string& endpoint, std::shared_ptr<AsyncTaskExecutor> pool)
+	AsyncGrpcClient(std::string const& endpoint, std::shared_ptr<AsyncTaskExecutor> pool)
 	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials())),
 	    stub_(ServiceType::NewStub(channel_)) {}
 
-	AsyncGrpcClient(const std::string& endpoint,
+	AsyncGrpcClient(std::string const& endpoint,
 	                std::shared_ptr<GrpcCredentialProvider> credentials_provider,
 	                std::shared_ptr<AsyncTaskExecutor> pool)
 	  : pool_(pool), channel_(grpc::CreateChannel(endpoint, credentials_provider->clientCredentials())),
@@ -65,7 +65,7 @@ public:
 	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
 	Future<grpc::Status> call(UnaryRpcFn<RequestType, ResponseType> rpc,
-	                          const RequestType& request,
+	                          RequestType const& request,
 	                          ResponseType* response) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto promise = ThreadReturnPromise<grpc::Status>();
@@ -86,7 +86,7 @@ public:
 	// NOTE: Must be called from network thread. This is because the underlying primitive used
 	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
-	Future<ResponseType> call(UnaryRpcFn<RequestType, ResponseType> rpc, const RequestType& request) {
+	Future<ResponseType> call(UnaryRpcFn<RequestType, ResponseType> rpc, RequestType const& request) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto promise = ThreadReturnPromise<ResponseType>();
 		auto future = promise.getFuture();
@@ -118,7 +118,7 @@ public:
 	//   is ThreadReturnPromise.
 	template <class RequestType, class ResponseType>
 	ThreadFutureStream<ResponseType> call(ServerStreamingRpcFn<RequestType, ResponseType> rpc,
-	                                      const RequestType& request) {
+	                                      RequestType const& request) {
 		ASSERT_WE_THINK(g_network->isOnMainThread());
 		auto promise = ThreadReturnPromiseStream<ResponseType>();
 		auto future = promise.getFuture();

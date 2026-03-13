@@ -41,7 +41,7 @@
 //
 // implemented.
 template <typename K, typename V>
-void keyValueReader(std::istream& stream, std::function<bool(const K&, const V&)> consumer) {
+void keyValueReader(std::istream& stream, std::function<bool(K const&, V const&)> consumer) {
 	std::stringstream lineParser;
 	std::string line;
 	K key;
@@ -112,7 +112,7 @@ struct Hold {
 	T* pCount;
 	T n;
 
-	void operator=(const Hold& other) = delete;
+	void operator=(Hold const& other) = delete;
 };
 
 #endif // _FLOW_UTIL_H_

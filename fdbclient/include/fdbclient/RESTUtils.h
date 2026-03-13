@@ -59,7 +59,7 @@ public:
 	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
 	    connectionPoolMap;
 
-	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
+	RESTConnectionPool(int const maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 
 	// Destructor implementation in RESTUtils.actor.cpp
 	// In simulation, explicitly closes all pooled connections before destruction
@@ -67,10 +67,10 @@ public:
 
 	// Routine is responsible to provide an usable TCP connection object; it reuses an active connection from
 	// connection-pool if available, otherwise, establish a new TCP connection
-	Future<ReusableConnection> connect(RESTConnectionPoolKey connectKey, const bool isSecure, const int maxConnLife);
-	void returnConnection(RESTConnectionPoolKey connectKey, ReusableConnection& conn, const int maxConnections);
+	Future<ReusableConnection> connect(RESTConnectionPoolKey connectKey, bool const isSecure, int const maxConnLife);
+	void returnConnection(RESTConnectionPoolKey connectKey, ReusableConnection& conn, int const maxConnections);
 
-	static RESTConnectionPoolKey getConnectionPoolKey(const std::string& host, const std::string& service) {
+	static RESTConnectionPoolKey getConnectionPoolKey(std::string const& host, std::string const& service) {
 		return std::make_pair(host, service);
 	}
 };
@@ -83,13 +83,13 @@ struct RESTConnectionType {
 	constexpr static int NOT_SECURE_CONNECTION = 0;
 
 	RESTConnectionType() : protocol("https"), secure(RESTConnectionType::SECURE_CONNECTION) {}
-	explicit RESTConnectionType(const std::string& p, const int s) : protocol(p), secure(s) {}
+	explicit RESTConnectionType(std::string const& p, int const s) : protocol(p), secure(s) {}
 	std::string toString() const { return format("%s:%d", this->protocol.c_str(), this->secure); }
 
-	static const std::unordered_map<std::string, RESTConnectionType> supportedConnTypes;
-	static RESTConnectionType getConnectionType(const std::string&);
-	static bool isProtocolSupported(const std::string&);
-	static bool isSecure(const std::string&);
+	static std::unordered_map<std::string, RESTConnectionType> const supportedConnTypes;
+	static RESTConnectionType getConnectionType(std::string const&);
+	static bool isProtocolSupported(std::string const&);
+	static bool isSecure(std::string const&);
 };
 
 // Util interface facilitating management and update for RESTClient knob parameters
@@ -103,7 +103,7 @@ struct RESTClientKnobs {
 
 	RESTClientKnobs();
 
-	void set(const std::unordered_map<std::string, int>& knobSettings);
+	void set(std::unordered_map<std::string, int> const& knobSettings);
 	std::unordered_map<std::string, int> get() const;
 	std::unordered_map<std::string, int*> knobMap;
 
@@ -136,8 +136,8 @@ public:
 	// URL connection type
 	RESTConnectionType connType;
 
-	explicit RESTUrl(const std::string& fullUrl);
-	explicit RESTUrl(const std::string& fullUrl, const std::string& body);
+	explicit RESTUrl(std::string const& fullUrl);
+	explicit RESTUrl(std::string const& fullUrl, std::string const& body);
 
 	std::string toString() const {
 		return fmt::format(
@@ -145,7 +145,7 @@ public:
 	}
 
 private:
-	void parseUrl(const std::string& fullUrl);
+	void parseUrl(std::string const& fullUrl);
 };
 
 double continuousTimeDecay(double initialValue, double decayRate, double time);

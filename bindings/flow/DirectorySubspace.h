@@ -63,8 +63,8 @@ public:
 	virtual Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path());
 
 	virtual Reference<DirectoryLayer> getDirectoryLayer();
-	virtual const Standalone<StringRef> getLayer() const;
-	virtual const Path getPath() const;
+	virtual Standalone<StringRef> const getLayer() const;
+	virtual Path const getPath() const;
 
 protected:
 	Reference<DirectoryLayer> directoryLayer;

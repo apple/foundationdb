@@ -110,27 +110,27 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
-	const auto it = watchMap.find(WatchMapKey(key));
+	auto const it = watchMap.find(WatchMapKey(key));
 	if (it == watchMap.end())
 		return Reference<WatchMetadata>();
 	return it->second;
 }
 
 void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	const WatchMapKey key(metadata->parameters->key);
+	WatchMapKey const key(metadata->parameters->key);
 	watchMap[key] = metadata;
 	// NOTE Here we do *NOT* update/reset the reference count for the key, see the source code in getWatchFuture.
 	// Basically the reference count could be increased, or the same watch is refreshed, or the watch might be cancelled
 }
 
-int32_t DatabaseContext::increaseWatchRefCount(KeyRef key, const Version& version) {
-	const WatchMapKey mapKey(key);
+int32_t DatabaseContext::increaseWatchRefCount(KeyRef key, Version const& version) {
+	WatchMapKey const mapKey(key);
 	watchCounterMap[mapKey].insert(version);
 	return watchCounterMap[mapKey].size();
 }
 
-int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& version) {
-	const WatchMapKey mapKey(key);
+int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, Version const& version) {
+	WatchMapKey const mapKey(key);
 	auto mapKeyIter = watchCounterMap.find(mapKey);
 	if (mapKeyIter == std::end(watchCounterMap)) {
 		// Key does not exist. The metadata might be removed by deleteWatchMetadata already.
@@ -146,7 +146,7 @@ int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& versio
 	}
 	versionSet.erase(versionIter);
 
-	const auto count = versionSet.size();
+	auto const count = versionSet.size();
 	// The metadata might be deleted somewhere else, before calling this decreaseWatchRefCount
 	if (auto metadata = getWatchMetadata(key); metadata.isValid() && versionSet.size() == 0) {
 		// It is a *must* to cancel the watchFutureSS manually. watchFutureSS waits for watchStorageServerResp, which
@@ -160,7 +160,7 @@ int32_t DatabaseContext::decreaseWatchRefCount(KeyRef key, const Version& versio
 }
 
 void DatabaseContext::deleteWatchMetadata(KeyRef key, bool removeReferenceCount) {
-	const WatchMapKey mapKey(key);
+	WatchMapKey const mapKey(key);
 	watchMap.erase(mapKey);
 	if (removeReferenceCount) {
 		watchCounterMap.erase(mapKey);
@@ -226,11 +226,11 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
-void DatabaseContext::addSSIdTagMapping(const UID& uid, const Tag& tag) {
+void DatabaseContext::addSSIdTagMapping(UID const& uid, Tag const& tag) {
 	ssidTagMapping[uid] = tag;
 }
 
-void DatabaseContext::getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion) {
+void DatabaseContext::getLatestCommitVersionForSSID(UID const& ssid, Tag& tag, Version& commitVersion) {
 	tag = invalidTag;
 	commitVersion = invalidVersion;
 
@@ -244,7 +244,7 @@ void DatabaseContext::getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, V
 	}
 }
 
-void DatabaseContext::getLatestCommitVersion(const StorageServerInterface& ssi,
+void DatabaseContext::getLatestCommitVersion(StorageServerInterface const& ssi,
                                              Version readVersion,
                                              VersionVector& latestCommitVersion) {
 	latestCommitVersion.clear();
@@ -275,7 +275,7 @@ void DatabaseContext::getLatestCommitVersion(const StorageServerInterface& ssi,
 	}
 }
 
-void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
+void DatabaseContext::getLatestCommitVersions(Reference<LocationInfo> const& locationInfo,
                                               Reference<TransactionState> info,
                                               VersionVector& latestCommitVersions) {
 	latestCommitVersions.clear();
@@ -446,7 +446,7 @@ void DatabaseContext::validateVersion(Version version) const {
 	ASSERT(version > 0 || version == latestVersion);
 }
 
-inline HealthMetrics populateHealthMetrics(const HealthMetrics& detailedMetrics, bool detailedOutput) {
+inline HealthMetrics populateHealthMetrics(HealthMetrics const& detailedMetrics, bool detailedOutput) {
 	if (detailedOutput) {
 		return detailedMetrics;
 	} else {
@@ -483,7 +483,7 @@ Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	return getHealthMetricsActor(this, detailed, sendDetailedRequest);
 }
 
-Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(const UID& id, double maxStaleness) {
+Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(UID const& id, double maxStaleness) {
 	if (now() - detailedHealthMetricsLastUpdated < maxStaleness) {
 		auto it = healthMetrics.storageStats.find(id);
 		return it == healthMetrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
@@ -507,7 +507,7 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 	}
 }
 
-void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, uint64_t>& errorsByCode) {
+void traceTSSErrors(char const* name, UID tssId, std::unordered_map<int, uint64_t> const& errorsByCode) {
 	TraceEvent ev(name, tssId);
 	for (auto& it : errorsByCode) {
 		ev.detail("E" + std::to_string(it.first), it.second);
@@ -521,7 +521,7 @@ void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, u
     Example:
     GetValueLatencySSMean
 */
-void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, DDSketch<double>& sample) {
+void traceSSOrTSSPercentiles(TraceEvent& ev, std::string const name, DDSketch<double>& sample) {
 	ev.detail(name + "Mean", sample.mean());
 	// don't log the larger percentiles unless we actually have enough samples to log the accurate percentile instead of
 	// the largest sample in this window
@@ -537,7 +537,7 @@ void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, DDSketch<do
 }
 
 void traceTSSPercentiles(TraceEvent& ev,
-                         const std::string name,
+                         std::string const name,
                          DDSketch<double>& ssSample,
                          DDSketch<double>& tssSample) {
 	ASSERT(ssSample.getPopulationSize() == tssSample.getPopulationSize());
@@ -554,7 +554,7 @@ ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
 		wait(delay(CLIENT_KNOBS->TSS_METRICS_LOGGING_INTERVAL, TaskPriority::FlushTrace));
 
 		// Log each TSS pair separately
-		for (const auto& it : cx->tssMetrics) {
+		for (auto const& it : cx->tssMetrics) {
 			if (it.second->detailedMismatches.size()) {
 				cx->tssMismatchStream.send(
 				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
@@ -650,11 +650,11 @@ struct TrInfoChunk {
 	Key key;
 };
 
-static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
-static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
+static Key const CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
+static Key const CLIENT_LATENCY_INFO_CTR_PREFIX = "client_latency_counter/"_sr;
 
 ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vector<TrInfoChunk>* chunks) {
-	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+	state Key const clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	state int retryCount = 0;
 	loop {
 		try {
@@ -681,8 +681,8 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vecto
 }
 
 ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t clientTxInfoSizeLimit) {
-	state const Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
-	state const Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+	state Key const clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
+	state Key const clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 	TraceEvent(SevInfo, "DelExcessClntTxnEntriesCalled").log();
 
 	// If we don't limit it with retries, the DatabaseContext will never cleanup as Transaction
@@ -742,7 +742,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 // counting will increment reference count for DatabaseContext which holds the future of this actor. This creates a
 // cyclic reference and hence this actor and Database object will not be destroyed at all.
 ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext* cx) {
-	state const std::string clientLatencyName =
+	state std::string const clientLatencyName =
 	    CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin).toString();
 	state Transaction tr;
 	state std::vector<TrInfoChunk> commitQ;
@@ -946,8 +946,8 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 }
 
 void updateLocationCacheWithCaches(DatabaseContext* self,
-                                   const std::map<UID, StorageServerInterface>& removed,
-                                   const std::map<UID, StorageServerInterface>& added) {
+                                   std::map<UID, StorageServerInterface> const& removed,
+                                   std::map<UID, StorageServerInterface> const& added) {
 	// TODO: this needs to be more clever in the future
 	auto ranges = self->locationCache.ranges();
 	for (auto iter = ranges.begin(); iter != ranges.end(); ++iter) {
@@ -956,12 +956,12 @@ void updateLocationCacheWithCaches(DatabaseContext* self,
 			std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
 			interfaces.reserve(val->size() - removed.size() + added.size());
 			for (int i = 0; i < val->size(); ++i) {
-				const auto& interf = (*val)[i];
+				auto const& interf = (*val)[i];
 				if (removed.count(interf->interf.id()) == 0) {
 					interfaces.emplace_back(interf);
 				}
 			}
-			for (const auto& p : added) {
+			for (auto const& p : added) {
 				interfaces.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(p.second));
 			}
 			iter->value() = makeReference<LocationInfo>(interfaces, true);
@@ -969,8 +969,8 @@ void updateLocationCacheWithCaches(DatabaseContext* self,
 	}
 }
 
-Reference<LocationInfo> addCaches(const Reference<LocationInfo>& loc,
-                                  const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& other) {
+Reference<LocationInfo> addCaches(Reference<LocationInfo> const& loc,
+                                  std::vector<Reference<ReferencedInterface<StorageServerInterface>>> const& other) {
 	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> interfaces;
 	interfaces.reserve(loc->size() + other.size());
 	for (int i = 0; i < loc->size(); ++i) {
@@ -994,7 +994,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 		// find ss pair id so we can remove it from the mapping
 		state UID tssPairID;
 		bool found = false;
-		for (const auto& it : cx->tssMapping) {
+		for (auto const& it : cx->tssMapping) {
 			if (it.second.id() == data.first) {
 				tssPairID = it.first;
 				found = true;
@@ -1021,7 +1021,7 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 					}
 					tssMapDB.erase(tr, tssPairID);
 
-					for (const DetailedTSSMismatch& d : data.second) {
+					for (DetailedTSSMismatch const& d : data.second) {
 						// <tssid, time, mismatchid> -> mismatch data
 						tssMismatchDB.set(tr,
 						                  Tuple::makeTuple(data.first.toString(), d.timestamp, d.mismatchId.toString()),
@@ -1065,7 +1065,7 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 		});
 	}
 
-	SingleSpecialKeyImpl(KeyRef k, const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f)
+	SingleSpecialKeyImpl(KeyRef k, std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> const& f)
 	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f) {}
 
 private:
@@ -1081,7 +1081,7 @@ public:
 	                             GetRangeLimits limitsHint) const override;
 };
 
-static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
+static RangeResult healthMetricsToKVPairs(HealthMetrics const& metrics, KeyRangeRef kr) {
 	RangeResult result;
 	if (CLIENT_BUGGIFY)
 		return result;
@@ -1102,7 +1102,7 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 	// tlog stats
 	{
 		int phase = 0; // Avoid comparing twice per loop iteration
-		for (const auto& [uid, logStats] : metrics.tLogQueue) {
+		for (auto const& [uid, logStats] : metrics.tLogQueue) {
 			StringRef k{ StringRef(uid.toString()).withPrefix("\xff\xff/metrics/health/log/"_sr, result.arena()) };
 			if (phase == 0 && k >= kr.begin) {
 				phase = 1;
@@ -1124,7 +1124,7 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 	// Storage stats
 	{
 		int phase = 0; // Avoid comparing twice per loop iteration
-		for (const auto& [uid, storageStats] : metrics.storageStats) {
+		for (auto const& [uid, storageStats] : metrics.storageStats) {
 			StringRef k{ StringRef(uid.toString()).withPrefix("\xff\xff/metrics/health/storage/"_sr, result.arena()) };
 			if (phase == 0 && k >= kr.begin) {
 				phase = 1;
@@ -1480,7 +1480,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	initializeSpecialCounters();
 }
 
-DatabaseContext::DatabaseContext(const Error& err)
+DatabaseContext::DatabaseContext(Error const& err)
   : deferredError(err), internal(IsInternal::False), cc("TransactionMetrics"),
     transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),

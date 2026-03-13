@@ -41,7 +41,7 @@ namespace ge = grpc::experimental;
 // provide secure or insecure credentials based on the underlying configuration.
 class GrpcCredentialProvider {
 public:
-	virtual ~GrpcCredentialProvider() {};
+	virtual ~GrpcCredentialProvider(){};
 
 	virtual std::shared_ptr<grpc::ServerCredentials> serverCredentials() const = 0;
 	virtual std::shared_ptr<grpc::ChannelCredentials> clientCredentials() const = 0;
@@ -122,7 +122,7 @@ private:
 // now, its just used in tests.
 class GrpcTlsCredentialStaticProvider : public GrpcCredentialProvider {
 public:
-	GrpcTlsCredentialStaticProvider(const std::string& key, const std::string& cert, const std::string& ca)
+	GrpcTlsCredentialStaticProvider(std::string const& key, std::string const& cert, std::string const& ca)
 	  : provider_(
 	        std::make_shared<ge::StaticDataCertificateProvider>(ca,
 	                                                            std::vector{ ge::IdentityKeyCertPair{ key, cert } })),

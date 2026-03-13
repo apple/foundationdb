@@ -52,7 +52,7 @@ public:
 	std::string key;
 	std::string value;
 
-	Attribute(const std::string& k, const std::string& v) : key{ k }, value{ v } {}
+	Attribute(std::string const& k, std::string const& v) : key{ k }, value{ v } {}
 	Attribute(std::string&& k, std::string&& v) : key{ std::move(k) }, value{ std::move(v) } {}
 };
 
@@ -72,12 +72,12 @@ public:
 	std::variant<int64_t, double> val; // 9 bytes in msgpack
 	DataPointFlags flags; // 1 byte in msgpack
 	// If we take the sum of above, we get 51 bytes
-	static const uint32_t MsgpackBytes = 51;
+	static uint32_t const MsgpackBytes = 51;
 	NumberDataPoint(int64_t v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
 	NumberDataPoint(double v) : recordTime{ now() }, val{ v }, flags{ DataPointFlags::FLAG_NONE } {}
 
-	NumberDataPoint& addAttribute(const std::string& key, const std::string& value) {
+	NumberDataPoint& addAttribute(std::string const& key, std::string const& value) {
 		attributes.emplace_back(Attribute(key, value));
 		return *this;
 	}
@@ -92,8 +92,8 @@ public:
 	AggregationTemporality aggregation;
 	bool isMonotonic;
 	OTELSum() : aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
-	OTELSum(const std::string& n) : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
-	OTELSum(const std::string& n, int64_t v)
+	OTELSum(std::string const& n) : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {}
+	OTELSum(std::string const& n, int64_t v)
 	  : name{ n }, aggregation{ AGGREGATION_TEMPORALITY_CUMULATIVE }, isMonotonic{ true } {
 		points.emplace_back(v);
 	}
@@ -113,8 +113,8 @@ public:
 	std::string name;
 	std::vector<NumberDataPoint> points;
 	OTELGauge() {}
-	OTELGauge(const std::string& n) : name{ n } {}
-	OTELGauge(const std::string& n, double v) : name{ n } { points.emplace_back(v); }
+	OTELGauge(std::string const& n) : name{ n } {}
+	OTELGauge(std::string const& n, double v) : name{ n } { points.emplace_back(v); }
 };
 
 class HistogramDataPoint {
@@ -122,17 +122,17 @@ public:
 	double errorGuarantee;
 	std::vector<Attribute> attributes;
 	double startTime;
-	const std::vector<uint32_t> buckets;
+	std::vector<uint32_t> const buckets;
 	double recordTime;
 	uint64_t count;
 	double sum;
 	double min;
 	double max;
 	DataPointFlags flags;
-	HistogramDataPoint(double error, const std::vector<uint32_t>& s, double _min, double _max, double _sum)
+	HistogramDataPoint(double error, std::vector<uint32_t> const& s, double _min, double _max, double _sum)
 	  : errorGuarantee(error), recordTime{ now() }, buckets{ s }, count{ buckets.size() }, min{ _min }, max{ _max },
 	    sum{ _sum }, flags{ DataPointFlags::FLAG_NONE } {}
-	HistogramDataPoint& addAttribute(const std::string& key, const std::string& value) {
+	HistogramDataPoint& addAttribute(std::string const& key, std::string const& value) {
 		attributes.emplace_back(Attribute(key, value));
 		return *this;
 	}
@@ -144,9 +144,9 @@ public:
 	std::vector<HistogramDataPoint> points;
 	AggregationTemporality aggregation;
 	OTELHistogram() {}
-	OTELHistogram(const std::string& n,
+	OTELHistogram(std::string const& n,
 	              double error,
-	              const std::vector<uint32_t>& s,
+	              std::vector<uint32_t> const& s,
 	              double min,
 	              double max,
 	              double sum)
@@ -155,15 +155,15 @@ public:
 	}
 };
 
-inline void serialize(const Attribute& attr, MsgpackBuffer& buf) {
+inline void serialize(Attribute const& attr, MsgpackBuffer& buf) {
 	serialize_string(attr.key, buf);
 	serialize_string(attr.value, buf);
 }
 
-inline void serialize(const NumberDataPoint& point, MsgpackBuffer& buf) {
+inline void serialize(NumberDataPoint const& point, MsgpackBuffer& buf) {
 	serialize_value(point.startTime, buf, 0xcb);
 	serialize_value(point.recordTime, buf, 0xcb);
-	typedef void (*func_ptr)(const Attribute&, MsgpackBuffer&);
+	typedef void (*func_ptr)(Attribute const&, MsgpackBuffer&);
 	func_ptr f = serialize;
 	serialize_vector(point.attributes, buf, f);
 	if (std::holds_alternative<int64_t>(point.val)) {
@@ -174,24 +174,24 @@ inline void serialize(const NumberDataPoint& point, MsgpackBuffer& buf) {
 	serialize_value<uint8_t>(point.flags, buf, 0xcc);
 }
 
-inline void serialize(const OTELSum& sum, MsgpackBuffer& buf) {
+inline void serialize(OTELSum const& sum, MsgpackBuffer& buf) {
 	serialize_string(sum.name, buf);
-	typedef void (*func_ptr)(const NumberDataPoint&, MsgpackBuffer&);
+	typedef void (*func_ptr)(NumberDataPoint const&, MsgpackBuffer&);
 	func_ptr f = OTEL::serialize;
 	serialize_vector(sum.points, buf, f);
 	serialize_value<uint8_t>(sum.aggregation, buf, 0xcc);
 	serialize_bool(sum.isMonotonic, buf);
 }
 
-inline void serialize(const OTELGauge& g, MsgpackBuffer& buf) {
+inline void serialize(OTELGauge const& g, MsgpackBuffer& buf) {
 	serialize_string(g.name, buf);
-	typedef void (*func_ptr)(const NumberDataPoint&, MsgpackBuffer&);
+	typedef void (*func_ptr)(NumberDataPoint const&, MsgpackBuffer&);
 	func_ptr f = OTEL::serialize;
 	serialize_vector(g.points, buf, f);
 }
 
-inline void serialize(const HistogramDataPoint& point, MsgpackBuffer& buf) {
-	typedef void (*func_ptr)(const Attribute&, MsgpackBuffer&);
+inline void serialize(HistogramDataPoint const& point, MsgpackBuffer& buf) {
+	typedef void (*func_ptr)(Attribute const&, MsgpackBuffer&);
 	func_ptr f = serialize;
 	serialize_value(point.errorGuarantee, buf, 0xcb);
 	serialize_vector(point.attributes, buf, f);
@@ -201,14 +201,14 @@ inline void serialize(const HistogramDataPoint& point, MsgpackBuffer& buf) {
 	serialize_value(point.sum, buf, 0xcb);
 	serialize_value(point.min, buf, 0xcb);
 	serialize_value(point.max, buf, 0xcb);
-	auto f_Bucket = [](const uint32_t& d, MsgpackBuffer& buf) { serialize_value(d, buf, 0xce); };
+	auto f_Bucket = [](uint32_t const& d, MsgpackBuffer& buf) { serialize_value(d, buf, 0xce); };
 	serialize_vector(point.buckets, buf, f_Bucket);
 	serialize_value<uint8_t>(point.flags, buf, 0xcc);
 }
 
-inline void serialize(const OTELHistogram& h, MsgpackBuffer& buf) {
+inline void serialize(OTELHistogram const& h, MsgpackBuffer& buf) {
 	serialize_string(h.name, buf);
-	typedef void (*func_ptr)(const HistogramDataPoint&, MsgpackBuffer&);
+	typedef void (*func_ptr)(HistogramDataPoint const&, MsgpackBuffer&);
 	func_ptr f = OTEL::serialize;
 	serialize_vector(h.points, buf, f);
 	serialize_value<uint8_t>(h.aggregation, buf, 0xcc);

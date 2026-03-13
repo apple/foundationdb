@@ -36,17 +36,17 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CheckpointRequest {
-	const Version version; // The FDB version at which the checkpoint is created.
-	const std::vector<KeyRange> ranges; // Keyranges this checkpoint must contain.
-	const CheckpointFormat format;
-	const UID checkpointID;
-	const std::string checkpointDir; // The local directory where the checkpoint file will be created.
+	Version const version; // The FDB version at which the checkpoint is created.
+	std::vector<KeyRange> const ranges; // Keyranges this checkpoint must contain.
+	CheckpointFormat const format;
+	UID const checkpointID;
+	std::string const checkpointDir; // The local directory where the checkpoint file will be created.
 
-	CheckpointRequest(const Version version,
-	                  const std::vector<KeyRange>& ranges,
-	                  const CheckpointFormat format,
-	                  const UID& id,
-	                  const std::string& checkpointDir)
+	CheckpointRequest(Version const version,
+	                  std::vector<KeyRange> const& ranges,
+	                  CheckpointFormat const format,
+	                  UID const& id,
+	                  std::string const& checkpointDir)
 	  : version(version), ranges(ranges), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
 };
 
@@ -63,8 +63,8 @@ public:
 	virtual bool shardAware() const { return false; }
 	// Returns true if the store supports external SST file ingestion.
 	virtual bool supportsSstIngestion() const { return false; }
-	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
-	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
+	virtual void set(KeyValueRef keyValue, Arena const* arena = nullptr) = 0;
+	virtual void clear(KeyRangeRef range, Arena const* arena = nullptr) = 0;
 	virtual Future<Void> canCommit() { return Void(); }
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
@@ -119,21 +119,21 @@ public:
 	virtual void enableSnapshot() {}
 
 	// Create a checkpoint.
-	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw not_implemented(); }
+	virtual Future<CheckpointMetaData> checkpoint(CheckpointRequest const& request) { throw not_implemented(); }
 
 	// Restore from a checkpoint.
-	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
+	virtual Future<Void> restore(std::vector<CheckpointMetaData> const& checkpoints) { throw not_implemented(); }
 
 	// Same as above, with a target shardId, and a list of target ranges, ranges must be a subset of the checkpoint
 	// ranges.
-	virtual Future<Void> restore(const std::string& shardId,
-	                             const std::vector<KeyRange>& ranges,
-	                             const std::vector<CheckpointMetaData>& checkpoints) {
+	virtual Future<Void> restore(std::string const& shardId,
+	                             std::vector<KeyRange> const& ranges,
+	                             std::vector<CheckpointMetaData> const& checkpoints) {
 		throw not_implemented();
 	}
 
 	// Delete a checkpoint.
-	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
+	virtual Future<Void> deleteCheckpoint(CheckpointMetaData const& checkpoint) { throw not_implemented(); }
 
 	// Compact a range of keys in the store
 	virtual Future<Void> compactRange(KeyRangeRef range) { throw not_implemented(); }
@@ -173,7 +173,7 @@ ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
                                             KeyRange range,
                                             Standalone<VectorRef<KeyValueRef>> data) {
 	state int sinceYield = 0;
-	state const KeyValueRef* kvItr = data.begin();
+	state KeyValueRef const* kvItr = data.begin();
 	state KeyRangeRef rangeRef = range;
 	if (rangeRef.empty()) {
 		return Void();

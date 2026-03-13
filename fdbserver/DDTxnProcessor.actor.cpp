@@ -29,7 +29,7 @@
 static void updateServersAndCompleteSources(std::set<UID>& servers,
                                             std::vector<UID>& completeSources,
                                             int shard,
-                                            const std::vector<UID>& src) {
+                                            std::vector<UID> const& src) {
 	servers.insert(src.begin(), src.end());
 	if (shard == 0) {
 		completeSources = src;
@@ -285,7 +285,7 @@ class DDTxnProcessorImpl {
 	    UID distributorId,
 	    MoveKeysLock moveKeysLock,
 	    std::vector<Optional<Key>> remoteDcIds,
-	    const DDEnabledState* ddEnabledState,
+	    DDEnabledState const* ddEnabledState,
 	    SkipDDModeCheck skipDDModeCheck) {
 		state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
 		state Key beginKey = allKeys.begin;
@@ -375,7 +375,7 @@ class DDTxnProcessorImpl {
 				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
-					const DataMoveMetaData& meta = dataMove->meta;
+					DataMoveMetaData const& meta = dataMove->meta;
 					if (meta.ranges.empty()) {
 						// Any persisted datamove with an empty range must be an tombstone persisted by
 						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
@@ -387,7 +387,7 @@ class DDTxnProcessorImpl {
 						continue;
 					}
 					ASSERT(!meta.ranges.empty());
-					for (const UID& id : meta.src) {
+					for (UID const& id : meta.src) {
 						auto& dc = server_dc[id];
 						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
 							dataMove->remoteSrc.push_back(id);
@@ -395,7 +395,7 @@ class DDTxnProcessorImpl {
 							dataMove->primarySrc.push_back(id);
 						}
 					}
-					for (const UID& id : meta.dest) {
+					for (UID const& id : meta.dest) {
 						auto& dc = server_dc[id];
 						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
 							dataMove->remoteDest.push_back(id);
@@ -533,7 +533,7 @@ class DDTxnProcessorImpl {
 
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && numDataMoves > 0) {
 			for (int shard = 0; shard < result->shards.size() - 1; ++shard) {
-				const DDShardInfo& iShard = result->shards[shard];
+				DDShardInfo const& iShard = result->shards[shard];
 				KeyRangeRef keys = KeyRangeRef(iShard.key, result->shards[shard + 1].key);
 				result->dataMoveMap[keys.begin]->validateShard(iShard, keys);
 			}
@@ -547,7 +547,7 @@ class DDTxnProcessorImpl {
 		return result;
 	}
 
-	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, DDEnabledState const* ddEnabledState) {
 		state Transaction tr(cx);
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
@@ -582,7 +582,7 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+	ACTOR static Future<bool> isDataDistributionEnabled(Database cx, DDEnabledState const* ddEnabledState) {
 		state Transaction tr(cx);
 		loop {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -626,7 +626,7 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
+	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, DDEnabledState const* ddEnabledState) {
 		loop {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 			state Transaction tr(cx);
@@ -713,18 +713,18 @@ class DDTxnProcessorImpl {
 };
 
 Future<Void> DDTxnProcessor::waitForAllDataRemoved(
-    const UID& serverID,
-    const Version& addedVersion,
+    UID const& serverID,
+    Version const& addedVersion,
     Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const {
 	return DDTxnProcessorImpl::waitForAllDataRemoved(cx, serverID, addedVersion, shardsAffectedByTeamFailure);
 }
 
-Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
+Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(KeyRangeRef const range) {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
 }
 
 Future<std::vector<IDDTxnProcessor::DDRangeLocations>> DDTxnProcessor::getSourceServerInterfacesForRange(
-    const KeyRangeRef range) {
+    KeyRangeRef const range) {
 	return DDTxnProcessorImpl::getSourceServerInterfacesForRange(cx, range);
 }
 
@@ -732,7 +732,7 @@ Future<ServerWorkerInfos> DDTxnProcessor::getServerListAndProcessClasses() {
 	return DDTxnProcessorImpl::getServerListAndProcessClasses(cx);
 }
 
-Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(const UID& ddId) const {
+Future<MoveKeysLock> DDTxnProcessor::takeMoveKeysLock(UID const& ddId) const {
 	return ::takeMoveKeysLock(cx, ddId);
 }
 
@@ -740,52 +740,52 @@ Future<DatabaseConfiguration> DDTxnProcessor::getDatabaseConfiguration() const {
 	return ::getDatabaseConfiguration(cx);
 }
 
-Future<Void> DDTxnProcessor::updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
-                                               const std::vector<Optional<Key>>& remoteIds,
-                                               const DatabaseConfiguration& configuration) const {
+Future<Void> DDTxnProcessor::updateReplicaKeys(std::vector<Optional<Key>> const& primaryIds,
+                                               std::vector<Optional<Key>> const& remoteIds,
+                                               DatabaseConfiguration const& configuration) const {
 	return DDTxnProcessorImpl::updateReplicaKeys(cx, primaryIds, remoteIds, configuration);
 }
 
 Future<Reference<InitialDataDistribution>> DDTxnProcessor::getInitialDataDistribution(
-    const UID& distributorId,
-    const MoveKeysLock& moveKeysLock,
-    const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState,
+    UID const& distributorId,
+    MoveKeysLock const& moveKeysLock,
+    std::vector<Optional<Key>> const& remoteDcIds,
+    DDEnabledState const* ddEnabledState,
     SkipDDModeCheck skipDDModeCheck) {
 	return DDTxnProcessorImpl::getInitialDataDistribution(
 	    cx, distributorId, moveKeysLock, remoteDcIds, ddEnabledState, skipDDModeCheck);
 }
 
-Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+Future<Void> DDTxnProcessor::waitForDataDistributionEnabled(DDEnabledState const* ddEnabledState) const {
 	return DDTxnProcessorImpl::waitForDataDistributionEnabled(cx, ddEnabledState);
 }
 
-Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
+Future<bool> DDTxnProcessor::isDataDistributionEnabled(DDEnabledState const* ddEnabledState) const {
 	return DDTxnProcessorImpl::isDataDistributionEnabled(cx, ddEnabledState);
 }
 
-Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
+Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock const& lock, DDEnabledState const* ddEnabledState) const {
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }
 
 Future<std::pair<Optional<StorageMetrics>, int>> DDTxnProcessor::waitStorageMetrics(
-    const KeyRange& keys,
-    const StorageMetrics& min,
-    const StorageMetrics& max,
-    const StorageMetrics& permittedError,
+    KeyRange const& keys,
+    StorageMetrics const& min,
+    StorageMetrics const& max,
+    StorageMetrics const& permittedError,
     int shardLimit,
     int expectedShardCount) const {
 	return cx->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
 }
 
-Future<Standalone<VectorRef<KeyRef>>> DDTxnProcessor::splitStorageMetrics(const KeyRange& keys,
-                                                                          const StorageMetrics& limit,
-                                                                          const StorageMetrics& estimated,
-                                                                          const Optional<int>& minSplitBytes) const {
+Future<Standalone<VectorRef<KeyRef>>> DDTxnProcessor::splitStorageMetrics(KeyRange const& keys,
+                                                                          StorageMetrics const& limit,
+                                                                          StorageMetrics const& estimated,
+                                                                          Optional<int> const& minSplitBytes) const {
 	return cx->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
 }
 
-Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DDTxnProcessor::getReadHotRanges(const KeyRange& keys) const {
+Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DDTxnProcessor::getReadHotRanges(KeyRange const& keys) const {
 	return cx->getReadHotRanges(keys);
 }
 
@@ -797,7 +797,7 @@ Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }
 
-Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(const Optional<Key>& dcId, const int& storageTeamSize) const {
+Future<int> DDTxnProcessor::tryUpdateReplicasKeyForDc(Optional<Key> const& dcId, int const& storageTeamSize) const {
 	return DDTxnProcessorImpl::tryUpdateReplicasKeyForDc(cx, dcId, storageTeamSize);
 }
 
@@ -809,13 +809,13 @@ Future<std::vector<ProcessData>> DDTxnProcessor::getWorkers() const {
 	return ::getWorkers(cx);
 }
 
-Future<Void> DDTxnProcessor::rawStartMovement(const MoveKeysParams& params,
+Future<Void> DDTxnProcessor::rawStartMovement(MoveKeysParams const& params,
                                               std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawStartMovement(cx, params, tssMapping);
 }
 
-Future<Void> DDTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
-                                               const std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> DDTxnProcessor::rawFinishMovement(MoveKeysParams const& params,
+                                               std::map<UID, StorageServerInterface> const& tssMapping) {
 	return ::rawFinishMovement(cx, params, tssMapping);
 }
 
@@ -842,7 +842,7 @@ struct DDMockTxnProcessorImpl {
 		return Void();
 	}
 
-	static Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, const MoveKeysParams& params) {
+	static Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, MoveKeysParams const& params) {
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			ASSERT(params.ranges.present());
 			// TODO: make startMoveShards work with multiple ranges.
@@ -882,7 +882,7 @@ Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 }
 
 std::pair<std::set<std::vector<UID>>, std::set<std::vector<UID>>> getAllTeamsInRegion(
-    const std::vector<DDShardInfo>& shards) {
+    std::vector<DDShardInfo> const& shards) {
 	std::set<std::vector<UID>> primary, remote;
 	for (auto& info : shards) {
 		if (!info.primarySrc.empty())
@@ -944,10 +944,10 @@ std::vector<DDShardInfo> DDMockTxnProcessor::getDDShardInfos() const {
 }
 
 Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDistribution(
-    const UID& distributorId,
-    const MoveKeysLock& moveKeysLock,
-    const std::vector<Optional<Key>>& remoteDcIds,
-    const DDEnabledState* ddEnabledState,
+    UID const& distributorId,
+    MoveKeysLock const& moveKeysLock,
+    std::vector<Optional<Key>> const& remoteDcIds,
+    DDEnabledState const* ddEnabledState,
     SkipDDModeCheck skipDDModeCheck) {
 
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
@@ -959,20 +959,20 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
 	return res;
 }
 
-Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(const UID& serverID,
-                                                            const std::vector<UID>& teamForDroppedRange,
-                                                            const MoveKeysLock& lock,
-                                                            const DDEnabledState* ddEnabledState) const {
+Future<Void> DDMockTxnProcessor::removeKeysFromFailedServer(UID const& serverID,
+                                                            std::vector<UID> const& teamForDroppedRange,
+                                                            MoveKeysLock const& lock,
+                                                            DDEnabledState const* ddEnabledState) const {
 
 	// This function only takes effect when user exclude failed IP:PORT in the fdbcli. In the first version , the mock
 	// class won’t support this.
 	UNREACHABLE();
 }
 
-Future<Void> DDMockTxnProcessor::removeStorageServer(const UID& serverID,
-                                                     const Optional<UID>& tssPairID,
-                                                     const MoveKeysLock& lock,
-                                                     const DDEnabledState* ddEnabledState) const {
+Future<Void> DDMockTxnProcessor::removeStorageServer(UID const& serverID,
+                                                     Optional<UID> const& tssPairID,
+                                                     MoveKeysLock const& lock,
+                                                     DDEnabledState const* ddEnabledState) const {
 	ASSERT(mgs->allShardsRemovedFromServer(serverID));
 	mgs->allServers.erase(serverID);
 	return Void();
@@ -1008,7 +1008,7 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 	mgs->shardMapping->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::Normal);
 }
 
-Future<Void> DDMockTxnProcessor::moveKeys(const MoveKeysParams& params) {
+Future<Void> DDMockTxnProcessor::moveKeys(MoveKeysParams const& params) {
 	// Not support location metadata yet
 	ASSERT(!SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	return DDMockTxnProcessorImpl::moveKeys(this, params);
@@ -1020,18 +1020,18 @@ Future<HealthMetrics> DDMockTxnProcessor::getHealthMetrics(bool detailed) const 
 }
 
 Future<Standalone<VectorRef<KeyRef>>> DDMockTxnProcessor::splitStorageMetrics(
-    const KeyRange& keys,
-    const StorageMetrics& limit,
-    const StorageMetrics& estimated,
-    const Optional<int>& minSplitBytes) const {
+    KeyRange const& keys,
+    StorageMetrics const& limit,
+    StorageMetrics const& estimated,
+    Optional<int> const& minSplitBytes) const {
 	return mgs->splitStorageMetrics(keys, limit, estimated, minSplitBytes);
 }
 
 Future<std::pair<Optional<StorageMetrics>, int>> DDMockTxnProcessor::waitStorageMetrics(
-    const KeyRange& keys,
-    const StorageMetrics& min,
-    const StorageMetrics& max,
-    const StorageMetrics& permittedError,
+    KeyRange const& keys,
+    StorageMetrics const& min,
+    StorageMetrics const& max,
+    StorageMetrics const& permittedError,
     int shardLimit,
     int expectedShardCount) const {
 	return mgs->waitStorageMetrics(keys, min, max, permittedError, shardLimit, expectedShardCount);
@@ -1096,7 +1096,7 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	return Void();
 }
 
-Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
+Future<Void> DDMockTxnProcessor::rawStartMovement(MoveKeysParams const& params,
                                                   std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawStartMovement(mgs, params, tssMapping);
 }
@@ -1153,17 +1153,17 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	return Void();
 }
 
-Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
-                                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+Future<Void> DDMockTxnProcessor::rawFinishMovement(MoveKeysParams const& params,
+                                                   std::map<UID, StorageServerInterface> const& tssMapping) {
 	return ::rawFinishMovement(mgs, params, tssMapping);
 }
 
-Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(const UID& id,
+Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(UID const& id,
                                                                               double maxStaleness) const {
 	return cx->getStorageStats(id, maxStaleness);
 }
 
-Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(const UID& id,
+Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(UID const& id,
                                                                                   double maxStaleness) const {
 	auto it = mgs->allServers.find(id);
 	if (it == mgs->allServers.end()) {
@@ -1176,7 +1176,7 @@ Future<DatabaseConfiguration> DDMockTxnProcessor::getDatabaseConfiguration() con
 	return mgs->configuration;
 }
 
-Future<IDDTxnProcessor::SourceServers> DDMockTxnProcessor::getSourceServersForRange(const KeyRangeRef keys) {
+Future<IDDTxnProcessor::SourceServers> DDMockTxnProcessor::getSourceServersForRange(KeyRangeRef const keys) {
 	std::set<UID> servers;
 	std::vector<UID> completeSources;
 	auto ranges = mgs->shardMapping->intersectingRanges(keys);
@@ -1191,8 +1191,8 @@ Future<IDDTxnProcessor::SourceServers> DDMockTxnProcessor::getSourceServersForRa
 }
 
 Future<Void> DDMockTxnProcessor::waitForAllDataRemoved(
-    const UID& serverID,
-    const Version& addedVersion,
+    UID const& serverID,
+    Version const& addedVersion,
     Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const {
 	return checkUntil(
 	    SERVER_KNOBS->ALL_DATA_REMOVED_DELAY,

@@ -41,16 +41,16 @@ struct StorageServerShard {
 	StorageServerShard() = default;
 	StorageServerShard(KeyRange range,
 	                   Version version,
-	                   const uint64_t id,
-	                   const uint64_t desiredId,
+	                   uint64_t const id,
+	                   uint64_t const desiredId,
 	                   ShardState shardState,
 	                   Optional<UID> moveInShardId)
 	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState),
 	    moveInShardId(moveInShardId) {}
 	StorageServerShard(KeyRange range,
 	                   Version version,
-	                   const uint64_t id,
-	                   const uint64_t desiredId,
+	                   uint64_t const id,
+	                   uint64_t const desiredId,
 	                   ShardState shardState)
 	  : range(range), version(version), id(id), desiredId(desiredId), shardState(shardState) {}
 
@@ -60,10 +60,10 @@ struct StorageServerShard {
 
 	ShardState getShardState() const { return static_cast<ShardState>(this->shardState); };
 
-	void setShardState(const ShardState shardState) { this->shardState = static_cast<int8_t>(shardState); }
+	void setShardState(ShardState const shardState) { this->shardState = static_cast<int8_t>(shardState); }
 
 	std::string getShardStateString() const {
-		const ShardState ss = getShardState();
+		ShardState const ss = getShardState();
 		switch (ss) {
 		case NotAssigned:
 			return "NotAssigned";

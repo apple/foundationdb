@@ -90,7 +90,7 @@ void SimBugInjector::reset() {
 	delete simBugInjector;
 }
 
-std::shared_ptr<ISimBug> SimBugInjector::getImpl(const IBugIdentifier& id, bool getDisabled /* = false */) const {
+std::shared_ptr<ISimBug> SimBugInjector::getImpl(IBugIdentifier const& id, bool getDisabled /* = false */) const {
 	if (!simBugInjector) {
 		return {};
 	}
@@ -105,7 +105,7 @@ std::shared_ptr<ISimBug> SimBugInjector::getImpl(const IBugIdentifier& id, bool 
 	}
 }
 
-std::shared_ptr<ISimBug> SimBugInjector::enableImpl(const IBugIdentifier& id) {
+std::shared_ptr<ISimBug> SimBugInjector::enableImpl(IBugIdentifier const& id) {
 	UNSTOPPABLE_ASSERT(isEnabled());
 	auto& res = simBugInjector->bugs[std::type_index(typeid(id))];
 	if (!res) {

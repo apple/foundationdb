@@ -108,8 +108,8 @@ Future<Void> setDDIgnoreRebalanceOff(Reference<IDatabase> db, uint8_t DDIgnoreOp
 
 namespace fdb_cli {
 
-const KeyRef ddModeSpecialKey = "\xff\xff/management/data_distribution/mode"_sr;
-const KeyRef ddIgnoreRebalanceSpecialKey = "\xff\xff/management/data_distribution/rebalance_ignored"_sr;
+KeyRef const ddModeSpecialKey = "\xff\xff/management/data_distribution/mode"_sr;
+KeyRef const ddIgnoreRebalanceSpecialKey = "\xff\xff/management/data_distribution/rebalance_ignored"_sr;
 constexpr auto usage =
     "Usage: datadistribution <on|off|disable <ssfailure|rebalance|rebalance_disk|rebalance_read>|enable "
     "<ssfailure|rebalance|rebalance_disk|rebalance_read>>\n";

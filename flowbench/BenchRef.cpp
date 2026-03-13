@@ -48,25 +48,25 @@ struct Factory<RefType::RawPointer> {
 template <>
 struct Factory<RefType::UniquePointer> {
 	static std::unique_ptr<Empty> create() { return std::make_unique<Empty>(); }
-	static void cleanup(const std::unique_ptr<Empty>&) {}
+	static void cleanup(std::unique_ptr<Empty> const&) {}
 };
 
 template <>
 struct Factory<RefType::SharedPointer> {
 	static std::shared_ptr<Empty> create() { return std::make_shared<Empty>(); }
-	static void cleanup(const std::shared_ptr<Empty>&) {}
+	static void cleanup(std::shared_ptr<Empty> const&) {}
 };
 
 template <>
 struct Factory<RefType::FlowReference> {
 	static Reference<Empty> create() { return makeReference<Empty>(); }
-	static void cleanup(const Reference<Empty>&) {}
+	static void cleanup(Reference<Empty> const&) {}
 };
 
 template <>
 struct Factory<RefType::FlowReferenceThreadSafe> {
 	static Reference<EmptyTSRC> create() { return makeReference<EmptyTSRC>(); }
-	static void cleanup(const Reference<EmptyTSRC>&) {}
+	static void cleanup(Reference<EmptyTSRC> const&) {}
 };
 
 template <RefType refType>

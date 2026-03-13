@@ -39,7 +39,7 @@ struct NetworkAddress {
 
 	NetworkAddress()
 	  : ip(IPAddress(0)), port(0), flags(FLAG_PRIVATE), fromHostname(NetworkAddressFromHostname::False) {}
-	NetworkAddress(const IPAddress& address,
+	NetworkAddress(IPAddress const& address,
 	               uint16_t port,
 	               bool isPublic,
 	               bool isTLS,
@@ -55,7 +55,7 @@ struct NetworkAddress {
 
 	NetworkAddress(uint32_t ip, uint16_t port)
 	  : NetworkAddress(ip, port, false, false, NetworkAddressFromHostname::False) {}
-	NetworkAddress(const IPAddress& ip, uint16_t port)
+	NetworkAddress(IPAddress const& ip, uint16_t port)
 	  : NetworkAddress(ip, port, false, false, NetworkAddressFromHostname::False) {}
 
 	bool operator==(NetworkAddress const& r) const { return ip == r.ip && port == r.port && flags == r.flags; }
@@ -113,13 +113,13 @@ struct NetworkAddress {
 
 template <>
 struct Traceable<NetworkAddress> : std::true_type {
-	static std::string toString(const NetworkAddress& value) { return value.toString(); }
+	static std::string toString(NetworkAddress const& value) { return value.toString(); }
 };
 
 namespace std {
 template <>
 struct hash<NetworkAddress> {
-	size_t operator()(const NetworkAddress& na) const { return na.hash(); }
+	size_t operator()(NetworkAddress const& na) const { return na.hash(); }
 };
 } // namespace std
 
@@ -153,7 +153,7 @@ struct NetworkAddressList {
 		return address.toString() + ", " + secondaryAddress.get().toString();
 	}
 
-	bool contains(const NetworkAddress& r) const {
+	bool contains(NetworkAddress const& r) const {
 		return address == r || (secondaryAddress.present() && secondaryAddress.get() == r);
 	}
 
@@ -163,15 +163,15 @@ struct NetworkAddressList {
 	}
 };
 
-extern std::string formatIpPort(const IPAddress& ip, uint16_t port);
+extern std::string formatIpPort(IPAddress const& ip, uint16_t port);
 
 struct AddressExclusion {
 	IPAddress ip;
 	int port;
 
 	AddressExclusion() : ip(0), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip) : ip(ip), port(0) {}
-	explicit AddressExclusion(const IPAddress& ip, int port) : ip(ip), port(port) {}
+	explicit AddressExclusion(IPAddress const& ip) : ip(ip), port(0) {}
+	explicit AddressExclusion(IPAddress const& ip, int port) : ip(ip), port(port) {}
 
 	bool operator<(AddressExclusion const& r) const {
 		if (ip != r.ip)

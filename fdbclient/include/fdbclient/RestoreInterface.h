@@ -62,13 +62,13 @@ struct RestoreRequest {
 	ReplyPromise<struct RestoreCommonReply> reply;
 
 	RestoreRequest() = default;
-	explicit RestoreRequest(const int index,
-	                        const Key& tagName,
-	                        const Key& url,
-	                        const Optional<std::string>& proxy,
+	explicit RestoreRequest(int const index,
+	                        Key const& tagName,
+	                        Key const& url,
+	                        Optional<std::string> const& proxy,
 	                        Version targetVersion,
-	                        const KeyRange& range,
-	                        const UID& randomUid,
+	                        KeyRange const& range,
+	                        UID const& randomUid,
 	                        Key& addPrefix,
 	                        Key removePrefix)
 	  : index(index), tagName(tagName), url(url), proxy(proxy), targetVersion(targetVersion), range(range),
@@ -92,9 +92,9 @@ struct RestoreRequest {
 	}
 };
 
-extern const KeyRef restoreRequestDoneKey;
-extern const KeyRef restoreRequestTriggerKey;
-extern const KeyRangeRef restoreRequestKeys;
+extern KeyRef const restoreRequestDoneKey;
+extern KeyRef const restoreRequestTriggerKey;
+extern KeyRangeRef const restoreRequestKeys;
 
 Value restoreRequestTriggerValue(UID randomID, int numRequests);
 int decodeRequestRequestTriggerValue(ValueRef const&);

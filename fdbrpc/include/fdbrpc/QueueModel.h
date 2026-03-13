@@ -112,7 +112,7 @@ public:
 	int laggingTSSCompareCount;
 
 	// Updates this endpoint data to duplicate requests to the specified TSS endpoint
-	void updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& endpointData);
+	void updateTssEndpoint(uint64_t endpointId, TSSEndpointData const& endpointData);
 
 	// Removes the TSS mapping from this endpoint to stop duplicating requests to a TSS endpoint
 	void removeTssEndpoint(uint64_t endpointId);

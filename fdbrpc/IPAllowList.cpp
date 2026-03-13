@@ -137,9 +137,9 @@ std::array<unsigned char, sz> AuthAllowedSubnet::createBitMask(std::array<unsign
 	return res;
 }
 
-template std::array<unsigned char, 4> AuthAllowedSubnet::createBitMask<4>(const std::array<unsigned char, 4>& addr,
+template std::array<unsigned char, 4> AuthAllowedSubnet::createBitMask<4>(std::array<unsigned char, 4> const& addr,
                                                                           int netmaskWeight);
-template std::array<unsigned char, 16> AuthAllowedSubnet::createBitMask<16>(const std::array<unsigned char, 16>& addr,
+template std::array<unsigned char, 16> AuthAllowedSubnet::createBitMask<16>(std::array<unsigned char, 16> const& addr,
                                                                             int netmaskWeight);
 
 // helpers for testing
@@ -147,7 +147,7 @@ namespace {
 using boost::asio::ip::address_v4;
 using boost::asio::ip::address_v6;
 
-void traceAddress(TraceEvent& evt, const char* name, IPAddress address) {
+void traceAddress(TraceEvent& evt, char const* name, IPAddress address) {
 	evt.detail(name, address);
 	std::string bin;
 	if (address.isV4()) {

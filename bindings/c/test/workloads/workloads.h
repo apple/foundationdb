@@ -30,12 +30,12 @@ struct IFDBWorkloadFactory {
 struct FDBWorkloadFactoryImpl : FDBWorkloadFactory {
 	~FDBWorkloadFactoryImpl();
 	static std::map<std::string, IFDBWorkloadFactory*>& factories();
-	std::shared_ptr<FDBWorkload> create(const std::string& name) override;
+	std::shared_ptr<FDBWorkload> create(std::string const& name) override;
 };
 
 template <class WorkloadType>
 struct FDBWorkloadFactoryT : IFDBWorkloadFactory {
-	explicit FDBWorkloadFactoryT(const std::string& name) { FDBWorkloadFactoryImpl::factories()[name] = this; }
+	explicit FDBWorkloadFactoryT(std::string const& name) { FDBWorkloadFactoryImpl::factories()[name] = this; }
 
 	std::shared_ptr<FDBWorkload> create() override { return std::make_shared<WorkloadType>(); }
 };

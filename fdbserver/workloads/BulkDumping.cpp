@@ -32,11 +32,11 @@
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
 
-const std::string simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
+std::string const simulationBulkDumpFolder = joinPath("simfdb", "bulkdump");
 
 struct BulkDumping : TestWorkload {
 	static constexpr auto NAME = "BulkDumpingWorkload";
-	const bool enabled = true;
+	bool const enabled = true;
 	bool pass = true;
 	int cancelTimes = 0;
 	int maxCancelTimes = 0;
@@ -142,7 +142,7 @@ struct BulkDumping : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				for (const auto& [key, value] : kvs) {
+				for (auto const& [key, value] : kvs) {
 					tr.set(key, value);
 				}
 				co_await tr.commit();
@@ -341,7 +341,7 @@ struct BulkDumping : TestWorkload {
 	                                        bool bulkDumpRangeContainBulkLoadRange) {
 		std::vector<BulkLoadJobState> jobHistory = co_await getBulkLoadJobFromHistory(cx);
 		Optional<BulkLoadJobState> jobInHistory;
-		for (const auto& job : jobHistory) {
+		for (auto const& job : jobHistory) {
 			ASSERT(job.isValid());
 			if (job.getJobId() == jobId) {
 				ASSERT(!jobInHistory.present());
@@ -383,8 +383,8 @@ struct BulkDumping : TestWorkload {
 		co_return kvs;
 	}
 
-	bool keyContainedInRanges(const Key& key, const std::vector<KeyRange>& ranges) {
-		for (const auto& range : ranges) {
+	bool keyContainedInRanges(Key const& key, std::vector<KeyRange> const& ranges) {
+		for (auto const& range : ranges) {
 			if (range.contains(key)) {
 				return true;
 			}
@@ -408,7 +408,7 @@ struct BulkDumping : TestWorkload {
 		std::vector<KeyValue> kvsToCheck;
 		std::vector<KeyValue> newKvsToCheck;
 		std::unordered_set<Key> keyOutsideDumpData;
-		for (const auto& [key, value] : kvs) {
+		for (auto const& [key, value] : kvs) {
 			if (!bulkDumpJobRange.contains(key)) {
 				keyOutsideDumpData.insert(key);
 				continue; // kvs may contain keys outside the bulkDumpJobRange
@@ -421,7 +421,7 @@ struct BulkDumping : TestWorkload {
 			}
 			kvsToCheck.push_back(KeyValueRef(key, value));
 		}
-		for (const auto& [key, value] : newKvs) {
+		for (auto const& [key, value] : newKvs) {
 			// newKvs should not contain keys outside the bulkDumpJobRange
 			ASSERT(keyOutsideDumpData.find(key) == keyOutsideDumpData.end() && bulkDumpJobRange.contains(key));
 			if (self->keyContainedInRanges(key, ignoreRanges)) {
@@ -571,7 +571,7 @@ struct BulkDumping : TestWorkload {
 				co_await delay(deterministicRandom()->random01() * 10.0);
 				continue;
 			}
-			for (const auto& errorTask : errorTasks) {
+			for (auto const& errorTask : errorTasks) {
 				errorRanges.push_back(errorTask.getRange());
 				hasError = true;
 			}

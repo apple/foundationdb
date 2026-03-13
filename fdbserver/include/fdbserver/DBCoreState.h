@@ -60,7 +60,7 @@ struct CoreTLogSet {
 	CoreTLogSet()
 	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid),
 	    startVersion(invalidVersion) {}
-	explicit CoreTLogSet(const LogSet& logset);
+	explicit CoreTLogSet(LogSet const& logset);
 
 	bool operator==(CoreTLogSet const& rhs) const {
 		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum &&
@@ -97,9 +97,9 @@ struct OldTLogCoreData {
 	LogEpoch epoch;
 
 	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
-	explicit OldTLogCoreData(const OldLogData&);
+	explicit OldTLogCoreData(OldLogData const&);
 
-	bool operator==(const OldTLogCoreData& rhs) const {
+	bool operator==(OldTLogCoreData const& rhs) const {
 		if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
 			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
 			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && recoverAt == rhs.recoverAt &&
@@ -176,13 +176,13 @@ struct DBCoreState {
 		return priorCommittedLogServers;
 	}
 
-	bool isEqual(const DBCoreState& r) const {
+	bool isEqual(DBCoreState const& r) const {
 		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs &&
 		       oldTLogData == r.oldTLogData && logRouterTags == r.logRouterTags && txsTags == r.txsTags &&
 		       pseudoLocalities == r.pseudoLocalities;
 	}
-	bool operator==(const DBCoreState& rhs) const { return isEqual(rhs); }
-	bool operator!=(const DBCoreState& rhs) const { return !isEqual(rhs); }
+	bool operator==(DBCoreState const& rhs) const { return isEqual(rhs); }
+	bool operator!=(DBCoreState const& rhs) const { return !isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {

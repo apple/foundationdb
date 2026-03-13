@@ -30,7 +30,7 @@
 // This avoids the complexity of BackupAndRestoreCorrectness which is used by many tests
 
 // Completion marker key to signal that restore is fully done
-const KeyRef restoreValidationCompletionKey = "\xff\x02/restoreValidationComplete"_sr;
+KeyRef const restoreValidationCompletionKey = "\xff\x02/restoreValidationComplete"_sr;
 struct BackupAndRestoreValidationWorkload : TestWorkload {
 	static constexpr auto NAME = "BackupAndRestoreValidation";
 	double backupAfter, restoreAfter;

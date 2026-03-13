@@ -80,7 +80,7 @@ constexpr size_t FOOTER_BYTE_SIZE = 16;
  */
 
 void CheckpointMetaData::setSerializedCheckpoint(Standalone<StringRef> checkpoint) {
-	const bool addPadding = g_network->isSimulated();
+	bool const addPadding = g_network->isSimulated();
 	if (!addPadding) {
 		// Production mode: store checkpoint without modification
 		serializedCheckpoint = checkpoint;
@@ -91,16 +91,16 @@ void CheckpointMetaData::setSerializedCheckpoint(Standalone<StringRef> checkpoin
 
 	// Step 1: Calculate target size and required padding
 	// Round up payload size to the next multiple of PAYLOAD_ROUND_TO_NEXT
-	const size_t payloadSize = checkpoint.size();
-	const size_t targetSize =
+	size_t const payloadSize = checkpoint.size();
+	size_t const targetSize =
 	    std::max<size_t>(PAYLOAD_ROUND_TO_NEXT,
 	                     ((payloadSize + (PAYLOAD_ROUND_TO_NEXT - 1)) / PAYLOAD_ROUND_TO_NEXT) * PAYLOAD_ROUND_TO_NEXT);
-	const size_t paddingBytes = targetSize - payloadSize;
+	size_t const paddingBytes = targetSize - payloadSize;
 
 	// Step 2: Build the footer
 	// Footer format: ASCII decimal padding size, followed by 'f' fill characters
 	std::string footer(FOOTER_BYTE_SIZE, 'f');
-	const std::string num = std::to_string(paddingBytes);
+	std::string const num = std::to_string(paddingBytes);
 	ASSERT(num.size() <= footer.size()); // Ensure padding size fits in footer
 	std::memcpy(&footer[0], num.data(), num.size());
 	ASSERT(footer.size() == FOOTER_BYTE_SIZE);
@@ -123,7 +123,7 @@ void CheckpointMetaData::setSerializedCheckpoint(Standalone<StringRef> checkpoin
 }
 
 Standalone<StringRef> CheckpointMetaData::getSerializedCheckpoint() const {
-	const bool addPadding = g_network->isSimulated();
+	bool const addPadding = g_network->isSimulated();
 	if (!addPadding) {
 		// Production mode: return checkpoint without modification
 		return serializedCheckpoint;
@@ -134,7 +134,7 @@ Standalone<StringRef> CheckpointMetaData::getSerializedCheckpoint() const {
 	// Step 1: Extract footer and parse padding size
 	// Footer is the last FOOTER_BYTE_SIZE bytes of the serialized data
 	// Parse ASCII decimal number from the beginning of the footer
-	const std::string& str = serializedCheckpoint.toString();
+	std::string const& str = serializedCheckpoint.toString();
 	ASSERT(str.size() >= FOOTER_BYTE_SIZE);
 	size_t start = str.size() - FOOTER_BYTE_SIZE;
 	size_t paddingBytes = 0;
@@ -144,7 +144,7 @@ Standalone<StringRef> CheckpointMetaData::getSerializedCheckpoint() const {
 
 	// Step 2: Calculate original payload size
 	// Total size - padding - footer = original payload size
-	const size_t payloadSize = str.size() - paddingBytes - FOOTER_BYTE_SIZE;
+	size_t const payloadSize = str.size() - paddingBytes - FOOTER_BYTE_SIZE;
 	ASSERT(payloadSize <= str.size());
 
 	// Step 3: Extract and return the original payload

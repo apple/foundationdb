@@ -76,7 +76,7 @@ void detachIfExternalThread(void* ignore) {
 }
 
 void throwOutOfMem(JNIEnv* jenv) {
-	const char* className = "java/lang/OutOfMemoryError";
+	char const* className = "java/lang/OutOfMemoryError";
 	jclass illegalArgClass = jenv->FindClass(className);
 
 	if (jenv->ExceptionOccurred())
@@ -92,7 +92,7 @@ void throwOutOfMem(JNIEnv* jenv) {
 	}
 }
 
-static jthrowable getThrowable(JNIEnv* jenv, fdb_error_t e, const char* msg = nullptr) {
+static jthrowable getThrowable(JNIEnv* jenv, fdb_error_t e, char const* msg = nullptr) {
 	jclass excepClass = jenv->FindClass("com/apple/foundationdb/FDBException");
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
@@ -101,7 +101,7 @@ static jthrowable getThrowable(JNIEnv* jenv, fdb_error_t e, const char* msg = nu
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
 
-	const char* fdb_message = msg ? msg : fdb_get_error(e);
+	char const* fdb_message = msg ? msg : fdb_get_error(e);
 	jstring m = jenv->NewStringUTF(fdb_message);
 	if (jenv->ExceptionOccurred())
 		return JNI_NULL;
@@ -113,7 +113,7 @@ static jthrowable getThrowable(JNIEnv* jenv, fdb_error_t e, const char* msg = nu
 	return t;
 }
 
-void throwNamedException(JNIEnv* jenv, const char* class_full_name, const char* message) {
+void throwNamedException(JNIEnv* jenv, char const* class_full_name, char const* message) {
 	jclass exceptionClass = jenv->FindClass(class_full_name);
 	if (jenv->ExceptionOccurred())
 		return;
@@ -125,7 +125,7 @@ void throwNamedException(JNIEnv* jenv, const char* class_full_name, const char* 
 	}
 }
 
-void throwRuntimeEx(JNIEnv* jenv, const char* message) {
+void throwRuntimeEx(JNIEnv* jenv, char const* message) {
 	throwNamedException(jenv, "java/lang/RuntimeException", message);
 }
 
@@ -327,7 +327,7 @@ JNIEXPORT jobjectArray JNICALL Java_com_apple_foundationdb_FutureStrings_FutureS
 	}
 	FDBFuture* f = (FDBFuture*)future;
 
-	const char** strings;
+	char const** strings;
 	int count;
 	fdb_error_t err = fdb_future_get_string_array(f, &strings, &count);
 	if (err) {
@@ -370,7 +370,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyArray_FutureKeyAr
 
 	FDBFuture* f = (FDBFuture*)future;
 
-	const FDBKey* ks;
+	FDBKey const* ks;
 	int count;
 	fdb_error_t err = fdb_future_get_key_array(f, &ks, &count);
 	if (err) {
@@ -440,7 +440,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyRangeArray_Future
 
 	FDBFuture* f = (FDBFuture*)future;
 
-	const FDBKeyRange* fdbKr;
+	FDBKeyRange const* fdbKr;
 	int count;
 	fdb_error_t err = fdb_future_get_keyrange_array(f, &fdbKr, &count);
 	if (err) {
@@ -468,8 +468,8 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyRangeArray_Future
 				throwOutOfMem(jenv);
 			return JNI_NULL;
 		}
-		jenv->SetByteArrayRegion(beginArr, 0, fdbKr[i].begin_key_length, (const jbyte*)fdbKr[i].begin_key);
-		jenv->SetByteArrayRegion(endArr, 0, fdbKr[i].end_key_length, (const jbyte*)fdbKr[i].end_key);
+		jenv->SetByteArrayRegion(beginArr, 0, fdbKr[i].begin_key_length, (jbyte const*)fdbKr[i].begin_key);
+		jenv->SetByteArrayRegion(endArr, 0, fdbKr[i].end_key_length, (jbyte const*)fdbKr[i].end_key);
 
 		jobject kr = jenv->NewObject(keyrange_class, keyrange_init, beginArr, endArr);
 		if (jenv->ExceptionOccurred())
@@ -496,7 +496,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 
 	FDBFuture* f = (FDBFuture*)future;
 
-	const FDBKeyValue* kvs;
+	FDBKeyValue const* kvs;
 	int count;
 	fdb_bool_t more;
 	fdb_error_t err = fdb_future_get_keyvalue_array(f, &kvs, &count, &more);
@@ -569,7 +569,7 @@ public:
 	~ExecuteOnLeave() { func(); }
 };
 
-void cpBytesAndLengthInner(uint8_t*& pByte, jint*& pLength, const uint8_t* data, const int& length) {
+void cpBytesAndLengthInner(uint8_t*& pByte, jint*& pLength, uint8_t const* data, int const& length) {
 	*pLength = length;
 	pLength++;
 
@@ -577,7 +577,7 @@ void cpBytesAndLengthInner(uint8_t*& pByte, jint*& pLength, const uint8_t* data,
 	pByte += length;
 }
 
-void cpBytesAndLength(uint8_t*& pByte, jint*& pLength, const FDBKey& key) {
+void cpBytesAndLength(uint8_t*& pByte, jint*& pLength, FDBKey const& key) {
 	cpBytesAndLengthInner(pByte, pLength, key.key, key.key_length);
 }
 
@@ -591,7 +591,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 
 	FDBFuture* f = (FDBFuture*)future;
 
-	const FDBMappedKeyValue* kvms;
+	FDBMappedKeyValue const* kvms;
 	int count;
 	fdb_bool_t more;
 	fdb_error_t err = fdb_future_get_mappedkeyvalue_array(f, &kvms, &count, &more);
@@ -613,9 +613,9 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 
 		// now it has 4 field, key, value, getRange.begin, getRange.end
 		// this needs to change if FDBMappedKeyValue definition is changed.
-		const int totalFieldFDBMappedKeyValue = 4;
+		int const totalFieldFDBMappedKeyValue = 4;
 
-		const int totalLengths = totalFieldFDBMappedKeyValue + kvm_count * 2;
+		int const totalLengths = totalFieldFDBMappedKeyValue + kvm_count * 2;
 
 		int totalBytes = kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
 		                 kvm.getRange.end.key.key_length;
@@ -698,7 +698,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResu
 	FDBFuture* f = (FDBFuture*)future;
 
 	fdb_bool_t present;
-	const uint8_t* value;
+	uint8_t const* value;
 	int length;
 	fdb_error_t err = fdb_future_get_value(f, &present, &value, &length);
 	if (err) {
@@ -716,7 +716,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResu
 		return JNI_NULL;
 	}
 
-	jenv->SetByteArrayRegion(result, 0, length, (const jbyte*)value);
+	jenv->SetByteArrayRegion(result, 0, length, (jbyte const*)value);
 	return result;
 }
 
@@ -727,7 +727,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	}
 	FDBFuture* f = (FDBFuture*)future;
 
-	const uint8_t* value;
+	uint8_t const* value;
 	int length;
 	fdb_error_t err = fdb_future_get_key(f, &value, &length);
 	if (err) {
@@ -742,7 +742,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 		return JNI_NULL;
 	}
 
-	jenv->SetByteArrayRegion(result, 0, length, (const jbyte*)value);
+	jenv->SetByteArrayRegion(result, 0, length, (jbyte const*)value);
 	return result;
 }
 
@@ -838,7 +838,7 @@ JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIE
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1create(JNIEnv* jenv,
                                                                          jobject,
                                                                          jstring clusterFileName) {
-	const char* fileName = nullptr;
+	char const* fileName = nullptr;
 	if (clusterFileName != JNI_NULL) {
 		fileName = jenv->GetStringUTFChars(clusterFileName, JNI_NULL);
 		if (jenv->ExceptionOccurred()) {
@@ -1077,7 +1077,7 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 	}
 
 	FDBFuture* f = (FDBFuture*)future;
-	const FDBKeyValue* kvs;
+	FDBKeyValue const* kvs;
 	int count;
 	fdb_bool_t more;
 	fdb_error_t err = fdb_future_get_keyvalue_array(f, &kvs, &count, &more);
@@ -1123,14 +1123,14 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 	}
 }
 
-void memcpyStringInner(uint8_t* buffer, int& offset, const uint8_t* data, const int& length) {
+void memcpyStringInner(uint8_t* buffer, int& offset, uint8_t const* data, int const& length) {
 	memcpy(buffer + offset, &length, sizeof(jint));
 	offset += sizeof(jint);
 	memcpy(buffer + offset, data, length);
 	offset += length;
 }
 
-void memcpyString(uint8_t* buffer, int& offset, const FDBKey& key) {
+void memcpyString(uint8_t* buffer, int& offset, FDBKey const& key) {
 	memcpyStringInner(buffer, offset, key.key, key.key_length);
 }
 
@@ -1154,7 +1154,7 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 	}
 
 	FDBFuture* f = (FDBFuture*)future;
-	const FDBMappedKeyValue* kvms;
+	FDBMappedKeyValue const* kvms;
 	int count;
 	fdb_bool_t more;
 	fdb_error_t err = fdb_future_get_mappedkeyvalue_array(f, &kvms, &count, &more);
@@ -1165,7 +1165,7 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 
 	int totalCapacityNeeded = 2 * sizeof(jint);
 	for (int i = 0; i < count; i++) {
-		const FDBMappedKeyValue& kvm = kvms[i];
+		FDBMappedKeyValue const& kvm = kvms[i];
 		totalCapacityNeeded += kvm.key.key_length + kvm.value.key_length + kvm.getRange.begin.key.key_length +
 		                       kvm.getRange.end.key.key_length +
 		                       5 * sizeof(jint); // Besides the 4 lengths above, also one for kvm_count.
@@ -1191,7 +1191,7 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 	offset += sizeof(jint);
 
 	for (int i = 0; i < count; i++) {
-		const FDBMappedKeyValue& kvm = kvms[i];
+		FDBMappedKeyValue const& kvm = kvms[i];
 		memcpyString(buffer, offset, kvm.key);
 		memcpyString(buffer, offset, kvm.value);
 		memcpyString(buffer, offset, kvm.getRange.begin.key);

@@ -33,9 +33,9 @@
 #include <unordered_set>
 
 // The versioned message has wire format : -1, version, messages
-static const int32_t VERSION_HEADER = -1;
+static int32_t const VERSION_HEADER = -1;
 
-static const char* typeString[] = { "SetValue",
+static char const* typeString[] = { "SetValue",
 	                                "ClearRange",
 	                                "AddValue",
 	                                "DebugKeyRange",
@@ -62,9 +62,9 @@ static const char* typeString[] = { "SetValue",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
-	static const int OVERHEAD_BYTES = 12; // 12 is the size of Header in MutationList entries
-	static const uint8_t CHECKSUM_FLAG_MASK = 128U; // 10000000, the first bit indicates if checksum is set
-	static const uint8_t ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK =
+	static int const OVERHEAD_BYTES = 12; // 12 is the size of Header in MutationList entries
+	static uint8_t const CHECKSUM_FLAG_MASK = 128U; // 10000000, the first bit indicates if checksum is set
+	static uint8_t const ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK =
 	    64U; // 01000000, the second bit indicates if the acs index is set
 	enum Type : uint8_t { // At most 64 types is available, since the first two bits have been reserved
 		SetValue = 0,
@@ -106,7 +106,7 @@ struct MutationRef {
 	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b), corrupted(false) {}
 	MutationRef(Arena& to, Type t, StringRef a, StringRef b)
 	  : type(t), param1(to, a), param2(to, b), corrupted(false) {}
-	MutationRef(Arena& to, const MutationRef& from)
+	MutationRef(Arena& to, MutationRef const& from)
 	  : type(from.type), param1(to, from.param1), param2(to, from.param2), corrupted(false) {}
 	int totalSize() const {
 		return OVERHEAD_BYTES + param1.size() + param2.size() + (checksum.present() ? sizeof(uint32_t) + 1 : 1) +
@@ -216,7 +216,7 @@ struct MutationRef {
 		}
 		this->type &= ~CHECKSUM_FLAG_MASK;
 		int index = this->param2.size() - 4;
-		this->checksum = *(const uint32_t*)(this->param2.substr(index, 4).begin());
+		this->checksum = *(uint32_t const*)(this->param2.substr(index, 4).begin());
 		this->param2 = this->param2.substr(0, index);
 	}
 
@@ -236,7 +236,7 @@ struct MutationRef {
 		}
 		this->type &= ~ACCUMULATIVE_CHECKSUM_INDEX_FLAG_MASK;
 		int index = this->param2.size() - 2;
-		this->accumulativeChecksumIndex = *(const uint16_t*)(this->param2.substr(index, 2).begin());
+		this->accumulativeChecksumIndex = *(uint16_t const*)(this->param2.substr(index, 2).begin());
 		this->param2 = this->param2.substr(0, index);
 	}
 
@@ -451,7 +451,7 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 
 struct CommitTransactionRef {
 	CommitTransactionRef() = default;
-	CommitTransactionRef(Arena& a, const CommitTransactionRef& from)
+	CommitTransactionRef(Arena& a, CommitTransactionRef const& from)
 	  : read_conflict_ranges(a, from.read_conflict_ranges), write_conflict_ranges(a, from.write_conflict_ranges),
 	    mutations(a, from.mutations), read_snapshot(from.read_snapshot),
 	    report_conflicting_keys(from.report_conflicting_keys), lock_aware(from.lock_aware),
@@ -532,7 +532,7 @@ struct MutationsAndVersionRef {
 	  : mutations(mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
 	MutationsAndVersionRef(Arena& to, VectorRef<MutationRef> mutations, Version version, Version knownCommittedVersion)
 	  : mutations(to, mutations), version(version), knownCommittedVersion(knownCommittedVersion) {}
-	MutationsAndVersionRef(Arena& to, const MutationsAndVersionRef& from)
+	MutationsAndVersionRef(Arena& to, MutationsAndVersionRef const& from)
 	  : mutations(to, from.mutations), version(from.version), knownCommittedVersion(from.knownCommittedVersion) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 

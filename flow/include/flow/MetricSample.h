@@ -31,7 +31,7 @@ struct MetricSample {
 
 	explicit MetricSample(int64_t metricUnitsPerSample) : metricUnitsPerSample(metricUnitsPerSample) {}
 
-	int64_t getMetric(const T& Key) const {
+	int64_t getMetric(T const& Key) const {
 		auto i = sample.find(Key);
 		if (i == sample.end())
 			return 0;
@@ -47,7 +47,7 @@ struct TransientMetricSample : MetricSample<T> {
 	explicit TransientMetricSample(int64_t metricUnitsPerSample) : MetricSample<T>(metricUnitsPerSample) {}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
-	int64_t addAndExpire(const T& key, int64_t metric, double expiration) {
+	int64_t addAndExpire(T const& key, int64_t metric, double expiration) {
 		int64_t x = add(key, metric);
 		if (x)
 			queue.emplace_back(expiration, *this->sample.find(key), -x);
@@ -57,7 +57,7 @@ struct TransientMetricSample : MetricSample<T> {
 	void poll() {
 		double now = ::now();
 		while (queue.size() && std::get<0>(queue.front()) <= now) {
-			const T& key = std::get<1>(queue.front());
+			T const& key = std::get<1>(queue.front());
 			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
 
@@ -74,7 +74,7 @@ private:
 		       (double)metric / this->metricUnitsPerSample; //< SOMEDAY: Better randomInt64?
 	}
 
-	int64_t add(const T& key, int64_t metric) {
+	int64_t add(T const& key, int64_t metric) {
 		if (!metric)
 			return 0;
 		int64_t mag = std::abs(metric);
@@ -103,7 +103,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 	  : MetricSample<T>(metricUnitsPerSample), thresholdLimit(threshold) {}
 
 	template <class U>
-	bool isAboveThreshold(const U& key) const {
+	bool isAboveThreshold(U const& key) const {
 		auto i = thresholdCrossedSet.find(key);
 		if (i == thresholdCrossedSet.end())
 			return false;
@@ -123,7 +123,7 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 	void poll() {
 		double now = ::now();
 		while (queue.size() && std::get<0>(queue.front()) <= now) {
-			const T& key = std::get<1>(queue.front());
+			T const& key = std::get<1>(queue.front());
 			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
 

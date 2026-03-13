@@ -27,7 +27,7 @@
 // Reads the entire string s as a JSON value
 // Throws if no value can be parsed or if s contains data after the first JSON value
 // Trailing whitespace in s is allowed
-json_spirit::mValue readJSONStrictly(const std::string& s);
+json_spirit::mValue readJSONStrictly(std::string const& s);
 
 struct StatusObject : json_spirit::mObject {
 	typedef json_spirit::mObject Map;
@@ -82,7 +82,7 @@ enum class MessageType {
 	UNREACHABLE_CLUSTER_CONTROLLER,
 };
 
-inline const std::unordered_map<MessageType, std::string> messageTypeToName{
+inline std::unordered_map<MessageType, std::string> const messageTypeToName{
 	{ MessageType::INCORRECT_CLUSTER_FILE_CONTENTS, "incorrect_cluster_file_contents" },
 	{ MessageType::NO_CLUSTER_CONTROLLER, "no_cluster_controller" },
 	{ MessageType::QUORUM_NOT_REACHABLE, "quorum_not_reachable" },
@@ -95,7 +95,7 @@ inline const std::unordered_map<MessageType, std::string> messageTypeToName{
 	{ MessageType::UNREACHABLE_CLUSTER_CONTROLLER, "unreachable_cluster_controller" },
 };
 
-inline StatusObject makeMessage(const MessageType messageType, const char* description) {
+inline StatusObject makeMessage(MessageType const messageType, char const* description) {
 	StatusObject out;
 	out["name"] = messageTypeToName.at(messageType);
 	out["description"] = description;
@@ -108,7 +108,7 @@ typedef JSONDoc StatusObjectReader;
 // Template specialization for get<JSONDoc> because is convenient to get() an
 // element from an object directly into a JSONDoc to have a handle to that sub-doc.
 template <>
-inline bool JSONDoc::get<JSONDoc>(const std::string path, StatusObjectReader& out, bool split) {
+inline bool JSONDoc::get<JSONDoc>(std::string const path, StatusObjectReader& out, bool split) {
 	bool r = has(path, split);
 	if (r)
 		out = pLast->get_obj();

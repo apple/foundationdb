@@ -40,20 +40,20 @@ public:
 			ASSERT(std::is_sorted(servers.begin(), servers.end()));
 		}
 
-		bool operator<(const Team& r) const {
+		bool operator<(Team const& r) const {
 			if (servers == r.servers)
 				return primary < r.primary;
 			return servers < r.servers;
 		}
-		bool operator>(const Team& r) const { return r < *this; }
-		bool operator<=(const Team& r) const { return !(*this > r); }
-		bool operator>=(const Team& r) const { return !(*this < r); }
-		bool operator==(const Team& r) const { return servers == r.servers && primary == r.primary; }
-		bool operator!=(const Team& r) const { return !(*this == r); }
+		bool operator>(Team const& r) const { return r < *this; }
+		bool operator<=(Team const& r) const { return !(*this > r); }
+		bool operator>=(Team const& r) const { return !(*this < r); }
+		bool operator==(Team const& r) const { return servers == r.servers && primary == r.primary; }
+		bool operator!=(Team const& r) const { return !(*this == r); }
 
-		bool hasServer(const UID& id) const { return std::find(servers.begin(), servers.end(), id) != servers.end(); }
+		bool hasServer(UID const& id) const { return std::find(servers.begin(), servers.end(), id) != servers.end(); }
 
-		bool removeServer(const UID& id) {
+		bool removeServer(UID const& id) {
 			auto oldSize = servers.size();
 			servers.erase(std::remove(servers.begin(), servers.end(), id), servers.end());
 			return oldSize != servers.size();
@@ -99,11 +99,11 @@ public:
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	// This function assume keys is exactly a shard in this mapping, this function set the srcTeam and destination
 	// directly without retaining the old destination team info
-	void rawMoveShard(KeyRangeRef keys, const std::vector<Team>& srcTeams, const std::vector<Team>& destinationTeam);
+	void rawMoveShard(KeyRangeRef keys, std::vector<Team> const& srcTeams, std::vector<Team> const& destinationTeam);
 	// finishMove never change the shard boundary but just clear the old source team value
 	void finishMove(KeyRangeRef keys);
 	// a convenient function for (defineShard, moveShard, finishMove) pipeline
-	void assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam);
+	void assignRangeToTeams(KeyRangeRef keys, std::vector<Team> const& destinationTeam);
 	void check() const;
 	void setCheckMode(CheckMode);
 
@@ -111,7 +111,7 @@ public:
 
 private:
 	struct OrderByTeamKey {
-		bool operator()(const std::pair<Team, KeyRange>& lhs, const std::pair<Team, KeyRange>& rhs) const {
+		bool operator()(std::pair<Team, KeyRange> const& lhs, std::pair<Team, KeyRange> const& rhs) const {
 			if (lhs.first < rhs.first)
 				return true;
 			if (lhs.first > rhs.first)
@@ -132,7 +132,7 @@ private:
 	// only insert into team_shards
 	void insert(Team team, KeyRange const& range);
 
-	bool removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team, const UID& id, KeyRangeRef keys);
+	bool removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team, UID const& id, KeyRangeRef keys);
 
 public:
 	// return the iterator that traversing all ranges
@@ -140,7 +140,7 @@ public:
 	auto intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges;
 	// get total shards count
 	size_t getNumberOfShards() const;
-	void removeFailedServerForRange(KeyRangeRef keys, const UID& serverID);
+	void removeFailedServerForRange(KeyRangeRef keys, UID const& serverID);
 };
 
 #endif // FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H

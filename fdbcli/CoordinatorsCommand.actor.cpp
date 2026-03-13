@@ -105,7 +105,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 					try {
 						if (Hostname::isHostname(t->toString())) {
 							// We do not resolve hostnames here. We commit them as is.
-							const auto& hostname = Hostname::parse(t->toString());
+							auto const& hostname = Hostname::parse(t->toString());
 							if (new_coordinators_hostnames.count(hostname)) {
 								fprintf(stderr,
 								        "ERROR: passed redundant coordinators: `%s'\n",
@@ -115,7 +115,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 							new_coordinators_hostnames.insert(hostname);
 							newCoordinatorslist.push_back(hostname.toString());
 						} else {
-							const auto& addr = NetworkAddress::parse(t->toString());
+							auto const& addr = NetworkAddress::parse(t->toString());
 							if (new_coordinators_addresses.count(addr)) {
 								fprintf(
 								    stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
@@ -174,9 +174,9 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 
 namespace fdb_cli {
 
-const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
-const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
-const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
+KeyRef const clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
+KeyRef const coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
+KeyRef const coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2) {

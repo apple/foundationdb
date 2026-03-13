@@ -45,7 +45,7 @@ Key Subspace::key() const {
 	return StringRef(rawPrefix.begin(), rawPrefix.size());
 }
 
-Key Subspace::pack(const Tuple& tuple) const {
+Key Subspace::pack(Tuple const& tuple) const {
 	return tuple.pack().withPrefix(StringRef(rawPrefix.begin(), rawPrefix.size()));
 }
 

@@ -30,10 +30,10 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // Erase file folder
-void clearFileFolder(const std::string& folderPath, const UID& logId = UID(), bool ignoreError = false);
+void clearFileFolder(std::string const& folderPath, UID const& logId = UID(), bool ignoreError = false);
 
 // Erase and recreate file folder
-void resetFileFolder(const std::string& folderPath);
+void resetFileFolder(std::string const& folderPath);
 
 // Asynchronously copy file from one path to another.
 ACTOR Future<Void> copyBulkFile(std::string fromFile, std::string toFile, size_t fileBytesMax);

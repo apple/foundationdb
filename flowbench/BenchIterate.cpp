@@ -51,7 +51,7 @@ static void bench_iterate(benchmark::State& state) {
 	ListImpl mutations;
 	populate(mutations, items, size, kv.key, kv.value);
 	for (auto _ : state) {
-		for (const auto& mutation : mutations) {
+		for (auto const& mutation : mutations) {
 			benchmark::DoNotOptimize(mutation);
 		}
 	}

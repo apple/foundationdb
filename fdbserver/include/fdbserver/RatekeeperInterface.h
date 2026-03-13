@@ -42,8 +42,8 @@ struct RatekeeperInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return getRateInfo.getEndpoint().getPrimaryAddress(); }
-	bool operator==(const RatekeeperInterface& r) const { return id() == r.id(); }
-	bool operator!=(const RatekeeperInterface& r) const { return !(*this == r); }
+	bool operator==(RatekeeperInterface const& r) const { return id() == r.id(); }
+	bool operator!=(RatekeeperInterface const& r) const { return !(*this == r); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
@@ -66,7 +66,7 @@ struct TransactionCommitCostEstimation {
 		serializer(ar, opsSum, costSum);
 	}
 
-	TransactionCommitCostEstimation& operator+=(const TransactionCommitCostEstimation& other) {
+	TransactionCommitCostEstimation& operator+=(TransactionCommitCostEstimation const& other) {
 		opsSum += other.opsSum;
 		costSum += other.costSum;
 		return *this;

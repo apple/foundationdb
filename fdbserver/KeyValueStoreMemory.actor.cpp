@@ -117,7 +117,7 @@ public:
 		committedWriteBytes += bytesWritten;
 	}
 
-	void set(KeyValueRef keyValue, const Arena* arena) override {
+	void set(KeyValueRef keyValue, Arena const* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;
@@ -132,7 +132,7 @@ public:
 		}
 	}
 
-	void clear(KeyRangeRef range, const Arena* arena) override {
+	void clear(KeyRangeRef range, Arena const* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;
@@ -327,19 +327,19 @@ private:
 
 		void rollback() { clear(); }
 
-		void set(KeyValueRef keyValue, const Arena* arena = nullptr) {
+		void set(KeyValueRef keyValue, Arena const* arena = nullptr) {
 			queue_op(OpSet, keyValue.key, keyValue.value, arena);
 		}
 
-		void clear(KeyRangeRef range, const Arena* arena = nullptr) {
+		void clear(KeyRangeRef range, Arena const* arena = nullptr) {
 			queue_op(OpClear, range.begin, range.end, arena);
 		}
 
-		void clear_to_end(StringRef fromKey, const Arena* arena = nullptr) {
+		void clear_to_end(StringRef fromKey, Arena const* arena = nullptr) {
 			queue_op(OpClearToEnd, fromKey, StringRef(), arena);
 		}
 
-		void queue_op(OpType op, StringRef p1, StringRef p2, const Arena* arena) {
+		void queue_op(OpType op, StringRef p1, StringRef p2, Arena const* arena) {
 			numBytes += p1.size() + p2.size() + sizeof(OpHeader) + sizeof(OpRef);
 
 			OpRef r;
@@ -354,9 +354,9 @@ private:
 			}
 		}
 
-		const OpRef* begin() { return operations.begin(); }
+		OpRef const* begin() { return operations.begin(); }
 
-		const OpRef* end() { return operations.end(); }
+		OpRef const* end() { return operations.end(); }
 
 	private:
 		Standalone<VectorRef<OpRef>> operations;
@@ -457,7 +457,7 @@ private:
 	IDiskQueue::location log_op(OpType op, StringRef v1, StringRef v2) {
 		uint32_t opType = (uint32_t)op;
 		OpHeader h = { opType, v1.size(), v2.size() };
-		log->push(StringRef((const uint8_t*)&h, sizeof(h)));
+		log->push(StringRef((uint8_t const*)&h, sizeof(h)));
 		log->push(v1);
 		log->push(v2);
 		IDiskQueue::location loc = log->push("\x01"_sr); // Changes here should be reflected in OP_DISK_OVERHEAD
@@ -646,7 +646,7 @@ private:
 
 					CODE_PROBE(true, "Fixing a partial commit at the end of the KeyValueStoreMemory log");
 					for (int i = 0; i < zeroFillSize; i++)
-						self->log->push(StringRef((const uint8_t*)"", 1));
+						self->log->push(StringRef((uint8_t const*)"", 1));
 				}
 				// self->rollback(); not needed, since we are about to discard anything left in the recoveryQueue
 				//TraceEvent("KVSMemRecRollback", self->id).detail("QueueEmpty", data.size() == 0);

@@ -49,7 +49,7 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		} else {
 			printf("\nThe following %zu addresses can be suspended:\n", address_interface->size());
 		}
-		for (const auto& it : *address_interface) {
+		for (auto const& it : *address_interface) {
 			printf("%s\n", printable(it.first).c_str());
 		}
 		printf("\n");

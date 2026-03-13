@@ -68,7 +68,7 @@ struct StopRequest {
 using Request = boost::variant<PingRequest, StopRequest>;
 
 class AdminServer {
-	const Arguments& args;
+	Arguments const& args;
 	pid_t server_pid;
 	boost::process::pstream pipe_to_server;
 	boost::process::pstream pipe_to_client;
@@ -95,7 +95,7 @@ class AdminServer {
 	}
 
 public:
-	AdminServer(const Arguments& args)
+	AdminServer(Arguments const& args)
 	  : args(args), server_pid(-1), pipe_to_server(boost::process::pipe()), pipe_to_client(boost::process::pipe()) {
 		start();
 	}
@@ -114,9 +114,9 @@ public:
 		return receiveObject<typename T::ResponseType>(pipe_to_client);
 	}
 
-	AdminServer(const AdminServer&) = delete;
+	AdminServer(AdminServer const&) = delete;
 	AdminServer(AdminServer&&) = delete;
-	AdminServer& operator=(const AdminServer&) = delete;
+	AdminServer& operator=(AdminServer const&) = delete;
 	AdminServer& operator=(AdminServer&&) = delete;
 };
 

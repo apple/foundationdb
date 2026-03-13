@@ -56,8 +56,8 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	bool shouldInject(DeterministicRandom& random,
-	                  const WorkloadRequest& work,
-	                  const unsigned alreadyAdded) const override {
+	                  WorkloadRequest const& work,
+	                  unsigned const alreadyAdded) const override {
 		// Inject this workload with 10% probability given that the workload uses database
 		return alreadyAdded == 0 && work.useDatabase && random.random01() < 0.1;
 	}

@@ -146,7 +146,7 @@ struct ResolverBugWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> start(const Database& cx) override {
+	Future<Void> start(Database const& cx) override {
 		std::vector<Future<Void>> futures;
 		auto bug = SimBugInjector().get<ResolverBug>(ResolverBugID(), true);
 		if (clientId == 0) {

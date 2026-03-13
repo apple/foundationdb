@@ -142,8 +142,8 @@ ACTOR Future<Void> echoServer() {
 int payload_size_bytes = 1024 * 10;
 
 std::string randString(int size) {
-	const std::string charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-	const int charsetLength = charset.length();
+	std::string const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	int const charsetLength = charset.length();
 	std::string result;
 
 	// Seed the random number generator

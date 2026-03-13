@@ -39,7 +39,7 @@ void fdb_check(fdb_error_t e) {
 	}
 }
 
-FDBDatabase* fdb_open_database(const char* clusterFile) {
+FDBDatabase* fdb_open_database(char const* clusterFile) {
 	FDBDatabase* db;
 	fdb_check(fdb_create_database(clusterFile, &db));
 	return db;
@@ -68,7 +68,7 @@ TEST_CASE("500ms_transaction_timeout") {
 	fdb::Transaction tr(db);
 
 	int64_t timeout = 500;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Int64Future grvFuture = tr.get_read_version();
 	fdb_error_t err = wait_future(grvFuture);
@@ -84,7 +84,7 @@ TEST_CASE("500ms_transaction_timeout_after_op") {
 	fdb::Int64Future grvFuture = tr.get_read_version();
 
 	int64_t timeout = 500;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb_error_t err = wait_future(grvFuture);
 
@@ -98,12 +98,12 @@ TEST_CASE("500ms_transaction_timeout_before_op_2000ms_after") {
 	fdb::Transaction tr(db);
 
 	int64_t timeout = 500;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Int64Future grvFuture = tr.get_read_version();
 
 	timeout = 2000;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb_error_t err = wait_future(grvFuture);
 
@@ -117,12 +117,12 @@ TEST_CASE("2000ms_transaction_timeout_before_op_500ms_after") {
 	fdb::Transaction tr(db);
 
 	int64_t timeout = 2000;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Int64Future grvFuture = tr.get_read_version();
 
 	timeout = 500;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb_error_t err = wait_future(grvFuture);
 
@@ -135,7 +135,7 @@ TEST_CASE("500ms_database_timeout") {
 
 	int64_t timeout = 500;
 	fdb_check(fdb_database_set_option(
-	    timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	    timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Transaction tr(timeoutDb);
 
@@ -151,12 +151,12 @@ TEST_CASE("2000ms_database_timeout_500ms_transaction_timeout") {
 
 	int64_t timeout = 2000;
 	fdb_check(fdb_database_set_option(
-	    timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	    timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Transaction tr(timeoutDb);
 
 	timeout = 500;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Int64Future grvFuture = tr.get_read_version();
 	fdb_error_t err = wait_future(grvFuture);
@@ -170,12 +170,12 @@ TEST_CASE("500ms_database_timeout_2000ms_transaction_timeout_with_reset") {
 
 	int64_t dbTimeout = 500;
 	fdb_check(fdb_database_set_option(
-	    timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&dbTimeout), sizeof(dbTimeout)));
+	    timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&dbTimeout), sizeof(dbTimeout)));
 
 	fdb::Transaction tr(timeoutDb);
 
 	int64_t trTimeout = 2000;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&trTimeout), sizeof(trTimeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&trTimeout), sizeof(trTimeout)));
 
 	tr.reset();
 
@@ -199,7 +199,7 @@ TEST_CASE("transaction_reset_cancels_with_timeout") {
 	fdb::Transaction tr(db);
 
 	int64_t timeout = 500;
-	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	fdb::Int64Future grvFuture = tr.get_read_version();
 	tr.reset();
@@ -228,7 +228,7 @@ TEST_CASE("transaction_destruction_cancels_with_timeout") {
 
 	int64_t timeout = 500;
 	fdb_check(fdb_transaction_set_option(
-	    tr, FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+	    tr, FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 
 	FDBFuture* grvFuture = fdb_transaction_get_read_version(tr);
 	fdb_transaction_destroy(tr);
@@ -244,7 +244,7 @@ TEST_CASE("transaction_set_timeout_and_destroy_repeatedly") {
 	for (int i = 0; i < 1000; ++i) {
 		fdb::Transaction tr(db);
 		int64_t timeout = 500;
-		fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
+		fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<uint8_t const*>(&timeout), sizeof(timeout)));
 	}
 }
 
@@ -260,9 +260,9 @@ int main(int argc, char** argv) {
 		std::string externalClientLibrary = argv[2];
 		if (externalClientLibrary.substr(0, 2) != "--") {
 			fdb_check(fdb_network_set_option(
-			    FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT, reinterpret_cast<const uint8_t*>(""), 0));
+			    FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT, reinterpret_cast<uint8_t const*>(""), 0));
 			fdb_check(fdb_network_set_option(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
-			                                 reinterpret_cast<const uint8_t*>(externalClientLibrary.c_str()),
+			                                 reinterpret_cast<uint8_t const*>(externalClientLibrary.c_str()),
 			                                 externalClientLibrary.size()));
 		}
 	}

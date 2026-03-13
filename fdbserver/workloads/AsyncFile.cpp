@@ -57,7 +57,7 @@ void RandomByteGenerator::writeRandomBytesToBuffer(void* buf, int bytes) {
 
 //// Asynch File Workload
 
-const int AsyncFileWorkload::_PAGE_SIZE = 4096;
+int const AsyncFileWorkload::_PAGE_SIZE = 4096;
 
 AsyncFileWorkload::AsyncFileWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), fileHandle(nullptr) {
 	// Only run on one client

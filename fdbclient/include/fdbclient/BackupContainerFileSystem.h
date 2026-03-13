@@ -79,29 +79,29 @@ public:
 	Future<bool> exists() override = 0;
 
 	// TODO: refactor this to separate out the "deal with blob store" stuff from the backup business logic
-	static Reference<BackupContainerFileSystem> openContainerFS(const std::string& url,
-	                                                            const Optional<std::string>& proxy,
-	                                                            const Optional<std::string>& encryptionKeyFileName,
+	static Reference<BackupContainerFileSystem> openContainerFS(std::string const& url,
+	                                                            Optional<std::string> const& proxy,
+	                                                            Optional<std::string> const& encryptionKeyFileName,
 	                                                            bool isBackup = true);
 
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders
 	// by calling folderPathFilter(absoluteFolderPath) and checking for a false return value.
 	using FilesAndSizesT = std::vector<std::pair<std::string, int64_t>>;
-	virtual Future<FilesAndSizesT> listFiles(const std::string& path = "",
+	virtual Future<FilesAndSizesT> listFiles(std::string const& path = "",
 	                                         std::function<bool(std::string const&)> folderPathFilter = nullptr) = 0;
 
 	// Open a file for read by fileName
-	Future<Reference<IAsyncFile>> readFile(const std::string& fileName) override = 0;
+	Future<Reference<IAsyncFile>> readFile(std::string const& fileName) override = 0;
 
 	// Open a file for write by fileName
-	virtual Future<Reference<IBackupFile>> writeFile(const std::string& fileName) = 0;
+	virtual Future<Reference<IBackupFile>> writeFile(std::string const& fileName) = 0;
 
 	// write entire file
-	virtual Future<Void> writeEntireFile(const std::string& fileName, const std::string& contents) = 0;
+	virtual Future<Void> writeEntireFile(std::string const& fileName, std::string const& contents) = 0;
 
 	// Delete a file
-	virtual Future<Void> deleteFile(const std::string& fileName) = 0;
+	virtual Future<Void> deleteFile(std::string const& fileName) = 0;
 
 	// Delete entire container.  During the process, if pNumDeleted is not null it will be
 	// updated with the count of deleted files so that progress can be seen.
@@ -123,8 +123,8 @@ public:
 	Future<std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>>> readKeyspaceSnapshot(
 	    KeyspaceSnapshotFile snapshot);
 
-	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
-	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> const& fileNames,
+	                                       std::vector<std::pair<Key, Key>> const& beginEndKeys,
 	                                       int64_t totalBytes,
 	                                       IncludeKeyRangeMap IncludeKeyRangeMap,
 	                                       Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) final;
@@ -158,7 +158,7 @@ public:
 	                        ExpireProgress* progress,
 	                        Version restorableBeginVersion) final;
 
-	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) final;
+	Future<KeyRange> getSnapshotFileKeyRange(RangeFile const& file, Database cx) final;
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
@@ -177,11 +177,11 @@ protected:
 
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
 
-	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
+	Future<Void> writeEntireFileFallback(std::string const& fileName, std::string const& fileContents);
 
 private:
 	struct VersionProperty {
-		VersionProperty(Reference<BackupContainerFileSystem> bc, const std::string& name)
+		VersionProperty(Reference<BackupContainerFileSystem> bc, std::string const& name)
 		  : bc(bc), path("properties/" + name) {}
 		Reference<BackupContainerFileSystem> bc;
 		std::string path;

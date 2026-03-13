@@ -59,7 +59,7 @@
 #define RESERVED_LOCK 2
 #define PENDING_LOCK 3
 #define EXCLUSIVE_LOCK 4
-const uint32_t RESERVED_COUNT = 1U << 29;
+uint32_t const RESERVED_COUNT = 1U << 29;
 
 VFSAsyncFile::VFSAsyncFile(std::string const& filename, int flags)
   : flags(flags), filename(filename), pLockCount(&filename_lockCount_openCount[filename].first), debug_zcrefs(0),
@@ -174,7 +174,7 @@ static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlit
 }
 #endif
 
-static int asyncWrite(sqlite3_file* pFile, const void* zBuf, int iAmt, sqlite_int64 iOfst) {
+static int asyncWrite(sqlite3_file* pFile, void const* zBuf, int iAmt, sqlite_int64 iOfst) {
 	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
 	try {
 		waitFor(p->file->write(zBuf, iAmt, iOfst));
@@ -513,12 +513,12 @@ VFSAsyncFile::~VFSAsyncFile() {
 ** Open a file handle.
 */
 static int asyncOpen(sqlite3_vfs* pVfs, /* VFS */
-                     const char* zName, /* File to open, or 0 for a temp file */
+                     char const* zName, /* File to open, or 0 for a temp file */
                      sqlite3_file* pFile, /* Pointer to VFSAsyncFile struct to populate */
                      int flags, /* Input SQLITE_OPEN_XXX flags */
                      int* pOutFlags /* Output SQLITE_OPEN_XXX flags (or nullptr) */
 ) {
-	static const sqlite3_io_methods asyncio = { 3, /* iVersion */
+	static sqlite3_io_methods const asyncio = { 3, /* iVersion */
 		                                        asyncClose, /* xClose */
 		                                        asyncRead, /* xRead */
 		                                        asyncWrite, /* xWrite */
@@ -588,7 +588,7 @@ static int asyncOpen(sqlite3_vfs* pVfs, /* VFS */
 ** is non-zero, then ensure the file-system modification to delete the
 ** file has been synced to disk before returning.
 */
-static int asyncDelete(sqlite3_vfs* pVfs, const char* zPath, int dirSync) {
+static int asyncDelete(sqlite3_vfs* pVfs, char const* zPath, int dirSync) {
 	ASSERT(false); // At the moment this isn't used; hence isn't under test.  Could easily use
 	               // IAsyncFileSystem::filesystem()->deleteFile().
 	return SQLITE_IOERR_DELETE;
@@ -599,7 +599,7 @@ static int asyncDelete(sqlite3_vfs* pVfs, const char* zPath, int dirSync) {
 ** is both readable and writable.  For an exists query, treat a zero-length file
 ** as if it does not exist.
 */
-static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pResOut) {
+static int asyncAccess(sqlite3_vfs* pVfs, char const* zPath, int flags, int* pResOut) {
 #ifdef __unixish__
 #ifndef F_OK
 #define F_OK 0
@@ -658,7 +658,7 @@ static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pRe
 ** path is written to the output buffer.
 */
 static int asyncFullPathname(sqlite3_vfs* pVfs, /* VFS */
-                             const char* zPath, /* Input path (possibly a relative path) */
+                             char const* zPath, /* Input path (possibly a relative path) */
                              int nPathOut, /* Size of output buffer in bytes */
                              char* zPathOut /* Pointer to output buffer */
 ) {
@@ -700,14 +700,14 @@ bool vfsAsyncIsOpen(std::string filename) {
 ** extensions compiled as shared objects. This simple VFS does not support
 ** this functionality, so the following functions are no-ops.
 */
-static void* asyncDlOpen(sqlite3_vfs* pVfs, const char* zPath) {
+static void* asyncDlOpen(sqlite3_vfs* pVfs, char const* zPath) {
 	return 0;
 }
 static void asyncDlError(sqlite3_vfs* pVfs, int nByte, char* zErrMsg) {
 	sqlite3_snprintf(nByte, zErrMsg, "Loadable extensions are not supported");
 	zErrMsg[nByte - 1] = '\0';
 }
-static void (*asyncDlSym(sqlite3_vfs* pVfs, void* pH, const char* z))(void) {
+static void (*asyncDlSym(sqlite3_vfs* pVfs, void* pH, char const* z))(void) {
 	return 0;
 }
 static void asyncDlClose(sqlite3_vfs* pVfs, void* pHandle) {
@@ -759,12 +759,12 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 */
 static int asyncCurrentTimeInt64(sqlite3_vfs* NotUsed, sqlite3_int64* piNow) {
 #if __unixish__
-	static const sqlite3_int64 unixEpoch = 24405875 * (sqlite3_int64)8640000;
+	static sqlite3_int64 const unixEpoch = 24405875 * (sqlite3_int64)8640000;
 	struct timeval sNow;
 	gettimeofday(&sNow, nullptr);
 	*piNow = unixEpoch + 1000 * (sqlite3_int64)sNow.tv_sec + sNow.tv_usec / 1000;
 #elif defined(_WIN32)
-	static const sqlite3_int64 winFiletimeEpoch = 23058135 * (sqlite3_int64)8640000;
+	static sqlite3_int64 const winFiletimeEpoch = 23058135 * (sqlite3_int64)8640000;
 	int64_t ft = 0;
 	GetSystemTimeAsFileTime((FILETIME*)&ft);
 	*piNow = winFiletimeEpoch + ft / 10000;

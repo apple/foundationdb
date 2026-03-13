@@ -55,7 +55,7 @@ bool ServerKnobCollection::trySetKnob(std::string const& knobName, KnobValueRef 
 	// Short circuiting would mean that server knob named FOO won't be updated if client knob FOO was updated
 	// Instead, we attempt setting client and server knobs in separate statements, and return true
 	// if at least one of the set attempts was succesful.
-	const bool setClientKnob = clientKnobCollection.trySetKnob(knobName, knobValue);
-	const bool setServerKnob = knobValue.visitSetKnob(knobName, serverKnobs);
+	bool const setClientKnob = clientKnobCollection.trySetKnob(knobName, knobValue);
+	bool const setServerKnob = knobValue.visitSetKnob(knobName, serverKnobs);
 	return setClientKnob || setServerKnob;
 }

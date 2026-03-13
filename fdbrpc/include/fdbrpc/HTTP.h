@@ -32,7 +32,7 @@
 
 namespace HTTP {
 struct is_iless {
-	bool operator()(const std::string& a, const std::string& b) const { return strcasecmp(a.c_str(), b.c_str()) < 0; }
+	bool operator()(std::string const& a, std::string const& b) const { return strcasecmp(a.c_str(), b.c_str()) < 0; }
 };
 
 constexpr int HTTP_STATUS_CODE_OK = 200;
@@ -53,21 +53,21 @@ constexpr int HTTP_STATUS_CODE_GATEWAY_TIMEOUT = 504;
 
 constexpr int HTTP_RETRYAFTER_DELAY_SECS = 300;
 
-const std::string HTTP_VERB_GET = "GET";
-const std::string HTTP_VERB_HEAD = "HEAD";
-const std::string HTTP_VERB_DELETE = "DELETE";
-const std::string HTTP_VERB_TRACE = "TRACE";
-const std::string HTTP_VERB_PUT = "PUT";
-const std::string HTTP_VERB_POST = "POST";
-const std::string HTTP_VERB_CONNECT = "CONNECT";
+std::string const HTTP_VERB_GET = "GET";
+std::string const HTTP_VERB_HEAD = "HEAD";
+std::string const HTTP_VERB_DELETE = "DELETE";
+std::string const HTTP_VERB_TRACE = "TRACE";
+std::string const HTTP_VERB_PUT = "PUT";
+std::string const HTTP_VERB_POST = "POST";
+std::string const HTTP_VERB_CONNECT = "CONNECT";
 
 typedef std::map<std::string, std::string, is_iless> Headers;
 
-std::string urlEncode(const std::string& s);
+std::string urlEncode(std::string const& s);
 // URL decode a percent-encoded string, converting %XX hex sequences to characters
 // and + characters to spaces. Used for parsing query parameters and form data.
-std::string urlDecode(const std::string& s);
-std::string awsV4URIEncode(const std::string& s, bool encodeSlash);
+std::string urlDecode(std::string const& s);
+std::string awsV4URIEncode(std::string const& s, bool encodeSlash);
 
 template <class T>
 struct HTTPData {
@@ -130,10 +130,10 @@ Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
                                               Reference<IRateControl> recvRate);
 
 // Connect to proxy, send CONNECT command, and connect to the remote host.
-Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
-                                            const std::string& remoteService,
-                                            const std::string& proxyHost,
-                                            const std::string& proxyService);
+Future<Reference<IConnection>> proxyConnect(std::string const& remoteHost,
+                                            std::string const& remoteService,
+                                            std::string const& proxyHost,
+                                            std::string const& proxyService);
 
 // HTTP server stuff
 

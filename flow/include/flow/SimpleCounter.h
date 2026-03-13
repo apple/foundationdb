@@ -82,8 +82,8 @@ private:
 	SimpleCounter(std::string_view n) : value(T(0)), name_(n) {}
 
 	// Not copyable or movable.
-	SimpleCounter(const SimpleCounter&) = delete;
-	SimpleCounter& operator=(const SimpleCounter&) = delete;
+	SimpleCounter(SimpleCounter const&) = delete;
+	SimpleCounter& operator=(SimpleCounter const&) = delete;
 	SimpleCounter(SimpleCounter&&) = delete;
 	SimpleCounter& operator=(SimpleCounter&&) = delete;
 
@@ -109,7 +109,7 @@ public:
 
 	inline T get(void) const { return value.load(); }
 
-	inline const std::string& name(void) const { return name_; }
+	inline std::string const& name(void) const { return name_; }
 
 	static inline SimpleCounter<T>* makeCounter(std::string_view name) {
 		SimpleCounter<T>* rv = new SimpleCounter<T>(name);

@@ -72,7 +72,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 
 	Future<Void> setInitialValue(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		Value val = StringRef((const uint8_t*)&initialValue, sizeof(initialValue));
+		Value val = StringRef((uint8_t const*)&initialValue, sizeof(initialValue));
 		while (true) {
 			Error err;
 			try {
@@ -90,7 +90,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 
 	Future<Void> applyAtomicAdd(Database cx) {
 		ReadYourWritesTransaction tr(cx);
-		Value val = StringRef((const uint8_t*)&addValue, sizeof(addValue));
+		Value val = StringRef((uint8_t const*)&addValue, sizeof(addValue));
 		while (true) {
 			Error err;
 			try {

@@ -39,7 +39,7 @@ extern "C" {
  *
  * The given path overrides the environment variable FDB_LOCAL_CLIENT_LIBRARY_PATH
  */
-DLLEXPORT void fdb_shim_set_local_client_library_path(const char* filePath);
+DLLEXPORT void fdb_shim_set_local_client_library_path(char const* filePath);
 
 #ifdef __cplusplus
 }

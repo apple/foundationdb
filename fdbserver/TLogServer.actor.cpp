@@ -144,7 +144,7 @@ private:
 	IDiskQueue* queue;
 	UID dbgid;
 
-	void updateVersionSizes(const TLogQueueEntry& result,
+	void updateVersionSizes(TLogQueueEntry const& result,
 	                        TLogData* tLog,
 	                        IDiskQueue::location start,
 	                        IDiskQueue::location end);
@@ -182,7 +182,7 @@ private:
 				Arena a = e.arena();
 				ArenaReader ar(a, e.substr(0, payloadSize), IncludeVersion());
 				ar >> result;
-				const IDiskQueue::location endloc = self->queue->getNextReadLocation();
+				IDiskQueue::location const endloc = self->queue->getNextReadLocation();
 				self->updateVersionSizes(result, tLog, startloc, endloc);
 				return result;
 			}
@@ -190,7 +190,7 @@ private:
 		if (zeroFillSize) {
 			CODE_PROBE(true, "Fixing a partial commit at the end of the tlog queue", probe::decoration::rare);
 			for (int i = 0; i < zeroFillSize; i++)
-				self->queue->push(StringRef((const uint8_t*)"", 1));
+				self->queue->push(StringRef((uint8_t const*)"", 1));
 		}
 		throw end_of_stream();
 	}
@@ -201,22 +201,22 @@ private:
 // Immutable keys
 // persistFormat has been mostly invalidated by TLogVersion, and can probably be removed when
 // 4.6's TLog code is removed.
-static const KeyValueRef persistFormat("Format"_sr, "FoundationDB/LogServer/3/0"_sr);
-static const KeyRangeRef persistFormatReadableRange("FoundationDB/LogServer/3/0"_sr, "FoundationDB/LogServer/4/0"_sr);
-static const KeyRangeRef persistProtocolVersionKeys("ProtocolVersion/"_sr, "ProtocolVersion0"_sr);
-static const KeyRangeRef persistTLogSpillTypeKeys("TLogSpillType/"_sr, "TLogSpillType0"_sr);
-static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef("DbRecoveryCount/"_sr, "DbRecoveryCount0"_sr);
+static KeyValueRef const persistFormat("Format"_sr, "FoundationDB/LogServer/3/0"_sr);
+static KeyRangeRef const persistFormatReadableRange("FoundationDB/LogServer/3/0"_sr, "FoundationDB/LogServer/4/0"_sr);
+static KeyRangeRef const persistProtocolVersionKeys("ProtocolVersion/"_sr, "ProtocolVersion0"_sr);
+static KeyRangeRef const persistTLogSpillTypeKeys("TLogSpillType/"_sr, "TLogSpillType0"_sr);
+static KeyRangeRef const persistRecoveryCountKeys = KeyRangeRef("DbRecoveryCount/"_sr, "DbRecoveryCount0"_sr);
 
 // Updated on updatePersistentData()
-static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef("version/"_sr, "version0"_sr);
-static const KeyRangeRef persistKnownCommittedVersionKeys = KeyRangeRef("knownCommitted/"_sr, "knownCommitted0"_sr);
-static const KeyRef persistRecoveryLocationKey = KeyRef("recoveryLocation"_sr);
-static const KeyRangeRef persistLocalityKeys = KeyRangeRef("Locality/"_sr, "Locality0"_sr);
-static const KeyRangeRef persistLogRouterTagsKeys = KeyRangeRef("LogRouterTags/"_sr, "LogRouterTags0"_sr);
-static const KeyRangeRef persistTxsTagsKeys = KeyRangeRef("TxsTags/"_sr, "TxsTags0"_sr);
-static const KeyRange persistTagMessagesKeys = prefixRange("TagMsg/"_sr);
-static const KeyRange persistTagMessageRefsKeys = prefixRange("TagMsgRef/"_sr);
-static const KeyRange persistTagPoppedKeys = prefixRange("TagPop/"_sr);
+static KeyRangeRef const persistCurrentVersionKeys = KeyRangeRef("version/"_sr, "version0"_sr);
+static KeyRangeRef const persistKnownCommittedVersionKeys = KeyRangeRef("knownCommitted/"_sr, "knownCommitted0"_sr);
+static KeyRef const persistRecoveryLocationKey = KeyRef("recoveryLocation"_sr);
+static KeyRangeRef const persistLocalityKeys = KeyRangeRef("Locality/"_sr, "Locality0"_sr);
+static KeyRangeRef const persistLogRouterTagsKeys = KeyRangeRef("LogRouterTags/"_sr, "LogRouterTags0"_sr);
+static KeyRangeRef const persistTxsTagsKeys = KeyRangeRef("TxsTags/"_sr, "TxsTags0"_sr);
+static KeyRange const persistTagMessagesKeys = prefixRange("TagMsg/"_sr);
+static KeyRange const persistTagMessageRefsKeys = prefixRange("TagMsgRef/"_sr);
+static KeyRange const persistTagPoppedKeys = prefixRange("TagPop/"_sr);
 
 static Key persistTagMessagesKey(UID id, Tag tag, Version version) {
 	BinaryWriter wr(Unversioned());
@@ -799,9 +799,9 @@ void TLogQueue::push(T const& qe, Reference<LogData> logData) {
 	wr << qe;
 	wr << uint8_t(1);
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
-	const IDiskQueue::location startloc = queue->getNextPushLocation();
+	IDiskQueue::location const startloc = queue->getNextPushLocation();
 	// FIXME: push shouldn't return anything.  We should call getNextPushLocation() again.
-	const IDiskQueue::location endloc = queue->push(wr.toValue());
+	IDiskQueue::location const endloc = queue->push(wr.toValue());
 	//TraceEvent("TLogQueueVersionWritten", dbgid).detail("Size", wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t)).detail("Loc", loc);
 	logData->versionLocation[qe.version] = std::make_pair(startloc, endloc);
 }
@@ -828,7 +828,7 @@ void TLogQueue::pop(IDiskQueue::location upToLocation) {
 	queue->pop(upToLocation);
 }
 
-void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
+void TLogQueue::updateVersionSizes(TLogQueueEntry const& result,
                                    TLogData* tLog,
                                    IDiskQueue::location start,
                                    IDiskQueue::location end) {
@@ -933,7 +933,7 @@ ACTOR Future<Void> updatePoppedLocation(TLogData* self, Reference<LogData> logDa
 			BinaryReader r(kvrefs[0].value, AssumeVersion(logData->protocolVersion));
 			r >> spilledData;
 
-			for (const SpilledData& sd : spilledData) {
+			for (SpilledData const& sd : spilledData) {
 				if (sd.version >= data->persistentPopped) {
 					data->poppedLocation = sd.start;
 					data->versionForPoppedLocation = sd.version;
@@ -1084,8 +1084,8 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 						tagDidWork = true;
 					} else {
 						// spill everything else by reference
-						const IDiskQueue::location begin = logData->versionLocation[currentVersion].first;
-						const IDiskQueue::location end = logData->versionLocation[currentVersion].second;
+						IDiskQueue::location const begin = logData->versionLocation[currentVersion].first;
+						IDiskQueue::location const end = logData->versionLocation[currentVersion].second;
 						ASSERT(end > begin && end.lo - begin.lo < std::numeric_limits<uint32_t>::max());
 						uint32_t length = static_cast<uint32_t>(end.lo - begin.lo);
 						refSpilledTagCount++;
@@ -1121,7 +1121,7 @@ ACTOR Future<Void> updatePersistentData(TLogData* self, Reference<LogData> logDa
 							    tagData->versionMessages.begin(),
 							    tagData->versionMessages.end(),
 							    std::make_pair(currentVersion, LengthPrefixedStringRef()),
-							    [](const auto& l, const auto& r) -> bool { return l.first < r.first; });
+							    [](auto const& l, auto const& r) -> bool { return l.first < r.first; });
 						}
 					}
 				}
@@ -1346,7 +1346,7 @@ ACTOR Future<Void> processPopRequests(TLogData* self, Reference<LogData> logData
 	logData->toBePopped.clear();
 	self->ignorePopUid = "";
 	for (it = toBePopped.cbegin(); it != toBePopped.cend(); ++it) {
-		const auto& [tag, version] = *it;
+		auto const& [tag, version] = *it;
 		TraceEvent("PlayIgnoredPop", logData->logId).detail("Tag", tag.toString()).detail("Version", version);
 		ignoredPops.push_back(tLogPopCore(self, tag, version, logData));
 		if (++ignoredPopsPlayed % SERVER_KNOBS->TLOG_POP_BATCH_SIZE == 0) {
@@ -1518,7 +1518,7 @@ ACTOR Future<Void> updateStorageLoop(TLogData* self) {
 void commitMessages(TLogData* self,
                     Reference<LogData> logData,
                     Version version,
-                    const std::vector<TagsAndMessage>& taggedMessages) {
+                    std::vector<TagsAndMessage> const& taggedMessages) {
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.
 	// Find a way to do the memory allocation right as we receive the messages in the network layer.
 
@@ -1703,7 +1703,7 @@ void peekMessagesFromMemory(Reference<LogData> self,
 	auto it = std::lower_bound(deque.begin(),
 	                           deque.end(),
 	                           std::make_pair(begin, LengthPrefixedStringRef()),
-	                           [](const auto& l, const auto& r) -> bool { return l.first < r.first; });
+	                           [](auto const& l, auto const& r) -> bool { return l.first < r.first; });
 
 	Version currentVersion = -1;
 	for (; it != deque.end(); ++it) {
@@ -2056,14 +2056,14 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 					VectorRef<SpilledData> spilledData;
 					BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
 					r >> spilledData;
-					for (const SpilledData& sd : spilledData) {
+					for (SpilledData const& sd : spilledData) {
 						if (mutationBytes >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 							earlyEnd = true;
 							break;
 						}
 						if (sd.version >= reqBegin) {
 							firstVersion = std::min(firstVersion, sd.version);
-							const IDiskQueue::location end = sd.start.lo + sd.length;
+							IDiskQueue::location const end = sd.start.lo + sd.length;
 							commitLocations.emplace_back(sd.start, end);
 							// This isn't perfect, because we aren't accounting for page boundaries, but should be
 							// close enough.
@@ -2079,7 +2079,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 				state FlowLock::Releaser memoryReservation(self->peekMemoryLimiter, commitBytes);
 				state std::vector<Future<Standalone<StringRef>>> messageReads;
 				messageReads.reserve(commitLocations.size());
-				for (const auto& pair : commitLocations) {
+				for (auto const& pair : commitLocations) {
 					messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
 				}
 				commitLocations.clear();
@@ -2092,7 +2092,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 						break;
 					Standalone<StringRef> queueEntryData = messageReads[index].get();
 					uint8_t valid;
-					const uint32_t length = *(uint32_t*)queueEntryData.begin();
+					uint32_t const length = *(uint32_t*)queueEntryData.begin();
 					queueEntryData = queueEntryData.substr(4, queueEntryData.size() - 4);
 					BinaryReader rd(queueEntryData, IncludeVersion());
 					state TLogQueueEntry entry;
@@ -2104,7 +2104,7 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 					std::vector<StringRef> rawMessages =
 					    wait(parseMessagesForTag(entry.messages, reqTag, logData->logRouterTags));
-					for (const StringRef& msg : rawMessages) {
+					for (StringRef const& msg : rawMessages) {
 						messages.serializeBytes(msg);
 						DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg, logData->logId)
 						    .detail("DebugID", self->dbgid)
@@ -2492,7 +2492,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 	    timeoutWarning(logData->queueCommittedVersion.whenAtLeast(req.version) || stopped, 0.1, warningCollectorInput));
 
 	// This is the point at which the transaction is durable (unless it timed out, or the tlog stopped).
-	const double durableTime = g_network->timer();
+	double const durableTime = g_network->timer();
 
 	if (stopped.isReady()) {
 		ASSERT(logData->stopped());
@@ -2507,7 +2507,7 @@ ACTOR Future<Void> tLogCommit(TLogData* self,
 
 	// Measure server-side RPC latency from the time a request was
 	// received until time the response was sent.
-	const double endTime = g_network->timer();
+	double const endTime = g_network->timer();
 
 	if (isNotDuplicate) {
 		self->timeUntilDurableDist->sampleSeconds(durableTime - queueWaitEndTime);
@@ -2661,7 +2661,7 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
 	loop {
 		Version oldestGenerationRecoverAtVersion = invalidVersion;
-		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
+		for (auto const& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
 			ASSERT(!genVersions.empty());
 			if (oldestGenerationRecoverAtVersion == invalidVersion) {
 				oldestGenerationRecoverAtVersion = genVersions.back();
@@ -3371,7 +3371,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	std::sort(logsByVersion.begin(), logsByVersion.end());
-	for (const auto& pair : logsByVersion) {
+	for (auto const& pair : logsByVersion) {
 		// TLogs that have been fully spilled won't have queue entries read in the loop below.
 		self->popOrder.push_back(pair.second);
 	}
@@ -3527,7 +3527,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self,
 		    .detail("Found", found)
 		    .detail("LogSystem", (bool)logSystem->get())
 		    .detail("RecoveryState", (int)self->dbInfo->get().recoveryState);
-		for (const auto& it : self->dbInfo->get().logSystemConfig.oldTLogs) {
+		for (auto const& it : self->dbInfo->get().logSystemConfig.oldTLogs) {
 			TraceEvent("TLogUpdateOld", self->dbgid).detail("LogId", logData->logId).detail("DbInfo", it.toString());
 		}
 		wait(self->dbInfo->onChange());
@@ -3625,7 +3625,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
 			if (!req.oldGenerationRecoverAtVersions.empty()) {
-				for (const auto& tag : req.allTags) {
+				for (auto const& tag : req.allTags) {
 					logData->tagUnpoppedOldGenerations.emplace(tag, req.oldGenerationRecoverAtVersions);
 				}
 			}

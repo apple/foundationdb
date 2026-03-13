@@ -63,13 +63,13 @@ private:
 
 struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>>, FastAllocated<LocationInfo> {
 	using Locations = MultiInterface<ReferencedInterface<StorageServerInterface>>;
-	explicit LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v)
+	explicit LocationInfo(std::vector<Reference<ReferencedInterface<StorageServerInterface>>> const& v)
 	  : Locations(v) {}
-	LocationInfo(const std::vector<Reference<ReferencedInterface<StorageServerInterface>>>& v, bool hasCaches)
+	LocationInfo(std::vector<Reference<ReferencedInterface<StorageServerInterface>>> const& v, bool hasCaches)
 	  : Locations(v), hasCaches(hasCaches) {}
-	LocationInfo(const LocationInfo&) = delete;
+	LocationInfo(LocationInfo const&) = delete;
 	LocationInfo(LocationInfo&&) = delete;
-	LocationInfo& operator=(const LocationInfo&) = delete;
+	LocationInfo& operator=(LocationInfo const&) = delete;
 	LocationInfo& operator=(LocationInfo&&) = delete;
 	bool hasCaches = false;
 	Reference<Locations> locations() { return Reference<Locations>::addRef(this); }
@@ -123,15 +123,15 @@ public:
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
-	const Key key;
-	const Optional<Value> value;
+	Key const key;
+	Optional<Value> const value;
 
-	const Version version;
-	const TagSet tags;
-	const SpanContext spanContext;
-	const TaskPriority taskID;
-	const Optional<UID> debugID;
-	const UseProvisionalProxies useProvisionalProxies;
+	Version const version;
+	TagSet const tags;
+	SpanContext const spanContext;
+	TaskPriority const taskID;
+	Optional<UID> const debugID;
+	UseProvisionalProxies const useProvisionalProxies;
 
 	WatchParameters(Key key,
 	                Optional<Value> value,
@@ -150,9 +150,9 @@ public:
 	Promise<Version> watchPromise;
 	Future<Void> watchFutureSS;
 
-	Reference<const WatchParameters> parameters;
+	Reference<WatchParameters const> parameters;
 
-	WatchMetadata(Reference<const WatchParameters> parameters) : parameters(parameters) {}
+	WatchMetadata(Reference<WatchParameters const> parameters) : parameters(parameters) {}
 };
 
 struct MutationAndVersionStream {
@@ -211,19 +211,19 @@ public:
 		return cx;
 	}
 
-	Optional<KeyRangeLocationInfo> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const KeyRangeRef&, std::vector<KeyRangeLocationInfo>&, int limit, Reverse reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef& key, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRangeRef& keys);
+	Optional<KeyRangeLocationInfo> getCachedLocation(KeyRef const&, Reverse isBackward = Reverse::False);
+	bool getCachedLocations(KeyRangeRef const&, std::vector<KeyRangeLocationInfo>&, int limit, Reverse reverse);
+	Reference<LocationInfo> setCachedLocation(KeyRangeRef const&, std::vector<struct StorageServerInterface> const&);
+	void invalidateCache(KeyRef const& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(KeyRangeRef const& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
-	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
+	void setFailedEndpointOnHealthyServer(Endpoint const& endpoint);
 
 	// Updates `endpoint` refresh time if the `endpoint` is a failed endpoint. If not, this does nothing.
-	void updateFailedEndpointRefreshTime(const Endpoint& endpoint);
-	Optional<EndpointFailureInfo> getEndpointFailureInfo(const Endpoint& endpoint);
-	void clearFailedEndpointOnHealthyServer(const Endpoint& endpoint);
+	void updateFailedEndpointRefreshTime(Endpoint const& endpoint);
+	Optional<EndpointFailureInfo> getEndpointFailureInfo(Endpoint const& endpoint);
+	void clearFailedEndpointOnHealthyServer(Endpoint const& endpoint);
 
 	bool sampleReadTags() const;
 	bool sampleOnCost(uint64_t cost) const;
@@ -237,7 +237,7 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Get storage stats of a storage server from the cached healthy metrics if now() - lastUpdate < maxStaleness.
 	// Otherwise, ask GRVProxy for the up-to-date health metrics.
-	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness);
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(UID const& id, double maxStaleness);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(
 	    KeyRange const& keys,
@@ -293,11 +293,11 @@ public:
 	void deleteWatchMetadata(KeyRef key, bool removeReferenceCount = false);
 
 	// Increases reference count to the given watch. Returns the number of references to the watch.
-	int32_t increaseWatchRefCount(KeyRef key, const Version& version);
+	int32_t increaseWatchRefCount(KeyRef key, Version const& version);
 
 	// Decreases reference count to the given watch. If the reference count is dropped to 0, the watch metadata will be
 	// removed. Returns the number of references to the watch.
-	int32_t decreaseWatchRefCount(KeyRef key, const Version& version);
+	int32_t decreaseWatchRefCount(KeyRef key, Version const& version);
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
 
@@ -351,7 +351,7 @@ public:
 	                         int _apiVersion = ApiVersion::LATEST_VERSION,
 	                         IsSwitchable = IsSwitchable::False);
 
-	explicit DatabaseContext(const Error& err);
+	explicit DatabaseContext(Error const& err);
 
 	void expireThrottles();
 
@@ -550,7 +550,7 @@ public:
 	                             int deprecatedVersion = -1);
 
 	static bool debugUseTags;
-	static const std::vector<std::string> debugTransactionTagChoices;
+	static std::vector<std::string> const debugTransactionTagChoices;
 
 	// Cache of the latest commit versions of storage servers.
 	VersionVector ssVersionVectorCache;
@@ -558,7 +558,7 @@ public:
 	// Introduced mainly to optimize out the version vector related code (on the client side)
 	// when the version vector feature is disabled (on the server side).
 	// @param ssVersionVectorDelta version vector changes sent by GRV proxy
-	inline bool versionVectorCacheActive(const VersionVector& ssVersionVectorDelta) {
+	inline bool versionVectorCacheActive(VersionVector const& ssVersionVectorDelta) {
 		return (ssVersionVectorCache.getMaxVersion() != invalidVersion ||
 		        ssVersionVectorDelta.getMaxVersion() != invalidVersion);
 	}
@@ -572,18 +572,18 @@ public:
 	void removeTssMapping(StorageServerInterface const& ssi);
 
 	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
-	void addSSIdTagMapping(const UID& uid, const Tag& tag);
+	void addSSIdTagMapping(UID const& uid, Tag const& tag);
 
 	// Returns the latest commit version that mutated the specified storage server.
 	// @in ssid id of the storage server interface
 	// @out tag storage server's tag, if an entry exists for "ssid" in "ssidTagMapping"
 	// @out commitVersion latest commit version that mutated the storage server
-	void getLatestCommitVersionForSSID(const UID& ssid, Tag& tag, Version& commitVersion);
+	void getLatestCommitVersionForSSID(UID const& ssid, Tag& tag, Version& commitVersion);
 
 	// Returns the latest commit versions that mutated the specified storage servers
 	/// @note returns the latest commit version for a storage server only if the latest
 	// commit version of that storage server is below the transaction's readVersion.
-	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
+	void getLatestCommitVersions(Reference<LocationInfo> const& locationInfo,
 	                             Reference<TransactionState> info,
 	                             VersionVector& latestCommitVersions);
 
@@ -591,7 +591,7 @@ public:
 	// @note this is a lightweight version of "getLatestCommitVersions()", to be used
 	// when the state ("TransactionState") of the transaction that fetched the read
 	// version is not available.
-	void getLatestCommitVersion(const StorageServerInterface& ssi,
+	void getLatestCommitVersion(StorageServerInterface const& ssi,
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
@@ -640,7 +640,7 @@ public:
 	// Updates internal Backoff state when a request fails or succeeds.
 	// E.g., commit_proxy_memory_limit_exceeded error means the database is overloaded
 	// and the client should back off more significantly than transaction-level errors.
-	void updateBackoff(const Error& err);
+	void updateBackoff(Error const& err);
 
 private:
 	using WatchMapKey = Key;

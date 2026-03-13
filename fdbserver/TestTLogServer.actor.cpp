@@ -38,7 +38,7 @@
 
 namespace {
 
-OldTLogConf buildOldTLogConf(const TLogTestContext& oldCtx, int numLogServers, int8_t primaryLocality) {
+OldTLogConf buildOldTLogConf(TLogTestContext const& oldCtx, int numLogServers, int8_t primaryLocality) {
 	OldTLogConf oldTLogConf;
 	oldTLogConf.tLogs = oldCtx.dbInfo.logSystemConfig.tLogs;
 	for (int i = 0; i < numLogServers && i < oldTLogConf.tLogs.size(); ++i) {
@@ -53,15 +53,15 @@ OldTLogConf buildOldTLogConf(const TLogTestContext& oldCtx, int numLogServers, i
 	return oldTLogConf;
 }
 
-std::string makeDiskQueueBasename(const TLogTestContext& ctx, UID tLogId) {
+std::string makeDiskQueueBasename(TLogTestContext const& ctx, UID tLogId) {
 	return ctx.diskQueueBasename + "." + tLogId.toString() + "." + std::to_string(ctx.epoch) + ".";
 }
 
-std::string makeKVStoreBasename(const TestTLogOptions& options, const TLogTestContext& ctx, UID tLogId) {
+std::string makeKVStoreBasename(TestTLogOptions const& options, TLogTestContext const& ctx, UID tLogId) {
 	return options.kvStoreFilename + "." + tLogId.toString() + "." + std::to_string(ctx.epoch) + ".";
 }
 
-InitializeTLogRequest buildInitializeRequest(const TLogTestContext& ctx) {
+InitializeTLogRequest buildInitializeRequest(TLogTestContext const& ctx) {
 	InitializeTLogRequest req;
 	std::vector<Tag> tags;
 	tags.reserve(ctx.numTags);
@@ -116,8 +116,8 @@ struct StorageResources {
 };
 
 StorageResources setupPersistentStorage(Reference<TLogContext> tLogContext,
-                                        const TLogTestContext& testContext,
-                                        const TestTLogOptions& options) {
+                                        TLogTestContext const& testContext,
+                                        TestTLogOptions const& options) {
 	std::string diskQueueFilename = options.dataFolder + "/" + makeDiskQueueBasename(testContext, tLogContext->tLogID);
 	tLogContext->persistentQueue =
 	    openDiskQueue(diskQueueFilename, options.diskQueueExtension, tLogContext->tLogID, DiskQueueVersion::V2);
@@ -148,7 +148,7 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
 	context->tagLocality = context->primaryLocality;
 	context->dbInfo = ServerDBInfo();
 	if (oldTLogTestContext.present()) {
-		const TLogTestContext& oldCtx = *oldTLogTestContext.get();
+		TLogTestContext const& oldCtx = *oldTLogTestContext.get();
 		context->dbInfo.logSystemConfig.oldTLogs.push_back(
 		    buildOldTLogConf(oldCtx, context->numLogServers, oldCtx.primaryLocality));
 		context->tagLocality = oldCtx.primaryLocality;
@@ -289,7 +289,7 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 			}
 		}
 		if (toCommit.getMutationCount()) {
-			const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
+			auto const versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
 			Future<Version> loggingComplete =
 			    pTLogTestContext->ls->push(versionSet, toCommit, SpanContext(), UID(), tpcvMap);
 			Version ver = wait(loggingComplete);
@@ -456,7 +456,7 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 
 	if (!pTLogTestContextEpochOne->recover) {
 		commitHistory = pTLogTestContextEpochOne->commitHistory;
-		for (const auto& [loc, ver] : commitHistory) {
+		for (auto const& [loc, ver] : commitHistory) {
 			wait(pTLogTestContextEpochOne->peekCommitMessages(std::get<0>(loc), std::get<1>(loc)));
 		}
 	} else {
@@ -467,7 +467,7 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		pTLogTestContextEpochTwo->tLogOptions.versions = pTLogTestContextEpochOne->tLogOptions.versions;
 		commitHistory = pTLogTestContextEpochTwo->commitHistory;
 		pTLogTestContextEpochTwo->pTLogContextList.resize(commitHistory.size());
-		for (const auto& [loc, ver] : commitHistory) {
+		for (auto const& [loc, ver] : commitHistory) {
 			tLogIdx = std::get<1>(loc);
 			tagID = std::get<0>(loc);
 			TLogLockResult data = wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
@@ -498,7 +498,7 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 			req.recoverFrom = pTLogTestContextEpochOne->dbInfo.logSystemConfig;
 			req.recoverFrom.logRouterTags = 0;
 
-			const TestTLogOptions& tLogOptions = pTLogTestContextEpochTwo->tLogOptions;
+			TestTLogOptions const& tLogOptions = pTLogTestContextEpochTwo->tLogOptions;
 
 			tLogActors.emplace_back(getTLogCreateActor(pTLogTestContextEpochTwo,
 			                                           tLogOptions,
@@ -512,7 +512,7 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 			pTLogContext->TLogStarted.send(true);
 		}
 
-		for (const auto& [loc, ver] : commitHistory) {
+		for (auto const& [loc, ver] : commitHistory) {
 			wait(pTLogTestContextEpochTwo->peekCommitMessages(std::get<0>(loc), std::get<1>(loc)));
 		}
 

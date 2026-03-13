@@ -63,13 +63,13 @@ public:
 		if (end <= begin)
 			return;
 
-		const size_t wordBegin = static_cast<size_t>(begin) / 64;
-		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
+		size_t const wordBegin = static_cast<size_t>(begin) / 64;
+		size_t const wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
 
 		if (wordBegin == wordEnd) {
 			// Single word case
-			const size_t bitStart = static_cast<size_t>(begin) % 64;
-			const size_t numBits = static_cast<size_t>(end - begin);
+			size_t const bitStart = static_cast<size_t>(begin) % 64;
+			size_t const numBits = static_cast<size_t>(end - begin);
 
 			ASSERT(numBits <= 64); // Single word should never span > 64 bits
 			uint64_t mask;
@@ -93,8 +93,8 @@ public:
 		if (end <= begin)
 			return false;
 
-		const size_t wordBegin = static_cast<size_t>(begin) / 64;
-		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
+		size_t const wordBegin = static_cast<size_t>(begin) / 64;
+		size_t const wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
 
 		for (size_t w = wordBegin; w <= wordEnd; w++) { // Check all words including wordEnd
 			uint64_t mask = ~0ULL;
@@ -128,13 +128,13 @@ struct ConflictRange {
 
 // Unified shared workload generator
 template <int NumRanges, int KeySpace, int SparsityPercent, int WorkloadType = 0>
-static const std::vector<ConflictRange>& getSharedWorkload() {
-	static const auto workload = []() {
+static std::vector<ConflictRange> const& getSharedWorkload() {
+	static auto const workload = []() {
 		// Different seed per workload type to ensure write/query workloads differ
-		const uint32_t seed = (KeySpace + NumRanges + SparsityPercent) * (WorkloadType + 1);
+		uint32_t const seed = (KeySpace + NumRanges + SparsityPercent) * (WorkloadType + 1);
 		setThreadLocalDeterministicRandomSeed(seed);
 
-		const double sparsity = SparsityPercent / 100.0;
+		double const sparsity = SparsityPercent / 100.0;
 		std::vector<ConflictRange> ranges;
 		ranges.reserve(NumRanges);
 
@@ -152,12 +152,12 @@ static const std::vector<ConflictRange>& getSharedWorkload() {
 
 // Convenience aliases for clarity
 template <int NumRanges, int KeySpace, int SparsityPercent>
-static const std::vector<ConflictRange>& getSharedWorkloadTemplate() {
+static std::vector<ConflictRange> const& getSharedWorkloadTemplate() {
 	return getSharedWorkload<NumRanges, KeySpace, SparsityPercent, 0>();
 }
 
 template <int NumRanges, int KeySpace, int SparsityPercent>
-static const std::vector<ConflictRange>& getSharedQueryWorkloadTemplate() {
+static std::vector<ConflictRange> const& getSharedQueryWorkloadTemplate() {
 	return getSharedWorkload<NumRanges, KeySpace, SparsityPercent, 1>();
 }
 
@@ -166,21 +166,21 @@ static const std::vector<ConflictRange>& getSharedQueryWorkloadTemplate() {
 // ============================================================================
 bool verifyCorrectness() {
 	// Use shared workload template system for consistency
-	const auto& ranges = getSharedWorkloadTemplate<50, 1000, 10>();
-	const auto& queryRanges = getSharedQueryWorkloadTemplate<100, 1000, 5>();
-	const int keySpace = 1000;
+	auto const& ranges = getSharedWorkloadTemplate<50, 1000, 10>();
+	auto const& queryRanges = getSharedQueryWorkloadTemplate<100, 1000, 5>();
+	int const keySpace = 1000;
 
 	MiniConflictSet mini(keySpace);
 	WordBitsetConflictSet cache(keySpace);
 
 	// Set the same ranges in both implementations
-	for (const auto& range : ranges) {
+	for (auto const& range : ranges) {
 		mini.set(range.begin, range.end);
 		cache.set(range.begin, range.end);
 	}
 
 	// Verify both implementations report the same conflicts
-	for (const auto& range : queryRanges) {
+	for (auto const& range : queryRanges) {
 		bool miniResult = mini.any(range.begin, range.end);
 		bool cacheResult = cache.any(range.begin, range.end);
 
@@ -197,11 +197,11 @@ bool verifyCorrectness() {
 // ============================================================================
 template <int KeySpace, int NumRanges, int SparsityPercent>
 static void bench_MiniConflictSet_set(benchmark::State& state) {
-	const auto& ranges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
+	auto const& ranges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 
 	for (auto _ : state) {
 		MiniConflictSet mcs(KeySpace);
-		for (const auto& range : ranges) {
+		for (auto const& range : ranges) {
 			mcs.set(range.begin, range.end);
 		}
 		benchmark::DoNotOptimize(mcs);
@@ -213,17 +213,17 @@ static void bench_MiniConflictSet_set(benchmark::State& state) {
 
 template <int KeySpace, int NumRanges, int SparsityPercent>
 static void bench_MiniConflictSet_query(benchmark::State& state) {
-	const auto& writeRanges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
-	const auto& readRanges = getSharedQueryWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
+	auto const& writeRanges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
+	auto const& readRanges = getSharedQueryWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 
 	MiniConflictSet mcs(KeySpace);
-	for (const auto& range : writeRanges) {
+	for (auto const& range : writeRanges) {
 		mcs.set(range.begin, range.end);
 	}
 
 	for (auto _ : state) {
 		int conflicts = 0;
-		for (const auto& range : readRanges) {
+		for (auto const& range : readRanges) {
 			if (mcs.any(range.begin, range.end)) {
 				conflicts++;
 			}
@@ -239,11 +239,11 @@ static void bench_MiniConflictSet_query(benchmark::State& state) {
 // ============================================================================
 template <int KeySpace, int NumRanges, int SparsityPercent>
 static void bench_WordBitsetConflictSet_set(benchmark::State& state) {
-	const auto& ranges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
+	auto const& ranges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 
 	for (auto _ : state) {
 		WordBitsetConflictSet mcs(KeySpace);
-		for (const auto& range : ranges) {
+		for (auto const& range : ranges) {
 			mcs.set(range.begin, range.end);
 		}
 		benchmark::DoNotOptimize(mcs);
@@ -255,17 +255,17 @@ static void bench_WordBitsetConflictSet_set(benchmark::State& state) {
 
 template <int KeySpace, int NumRanges, int SparsityPercent>
 static void bench_WordBitsetConflictSet_query(benchmark::State& state) {
-	const auto& writeRanges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
-	const auto& readRanges = getSharedQueryWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
+	auto const& writeRanges = getSharedWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
+	auto const& readRanges = getSharedQueryWorkloadTemplate<NumRanges, KeySpace, SparsityPercent>();
 
 	WordBitsetConflictSet mcs(KeySpace);
-	for (const auto& range : writeRanges) {
+	for (auto const& range : writeRanges) {
 		mcs.set(range.begin, range.end);
 	}
 
 	for (auto _ : state) {
 		int conflicts = 0;
-		for (const auto& range : readRanges) {
+		for (auto const& range : readRanges) {
 			if (mcs.any(range.begin, range.end)) {
 				conflicts++;
 			}
@@ -297,21 +297,21 @@ static void bench_ConflictDetection_Realistic(benchmark::State& state) {
 	// ~400 read ranges (100 transactions × ~4 reads each)
 	// 10K keyspace (typical sorted boundary count)
 	// Low sparsity for realistic range sizes
-	const auto& writeRanges = getSharedWorkloadTemplate<200, 10000, 2>();
-	const auto& readRanges = getSharedQueryWorkloadTemplate<400, 10000, 3>();
-	const int keySpace = 10000;
+	auto const& writeRanges = getSharedWorkloadTemplate<200, 10000, 2>();
+	auto const& readRanges = getSharedQueryWorkloadTemplate<400, 10000, 3>();
+	int const keySpace = 10000;
 
 	for (auto _ : state) {
 		if constexpr (Implementation == 0) {
 			// MiniConflictSet (std::vector<bool>)
 			MiniConflictSet mcs(keySpace);
 
-			for (const auto& range : writeRanges) {
+			for (auto const& range : writeRanges) {
 				mcs.set(range.begin, range.end);
 			}
 
 			int conflicts = 0;
-			for (const auto& range : readRanges) {
+			for (auto const& range : readRanges) {
 				if (mcs.any(range.begin, range.end)) {
 					conflicts++;
 				}
@@ -321,12 +321,12 @@ static void bench_ConflictDetection_Realistic(benchmark::State& state) {
 			// WordBitsetConflictSet
 			WordBitsetConflictSet mcs(keySpace);
 
-			for (const auto& range : writeRanges) {
+			for (auto const& range : writeRanges) {
 				mcs.set(range.begin, range.end);
 			}
 
 			int conflicts = 0;
-			for (const auto& range : readRanges) {
+			for (auto const& range : readRanges) {
 				if (mcs.any(range.begin, range.end)) {
 					conflicts++;
 				}

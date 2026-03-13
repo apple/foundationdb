@@ -35,13 +35,13 @@
 
 class BackupProgress : NonCopyable, ReferenceCounted<BackupProgress> {
 public:
-	BackupProgress(UID id, const std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo>& infos)
+	BackupProgress(UID id, std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> const& infos)
 	  : dbgid(id), epochInfos(infos) {}
 	~BackupProgress() {}
 
 	// Adds a backup status. If the tag already has an entry, then the max of
 	// savedVersion is used.
-	void addBackupStatus(const WorkerBackupStatus& status);
+	void addBackupStatus(WorkerBackupStatus const& status);
 
 	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : std::map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
@@ -58,7 +58,7 @@ public:
 
 	// Returns progress for an epoch.
 	std::map<Tag, Version> getEpochStatus(LogEpoch epoch) const {
-		const auto it = progress.find(epoch);
+		auto const it = progress.find(epoch);
 		if (it == progress.end())
 			return {};
 		return it->second;
@@ -81,15 +81,15 @@ private:
 	// add {tag, savedVersion+1} to tagVersions and remove the tag from "tags".
 	void updateTagVersions(std::map<Tag, Version>* tagVersions,
 	                       std::set<Tag>* tags,
-	                       const std::map<Tag, Version>& progress,
+	                       std::map<Tag, Version> const& progress,
 	                       Version endVersion,
 	                       Version adjustedBeginVersion,
 	                       LogEpoch epoch);
 
-	const UID dbgid;
+	UID const dbgid;
 
 	// Note this MUST be iterated in ascending order.
-	const std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> epochInfos;
+	std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> const epochInfos;
 
 	// Backup progress saved in the system keyspace. Note there can be multiple
 	// progress status for a tag in an epoch due to later epoch trying to fill

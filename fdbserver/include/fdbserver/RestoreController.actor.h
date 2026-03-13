@@ -49,9 +49,9 @@ struct VersionBatch {
 	double size; // size of data in range and log files
 	int batchIndex; // Never reset
 
-	VersionBatch() : beginVersion(0), endVersion(0), size(0) {};
+	VersionBatch() : beginVersion(0), endVersion(0), size(0){};
 
-	bool operator<(const VersionBatch& rhs) const {
+	bool operator<(VersionBatch const& rhs) const {
 		return std::tie(batchIndex, beginVersion, endVersion, logFiles, rangeFiles, size) <
 		       std::tie(rhs.batchIndex, rhs.beginVersion, rhs.endVersion, rhs.logFiles, rhs.rangeFiles, rhs.size);
 	}
@@ -188,7 +188,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		return ss.str();
 	}
 
-	void dumpVersionBatches(const std::map<Version, VersionBatch>& versionBatches) const {
+	void dumpVersionBatches(std::map<Version, VersionBatch> const& versionBatches) const {
 		int i = 1;
 		double rangeFiles = 0;
 		double rangeSize = 0;
@@ -234,9 +234,9 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	// nextVersion, param3: log files with data in [prevVersion, nextVersion)
 	std::tuple<double, int, std::vector<RestoreFileFR>> getVersionSize(Version prevVersion,
 	                                                                   Version nextVersion,
-	                                                                   const std::vector<RestoreFileFR>& rangeFiles,
+	                                                                   std::vector<RestoreFileFR> const& rangeFiles,
 	                                                                   int rangeIdx,
-	                                                                   const std::vector<RestoreFileFR>& logFiles) {
+	                                                                   std::vector<RestoreFileFR> const& logFiles) {
 		double size = 0;
 		TraceEvent(SevVerbose, "FastRestoreGetVersionSize")
 		    .detail("PreviousVersion", prevVersion)
@@ -258,7 +258,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		std::vector<RestoreFileFR> retLogs;
 		// Scan all logFiles every time to avoid assumption on log files' version ranges.
 		// For example, we do not assume each version range only exists in one log file
-		for (const auto& file : logFiles) {
+		for (auto const& file : logFiles) {
 			Version begin = std::max(prevVersion, file.beginVersion);
 			Version end = std::min(nextVersion, file.endVersion);
 			if (begin < end) { // logIdx file overlap in [prevVersion, nextVersion)
@@ -278,8 +278,8 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	// Assumption 2: range files at one version <= FASTRESTORE_VERSIONBATCH_MAX_BYTES.
 	// Note: We do not allow a versionBatch size larger than the FASTRESTORE_VERSIONBATCH_MAX_BYTES because the range
 	// file size at a version depends on the number of backupAgents and its upper bound is hard to get.
-	void buildVersionBatches(const std::vector<RestoreFileFR>& rangeFiles,
-	                         const std::vector<RestoreFileFR>& logFiles,
+	void buildVersionBatches(std::vector<RestoreFileFR> const& rangeFiles,
+	                         std::vector<RestoreFileFR> const& logFiles,
 	                         std::map<Version, VersionBatch>* versionBatches,
 	                         Version targetVersion) {
 		bool rewriteNextVersion = false;

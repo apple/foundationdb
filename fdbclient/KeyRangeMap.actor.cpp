@@ -26,7 +26,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-void KeyRangeActorMap::getRangesAffectedByInsertion(const KeyRangeRef& keys, std::vector<KeyRange>& affectedRanges) {
+void KeyRangeActorMap::getRangesAffectedByInsertion(KeyRangeRef const& keys, std::vector<KeyRange>& affectedRanges) {
 	auto s = map.rangeContaining(keys.begin);
 	if (s.begin() != keys.begin && s.value().isValid() && !s.value().isReady())
 		affectedRanges.push_back(KeyRangeRef(s.begin(), keys.begin));
@@ -154,10 +154,10 @@ ACTOR Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransact
 }
 
 void krmSetPreviouslyEmptyRange(Transaction* tr,
-                                const KeyRef& mapPrefix,
-                                const KeyRangeRef& keys,
-                                const ValueRef& newValue,
-                                const ValueRef& oldEndValue) {
+                                KeyRef const& mapPrefix,
+                                KeyRangeRef const& keys,
+                                ValueRef const& newValue,
+                                ValueRef const& oldEndValue) {
 	KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
 	tr->set(withPrefix.begin, newValue);
@@ -166,10 +166,10 @@ void krmSetPreviouslyEmptyRange(Transaction* tr,
 
 void krmSetPreviouslyEmptyRange(CommitTransactionRef& tr,
                                 Arena& trArena,
-                                const KeyRef& mapPrefix,
-                                const KeyRangeRef& keys,
-                                const ValueRef& newValue,
-                                const ValueRef& oldEndValue) {
+                                KeyRef const& mapPrefix,
+                                KeyRangeRef const& keys,
+                                ValueRef const& newValue,
+                                ValueRef const& oldEndValue) {
 	KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + keys.begin.toString(), mapPrefix.toString() + keys.end.toString());
 	tr.set(trArena, withPrefix.begin, newValue);

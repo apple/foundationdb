@@ -45,7 +45,7 @@ std::vector<TransactionTag> ServerThroughputTracker::getTagsAffectingStorageServ
 		return {};
 	} else {
 		result.reserve(tagToThroughputCounters.get().size());
-		for (const auto& [tag, _] : tagToThroughputCounters.get()) {
+		for (auto const& [tag, _] : tagToThroughputCounters.get()) {
 			result.push_back(tag);
 		}
 	}
@@ -135,11 +135,11 @@ void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) 
 		seenStorageServerIds.insert(ss.id);
 		std::unordered_set<TransactionTag> seenReadTags, seenWriteTags;
 		auto& tagToThroughputCounters = throughput[ss.id];
-		for (const auto& busyReader : ss.busiestReadTags) {
+		for (auto const& busyReader : ss.busiestReadTags) {
 			seenReadTags.insert(busyReader.tag);
 			tagToThroughputCounters[busyReader.tag].updateThroughput(busyReader.rate, OpType::READ);
 		}
-		for (const auto& busyWriter : ss.busiestWriteTags) {
+		for (auto const& busyWriter : ss.busiestWriteTags) {
 			seenWriteTags.insert(busyWriter.tag);
 			tagToThroughputCounters[busyWriter.tag].updateThroughput(busyWriter.rate, OpType::WRITE);
 		}
@@ -175,7 +175,7 @@ Optional<double> ServerThroughputTracker::getThroughput(UID storageServerId) con
 		return {};
 	}
 	double result = 0;
-	for (const auto& [_, throughputCounters] : tagToThroughputCounters.get()) {
+	for (auto const& [_, throughputCounters] : tagToThroughputCounters.get()) {
 		result += throughputCounters.getThroughput();
 	}
 	return result;

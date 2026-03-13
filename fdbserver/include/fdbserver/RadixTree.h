@@ -35,10 +35,10 @@
 #include "flow/Arena.h"
 
 // forward declaration
-const int LEAF_BYTE = -1;
-const int INLINE_KEY_SIZE = sizeof(StringRef);
+int const LEAF_BYTE = -1;
+int const INLINE_KEY_SIZE = sizeof(StringRef);
 
-StringRef radix_substr(const StringRef& key, int begin, int num) {
+StringRef radix_substr(StringRef const& key, int begin, int num) {
 	int size = key.size();
 	if (begin > size) {
 		throw std::out_of_range("out of range in radix_substr<StringRef>");
@@ -49,7 +49,7 @@ StringRef radix_substr(const StringRef& key, int begin, int num) {
 	return key.substr(begin, num);
 }
 
-StringRef radix_join(const StringRef& key1, const StringRef& key2, Arena& arena) {
+StringRef radix_join(StringRef const& key1, StringRef const& key2, Arena& arena) {
 	int rsize = key1.size() + key2.size();
 	uint8_t* s = new (arena) uint8_t[rsize];
 
@@ -61,7 +61,7 @@ StringRef radix_join(const StringRef& key1, const StringRef& key2, Arena& arena)
 	return StringRef(s, rsize);
 }
 
-StringRef radix_constructStr(const StringRef& key, int begin, int num, Arena& arena) {
+StringRef radix_constructStr(StringRef const& key, int begin, int num, Arena& arena) {
 	int size = key.size();
 	if (begin > size) {
 		throw std::out_of_range("out of range in radix_substr<StringRef>");
@@ -89,8 +89,8 @@ private:
 		// constructor for all kinds of node (root/internal/leaf)
 		node() : m_is_leaf(0), m_is_inline(0), m_inline_length(0), m_depth(0), key(), arena(), m_parent(nullptr) {}
 
-		node(const node&) = delete; // delete
-		node& operator=(const node& other) {
+		node(node const&) = delete; // delete
+		node& operator=(node const& other) {
 			m_is_leaf = other.m_is_leaf;
 			m_is_inline = other.m_is_inline;
 			m_inline_length = other.m_inline_length;
@@ -102,7 +102,7 @@ private:
 			return *this;
 		}
 
-		void setKey(const StringRef& content, int start, int num) {
+		void setKey(StringRef const& content, int start, int num) {
 			bool isInline = num <= INLINE_KEY_SIZE;
 			if (isInline) {
 				memcpy(key.inlineData, content.begin() + start, num);
@@ -151,14 +151,14 @@ private:
 	};
 
 	struct leafNode : FastAllocated<leafNode> {
-		leafNode(const StringRef& content) : base(), is_inline(0), inline_length(0), arena() {
+		leafNode(StringRef const& content) : base(), is_inline(0), inline_length(0), arena() {
 			base.m_is_leaf = 1;
 			setValue(content);
 		}
 
 		~leafNode() = default;
 
-		void setValue(const StringRef& content) {
+		void setValue(StringRef const& content) {
 			bool isInline = content.size() <= INLINE_KEY_SIZE;
 			if (isInline) {
 				memcpy(value.inlineData, content.begin(), content.size());
@@ -235,18 +235,18 @@ public:
 		node* m_pointee;
 
 		iterator() : m_pointee(nullptr) {}
-		iterator(const iterator& r) : m_pointee(r.m_pointee) {}
+		iterator(iterator const& r) : m_pointee(r.m_pointee) {}
 		iterator(node* p) : m_pointee(p) {}
-		iterator& operator=(const iterator& r) {
+		iterator& operator=(iterator const& r) {
 			m_pointee = r.m_pointee;
 			return *this;
 		}
 		~iterator() = default;
 
-		const iterator& operator++();
-		const iterator& operator--();
-		bool operator!=(const iterator& lhs) const;
-		bool operator==(const iterator& lhs) const;
+		iterator const& operator++();
+		iterator const& operator--();
+		bool operator!=(iterator const& lhs) const;
+		bool operator==(iterator const& lhs) const;
 		StringRef getKey(uint8_t* content) const;
 		StringRef getValue() const {
 			ASSERT(m_pointee->m_is_leaf);
@@ -262,8 +262,8 @@ public:
 
 	~radix_tree() {}
 
-	radix_tree(const radix_tree& other) = delete; // delete
-	radix_tree& operator=(const radix_tree other) = delete; // delete
+	radix_tree(radix_tree const& other) = delete; // delete
+	radix_tree& operator=(radix_tree const other) = delete; // delete
 
 	inline std::tuple<size_type, size_type, size_type> size() const {
 		return std::make_tuple(m_size, m_node, inline_keys);
@@ -302,13 +302,13 @@ public:
 		total_bytes = 0;
 	}
 	// iterators
-	iterator find(const StringRef& key);
+	iterator find(StringRef const& key);
 	iterator begin();
 	iterator end() const;
 	iterator previous(iterator i);
 	// modifications
-	std::pair<iterator, bool> insert(const StringRef& key, const StringRef& val, bool replaceExisting = true);
-	int insert(const std::vector<std::pair<KeyValueMapPair, uint64_t>>& pairs, bool replaceExisting = true) {
+	std::pair<iterator, bool> insert(StringRef const& key, StringRef const& val, bool replaceExisting = true);
+	int insert(std::vector<std::pair<KeyValueMapPair, uint64_t>> const& pairs, bool replaceExisting = true) {
 		// dummy method interface(to keep every interface same as IndexedSet )
 		ASSERT(false);
 		return 0;
@@ -316,8 +316,8 @@ public:
 	void erase(iterator it);
 	void erase(iterator begin, iterator end);
 	// lookups
-	iterator lower_bound(const StringRef& key);
-	iterator upper_bound(const StringRef& key);
+	iterator lower_bound(StringRef const& key);
+	iterator upper_bound(StringRef const& key);
 	// access
 	uint64_t sumTo(iterator to) const;
 
@@ -356,12 +356,12 @@ private:
 		return i;
 	}
 
-	node* find_node(const StringRef& key, node* node, int depth);
-	node* append(node* parent, const StringRef& key, const StringRef& val);
-	node* prepend(node* node, const StringRef& key, const StringRef& val);
+	node* find_node(StringRef const& key, node* node, int depth);
+	node* append(node* parent, StringRef const& key, StringRef const& val);
+	node* prepend(node* node, StringRef const& key, StringRef const& val);
 	bool erase(node* child);
-	iterator lower_bound(const StringRef& key, node* node);
-	iterator upper_bound(const StringRef& key, node* node);
+	iterator lower_bound(StringRef const& key, node* node);
+	iterator upper_bound(StringRef const& key, node* node);
 };
 /////////////////////// iterator //////////////////////////
 void radix_tree::add_child(node* parent, node* child) {
@@ -559,21 +559,21 @@ radix_tree::node* radix_tree::iterator::decrement(radix_tree::node* target) cons
 	}
 }
 
-bool radix_tree::iterator::operator!=(const radix_tree::iterator& lhs) const {
+bool radix_tree::iterator::operator!=(radix_tree::iterator const& lhs) const {
 	return m_pointee != lhs.m_pointee;
 }
 
-bool radix_tree::iterator::operator==(const radix_tree::iterator& lhs) const {
+bool radix_tree::iterator::operator==(radix_tree::iterator const& lhs) const {
 	return m_pointee == lhs.m_pointee;
 }
 
-const radix_tree::iterator& radix_tree::iterator::operator++() {
+radix_tree::iterator const& radix_tree::iterator::operator++() {
 	if (m_pointee != nullptr) // it is undefined behaviour to dereference iterator that is out of bounds...
 		m_pointee = increment(m_pointee);
 	return *this;
 }
 
-const radix_tree::iterator& radix_tree::iterator::operator--() {
+radix_tree::iterator const& radix_tree::iterator::operator--() {
 	if (m_pointee != nullptr && m_pointee->m_is_leaf) {
 		m_pointee = decrement(m_pointee);
 	}
@@ -617,7 +617,7 @@ radix_tree::iterator radix_tree::begin() {
 }
 
 /////////////////////// lookup //////////////////////////
-radix_tree::iterator radix_tree::find(const StringRef& key) {
+radix_tree::iterator radix_tree::find(StringRef const& key) {
 	if (m_root == nullptr)
 		return iterator(nullptr);
 
@@ -634,7 +634,7 @@ radix_tree::iterator radix_tree::find(const StringRef& key) {
  * corner case : insert "apache, append", then search for "appends". find_node() will return leaf node with m_key ==
  * "pend"; if search for "ap", find_node() will return internal node with m_key = ap
  */
-radix_tree::node* radix_tree::find_node(const StringRef& key, node* node, int depth) {
+radix_tree::node* radix_tree::find_node(StringRef const& key, node* node, int depth) {
 	if (node->m_is_leaf)
 		return node;
 
@@ -671,13 +671,13 @@ radix_tree::node* radix_tree::find_node(const StringRef& key, node* node, int de
 /*
  * Returns the smallest node x such that *x>=key, or end()
  */
-radix_tree::iterator radix_tree::lower_bound(const StringRef& key) {
+radix_tree::iterator radix_tree::lower_bound(StringRef const& key) {
 	if (m_root == nullptr || m_size == 0)
 		return iterator(nullptr);
 	return lower_bound(key, m_root);
 }
 
-radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
+radix_tree::iterator radix_tree::lower_bound(StringRef const& key, node* node) {
 	iterator result(nullptr);
 	int size = child_size(node);
 
@@ -709,13 +709,13 @@ radix_tree::iterator radix_tree::lower_bound(const StringRef& key, node* node) {
 /*
  * Returns the smallest x such that *x>key, or end()
  */
-radix_tree::iterator radix_tree::upper_bound(const StringRef& key) {
+radix_tree::iterator radix_tree::upper_bound(StringRef const& key) {
 	if (m_root == nullptr || m_size == 0)
 		return iterator(nullptr);
 	return upper_bound(key, m_root);
 }
 
-radix_tree::iterator radix_tree::upper_bound(const StringRef& key, node* node) {
+radix_tree::iterator radix_tree::upper_bound(StringRef const& key, node* node) {
 	if (node == nullptr || node->m_is_leaf)
 		return iterator(node);
 
@@ -764,7 +764,7 @@ radix_tree::iterator radix_tree::previous(radix_tree::iterator i) {
  * @param parent : direct parent of this newly inserted node
  * @param val : using val to create a newly inserted node
  */
-radix_tree::node* radix_tree::append(node* parent, const StringRef& key, const StringRef& val) {
+radix_tree::node* radix_tree::append(node* parent, StringRef const& key, StringRef const& val) {
 	int depth = parent->m_depth + parent->getKeySize();
 	int len = key.size() - depth;
 
@@ -796,7 +796,7 @@ radix_tree::node* radix_tree::append(node* parent, const StringRef& key, const S
  * @param node : split node
  * @param val : using val to create a newly inserted node
  */
-radix_tree::node* radix_tree::prepend(node* split, const StringRef& key, const StringRef& val) {
+radix_tree::node* radix_tree::prepend(node* split, StringRef const& key, StringRef const& val) {
 	int len1 = split->getKeySize();
 	int len2 = key.size() - split->m_depth;
 	int count = 0;
@@ -833,8 +833,8 @@ radix_tree::node* radix_tree::prepend(node* split, const StringRef& key, const S
 	return append(node_a, key, val);
 }
 
-std::pair<radix_tree::iterator, bool> radix_tree::insert(const StringRef& key,
-                                                         const StringRef& val,
+std::pair<radix_tree::iterator, bool> radix_tree::insert(StringRef const& key,
+                                                         StringRef const& val,
                                                          bool replaceExisting) {
 	if (m_root == nullptr) {
 		m_root = (node*)new radix_tree::internalNode();

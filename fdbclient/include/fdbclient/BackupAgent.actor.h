@@ -80,33 +80,33 @@ public:
 		STATE_PARTIALLY_ABORTED = 7
 	};
 
-	static const Key keyFolderId;
-	static const Key keyBeginVersion;
-	static const Key keyEndVersion;
-	static const Key keyPrevBeginVersion;
-	static const Key keyConfigBackupTag;
-	static const Key keyConfigLogUid;
-	static const Key keyConfigBackupRanges;
-	static const Key keyConfigStopWhenDoneKey;
-	static const Key keyStateStatus;
-	static const Key keyStateStop;
-	static const Key keyStateLogBeginVersion;
-	static const Key keyLastUid;
-	static const Key keyBeginKey;
-	static const Key keyEndKey;
-	static const Key keyDrVersion;
-	static const Key destUid;
-	static const Key backupStartVersion;
+	static Key const keyFolderId;
+	static Key const keyBeginVersion;
+	static Key const keyEndVersion;
+	static Key const keyPrevBeginVersion;
+	static Key const keyConfigBackupTag;
+	static Key const keyConfigLogUid;
+	static Key const keyConfigBackupRanges;
+	static Key const keyConfigStopWhenDoneKey;
+	static Key const keyStateStatus;
+	static Key const keyStateStop;
+	static Key const keyStateLogBeginVersion;
+	static Key const keyLastUid;
+	static Key const keyBeginKey;
+	static Key const keyEndKey;
+	static Key const keyDrVersion;
+	static Key const destUid;
+	static Key const backupStartVersion;
 
-	static const Key keyTagName;
-	static const Key keyStates;
-	static const Key keyConfig;
-	static const Key keyErrors;
-	static const Key keyRanges;
-	static const Key keyTasks;
-	static const Key keyFutures;
-	static const Key keySourceStates;
-	static const Key keySourceTagName;
+	static Key const keyTagName;
+	static Key const keyStates;
+	static Key const keyConfig;
+	static Key const keyErrors;
+	static Key const keyRanges;
+	static Key const keyTasks;
+	static Key const keyFutures;
+	static Key const keySourceStates;
+	static Key const keySourceTagName;
 
 	static constexpr int logHeaderSize = 12;
 
@@ -114,10 +114,10 @@ public:
 	static EnumState getState(std::string const& stateText);
 
 	// Convert the status enum to a text description
-	static const char* getStateText(EnumState enState);
+	static char const* getStateText(EnumState enState);
 
 	// Convert the status enum to a name
-	static const char* getStateName(EnumState enState);
+	static char const* getStateName(EnumState enState);
 
 	// Determine if the specified state is runnable
 	static bool isRunnable(EnumState enState);
@@ -130,7 +130,7 @@ public:
 	static Standalone<StringRef> getCurrentTime();
 
 protected:
-	static const std::string defaultTagName;
+	static std::string const defaultTagName;
 };
 
 // Snapshot generation mode for backup operations
@@ -375,7 +375,7 @@ public:
 	                             Reference<IBackupContainer>* pContainer = nullptr,
 	                             UID* pUID = nullptr);
 
-	static const Key keyLastRestorable;
+	static Key const keyLastRestorable;
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
@@ -386,7 +386,7 @@ public:
 	Future<Void> changePause(Database db, bool pause);
 
 	friend class FileBackupAgentImpl;
-	static const int dataFooterSize;
+	static int const dataFooterSize;
 
 	Subspace subspace;
 	Subspace config;
@@ -523,12 +523,12 @@ public:
 	Future<EnumState> waitSubmitted(Database cx, Key tagName);
 	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
-	static const Key keyAddPrefix;
-	static const Key keyRemovePrefix;
-	static const Key keyRangeVersions;
-	static const Key keyCopyStop;
-	static const Key keyDatabasesInSync;
-	static const int LATEST_DR_VERSION;
+	static Key const keyAddPrefix;
+	static Key const keyRemovePrefix;
+	static Key const keyRangeVersions;
+	static Key const keyCopyStop;
+	static Key const keyDatabasesInSync;
+	static int const LATEST_DR_VERSION;
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
@@ -584,8 +584,8 @@ Key getApplyKey(Version version, Key backupUid);
 Key getLogKey(Version version, Key backupUid, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Version getLogKeyVersion(Key key);
 std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
-Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
-Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
+Future<Void> logError(Database cx, Key keyErrors, std::string const& message);
+Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string const& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
 ACTOR Future<Void> readCommitted(Database cx,
                                  PromiseStream<RangeResultWithVersion> results,
@@ -665,7 +665,7 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 	                                                           Snapshot snapshot);
 
 public:
-	TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
+	TagUidMap(StringRef const& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
 	                                         Snapshot snapshot = Snapshot::False) {
@@ -1018,10 +1018,10 @@ struct StringRefReader {
 	StringRef remainder() { return StringRef(rptr, end - rptr); }
 
 	// Return a pointer to len bytes at the current read position and advance read pos
-	const uint8_t* consume(unsigned int len) {
+	uint8_t const* consume(unsigned int len) {
 		if (rptr == end && len != 0)
 			throw end_of_stream();
-		const uint8_t* p = rptr;
+		uint8_t const* p = rptr;
 		rptr += len;
 		if (rptr > end)
 			throw failure_error;
@@ -1030,8 +1030,8 @@ struct StringRefReader {
 
 	// Return a T from the current read position and advance read pos
 	template <typename T>
-	const T consume() {
-		return *(const T*)consume(sizeof(T));
+	T const consume() {
+		return *(T const*)consume(sizeof(T));
 	}
 
 	// Functions for consuming big endian (network byte order) integers.
@@ -1045,19 +1045,19 @@ struct StringRefReader {
 
 	bool eof() { return rptr == end; }
 
-	const uint8_t *rptr, *end;
+	uint8_t const *rptr, *end;
 	Error failure_error;
 };
 
 namespace fileBackup {
-Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf);
+Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(Standalone<StringRef> const& buf);
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
                                                                       int64_t offset,
                                                                       int len,
                                                                       Database cx);
 
-Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf);
+Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(Standalone<StringRef> const& buf);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,

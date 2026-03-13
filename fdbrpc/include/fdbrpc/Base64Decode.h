@@ -35,7 +35,7 @@ namespace base64 {
 //       URL-encoded or otherwise. Also, every encoding/decoding is one-off: i.e. no streaming.
 
 // Decodes base64-encoded input and returns the length of produced plaintext data if input is valid, -1 otherwise.
-int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __restrict plaintextOut) noexcept;
+int decode(uint8_t const* __restrict codeIn, int const lengthIn, uint8_t* __restrict plaintextOut) noexcept;
 
 // Assuming correctly encoded base64 code length, get the decoded length
 int decodedLength(int codeLength) noexcept;
@@ -47,7 +47,7 @@ Optional<StringRef> decode(Arena& arena, StringRef input);
 namespace url {
 
 // Decodes URL-encoded base64 input and returns the length of produced plaintext data if input is valid, -1 otherwise.
-int decode(const uint8_t* __restrict codeIn, const int lengthIn, uint8_t* __restrict plaintextOut) noexcept;
+int decode(uint8_t const* __restrict codeIn, int const lengthIn, uint8_t* __restrict plaintextOut) noexcept;
 
 // Assuming correctly URL-encoded base64 code length, get the decoded length
 // Returns -1 for invalid length (4n-3)

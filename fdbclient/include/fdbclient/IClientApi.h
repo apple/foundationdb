@@ -42,49 +42,49 @@ public:
 	// These functions that read data return Standalone<...> objects, but these objects are not required to manage their
 	// own memory. It is guaranteed, however, that the ThreadFuture will hold a reference to the memory. It will persist
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
-	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                           const KeySelectorRef& end,
+	virtual ThreadFuture<Optional<Value>> get(KeyRef const& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<Key> getKey(KeySelectorRef const& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                           KeySelectorRef const& end,
 	                                           int limit,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                           const KeySelectorRef& end,
+	virtual ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                           KeySelectorRef const& end,
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	virtual ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                           int limit,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	virtual ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
-	                                                       const KeySelectorRef& end,
-	                                                       const StringRef& mapper,
+	virtual ThreadFuture<MappedRangeResult> getMappedRange(KeySelectorRef const& begin,
+	                                                       KeySelectorRef const& end,
+	                                                       StringRef const& mapper,
 	                                                       GetRangeLimits limits,
 	                                                       bool snapshot = false,
 	                                                       bool reverse = false) = 0;
-	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<char const*>>> getAddressesForKey(KeyRef const& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
-	virtual void addReadConflictRange(const KeyRangeRef& keys) = 0;
-	virtual ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) = 0;
-	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
+	virtual void addReadConflictRange(KeyRangeRef const& keys) = 0;
+	virtual ThreadFuture<int64_t> getEstimatedRangeSizeBytes(KeyRangeRef const& keys) = 0;
+	virtual ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRangeRef const& range,
 	                                                                        int64_t chunkSize) = 0;
 
-	virtual void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) = 0;
-	virtual void set(const KeyRef& key, const ValueRef& value) = 0;
-	virtual void clear(const KeyRef& begin, const KeyRef& end) = 0;
-	virtual void clear(const KeyRangeRef& range) = 0;
-	virtual void clear(const KeyRef& key) = 0;
+	virtual void atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) = 0;
+	virtual void set(KeyRef const& key, ValueRef const& value) = 0;
+	virtual void clear(KeyRef const& begin, KeyRef const& end) = 0;
+	virtual void clear(KeyRangeRef const& range) = 0;
+	virtual void clear(KeyRef const& key) = 0;
 
-	virtual ThreadFuture<Void> watch(const KeyRef& key) = 0;
+	virtual ThreadFuture<Void> watch(KeyRef const& key) = 0;
 
-	virtual void addWriteConflictRange(const KeyRangeRef& keys) = 0;
+	virtual void addWriteConflictRange(KeyRangeRef const& keys) = 0;
 
 	virtual ThreadFuture<Void> commit() = 0;
 	virtual Version getCommittedVersion() = 0;
@@ -145,12 +145,12 @@ public:
 	// requests to multiple processes simultaneously
 	// If multiple addresses are provided, it returns 1 for requests being sent out to all provided addresses.
 	// On the contrary, if the client cannot connect to any of the given address, no requests will be sent out
-	virtual ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) = 0;
+	virtual ThreadFuture<int64_t> rebootWorker(StringRef const& address, bool check, int duration) = 0;
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
 	// mutations
-	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
+	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(StringRef const& dcid) = 0;
 	// Management API, create snapshot
-	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
+	virtual ThreadFuture<Void> createSnapshot(StringRef const& uid, StringRef const& snapshot_command) = 0;
 
 	// Interface to manage shared state across multiple connections to the same Database
 	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
@@ -172,7 +172,7 @@ public:
 	virtual ~IClientApi() {}
 
 	virtual void selectApiVersion(int apiVersion) = 0;
-	virtual const char* getClientVersion() = 0;
+	virtual char const* getClientVersion() = 0;
 	virtual void useFutureProtocolVersion() = 0;
 
 	virtual void setNetworkOption(FDBNetworkOptions::Option option,
@@ -181,8 +181,8 @@ public:
 	virtual void runNetwork() = 0;
 	virtual void stopNetwork() = 0;
 
-	virtual Reference<IDatabase> createDatabase(const char* clusterFilePath) = 0;
-	virtual Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) = 0;
+	virtual Reference<IDatabase> createDatabase(char const* clusterFilePath) = 0;
+	virtual Reference<IDatabase> createDatabaseFromConnectionString(char const* connectionString) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
 };

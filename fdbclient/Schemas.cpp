@@ -21,7 +21,7 @@
 #include "fdbclient/Schemas.h"
 
 // NOTE: also change mr-status-json-schemas.rst.inc
-const KeyRef JSONSchemas::statusSchema = R"statusSchema(
+KeyRef const JSONSchemas::statusSchema = R"statusSchema(
 {
    "cluster":{
       "storage_wiggler": {
@@ -1094,7 +1094,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
    }
 })statusSchema"_sr;
 
-const KeyRef JSONSchemas::clusterConfigurationSchema = R"configSchema(
+KeyRef const JSONSchemas::clusterConfigurationSchema = R"configSchema(
 {
     "create":{
     "$enum":[
@@ -1166,7 +1166,7 @@ const KeyRef JSONSchemas::clusterConfigurationSchema = R"configSchema(
     "grv_proxies":1
 })configSchema"_sr;
 
-const KeyRef JSONSchemas::latencyBandConfigurationSchema = R"configSchema(
+KeyRef const JSONSchemas::latencyBandConfigurationSchema = R"configSchema(
 {
     "get_read_version":{
         "bands":[
@@ -1188,20 +1188,20 @@ const KeyRef JSONSchemas::latencyBandConfigurationSchema = R"configSchema(
     }
 })configSchema"_sr;
 
-const KeyRef JSONSchemas::dataDistributionStatsSchema = R"""(
+KeyRef const JSONSchemas::dataDistributionStatsSchema = R"""(
 {
   "shard_bytes": 1947000,
   "shard_bytes_per_ksecond": 1000000
 }
 )"""_sr;
 
-const KeyRef JSONSchemas::logHealthSchema = R"""(
+KeyRef const JSONSchemas::logHealthSchema = R"""(
 {
   "log_queue": 156
 }
 )"""_sr;
 
-const KeyRef JSONSchemas::storageHealthSchema = R"""(
+KeyRef const JSONSchemas::storageHealthSchema = R"""(
 {
   "cpu_usage": 3.28629447047675,
   "disk_usage": 0.19997897369207954,
@@ -1210,7 +1210,7 @@ const KeyRef JSONSchemas::storageHealthSchema = R"""(
 }
 )"""_sr;
 
-const KeyRef JSONSchemas::aggregateHealthSchema = R"""(
+KeyRef const JSONSchemas::aggregateHealthSchema = R"""(
 {
   "batch_limited": false,
   "limiting_storage_durability_lag": 5050809,
@@ -1222,7 +1222,7 @@ const KeyRef JSONSchemas::aggregateHealthSchema = R"""(
 }
 )"""_sr;
 
-const KeyRef JSONSchemas::managementApiErrorSchema = R"""(
+KeyRef const JSONSchemas::managementApiErrorSchema = R"""(
 {
    "retriable": false,
    "command": "exclude",
@@ -1230,7 +1230,7 @@ const KeyRef JSONSchemas::managementApiErrorSchema = R"""(
 }
 )"""_sr;
 
-const KeyRef JSONSchemas::faultToleranceStatusSchema = R"statusSchema(
+KeyRef const JSONSchemas::faultToleranceStatusSchema = R"statusSchema(
 {
    "cluster":{
       "layers":{

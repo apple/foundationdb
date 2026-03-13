@@ -47,7 +47,7 @@ struct ConflictBatch {
 		TransactionLockReject,
 	};
 
-	void addTransaction(const CommitTransactionRef& transaction, Version newOldestVersion);
+	void addTransaction(CommitTransactionRef const& transaction, Version newOldestVersion);
 	void detectConflicts(Version now,
 	                     Version newOldestVersion,
 	                     std::vector<int>& nonConflicting,

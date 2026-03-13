@@ -33,7 +33,7 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 	try {
 		wait(f);
 		Version minVersion = std::numeric_limits<Version>::max();
-		for (const auto& [_tlogID, reply] : replies) {
+		for (auto const& [_tlogID, reply] : replies) {
 			if (reply.isReady() && !reply.isError()) {
 				minVersion = std::min(minVersion, reply.get().version);
 			}
@@ -43,7 +43,7 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 		if (err.code() == error_code_operation_cancelled) {
 			TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, "TLogPushCancelled");
 			int index = 0;
-			for (const auto& [tlogID, reply] : replies) {
+			for (auto const& [tlogID, reply] : replies) {
 				if (reply.isReady()) {
 					continue;
 				}
@@ -62,30 +62,30 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 	}
 }
 
-LogSet::LogSet(const TLogSet& tLogSet)
+LogSet::LogSet(TLogSet const& tLogSet)
   : tLogWriteAntiQuorum(tLogSet.tLogWriteAntiQuorum), tLogReplicationFactor(tLogSet.tLogReplicationFactor),
     tLogLocalities(tLogSet.tLogLocalities), tLogVersion(tLogSet.tLogVersion), tLogPolicy(tLogSet.tLogPolicy),
     isLocal(tLogSet.isLocal), locality(tLogSet.locality), startVersion(tLogSet.startVersion),
     satelliteTagLocations(tLogSet.satelliteTagLocations) {
-	for (const auto& log : tLogSet.tLogs) {
+	for (auto const& log : tLogSet.tLogs) {
 		logServers.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
-	for (const auto& log : tLogSet.logRouters) {
+	for (auto const& log : tLogSet.logRouters) {
 		logRouters.push_back(makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(log));
 	}
-	for (const auto& log : tLogSet.backupWorkers) {
+	for (auto const& log : tLogSet.backupWorkers) {
 		backupWorkers.push_back(makeReference<AsyncVar<OptionalInterface<BackupInterface>>>(log));
 	}
 	filterLocalityDataForPolicy(tLogPolicy, &tLogLocalities);
 	updateLocalitySet(tLogLocalities);
 }
 
-LogSet::LogSet(const CoreTLogSet& coreSet)
+LogSet::LogSet(CoreTLogSet const& coreSet)
   : tLogWriteAntiQuorum(coreSet.tLogWriteAntiQuorum), tLogReplicationFactor(coreSet.tLogReplicationFactor),
     tLogLocalities(coreSet.tLogLocalities), tLogVersion(coreSet.tLogVersion), tLogPolicy(coreSet.tLogPolicy),
     isLocal(coreSet.isLocal), locality(coreSet.locality), startVersion(coreSet.startVersion),
     satelliteTagLocations(coreSet.satelliteTagLocations) {
-	for (const auto& log : coreSet.tLogs) {
+	for (auto const& log : coreSet.tLogs) {
 		logServers.push_back(
 		    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(log)));
 	}
@@ -94,46 +94,46 @@ LogSet::LogSet(const CoreTLogSet& coreSet)
 	updateLocalitySet(tLogLocalities);
 }
 
-TLogSet::TLogSet(const LogSet& rhs)
+TLogSet::TLogSet(LogSet const& rhs)
   : tLogWriteAntiQuorum(rhs.tLogWriteAntiQuorum), tLogReplicationFactor(rhs.tLogReplicationFactor),
     tLogLocalities(rhs.tLogLocalities), tLogVersion(rhs.tLogVersion), tLogPolicy(rhs.tLogPolicy), isLocal(rhs.isLocal),
     locality(rhs.locality), startVersion(rhs.startVersion), satelliteTagLocations(rhs.satelliteTagLocations) {
-	for (const auto& tlog : rhs.logServers) {
+	for (auto const& tlog : rhs.logServers) {
 		tLogs.push_back(tlog->get());
 	}
-	for (const auto& logRouter : rhs.logRouters) {
+	for (auto const& logRouter : rhs.logRouters) {
 		logRouters.push_back(logRouter->get());
 	}
-	for (const auto& worker : rhs.backupWorkers) {
+	for (auto const& worker : rhs.backupWorkers) {
 		backupWorkers.push_back(worker->get());
 	}
 }
 
-OldTLogConf::OldTLogConf(const OldLogData& oldLogData)
+OldTLogConf::OldTLogConf(OldLogData const& oldLogData)
   : epochBegin(oldLogData.epochBegin), epochEnd(oldLogData.epochEnd), recoverAt(oldLogData.recoverAt),
     logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), pseudoLocalities(oldLogData.pseudoLocalities),
     epoch(oldLogData.epoch) {
-	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
+	for (Reference<LogSet> const& logSet : oldLogData.tLogs) {
 		tLogs.emplace_back(*logSet);
 	}
 }
 
-CoreTLogSet::CoreTLogSet(const LogSet& logset)
+CoreTLogSet::CoreTLogSet(LogSet const& logset)
   : tLogWriteAntiQuorum(logset.tLogWriteAntiQuorum), tLogReplicationFactor(logset.tLogReplicationFactor),
     tLogLocalities(logset.tLogLocalities), tLogPolicy(logset.tLogPolicy), isLocal(logset.isLocal),
     locality(logset.locality), startVersion(logset.startVersion), satelliteTagLocations(logset.satelliteTagLocations),
     tLogVersion(logset.tLogVersion) {
-	for (const auto& log : logset.logServers) {
+	for (auto const& log : logset.logServers) {
 		tLogs.push_back(log->get().id());
 	}
 	// Do NOT store logset.backupWorkers, because master will recruit new ones.
 }
 
-OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
+OldTLogCoreData::OldTLogCoreData(OldLogData const& oldData)
   : logRouterTags(oldData.logRouterTags), txsTags(oldData.txsTags), epochBegin(oldData.epochBegin),
     epochEnd(oldData.epochEnd), recoverAt(oldData.recoverAt), pseudoLocalities(oldData.pseudoLocalities),
     epoch(oldData.epoch) {
-	for (const Reference<LogSet>& logSet : oldData.tLogs) {
+	for (Reference<LogSet> const& logSet : oldData.tLogs) {
 		if (logSet->logServers.size()) {
 			tLogs.emplace_back(*logSet);
 		}
@@ -253,7 +253,7 @@ Version TagPartitionedLogSystem::popPseudoLocalityTag(Tag tag, Version upTo) {
 	// Why do we need to use the minimum popped version among all tags? Reason: for example,
 	// 2 pseudo tags pop 100 or 150, respectively. It's only safe to pop min(100, 150),
 	// because [101,150) is needed by another pseudo tag.
-	for (const int8_t locality : pseudoLocalities) {
+	for (int8_t const locality : pseudoLocalities) {
 		minVersion = std::min(minVersion, pseudoLocalityPopVersion[Tag(locality, tag.id)]);
 	}
 	// TraceEvent("TLogPopPseudoTag", dbgid).detail("Tag", tag).detail("Version", upTo).detail("PopVersion", minVersion);
@@ -290,13 +290,13 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromLogSystemConfig(UID const& db
 		logSystem->recoveredAt = lsConf.recoveredAt;
 	}
 	logSystem->pseudoLocalities = lsConf.pseudoLocalities;
-	for (const TLogSet& tLogSet : lsConf.tLogs) {
+	for (TLogSet const& tLogSet : lsConf.tLogs) {
 		if (!excludeRemote || tLogSet.isLocal) {
 			logSystem->tLogs.push_back(makeReference<LogSet>(tLogSet));
 		}
 	}
 
-	for (const auto& oldTlogConf : lsConf.oldTLogs) {
+	for (auto const& oldTlogConf : lsConf.oldTLogs) {
 		logSystem->oldLogData.emplace_back(oldTlogConf);
 		//TraceEvent("BWFromLSConf")
 		//    .detail("Epoch", logSystem->oldLogData.back().epoch)
@@ -315,11 +315,11 @@ Reference<ILogSystem> TagPartitionedLogSystem::fromOldLogSystemConfig(UID const&
 	ASSERT(lsConf.logSystemType == LogSystemType::tagPartitioned ||
 	       (lsConf.logSystemType == LogSystemType::empty && !lsConf.tLogs.size()));
 	// ASSERT(lsConf.epoch == epoch);  //< FIXME
-	const LogEpoch e = lsConf.oldTLogs.size() > 0 ? lsConf.oldTLogs[0].epoch : 0;
+	LogEpoch const e = lsConf.oldTLogs.size() > 0 ? lsConf.oldTLogs[0].epoch : 0;
 	auto logSystem = makeReference<TagPartitionedLogSystem>(dbgid, locality, e);
 
 	if (lsConf.oldTLogs.size()) {
-		for (const TLogSet& tLogSet : lsConf.oldTLogs[0].tLogs) {
+		for (TLogSet const& tLogSet : lsConf.oldTLogs[0].tLogs) {
 			logSystem->tLogs.push_back(makeReference<LogSet>(tLogSet));
 		}
 		logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
@@ -344,7 +344,7 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState&
 	    .detail("RemoteRecoveredVersion", remoteRecoveredVersion->get())
 	    .detail("OldestBackupEpoch", oldestBackupEpoch);
 	for (int i = 0; i < newState.oldTLogData.size(); ++i) {
-		const auto& oldData = newState.oldTLogData[i];
+		auto const& oldData = newState.oldTLogData[i];
 		// Remove earlier generation that TLog data are
 		//  - consumed by all storage servers
 		//  - no longer used by backup workers
@@ -378,7 +378,7 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerationsCoreState(DBCoreState&
 	}
 }
 
-void TagPartitionedLogSystem::purgeOldRecoveredGenerationsInMemory(const DBCoreState& newState) {
+void TagPartitionedLogSystem::purgeOldRecoveredGenerationsInMemory(DBCoreState const& newState) {
 	auto generations = newState.oldTLogData.size();
 	if (generations < oldLogData.size()) {
 		TraceEvent("PurgeOldTLogGenerationsInMemory", dbgid)
@@ -399,11 +399,11 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 	newState.logRouterTags = logRouterTags;
 	newState.txsTags = txsTags;
 	newState.pseudoLocalities = pseudoLocalities;
-	for (const auto& t : tLogs) {
+	for (auto const& t : tLogs) {
 		if (t->logServers.size()) {
 			newState.tLogs.emplace_back(*t);
 			newState.tLogs.back().tLogLocalities.clear();
-			for (const auto& log : t->logServers) {
+			for (auto const& log : t->logServers) {
 				newState.tLogs.back().tLogLocalities.push_back(log->get().interf().filteredLocality);
 			}
 		}
@@ -413,7 +413,7 @@ void TagPartitionedLogSystem::toCoreState(DBCoreState& newState) const {
 	if (!recoveryComplete.isValid() || !recoveryComplete.isReady() ||
 	    (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady())) ||
 	    epoch != oldestBackupEpoch) {
-		for (const auto& oldData : oldLogData) {
+		for (auto const& oldData : oldLogData) {
 			newState.oldTLogData.emplace_back(oldData);
 			TraceEvent("BWToCore")
 			    .detail("Epoch", newState.oldTLogData.back().epoch)
@@ -498,7 +498,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					changes.push_back(t->onChange());
 				}
 			}
-			for (const auto& worker : it->backupWorkers) {
+			for (auto const& worker : it->backupWorkers) {
 				if (worker->get().present()) {
 					backupFailed.push_back(waitFailureClient(worker->get().interf().waitFailure,
 					                                         /* failureReactionTime */ SERVER_KNOBS->BACKUP_TIMEOUT,
@@ -531,7 +531,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 					}
 				}
 				// Monitor changes of backup workers for old epochs.
-				for (const auto& worker : old.tLogs[0]->backupWorkers) {
+				for (auto const& worker : old.tLogs[0]->backupWorkers) {
 					if (worker->get().present()) {
 						backupFailed.push_back(
 						    waitFailureClient(worker->get().interf().waitFailure,
@@ -605,7 +605,7 @@ ACTOR Future<TLogCommitReply> TagPartitionedLogSystem::recordPushMetrics(Referen
 	return t;
 }
 
-Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& versionSet,
+Future<Version> TagPartitionedLogSystem::push(ILogSystem::PushVersionSet const& versionSet,
                                               LogPushData& data,
                                               SpanContext const& spanContext,
                                               Optional<UID> debugID,
@@ -619,8 +619,8 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		uint16_t location = 0;
 		uint8_t logGroupLocal = 0;
-		const auto& tpcvMapRef = tpcvMap.get();
-		for (const auto& it : tLogs) {
+		auto const& tpcvMapRef = tpcvMap.get();
+		for (auto const& it : tLogs) {
 			if (!it->isLocal) {
 				continue;
 			}
@@ -642,7 +642,7 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 	uint8_t logGroupLocal = 0;
 	std::vector<Future<Void>> quorumResults;
 	std::vector<std::pair<UID, Future<TLogCommitReply>>> allReplies;
-	const Span span("TPLS:push"_loc, spanContext);
+	Span const span("TPLS:push"_loc, spanContext);
 	for (auto& it : tLogs) {
 		if (!it->isLocal) {
 			// Remote TLogs should read from LogRouter
@@ -681,8 +681,8 @@ Future<Version> TagPartitionedLogSystem::push(const ILogSystem::PushVersionSet& 
 				}
 			}
 
-			const auto& interface = it->logServers[loc]->get().interf();
-			const auto request = TLogCommitRequest(spanContext,
+			auto const& interface = it->logServers[loc]->get().interf();
+			auto const request = TLogCommitRequest(spanContext,
 			                                       msg.arena(),
 			                                       prevVersion,
 			                                       versionSet.version,
@@ -720,7 +720,7 @@ void TagPartitionedLogSystem::resetBestServerIfNotLocked(
     int bestSet,
     int& bestServer,
     Optional<Version> end,
-    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownLockedTLogIds) {
+    Optional<std::map<uint8_t, std::vector<uint16_t>>> const& knownLockedTLogIds) {
 	ASSERT(SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST);
 	if (bestSet >= 0 && bestServer >= 0 && end.present() && end.get() != std::numeric_limits<Version>::max()) {
 		ASSERT_WE_THINK(knownLockedTLogIds.present() && !knownLockedTLogIds.get().empty());
@@ -1364,7 +1364,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
     Tag tag,
     bool useSatellite,
     Optional<Version> end,
-    const Optional<std::map<uint8_t, std::vector<uint16_t>>>& knownStoppedTLogIds) {
+    Optional<std::map<uint8_t, std::vector<uint16_t>>> const& knownStoppedTLogIds) {
 	bool found = false;
 	if (!end.present()) {
 		end = std::numeric_limits<Version>::max();
@@ -1372,7 +1372,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 		end = end.get() + 1; // The last version is exclusive to the cursor's desired range
 	}
 
-	for (const auto& log : tLogs) {
+	for (auto const& log : tLogs) {
 		found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
 		if (found) {
 			break;
@@ -1429,7 +1429,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 			int bestPrimarySet = -1;
 			int bestSatelliteSet = -1;
 			for (int i = 0; i < tLogs.size(); i++) {
-				const auto& log = tLogs[i];
+				auto const& log = tLogs[i];
 				if (log->logServers.size() && log->isLocal) {
 					if (log->locality == tagLocalitySatellite) {
 						bestSatelliteSet = i;
@@ -1444,7 +1444,7 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 			if (useSatellite && bestSatelliteSet != -1 && tLogs[bestSatelliteSet]->tLogVersion >= TLogVersion::V4) {
 				bestSet = bestSatelliteSet;
 			}
-			const auto& log = tLogs[bestSet];
+			auto const& log = tLogs[bestSet];
 			TraceEvent("TLogPeekLogRouterBestOnly", dbgid)
 			    .detail("Tag", tag.toString())
 			    .detail("Begin", begin)
@@ -1454,9 +1454,9 @@ Reference<ILogSystem::IPeekCursor> TagPartitionedLogSystem::peekLogRouter(
 		}
 	}
 	bool firstOld = true;
-	for (const auto& old : oldLogData) {
+	for (auto const& old : oldLogData) {
 		found = false;
-		for (const auto& log : old.tLogs) {
+		for (auto const& log : old.tLogs) {
 			found = log->hasLogRouter(dbgid) || log->hasBackupWorker(dbgid);
 			if (found) {
 				break;
@@ -1561,7 +1561,7 @@ void TagPartitionedLogSystem::popLogRouter(Version upTo,
 	}
 
 	Version nextGenerationStartVersion = lastGenerationStartVersion;
-	for (const auto& old : oldLogData) {
+	for (auto const& old : oldLogData) {
 		Version generationStartVersion = TagPartitionedLogSystem::getMaxLocalStartVersion(old.tLogs);
 		if (generationStartVersion <= upTo) {
 			for (auto& t : old.tLogs) {
@@ -1852,14 +1852,14 @@ LogSystemConfig TagPartitionedLogSystem::getLogSystemConfig() const {
 	logSystemConfig.pseudoLocalities = pseudoLocalities;
 	logSystemConfig.oldestBackupEpoch = oldestBackupEpoch;
 	logSystemConfig.knownLockedTLogIds = knownLockedTLogIds;
-	for (const Reference<LogSet>& logSet : tLogs) {
+	for (Reference<LogSet> const& logSet : tLogs) {
 		if (logSet->isLocal || remoteLogsWrittenToCoreState) {
 			logSystemConfig.tLogs.emplace_back(*logSet);
 		}
 	}
 
 	if (!recoveryCompleteWrittenToCoreState.get()) {
-		for (const auto& oldData : oldLogData) {
+		for (auto const& oldData : oldLogData) {
 			logSystemConfig.oldTLogs.emplace_back(oldData);
 		}
 	}
@@ -2004,7 +2004,7 @@ Version TagPartitionedLogSystem::getBackupStartVersion() const {
 
 std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> TagPartitionedLogSystem::getOldEpochTagsVersionsInfo() const {
 	std::map<LogEpoch, EpochTagsVersionsInfo> epochInfos;
-	for (const auto& old : oldLogData) {
+	for (auto const& old : oldLogData) {
 		epochInfos.insert(
 		    { old.epoch, ILogSystem::EpochTagsVersionsInfo(old.logRouterTags, old.epochBegin, old.epochEnd) });
 		TraceEvent("OldEpochTagsVersions", dbgid)
@@ -2017,20 +2017,20 @@ std::map<LogEpoch, ILogSystem::EpochTagsVersionsInfo> TagPartitionedLogSystem::g
 }
 
 inline Reference<LogSet> TagPartitionedLogSystem::getEpochLogSet(LogEpoch epoch) const {
-	for (const auto& old : oldLogData) {
+	for (auto const& old : oldLogData) {
 		if (epoch == old.epoch)
 			return old.tLogs[0];
 	}
 	return Reference<LogSet>(nullptr);
 }
 
-void TagPartitionedLogSystem::setBackupWorkers(const std::vector<InitializeBackupReply>& replies) {
+void TagPartitionedLogSystem::setBackupWorkers(std::vector<InitializeBackupReply> const& replies) {
 	ASSERT(tLogs.size() > 0);
 
 	Reference<LogSet> logset = tLogs[0]; // Master recruits this epoch's worker first.
 	LogEpoch logsetEpoch = this->epoch;
 	oldestBackupEpoch = this->epoch;
-	for (const auto& reply : replies) {
+	for (auto const& reply : replies) {
 		if (removedBackupWorkers.contains(reply.interf.id())) {
 			removedBackupWorkers.erase(reply.interf.id());
 			continue;
@@ -2051,7 +2051,7 @@ void TagPartitionedLogSystem::setBackupWorkers(const std::vector<InitializeBacku
 	backupWorkerChanged.trigger();
 }
 
-bool TagPartitionedLogSystem::removeBackupWorker(const BackupWorkerDoneRequest& req) {
+bool TagPartitionedLogSystem::removeBackupWorker(BackupWorkerDoneRequest const& req) {
 	bool removed = false;
 	Reference<LogSet> logset = getEpochLogSet(req.backupEpoch);
 	if (logset.isValid()) {
@@ -2066,7 +2066,7 @@ bool TagPartitionedLogSystem::removeBackupWorker(const BackupWorkerDoneRequest& 
 
 	if (removed) {
 		oldestBackupEpoch = epoch;
-		for (const auto& old : oldLogData) {
+		for (auto const& old : oldLogData) {
 			if (old.epoch < oldestBackupEpoch && old.tLogs[0]->backupWorkers.size() > 0) {
 				oldestBackupEpoch = old.epoch;
 			}
@@ -2162,7 +2162,7 @@ Optional<DurableVersionInfo> TagPartitionedLogSystem::getDurableVersion(UID dbgi
 
 	ASSERT(logSet->logServers.size() == lockInfo.replies.size());
 	if (!bTooManyFailures) {
-		std::sort(results.begin(), results.end(), [](const TLogLockResult& a, const TLogLockResult& b) -> bool {
+		std::sort(results.begin(), results.end(), [](TLogLockResult const& a, TLogLockResult const& b) -> bool {
 			return a.end < b.end;
 		});
 		int absent = logSet->logServers.size() - results.size();
@@ -2246,8 +2246,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 	return Void();
 }
 
-void getTLogLocIds(const std::vector<Reference<LogSet>>& tLogs,
-                   const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
+void getTLogLocIds(std::vector<Reference<LogSet>> const& tLogs,
+                   std::tuple<int, std::vector<TLogLockResult>, bool> const& logGroupResults,
                    std::vector<uint16_t>& tLogLocIds,
                    uint16_t& maxTLogLocId) {
 	// Initialization.
@@ -2279,7 +2279,7 @@ void getTLogLocIds(const std::vector<Reference<LogSet>>& tLogs,
 	}
 }
 
-Version findMaxKCV(const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults) {
+Version findMaxKCV(std::tuple<int, std::vector<TLogLockResult>, bool> const& logGroupResults) {
 	Version maxKCV = 0;
 	for (auto& tLogResult : std::get<1>(logGroupResults)) {
 		maxKCV = std::max(maxKCV, tLogResult.knownCommittedVersion);
@@ -2287,7 +2287,7 @@ Version findMaxKCV(const std::tuple<int, std::vector<TLogLockResult>, bool>& log
 	return maxKCV;
 }
 
-void populateBitset(boost::dynamic_bitset<>& bs, const std::vector<uint16_t>& ids) {
+void populateBitset(boost::dynamic_bitset<>& bs, std::vector<uint16_t> const& ids) {
 	for (auto& id : ids) {
 		ASSERT(id < bs.size());
 		bs.set(id);
@@ -2299,8 +2299,8 @@ void populateBitset(boost::dynamic_bitset<>& bs, const std::vector<uint16_t>& id
 // All prior versions to the chosen RV must also be recoverable.
 // TODO: unit tests to stress UNICAST
 Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
-    const std::vector<Reference<LogSet>>& logServers,
-    const std::tuple<int, std::vector<TLogLockResult>, bool>& logGroupResults,
+    std::vector<Reference<LogSet>> const& logServers,
+    std::tuple<int, std::vector<TLogLockResult>, bool> const& logGroupResults,
     Version minDV) {
 	std::vector<uint16_t> tLogLocIds;
 	uint16_t maxTLogLocId; // maximum possible id, not maximum of id's of available log servers
@@ -2426,14 +2426,14 @@ Optional<std::tuple<Version, Version>> getRecoverVersionUnicast(
  * @note This function extends the functionality of "std::includes()" to containers of
  * type "std::map<uint8_t, std::vector<uint16_t>>".
  */
-static bool isSubset(const std::map<uint8_t, std::vector<uint16_t>>& mapA,
-                     const std::map<uint8_t, std::vector<uint16_t>>& mapB) {
-	for (const auto& [keyA, valueA] : mapA) {
+static bool isSubset(std::map<uint8_t, std::vector<uint16_t>> const& mapA,
+                     std::map<uint8_t, std::vector<uint16_t>> const& mapB) {
+	for (auto const& [keyA, valueA] : mapA) {
 		auto it = mapB.find(keyA);
 		if (it == mapB.end()) {
 			return false;
 		}
-		const auto& valueB = it->second;
+		auto const& valueB = it->second;
 		if (!std::includes(valueB.begin(), valueB.end(), valueA.begin(), valueA.end())) {
 			return false;
 		}
@@ -2584,11 +2584,11 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 	state std::vector<std::vector<Reference<AsyncVar<bool>>>> logFailed;
 	state std::vector<Future<Void>> failureTrackers;
 
-	for (const CoreTLogSet& coreSet : prevState.tLogs) {
+	for (CoreTLogSet const& coreSet : prevState.tLogs) {
 		logServers.push_back(makeReference<LogSet>(coreSet));
 		std::vector<Reference<AsyncVar<bool>>> failed;
 
-		for (const auto& logVar : logServers.back()->logServers) {
+		for (auto const& logVar : logServers.back()->logServers) {
 			allLogServers.emplace_back(logVar, coreSet.tLogPolicy);
 			failed.push_back(makeReference<AsyncVar<bool>>());
 			failureTrackers.push_back(TagPartitionedLogSystem::monitorLog(logVar, failed.back()));
@@ -2596,11 +2596,11 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 		logFailed.push_back(failed);
 	}
 
-	for (const auto& oldTlogData : prevState.oldTLogData) {
+	for (auto const& oldTlogData : prevState.oldTLogData) {
 		oldLogData.emplace_back(oldTlogData);
 
-		for (const auto& logSet : oldLogData.back().tLogs) {
-			for (const auto& logVar : logSet->logServers) {
+		for (auto const& logSet : oldLogData.back().tLogs) {
+			for (auto const& logVar : logSet->logServers) {
 				allLogServers.emplace_back(logVar, logSet->tLogPolicy);
 			}
 		}
@@ -2968,9 +2968,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 	return Void();
 }
 
-Version TagPartitionedLogSystem::getMaxLocalStartVersion(const std::vector<Reference<LogSet>>& tLogs) {
+Version TagPartitionedLogSystem::getMaxLocalStartVersion(std::vector<Reference<LogSet>> const& tLogs) {
 	Version maxStart = 0;
-	for (const auto& logSet : tLogs) {
+	for (auto const& logSet : tLogs) {
 		if (logSet->isLocal) {
 			maxStart = std::max(maxStart, logSet->startVersion);
 		}
@@ -2978,9 +2978,9 @@ Version TagPartitionedLogSystem::getMaxLocalStartVersion(const std::vector<Refer
 	return maxStart;
 }
 
-std::vector<Tag> TagPartitionedLogSystem::getLocalTags(int8_t locality, const std::vector<Tag>& allTags) {
+std::vector<Tag> TagPartitionedLogSystem::getLocalTags(int8_t locality, std::vector<Tag> const& allTags) {
 	std::vector<Tag> localTags;
-	for (const auto& tag : allTags) {
+	for (auto const& tag : allTags) {
 		if (locality == tagLocalitySpecial || locality == tag.locality || tag.locality < 0) {
 			localTags.push_back(tag);
 		}
@@ -3051,7 +3051,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	}
 
 	state std::vector<Future<TLogInterface>> logRouterInitializationReplies;
-	const Version startVersion = oldLogSystem->logRouterTags == 0
+	Version const startVersion = oldLogSystem->logRouterTags == 0
 	                                 ? oldLogSystem->recoverAt.get() + 1
 	                                 : std::max(self->tLogs[0]->startVersion, logSet->startVersion);
 	TraceEvent("LogRouterInitReqSent3").detail("Locality", remoteLocality).detail("LogRouterTags", self->logRouterTags);
@@ -3400,7 +3400,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 	// Should be sorted by descending orders of versions.
 	state std::vector<Version> oldGenerationRecoverAtVersions;
-	for (const auto& oldLogGen : logSystem->oldLogData) {
+	for (auto const& oldLogGen : logSystem->oldLogData) {
 		if (oldLogGen.recoverAt <= 0) {
 			// When we have an invalid recover at value, it's possible that the previous generations' recover at is not
 			// properly recorded in cstate. Therefore, we skip tracking old tlog generation recovery.
@@ -3600,7 +3600,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 	state double startTime = now();
 	state Future<Void> warnTimeout = delay(SERVER_KNOBS->TLOG_SLOW_REJOIN_WARN_TIMEOUT_SECS);
 
-	for (const auto& log : logServers) {
+	for (auto const& log : logServers) {
 		logsWaiting.insert(log.first->get().id());
 	}
 
@@ -3636,7 +3636,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 				}
 			}
 			when(wait(warnTimeout)) {
-				for (const auto& logId : logsWaiting) {
+				for (auto const& logId : logsWaiting) {
 					TraceEvent(SevWarnAlways, "TLogRejoinSlow", dbgid)
 					    .detail("Elapsed", startTime - now())
 					    .detail("LogId", logId);

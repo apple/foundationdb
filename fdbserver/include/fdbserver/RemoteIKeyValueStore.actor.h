@@ -47,7 +47,7 @@ struct IKVSCommitReply {
 	StorageBytes storeBytes;
 
 	IKVSCommitReply() : storeBytes(0, 0, 0, 0) {}
-	IKVSCommitReply(const StorageBytes& sb) : storeBytes(sb) {}
+	IKVSCommitReply(StorageBytes const& sb) : storeBytes(sb) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -135,7 +135,7 @@ struct OpenKVStoreRequest {
 	bool checkIntegrity;
 	ReplyPromise<struct IKVSInterface> reply;
 
-	OpenKVStoreRequest() {};
+	OpenKVStoreRequest(){};
 
 	OpenKVStoreRequest(KeyValueStoreType storeType,
 	                   std::string filename,
@@ -222,8 +222,8 @@ struct IKVSReadRangeReply {
 
 	IKVSReadRangeReply() = default;
 
-	explicit IKVSReadRangeReply(const RangeResult& res)
-	  : arena(res.arena()), data(static_cast<const VectorRef<KeyValueRef>&>(res)), more(res.more),
+	explicit IKVSReadRangeReply(RangeResult const& res)
+	  : arena(res.arena()), data(static_cast<VectorRef<KeyValueRef> const&>(res)), more(res.more),
 	    readThrough(res.readThrough), readToBegin(res.readToBegin), readThroughEnd(res.readThroughEnd) {}
 
 	template <class Ar>
@@ -387,10 +387,10 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	KeyValueStoreType getType() const override { return interf.type(); }
 
-	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
+	void set(KeyValueRef keyValue, Arena const* arena = nullptr) override {
 		interf.set.send(IKVSSetRequest{ keyValue, ReplyPromise<Void>() });
 	}
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
+	void clear(KeyRangeRef range, Arena const* arena = nullptr) override {
 		interf.clear.send(IKVSClearRequest{ range, ReplyPromise<Void>() });
 	}
 
@@ -416,7 +416,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	                              int byteLimit = 1 << 30,
 	                              Optional<ReadOptions> options = Optional<ReadOptions>()) override {
 		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options, ReplyPromise<IKVSReadRangeReply>() };
-		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
+		return fmap([](IKVSReadRangeReply const& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));
 	}
 
@@ -438,7 +438,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		return val;
 	}
 
-	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self, Future<int> returnCode) {
+	ACTOR static Future<Void> getErrorImpl(RemoteIKeyValueStore const* self, Future<int> returnCode) {
 		choose {
 			when(wait(self->initialized)) {}
 			when(wait(delay(SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION))) {
@@ -479,7 +479,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		}
 	}
 
-	ACTOR static Future<Void> onCloseImpl(const RemoteIKeyValueStore* self) {
+	ACTOR static Future<Void> onCloseImpl(RemoteIKeyValueStore const* self) {
 		try {
 			wait(self->initialized);
 			wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));

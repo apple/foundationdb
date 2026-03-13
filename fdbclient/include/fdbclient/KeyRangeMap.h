@@ -43,16 +43,16 @@ public:
 		mapEnd = std::move(r.mapEnd);
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::operator=(std::move(r));
 	}
-	void insert(const KeyRangeRef& keys, const Val& value) {
+	void insert(KeyRangeRef const& keys, Val const& value) {
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::insert(keys, value);
 	}
-	void insert(const KeyRef& key, const Val& value) {
+	void insert(KeyRef const& key, Val const& value) {
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::insert(singleKeyRange(key), value);
 	}
-	std::vector<KeyRangeWith<Val>> getAffectedRangesAfterInsertion(const KeyRangeRef& keys,
-	                                                               const Val& insertionValue = Val());
+	std::vector<KeyRangeWith<Val>> getAffectedRangesAfterInsertion(KeyRangeRef const& keys,
+	                                                               Val const& insertionValue = Val());
 	typename RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::Ranges modify(
-	    const KeyRangeRef&
+	    KeyRangeRef const&
 	        keys) // Returns ranges, the first of which begins at keys.begin and the last of which ends at keys.end
 	{
 		MapPair<Key, Val> valueBeforeRange(
@@ -75,7 +75,7 @@ public:
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(
 		    pair, true, RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::mf(pair));
 	}
-	void rawInsert(const std::vector<std::pair<MapPair<Key, Val>, Metric>>& pairs) {
+	void rawInsert(std::vector<std::pair<MapPair<Key, Val>, Metric>> const& pairs) {
 		RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.insert(pairs);
 	}
 	Key mapEnd;
@@ -91,8 +91,8 @@ public:
 		mapEnd = std::move(r.mapEnd);
 		RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::operator=(std::move(r));
 	}
-	void insert(const KeyRangeRef& keys, const Val& value);
-	void insert(const KeyRef& key, const Val& value, Arena& arena);
+	void insert(KeyRangeRef const& keys, Val const& value);
+	void insert(KeyRef const& key, Val const& value, Arena& arena);
 	Key mapEnd;
 };
 
@@ -109,17 +109,17 @@ public:
 
 	CoalescedKeyRangeMap(CoalescedKeyRangeMap&& source) = default;
 
-	void insert(const KeyRangeRef& keys, const Val& value);
-	void insert(const KeyRef& key, const Val& value);
+	void insert(KeyRangeRef const& keys, Val const& value);
+	void insert(KeyRef const& key, Val const& value);
 	Key mapEnd;
 };
 
 class KeyRangeActorMap {
 public:
-	void getRangesAffectedByInsertion(const KeyRangeRef& keys, std::vector<KeyRange>& affectedRanges);
-	void insert(const KeyRangeRef& keys, const Future<Void>& value) { map.insert(keys, value); }
-	void cancel(const KeyRangeRef& keys) { insert(keys, Future<Void>()); }
-	bool liveActorAt(const KeyRef& key) {
+	void getRangesAffectedByInsertion(KeyRangeRef const& keys, std::vector<KeyRange>& affectedRanges);
+	void insert(KeyRangeRef const& keys, Future<Void> const& value) { map.insert(keys, value); }
+	void cancel(KeyRangeRef const& keys) { insert(keys, Future<Void>()); }
+	bool liveActorAt(KeyRef const& key) {
 		Future<Void> actorAt = map[key];
 		return actorAt.isValid() && !actorAt.isReady();
 	}
@@ -152,16 +152,16 @@ Future<RangeResult> krmGetRangesUnaligned(Reference<ReadYourWritesTransaction> c
                                           int const& limit = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
                                           int const& limitBytes = CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 void krmSetPreviouslyEmptyRange(Transaction* tr,
-                                const KeyRef& mapPrefix,
-                                const KeyRangeRef& keys,
-                                const ValueRef& newValue,
-                                const ValueRef& oldEndValue);
+                                KeyRef const& mapPrefix,
+                                KeyRangeRef const& keys,
+                                ValueRef const& newValue,
+                                ValueRef const& oldEndValue);
 void krmSetPreviouslyEmptyRange(struct CommitTransactionRef& tr,
                                 Arena& trArena,
-                                const KeyRef& mapPrefix,
-                                const KeyRangeRef& keys,
-                                const ValueRef& newValue,
-                                const ValueRef& oldEndValue);
+                                KeyRef const& mapPrefix,
+                                KeyRangeRef const& keys,
+                                ValueRef const& newValue,
+                                ValueRef const& oldEndValue);
 Future<Void> krmSetRange(Transaction* const& tr, Key const& mapPrefix, KeyRange const& range, Value const& value);
 Future<Void> krmSetRange(Reference<ReadYourWritesTransaction> const& tr,
                          Key const& mapPrefix,
@@ -181,8 +181,8 @@ RangeResult krmDecodeRanges(KeyRef mapPrefix, KeyRange keys, RangeResult kv, boo
 
 template <class Val, class Metric, class MetricFunc>
 std::vector<KeyRangeWith<Val>> KeyRangeMap<Val, Metric, MetricFunc>::getAffectedRangesAfterInsertion(
-    const KeyRangeRef& keys,
-    const Val& insertionValue) {
+    KeyRangeRef const& keys,
+    Val const& insertionValue) {
 	std::vector<KeyRangeWith<Val>> affectedRanges;
 
 	{ // possible first range if no exact alignment
@@ -203,7 +203,7 @@ std::vector<KeyRangeWith<Val>> KeyRangeMap<Val, Metric, MetricFunc>::getAffected
 }
 
 template <class Val, class Metric, class MetricFunc>
-void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& keys, const Val& value) {
+void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(KeyRangeRef const& keys, Val const& value) {
 	ASSERT(keys.end <= mapEnd);
 
 	if (keys.empty())
@@ -253,7 +253,7 @@ void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& ke
 }
 
 template <class Val, class Metric, class MetricFunc>
-void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRef& key, const Val& value) {
+void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(KeyRef const& key, Val const& value) {
 	ASSERT(key < mapEnd);
 
 	auto begin = RangeMap<Key, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(key);
@@ -301,7 +301,7 @@ void CoalescedKeyRangeMap<Val, Metric, MetricFunc>::insert(const KeyRef& key, co
 }
 
 template <class Val, class Metric, class MetricFunc>
-void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef& keys, const Val& value) {
+void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(KeyRangeRef const& keys, Val const& value) {
 	ASSERT(keys.end <= mapEnd);
 
 	if (keys.empty())
@@ -351,7 +351,7 @@ void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(const KeyRangeRef&
 }
 
 template <class Val, class Metric, class MetricFunc>
-void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(const KeyRef& key, const Val& value, Arena& arena) {
+void CoalescedKeyRefRangeMap<Val, Metric, MetricFunc>::insert(KeyRef const& key, Val const& value, Arena& arena) {
 	ASSERT(key < mapEnd);
 
 	auto begin = RangeMap<KeyRef, Val, KeyRangeRef, Metric, MetricFunc>::map.lower_bound(key);

@@ -29,7 +29,7 @@
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 
-constexpr const char* MOCK_DD_TEST_CLASS = "MockDD";
+constexpr char const* MOCK_DD_TEST_CLASS = "MockDD";
 
 struct MockGlobalStateTester;
 
@@ -76,8 +76,8 @@ public:
 		MockShardStatus status;
 		uint64_t shardSize;
 
-		bool operator==(const ShardInfo& a) const { return shardSize == a.shardSize && status == a.status; }
-		bool operator!=(const ShardInfo& a) const { return !(a == *this); }
+		bool operator==(ShardInfo const& a) const { return shardSize == a.shardSize && status == a.status; }
+		bool operator!=(ShardInfo const& a) const { return !(a == *this); }
 	};
 
 	struct FetchKeysParams {
@@ -123,46 +123,46 @@ public:
 	  : counters("MockStorageServer", ssi.id().toString()), totalDiskSpace(usedDiskSpace + availableDiskSpace),
 	    usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
 
-	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
+	MockStorageServer(UID const& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
 	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
 
 	decltype(serverKeys)::Ranges getAllRanges() { return serverKeys.ranges(); }
 
-	bool allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status) const;
-	bool allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const;
+	bool allShardStatusEqual(KeyRangeRef const& range, MockShardStatus status) const;
+	bool allShardStatusIn(KeyRangeRef const& range, std::set<MockShardStatus> const& status) const;
 
 	// change the status of range. This function may result in split to make the shard boundary align with range.begin
 	// and range.end. If split happened, the shard size will be equally split.
-	void setShardStatus(const KeyRangeRef& range, MockShardStatus status);
+	void setShardStatus(KeyRangeRef const& range, MockShardStatus status);
 
-	void coalesceCompletedRange(const KeyRangeRef& range);
+	void coalesceCompletedRange(KeyRangeRef const& range);
 
 	// this function removed an aligned range from server
-	void removeShard(const KeyRangeRef& range);
+	void removeShard(KeyRangeRef const& range);
 
 	// intersecting range size
-	uint64_t sumRangeSize(const KeyRangeRef& range) const;
+	uint64_t sumRangeSize(KeyRangeRef const& range) const;
 
 	void addActor(Future<Void> future) override;
 
 	void getSplitPoints(SplitRangeRequest const& req) override;
 
-	Future<Void> waitMetricsForReal(const WaitMetricsRequest& req) override;
+	Future<Void> waitMetricsForReal(WaitMetricsRequest const& req) override;
 
-	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
+	void getStorageMetrics(GetStorageMetricsRequest const& req) override;
 
-	void getSplitMetrics(const SplitMetricsRequest& req) override;
+	void getSplitMetrics(SplitMetricsRequest const& req) override;
 
-	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override;
+	void getHotRangeMetrics(ReadHotSubRangeRequest const& req) override;
 
-	int64_t getHotShardsMetrics(const KeyRange& range) override;
+	int64_t getHotShardsMetrics(KeyRange const& range) override;
 
 	template <class Reply>
 	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
 
 	template <class Reply>
-	typename std::enable_if_t<isLoadBalancedReply<Reply>, void> sendErrorWithPenalty(const ReplyPromise<Reply>& promise,
-	                                                                                 const Error& err,
+	typename std::enable_if_t<isLoadBalancedReply<Reply>, void> sendErrorWithPenalty(ReplyPromise<Reply> const& promise,
+	                                                                                 Error const& err,
 	                                                                                 double penalty) {
 		Reply reply;
 		reply.error = err;
@@ -172,7 +172,7 @@ public:
 
 	template <class Reply>
 	typename std::enable_if_t<!isLoadBalancedReply<Reply>, void>
-	sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+	sendErrorWithPenalty(ReplyPromise<Reply> const& promise, Error const& err, double) {
 		promise.sendError(err);
 	}
 
@@ -196,16 +196,16 @@ public:
 	int64_t getRange(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes);
 
 	// trigger the asynchronous fetch keys operation
-	void signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes);
+	void signalFetchKeys(KeyRangeRef const& range, int64_t rangeTotalBytes);
 
 	HealthMetrics::StorageStats getStorageStats() const;
 
 protected:
 	PromiseStream<FetchKeysParams> fetchKeysRequests;
 
-	void threeWayShardSplitting(const KeyRangeRef& outerRange, const KeyRangeRef& innerRange, uint64_t outerRangeSize);
+	void threeWayShardSplitting(KeyRangeRef const& outerRange, KeyRangeRef const& innerRange, uint64_t outerRangeSize);
 
-	void twoWayShardSplitting(const KeyRangeRef& range, const KeyRef& splitPoint, uint64_t rangeSize);
+	void twoWayShardSplitting(KeyRangeRef const& range, KeyRef const& splitPoint, uint64_t rangeSize);
 
 	// Assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	int64_t estimateRangeTotalBytes(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes);
@@ -255,7 +255,7 @@ class MockGlobalState : public IKeyLocationService {
 	std::vector<std::shared_ptr<mock::Process>> processes;
 	std::vector<std::shared_ptr<mock::Process>> seedProcesses;
 
-	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
+	std::vector<StorageServerInterface> extractStorageServerInterfaces(std::vector<UID> const& ids) const;
 
 public:
 	typedef ShardsAffectedByTeamFailure::Team Team;
@@ -276,8 +276,8 @@ public:
 	static std::shared_ptr<MockGlobalState>& g_mockState();
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
-	void initializeClusterLayout(const BasicSimulationConfig&);
-	void initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
+	void initializeClusterLayout(BasicSimulationConfig const&);
+	void initializeAsEmptyDatabaseMGS(DatabaseConfiguration const& conf,
 	                                  uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 	// create a storage server interface on each process
 	void addStoragePerProcess(uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
@@ -297,8 +297,8 @@ public:
 	 * * In sharedMgs.shardMapping,  the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Empty
 	 */
-	bool serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard = false);
-	bool serverIsDestForShard(const UID& serverId, KeyRangeRef shard);
+	bool serverIsSourceForShard(UID const& serverId, KeyRangeRef shard, bool inFlightShard = false);
+	bool serverIsDestForShard(UID const& serverId, KeyRangeRef shard);
 
 	/* Server status contract:
 	 * Server X  is removed
@@ -310,7 +310,7 @@ public:
 	 * * sharedMgs.shardMapping doesn’t have any information about X
 	 * * sharedMgs.allServer[X] is existed
 	 */
-	bool allShardsRemovedFromServer(const UID& serverId);
+	bool allShardsRemovedFromServer(UID const& serverId);
 
 	// SOMEDAY: NativeAPI::waitStorageMetrics should share the code in the future, this is a simpler version of it
 	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
@@ -320,10 +320,10 @@ public:
 	                                                                    int shardLimit,
 	                                                                    int expectedShardCount);
 
-	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(const KeyRange& keys,
-	                                                          const StorageMetrics& limit,
-	                                                          const StorageMetrics& estimated,
-	                                                          const Optional<int>& minSplitBytes);
+	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
+	                                                          StorageMetrics const& limit,
+	                                                          StorageMetrics const& estimated,
+	                                                          Optional<int> const& minSplitBytes);
 
 	Future<KeyRangeLocationInfo> getKeyLocation(Key key,
 	                                            SpanContext spanContext,
@@ -361,7 +361,7 @@ public:
 
 	// convenient shortcuts for test
 	std::vector<Future<Void>> runAllMockServers();
-	Future<Void> runMockServer(const UID& id);
+	Future<Void> runMockServer(UID const& id);
 };
 
 #endif // FOUNDATIONDB_MOCKGLOBALSTATE_H

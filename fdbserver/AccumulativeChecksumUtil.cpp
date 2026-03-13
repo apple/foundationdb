@@ -36,14 +36,14 @@ void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<Accumulativ
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                                      MutationRef& mutation,
-                                                     const std::vector<Tag>& inputTags,
+                                                     std::vector<Tag> const& inputTags,
                                                      uint16_t acsIndex,
                                                      LogEpoch epoch,
                                                      Version commitVersion,
                                                      UID commitProxyId) {
 	mutation.populateChecksum();
 	mutation.setAccumulativeChecksumIndex(acsIndex);
-	for (const auto& inputTag : inputTags) {
+	for (auto const& inputTag : inputTags) {
 		acsBuilder->addMutation(mutation, inputTag, epoch, commitProxyId, commitVersion);
 	}
 	return;
@@ -51,20 +51,20 @@ void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<Accumulativ
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                                      MutationRef& mutation,
-                                                     const std::set<Tag>& inputTags,
+                                                     std::set<Tag> const& inputTags,
                                                      uint16_t acsIndex,
                                                      LogEpoch epoch,
                                                      Version commitVersion,
                                                      UID commitProxyId) {
 	mutation.populateChecksum();
 	mutation.setAccumulativeChecksumIndex(acsIndex);
-	for (const auto& inputTag : inputTags) {
+	for (auto const& inputTag : inputTags) {
 		acsBuilder->addMutation(mutation, inputTag, epoch, commitProxyId, commitVersion);
 	}
 	return;
 }
 
-void AccumulativeChecksumBuilder::addMutation(const MutationRef& mutation,
+void AccumulativeChecksumBuilder::addMutation(MutationRef const& mutation,
                                               Tag tag,
                                               LogEpoch epoch,
                                               UID commitProxyId,
@@ -121,14 +121,14 @@ void AccumulativeChecksumBuilder::newTag(Tag tag, UID ssid, Version commitVersio
 	}
 }
 
-void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
+void AccumulativeChecksumValidator::addMutation(MutationRef const& mutation,
                                                 UID ssid,
                                                 Tag tag,
                                                 Version ssVersion,
                                                 Version mutationVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
 	ASSERT(mutation.checksum.present() && mutation.accumulativeChecksumIndex.present());
-	const uint16_t& acsIndex = mutation.accumulativeChecksumIndex.get();
+	uint16_t const& acsIndex = mutation.accumulativeChecksumIndex.get();
 	if (!mutationBuffer.empty()) {
 		ASSERT(mutationBuffer[0].second.accumulativeChecksumIndex.present());
 		if (mutationBuffer[0].first != mutationVersion) {
@@ -166,12 +166,12 @@ void AccumulativeChecksumValidator::addMutation(const MutationRef& mutation,
 }
 
 Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumulativeChecksum(
-    const AccumulativeChecksumState& acsMutationState,
+    AccumulativeChecksumState const& acsMutationState,
     UID ssid,
     Tag tag,
     Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	const uint16_t& acsIndex = acsMutationState.acsIndex;
+	uint16_t const& acsIndex = acsMutationState.acsIndex;
 	auto it = acsTable.find(acsIndex);
 	bool existInTable = true;
 	if (it == acsTable.end()) {
@@ -244,12 +244,12 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 	return acsMutationState;
 }
 
-void AccumulativeChecksumValidator::restore(const AccumulativeChecksumState& acsState,
+void AccumulativeChecksumValidator::restore(AccumulativeChecksumState const& acsState,
                                             UID ssid,
                                             Tag tag,
                                             Version ssVersion) {
 	ASSERT(CLIENT_KNOBS->ENABLE_MUTATION_CHECKSUM && CLIENT_KNOBS->ENABLE_ACCUMULATIVE_CHECKSUM);
-	const uint16_t& acsIndex = acsState.acsIndex;
+	uint16_t const& acsIndex = acsState.acsIndex;
 	if (acsState.version > ssVersion) {
 		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
 		    .detail("Reason", "Restored ACS version is larger than storage server version")

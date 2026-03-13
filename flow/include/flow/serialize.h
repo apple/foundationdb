@@ -67,19 +67,19 @@ template <>
 struct scalar_traits<ProtocolVersion> : std::true_type {
 	constexpr static size_t size = sizeof(uint64_t);
 
-	static void save(uint8_t* out, const ProtocolVersion& v) {
+	static void save(uint8_t* out, ProtocolVersion const& v) {
 		*reinterpret_cast<uint64_t*>(out) = v.versionWithFlags();
 	}
 
 	template <class Context>
-	static void load(const uint8_t* i, ProtocolVersion& out, Context& context) {
-		const uint64_t* in = reinterpret_cast<const uint64_t*>(i);
+	static void load(uint8_t const* i, ProtocolVersion& out, Context& context) {
+		uint64_t const* in = reinterpret_cast<uint64_t const*>(i);
 		out = ProtocolVersion(*in);
 	}
 };
 
 template <class Archive, class Item>
-inline typename Archive::WRITER& operator<<(Archive& ar, const Item& item) {
+inline typename Archive::WRITER& operator<<(Archive& ar, Item const& item) {
 	save(ar, item);
 	return ar;
 }
@@ -91,7 +91,7 @@ inline typename Archive::READER& operator>>(Archive& ar, Item& item) {
 }
 
 template <class Archive, class Item, class... Items>
-typename Archive::WRITER& serializer(Archive& ar, const Item& item, const Items&... items) {
+typename Archive::WRITER& serializer(Archive& ar, Item const& item, Items const&... items) {
 	static_assert(fb_appears_last_property(pack<Item, Items...>{}),
 	              "An argument to a serializer call that must appear last (Arena?) does not appear last");
 	save(ar, item);
@@ -122,7 +122,7 @@ public:
 };
 
 template <class Ar, class T>
-inline void save(Ar& ar, const T& value) {
+inline void save(Ar& ar, T const& value) {
 	Serializer<Ar, T>::serialize(ar, const_cast<T&>(value));
 }
 
@@ -146,7 +146,7 @@ inline void load(Archive& ar, std::string& value) {
 }
 
 template <class Archive>
-inline void save(Archive& ar, const std::string& value) {
+inline void save(Archive& ar, std::string const& value) {
 	ar << (int32_t)value.length();
 	ar.serializeBytes((void*)&value[0], (int)value.length());
 	ASSERT(ar.protocolVersion().isValid());
@@ -188,7 +188,7 @@ struct CompositionDepthFor<std::unordered_set<Key, Hash, KeyEqual, Allocator>>
   : std::integral_constant<int, CompositionDepthFor<Key>::value + 1> {};
 
 template <class Archive, class T>
-inline void save(Archive& ar, const std::vector<T>& value) {
+inline void save(Archive& ar, std::vector<T> const& value) {
 	ar << (int)value.size();
 	for (auto it = value.begin(); it != value.end(); ++it)
 		ar << *it;
@@ -208,7 +208,7 @@ inline void load(Archive& ar, std::vector<T>& value) {
 }
 
 template <class Archive, class T>
-inline void save(Archive& ar, const std::deque<T>& value) {
+inline void save(Archive& ar, std::deque<T> const& value) {
 	ar << (int)value.size();
 	for (auto it = value.begin(); it != value.end(); ++it)
 		ar << *it;
@@ -229,7 +229,7 @@ inline void load(Archive& ar, std::deque<T>& value) {
 }
 
 template <class Archive, class T, size_t N>
-inline void save(Archive& ar, const std::array<T, N>& value) {
+inline void save(Archive& ar, std::array<T, N> const& value) {
 	for (int ii = 0; ii < N; ++ii)
 		ar << value[ii];
 	ASSERT(ar.protocolVersion().isValid());
@@ -243,7 +243,7 @@ inline void load(Archive& ar, std::array<T, N>& value) {
 }
 
 template <class Archive, class T>
-inline void save(Archive& ar, const std::set<T>& value) {
+inline void save(Archive& ar, std::set<T> const& value) {
 	ar << (int)value.size();
 	for (auto it = value.begin(); it != value.end(); ++it)
 		ar << *it;
@@ -263,9 +263,9 @@ inline void load(Archive& ar, std::set<T>& value) {
 }
 
 template <class Archive, class K, class V>
-inline void save(Archive& ar, const std::map<K, V>& value) {
+inline void save(Archive& ar, std::map<K, V> const& value) {
 	ar << (int)value.size();
-	for (const auto& it : value) {
+	for (auto const& it : value) {
 		ar << it.first << it.second;
 	}
 	ASSERT(ar.protocolVersion().isValid());
@@ -284,9 +284,9 @@ inline void load(Archive& ar, std::map<K, V>& value) {
 }
 
 template <class Archive, class K, class V>
-inline void save(Archive& ar, const boost::container::flat_map<K, V>& value) {
+inline void save(Archive& ar, boost::container::flat_map<K, V> const& value) {
 	ar << (int)value.size();
-	for (const auto& it : value) {
+	for (auto const& it : value) {
 		ar << it.first << it.second;
 	}
 	ASSERT(ar.protocolVersion().isValid());
@@ -305,7 +305,7 @@ inline void load(Archive& ar, boost::container::flat_map<K, V>& value) {
 }
 
 template <class Archive, class... Variants>
-inline void save(Archive& ar, const std::variant<Variants...> value) {
+inline void save(Archive& ar, std::variant<Variants...> const value) {
 	ar << (uint8_t)value.index();
 	std::visit([&](auto& inner) { ar << inner; }, value);
 	ASSERT(ar.protocolVersion().isValid());
@@ -340,7 +340,7 @@ inline void load(Archive& ar, std::variant<Variants...>& value) {
 #endif
 
 #if VALGRIND
-static bool valgrindCheck(const void* data, int bytes, const char* context) {
+static bool valgrindCheck(void const* data, int bytes, char const* context) {
 	auto first = VALGRIND_CHECK_MEM_IS_DEFINED(data, bytes);
 	if (first) {
 		int und = 0;
@@ -357,7 +357,7 @@ static bool valgrindCheck(const void* data, int bytes, const char* context) {
 	return true;
 }
 #else
-static inline bool valgrindCheck(const void* data, int bytes, const char* context) {
+static inline bool valgrindCheck(void const* data, int bytes, char const* context) {
 	return true;
 }
 #endif
@@ -424,12 +424,12 @@ inline _Unversioned Unversioned() {
 
 class BinaryWriter : NonCopyable {
 public:
-	static const int isDeserializing = 0;
+	static int const isDeserializing = 0;
 	static constexpr bool isSerializing = true;
 	typedef BinaryWriter WRITER;
 
 	void serializeBytes(StringRef bytes) { serializeBytes(bytes.begin(), bytes.size()); }
-	void serializeBytes(const void* data, int bytes) {
+	void serializeBytes(void const* data, int bytes) {
 		if (bytes > 0) {
 			valgrindCheck(data, bytes, "serializeBytes");
 			void* p = writeBytes(bytes);
@@ -437,7 +437,7 @@ public:
 		}
 	}
 	template <class T>
-	void serializeBinaryItem(const T& t) {
+	void serializeBinaryItem(T const& t) {
 		static_assert(is_binary_serializable<T>::value,
 		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		*(T*)writeBytes(sizeof(T)) = t;
@@ -584,9 +584,9 @@ private:
 
 // A known-length memory segment and an unknown-length memory segment which can be written to as a whole.
 struct SplitBuffer {
-	void write(const void* data, int length);
-	void write(const void* data, int length, int offset);
-	void writeAndShrink(const void* data, int length);
+	void write(void const* data, int length);
+	void write(void const* data, int length, int offset);
+	void writeAndShrink(void const* data, int length);
 	uint8_t *begin, *next;
 	int first_length;
 };
@@ -609,12 +609,12 @@ public:
 	}
 
 	void serializeBytes(StringRef bytes) { serializeBytes(bytes.begin(), bytes.size()); }
-	void serializeBytes(const void* data, int bytes) {
+	void serializeBytes(void const* data, int bytes) {
 		valgrindCheck(data, bytes, "serializeBytes");
 		writeBytes(data, bytes);
 	}
 	template <class T>
-	void serializeBinaryItem(const T& t) {
+	void serializeBinaryItem(T const& t) {
 		static_assert(is_binary_serializable<T>::value,
 		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		writeBytes(&t, sizeof(T));
@@ -628,7 +628,7 @@ private:
 	SplitBuffer buf;
 	ProtocolVersion m_protocolVersion;
 
-	void writeBytes(const void* data, int wlen) {
+	void writeBytes(void const* data, int wlen) {
 		ASSERT(wlen <= len);
 		buf.writeAndShrink(data, wlen);
 		len -= wlen;
@@ -638,11 +638,11 @@ private:
 template <class Impl>
 class _Reader {
 public:
-	static const int isDeserializing = 1;
+	static int const isDeserializing = 1;
 	static constexpr bool isSerializing = false;
 	using READER = Impl;
 
-	const void* peekBytes(int bytes) const {
+	void const* peekBytes(int bytes) const {
 		ASSERT(begin + bytes <= end);
 		return begin;
 	}
@@ -674,11 +674,11 @@ public:
 	size_t remainingBytes() const { return end - begin; };
 
 protected:
-	_Reader(const char* begin, const char* end) : begin(begin), end(end) {}
-	_Reader(const char* begin, const char* end, const Arena& arena) : begin(begin), end(end), m_pool(arena) {}
+	_Reader(char const* begin, char const* end) : begin(begin), end(end) {}
+	_Reader(char const* begin, char const* end, Arena const& arena) : begin(begin), end(end), m_pool(arena) {}
 
-	const char *begin, *end;
-	const char* check = nullptr;
+	char const *begin, *end;
+	char const* check = nullptr;
 	Arena m_pool;
 	ProtocolVersion m_protocolVersion;
 };
@@ -687,26 +687,26 @@ class ArenaReader : public _Reader<ArenaReader> {
 	Optional<ArenaObjectReader> arenaObjectReader;
 
 public:
-	const void* readBytes(int bytes) {
-		const char* b = begin;
-		const char* e = b + bytes;
+	void const* readBytes(int bytes) {
+		char const* b = begin;
+		char const* e = b + bytes;
 		ASSERT(e <= end);
 		begin = e;
 		return b;
 	}
 
-	const uint8_t* arenaRead(int bytes) { return (const uint8_t*)readBytes(bytes); }
+	uint8_t const* arenaRead(int bytes) { return (uint8_t const*)readBytes(bytes); }
 
-	const void* peekBytes(int bytes) const {
+	void const* peekBytes(int bytes) const {
 		ASSERT(begin + bytes <= end);
 		return begin;
 	}
 
-	StringRef arenaReadAll() const { return StringRef(reinterpret_cast<const uint8_t*>(begin), end - begin); }
+	StringRef arenaReadAll() const { return StringRef(reinterpret_cast<uint8_t const*>(begin), end - begin); }
 
 	template <class VersionOptions>
-	ArenaReader(Arena const& arena, const StringRef& input, VersionOptions vo)
-	  : _Reader(reinterpret_cast<const char*>(input.begin()), reinterpret_cast<const char*>(input.end()), arena) {
+	ArenaReader(Arena const& arena, StringRef const& input, VersionOptions vo)
+	  : _Reader(reinterpret_cast<char const*>(input.begin()), reinterpret_cast<char const*>(input.end()), arena) {
 		vo.read(*this);
 		if (m_protocolVersion.hasObjectSerializerFlag()) {
 			arenaObjectReader = ArenaObjectReader(arena, input, vo);
@@ -731,9 +731,9 @@ class BinaryReader : public _Reader<BinaryReader> {
 	Optional<ObjectReader> objectReader;
 
 public:
-	const void* readBytes(int bytes);
+	void const* readBytes(int bytes);
 
-	const uint8_t* arenaRead(int bytes) {
+	uint8_t const* arenaRead(int bytes) {
 		// Reads and returns the next bytes.
 		// The returned pointer has the lifetime of this.arena()
 		// Could be implemented zero-copy if [begin,end) was in this.arena() already; for now is a copy
@@ -760,17 +760,17 @@ public:
 	bool empty() const { return begin == end; }
 
 	template <class VersionOptions>
-	BinaryReader(const void* data, int length, VersionOptions vo)
-	  : _Reader(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data) + length) {
+	BinaryReader(void const* data, int length, VersionOptions vo)
+	  : _Reader(reinterpret_cast<char const*>(data), reinterpret_cast<char const*>(data) + length) {
 		readVersion(vo);
 	}
 	template <class VersionOptions>
-	BinaryReader(const StringRef& s, VersionOptions vo)
-	  : _Reader(reinterpret_cast<const char*>(s.begin()), reinterpret_cast<const char*>(s.end())) {
+	BinaryReader(StringRef const& s, VersionOptions vo)
+	  : _Reader(reinterpret_cast<char const*>(s.begin()), reinterpret_cast<char const*>(s.end())) {
 		readVersion(vo);
 	}
 	template <class VersionOptions>
-	BinaryReader(const std::string& s, VersionOptions vo) : _Reader(s.c_str(), s.c_str() + s.size()) {
+	BinaryReader(std::string const& s, VersionOptions vo) : _Reader(s.c_str(), s.c_str() + s.size()) {
 		readVersion(vo);
 	}
 
@@ -792,7 +792,7 @@ private:
 	void readVersion(VersionOptions vo) {
 		vo.read(*this);
 		if (m_protocolVersion.hasObjectSerializerFlag()) {
-			objectReader = ObjectReader(reinterpret_cast<const uint8_t*>(begin), AssumeVersion(m_protocolVersion));
+			objectReader = ObjectReader(reinterpret_cast<uint8_t const*>(begin), AssumeVersion(m_protocolVersion));
 		}
 	}
 };
@@ -894,7 +894,7 @@ struct PacketWriter {
 		vo.read(*this);
 	}
 
-	void serializeBytes(const void* data, int bytes) {
+	void serializeBytes(void const* data, int bytes) {
 		if (bytes <= buffer->bytes_unwritten()) {
 			memcpy(buffer->data() + buffer->bytes_written, data, bytes);
 			buffer->bytes_written += bytes;
@@ -908,7 +908,7 @@ struct PacketWriter {
 
 	void serializeBytes(StringRef bytes) { serializeBytes(bytes.begin(), bytes.size()); }
 	template <class T>
-	void serializeBinaryItem(const T& t) {
+	void serializeBinaryItem(T const& t) {
 		static_assert(is_binary_serializable<T>::value,
 		              "Object must be binary serializable, see BINARY_SERIALIZABLE macro");
 		if (sizeof(T) <= buffer->bytes_unwritten()) {
@@ -931,7 +931,7 @@ struct PacketWriter {
 	}
 
 	// This is used by MakeSerializeSource::serializePacketWriter
-	static uint8_t* packetWriterAlloc(const size_t size, void* self) {
+	static uint8_t* packetWriterAlloc(size_t const size, void* self) {
 		return static_cast<PacketWriter*>(self)->writeBytes(size);
 	}
 
@@ -942,7 +942,7 @@ struct PacketWriter {
 	}
 
 private:
-	void serializeBytesAcrossBoundary(const void* data, int bytes);
+	void serializeBytesAcrossBoundary(void const* data, int bytes);
 	void nextBuffer(size_t size = 0 /* downstream it will default to at least 4k minus some padding */);
 	template <class, class>
 	friend class MakeSerializeSource;

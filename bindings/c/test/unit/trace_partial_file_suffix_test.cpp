@@ -39,11 +39,11 @@ void fdb_check(fdb_error_t e) {
 	}
 }
 
-void set_net_opt(FDBNetworkOption option, const std::string& value) {
-	fdb_check(fdb_network_set_option(option, reinterpret_cast<const uint8_t*>(value.c_str()), value.size()));
+void set_net_opt(FDBNetworkOption option, std::string const& value) {
+	fdb_check(fdb_network_set_option(option, reinterpret_cast<uint8_t const*>(value.c_str()), value.size()));
 }
 
-bool file_exists(const char* path) {
+bool file_exists(char const* path) {
 	FILE* f = fopen(path, "r");
 	if (f) {
 		fclose(f);
@@ -61,9 +61,7 @@ int main(int argc, char** argv) {
 	    "trace.127.0.0.1." + file_identifier + ".simulated.xml" + trace_partial_file_suffix;
 
 	// Simulate this process crashing previously by creating a ".tmp" file
-	{
-		std::ofstream file{ simulated_stray_partial_file };
-	}
+	{ std::ofstream file{ simulated_stray_partial_file }; }
 
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, "");
 	set_net_opt(FDBNetworkOption::FDB_NET_OPTION_TRACE_FILE_IDENTIFIER, file_identifier);
@@ -80,7 +78,7 @@ int main(int argc, char** argv) {
 	// Eventually there's a new trace file for this test ending in .tmp
 	std::string name;
 	for (;;) {
-		for (const auto& path : platform::listFiles(".")) {
+		for (auto const& path : platform::listFiles(".")) {
 			if (path.find(file_identifier) != std::string::npos && path.find(".simulated.") == std::string::npos) {
 				assert(path.substr(path.size() - trace_partial_file_suffix.size()) == trace_partial_file_suffix);
 				name = path;

@@ -44,14 +44,14 @@ public:
 	ExtStringRef beginKey();
 	ExtStringRef endKey();
 
-	virtual const KeyValueRef* kv(Arena& arena);
+	virtual KeyValueRef const* kv(Arena& arena);
 
 	RYWIterator& operator++();
 
 	RYWIterator& operator--();
 
-	bool operator==(const RYWIterator& r) const;
-	bool operator!=(const RYWIterator& r) const;
+	bool operator==(RYWIterator const& r) const;
+	bool operator!=(RYWIterator const& r) const;
 
 	void skip(KeyRef key);
 
@@ -94,7 +94,7 @@ public:
 			pos = value.size() - 10;
 		}
 		pos = littleEndian32(pos);
-		value += std::string((const char*)&pos, sizeof(int32_t));
+		value += std::string((char const*)&pos, sizeof(int32_t));
 		return ValueRef(arena, value);
 	}
 
@@ -113,7 +113,7 @@ public:
 		key += "XXXXXXXXYY";
 		key += std::string(deterministicRandom()->randomInt(0, 3), 'z');
 		pos = littleEndian32(pos);
-		key += std::string((const char*)&pos, sizeof(int32_t));
+		key += std::string((char const*)&pos, sizeof(int32_t));
 		return ValueRef(arena, key);
 	}
 

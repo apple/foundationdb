@@ -227,7 +227,7 @@ struct RestoreValidationWorkload : TestWorkload {
 					bool allComplete = true;
 					bool anyError = false;
 
-					for (const auto& auditState : auditStates) {
+					for (auto const& auditState : auditStates) {
 						if (auditState.id == auditId) {
 							foundOurAudit = true;
 

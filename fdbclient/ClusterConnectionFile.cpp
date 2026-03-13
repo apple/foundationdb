@@ -45,7 +45,7 @@ Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(std::strin
 	return makeReference<ClusterConnectionFile>(lookupClusterFileName(filename).first);
 }
 
-Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(const char* filename) {
+Reference<ClusterConnectionFile> ClusterConnectionFile::openOrDefault(char const* filename) {
 	return openOrDefault(std::string(filename == nullptr ? "" : filename));
 }
 

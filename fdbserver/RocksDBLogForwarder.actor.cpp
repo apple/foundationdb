@@ -31,7 +31,7 @@ using InfoLogLevel = rocksdb::InfoLogLevel;
 
 namespace {
 
-Severity getSeverityFromLogLevel(const InfoLogLevel& log_level) {
+Severity getSeverityFromLogLevel(InfoLogLevel const& log_level) {
 	switch (log_level) {
 	case InfoLogLevel::DEBUG_LEVEL:
 		return SevDebug;
@@ -55,7 +55,7 @@ Severity getSeverityFromLogLevel(const InfoLogLevel& log_level) {
 
 namespace details {
 
-void logTraceEvent(const RocksDBLogRecord& record) {
+void logTraceEvent(RocksDBLogRecord const& record) {
 	TraceEvent event = TraceEvent(record.severity, "RocksDBLogRecord", record.uid);
 	event.detail("RocksDBLogTime", record.logReceiveTime);
 
@@ -65,7 +65,7 @@ void logTraceEvent(const RocksDBLogRecord& record) {
 		event.detail("RocksDBThreadID", ss.str());
 	}
 
-	for (const auto& [k, v] : record.kvPairs) {
+	for (auto const& [k, v] : record.kvPairs) {
 		event.detail(k.c_str(), v);
 	}
 }
@@ -82,14 +82,14 @@ RocksDBLogger::RocksDBLogger()
   : mainThreadId(std::this_thread::get_id()), periodicLogger(rocksDBPeriodicallyLogger(this)) {}
 
 void RocksDBLogger::inject(RocksDBLogRecord&& record) {
-	const std::thread::id threadId = std::this_thread::get_id();
+	std::thread::id const threadId = std::this_thread::get_id();
 	if (threadId == mainThreadId) {
 		// In the main thread, it is *NOT* necessary to cache the record.
 		logTraceEvent(record);
 
 		consume();
 	} else {
-		const std::lock_guard<std::mutex> lockGuard(recordsMutex);
+		std::lock_guard<std::mutex> const lockGuard(recordsMutex);
 
 		logRecords.emplace_back();
 		logRecords.back() = std::move(record);
@@ -99,18 +99,18 @@ void RocksDBLogger::inject(RocksDBLogRecord&& record) {
 void RocksDBLogger::consume() {
 	std::vector<RocksDBLogRecord> currentRecords;
 	{
-		const std::lock_guard<std::mutex> lockGuard(recordsMutex);
+		std::lock_guard<std::mutex> const lockGuard(recordsMutex);
 		currentRecords.swap(logRecords);
 	}
 
-	for (const auto& record : currentRecords) {
+	for (auto const& record : currentRecords) {
 		logTraceEvent(record);
 	}
 }
 
 } // namespace details
 
-RocksDBLogForwarder::RocksDBLogForwarder(const UID& id_, const InfoLogLevel log_level)
+RocksDBLogForwarder::RocksDBLogForwarder(UID const& id_, InfoLogLevel const log_level)
   : rocksdb::Logger(log_level), id(id_), logger() {
 	TraceEvent(SevInfo, "RocksDBLoggerStart", id);
 }
@@ -119,16 +119,16 @@ RocksDBLogForwarder::~RocksDBLogForwarder() {
 	TraceEvent(SevInfo, "RocksDBLoggerStop", id);
 }
 
-void RocksDBLogForwarder::Logv(const char* format, va_list ap) {
+void RocksDBLogForwarder::Logv(char const* format, va_list ap) {
 	Logv(InfoLogLevel::INFO_LEVEL, format, ap);
 }
 
-void RocksDBLogForwarder::Logv(const InfoLogLevel log_level, const char* format, va_list ap) {
-	const std::thread::id threadID = std::this_thread::get_id();
+void RocksDBLogForwarder::Logv(InfoLogLevel const log_level, char const* format, va_list ap) {
+	std::thread::id const threadID = std::this_thread::get_id();
 
 	// FIXME: Restrict the RocksDB log level to warn in order to prevent almost all simulation test failure. This has to
 	// be reconsidered.
-	const Severity severity = std::min(getSeverityFromLogLevel(log_level), SevWarn);
+	Severity const severity = std::min(getSeverityFromLogLevel(log_level), SevWarn);
 
 	// TODO: Parse the log information into KV pairs
 	// At this stage vsnprintf is used

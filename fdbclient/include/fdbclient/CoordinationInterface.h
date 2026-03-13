@@ -30,7 +30,7 @@
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/Hostname.h"
 
-const int MAX_CLUSTER_FILE_BYTES = 60000;
+int const MAX_CLUSTER_FILE_BYTES = 60000;
 
 struct ClientLeaderRegInterface {
 	PublicRequestStream<struct GetLeaderRequest> getLeader;
@@ -43,7 +43,7 @@ struct ClientLeaderRegInterface {
 	ClientLeaderRegInterface(INetwork* local);
 	ClientLeaderRegInterface(Hostname hostname) : hostname(hostname) {}
 
-	bool operator==(const ClientLeaderRegInterface& rhs) const {
+	bool operator==(ClientLeaderRegInterface const& rhs) const {
 		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
 	}
 
@@ -66,9 +66,9 @@ public:
 	constexpr static FileIdentifier file_identifier = 13602011;
 
 	ClusterConnectionString() {}
-	ClusterConnectionString(const std::string& connectionString);
-	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
-	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
+	ClusterConnectionString(std::string const& connectionString);
+	ClusterConnectionString(std::vector<NetworkAddress> const& coordinators, Key key);
+	ClusterConnectionString(std::vector<Hostname> const& hosts, Key key);
 
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
@@ -77,7 +77,7 @@ public:
 	std::string toString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
 
-	void parseKey(const std::string& key);
+	void parseKey(std::string const& key);
 
 	// This function tries to resolve all hostnames once, and return them with coords.
 	// Best effort, does not guarantee that the resolves succeed.
@@ -93,10 +93,10 @@ public:
 	// This function blocks on connection attempts.
 	IPAddress determineLocalSourceIP() const;
 
-	bool operator==(const ClusterConnectionString& other) const noexcept {
+	bool operator==(ClusterConnectionString const& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}
-	bool operator!=(const ClusterConnectionString& other) const noexcept { return !(*this == other); }
+	bool operator!=(ClusterConnectionString const& other) const noexcept { return !(*this == other); }
 
 private:
 	void parseConnString();
@@ -186,7 +186,7 @@ struct LeaderInfo {
 	constexpr static FileIdentifier file_identifier = 8338794;
 	// The first 7 bits of changeID represent cluster controller process class fitness, the lower the better
 	UID changeID;
-	static const uint64_t changeIDMask = ~(uint64_t(0b1111111) << 57);
+	static uint64_t const changeIDMask = ~(uint64_t(0b1111111) << 57);
 	Value serializedInfo;
 	// If true, serializedInfo is a connection string instead!
 	// If true, it also means the recipient need to update their local cluster file

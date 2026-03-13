@@ -126,7 +126,7 @@ static struct FDBWorkload_VT CWorkload_vt = {
 	.getCheckTimeout = workload_getCheckTimeout,
 };
 
-EXPORT FDBWorkload workloadCFactory(const char* borrow_name, FDBWorkloadContext context) {
+EXPORT FDBWorkload workloadCFactory(char const* borrow_name, FDBWorkloadContext context) {
 	int len = strlen(borrow_name) + 1;
 	char* name = (char*)malloc(len);
 	memcpy(name, borrow_name, len);

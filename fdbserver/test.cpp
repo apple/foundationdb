@@ -61,13 +61,13 @@
 
 WorkloadContext::WorkloadContext() {}
 
-WorkloadContext::WorkloadContext(const WorkloadContext& r)
+WorkloadContext::WorkloadContext(WorkloadContext const& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
     dbInfo(r.dbInfo), ccr(r.ccr), rangesToCheck(r.rangesToCheck) {}
 
 WorkloadContext::~WorkloadContext() {}
 
-const char HEX_CHAR_LOOKUP[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+char const HEX_CHAR_LOOKUP[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
 
 void emplaceIndex(uint8_t* data, int offset, int64_t index) {
 	for (int i = 0; i < 16; i++) {
@@ -80,13 +80,13 @@ Key doubleToTestKey(double p) {
 	return StringRef(format("%016llx", *(uint64_t*)&p));
 }
 
-double testKeyToDouble(const KeyRef& p) {
+double testKeyToDouble(KeyRef const& p) {
 	uint64_t x = 0;
 	sscanf(p.toString().c_str(), "%" SCNx64, &x);
 	return *(double*)&x;
 }
 
-Key doubleToTestKey(double p, const KeyRef& prefix) {
+Key doubleToTestKey(double p, KeyRef const& prefix) {
 	return doubleToTestKey(p).withPrefix(prefix);
 }
 
@@ -114,7 +114,7 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 	}
 }
 
-int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
+int64_t KVWorkload::indexForKey(KeyRef const& key, bool absent) const {
 	int idx = 0;
 	if (nodePrefix > 0) {
 		ASSERT(keyBytes >= 32);
@@ -147,7 +147,7 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	return result;
 }
 
-double testKeyToDouble(const KeyRef& p, const KeyRef& prefix) {
+double testKeyToDouble(KeyRef const& p, KeyRef const& prefix) {
 	return testKeyToDouble(p.removePrefix(prefix));
 }
 
@@ -280,7 +280,7 @@ std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<
 }
 
 bool hasOption(VectorRef<KeyValueRef> options, Key key) {
-	for (const auto& option : options) {
+	for (auto const& option : options) {
 		if (option.key == key) {
 			return true;
 		}
@@ -448,7 +448,7 @@ void CompoundWorkload::addFailureInjection(WorkloadRequest& work) {
 }
 
 bool CompoundWorkload::shouldInjectFailure(DeterministicRandom& random,
-                                           const WorkloadRequest& work,
+                                           WorkloadRequest const& work,
                                            Reference<FailureInjectionWorkload> failure) const {
 	auto desc = failure->description();
 	unsigned alreadyAdded =
@@ -480,20 +480,20 @@ FailureInjectionWorkload::FailureInjectionWorkload(WorkloadContext const& wcx) :
 void FailureInjectionWorkload::initFailureInjectionMode(DeterministicRandom& random) {}
 
 bool FailureInjectionWorkload::shouldInject(DeterministicRandom& random,
-                                            const WorkloadRequest& work,
-                                            const unsigned alreadyAdded) const {
+                                            WorkloadRequest const& work,
+                                            unsigned const alreadyAdded) const {
 	return alreadyAdded < 3 && work.useDatabase && 0.1 / (1 + alreadyAdded) > random.random01();
 }
 
-Future<Void> FailureInjectionWorkload::setupInjectionWorkload(const Database& cx, Future<Void> done) {
+Future<Void> FailureInjectionWorkload::setupInjectionWorkload(Database const& cx, Future<Void> done) {
 	return holdWhile(this->setup(cx), done);
 }
 
-Future<Void> FailureInjectionWorkload::startInjectionWorkload(const Database& cx, Future<Void> done) {
+Future<Void> FailureInjectionWorkload::startInjectionWorkload(Database const& cx, Future<Void> done) {
 	return holdWhile(this->start(cx), done);
 }
 
-Future<bool> FailureInjectionWorkload::checkInjectionWorkload(const Database& cx, Future<bool> done) {
+Future<bool> FailureInjectionWorkload::checkInjectionWorkload(Database const& cx, Future<bool> done) {
 	return holdWhile(this->check(cx), done);
 }
 
@@ -1205,7 +1205,7 @@ void logMetrics(std::vector<PerfMetric> metrics) {
 }
 
 template <class T>
-void throwIfError(const std::vector<Future<ErrorOr<T>>>& futures, std::string errorMsg) {
+void throwIfError(std::vector<Future<ErrorOr<T>>> const& futures, std::string errorMsg) {
 	for (auto& future : futures) {
 		if (future.get().isError()) {
 			TraceEvent(SevError, errorMsg.c_str()).error(future.get().getError());
@@ -1652,7 +1652,7 @@ Future<std::vector<KeyRange>> getConsistencyCheckShards(Database cx, std::vector
 				KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
 				Value valueToCheck = Standalone(readResult[i].value);
 				bool toAdd = false;
-				for (const auto& range : ranges) {
+				for (auto const& range : ranges) {
 					if (rangeToCheck.intersects(range) == true) {
 						toAdd = true;
 						break;
@@ -1725,13 +1725,13 @@ Future<std::vector<TesterInterface>> getTesters(Reference<AsyncVar<Optional<Clus
 	co_return ts;
 }
 
-const std::unordered_map<char, uint8_t> parseCharMap{
+std::unordered_map<char, uint8_t> const parseCharMap{
 	{ '0', 0 },  { '1', 1 },  { '2', 2 },  { '3', 3 },  { '4', 4 },  { '5', 5 },  { '6', 6 },  { '7', 7 },
 	{ '8', 8 },  { '9', 9 },  { 'a', 10 }, { 'b', 11 }, { 'c', 12 }, { 'd', 13 }, { 'e', 14 }, { 'f', 15 },
 	{ 'A', 10 }, { 'B', 11 }, { 'C', 12 }, { 'D', 13 }, { 'E', 14 }, { 'F', 15 },
 };
 
-Optional<Key> getKeyFromString(const std::string& str) {
+Optional<Key> getKeyFromString(std::string const& str) {
 	Key emptyKey;
 	if (str.empty()) {
 		return emptyKey;
@@ -1755,8 +1755,8 @@ Optional<Key> getKeyFromString(const std::string& str) {
 			    .detail("InputStr", str);
 			return Optional<Key>();
 		}
-		const char first = str.at(i + 2);
-		const char second = str.at(i + 3);
+		char const first = str.at(i + 2);
+		char const second = str.at(i + 3);
 		if (!parseCharMap.contains(first) || !parseCharMap.contains(second)) {
 			TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
 			           "ConsistencyCheckUrgent_GetKeyFromStringError")
@@ -1789,7 +1789,7 @@ Optional<std::vector<KeyRange>> loadRangesToCheckFromKnob() {
 
 	// Get keys from strings
 	std::vector<Key> beginKeys;
-	for (const auto& beginKeyStr : beginKeyStrs) {
+	for (auto const& beginKeyStr : beginKeyStrs) {
 		Optional<Key> key = getKeyFromString(beginKeyStr);
 		if (key.present()) {
 			beginKeys.push_back(key.get());
@@ -1798,7 +1798,7 @@ Optional<std::vector<KeyRange>> loadRangesToCheckFromKnob() {
 		}
 	}
 	std::vector<Key> endKeys;
-	for (const auto& endKeyStr : endKeyStrs) {
+	for (auto const& endKeyStr : endKeyStrs) {
 		Optional<Key> key = getKeyFromString(endKeyStr);
 		if (key.present()) {
 			endKeys.push_back(key.get());
@@ -1932,7 +1932,7 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 	Optional<std::vector<KeyRange>> rangesToCheck_ = loadRangesToCheckFromKnob();
 	if (rangesToCheck_.present()) {
 		globalProgressMap.insert(allKeys, true);
-		for (const auto& rangeToCheck : rangesToCheck_.get()) {
+		for (auto const& rangeToCheck : rangesToCheck_.get()) {
 			// Mark rangesToCheck as incomplete
 			// Those ranges will be checked
 			globalProgressMap.insert(rangeToCheck, false);
@@ -2032,8 +2032,8 @@ Future<Void> runConsistencyCheckerUrgentCore(Reference<AsyncVar<Optional<Cluster
 				throw operation_failed(); // Introduce random failure
 			}
 			// We use the complete client to decide which ranges are completed
-			for (const auto& clientId : completeClients) {
-				for (const auto& range : assignment[clientId]) {
+			for (auto const& clientId : completeClients) {
+				for (auto const& range : assignment[clientId]) {
 					globalProgressMap.insert(range, true); // Mark the ranges as complete
 				}
 			}
@@ -2262,29 +2262,29 @@ Future<bool> runTest(Database cx,
 	co_return ok;
 }
 
-std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKeys = {
+std::map<std::string, std::function<void(std::string const&)>> testSpecGlobalKeys = {
 	// These are read by SimulatedCluster and used before testers exist.  Thus, they must
 	// be recognized and accepted, but there's no point in placing them into a testSpec.
 	// testClass and testPriority are only used for TestHarness, we'll ignore those here
 	{ "testClass", [](std::string const&) {} },
 	{ "testPriority", [](std::string const&) {} },
 	{ "extraDatabaseMode",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseMode", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseMode", ""); } },
 	{ "extraDatabaseCount",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseCount", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedExtraDatabaseCount", ""); } },
 	{ "configureLocked",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedConfigureLocked", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedConfigureLocked", ""); } },
 	{ "minimumReplication",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMinimumReplication", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedMinimumReplication", ""); } },
 	{ "minimumRegions",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMinimumRegions", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedMinimumRegions", ""); } },
 	{ "logAntiQuorum",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedLogAntiQuorum", ""); } },
-	{ "buggify", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedBuggify", value); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedLogAntiQuorum", ""); } },
+	{ "buggify", [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedBuggify", value); } },
 	// The test harness handles NewSeverity events specially.
-	{ "StderrSeverity", [](const std::string& value) { TraceEvent("StderrSeverity").detail("NewSeverity", value); } },
+	{ "StderrSeverity", [](std::string const& value) { TraceEvent("StderrSeverity").detail("NewSeverity", value); } },
 	{ "ClientInfoLogging",
-	  [](const std::string& value) {
+	  [](std::string const& value) {
 	      if (value == "false") {
 		      setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 	      }
@@ -2292,36 +2292,36 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	      TraceEvent("TestParserTest").detail("ClientInfoLogging", value);
 	  } },
 	{ "startIncompatibleProcess",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedStartIncompatibleProcess", value); } },
 	{ "storageEngineExcludeTypes",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedStorageEngineExcludeTypes", ""); } },
 	{ "maxTLogVersion",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
-	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
+	{ "disableTss", [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
 	{ "disableHostname",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
 	{ "disableRemoteKVS",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } },
 	// TODO(gglass): remove this when it's no longer used.  For now it's a useful signal in a toml file
 	// for tests against functionality that might not actually be tenant related and hence need to keep.
 	{ "allowDefaultTenant",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
+	  [](std::string const& value) { TraceEvent("TestParserTest").detail("ParsedDefaultTenant", ""); } }
 };
 
-std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
+std::map<std::string, std::function<void(std::string const& value, TestSpec* spec)>> testSpecTestKeys = {
 	{ "testTitle",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->title = value;
 	      TraceEvent("TestParserTest").detail("ParsedTest", spec->title);
 	  } },
 	{ "timeout",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      sscanf(value.c_str(), "%d", &(spec->timeout));
 	      ASSERT(spec->timeout > 0);
 	      TraceEvent("TestParserTest").detail("ParsedTimeout", spec->timeout);
 	  } },
 	{ "databasePingDelay",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      double databasePingDelay;
 	      sscanf(value.c_str(), "%lf", &databasePingDelay);
 	      ASSERT(databasePingDelay >= 0);
@@ -2336,76 +2336,76 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      TraceEvent("TestParserTest").detail("ParsedPingDelay", spec->databasePingDelay);
 	  } },
 	{ "runSetup",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->phases = TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 	      if (value == "true")
 		      spec->phases |= TestWorkload::SETUP;
 	      TraceEvent("TestParserTest").detail("ParsedSetupFlag", (spec->phases & TestWorkload::SETUP) != 0);
 	  } },
 	{ "dumpAfterTest",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->dumpAfterTest = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedDumpAfter", spec->dumpAfterTest);
 	  } },
 	{ "clearAfterTest",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->clearAfterTest = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedClearAfter", spec->clearAfterTest);
 	  } },
 	{ "useDB",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->useDB = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedUseDB", spec->useDB);
 	      if (!spec->useDB)
 		      spec->databasePingDelay = 0.0;
 	  } },
 	{ "startDelay",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      sscanf(value.c_str(), "%lf", &spec->startDelay);
 	      TraceEvent("TestParserTest").detail("ParsedStartDelay", spec->startDelay);
 	  } },
 	{ "runConsistencyCheck",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->runConsistencyCheck = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheck", spec->runConsistencyCheck);
 	  } },
 	{ "runConsistencyCheckOnTSS",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->runConsistencyCheckOnTSS = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedRunConsistencyCheckOnTSS", spec->runConsistencyCheckOnTSS);
 	  } },
 	{ "maxDDRunTime",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      sscanf(value.c_str(), "%lf", &(spec->maxDDRunTime));
 	      ASSERT(spec->maxDDRunTime >= 0);
 	      TraceEvent("TestParserTest").detail("ParsedMaxDDRunTime", spec->maxDDRunTime);
 	  } },
 	{ "waitForQuiescence",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      bool toWait = value == "true";
 	      spec->waitForQuiescenceBegin = toWait;
 	      spec->waitForQuiescenceEnd = toWait;
 	      TraceEvent("TestParserTest").detail("ParsedWaitForQuiescence", toWait);
 	  } },
 	{ "waitForQuiescenceBegin",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      bool toWait = value == "true";
 	      spec->waitForQuiescenceBegin = toWait;
 	      TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceBegin", toWait);
 	  } },
 	{ "waitForQuiescenceEnd",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      bool toWait = value == "true";
 	      spec->waitForQuiescenceEnd = toWait;
 	      TraceEvent("TestParserTest").detail("ParsedWaitForQuiescenceEnd", toWait);
 	  } },
 	{ "simCheckRelocationDuration",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      spec->simCheckRelocationDuration = (value == "true");
 	      TraceEvent("TestParserTest").detail("ParsedSimCheckRelocationDuration", spec->simCheckRelocationDuration);
 	  } },
 	{ "connectionFailuresDisableDuration",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      double connectionFailuresDisableDuration;
 	      sscanf(value.c_str(), "%lf", &connectionFailuresDisableDuration);
 	      ASSERT(connectionFailuresDisableDuration >= 0);
@@ -2414,7 +2414,7 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	          .detail("ParsedSimConnectionFailuresDisableDuration", spec->simConnectionFailuresDisableDuration);
 	  } },
 	{ "simBackupAgents",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      if (value == "BackupToFile" || value == "BackupToFileAndDB")
 		      spec->simBackupAgents = ISimulator::BackupAgentType::BackupToFile;
 	      else
@@ -2428,19 +2428,19 @@ std::map<std::string, std::function<void(const std::string& value, TestSpec* spe
 	      TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec->simDrAgents);
 	  } },
 	{ "checkOnly",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      if (value == "true")
 		      spec->phases = TestWorkload::CHECK;
 	  } },
 	{ "restorePerpetualWiggleSetting",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      if (value == "false")
 		      spec->restorePerpetualWiggleSetting = false;
 	  } },
 	{ "runFailureWorkloads",
-	  [](const std::string& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
+	  [](std::string const& value, TestSpec* spec) { spec->runFailureWorkloads = (value == "true"); } },
 	{ "disabledFailureInjectionWorkloads",
-	  [](const std::string& value, TestSpec* spec) {
+	  [](std::string const& value, TestSpec* spec) {
 	      // Expects a comma separated list of workload names in "value".
 	      // This custom encoding is needed because both text and toml files need to be supported
 	      // and "value" is passed in as a string.
@@ -2522,12 +2522,12 @@ std::vector<TestSpec> readTests(std::ifstream& ifs) {
 }
 
 template <typename T>
-std::string toml_to_string(const T& value) {
+std::string toml_to_string(T const& value) {
 	// TOML formatting converts numbers to strings exactly how they're in the file
 	// and thus, is equivalent to testspec.  However, strings are quoted, so we
 	// must remove the quotes.
 	if (value.type() == toml::value_t::string) {
-		const std::string& formatted = toml::format(value);
+		std::string const& formatted = toml::format(value);
 		return formatted.substr(1, formatted.size() - 2);
 	} else {
 		return toml::format(value);
@@ -2543,14 +2543,14 @@ namespace {
 
 // In the current TOML scope, look for "knobs" field. If exists, translate all
 // key value pairs into KnobKeyValuePairs
-KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
+KnobKeyValuePairs getOverriddenKnobKeyValues(toml::value const& context) {
 	KnobKeyValuePairs result;
 
 	try {
-		const toml::array& overrideKnobs = toml::find(context, "knobs").as_array();
-		for (const toml::value& knob : overrideKnobs) {
-			for (const auto& [key, value_] : knob.as_table()) {
-				const std::string& value = toml_to_string(value_);
+		toml::array const& overrideKnobs = toml::find(context, "knobs").as_array();
+		for (toml::value const& knob : overrideKnobs) {
+			for (auto const& [key, value_] : knob.as_table()) {
+				std::string const& value = toml_to_string(value_);
 				ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
 				if (std::get_if<NoKnobFound>(&parsedValue)) {
 					parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
@@ -2567,7 +2567,7 @@ KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
 				result.set(key, parsedValue);
 			}
 		}
-	} catch (const std::out_of_range&) {
+	} catch (std::out_of_range const&) {
 		// No knobs field in this scope, this is not an error
 	}
 
@@ -2580,18 +2580,18 @@ TestSet readTOMLTests_(std::string fileName) {
 	Standalone<VectorRef<KeyValueRef>> workloadOptions;
 	TestSet result;
 
-	const toml::value& conf = toml::parse(fileName);
+	toml::value const& conf = toml::parse(fileName);
 
 	// Parse the global knob changes
 	result.overrideKnobs = getOverriddenKnobKeyValues(conf);
 
 	// Then parse each test
-	const toml::array& tests = toml::find(conf, "test").as_array();
-	for (const toml::value& test : tests) {
+	toml::array const& tests = toml::find(conf, "test").as_array();
+	for (toml::value const& test : tests) {
 		TestSpec spec;
 
 		// First handle all test-level settings
-		for (const auto& [k, v] : test.as_table()) {
+		for (auto const& [k, v] : test.as_table()) {
 			if (k == "workload" || k == "knobs") {
 				continue;
 			}
@@ -2605,12 +2605,12 @@ TestSet readTOMLTests_(std::string fileName) {
 		}
 
 		// And then copy the workload attributes to spec.options
-		const toml::array& workloads = toml::find(test, "workload").as_array();
-		for (const toml::value& workload : workloads) {
+		toml::array const& workloads = toml::find(test, "workload").as_array();
+		for (toml::value const& workload : workloads) {
 			workloadOptions = Standalone<VectorRef<KeyValueRef>>();
 			TraceEvent("TestParserFlush").detail("Reason", "new (compound) test");
-			for (const auto& [attrib, v] : workload.as_table()) {
-				const std::string& value = toml_to_string(v);
+			for (auto const& [attrib, v] : workload.as_table()) {
+				std::string const& value = toml_to_string(v);
 				workloadOptions.push_back_deep(workloadOptions.arena(),
 				                               KeyValueRef(StringRef(attrib), StringRef(value)));
 				TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
@@ -2884,16 +2884,16 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
-		std::string_view confView(reinterpret_cast<const char*>(startingConfiguration.begin()),
+		std::string_view confView(reinterpret_cast<char const*>(startingConfiguration.begin()),
 		                          startingConfiguration.size());
 		if (restorePerpetualWiggleSetting) {
-			const std::string setting = "perpetual_storage_wiggle:=";
+			std::string const setting = "perpetual_storage_wiggle:=";
 			auto pos = confView.find(setting);
 			if (pos != confView.npos && confView.at(pos + setting.size()) == '1') {
 				perpetualWiggleEnabled = true;
 			}
 		}
-		const std::string bwSetting = "backup_worker_enabled:=";
+		std::string const bwSetting = "backup_worker_enabled:=";
 		auto pos = confView.find(bwSetting);
 		if (pos != confView.npos && confView.at(pos + bwSetting.size()) == '1') {
 			backupWorkerEnabled = true;
@@ -2924,7 +2924,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 			g_simulator->satelliteTLogPolicy = configuration.regions[0].satelliteTLogPolicy;
 			g_simulator->satelliteTLogWriteAntiQuorum = configuration.regions[0].satelliteTLogWriteAntiQuorum;
 
-			for (const auto& s : configuration.regions[0].satellites) {
+			for (auto const& s : configuration.regions[0].satellites) {
 				g_simulator->primarySatelliteDcIds.push_back(s.dcId);
 			}
 		} else {
@@ -2938,7 +2938,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 			       configuration.regions[0].satelliteTLogPolicy->info() ==
 			           configuration.regions[1].satelliteTLogPolicy->info());
 
-			for (const auto& s : configuration.regions[1].satellites) {
+			for (auto const& s : configuration.regions[1].satellites) {
 				g_simulator->remoteSatelliteDcIds.push_back(s.dcId);
 			}
 		}
@@ -3320,7 +3320,7 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsaf
 
 namespace {
 Future<Void> testExpectedErrorImpl(Future<Void> test,
-                                   const char* testDescr,
+                                   char const* testDescr,
                                    Optional<Error> expectedError,
                                    Optional<bool*> successFlag,
                                    std::map<std::string, std::string> details,
@@ -3379,7 +3379,7 @@ Future<Void> testExpectedErrorImpl(Future<Void> test,
 } // namespace
 
 Future<Void> testExpectedError(Future<Void> test,
-                               const char* testDescr,
+                               char const* testDescr,
                                Optional<Error> expectedError,
                                Optional<bool*> successFlag,
                                std::map<std::string, std::string> details,

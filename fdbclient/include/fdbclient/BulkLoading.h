@@ -42,13 +42,13 @@ inline Severity bulkLoadPerfEventSev() {
 	return !g_network->isSimulated() && CLIENT_KNOBS->BULKLOAD_VERBOSE_LEVEL >= 5 ? SevInfo : SevDebug;
 }
 
-const std::string bulkLoadJobManifestLineTerminator = "\n";
+std::string const bulkLoadJobManifestLineTerminator = "\n";
 
 // Remove the input prefix from the input str. Throw bulkload_manifest_decode_error if no prefix found in str.
-std::string stringRemovePrefix(std::string str, const std::string& prefix);
+std::string stringRemovePrefix(std::string str, std::string const& prefix);
 
 // A reverse function of StringRef.toFullHexStringPlain().
-Key getKeyFromHexString(const std::string& hexRawString);
+Key getKeyFromHexString(std::string const& hexRawString);
 
 enum class BulkLoadType : uint8_t {
 	Invalid = 0,
@@ -65,21 +65,21 @@ std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod metho
 
 // Specifying the format version of the bulkload job manifest metadata (the global manifest and range manifests).
 // The number should increase by 1 when we change the metadata in a release.
-const int bulkLoadManifestFormatVersion = 1;
+int const bulkLoadManifestFormatVersion = 1;
 
 // Append a string to a path.
 // 'path' is a filesystem path or an URL.
 // 'append' is what to append to path.
 // URLs can have query strings so we need to be careful where we append.
 // TODO(BulkDump): use this everywhere
-std::string appendToPath(const std::string& path, const std::string& append);
+std::string appendToPath(std::string const& path, std::string const& append);
 
 // Constructs a URL with the path modified to include "data/" prefix.
 // This is used for BulkDump/BulkLoad to write under the backup container's data directory,
 // consistent with where BackupContainerS3BlobStore stores other backup files.
 // Input:  blobstore://creds@host/backup_container?bucket=... , "bulkdump_data"
 // Output: blobstore://creds@host/data/backup_container/bulkdump_data?bucket=...
-std::string getBackupDataPath(const std::string& url, const std::string& suffix);
+std::string getBackupDataPath(std::string const& url, std::string const& suffix);
 
 // Here are important metadata: (1) BulkLoadTaskState; (2) BulkDumpState; (3) BulkLoadManifest. BulkLoadTaskState is
 // only used for bulkload core engine which persists the metadata for each unit bulkload range (aka. task).
@@ -94,7 +94,7 @@ struct BulkLoadByteSampleSetting {
 	BulkLoadByteSampleSetting() = default;
 
 	BulkLoadByteSampleSetting(int version,
-	                          const std::string& method,
+	                          std::string const& method,
 	                          int factor,
 	                          int overhead,
 	                          double minimalProbability)
@@ -116,7 +116,7 @@ struct BulkLoadByteSampleSetting {
 		       ", [ByteSampleMinimalProbability]: " + std::to_string(minimalProbability);
 	}
 
-	bool operator==(const BulkLoadByteSampleSetting& rhs) const {
+	bool operator==(BulkLoadByteSampleSetting const& rhs) const {
 		return version == rhs.version && method == rhs.method && factor == rhs.factor && overhead == rhs.overhead &&
 		       minimalProbability == rhs.minimalProbability;
 	}
@@ -140,7 +140,7 @@ public:
 
 	BulkLoadChecksum() = default;
 
-	BulkLoadChecksum(const std::string& checksumMethod, const std::string& checksumValue)
+	BulkLoadChecksum(std::string const& checksumMethod, std::string const& checksumValue)
 	  : checksumMethod(checksumMethod), checksumValue(checksumValue) {}
 
 	std::string toString() const {
@@ -174,12 +174,12 @@ public:
 
 	BulkLoadFileSet() = default;
 
-	BulkLoadFileSet(const std::string& rootPath,
-	                const std::string& relativePath,
-	                const std::string& manifestFileName,
-	                const std::string& dataFileName,
-	                const std::string& byteSampleFileName,
-	                const BulkLoadChecksum& checksum)
+	BulkLoadFileSet(std::string const& rootPath,
+	                std::string const& relativePath,
+	                std::string const& manifestFileName,
+	                std::string const& dataFileName,
+	                std::string const& byteSampleFileName,
+	                BulkLoadChecksum const& checksum)
 	  : rootPath(rootPath), relativePath(relativePath), manifestFileName(manifestFileName), dataFileName(dataFileName),
 	    byteSampleFileName(byteSampleFileName), checksum(checksum) {
 		if (!isValid()) {
@@ -188,7 +188,7 @@ public:
 		}
 	}
 
-	BulkLoadFileSet(const std::string& rootPath) : rootPath(rootPath) {
+	BulkLoadFileSet(std::string const& rootPath) : rootPath(rootPath) {
 		if (rootPath.empty()) {
 			TraceEvent(SevError, "BulkLoadFileSetProvideInvalidPath")
 			    .suppressFor(10.0)
@@ -236,7 +236,7 @@ public:
 
 	std::string getByteSampleFileName() const { return byteSampleFileName; }
 
-	void setByteSampleFileName(const std::string& inputFileName) {
+	void setByteSampleFileName(std::string const& inputFileName) {
 		if (hasByteSampleFile() || inputFileName.empty()) {
 			TraceEvent(SevError, "BulkLoadSetByteSampleFileNameError")
 			    .suppressFor(10.0)
@@ -310,7 +310,7 @@ public:
 		       ", [ByteSampleFileName]: " + byteSampleFileName + ", " + checksum.toString();
 	}
 
-	void setRootPath(const std::string& inputRootPath) {
+	void setRootPath(std::string const& inputRootPath) {
 		if (rootPath != inputRootPath) {
 			TraceEvent(SevWarn, "DDBulkLoadFileSetRootPathChanged")
 			    .suppressFor(10.0)
@@ -347,13 +347,13 @@ public:
 
 	// Used when dumping to manifest file and persist to metadata or loading data.
 	// So, we need to make sure the content is valid.
-	BulkLoadManifest(const BulkLoadFileSet& fileSet,
-	                 const Key& beginKey,
-	                 const Key& endKey,
-	                 const Version& version,
+	BulkLoadManifest(BulkLoadFileSet const& fileSet,
+	                 Key const& beginKey,
+	                 Key const& endKey,
+	                 Version const& version,
 	                 int64_t bytes,
 	                 int64_t keyCount,
-	                 const BulkLoadByteSampleSetting& byteSampleSetting,
+	                 BulkLoadByteSampleSetting const& byteSampleSetting,
 	                 BulkLoadType loadType,
 	                 BulkLoadTransportMethod transportMethod)
 	  : formatVersion(bulkLoadManifestFormatVersion), fileSet(fileSet), beginKey(beginKey), endKey(endKey),
@@ -363,7 +363,7 @@ public:
 	}
 
 	// Used when initialize a bulk dump job. Information are partially filled at this time.
-	BulkLoadManifest(BulkLoadType loadType, BulkLoadTransportMethod transportMethod, const std::string& rootPath)
+	BulkLoadManifest(BulkLoadType loadType, BulkLoadTransportMethod transportMethod, std::string const& rootPath)
 	  : formatVersion(bulkLoadManifestFormatVersion), loadType(loadType), transportMethod(transportMethod) {
 		fileSet = BulkLoadFileSet(rootPath);
 	}
@@ -379,7 +379,7 @@ public:
 	// [ByteSampleOverhead]: 100, [ByteSampleMinimalProbability]: 0.500000, [loadType]: 1, [TransportMethod]: 1"
 	// To decode the string, we firstly split the string by ", ". Then, for each part, we remove "[*]: ". Finally, we
 	// convert the remain string for each part to the fields defined in the BulkLoadManifest.
-	BulkLoadManifest(const std::string& rawString) {
+	BulkLoadManifest(std::string const& rawString) {
 		try {
 			std::vector<std::string> parts = splitString(rawString, ", ");
 			formatVersion = std::stoi(stringRemovePrefix(parts[0], "[FormatVersion]: "));
@@ -502,7 +502,7 @@ public:
 
 	bool hasByteSampleFile() const { return fileSet.hasByteSampleFile(); }
 
-	void setRange(const KeyRange& range) {
+	void setRange(KeyRange const& range) {
 		ASSERT(!range.empty() && beginKey.empty() && endKey.empty());
 		beginKey = range.begin;
 		endKey = range.end;
@@ -519,7 +519,7 @@ public:
 		       ", [TransportMethod]: " + std::to_string(static_cast<uint8_t>(transportMethod));
 	}
 
-	void setRootPath(const std::string& rootPath) { fileSet.setRootPath(rootPath); }
+	void setRootPath(std::string const& rootPath) { fileSet.setRootPath(rootPath); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -583,7 +583,7 @@ public:
 		if (!maxEndKey.present()) {
 			return false;
 		}
-		for (const auto& manifest : manifests) {
+		for (auto const& manifest : manifests) {
 			if (!manifest.isValid()) {
 				return false;
 			}
@@ -598,7 +598,7 @@ public:
 	// After a task completes all addManifest()'s, the task range is decided as the range between the min begin key and
 	// the max end key among all manifests. So, it is the caller's responsibility to make sure that different tasks do
 	// not have overlapping ranges. See tryGetRangeForBulkLoad for details.
-	bool addManifest(const BulkLoadManifest& manifest) {
+	bool addManifest(BulkLoadManifest const& manifest) {
 		if (manifests.size() > maxCount) {
 			return false;
 		}
@@ -630,7 +630,7 @@ public:
 	bool isFull() const { return manifests.size() >= maxCount; }
 
 	bool hasEmptyData() const {
-		for (const auto& manifest : manifests) {
+		for (auto const& manifest : manifests) {
 			if (!manifest.hasEmptyData()) {
 				return false;
 			}
@@ -640,13 +640,13 @@ public:
 
 	int64_t getTotalBytes() const {
 		int64_t res = 0;
-		for (const auto& manifest : manifests) {
+		for (auto const& manifest : manifests) {
 			res = res + manifest.getTotalBytes();
 		}
 		return res;
 	}
 
-	const std::vector<BulkLoadManifest>& getManifests() const { return manifests; }
+	std::vector<BulkLoadManifest> const& getManifests() const { return manifests; }
 
 	BulkLoadTransportMethod getTransportMethod() const {
 		ASSERT(transportMethod != BulkLoadTransportMethod::Invalid);
@@ -679,7 +679,7 @@ public:
 
 	std::string toString() const { return describe(manifests); }
 
-	void setRootPath(const std::string& rootPath) {
+	void setRootPath(std::string const& rootPath) {
 		for (auto& manifest : manifests) {
 			manifest.setRootPath(rootPath);
 		}
@@ -710,7 +710,7 @@ public:
 	BulkLoadTaskState() = default;
 
 	// For submitting a task by a job
-	BulkLoadTaskState(const UID& jobId, const BulkLoadManifestSet& manifests, const KeyRange& taskRange)
+	BulkLoadTaskState(UID const& jobId, BulkLoadManifestSet const& manifests, KeyRange const& taskRange)
 	  : jobId(jobId), taskId(deterministicRandom()->randomUniqueID()), manifests(manifests), taskRange(taskRange) {
 		ASSERT(!manifests.empty());
 		if (manifests.hasEmptyData()) {
@@ -720,7 +720,7 @@ public:
 		}
 	}
 
-	bool operator==(const BulkLoadTaskState& rhs) const { return jobId == rhs.jobId && taskId == rhs.taskId; }
+	bool operator==(BulkLoadTaskState const& rhs) const { return jobId == rhs.jobId && taskId == rhs.taskId; }
 
 	std::string toString() const {
 		std::string res = "BulkLoadTaskState: [JobId]: " + jobId.toString() + ", [TaskId]: " + taskId.toString() +
@@ -752,7 +752,7 @@ public:
 
 	int64_t getTotalBytes() const { return manifests.getTotalBytes(); }
 
-	const std::vector<BulkLoadManifest>& getManifests() const { return manifests.getManifests(); }
+	std::vector<BulkLoadManifest> const& getManifests() const { return manifests.getManifests(); }
 
 	BulkLoadByteSampleSetting getByteSampleSetting() const { return manifests.getByteSampleSetting(); }
 
@@ -762,8 +762,8 @@ public:
 
 	Optional<int> getCancelledDataMovePriority() const { return cancelledDataMovePriority; }
 
-	bool onAnyPhase(const std::vector<BulkLoadPhase>& inputPhases) const {
-		for (const auto& inputPhase : inputPhases) {
+	bool onAnyPhase(std::vector<BulkLoadPhase> const& inputPhases) const {
+		for (auto const& inputPhase : inputPhases) {
 			if (inputPhase == phase) {
 				return true;
 			}
@@ -845,7 +845,7 @@ enum class BulkLoadJobPhase : uint8_t {
 	Cancelled = 4, // Updated by ManagementAPI when cancel a job. See cancelBulkLoadJob for more details.
 };
 
-std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase);
+std::string convertBulkLoadJobPhaseToString(BulkLoadJobPhase const& phase);
 
 struct BulkLoadJobState {
 public:
@@ -854,10 +854,10 @@ public:
 	BulkLoadJobState() = default;
 
 	// Used when submit a global job
-	BulkLoadJobState(const UID& jobId,
-	                 const std::string& jobRoot,
-	                 const KeyRange& jobRange,
-	                 const BulkLoadTransportMethod& transportMethod)
+	BulkLoadJobState(UID const& jobId,
+	                 std::string const& jobRoot,
+	                 KeyRange const& jobRange,
+	                 BulkLoadTransportMethod const& transportMethod)
 	  : jobId(jobId), jobRoot(jobRoot), jobRange(jobRange), phase(BulkLoadJobPhase::Submitted),
 	    transportMethod(transportMethod), submitTime(now()) {}
 
@@ -887,7 +887,7 @@ public:
 
 	BulkLoadJobPhase getPhase() const { return phase; }
 
-	void setErrorPhase(const std::string& message) {
+	void setErrorPhase(std::string const& message) {
 		phase = BulkLoadJobPhase::Error;
 		errorMessage = message;
 		return;
@@ -953,7 +953,7 @@ public:
 	BulkLoadJobManifestFileHeader() = default;
 
 	// Used when loading
-	BulkLoadJobManifestFileHeader(const int& formatVersion, size_t manifestCount)
+	BulkLoadJobManifestFileHeader(int const& formatVersion, size_t manifestCount)
 	  : formatVersion(formatVersion), manifestCount(manifestCount) {
 		ASSERT(isValid());
 	}
@@ -964,7 +964,7 @@ public:
 	// "[FormatVersion]: 1, [ManifestCount]: 2"
 	// To decode the string, we firstly split the string by ", ". Then, for each part, we remove "[*]: ". Finally,
 	// we convert the remain string for each part to the fields defined in the BulkLoadJobManifestFileHeader.
-	BulkLoadJobManifestFileHeader(const std::string& rawString) {
+	BulkLoadJobManifestFileHeader(std::string const& rawString) {
 		try {
 			std::vector<std::string> parts = splitString(rawString, ", ");
 			formatVersion = std::stoi(stringRemovePrefix(parts[0], "[FormatVersion]: "));
@@ -1016,7 +1016,7 @@ public:
 	// 50705947, [Bytes]: 6889" To decode the string, we firstly split the string by ", ". Then, for each part, we
 	// remove "[*]: ". Finally, we convert the remain string for each part to the fields defined in the
 	// BulkLoadJobFileManifestEntry.
-	BulkLoadJobFileManifestEntry(const std::string& rawString) {
+	BulkLoadJobFileManifestEntry(std::string const& rawString) {
 		try {
 			std::vector<std::string> parts = splitString(rawString, ", ");
 			if (parts.size() != 5) {
@@ -1042,7 +1042,7 @@ public:
 	}
 
 	// Used when dumping
-	BulkLoadJobFileManifestEntry(const BulkLoadManifest& manifest)
+	BulkLoadJobFileManifestEntry(BulkLoadManifest const& manifest)
 	  : beginKey(manifest.getBeginKey()), endKey(manifest.getEndKey()),
 	    manifestRelativePath(manifest.getManifestRelativePath()), version(manifest.getVersion()),
 	    bytes(manifest.getTotalBytes()) {
@@ -1078,9 +1078,9 @@ private:
 
 using BulkLoadManifestFileMap = std::map<Key, BulkLoadJobFileManifestEntry>;
 
-bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId);
+bool dataMoveIdIsValidForBulkLoad(UID const& dataMoveId);
 
-bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId);
+bool getConductBulkLoadFromDataMoveId(UID const& dataMoveId);
 
 // When the storage engine is not ShardedRocksDB, SS conducts bulkLoad using fetchKey based method.
 // In this case, SS needs to persist the bulkload task metadata locally because when SS restarts, SS
@@ -1091,14 +1091,14 @@ struct SSBulkLoadMetadata {
 public:
 	constexpr static FileIdentifier file_identifier = 1384506;
 
-	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false) {};
+	SSBulkLoadMetadata() : dataMoveId(UID()), conductBulkLoad(false){};
 
-	SSBulkLoadMetadata(const UID& dataMoveId) : dataMoveId(dataMoveId) {
+	SSBulkLoadMetadata(UID const& dataMoveId) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
 		return;
 	}
 
-	SSBulkLoadMetadata(const UID& dataMoveId, bool inputConductBulkLoad) : dataMoveId(dataMoveId) {
+	SSBulkLoadMetadata(UID const& dataMoveId, bool inputConductBulkLoad) : dataMoveId(dataMoveId) {
 		conductBulkLoad = getConductBulkLoadFromDataMoveId(dataMoveId);
 		ASSERT(conductBulkLoad == inputConductBulkLoad);
 		return;
@@ -1130,7 +1130,7 @@ std::string getBulkLoadJobManifestFileName();
 // sampling file. In this case, the SS generates a byte sampling file with a name tight to the data filename. This
 // generated file temporarily stored locally and the file is used to inject the byte sampling metadata to SS. After
 // the injection, the file is removed.
-std::string generateBulkLoadBytesSampleFileNameFromDataFileName(const std::string& dataFileName);
+std::string generateBulkLoadBytesSampleFileNameFromDataFileName(std::string const& dataFileName);
 
 // Return a manifest filename as a place holder when testing bulkload feature, where we issue bulkload tasks without
 // providing a manifest file. So, this manifest file is never read in this scenario.
@@ -1139,24 +1139,24 @@ std::string generateEmptyManifestFileName();
 // Return path.
 // If the input is a filesystem path, return the path.
 // If the input is an URL, return the path part of the URL.
-std::string getPath(const std::string& path_or_url);
+std::string getPath(std::string const& path_or_url);
 
 // Define bulkLoad/bulkDump job folder using the root path and the jobId.
-std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
+std::string getBulkLoadJobRoot(std::string const& root, UID const& jobId);
 
 // For submitting a task manually (for testing)
-BulkLoadTaskState createBulkLoadTask(const UID& jobId,
-                                     const KeyRange& range,
-                                     const BulkLoadFileSet& fileSet,
-                                     const BulkLoadByteSampleSetting& byteSampleSetting,
-                                     const Version& snapshotVersion,
-                                     const int64_t& bytes,
-                                     const int64_t& keyCount,
-                                     const BulkLoadType& type,
-                                     const BulkLoadTransportMethod& transportMethod);
+BulkLoadTaskState createBulkLoadTask(UID const& jobId,
+                                     KeyRange const& range,
+                                     BulkLoadFileSet const& fileSet,
+                                     BulkLoadByteSampleSetting const& byteSampleSetting,
+                                     Version const& snapshotVersion,
+                                     int64_t const& bytes,
+                                     int64_t const& keyCount,
+                                     BulkLoadType const& type,
+                                     BulkLoadTransportMethod const& transportMethod);
 
-BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
-                                   const KeyRange& range,
-                                   const std::string& jobRoot,
-                                   const BulkLoadTransportMethod& transportMethod);
+BulkLoadJobState createBulkLoadJob(UID const& dumpJobIdToLoad,
+                                   KeyRange const& range,
+                                   std::string const& jobRoot,
+                                   BulkLoadTransportMethod const& transportMethod);
 #endif

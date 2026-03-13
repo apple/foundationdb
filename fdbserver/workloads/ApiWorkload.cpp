@@ -57,7 +57,7 @@ Future<Void> ApiWorkload::clearKeyspace() {
 
 Future<Void> setup(Database cx, ApiWorkload* self) {
 	self->transactionFactory = Reference<TransactionFactoryInterface>(
-	    new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, cx, false));
+	    new TransactionFactory<FlowTransactionWrapper<Transaction>, Database const>(cx, cx, false));
 
 	// Clear keyspace before running
 	co_await timeoutError(self->clearKeyspace(), 600);
@@ -323,12 +323,12 @@ Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> 
 	if (transactionType == NATIVE) {
 		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
-		    new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(
+		    new TransactionFactory<FlowTransactionWrapper<Transaction>, Database const>(
 		        cx, self->extraDB, self->useExtraDB));
 	} else if (transactionType == READ_YOUR_WRITES) {
 		printf("client %d: Running ReadYourWrites Transactions\n", self->clientPrefixInt);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
-		    new TransactionFactory<FlowTransactionWrapper<ReadYourWritesTransaction>, const Database>(
+		    new TransactionFactory<FlowTransactionWrapper<ReadYourWritesTransaction>, Database const>(
 		        cx, self->extraDB, self->useExtraDB));
 	} else if (transactionType == THREAD_SAFE) {
 		printf("client %d: Running ThreadSafe Transactions\n", self->clientPrefixInt);

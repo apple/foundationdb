@@ -30,21 +30,22 @@
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // TransactionStoreMutationTracking TraceEvent for easier searching/recognition.
 
-static const struct DebugKeyInfo {
-	const char* label;
-	const char* prefix;
+static struct DebugKeyInfo const {
+	char const* label;
+	char const* prefix;
 	UID uid;
-} DEBUG_KEY = { "SomeKey", "\xff/serverList/", UID(0x4c3fd4099192a3e0, 0x3733d810ae0a6e13) };
+}
+DEBUG_KEY = { "SomeKey", "\xff/serverList/", UID(0x4c3fd4099192a3e0, 0x3733d810ae0a6e13) };
 
-static std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {
+static std::vector<std::pair<char const*, KeyRangeRef>> debugRanges = {
 	{ "SomeRange", { "\xff/serverList/\x09I\x8c\xc7\xdd"_sr, "\xff/serverList/\x09I\x8c\xc7\xdd\xff"_sr } }
 };
 
-TraceEvent transactionStoreDebugMutationEnabled(const char* context,
+TraceEvent transactionStoreDebugMutationEnabled(char const* context,
                                                 StringRef const& mutation,
-                                                const UID id,
-                                                const std::string loc) {
-	const char* label = nullptr;
+                                                UID const id,
+                                                std::string const loc) {
+	char const* label = nullptr;
 	BinaryWriter writer(Unversioned());
 
 	// Build the expected value
@@ -56,7 +57,7 @@ TraceEvent transactionStoreDebugMutationEnabled(const char* context,
 		label = DEBUG_KEY.label;
 	}
 
-	for (const auto& [rangeLabel, debugRange] : debugRanges) {
+	for (auto const& [rangeLabel, debugRange] : debugRanges) {
 		if (debugRange.contains(mutation)) {
 			label = rangeLabel;
 			break;
@@ -76,17 +77,17 @@ TraceEvent transactionStoreDebugMutationEnabled(const char* context,
 }
 
 #if DEBUG_TRANSACTION_STATE_STORE_ENABLED
-TraceEvent transactionStoreDebugMutation(const char* context,
+TraceEvent transactionStoreDebugMutation(char const* context,
                                          StringRef const& mutation,
-                                         const UID id,
-                                         const std::string loc) {
+                                         UID const id,
+                                         std::string const loc) {
 	return transactionStoreDebugMutationEnabled(context, mutation, id, loc);
 }
 #else
-TraceEvent transactionStoreDebugMutation(const char* context,
+TraceEvent transactionStoreDebugMutation(char const* context,
                                          StringRef const& mutation,
-                                         const UID id,
-                                         const std::string loc) {
+                                         UID const id,
+                                         std::string const loc) {
 	return TraceEvent();
 }
 #endif

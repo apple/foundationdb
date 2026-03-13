@@ -60,7 +60,7 @@ double QueueModel::addRequest(uint64_t id) {
 	return d.penalty;
 }
 
-void QueueModel::updateTssEndpoint(uint64_t endpointId, const TSSEndpointData& tssData) {
+void QueueModel::updateTssEndpoint(uint64_t endpointId, TSSEndpointData const& tssData) {
 	auto& d = data[endpointId];
 	d.tssData = tssData;
 }
@@ -74,19 +74,19 @@ Optional<TSSEndpointData> QueueModel::getTssData(uint64_t id) {
 	return data[id].tssData;
 }
 
-Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply) {
+Optional<LoadBalancedReply> getLoadBalancedReply(LoadBalancedReply const* reply) {
 	return *reply;
 }
 
-Optional<LoadBalancedReply> getLoadBalancedReply(const void*) {
+Optional<LoadBalancedReply> getLoadBalancedReply(void const*) {
 	return Optional<LoadBalancedReply>();
 }
 
-Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const BasicLoadBalancedReply* reply) {
+Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(BasicLoadBalancedReply const* reply) {
 	return *reply;
 }
 
-Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*) {
+Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(void const*) {
 	return Optional<BasicLoadBalancedReply>();
 }
 

@@ -26,7 +26,7 @@
 #include <boost/url/error_types.hpp>
 #include <boost/url/string_view.hpp>
 
-bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
+bool getConductBulkLoadFromDataMoveId(UID const& dataMoveId) {
 	bool nowAssigned = false;
 	bool emptyRange = false;
 	DataMoveType dataMoveType = DataMoveType::LOGICAL;
@@ -44,11 +44,11 @@ bool getConductBulkLoadFromDataMoveId(const UID& dataMoveId) {
 	return conductBulkLoad;
 }
 
-bool dataMoveIdIsValidForBulkLoad(const UID& dataMoveId) {
+bool dataMoveIdIsValidForBulkLoad(UID const& dataMoveId) {
 	return dataMoveId.isValid() && dataMoveId != anonymousShardId;
 }
 
-std::string stringRemovePrefix(std::string str, const std::string& prefix) {
+std::string stringRemovePrefix(std::string str, std::string const& prefix) {
 	if (str.compare(0, prefix.length(), prefix) == 0) {
 		str.erase(0, prefix.length());
 	} else {
@@ -57,7 +57,7 @@ std::string stringRemovePrefix(std::string str, const std::string& prefix) {
 	return str;
 }
 
-Key getKeyFromHexString(const std::string& hexRawString) {
+Key getKeyFromHexString(std::string const& hexRawString) {
 	if (hexRawString.empty()) {
 		return Key();
 	}
@@ -80,7 +80,7 @@ std::string getBulkLoadJobManifestFileName() {
 	return "job-manifest.txt";
 }
 
-std::string generateBulkLoadBytesSampleFileNameFromDataFileName(const std::string& dataFileName) {
+std::string generateBulkLoadBytesSampleFileNameFromDataFileName(std::string const& dataFileName) {
 	return dataFileName + "-sample.sst";
 }
 
@@ -88,7 +88,7 @@ std::string generateEmptyManifestFileName() {
 	return "manifest-empty.sst";
 }
 
-std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase) {
+std::string convertBulkLoadJobPhaseToString(BulkLoadJobPhase const& phase) {
 	if (phase == BulkLoadJobPhase::Invalid) {
 		return "Invalid";
 	} else if (phase == BulkLoadJobPhase::Submitted) {
@@ -109,9 +109,9 @@ std::string convertBulkLoadJobPhaseToString(const BulkLoadJobPhase& phase) {
 // For now, we only support blobstore:// urls.
 // 'blobstore://' is the first match, credentials including '@' are optional and second regex match.
 // The third match is the host + path, etc. of the url.
-static const std::regex BLOBSTORE_URL_PATTERN(R"((blobstore://)([A-Z0-9]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+@)?(.+)$)");
+static std::regex const BLOBSTORE_URL_PATTERN(R"((blobstore://)([A-Z0-9]+:[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+@)?(.+)$)");
 
-std::string getPath(const std::string& path) {
+std::string getPath(std::string const& path) {
 	std::smatch matches;
 	if (!std::regex_match(path, matches, BLOBSTORE_URL_PATTERN)) {
 		return path;
@@ -130,7 +130,7 @@ std::string getPath(const std::string& path) {
 }
 
 // TODO(BulkLoad): use this everywhere
-std::string appendToPath(const std::string& path, const std::string& append) {
+std::string appendToPath(std::string const& path, std::string const& append) {
 	std::smatch matches;
 	if (!std::regex_match(path, matches, BLOBSTORE_URL_PATTERN)) {
 		return joinPath(path, append);
@@ -150,7 +150,7 @@ std::string appendToPath(const std::string& path, const std::string& append) {
 	}
 }
 
-std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
+std::string getBulkLoadJobRoot(std::string const& root, UID const& jobId) {
 	return appendToPath(root, jobId.toString());
 }
 
@@ -158,7 +158,7 @@ std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId) {
 // This is used for BulkDump/BulkLoad to write under the backup container's data directory.
 // Input:  blobstore://creds@host/backup_container?bucket=... , "bulkdump_data"
 // Output: blobstore://creds@host/data/backup_container/bulkdump_data?bucket=...
-std::string getBackupDataPath(const std::string& url, const std::string& suffix) {
+std::string getBackupDataPath(std::string const& url, std::string const& suffix) {
 	std::smatch matches;
 	if (!std::regex_match(url, matches, BLOBSTORE_URL_PATTERN)) {
 		// For local paths, prepend "data/" and append suffix
@@ -198,15 +198,15 @@ std::string convertBulkLoadTransportMethodToString(BulkLoadTransportMethod metho
 }
 
 // For submitting a task manually (for testing)
-BulkLoadTaskState createBulkLoadTask(const UID& jobId,
-                                     const KeyRange& range,
-                                     const BulkLoadFileSet& fileSet,
-                                     const BulkLoadByteSampleSetting& byteSampleSetting,
-                                     const Version& snapshotVersion,
-                                     const int64_t& bytes,
-                                     const int64_t& keyCount,
-                                     const BulkLoadType& type,
-                                     const BulkLoadTransportMethod& transportMethod) {
+BulkLoadTaskState createBulkLoadTask(UID const& jobId,
+                                     KeyRange const& range,
+                                     BulkLoadFileSet const& fileSet,
+                                     BulkLoadByteSampleSetting const& byteSampleSetting,
+                                     Version const& snapshotVersion,
+                                     int64_t const& bytes,
+                                     int64_t const& keyCount,
+                                     BulkLoadType const& type,
+                                     BulkLoadTransportMethod const& transportMethod) {
 	BulkLoadManifest manifest(
 	    fileSet, range.begin, range.end, snapshotVersion, bytes, keyCount, byteSampleSetting, type, transportMethod);
 	BulkLoadManifestSet manifests(1);
@@ -214,9 +214,9 @@ BulkLoadTaskState createBulkLoadTask(const UID& jobId,
 	return BulkLoadTaskState(jobId, manifests, range);
 }
 
-BulkLoadJobState createBulkLoadJob(const UID& dumpJobIdToLoad,
-                                   const KeyRange& range,
-                                   const std::string& jobRoot,
-                                   const BulkLoadTransportMethod& transportMethod) {
+BulkLoadJobState createBulkLoadJob(UID const& dumpJobIdToLoad,
+                                   KeyRange const& range,
+                                   std::string const& jobRoot,
+                                   BulkLoadTransportMethod const& transportMethod) {
 	return BulkLoadJobState(dumpJobIdToLoad, jobRoot, range, transportMethod);
 }

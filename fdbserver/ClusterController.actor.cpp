@@ -85,20 +85,20 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 	}
 }
 
-bool ClusterControllerData::processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const {
+bool ClusterControllerData::processesInSameDC(NetworkAddress const& addr1, NetworkAddress const& addr2) const {
 	return this->addr_locality.contains(addr1) && this->addr_locality.contains(addr2) &&
 	       this->addr_locality.at(addr1).dcId().present() && this->addr_locality.at(addr2).dcId().present() &&
 	       this->addr_locality.at(addr1).dcId().get() == this->addr_locality.at(addr2).dcId().get();
 }
 
 bool ClusterControllerData::transactionSystemContainsDegradedServers() {
-	const ServerDBInfo& dbi = db.serverInfo->get();
-	const Reference<ClusterRecoveryData> recoveryData = db.recoveryData;
-	auto transactionWorkerInList = [&dbi, &recoveryData](const std::unordered_set<NetworkAddress>& serverList,
+	ServerDBInfo const& dbi = db.serverInfo->get();
+	Reference<ClusterRecoveryData> const recoveryData = db.recoveryData;
+	auto transactionWorkerInList = [&dbi, &recoveryData](std::unordered_set<NetworkAddress> const& serverList,
 	                                                     bool skipSatellite,
 	                                                     bool skipRemoteTLog,
 	                                                     bool skipRemoteLogRouter) -> bool {
-		for (const auto& server : serverList) {
+		for (auto const& server : serverList) {
 			if (dbi.master.addresses().contains(server)) {
 				return true;
 			}
@@ -108,28 +108,28 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 			auto logSystemConfig = (recoveryData.isValid() && recoveryData->logSystem.isValid())
 			                           ? recoveryData->logSystem->getLogSystemConfig()
 			                           : dbi.logSystemConfig;
-			for (const auto& logSet : logSystemConfig.tLogs) {
+			for (auto const& logSet : logSystemConfig.tLogs) {
 				if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 					continue;
 				}
 
 				if (!logSet.isLocal) {
 					if (!skipRemoteTLog) {
-						for (const auto& tlog : logSet.tLogs) {
+						for (auto const& tlog : logSet.tLogs) {
 							if (tlog.present() && tlog.interf().addresses().contains(server)) {
 								return true;
 							}
 						}
 					}
 					if (!skipRemoteLogRouter) {
-						for (const auto& logRouter : logSet.logRouters) {
+						for (auto const& logRouter : logSet.logRouters) {
 							if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
 								return true;
 							}
 						}
 					}
 				} else {
-					for (const auto& tlog : logSet.tLogs) {
+					for (auto const& tlog : logSet.tLogs) {
 						if (tlog.present() && tlog.interf().addresses().contains(server)) {
 							return true;
 						}
@@ -142,14 +142,14 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				// During recovery, TLogs may not be able to pull data from previous generation TLogs due to gray
 				// failures. In this case, we rely on the latest recruitment information and see if any newly recruited
 				// TLogs are degraded.
-				for (const auto& tlog : recoveryData->primaryRecruitment.tLogs) {
+				for (auto const& tlog : recoveryData->primaryRecruitment.tLogs) {
 					if (tlog.addresses().contains(server)) {
 						return true;
 					}
 				}
 
 				if (!skipSatellite) {
-					for (const auto& satelliteLog : recoveryData->primaryRecruitment.satelliteTLogs) {
+					for (auto const& satelliteLog : recoveryData->primaryRecruitment.satelliteTLogs) {
 						if (satelliteLog.addresses().contains(server)) {
 							return true;
 						}
@@ -157,19 +157,19 @@ bool ClusterControllerData::transactionSystemContainsDegradedServers() {
 				}
 			}
 
-			for (const auto& proxy : dbi.client.grvProxies) {
+			for (auto const& proxy : dbi.client.grvProxies) {
 				if (proxy.addresses().contains(server)) {
 					return true;
 				}
 			}
 
-			for (const auto& proxy : dbi.client.commitProxies) {
+			for (auto const& proxy : dbi.client.commitProxies) {
 				if (proxy.addresses().contains(server)) {
 					return true;
 				}
 			}
 
-			for (const auto& resolver : dbi.resolvers) {
+			for (auto const& resolver : dbi.resolvers) {
 				if (resolver.addresses().contains(server)) {
 					return true;
 				}
@@ -203,13 +203,13 @@ bool ClusterControllerData::remoteTransactionSystemContainsDegradedServers() {
 		return false;
 	}
 
-	for (const auto& excludedServer : degradationInfo.degradedServers) {
+	for (auto const& excludedServer : degradationInfo.degradedServers) {
 		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
 			return true;
 		}
 	}
 
-	for (const auto& excludedServer : degradationInfo.disconnectedServers) {
+	for (auto const& excludedServer : degradationInfo.disconnectedServers) {
 		if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
 			return true;
 		}
@@ -375,7 +375,7 @@ ACTOR Future<std::vector<int>> monitorLogRouters(Reference<ILogSystem> logSystem
 // This actor will be restarted in each recovery and will exit when a new recovery is detected.
 ACTOR Future<Void> monitorAndRecruitWorkerSet(ClusterControllerData* self,
                                               uint64_t recoveryCount,
-                                              const char* workerName,
+                                              char const* workerName,
                                               std::function<Future<std::vector<int>>()> monitor,
                                               std::function<Future<Void>(std::vector<int>)> recruit) {
 	TraceEvent((std::string(workerName) + "MonitoringStart").c_str(), self->id).detail("RecoveryCount", recoveryCount);
@@ -749,7 +749,7 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
-                                         const ProcessClass::ClusterRole role,
+                                         ProcessClass::ClusterRole const role,
                                          std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 	// find new process in cluster for role
 	WorkerDetails newWorker =
@@ -769,9 +769,9 @@ WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
 }
 
 // Return best possible fitness for singleton. Note that lower fitness is better.
-ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* self,
-                                                  const WorkerDetails& worker,
-                                                  const ProcessClass::ClusterRole& role) {
+ProcessClass::Fitness findBestFitnessForSingleton(ClusterControllerData const* self,
+                                                  WorkerDetails const& worker,
+                                                  ProcessClass::ClusterRole const& role) {
 	auto bestFitness = worker.processClass.machineClassFitness(role);
 	// If the process has been marked as excluded, we take the max with ExcludeFit to ensure its fit
 	// is at least as bad as ExcludeFit. This assists with successfully offboarding such processes
@@ -787,10 +787,10 @@ ProcessClass::Fitness findBestFitnessForSingleton(const ClusterControllerData* s
 // Side effects: (possibly) initiates recruitment
 template <class SingletonClass>
 bool isHealthySingleton(ClusterControllerData* self,
-                        const WorkerDetails& newWorker,
-                        const SingletonClass& singleton,
-                        const ProcessClass::Fitness& bestFitness,
-                        const Optional<UID> recruitingID) {
+                        WorkerDetails const& newWorker,
+                        SingletonClass const& singleton,
+                        ProcessClass::Fitness const& bestFitness,
+                        Optional<UID> const recruitingID) {
 	// A singleton is stable if it exists in cluster, has not been killed off of proc and is not being recruited
 	bool isStableSingleton = singleton.isPresent() &&
 	                         self->id_worker.contains(singleton.getInterface().locality.processId()) &&
@@ -841,9 +841,9 @@ bool isHealthySingleton(ClusterControllerData* self,
 
 // Returns a mapping from pid->pidCount for pids
 std::map<Optional<Standalone<StringRef>>, int> getColocCounts(
-    const std::vector<Optional<Standalone<StringRef>>>& pids) {
+    std::vector<Optional<Standalone<StringRef>>> const& pids) {
 	std::map<Optional<Standalone<StringRef>>, int> counts;
-	for (const auto& pid : pids) {
+	for (auto const& pid : pids) {
 		if (pid.present()) {
 			++counts[pid];
 		}
@@ -1242,14 +1242,14 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 // or, halts the existing singleton in favour of the requesting one
 template <class SingletonClass>
 void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
-                                       const WorkerInterface& worker,
-                                       const SingletonClass& currSingleton,
-                                       const SingletonClass& registeringSingleton,
-                                       const Optional<UID> recruitingID) {
+                                       WorkerInterface const& worker,
+                                       SingletonClass const& currSingleton,
+                                       SingletonClass const& registeringSingleton,
+                                       Optional<UID> const recruitingID) {
 	ASSERT(currSingleton.getRole() == registeringSingleton.getRole());
-	const UID registeringID = registeringSingleton.getInterface().id();
-	const std::string roleName = currSingleton.getRole().roleName;
-	const std::string roleAbbr = currSingleton.getRole().abbreviation;
+	UID const registeringID = registeringSingleton.getInterface().id();
+	std::string const roleName = currSingleton.getRole().roleName;
+	std::string const roleAbbr = currSingleton.getRole().abbreviation;
 
 	// halt the requesting singleton if it isn't the one currently being recruited
 	if ((recruitingID.present() && recruitingID.get() != registeringID) ||
@@ -1280,7 +1280,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 }
 
 void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
-	const WorkerInterface& w = req.wi;
+	WorkerInterface const& w = req.wi;
 	if (req.clusterId.present() && self->clusterId->get().present() && req.clusterId != self->clusterId->get() &&
 	    req.processClass != ProcessClass::TesterClass) {
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "WorkerBelongsToExistingCluster", self->id)
@@ -1381,7 +1381,7 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self) {
 		// Currently, only CC_ONLY_CONSIDER_INTRA_DC_LATENCY feature relies on addr_locality mapping. In the future, if
 		// needed, we can populate the mapping unconditionally.
 		if (SERVER_KNOBS->CC_ONLY_CONSIDER_INTRA_DC_LATENCY) {
-			const bool addrDcChanged = self->addr_locality.contains(w.address()) &&
+			bool const addrDcChanged = self->addr_locality.contains(w.address()) &&
 			                           self->addr_locality[w.address()].dcId() != w.locality.dcId();
 			if (addrDcChanged) {
 				TraceEvent(SevWarn, "AddrDcChanged")
@@ -1782,15 +1782,15 @@ ACTOR Future<Void> monitorStorageMetadata(ClusterControllerData* self) {
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			servers.reserve(serverList.size());
-			for (const auto ss : serverList) {
+			for (auto const ss : serverList) {
 				servers.push_back(StorageServerMetaInfo(decodeServerListValue(ss.value)));
 			}
 
 			state RangeResult serverMetadata = wait(tr->getRange(serverMetadataKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverMetadata.more && serverMetadata.size() < CLIENT_KNOBS->TOO_MANY);
 			std::map<UID, StorageMetadataType> idMetadata;
-			for (const auto& sm : serverMetadata) {
-				const UID id = decodeServerMetadataKey(sm.key);
+			for (auto const& sm : serverMetadata) {
+				UID const id = decodeServerMetadataKey(sm.key);
 				idMetadata[id] = decodeServerMetadataValue(sm.value);
 			}
 			for (auto& s : servers) {
@@ -1840,7 +1840,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					clientInfo = db->serverInfo->get().client;
 					clientInfo.history.clear();
 
-					for (const auto& kv : globalConfigHistory) {
+					for (auto const& kv : globalConfigHistory) {
 						ObjectReader reader(kv.value.begin(), IncludeVersion());
 						if (reader.protocolVersion() != g_network->protocolVersion() || BUGGIFY_WITH_PROB(0.01)) {
 							// If the protocol version has changed, the
@@ -2312,7 +2312,7 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 			if (ddInterf.present()) {
 				self->recruitDistributor.set(false);
 				self->recruitingDistributorID = ddInterf.get().id();
-				const auto& distributor = self->db.serverInfo->get().distributor;
+				auto const& distributor = self->db.serverInfo->get().distributor;
 				TraceEvent("CCDataDistributorRecruited", self->id)
 				    .detail("Addr", worker.interf.address())
 				    .detail("DDID", ddInterf.get().id());
@@ -2358,7 +2358,7 @@ ACTOR Future<Void> monitorDataDistributor(ClusterControllerData* self) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().distributor.get().waitFailure,
 				                            SERVER_KNOBS->DD_FAILURE_TIME))) {
-					const auto& distributor = self->db.serverInfo->get().distributor;
+					auto const& distributor = self->db.serverInfo->get().distributor;
 					TraceEvent("CCDataDistributorDied", self->id).detail("DDID", distributor.get().id());
 					DataDistributorSingleton(distributor).halt(*self, distributor.get().locality.processId());
 					self->db.clearInterf(ProcessClass::DataDistributorClass);
@@ -2412,7 +2412,7 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 			if (interf.present()) {
 				self->recruitRatekeeper.set(false);
 				self->recruitingRatekeeperID = interf.get().id();
-				const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+				auto const& ratekeeper = self->db.serverInfo->get().ratekeeper;
 				TraceEvent("CCRatekeeperRecruited", self->id)
 				    .detail("Addr", worker.interf.address())
 				    .detail("RKID", interf.get().id());
@@ -2450,7 +2450,7 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 			choose {
 				when(wait(waitFailureClient(self->db.serverInfo->get().ratekeeper.get().waitFailure,
 				                            SERVER_KNOBS->RATEKEEPER_FAILURE_TIME))) {
-					const auto& ratekeeper = self->db.serverInfo->get().ratekeeper;
+					auto const& ratekeeper = self->db.serverInfo->get().ratekeeper;
 					TraceEvent("CCRatekeeperDied", self->id).detail("RKID", ratekeeper.get().id());
 					RatekeeperSingleton(ratekeeper).halt(*self, ratekeeper.get().locality.processId());
 					self->db.clearInterf(ProcessClass::RatekeeperClass);
@@ -2502,7 +2502,7 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 			if (interf.present()) {
 				self->recruitConsistencyScan.set(false);
 				self->recruitingConsistencyScanID = interf.get().id();
-				const auto& consistencyScan = self->db.serverInfo->get().consistencyScan;
+				auto const& consistencyScan = self->db.serverInfo->get().consistencyScan;
 				TraceEvent("CCConsistencyScanRecruited", self->id)
 				    .detail("Addr", worker.interf.address())
 				    .detail("CKID", interf.get().id());
@@ -2646,7 +2646,7 @@ static void invalidateExcludedProcessComplaints(ClusterControllerData* self) {
 	if (!SERVER_KNOBS->CC_INVALIDATE_EXCLUDED_PROCESSES) {
 		return;
 	}
-	for (const auto& [addr, _] : self->excludedDegradedServers) {
+	for (auto const& [addr, _] : self->excludedDegradedServers) {
 		self->workerHealth.erase(addr);
 	}
 }
@@ -2678,11 +2678,11 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 			if (!self->degradationInfo.degradedServers.empty() || !self->degradationInfo.disconnectedServers.empty() ||
 			    self->degradationInfo.degradedSatellite) {
 				std::string degradedServerString;
-				for (const auto& server : self->degradationInfo.degradedServers) {
+				for (auto const& server : self->degradationInfo.degradedServers) {
 					degradedServerString += server.toString() + " ";
 				}
 				std::string disconnectedServerString;
-				for (const auto& server : self->degradationInfo.disconnectedServers) {
+				for (auto const& server : self->degradationInfo.disconnectedServers) {
 					disconnectedServerString += server.toString() + " ";
 				}
 				TraceEvent("ClusterControllerHealthMonitor")
@@ -2696,10 +2696,10 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->excludedDegradedServers.clear();
-							for (const auto& degradedServer : self->degradationInfo.degradedServers) {
+							for (auto const& degradedServer : self->degradationInfo.degradedServers) {
 								self->excludedDegradedServers[degradedServer] = now();
 							}
-							for (const auto& disconnectedServer : self->degradationInfo.disconnectedServers) {
+							for (auto const& disconnectedServer : self->degradationInfo.disconnectedServers) {
 								self->excludedDegradedServers[disconnectedServer] = now();
 							}
 							invalidateExcludedProcessComplaints(self);
@@ -3029,11 +3029,11 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 
 namespace {
 
-void addProcessesToSameDC(ClusterControllerData& self, const std::vector<NetworkAddress>&& processes) {
+void addProcessesToSameDC(ClusterControllerData& self, std::vector<NetworkAddress> const&& processes) {
 	LocalityData locality;
 	locality.set(LocalityData::keyDcId, Standalone<StringRef>(std::string{ "1" }));
-	for (const auto& process : processes) {
-		const bool added = self.addr_locality.insert({ process, locality }).second;
+	for (auto const& process : processes) {
+		bool const added = self.addr_locality.insert({ process, locality }).second;
 		ASSERT(added);
 	}
 }
@@ -3707,7 +3707,7 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 
 	// Compute degraded processes
 	data.degradationInfo = data.getDegradationInfo();
-	for (const auto& addr : data.degradationInfo.degradedServers) {
+	for (auto const& addr : data.degradationInfo.degradedServers) {
 		data.excludedDegradedServers[addr] = now();
 	}
 
@@ -3727,7 +3727,7 @@ TEST_CASE("/fdbserver/clustercontroller/invalidateExcludedProcessComplaints") {
 
 	// Compute degraded processes again
 	data.degradationInfo = data.getDegradationInfo();
-	for (const auto& addr : data.degradationInfo.degradedServers) {
+	for (auto const& addr : data.degradationInfo.degradedServers) {
 		data.excludedDegradedServers[addr] = now();
 	}
 

@@ -104,8 +104,8 @@ Key TagThrottleKey::toKey() const {
 	return result;
 }
 
-TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
-	const uint8_t* str = key.substr(tagThrottleKeysPrefix.size()).begin();
+TagThrottleKey TagThrottleKey::fromKey(KeyRef const& key) {
+	uint8_t const* str = key.substr(tagThrottleKeysPrefix.size()).begin();
 	TagThrottleType throttleType = TagThrottleType(*(str++));
 	TransactionPriority priority = TransactionPriority(*(str++));
 	TagSet tags;
@@ -119,7 +119,7 @@ TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
 	return TagThrottleKey(tags, throttleType, priority);
 }
 
-TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
+TagThrottleValue TagThrottleValue::fromValue(ValueRef const& value) {
 	TagThrottleValue throttleValue;
 	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;

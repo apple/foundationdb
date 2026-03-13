@@ -55,7 +55,7 @@ struct FlowGrpc {
 	// - Configurs TLS if a `tls_config` object is provided.
 	// - Creates a `GrpcServer` instance if `server_addr` is specified (used for server-side setup).
 	// - If `server_addr` is not provided (`nullopt`), this instance operates in client mode.
-	static void init(TLSConfig* tls_config, const std::optional<NetworkAddress>& server_addr);
+	static void init(TLSConfig* tls_config, std::optional<NetworkAddress> const& server_addr);
 
 	// Returns the local `GrpcServer` instance.
 	std::shared_ptr<GrpcServer> server() const { return server_; }
@@ -110,7 +110,7 @@ class GrpcServer {
 public:
 	using ServiceList = std::vector<std::shared_ptr<grpc::Service>>;
 
-	GrpcServer(const NetworkAddress& addr, std::shared_ptr<GrpcCredentialProvider> provider = nullptr);
+	GrpcServer(NetworkAddress const& addr, std::shared_ptr<GrpcCredentialProvider> provider = nullptr);
 	~GrpcServer();
 
 	// Returns the singleton instance.
@@ -148,12 +148,12 @@ public:
 	// Registers given services with the gRPC server. Return doesn't necessarily means the service has started.
 	// TODO: should we add notification when service is alive?
 	void registerService(std::shared_ptr<grpc::Service> service);
-	void registerRoleServices(const UID& owner_id, const ServiceList& services);
+	void registerRoleServices(UID const& owner_id, ServiceList const& services);
 
 	// Removes services associated with given `owner_id` from the server. Returns future that is fulfilled onced the
 	// services are no longer alive (however, server may not have restarted yet).
-	Future<Void> deregisterRoleServices(const UID& owner_id);
-	void deregisterRoleServicesSync(const UID& owner_id);
+	Future<Void> deregisterRoleServices(UID const& owner_id);
+	void deregisterRoleServicesSync(UID const& owner_id);
 
 	// Returns `true` if TLS is enabled.
 	bool isTLSEnabled() const;
@@ -169,7 +169,7 @@ public:
 	// indepdendently and avoid multiple restarts.
 	//
 	// TODO: Make it configurable.
-	static const int CONFIG_STARTUP_DELAY_BETWEEN_RESTART = 2; /* seconds */
+	static int const CONFIG_STARTUP_DELAY_BETWEEN_RESTART = 2; /* seconds */
 
 private:
 	Future<Void> runInternal();

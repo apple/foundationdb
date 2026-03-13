@@ -35,7 +35,7 @@ struct IGenerator {
 	virtual T last() const = 0;
 	virtual std::string toString() const = 0;
 	virtual T next(int distance, bool wrap = false) { throw unsupported_operation(); }
-	virtual ~IGenerator() {};
+	virtual ~IGenerator(){};
 };
 
 struct IKeyGenerator : public IGenerator<Key> {
@@ -77,7 +77,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 			std::swap(min, max);
 		}
 	}
-	RandomIntGenerator(const char* cstr) : RandomIntGenerator(std::string(cstr)) {}
+	RandomIntGenerator(char const* cstr) : RandomIntGenerator(std::string(cstr)) {}
 	RandomIntGenerator(std::string str) : RandomIntGenerator(StringRef(str)) {}
 	RandomIntGenerator(StringRef str) {
 		bool skewTowardFirst = false;
@@ -143,7 +143,7 @@ struct RandomIntGenerator : IGenerator<unsigned int> {
 struct RandomStringGenerator : IKeyGenerator {
 	RandomStringGenerator() {}
 	RandomStringGenerator(RandomIntGenerator size, RandomIntGenerator byteset) : size(size), bytes(byteset) {}
-	RandomStringGenerator(const char* cstr) : RandomStringGenerator(std::string(cstr)) {}
+	RandomStringGenerator(char const* cstr) : RandomStringGenerator(std::string(cstr)) {}
 	RandomStringGenerator(std::string str) : RandomStringGenerator(StringRef(str)) {}
 	RandomStringGenerator(StringRef str) {
 		StringRef sSize = str.eat("/");
@@ -223,7 +223,7 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 		int inserts = 0;
 		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
 		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
-		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
+		uint const maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
 		while (uniqueKeys.size() < indexGenerator.max) {
 			auto k = keyGen.next();
 			uniqueKeys.insert(k);
@@ -282,7 +282,7 @@ struct RandomStringSetGenerator : public RandomStringSetGeneratorBase {
 	  : indexGen(indexGen), stringGen(stringGen) {
 		init(indexGen, stringGen);
 	}
-	RandomStringSetGenerator(const char* cstr) : RandomStringSetGenerator(std::string(cstr)) {}
+	RandomStringSetGenerator(char const* cstr) : RandomStringSetGenerator(std::string(cstr)) {}
 	RandomStringSetGenerator(std::string str) : RandomStringSetGenerator(StringRef(str)) {}
 	RandomStringSetGenerator(StringRef str) {
 		indexGen = str.eat("::");
@@ -301,7 +301,7 @@ typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
 struct RandomKeyTupleGenerator : public IKeyGenerator {
-	RandomKeyTupleGenerator() {};
+	RandomKeyTupleGenerator(){};
 	RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
 	RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
 	RandomKeyTupleGenerator(StringRef s) {
@@ -343,7 +343,7 @@ struct RandomKeyTupleGenerator : public IKeyGenerator {
 
 	int getMaxKeyLen() const override {
 		int maxKeyLen = 0;
-		for (const auto& g : tuples) {
+		for (auto const& g : tuples) {
 			maxKeyLen += g.getMaxKeyLen();
 		}
 		return maxKeyLen;
@@ -368,7 +368,7 @@ struct RandomKeyGenerator : IKeyGenerator {
 		}
 		val = makeString(totalBytes);
 		totalBytes = 0;
-		for (const auto& g : keyGenerators) {
+		for (auto const& g : keyGenerators) {
 			memcpy(mutateString(val) + totalBytes, g->last().begin(), g->last().size());
 			totalBytes += g->last().size();
 		}
@@ -388,7 +388,7 @@ struct RandomKeyGenerator : IKeyGenerator {
 
 	int getMaxKeyLen() const override {
 		int maxKeyLen = 0;
-		for (const auto& g : keyGenerators) {
+		for (auto const& g : keyGenerators) {
 			maxKeyLen += g->getMaxKeyLen();
 		}
 		return maxKeyLen;

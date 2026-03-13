@@ -28,24 +28,24 @@
 
 namespace fdb_cli {
 
-static const std::string BULK_LOAD_MODE_USAGE = "To set bulkload mode: bulkload mode [on|off]\n";
-static const std::string BULK_LOAD_LOAD_USAGE =
+static std::string const BULK_LOAD_MODE_USAGE = "To set bulkload mode: bulkload mode [on|off]\n";
+static std::string const BULK_LOAD_LOAD_USAGE =
     "To load a range of key/values: bulkload load <JOBID> <BEGINKEY> <ENDKEY> <DIR>\n"
     " where <JOBID> is the id of the bulkdumped job to load, <BEGINKEY> to <ENDKEY>\n"
     " denotes the key/value range to load, and <DIR> is a local directory OR \n"
     " blobstore url to load SST files from.\n";
-static const std::string BULK_LOAD_STATUS_USAGE = "To get status: bulkload status\n";
-static const std::string BULK_LOAD_CANCEL_USAGE = "To cancel current bulkload job: bulkload cancel <JOBID>\n";
-static const std::string BULK_LOAD_HISTORY_USAGE = "To print bulkload job history: bulkload history\n";
-static const std::string BULK_LOAD_HISTORY_CLEAR_USAGE = "To clear history: bulkload history clear [all|id]\n";
+static std::string const BULK_LOAD_STATUS_USAGE = "To get status: bulkload status\n";
+static std::string const BULK_LOAD_CANCEL_USAGE = "To cancel current bulkload job: bulkload cancel <JOBID>\n";
+static std::string const BULK_LOAD_HISTORY_USAGE = "To print bulkload job history: bulkload history\n";
+static std::string const BULK_LOAD_HISTORY_CLEAR_USAGE = "To clear history: bulkload history clear [all|id]\n";
 
-static const std::string BULKLOAD_ADD_LOCK_OWNER_USAGE =
+static std::string const BULKLOAD_ADD_LOCK_OWNER_USAGE =
     "To add a range lock owner: bulkload addlockowner <OWNER_UNIQUE_ID>\n";
-static const std::string BULKLOAD_PRINT_LOCK_USAGE = "To print locked ranges: bulkload printlock\n";
-static const std::string BULKLOAD_PRINT_LOCK_OWNER_USAGE = "To print range lock owners: bulkload printlockowner\n";
-static const std::string BULKLOAD_CLEAR_LOCK_USAGE = "To clear a range lock: bulkload clearlock <OWNER_UNIQUE_ID>\n";
+static std::string const BULKLOAD_PRINT_LOCK_USAGE = "To print locked ranges: bulkload printlock\n";
+static std::string const BULKLOAD_PRINT_LOCK_OWNER_USAGE = "To print range lock owners: bulkload printlockowner\n";
+static std::string const BULKLOAD_CLEAR_LOCK_USAGE = "To clear a range lock: bulkload clearlock <OWNER_UNIQUE_ID>\n";
 
-static const std::string BULK_LOAD_HELP_MESSAGE =
+static std::string const BULK_LOAD_HELP_MESSAGE =
     BULK_LOAD_MODE_USAGE + BULK_LOAD_LOAD_USAGE + BULK_LOAD_STATUS_USAGE + BULK_LOAD_CANCEL_USAGE +
     BULK_LOAD_HISTORY_USAGE + BULK_LOAD_HISTORY_CLEAR_USAGE + BULKLOAD_ADD_LOCK_OWNER_USAGE +
     BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE + BULKLOAD_CLEAR_LOCK_USAGE;
@@ -56,7 +56,7 @@ ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 		fmt::println("No bulk loading job in the history");
 		return Void();
 	}
-	for (const auto& job : jobs) {
+	for (auto const& job : jobs) {
 		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
 		       job.getPhase() == BulkLoadJobPhase::Cancelled);
 		if (!job.getTaskCount().present()) {
@@ -317,7 +317,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("First 10 locks are:");
 		}
 		int count = 1;
-		for (const auto& lock : lockedRanges) {
+		for (auto const& lock : lockedRanges) {
 			if (count > 10) {
 				break;
 			}
@@ -333,7 +333,7 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			return UID();
 		}
 		std::vector<RangeLockOwner> owners = wait(getAllRangeLockOwners(cx));
-		for (const auto owner : owners) {
+		for (auto const owner : owners) {
 			fmt::println("{}", owner.toString());
 		}
 		return UID();

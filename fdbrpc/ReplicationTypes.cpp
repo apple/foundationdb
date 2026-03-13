@@ -21,5 +21,5 @@
 #include "fdbrpc/ReplicationTypes.h"
 
 // Map of attribute hash to name
-const std::vector<LocalityEntry> emptyEntryArray;
+std::vector<LocalityEntry> const emptyEntryArray;
 int g_replicationdebug = 0;

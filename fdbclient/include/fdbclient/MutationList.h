@@ -44,20 +44,20 @@ public:
 private:
 	struct Header {
 		int type, p1len, p2len;
-		const uint8_t* p1begin() const {
+		uint8_t const* p1begin() const {
 			//(this+1) moves the pointer by Header size and get to the beginning of p1_content
-			return (const uint8_t*)(this + 1);
+			return (uint8_t const*)(this + 1);
 		}
-		const uint8_t* p2begin() const { return (const uint8_t*)(this + 1) + p1len; }
-		const uint8_t* end() const { return (const uint8_t*)(this + 1) + p1len + p2len; }
+		uint8_t const* p2begin() const { return (uint8_t const*)(this + 1) + p1len; }
+		uint8_t const* end() const { return (uint8_t const*)(this + 1) + p1len + p2len; }
 	};
 	static_assert(sizeof(Header) == 12, "Header packing problem");
 	static_assert(sizeof(Header) == MutationRef::OVERHEAD_BYTES, "Invalid MutationRef Overhead Bytes");
 
 public:
 	struct Iterator {
-		const MutationRef& operator*() { return item; }
-		const MutationRef* operator->() { return &item; }
+		MutationRef const& operator*() { return item; }
+		MutationRef const* operator->() { return &item; }
 		void operator++() {
 			ASSERT(blob->data.size() > 0);
 			auto e = ptr->end(); // e points to the end of the current blob
@@ -74,18 +74,18 @@ public:
 		explicit operator bool() const { return blob != nullptr; }
 
 		typedef std::forward_iterator_tag iterator_category;
-		typedef const MutationRef value_type;
+		typedef MutationRef const value_type;
 		typedef int64_t difference_type;
-		typedef const MutationRef* pointer;
-		typedef const MutationRef& reference;
+		typedef MutationRef const* pointer;
+		typedef MutationRef const& reference;
 
-		Iterator(Blob* blob, const Header* ptr) : blob(blob), ptr(ptr) { decode(); }
+		Iterator(Blob* blob, Header const* ptr) : blob(blob), ptr(ptr) { decode(); }
 		Iterator() : blob(nullptr), ptr(nullptr) {}
 
 	private:
 		friend struct MutationListRef;
-		const Blob* blob; // The blob containing the indicated mutation
-		const Header* ptr; // The header of the indicated mutation
+		Blob const* blob; // The blob containing the indicated mutation
+		Header const* ptr; // The header of the indicated mutation
 		MutationRef item;
 
 		void decode() {
@@ -124,8 +124,8 @@ public:
 	}
 	void append_deep(Arena& arena, Iterator begin, Iterator end) {
 		for (auto blob = begin.blob; blob; blob = blob->next) {
-			const uint8_t* b = blob == begin.blob ? (const uint8_t*)begin.ptr : blob->data.begin();
-			const uint8_t* e = blob == end.blob ? (const uint8_t*)end.ptr : blob->data.end();
+			uint8_t const* b = blob == begin.blob ? (uint8_t const*)begin.ptr : blob->data.begin();
+			uint8_t const* e = blob == end.blob ? (uint8_t const*)end.ptr : blob->data.end();
 			int len = e - b;
 			if (len > 0) {
 				void* a = allocate(arena, len);
@@ -150,7 +150,7 @@ public:
 		if (totalBytes > 0) {
 			blob_begin = blob_end = new (ar.arena()) Blob;
 			blob_begin->next = nullptr;
-			blob_begin->data = StringRef((const uint8_t*)ar.arenaRead(totalBytes),
+			blob_begin->data = StringRef((uint8_t const*)ar.arenaRead(totalBytes),
 			                             totalBytes); // Zero-copy read when deserializing from an ArenaReader
 		}
 	}

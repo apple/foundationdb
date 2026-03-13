@@ -33,11 +33,11 @@
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IRandom.h"
 
-static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
+static char const* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
 	                                           "storage_migration_type=aggressive" };
-static const char* logTypes[] = { "log_engine:=1",
+static char const* logTypes[] = { "log_engine:=1",
 	                              "log_engine:=2",
 	                              "log_spill:=1",
 	                              "log_spill:=2",
@@ -48,8 +48,8 @@ static const char* logTypes[] = { "log_engine:=1",
 	                              "log_version:=6",
 	                              // downgrade incompatible log version
 	                              "log_version:=7" };
-static const char* redundancies[] = { "single", "double", "triple" };
-static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
+static char const* redundancies[] = { "single", "double", "triple" };
+static char const* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
 std::string generateRegions() {
 	std::string result;
@@ -256,7 +256,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(retries.getMetric()); }
 
-	static inline uint64_t valueToUInt64(const StringRef& v) {
+	static inline uint64_t valueToUInt64(StringRef const& v) {
 		long long unsigned int x = 0;
 		sscanf(v.toString().c_str(), "%llx", &x);
 		return x;
@@ -264,7 +264,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 
 	inline Standalone<StringRef> getDatabaseName(int dbIndex) { return StringRef(format("DestroyDB%d", dbIndex)); }
 
-	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
+	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, std::string const& config, bool force) {
 		printf("Issuing configuration change: %s\n", config.c_str());
 		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
@@ -294,9 +294,9 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	                                              DatabaseConfiguration conf,
 	                                              std::vector<StorageServerInterface> storageServers) {
 		std::unordered_map<std::string /* dc id */, int /* number of ss in that dc id */> dcIdToSSCount;
-		for (const auto& ss : storageServers) {
+		for (auto const& ss : storageServers) {
 			if (ss.locality.dcId().present()) {
-				const auto& dcId = ss.locality.dcId().get().toString();
+				auto const& dcId = ss.locality.dcId().get().toString();
 				if (!dcIdToSSCount.contains(dcId)) {
 					dcIdToSSCount[dcId] = 0;
 				}
@@ -304,7 +304,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 		}
 
-		for (const auto& [_, ssCount] : dcIdToSSCount) {
+		for (auto const& [_, ssCount] : dcIdToSSCount) {
 			if (ssCount <= conf.storageTeamSize) {
 				co_await IssueConfigurationChange(cx, "storage_migration_type=aggressive", false);
 				co_return true;
@@ -458,7 +458,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				}
 				constexpr std::array ssdTypes{ "ssd", "ssd-1", "ssd-2" };
 				constexpr std::array memoryTypes{ "memory", "memory-1", "memory-2" };
-				const char* storeTypeStr = nullptr;
+				char const* storeTypeStr = nullptr;
 				switch (storeType) {
 				case 0:
 					storeTypeStr = ssdTypes[deterministicRandom()->randomInt(0, 3)];

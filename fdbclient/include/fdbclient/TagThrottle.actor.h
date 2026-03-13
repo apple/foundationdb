@@ -64,7 +64,7 @@ public:
 	template <class Context>
 	void save(uint8_t* out, Context&) const {
 		uint8_t* start = out;
-		for (const auto& tag : *this) {
+		for (auto const& tag : *this) {
 			*(out++) = (uint8_t)tag.size();
 
 			std::copy(tag.begin(), tag.end(), out);
@@ -75,13 +75,13 @@ public:
 	}
 
 	template <class Context>
-	void load(const uint8_t* data, size_t size, Context& context) {
+	void load(uint8_t const* data, size_t size, Context& context) {
 		// const uint8_t *start = data;
-		const uint8_t* end = data + size;
+		uint8_t const* end = data + size;
 		while (data < end) {
 			uint8_t len = *(data++);
 			// Tags are already deduplicated
-			const auto& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
+			auto const& tag = tags.emplace_back(context.tryReadZeroCopy(data, len), len);
 			data += len;
 			bytes += tag.size();
 		}
@@ -96,7 +96,7 @@ public:
 
 	size_t getBytes() const { return bytes; }
 
-	const Arena& getArena() const { return arena; }
+	Arena const& getArena() const { return arena; }
 
 	// Used by fdbcli commands
 	std::string toString(Capitalize = Capitalize::False) const;
@@ -114,20 +114,20 @@ template <>
 struct dynamic_size_traits<TagSet> : std::true_type {
 	// May be called multiple times during one serialization
 	template <class Context>
-	static size_t size(const TagSet& t, Context&) {
+	static size_t size(TagSet const& t, Context&) {
 		return t.size() + t.getBytes();
 	}
 
 	// Guaranteed to be called only once during serialization
 	template <class Context>
-	static void save(uint8_t* out, const TagSet& t, Context& c) {
+	static void save(uint8_t* out, TagSet const& t, Context& c) {
 		t.save(out, c);
 	}
 
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* data, size_t size, TagSet& t, Context& context) {
+	static void load(uint8_t const* data, size_t size, TagSet& t, Context& context) {
 		t.load(data, size, context);
 	}
 };
@@ -146,7 +146,7 @@ struct TagThrottleKey {
 	  : tags(tags), throttleType(throttleType), priority(priority) {}
 
 	Key toKey() const;
-	static TagThrottleKey fromKey(const KeyRef& key);
+	static TagThrottleKey fromKey(KeyRef const& key);
 };
 
 struct TagThrottleValue {
@@ -159,7 +159,7 @@ struct TagThrottleValue {
 	TagThrottleValue(double tpsRate, double expirationTime, double initialDuration, TagThrottledReason reason)
 	  : tpsRate(tpsRate), expirationTime(expirationTime), initialDuration(initialDuration), reason(reason) {}
 
-	static TagThrottleValue fromValue(const ValueRef& value);
+	static TagThrottleValue fromValue(ValueRef const& value);
 
 	// To change this serialization, ProtocolVersion::TagThrottleValue must be updated, and downgrades need to be
 	// considered
@@ -234,13 +234,13 @@ struct ClientTrCommitCostEstimation {
 };
 
 // Keys to view and control tag throttling
-extern const KeyRangeRef tagThrottleKeys;
-extern const KeyRef tagThrottleKeysPrefix;
-extern const KeyRef tagThrottleAutoKeysPrefix;
-extern const KeyRef tagThrottleSignalKey;
-extern const KeyRef tagThrottleAutoEnabledKey;
-extern const KeyRef tagThrottleLimitKey;
-extern const KeyRef tagThrottleCountKey;
+extern KeyRangeRef const tagThrottleKeys;
+extern KeyRef const tagThrottleKeysPrefix;
+extern KeyRef const tagThrottleAutoKeysPrefix;
+extern KeyRef const tagThrottleSignalKey;
+extern KeyRef const tagThrottleAutoEnabledKey;
+extern KeyRef const tagThrottleLimitKey;
+extern KeyRef const tagThrottleCountKey;
 
 namespace ThrottleApi {
 

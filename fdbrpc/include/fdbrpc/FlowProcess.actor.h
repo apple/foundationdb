@@ -77,17 +77,17 @@ struct IProcessFactory {
 
 	virtual FlowProcess* create() = 0;
 
-	virtual const char* getName() = 0;
+	virtual char const* getName() = 0;
 };
 
 template <class ProcessType>
 struct ProcessFactory : IProcessFactory {
-	ProcessFactory(const char* name) : name(name) { factories()[name] = this; }
+	ProcessFactory(char const* name) : name(name) { factories()[name] = this; }
 	FlowProcess* create() override { return new ProcessType(); }
-	const char* getName() override { return this->name; }
+	char const* getName() override { return this->name; }
 
 private:
-	const char* name;
+	char const* name;
 };
 
 #include <flow/unactorcompiler.h>

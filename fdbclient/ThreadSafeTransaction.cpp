@@ -75,7 +75,7 @@ void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<S
 	    &DatabaseContext::deferredError);
 }
 
-ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(StringRef const& address, bool check, int duration) {
 	DatabaseContext* db = this->db;
 	Key addressKey = address;
 	return onMainThread([db, addressKey, check, duration]() -> Future<int64_t> {
@@ -84,7 +84,7 @@ ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address,
 	});
 }
 
-ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
+ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(StringRef const& dcid) {
 	DatabaseContext* db = this->db;
 	Key dcidKey = dcid;
 	return onMainThread([db, dcidKey]() -> Future<Void> {
@@ -93,7 +93,7 @@ ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef
 	});
 }
 
-ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
+ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(StringRef const& uid, StringRef const& snapshot_command) {
 	DatabaseContext* db = this->db;
 	Key snapUID = uid;
 	Key cmd = snapshot_command;
@@ -216,7 +216,7 @@ ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(KeyRef const& key, bool snapshot) {
 	Key k = key;
 
 	ReadYourWritesTransaction* tr = this->tr;
@@ -226,7 +226,7 @@ ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool
 	});
 }
 
-ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<Key> ThreadSafeTransaction::getKey(KeySelectorRef const& key, bool snapshot) {
 	KeySelector k = key;
 
 	ReadYourWritesTransaction* tr = this->tr;
@@ -236,7 +236,7 @@ ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool 
 	});
 }
 
-ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes(KeyRangeRef const& keys) {
 	KeyRange r = keys;
 
 	ReadYourWritesTransaction* tr = this->tr;
@@ -246,7 +246,7 @@ ThreadFuture<int64_t> ThreadSafeTransaction::getEstimatedRangeSizeBytes(const Ke
 	});
 }
 
-ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplitPoints(KeyRangeRef const& range,
                                                                                        int64_t chunkSize) {
 	KeyRange r = range;
 
@@ -257,8 +257,8 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                          const KeySelectorRef& end,
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(KeySelectorRef const& begin,
+                                                          KeySelectorRef const& end,
                                                           int limit,
                                                           bool snapshot,
                                                           bool reverse) {
@@ -272,8 +272,8 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                          const KeySelectorRef& end,
+ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(KeySelectorRef const& begin,
+                                                          KeySelectorRef const& end,
                                                           GetRangeLimits limits,
                                                           bool snapshot,
                                                           bool reverse) {
@@ -287,9 +287,9 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	});
 }
 
-ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
+ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(KeySelectorRef const& begin,
+                                                                      KeySelectorRef const& end,
+                                                                      StringRef const& mapper,
                                                                       GetRangeLimits limits,
                                                                       bool snapshot,
                                                                       bool reverse) {
@@ -304,17 +304,17 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
 	});
 }
 
-ThreadFuture<Standalone<VectorRef<const char*>>> ThreadSafeTransaction::getAddressesForKey(const KeyRef& key) {
+ThreadFuture<Standalone<VectorRef<char const*>>> ThreadSafeTransaction::getAddressesForKey(KeyRef const& key) {
 	Key k = key;
 
 	ReadYourWritesTransaction* tr = this->tr;
-	return onMainThread([tr, k]() -> Future<Standalone<VectorRef<const char*>>> {
+	return onMainThread([tr, k]() -> Future<Standalone<VectorRef<char const*>>> {
 		tr->checkDeferredError();
 		return tr->getAddressesForKey(k);
 	});
 }
 
-void ThreadSafeTransaction::addReadConflictRange(const KeyRangeRef& keys) {
+void ThreadSafeTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	KeyRange r = keys;
 
 	ReadYourWritesTransaction* tr = this->tr;
@@ -326,7 +326,7 @@ void ThreadSafeTransaction::makeSelfConflicting() {
 	onMainThreadVoid([tr]() { tr->makeSelfConflicting(); }, tr, &ReadYourWritesTransaction::deferredError);
 }
 
-void ThreadSafeTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
+void ThreadSafeTransaction::atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) {
 	Key k = key;
 	Value v = value;
 
@@ -336,7 +336,7 @@ void ThreadSafeTransaction::atomicOp(const KeyRef& key, const ValueRef& value, u
 	                 &ReadYourWritesTransaction::deferredError);
 }
 
-void ThreadSafeTransaction::set(const KeyRef& key, const ValueRef& value) {
+void ThreadSafeTransaction::set(KeyRef const& key, ValueRef const& value) {
 	Key k = key;
 	Value v = value;
 
@@ -344,14 +344,14 @@ void ThreadSafeTransaction::set(const KeyRef& key, const ValueRef& value) {
 	onMainThreadVoid([tr, k, v]() { tr->set(k, v); }, tr, &ReadYourWritesTransaction::deferredError);
 }
 
-void ThreadSafeTransaction::clear(const KeyRangeRef& range) {
+void ThreadSafeTransaction::clear(KeyRangeRef const& range) {
 	KeyRange r = range;
 
 	ReadYourWritesTransaction* tr = this->tr;
 	onMainThreadVoid([tr, r]() { tr->clear(r); }, tr, &ReadYourWritesTransaction::deferredError);
 }
 
-void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
+void ThreadSafeTransaction::clear(KeyRef const& begin, KeyRef const& end) {
 	Key b = begin;
 	Key e = end;
 
@@ -367,14 +367,14 @@ void ThreadSafeTransaction::clear(const KeyRef& begin, const KeyRef& end) {
 	    &ReadYourWritesTransaction::deferredError);
 }
 
-void ThreadSafeTransaction::clear(const KeyRef& key) {
+void ThreadSafeTransaction::clear(KeyRef const& key) {
 	Key k = key;
 
 	ReadYourWritesTransaction* tr = this->tr;
 	onMainThreadVoid([tr, k]() { tr->clear(k); }, tr, &ReadYourWritesTransaction::deferredError);
 }
 
-ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
+ThreadFuture<Void> ThreadSafeTransaction::watch(KeyRef const& key) {
 	Key k = key;
 
 	ReadYourWritesTransaction* tr = this->tr;
@@ -384,7 +384,7 @@ ThreadFuture<Void> ThreadSafeTransaction::watch(const KeyRef& key) {
 	});
 }
 
-void ThreadSafeTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
+void ThreadSafeTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 	KeyRange r = keys;
 
 	ReadYourWritesTransaction* tr = this->tr;
@@ -518,7 +518,7 @@ void ThreadSafeTransaction::debugPrint(std::string const& message) {
 	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
 }
 
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
 
@@ -526,7 +526,7 @@ void ThreadSafeApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = ApiVersion(apiVersion);
 }
 
-const char* ThreadSafeApi::getClientVersion() {
+char const* ThreadSafeApi::getClientVersion() {
 	// There is only one copy of the ThreadSafeAPI, and it never gets deleted.
 	// Also, clientVersion is initialized on demand and never modified afterwards.
 	if (clientVersion.empty()) {
@@ -557,10 +557,10 @@ void ThreadSafeApi::runNetwork() {
 	Optional<Error> runErr;
 	try {
 		::runNetwork();
-	} catch (const Error& e) {
+	} catch (Error const& e) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
 		runErr = e;
-	} catch (const std::exception& e) {
+	} catch (std::exception const& e) {
 		runErr = unknown_error();
 		TraceEvent(SevError, "RunNetworkError").error(unknown_error()).detail("RootException", e.what());
 	} catch (...) {
@@ -571,9 +571,9 @@ void ThreadSafeApi::runNetwork() {
 	for (auto& hook : threadCompletionHooks) {
 		try {
 			hook.first(hook.second);
-		} catch (const Error& e) {
+		} catch (Error const& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		} catch (const std::exception& e) {
+		} catch (std::exception const& e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error()).detail("RootException", e.what());
 		} catch (...) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
@@ -591,12 +591,12 @@ void ThreadSafeApi::stopNetwork() {
 	::stopNetwork();
 }
 
-Reference<IDatabase> ThreadSafeApi::createDatabase(const char* clusterFilePath) {
+Reference<IDatabase> ThreadSafeApi::createDatabase(char const* clusterFilePath) {
 	return Reference<IDatabase>(
 	    new ThreadSafeDatabase(ThreadSafeDatabase::ConnectionRecordType::FILE, clusterFilePath, apiVersion.version()));
 }
 
-Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(const char* connectionString) {
+Reference<IDatabase> ThreadSafeApi::createDatabaseFromConnectionString(char const* connectionString) {
 	return Reference<IDatabase>(new ThreadSafeDatabase(
 	    ThreadSafeDatabase::ConnectionRecordType::CONNECTION_STRING, connectionString, apiVersion.version()));
 }

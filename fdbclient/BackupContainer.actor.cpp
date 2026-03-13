@@ -68,7 +68,7 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
 
-bool isBlobstoreUrl(const std::string& url) {
+bool isBlobstoreUrl(std::string const& url) {
 	return url.find("blobstore://") == 0;
 }
 
@@ -81,13 +81,13 @@ std::string IBackupContainer::ExpireProgress::toString() const {
 }
 
 void BackupFileList::toStream(FILE* fout) const {
-	for (const RangeFile& f : ranges) {
+	for (RangeFile const& f : ranges) {
 		fmt::print(fout, "range {0} {1}\n", f.fileSize, f.fileName);
 	}
-	for (const LogFile& f : logs) {
+	for (LogFile const& f : logs) {
 		fmt::print(fout, "log {0} {1}\n", f.fileSize, f.fileName);
 	}
-	for (const KeyspaceSnapshotFile& f : snapshots) {
+	for (KeyspaceSnapshotFile const& f : snapshots) {
 		fmt::print(fout, "snapshotManifest {0} {1}\n", f.totalSize, f.fileName);
 	}
 }
@@ -113,7 +113,7 @@ Future<Void> BackupDescription::resolveVersionTimes(Database cx) {
 	// Populate map with versions needed
 	versionTimeMap.clear();
 
-	for (const KeyspaceSnapshotFile& m : snapshots) {
+	for (KeyspaceSnapshotFile const& m : snapshots) {
 		versionTimeMap[m.beginVersion];
 		versionTimeMap[m.endVersion];
 	}
@@ -157,7 +157,7 @@ std::string BackupDescription::toString() const {
 		return s;
 	};
 
-	for (const KeyspaceSnapshotFile& m : snapshots) {
+	for (KeyspaceSnapshotFile const& m : snapshots) {
 		info.append(
 		    format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s  expiredPct=%.2f\n",
 		           formatVersion(m.beginVersion).c_str(),
@@ -216,7 +216,7 @@ std::string BackupDescription::toJSON() const {
 	};
 
 	JsonBuilderArray snapshotsArray;
-	for (const KeyspaceSnapshotFile& m : snapshots) {
+	for (KeyspaceSnapshotFile const& m : snapshots) {
 		JsonBuilderObject snapshotDoc;
 		snapshotDoc.setKey("Start", formatVersion(m.beginVersion));
 		snapshotDoc.setKey("End", formatVersion(m.endVersion));
@@ -263,9 +263,9 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 }
 
 // Get an IBackupContainer based on a container URL string
-Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
-                                                            const Optional<std::string>& proxy,
-                                                            const Optional<std::string>& encryptionKeyFileName) {
+Reference<IBackupContainer> IBackupContainer::openContainer(std::string const& url,
+                                                            Optional<std::string> const& proxy,
+                                                            Optional<std::string> const& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	// In simulation, disable caching for blobstore:// URLs to prevent cross-process connection issues.
@@ -440,8 +440,8 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL, 
 	}
 }
 
-Future<std::vector<std::string>> IBackupContainer::listContainers(const std::string& baseURL,
-                                                                  const Optional<std::string>& proxy) {
+Future<std::vector<std::string>> IBackupContainer::listContainers(std::string const& baseURL,
+                                                                  Optional<std::string> const& proxy) {
 	return listContainers_impl(baseURL, proxy);
 }
 

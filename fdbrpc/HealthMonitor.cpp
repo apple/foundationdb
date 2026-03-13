@@ -22,7 +22,7 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbrpc/HealthMonitor.h"
 
-void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
+void HealthMonitor::reportPeerClosed(NetworkAddress const& peerAddress) {
 	purgeOutdatedHistory();
 	peerClosedHistory.emplace_back(now(), peerAddress);
 	peerClosedNum[peerAddress] += 1;
@@ -45,7 +45,7 @@ void HealthMonitor::purgeOutdatedHistory() {
 	}
 }
 
-bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) {
+bool HealthMonitor::tooManyConnectionsClosed(NetworkAddress const& peerAddress) {
 	purgeOutdatedHistory();
 	if (peerClosedNum.find(peerAddress) == peerClosedNum.end()) {
 		return false;
@@ -53,7 +53,7 @@ bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) 
 	return peerClosedNum[peerAddress] > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
 }
 
-int HealthMonitor::closedConnectionsCount(const NetworkAddress& peerAddress) {
+int HealthMonitor::closedConnectionsCount(NetworkAddress const& peerAddress) {
 	purgeOutdatedHistory();
 	if (peerClosedNum.find(peerAddress) == peerClosedNum.end()) {
 		return 0;
@@ -64,7 +64,7 @@ int HealthMonitor::closedConnectionsCount(const NetworkAddress& peerAddress) {
 std::unordered_set<NetworkAddress> HealthMonitor::getRecentClosedPeers() {
 	purgeOutdatedHistory();
 	std::unordered_set<NetworkAddress> closedPeers;
-	for (const auto& [peerAddr, count] : peerClosedNum) {
+	for (auto const& [peerAddr, count] : peerClosedNum) {
 		if (count > 0) {
 			closedPeers.insert(peerAddr);
 		}

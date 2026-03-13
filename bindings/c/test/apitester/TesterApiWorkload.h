@@ -105,7 +105,7 @@ protected:
 	// In-memory store maintaining expected database state
 	std::unordered_map<std::optional<int>, KeyValueStore> stores;
 
-	ApiWorkload(const WorkloadConfig& config);
+	ApiWorkload(WorkloadConfig const& config);
 
 	// Methods for generating random keys and values
 	fdb::Key randomKeyName();

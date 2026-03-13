@@ -74,13 +74,13 @@ struct ProcessInfo : NonCopyable {
 
 	std::vector<ProcessInfo*> childs;
 
-	ProcessInfo(const char* name,
+	ProcessInfo(char const* name,
 	            LocalityData locality,
 	            ProcessClass startingClass,
 	            NetworkAddressList addresses,
 	            INetworkConnections* net,
-	            const char* dataFolder,
-	            const char* coordinationFolder)
+	            char const* dataFolder,
+	            char const* coordinationFolder)
 	  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 	    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
 	    failed(false), excluded(false), cleared(false), rebooting(false), drProcess(false), network(net),
@@ -139,7 +139,7 @@ struct ProcessInfo : NonCopyable {
 		}
 	}
 
-	Reference<IListener> getListener(const NetworkAddress& addr) const {
+	Reference<IListener> getListener(NetworkAddress const& addr) const {
 		auto listener = listenerMap.find(addr);
 		ASSERT(listener != listenerMap.end());
 		return listener->second;

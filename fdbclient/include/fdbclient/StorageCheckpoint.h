@@ -25,8 +25,8 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 
-const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
-const std::string emptySstFilePath = "Dummy Empty SST File Path";
+std::string const checkpointBytesSampleFileName = "metadata_bytes.sst";
+std::string const emptySstFilePath = "Dummy Empty SST File Path";
 
 // FDB storage checkpoint format.
 enum CheckpointFormat {
@@ -66,14 +66,14 @@ struct CheckpointMetaData {
 	std::string dir;
 
 	CheckpointMetaData() = default;
-	CheckpointMetaData(const std::vector<KeyRange>& ranges,
+	CheckpointMetaData(std::vector<KeyRange> const& ranges,
 	                   CheckpointFormat format,
-	                   const std::vector<UID>& src,
+	                   std::vector<UID> const& src,
 	                   UID const& checkpointID,
 	                   UID const& actionId)
 	  : version(invalidVersion), ranges(ranges), format(format), src(src), checkpointID(checkpointID), state(Pending),
 	    actionId(actionId) {}
-	CheckpointMetaData(const std::vector<KeyRange>& ranges,
+	CheckpointMetaData(std::vector<KeyRange> const& ranges,
 	                   Version version,
 	                   CheckpointFormat format,
 	                   UID const& checkpointID)
@@ -93,8 +93,8 @@ struct CheckpointMetaData {
 
 	Standalone<StringRef> getSerializedCheckpoint() const;
 
-	bool hasRange(const KeyRangeRef range) const {
-		for (const auto& checkpointRange : ranges) {
+	bool hasRange(KeyRangeRef const range) const {
+		for (auto const& checkpointRange : ranges) {
 			if (checkpointRange.contains(range)) {
 				return true;
 			}
@@ -102,8 +102,8 @@ struct CheckpointMetaData {
 		return false;
 	}
 
-	bool hasRanges(const std::vector<KeyRange>& ranges) const {
-		for (const auto& range : ranges) {
+	bool hasRanges(std::vector<KeyRange> const& ranges) const {
+		for (auto const& range : ranges) {
 			if (!this->hasRange(range)) {
 				return false;
 			}
@@ -111,8 +111,8 @@ struct CheckpointMetaData {
 		return true;
 	}
 
-	bool containsKey(const KeyRef key) const {
-		for (const auto& range : ranges) {
+	bool containsKey(KeyRef const key) const {
+		for (auto const& range : ranges) {
 			if (range.contains(key)) {
 				return true;
 			}
@@ -121,7 +121,7 @@ struct CheckpointMetaData {
 		return false;
 	}
 
-	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
+	bool operator==(CheckpointMetaData const& r) const { return checkpointID == r.checkpointID; }
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +

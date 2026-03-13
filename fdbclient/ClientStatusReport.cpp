@@ -51,10 +51,10 @@ private:
 		auto& connRecord = cx.connectionRecord->get();
 		ClusterConnectionString cs = connRecord->getConnectionString();
 		json_spirit::mArray coordArray;
-		for (const auto& hostName : cs.hostnames) {
+		for (auto const& hostName : cs.hostnames) {
 			coordArray.push_back(hostName.toString());
 		}
-		for (const auto& addr : cs.coords) {
+		for (auto const& addr : cs.coords) {
 			coordArray.push_back(addr.toString());
 			serverAddresses.insert(addr);
 		}
@@ -76,13 +76,13 @@ private:
 		auto& clientInfo = cx.clientInfo->get();
 		statusObj["ClusterID"] = clientInfo.clusterId.toString();
 		json_spirit::mArray grvProxyArr;
-		for (const auto& grvProxy : clientInfo.grvProxies) {
+		for (auto const& grvProxy : clientInfo.grvProxies) {
 			serverAddresses.insert(grvProxy.address());
 			grvProxyArr.push_back(grvProxy.address().toString());
 		}
 		statusObj["GrvProxies"] = grvProxyArr;
 		json_spirit::mArray commitProxyArr;
-		for (const auto& commitProxy : clientInfo.commitProxies) {
+		for (auto const& commitProxy : clientInfo.commitProxies) {
 			serverAddresses.insert(commitProxy.address());
 			commitProxyArr.push_back(commitProxy.address().toString());
 		}
@@ -96,7 +96,7 @@ private:
 
 	void reportStorageServers() {
 		json_spirit::mArray storageServerArr;
-		for (const auto& [ssid, serverInfo] : cx.server_interf) {
+		for (auto const& [ssid, serverInfo] : cx.server_interf) {
 			json_spirit::mObject serverDesc;
 			serverDesc["SSID"] = ssid.toString();
 			serverDesc["Address"] = serverInfo->interf.address().toString();
@@ -108,7 +108,7 @@ private:
 
 	void reportConnections() {
 		json_spirit::mArray connectionArr;
-		for (const auto& addr : serverAddresses) {
+		for (auto const& addr : serverAddresses) {
 			connectionArr.push_back(connectionStatusReport(addr));
 		}
 		statusObj["Connections"] = connectionArr;
@@ -120,7 +120,7 @@ private:
 		}
 	}
 
-	json_spirit::mObject connectionStatusReport(const NetworkAddress& address) {
+	json_spirit::mObject connectionStatusReport(NetworkAddress const& address) {
 		json_spirit::mObject connStatus;
 		connStatus["Address"] = address.toString();
 

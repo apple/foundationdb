@@ -65,8 +65,8 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 	virtual bool validate(std::vector<LocalityEntry> const& solutionSet,
 	                      Reference<LocalitySet> const& fromServers) const = 0;
 
-	bool operator==(const IReplicationPolicy& r) const { return info() == r.info(); }
-	bool operator!=(const IReplicationPolicy& r) const { return info() != r.info(); }
+	bool operator==(IReplicationPolicy const& r) const { return info() == r.info(); }
+	bool operator!=(IReplicationPolicy const& r) const { return info() != r.info(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -112,7 +112,7 @@ inline void load(Archive& ar, Reference<IReplicationPolicy>& value) {
 }
 
 template <class Archive>
-inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
+inline void save(Archive& ar, Reference<IReplicationPolicy> const& value) {
 	bool present = (value.getPtr() != nullptr);
 	ar << present;
 	if (present) {
@@ -121,8 +121,8 @@ inline void save(Archive& ar, const Reference<IReplicationPolicy>& value) {
 }
 
 struct PolicyOne final : IReplicationPolicy {
-	PolicyOne() {};
-	explicit PolicyOne(const PolicyOne& o) {}
+	PolicyOne(){};
+	explicit PolicyOne(PolicyOne const& o) {}
 	std::string name() const override { return "One"; }
 	std::string info() const override { return "1"; }
 	int maxResults() const override { return 1; }
@@ -151,7 +151,7 @@ struct PolicyAcross final : IReplicationPolicy {
 	friend struct serializable_traits<PolicyAcross*>;
 	PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy);
 	explicit PolicyAcross();
-	explicit PolicyAcross(const PolicyAcross& other) : PolicyAcross(other._count, other._attribKey, other._policy) {}
+	explicit PolicyAcross(PolicyAcross const& other) : PolicyAcross(other._count, other._attribKey, other._policy) {}
 	~PolicyAcross() override;
 	std::string name() const override { return "Across"; }
 	std::string embeddedPolicyName() const { return _policy->name(); }
@@ -173,7 +173,7 @@ struct PolicyAcross final : IReplicationPolicy {
 
 	void deserializationDone() override {}
 
-	static bool compareAddedResults(const std::pair<int, int>& rhs, const std::pair<int, int>& lhs) {
+	static bool compareAddedResults(std::pair<int, int> const& rhs, std::pair<int, int> const& lhs) {
 		return (rhs.first < lhs.first) || (!(lhs.first < rhs.first) && (rhs.second < lhs.second));
 	}
 
@@ -184,7 +184,7 @@ struct PolicyAcross final : IReplicationPolicy {
 
 	Reference<IReplicationPolicy> embeddedPolicy() const { return _policy; }
 
-	const std::string& attributeKey() const { return _attribKey; }
+	std::string const& attributeKey() const { return _attribKey; }
 
 	void traverseForMaxDepth(int& globalMax) const override {
 		globalMax = std::max(globalMax, depth());
@@ -220,7 +220,7 @@ struct PolicyAnd final : IReplicationPolicy {
 		// Sort the policy array
 		std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 	}
-	explicit PolicyAnd(const PolicyAnd& other) : _policies(other._policies), _sortedPolicies(other._sortedPolicies) {}
+	explicit PolicyAnd(PolicyAnd const& other) : _policies(other._policies), _sortedPolicies(other._sortedPolicies) {}
 	explicit PolicyAnd() {}
 	std::string name() const override { return "And"; }
 	std::string info() const override {
@@ -246,7 +246,7 @@ struct PolicyAnd final : IReplicationPolicy {
 	                    std::vector<LocalityEntry> const& alsoServers,
 	                    std::vector<LocalityEntry>& results) override;
 
-	static bool comparePolicy(const Reference<IReplicationPolicy>& rhs, const Reference<IReplicationPolicy>& lhs) {
+	static bool comparePolicy(Reference<IReplicationPolicy> const& rhs, Reference<IReplicationPolicy> const& lhs) {
 		return (lhs->maxResults() < rhs->maxResults()) ||
 		       (!(rhs->maxResults() < lhs->maxResults()) && (lhs->depth() < rhs->depth()));
 	}
@@ -272,7 +272,7 @@ struct PolicyAnd final : IReplicationPolicy {
 	}
 
 	void attributeKeys(std::set<std::string>* set) const override {
-		for (const Reference<IReplicationPolicy>& r : _policies) {
+		for (Reference<IReplicationPolicy> const& r : _policies) {
 			r->attributeKeys(set);
 		}
 	}
@@ -350,7 +350,7 @@ private:
 
 public:
 	template <class Context>
-	static size_t size(const T& value, Context& context) {
+	static size_t size(T const& value, Context& context) {
 		// size gets called multiple times. If this becomes a performance problem, we can perform the
 		// serialization once and cache the result as a mutable member of IReplicationPolicy
 		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
@@ -360,7 +360,7 @@ public:
 
 	// Guaranteed to be called only once during serialization
 	template <class Context>
-	static void save(uint8_t* out, const T& value, Context& context) {
+	static void save(uint8_t* out, T const& value, Context& context) {
 		BinaryWriter writer{ AssumeVersion(context.protocolVersion()) };
 		::save(writer, value);
 		memcpy(out, writer.getData(), writer.getLength());
@@ -369,7 +369,7 @@ public:
 	// Context is an arbitrary type that is plumbed by reference throughout the
 	// load call tree.
 	template <class Context>
-	static void load(const uint8_t* buf, size_t sz, Reference<IReplicationPolicy>& value, Context& context) {
+	static void load(uint8_t const* buf, size_t sz, Reference<IReplicationPolicy>& value, Context& context) {
 		StringRef str(buf, sz);
 		BinaryReader reader(str, AssumeVersion(context.protocolVersion()));
 		::load(reader, value);

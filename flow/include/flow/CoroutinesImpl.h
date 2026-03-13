@@ -133,7 +133,7 @@ struct AwaitableFutureStore {
 	void set(U&& v) { data = std::move(v); }
 	void set(U const& v) { data = v; }
 
-	const U& getRef() const {
+	U const& getRef() const {
 		switch (data.index()) {
 		case 0:
 			throw std::get<0>(data);
@@ -209,7 +209,7 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 	struct Empty {};
 	[[no_unique_address]] std::conditional_t<IsStream, AwaitableFutureStore<FutureValue>, Empty> store;
 
-	AwaitableFuture(const FutureType& f, promise_type* pt) : future(f), pt(pt) {}
+	AwaitableFuture(FutureType const& f, promise_type* pt) : future(f), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
 		if constexpr (IsStream) {
@@ -287,7 +287,7 @@ struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
 	promise_type* pt = nullptr;
 	AwaitableFutureStore<FutureValue> store;
 
-	ThreadAwaitableFutureStream(const FutureType& f, promise_type* pt) : future(f), pt(pt) {}
+	ThreadAwaitableFutureStream(FutureType const& f, promise_type* pt) : future(f), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
 		store.set(value);
@@ -416,7 +416,7 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 		// The exception should always be type Error.
 		try {
 			std::rethrow_exception(std::current_exception());
-		} catch (const Error& error) {
+		} catch (Error const& error) {
 			coroActor.setError(error);
 		} catch (...) {
 			coroActor.setError(unknown_error());
@@ -430,17 +430,17 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 	int8_t& waitState() { return coroActor.waitState(); }
 
 	template <class U>
-	auto await_transform(const Future<U>& future) {
+	auto await_transform(Future<U> const& future) {
 		return coro::AwaitableFuture<promise_type, U, false>{ future, this };
 	}
 
 	template <class U>
-	auto await_transform(const FutureStream<U>& futureStream) {
+	auto await_transform(FutureStream<U> const& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
 	}
 
 	template <class U>
-	auto await_transform(const ThreadFutureStream<U>& futureStream) {
+	auto await_transform(ThreadFutureStream<U> const& futureStream) {
 		return coro::ThreadAwaitableFutureStream<promise_type, U>{ futureStream, this };
 	}
 };
@@ -510,7 +510,7 @@ struct AsyncGeneratorPromise {
 		// The exception should always be type Error.
 		try {
 			std::rethrow_exception(std::current_exception());
-		} catch (const Error& error) {
+		} catch (Error const& error) {
 			nextPromise.sendError(error);
 		} catch (...) {
 			nextPromise.sendError(unknown_error());
@@ -528,12 +528,12 @@ struct AsyncGeneratorPromise {
 	void resume() { mHandle.resume(); }
 
 	template <class U>
-	auto await_transform(const Future<U>& future) {
+	auto await_transform(Future<U> const& future) {
 		return coro::AwaitableFuture<promise_type, U, false>{ future, this };
 	}
 
 	template <class U>
-	auto await_transform(const FutureStream<U>& futureStream) {
+	auto await_transform(FutureStream<U> const& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
 	}
 

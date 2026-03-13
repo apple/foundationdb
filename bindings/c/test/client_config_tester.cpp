@@ -64,7 +64,7 @@ enum TesterOptionId {
 	OPT_NETWORK_OPTION
 };
 
-const int MIN_TESTABLE_API_VERSION = 400;
+int const MIN_TESTABLE_API_VERSION = 400;
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
     { { OPT_HELP, "-h", SO_NONE },
@@ -107,7 +107,7 @@ namespace {
 TesterOptions options;
 }
 
-void printProgramUsage(const char* execName) {
+void printProgramUsage(char const* execName) {
 	printf("usage: %s [OPTIONS]\n"
 	       "\n",
 	       execName);
@@ -140,7 +140,7 @@ void printProgramUsage(const char* execName) {
 	       FDB_API_VERSION);
 }
 
-bool processIntOption(const std::string& optionName, const std::string& value, int minValue, int maxValue, int& res) {
+bool processIntOption(std::string const& optionName, std::string const& value, int minValue, int maxValue, int& res) {
 	char* endptr;
 	res = strtol(value.c_str(), &endptr, 10);
 	if (*endptr != '\0') {
@@ -157,7 +157,7 @@ bool processIntOption(const std::string& optionName, const std::string& value, i
 
 // Extracts the key for command line arguments that are specified with a prefix (e.g. --knob-).
 // This function converts any hyphens in the extracted key to underscores.
-bool extractPrefixedArgument(std::string prefix, const std::string& arg, std::string& res) {
+bool extractPrefixedArgument(std::string prefix, std::string const& arg, std::string& res) {
 	if (arg.size() <= prefix.size() || arg.find(prefix) != 0 ||
 	    (arg[prefix.size()] != '-' && arg[prefix.size()] != '_')) {
 		return false;
@@ -168,7 +168,7 @@ bool extractPrefixedArgument(std::string prefix, const std::string& arg, std::st
 	return true;
 }
 
-bool processArg(const CSimpleOpt& args) {
+bool processArg(CSimpleOpt const& args) {
 	switch (args.OptionId()) {
 	case OPT_CONNFILE:
 		options.clusterFile = args.OptionArg();
@@ -268,7 +268,7 @@ void fdb_check(fdb::Error e, std::string_view msg) {
 	}
 }
 
-std::string stringToUpper(const std::string& str) {
+std::string stringToUpper(std::string const& str) {
 	std::string outStr(str);
 	std::transform(outStr.begin(), outStr.end(), outStr.begin(), [](char c) { return std::toupper(c); });
 	return outStr;
@@ -373,10 +373,10 @@ int main(int argc, char** argv) {
 
 		fdb_check(fdb::network::stop(), "Stop network failed");
 		network_thread.join();
-	} catch (const fdb::Error& err) {
+	} catch (fdb::Error const& err) {
 		fmt::print(stderr, "FDB Error: {}\n", err.what());
 		retCode = err.code();
-	} catch (const std::runtime_error& err) {
+	} catch (std::runtime_error const& err) {
 		fmt::print(stderr, "runtime error caught: {}\n", err.what());
 		retCode = 1;
 	}

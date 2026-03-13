@@ -29,15 +29,15 @@ void XmlTraceLogFormatter::delref() {
 	ReferenceCounted<XmlTraceLogFormatter>::delref();
 }
 
-const char* XmlTraceLogFormatter::getExtension() const {
+char const* XmlTraceLogFormatter::getExtension() const {
 	return "xml";
 }
 
-const char* XmlTraceLogFormatter::getHeader() const {
+char const* XmlTraceLogFormatter::getHeader() const {
 	return "<?xml version=\"1.0\"?>\r\n<Trace>\r\n";
 }
 
-const char* XmlTraceLogFormatter::getFooter() const {
+char const* XmlTraceLogFormatter::getFooter() const {
 	return "</Trace>\r\n";
 }
 
@@ -74,7 +74,7 @@ void XmlTraceLogFormatter::escape(std::ostringstream& oss, std::string source) c
 	oss << std::move(source);
 }
 
-std::string XmlTraceLogFormatter::formatEvent(const TraceEventFields& fields) const {
+std::string XmlTraceLogFormatter::formatEvent(TraceEventFields const& fields) const {
 	std::ostringstream oss;
 	oss << "<Event ";
 

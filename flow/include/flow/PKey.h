@@ -52,9 +52,9 @@ public:
 	// d2i_PUBKEY
 	PublicKey(DerEncoded, StringRef der);
 
-	PublicKey(const PublicKey& other) noexcept = default;
+	PublicKey(PublicKey const& other) noexcept = default;
 
-	PublicKey& operator=(const PublicKey& other) noexcept = default;
+	PublicKey& operator=(PublicKey const& other) noexcept = default;
 
 	// PEM_write_bio_PUBKEY
 	StringRef writePem(Arena& arena) const;
@@ -68,7 +68,7 @@ public:
 	std::string_view algorithmName() const;
 
 	// EVP_DigestVerify*
-	bool verify(StringRef data, StringRef signature, const EVP_MD& digest) const;
+	bool verify(StringRef data, StringRef signature, EVP_MD const& digest) const;
 
 	EVP_PKEY* nativeHandle() const noexcept { return ptr.get(); }
 
@@ -87,9 +87,9 @@ public:
 	// d2i_AutoPrivateKey
 	PrivateKey(DerEncoded, StringRef der);
 
-	PrivateKey(const PrivateKey& other) noexcept = default;
+	PrivateKey(PrivateKey const& other) noexcept = default;
 
-	PrivateKey& operator=(const PrivateKey& other) noexcept = default;
+	PrivateKey& operator=(PrivateKey const& other) noexcept = default;
 
 	// PEM_write_bio_PrivateKey
 	StringRef writePem(Arena& arena, StringRef password = StringRef()) const;
@@ -113,10 +113,10 @@ public:
 	explicit operator bool() const noexcept { return static_cast<bool>(ptr); }
 
 	// EVP_DigestSign*
-	StringRef sign(Arena& arena, StringRef data, const EVP_MD& digest) const;
+	StringRef sign(Arena& arena, StringRef data, EVP_MD const& digest) const;
 
 	// EVP_DigestVerify*
-	bool verify(StringRef data, StringRef signature, const EVP_MD& digest) const;
+	bool verify(StringRef data, StringRef signature, EVP_MD const& digest) const;
 
 	// Create a PublicKey independent of this key
 	PublicKey toPublic() const;

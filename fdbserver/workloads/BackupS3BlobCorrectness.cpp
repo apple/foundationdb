@@ -228,7 +228,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			// Create ranges from the keys, in order, to prevent overlaps
 			std::vector<std::string> sortedEndpoints(rangeEndpoints.begin(), rangeEndpoints.end());
 			for (auto i = sortedEndpoints.begin(); i != sortedEndpoints.end(); ++i) {
-				const std::string& start = *i++;
+				std::string const& start = *i++;
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(start, *i));
 			}
 		}
@@ -237,7 +237,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			skippedRestoreRanges.push_back(backupRanges[deterministicRandom()->randomInt(0, backupRanges.size())]);
 		}
 
-		for (const auto& range : backupRanges) {
+		for (auto const& range : backupRanges) {
 			if (std::find(skippedRestoreRanges.begin(), skippedRestoreRanges.end(), range) ==
 			    skippedRestoreRanges.end()) {
 				restoreRanges.push_back_deep(restoreRanges.arena(), range);
@@ -246,8 +246,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		if (!restorePrefixesToInclude.empty()) {
 			Standalone<VectorRef<KeyRangeRef>> filteredRestoreRanges;
-			for (const auto& range : restoreRanges) {
-				for (const auto& prefix : restorePrefixesToInclude) {
+			for (auto const& range : restoreRanges) {
+				for (auto const& prefix : restorePrefixesToInclude) {
 					if (range.begin.startsWith(StringRef(prefix))) {
 						filteredRestoreRanges.push_back_deep(filteredRestoreRanges.arena(), range);
 						break;
@@ -794,7 +794,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 							std::vector<AuditStorageState> auditStates =
 							    co_await getAuditStates(cx, AuditType::ValidateRestore, true);
 
-							for (const auto& auditState : auditStates) {
+							for (auto const& auditState : auditStates) {
 								if (auditState.id == auditId) {
 									if (auditState.getPhase() == AuditPhase::Complete) {
 										finalPhase = AuditPhase::Complete;

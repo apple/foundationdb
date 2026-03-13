@@ -34,7 +34,7 @@ namespace base64 {
 //       URL-encoded or otherwise. Also, every encoding/decoding is one-off: i.e. no streaming.
 
 // Encodes plaintext into base64 string and returns the length of encoded output in bytes
-int encode(const uint8_t* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept;
+int encode(uint8_t const* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept;
 
 // Returns the number of bytes required to store the data of given length in base64 encoding.
 int encodedLength(int dataLength) noexcept;
@@ -45,7 +45,7 @@ StringRef encode(Arena& arena, StringRef plainText);
 namespace url {
 
 // Encodes plaintext into URL-encoded base64 string and returns the length of encoded output in bytes
-int encode(const uint8_t* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept;
+int encode(uint8_t const* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept;
 
 // Returns the number of bytes required to store the data of given length in URL-encoded base64
 int encodedLength(int dataLength) noexcept;

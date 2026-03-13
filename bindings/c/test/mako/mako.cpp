@@ -93,15 +93,15 @@ std::pair<Transaction, std::optional<std::string> /*token*/> createNewTransactio
 
 /* cleanup database */
 int cleanupNormalKeyspace(Database db, Arguments const& args) {
-	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
+	auto const prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
 	auto genprefix = [&args](ByteString& s) {
-		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
+		auto const padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
 		auto pos = 0;
 		if (args.prefixpadding) {
 			memset(s.data(), 'x', padding_len);
 			pos += padding_len;
 		}
-		const auto key_prefix_len = intSize(KEY_PREFIX);
+		auto const key_prefix_len = intSize(KEY_PREFIX);
 		memcpy(&s[pos], KEY_PREFIX.data(), key_prefix_len);
 	};
 	auto beginstr = ByteString(prefix_len + 1, '\0');
@@ -115,7 +115,7 @@ int cleanupNormalKeyspace(Database db, Arguments const& args) {
 	while (true) {
 		tx.clearRange(beginstr, endstr);
 		auto future_commit = tx.commit();
-		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
+		auto const rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
 		if (rc == FutureRC::OK) {
 			break;
 		} else if (rc == FutureRC::RETRY) {
@@ -131,17 +131,17 @@ int cleanupNormalKeyspace(Database db, Arguments const& args) {
 }
 
 /* populate database */
-int populate(Database db, const ThreadArgs& thread_args, int thread_tps, WorkflowStatistics& stats) {
+int populate(Database db, ThreadArgs const& thread_args, int thread_tps, WorkflowStatistics& stats) {
 	Arguments const& args = *thread_args.args;
-	const auto process_idx = thread_args.process_idx;
-	const auto thread_idx = thread_args.thread_idx;
+	auto const process_idx = thread_args.process_idx;
+	auto const thread_idx = thread_args.thread_idx;
 	auto xacts = 0;
 	auto keystr = ByteString{};
 	auto valstr = ByteString{};
 	keystr.resize(args.key_length);
 	valstr.resize(args.value_length);
-	const auto num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
-	const auto num_seconds_trace_every = args.txntrace;
+	auto const num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
+	auto const num_seconds_trace_every = args.txntrace;
 	auto watch_total = Stopwatch(StartAtCtor{});
 	auto watch_throttle = Stopwatch(watch_total.getStart());
 	auto watch_tx = Stopwatch(watch_total.getStart());
@@ -150,8 +150,8 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, Workflo
 	int populate_iters = 1;
 	for (auto t_id = 0; t_id < populate_iters; ++t_id) {
 		auto [tx, token] = createNewTransaction(db, args, t_id);
-		const auto key_begin = insertBegin(args.rows, process_idx, thread_idx, args.num_processes, args.num_threads);
-		const auto key_end = insertEnd(args.rows, process_idx, thread_idx, args.num_processes, args.num_threads);
+		auto const key_begin = insertBegin(args.rows, process_idx, thread_idx, args.num_processes, args.num_threads);
+		auto const key_end = insertEnd(args.rows, process_idx, thread_idx, args.num_processes, args.num_threads);
 		auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 		double required_keys = (key_end - key_begin + 1) * args.load_factor;
 		for (auto i = key_begin; i <= key_end; i++) {
@@ -198,10 +198,10 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, Workflo
 
 			/* commit every 100 inserts (default) or if this is the last key */
 			if ((i % num_commit_every == 0) || i == key_end) {
-				const auto do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
+				auto const do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
 				auto watch_commit = Stopwatch(StartAtCtor{});
 				auto future_commit = tx.commit();
-				const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_POPULATE_INSERT");
+				auto const rc = waitAndHandleError(tx, future_commit, "COMMIT_POPULATE_INSERT");
 				watch_commit.stop();
 				watch_tx.setStop(watch_commit.getStop());
 				auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
@@ -216,8 +216,8 @@ int populate(Database db, const ThreadArgs& thread_args, int thread_tps, Workflo
 				}
 				/* xact latency stats */
 				if (do_sample) {
-					const auto commit_latency = watch_commit.diff();
-					const auto tx_duration = watch_tx.diff();
+					auto const commit_latency = watch_commit.diff();
+					auto const tx_duration = watch_tx.diff();
 					stats.addLatency(OP_COMMIT, commit_latency);
 					stats.addLatency(OP_TRANSACTION, tx_duration);
 				}
@@ -257,7 +257,7 @@ int runOneTransaction(Transaction& tx,
                       ByteString& key1,
                       ByteString& key2,
                       ByteString& val) {
-	const auto do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
+	auto const do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
 	auto watch_tx = Stopwatch(StartAtCtor{});
 	auto watch_op = Stopwatch{};
 
@@ -265,8 +265,8 @@ int runOneTransaction(Transaction& tx,
 	auto needs_commit = false;
 transaction_begin:
 	while (op_iter != OpEnd) {
-		const auto& [op, count, step] = op_iter;
-		const auto step_kind = opTable[op].stepKind(step);
+		auto const& [op, count, step] = op_iter;
+		auto const step_kind = opTable[op].stepKind(step);
 		if (step == 0 /* first step */)
 			prepareKeys(op, key1, key2, args);
 		auto watch_step = Stopwatch(StartAtCtor{});
@@ -298,7 +298,7 @@ transaction_begin:
 		if (step_kind == StepKind::COMMIT) {
 			// reset transaction boundary
 			if (do_sample) {
-				const auto step_latency = watch_step.diff();
+				auto const step_latency = watch_step.diff();
 				stats.addLatency(OP_COMMIT, step_latency);
 			}
 			tx.reset();
@@ -314,7 +314,7 @@ transaction_begin:
 				needs_commit = true;
 			watch_op.setStop(watch_step.getStop());
 			if (do_sample) {
-				const auto op_latency = watch_op.diff();
+				auto const op_latency = watch_op.diff();
 				stats.addLatency(op, op_latency);
 			}
 			stats.incrOpCount(op);
@@ -326,7 +326,7 @@ transaction_begin:
 	if (needs_commit || args.commit_get) {
 		auto watch_commit = Stopwatch(StartAtCtor{});
 		auto f = tx.commit();
-		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
+		auto const rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END", args.isAnyTimeoutEnabled());
 		updateErrorStatsRunMode(stats, f.error(), OP_COMMIT);
 		watch_commit.stop();
 		auto tx_resetter = ExitGuard([&tx, &token]() {
@@ -336,7 +336,7 @@ transaction_begin:
 		});
 		if (rc == FutureRC::OK) {
 			if (do_sample) {
-				const auto commit_latency = watch_commit.diff();
+				auto const commit_latency = watch_commit.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
 			}
 			stats.incrOpCount(OP_COMMIT);
@@ -351,7 +351,7 @@ transaction_begin:
 	}
 	// one transaction has completed successfully
 	if (do_sample) {
-		const auto tx_duration = watch_tx.stop().diff();
+		auto const tx_duration = watch_tx.stop().diff();
 		stats.addLatency(OP_TRANSACTION, tx_duration);
 	}
 	stats.incrOpCount(OP_TRANSACTION);
@@ -420,7 +420,7 @@ int runWorkload(Database db,
 
 			/* enable transaction trace */
 			if (dotrace) {
-				const auto time_now = steady_clock::now();
+				auto const time_now = steady_clock::now();
 				if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
 					time_last_trace = time_now;
 					traceid.clear();
@@ -487,10 +487,10 @@ void dumpThreadSamples(Arguments const& args,
                        pid_t parent_id,
                        int process_idx,
                        int thread_id,
-                       const WorkflowStatistics& stats,
+                       WorkflowStatistics const& stats,
                        bool overwrite = true) {
-	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
-	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	auto const dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
+	auto const rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 	if (rc < 0 && errno != EEXIST) {
 		logr.error("mkdir {}: {}", dirname, strerror(errno));
 		return;
@@ -510,7 +510,7 @@ void runAsyncWorkload(Arguments const& args,
                       std::vector<Database>& databases) {
 	auto dump_samples = [&args, pid_main, process_idx](auto&& states) {
 		auto overwrite = true; /* overwrite or append */
-		for (const auto& state : states) {
+		for (auto const& state : states) {
 			dumpThreadSamples(args, pid_main, process_idx, 0 /*thread_id*/, state->stats, overwrite);
 			overwrite = false;
 		}
@@ -519,8 +519,8 @@ void runAsyncWorkload(Arguments const& args,
 	if (args.mode == MODE_BUILD) {
 		auto states = std::vector<PopulateStateHandle>(args.async_xacts);
 		for (auto i = 0; i < args.async_xacts; i++) {
-			const auto key_begin = insertBegin(args.rows, process_idx, i, args.num_processes, args.async_xacts);
-			const auto key_end = insertEnd(args.rows, process_idx, i, args.num_processes, args.async_xacts);
+			auto const key_begin = insertBegin(args.rows, process_idx, i, args.num_processes, args.async_xacts);
+			auto const key_end = insertEnd(args.rows, process_idx, i, args.num_processes, args.async_xacts);
 			auto db = databases[i % args.num_databases];
 			auto state =
 			    std::make_shared<ResumableStateForPopulate>(Logger(WorkerProcess{}, args.verbose, process_idx, i),
@@ -539,7 +539,7 @@ void runAsyncWorkload(Arguments const& args,
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
 		// launch [async_xacts] concurrent transactions
-		for (const auto& state : states)
+		for (auto const& state : states)
 			state->postNextTick();
 		while (stopcount.load() != args.async_xacts)
 			usleep(1000);
@@ -548,7 +548,7 @@ void runAsyncWorkload(Arguments const& args,
 		auto states = std::vector<RunWorkloadStateHandle>(args.async_xacts);
 		for (auto i = 0; i < args.async_xacts; i++) {
 			auto db = databases[i % args.num_databases];
-			const auto max_iters =
+			auto const max_iters =
 			    args.iteration == 0
 			        ? -1
 			        : computeThreadIters(args.iteration, process_idx, i, args.num_processes, args.async_xacts);
@@ -571,7 +571,7 @@ void runAsyncWorkload(Arguments const& args,
 		}
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
-		for (const auto& state : states)
+		for (auto const& state : states)
 			state->postNextTick();
 		logr.debug("Launched {} concurrent transactions", states.size());
 		while (stopcount.load() != args.async_xacts)
@@ -582,17 +582,17 @@ void runAsyncWorkload(Arguments const& args,
 }
 
 /* mako worker thread */
-void workerThread(const ThreadArgs& thread_args) {
+void workerThread(ThreadArgs const& thread_args) {
 
-	const auto& args = *thread_args.args;
-	const auto parent_id = thread_args.parent_id;
-	const auto process_idx = thread_args.process_idx;
-	const auto thread_idx = thread_args.thread_idx;
-	const auto dotrace = (process_idx == 0 && thread_idx == 0 && args.txntrace) ? args.txntrace : 0;
+	auto const& args = *thread_args.args;
+	auto const parent_id = thread_args.parent_id;
+	auto const process_idx = thread_args.process_idx;
+	auto const thread_idx = thread_args.thread_idx;
+	auto const dotrace = (process_idx == 0 && thread_idx == 0 && args.txntrace) ? args.txntrace : 0;
 	auto database = thread_args.database;
-	const auto dotagging = args.txntagging;
-	const auto& signal = thread_args.shm.headerConst().signal;
-	const auto& throttle_factor = thread_args.shm.headerConst().throttle_factor;
+	auto const dotagging = args.txntagging;
+	auto const& signal = thread_args.shm.headerConst().signal;
+	auto const& throttle_factor = thread_args.shm.headerConst().throttle_factor;
 	auto& readycount = thread_args.shm.header().readycount;
 	auto& stopcount = thread_args.shm.header().stopcount;
 	auto& workflow_stats = thread_args.shm.workerStatsSlot(process_idx, thread_idx);
@@ -602,13 +602,13 @@ void workerThread(const ThreadArgs& thread_args) {
 
 	logr.debug("started, tid: {}", reinterpret_cast<uint64_t>(pthread_self()));
 
-	const auto thread_tps =
+	auto const thread_tps =
 	    args.tpsmax == 0 ? 0
 	                     : computeThreadTps(args.tpsmax, process_idx, thread_idx, args.num_processes, args.num_threads);
 	// argument validation should ensure thread_tps > 0
 	assert(args.tpsmax == 0 || thread_tps > 0);
 
-	const auto thread_iters =
+	auto const thread_iters =
 	    args.iteration == 0
 	        ? -1
 	        : computeThreadIters(args.iteration, process_idx, thread_idx, args.num_processes, args.num_threads);
@@ -727,7 +727,7 @@ int workerProcessMain(Arguments const& args, int process_idx, shared_memory::Acc
 			this_args.database = databases[i % args.num_databases];
 			worker_threads[i] = std::thread(workerThread, std::ref(this_args));
 #if defined(__linux__)
-			const auto thread_name = "mako_worker_" + std::to_string(i);
+			auto const thread_name = "mako_worker_" + std::to_string(i);
 			pthread_setname_np(worker_threads[i].native_handle(), thread_name.c_str());
 #endif
 		}
@@ -754,7 +754,7 @@ int workerProcessMain(Arguments const& args, int process_idx, shared_memory::Acc
 				shm.threadStatsSlot(process_idx, i).endThreadTimer();
 			});
 #if defined(__linux__)
-			const auto thread_name = "mako_worker_" + std::to_string(i);
+			auto const thread_name = "mako_worker_" + std::to_string(i);
 			pthread_setname_np(worker_threads[i].native_handle(), thread_name.c_str());
 #endif
 		}
@@ -896,7 +896,7 @@ int Arguments::setGlobalOptions() const {
 	/* enable knobs if specified */
 	if (knobs[0] != '\0') {
 		auto k = std::string_view(knobs);
-		const auto delim = std::string_view(", ");
+		auto const delim = std::string_view(", ");
 		while (true) {
 			k.remove_prefix(std::min(k.find_first_not_of(delim), k.size()));
 			auto knob = k.substr(0, k.find_first_of(delim));
@@ -1141,7 +1141,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 	int c;
 	int idx;
 	while (1) {
-		const char* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
+		char const* short_options = "a:c:d:p:t:r:s:i:x:v:m:hz";
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
 			/* options requiring an argument */
@@ -1224,7 +1224,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.api_version = atoi(optarg);
 			break;
 		case 'c': {
-			const char delim[] = ",";
+			char const delim[] = ",";
 			char* cluster_file = strtok(optarg, delim);
 			while (cluster_file != NULL) {
 				strcpy(args.cluster_files[args.num_fdb_clusters++], cluster_file);
@@ -1277,7 +1277,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				int i = optind;
 				for (; i < argc; i++) {
 					if (argv[i][0] != '-') {
-						const std::string report_file = argv[i];
+						std::string const report_file = argv[i];
 						strncpy(args.report_files[args.num_report_files], report_file.c_str(), report_file.size());
 						args.num_report_files++;
 					} else {
@@ -1596,7 +1596,7 @@ int Arguments::validate() {
 void printStats(Arguments const& args, WorkflowStatistics const* stats, double const duration_sec, FILE* fp) {
 	static WorkflowStatistics prev;
 
-	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+	auto const num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
 	auto current = WorkflowStatistics{};
 	for (auto i = 0; i < args.num_processes * num_workers; i++) {
 		current.combine(stats[i]);
@@ -1609,7 +1609,7 @@ void printStats(Arguments const& args, WorkflowStatistics const* stats, double c
 	auto print_err = false;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0) {
-			const auto ops_total_diff = current.getOpCount(op) - prev.getOpCount(op);
+			auto const ops_total_diff = current.getOpCount(op) - prev.getOpCount(op);
 			putField(ops_total_diff);
 			if (fp) {
 				fmt::print(fp, "\"{}\": {},", getOpName(op), ops_total_diff);
@@ -1618,14 +1618,14 @@ void printStats(Arguments const& args, WorkflowStatistics const* stats, double c
 		}
 	}
 	/* TPS */
-	const auto tps = (current.getOpCount(OP_TRANSACTION) - prev.getOpCount(OP_TRANSACTION)) / duration_sec;
+	auto const tps = (current.getOpCount(OP_TRANSACTION) - prev.getOpCount(OP_TRANSACTION)) / duration_sec;
 	putFieldFloat(tps, 2);
 	if (fp) {
 		fprintf(fp, "\"tps\": %.2f,", tps);
 	}
 
 	/* Conflicts */
-	const auto conflicts_diff = (current.getConflictCount() - prev.getConflictCount()) / duration_sec;
+	auto const conflicts_diff = (current.getConflictCount() - prev.getConflictCount()) / duration_sec;
 	putFieldFloat(conflicts_diff, 2);
 	fmt::print("\n");
 	if (fp) {
@@ -1636,7 +1636,7 @@ void printStats(Arguments const& args, WorkflowStatistics const* stats, double c
 		putTitleRight("Errors");
 		for (auto op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0) {
-				const auto errors_diff = current.getErrorCount(op) - prev.getErrorCount(op);
+				auto const errors_diff = current.getErrorCount(op) - prev.getErrorCount(op);
 				putField(errors_diff);
 				if (fp) {
 					fmt::print(fp, ",\"errors\": {}", errors_diff);
@@ -1740,7 +1740,7 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_min = final_stats.getLatencyUsMin(op);
+			auto const lat_min = final_stats.getLatencyUsMin(op);
 			if (lat_min == -1) {
 				putField("N/A");
 			} else {
@@ -1791,7 +1791,7 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_max = final_stats.getLatencyUsMax(op);
+			auto const lat_max = final_stats.getLatencyUsMax(op);
 			if (lat_max == 0) {
 				putField("N/A");
 			} else {
@@ -1817,8 +1817,8 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 	first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
-			const auto lat_total = final_stats.getLatencyUsTotal(op);
-			const auto lat_samples = final_stats.getLatencySampleCount(op);
+			auto const lat_total = final_stats.getLatencyUsTotal(op);
+			auto const lat_samples = final_stats.getLatencySampleCount(op);
 			if (lat_total && lat_samples) {
 				auto median = final_stats.percentile(op, 0.5);
 				putField(median);
@@ -1849,7 +1849,7 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 				putField("N/A");
 				continue;
 			}
-			const auto point_95pct = final_stats.percentile(op, 0.95);
+			auto const point_95pct = final_stats.percentile(op, 0.95);
 			putField(point_95pct);
 			if (fp) {
 				if (first_op) {
@@ -1875,7 +1875,7 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 				putField("N/A");
 				continue;
 			}
-			const auto point_99pct = final_stats.percentile(op, 0.99);
+			auto const point_99pct = final_stats.percentile(op, 0.99);
 			putField(point_99pct);
 			if (fp) {
 				if (first_op) {
@@ -1901,7 +1901,7 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 				putField("N/A");
 				continue;
 			}
-			const auto point_99_9pct = final_stats.percentile(op, 0.999);
+			auto const point_99_9pct = final_stats.percentile(op, 0.999);
 			putField(point_99_9pct);
 			if (fp) {
 				if (first_op) {
@@ -1920,8 +1920,8 @@ void printWorkerStats(WorkflowStatistics& final_stats, Arguments args, FILE* fp,
 }
 
 void loadSample(int pid_main, int op, std::vector<DDSketchMako>& data_points, int process_id, int thread_id) {
-	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
-	const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
+	auto const dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
+	auto const filename = getStatsFilename(dirname, process_id, thread_id, op);
 	std::ifstream fp{ filename };
 	std::ostringstream sstr;
 	sstr << fp.rdbuf();
@@ -1947,7 +1947,7 @@ void printReport(Arguments const& args,
                  FILE* fp) {
 
 	auto final_worker_stats = WorkflowStatistics{};
-	const auto num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
+	auto const num_workers = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
 
 	for (auto i = 0; i < args.num_processes * num_workers; i++) {
 		final_worker_stats.combine(worker_stats[i]);
@@ -1957,18 +1957,18 @@ void printReport(Arguments const& args,
 	    std::accumulate(thread_stats,
 	                    thread_stats + args.num_processes * args.num_threads,
 	                    0.0,
-	                    [](double x, const ThreadStatistics& s) { return x + s.getCPUTime(); });
+	                    [](double x, ThreadStatistics const& s) { return x + s.getCPUTime(); });
 	double total_duration_worker_threads =
 	    std::accumulate(thread_stats,
 	                    thread_stats + args.num_processes * args.num_threads,
 	                    0.0,
-	                    [](double x, const ThreadStatistics& s) { return x + s.getTotalDuration(); }) /
+	                    [](double x, ThreadStatistics const& s) { return x + s.getTotalDuration(); }) /
 	    (args.num_processes * args.num_threads); // average
 
 	double cpu_util_worker_threads = 100. * cpu_time_worker_threads / total_duration_worker_threads;
 
 	double cpu_time_worker_processes = std::accumulate(
-	    process_stats, process_stats + args.num_processes, 0.0, [](double x, const ProcessStatistics& s) {
+	    process_stats, process_stats + args.num_processes, 0.0, [](double x, ProcessStatistics const& s) {
 		    return x + s.getProcessCPUTime();
 	    });
 
@@ -1976,13 +1976,13 @@ void printReport(Arguments const& args,
 	    std::accumulate(process_stats,
 	                    process_stats + args.num_processes,
 	                    0.0,
-	                    [](double x, const ProcessStatistics& s) { return x + s.getProcessTotalDuration(); }) /
+	                    [](double x, ProcessStatistics const& s) { return x + s.getProcessTotalDuration(); }) /
 	    args.num_processes; // average
 
 	double cpu_util_worker_processes = 100. * cpu_time_worker_processes / total_duration_worker_processes;
 
 	double cpu_time_local_fdb_networks = std::accumulate(
-	    process_stats, process_stats + args.num_processes, 0.0, [](double x, const ProcessStatistics& s) {
+	    process_stats, process_stats + args.num_processes, 0.0, [](double x, ProcessStatistics const& s) {
 		    return x + s.getFDBNetworkCPUTime();
 	    });
 
@@ -1990,7 +1990,7 @@ void printReport(Arguments const& args,
 	    std::accumulate(process_stats,
 	                    process_stats + args.num_processes,
 	                    0.0,
-	                    [](double x, const ProcessStatistics& s) { return x + s.getProcessTotalDuration(); }) /
+	                    [](double x, ProcessStatistics const& s) { return x + s.getProcessTotalDuration(); }) /
 	    args.num_processes; // average
 
 	double cpu_util_local_fdb_networks = 100. * cpu_time_local_fdb_networks / total_duration_local_fdb_networks;
@@ -2023,8 +2023,8 @@ void printReport(Arguments const& args,
 			break;
 		}
 	}
-	const auto tps_f = final_worker_stats.getOpCount(OP_TRANSACTION) / duration_sec;
-	const auto tps_i = static_cast<uint64_t>(tps_f);
+	auto const tps_f = final_worker_stats.getOpCount(OP_TRANSACTION) / duration_sec;
+	auto const tps_i = static_cast<uint64_t>(tps_f);
 
 	fmt::printf("Total Xacts:       %8lu\n", final_worker_stats.getOpCount(OP_TRANSACTION));
 	fmt::printf("Total Conflicts:   %8lu\n", final_worker_stats.getConflictCount());
@@ -2078,11 +2078,11 @@ void printReport(Arguments const& args,
 	}
 
 	/* TPS */
-	const auto tps = final_worker_stats.getOpCount(OP_TRANSACTION) / duration_sec;
+	auto const tps = final_worker_stats.getOpCount(OP_TRANSACTION) / duration_sec;
 	putFieldFloat(tps, 2);
 
 	/* Conflicts */
-	const auto conflicts_rate = final_worker_stats.getConflictCount() / duration_sec;
+	auto const conflicts_rate = final_worker_stats.getConflictCount() / duration_sec;
 	putFieldFloat(conflicts_rate, 2);
 	fmt::print("\n");
 
@@ -2158,7 +2158,7 @@ void printReport(Arguments const& args,
 		f << final_worker_stats;
 	}
 
-	const auto command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
+	auto const command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
 	if (auto rc = system(command_remove.c_str())) {
 		logr.error("Command {} returned {}", command_remove, rc);
 		return;
@@ -2225,7 +2225,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "},\"samples\": [");
 	}
 
-	const auto time_start = steady_clock::now();
+	auto const time_start = steady_clock::now();
 	auto time_prev = time_start;
 	while (signal.load() != SIGNAL_RED) {
 		usleep(100000); /* sleep for 100ms */
@@ -2236,10 +2236,10 @@ int statsProcessMain(Arguments const& args,
 
 			/* adjust throttle rate if needed */
 			if (args.tpsmax != args.tpsmin) {
-				const auto tpsinterval = static_cast<double>(args.tpsinterval);
-				const auto tpsmin = static_cast<double>(args.tpsmin);
-				const auto tpsmax = static_cast<double>(args.tpsmax);
-				const auto pos = fmod(toDoubleSeconds(time_now - time_start), tpsinterval);
+				auto const tpsinterval = static_cast<double>(args.tpsinterval);
+				auto const tpsmin = static_cast<double>(args.tpsmin);
+				auto const tpsmax = static_cast<double>(args.tpsmax);
+				auto const pos = fmod(toDoubleSeconds(time_now - time_start), tpsinterval);
 				auto sin_factor = 0.;
 				/* set the throttle factor between 0.0 and 1.0 */
 				switch (args.tpschange) {
@@ -2362,9 +2362,9 @@ int main(int argc, char* argv[]) {
 		return 0;
 	}
 
-	const auto pid_main = getpid();
+	auto const pid_main = getpid();
 	/* create the shared memory for stats */
-	const auto shmpath = fmt::format("mako{}", pid_main);
+	auto const shmpath = fmt::format("mako{}", pid_main);
 	auto shmfd = shm_open(shmpath.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 	if (shmfd < 0) {
 		logr.error("shm_open failed: {}", strerror(errno));
@@ -2376,10 +2376,10 @@ int main(int argc, char* argv[]) {
 		unlink(shmpath.c_str());
 	});
 
-	const auto async_mode = args.async_xacts > 0;
-	const auto num_workers = async_mode ? args.async_xacts : args.num_threads;
+	auto const async_mode = args.async_xacts > 0;
+	auto const num_workers = async_mode ? args.async_xacts : args.num_threads;
 	/* allocate */
-	const auto shmsize = shared_memory::storageSize(args.num_processes, args.num_threads, num_workers);
+	auto const shmsize = shared_memory::storageSize(args.num_processes, args.num_threads, num_workers);
 
 	auto shm = std::add_pointer_t<void>{};
 	if (ftruncate(shmfd, shmsize) < 0) {

@@ -165,7 +165,7 @@ struct Profiler {
 
 	void phdr(struct dl_phdr_info* info) {
 		environmentInfoWriter << int64_t(1) << info->dlpi_addr
-		                      << StringRef((const uint8_t*)info->dlpi_name, strlen(info->dlpi_name));
+		                      << StringRef((uint8_t const*)info->dlpi_name, strlen(info->dlpi_name));
 		for (int s = 0; s < info->dlpi_phnum; s++) {
 			auto const& h = info->dlpi_phdr[s];
 			environmentInfoWriter << int64_t(2) << h.p_type << h.p_flags // Word (uint32_t)
@@ -275,14 +275,14 @@ void startProfiling(INetwork* network,
 	if (maybePeriod.present()) {
 		period = maybePeriod.get();
 	} else {
-		const char* periodEnv = getenv("FLOW_PROFILER_PERIOD");
+		char const* periodEnv = getenv("FLOW_PROFILER_PERIOD");
 		period = (periodEnv ? atoi(periodEnv) : 2000);
 	}
 	std::string outputFile;
 	if (maybeOutputFile.present()) {
-		outputFile = std::string((const char*)maybeOutputFile.get().begin(), maybeOutputFile.get().size());
+		outputFile = std::string((char const*)maybeOutputFile.get().begin(), maybeOutputFile.get().size());
 	} else {
-		const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
+		char const* outfn = getenv("FLOW_PROFILER_OUTPUT");
 		outputFile = (outfn ? outfn : "profile.bin");
 	}
 	outputFile = findAndReplace(

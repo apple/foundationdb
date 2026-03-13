@@ -27,7 +27,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-void ResolutionBalancer::setResolvers(const std::vector<ResolverInterface>& v) {
+void ResolutionBalancer::setResolvers(std::vector<ResolverInterface> const& v) {
 	resolvers = v;
 	if (resolvers.size() > 1)
 		triggerResolution.trigger();

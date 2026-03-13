@@ -156,7 +156,7 @@ public:
 			clientCounter = countClients(this);
 		}
 
-		void setDistributor(const DataDistributorInterface& interf) {
+		void setDistributor(DataDistributorInterface const& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
@@ -164,7 +164,7 @@ public:
 			serverInfo->set(newInfo);
 		}
 
-		void setRatekeeper(const RatekeeperInterface& interf) {
+		void setRatekeeper(RatekeeperInterface const& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
@@ -172,7 +172,7 @@ public:
 			serverInfo->set(newInfo);
 		}
 
-		void setConsistencyScan(const ConsistencyScanInterface& interf) {
+		void setConsistencyScan(ConsistencyScanInterface const& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
@@ -396,7 +396,7 @@ public:
 	// only add workers which have a field which is already in the result set
 	void addWorkersByLowestField(StringRef field,
 	                             int desired,
-	                             const std::vector<WorkerDetails>& workers,
+	                             std::vector<WorkerDetails> const& workers,
 	                             std::set<WorkerDetails>& resultSet) {
 		typedef Optional<Standalone<StringRef>> Field;
 		typedef Optional<Standalone<StringRef>> Zone;
@@ -481,7 +481,7 @@ public:
 
 	// Adds workers to the result which minimize the reuse of zoneIds
 	void addWorkersByLowestZone(int desired,
-	                            const std::vector<WorkerDetails>& workers,
+	                            std::vector<WorkerDetails> const& workers,
 	                            std::set<WorkerDetails>& resultSet) {
 		typedef Optional<Standalone<StringRef>> Zone;
 		typedef std::pair<int, Zone> ZoneCount;
@@ -490,7 +490,7 @@ public:
 		std::map<Zone, std::vector<WorkerDetails>> zone_workers;
 		std::priority_queue<ZoneCount, std::vector<ZoneCount>, std::greater<ZoneCount>> zoneQueue;
 
-		for (const auto& worker : workers) {
+		for (auto const& worker : workers) {
 			auto thisZone = worker.interf.locality.zoneId();
 			zone_count[thisZone] = 0;
 			zone_workers[thisZone].push_back(worker);
@@ -529,16 +529,16 @@ public:
 	}
 
 	// Log the reason why the worker is considered as unavailable.
-	void logWorkerUnavailable(const Severity severity,
-	                          const UID& id,
-	                          const std::string& method,
-	                          const std::string& reason,
-	                          const WorkerDetails& details,
-	                          const ProcessClass::Fitness& fitness,
-	                          const std::set<Optional<Key>>& dcIds) {
+	void logWorkerUnavailable(Severity const severity,
+	                          UID const& id,
+	                          std::string const& method,
+	                          std::string const& reason,
+	                          WorkerDetails const& details,
+	                          ProcessClass::Fitness const& fitness,
+	                          std::set<Optional<Key>> const& dcIds) {
 		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
 		std::string dcList;
-		for (const auto& dc : dcIds) {
+		for (auto const& dc : dcIds) {
 			if (!dcList.empty()) {
 				dcList += ',';
 			}
@@ -570,13 +570,13 @@ public:
 	                                                     int minPerField,
 	                                                     bool allowDegraded,
 	                                                     bool checkStable,
-	                                                     const std::set<Optional<Key>>& dcIds,
-	                                                     const std::vector<UID>& exclusionWorkerIds) {
+	                                                     std::set<Optional<Key>> const& dcIds,
+	                                                     std::vector<UID> const& exclusionWorkerIds) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool>, std::vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
-		for (const auto& [worker_process_id, worker_info] : id_worker) {
-			const auto& worker_details = worker_info.details;
+		for (auto const& [worker_process_id, worker_info] : id_worker) {
+			auto const& worker_details = worker_info.details;
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
@@ -753,8 +753,8 @@ public:
 	                                                     int minFields,
 	                                                     int minPerField,
 	                                                     bool checkStable,
-	                                                     const std::set<Optional<Key>>& dcIds,
-	                                                     const std::vector<UID>& exclusionWorkerIds) {
+	                                                     std::set<Optional<Key>> const& dcIds,
+	                                                     std::vector<UID> const& exclusionWorkerIds) {
 		desired = std::max(desired, minFields * minPerField);
 		std::map<Optional<Standalone<StringRef>>, int> withDegradedUsed = id_used;
 		auto withDegraded = getWorkersForTlogsComplex(conf,
@@ -820,13 +820,13 @@ public:
 	                                                    int32_t desired,
 	                                                    std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                                    bool checkStable,
-	                                                    const std::set<Optional<Key>>& dcIds,
-	                                                    const std::vector<UID>& exclusionWorkerIds) {
+	                                                    std::set<Optional<Key>> const& dcIds,
+	                                                    std::vector<UID> const& exclusionWorkerIds) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 
 		// Go through all the workers to list all the workers that can be recruited.
-		for (const auto& [worker_process_id, worker_info] : id_worker) {
-			const auto& worker_details = worker_info.details;
+		for (auto const& [worker_process_id, worker_info] : id_worker) {
+			auto const& worker_details = worker_info.details;
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
@@ -966,8 +966,8 @@ public:
 	    Reference<IReplicationPolicy> const& policy,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	    bool checkStable = false,
-	    const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
-	    const std::vector<UID>& exclusionWorkerIds = {}) {
+	    std::set<Optional<Key>> const& dcIds = std::set<Optional<Key>>(),
+	    std::vector<UID> const& exclusionWorkerIds = {}) {
 		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
 		std::vector<WorkerDetails> results;
 		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
@@ -976,8 +976,8 @@ public:
 		desired = std::max(required, desired);
 
 		// Go through all the workers to list all the workers that can be recruited.
-		for (const auto& [worker_process_id, worker_info] : id_worker) {
-			const auto& worker_details = worker_info.details;
+		for (auto const& [worker_process_id, worker_info] : id_worker) {
+			auto const& worker_details = worker_info.details;
 			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
 
 			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
@@ -1208,8 +1208,8 @@ public:
 	                                              Reference<IReplicationPolicy> const& policy,
 	                                              std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                              bool checkStable = false,
-	                                              const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
-	                                              const std::vector<UID>& exclusionWorkerIds = {}) {
+	                                              std::set<Optional<Key>> const& dcIds = std::set<Optional<Key>>(),
+	                                              std::vector<UID> const& exclusionWorkerIds = {}) {
 		desired = std::max(required, desired);
 		bool useSimple = false;
 		if (policy->name() == "Across") {
@@ -1322,9 +1322,9 @@ public:
 
 	// FIXME: This logic will fallback unnecessarily when usable dcs > 1 because it does not check all combinations of
 	// potential satellite locations
-	std::vector<WorkerDetails> getWorkersForSatelliteLogs(const DatabaseConfiguration& conf,
-	                                                      const RegionInfo& region,
-	                                                      const RegionInfo& remoteRegion,
+	std::vector<WorkerDetails> getWorkersForSatelliteLogs(DatabaseConfiguration const& conf,
+	                                                      RegionInfo const& region,
+	                                                      RegionInfo const& remoteRegion,
 	                                                      std::map<Optional<Standalone<StringRef>>, int>& id_used,
 	                                                      bool& satelliteFallback,
 	                                                      bool checkStable = false) {
@@ -1380,7 +1380,7 @@ public:
 					std::transform(remoteLogs.begin(),
 					               remoteLogs.end(),
 					               std::back_inserter(exclusionWorkerIds),
-					               [](const WorkerDetails& in) { return in.interf.id(); });
+					               [](WorkerDetails const& in) { return in.interf.id(); });
 				}
 				if (satelliteFallback) {
 					return getWorkersForTlogs(conf,
@@ -1417,7 +1417,7 @@ public:
 
 	ProcessClass::Fitness getBestFitnessForRoleInDatacenter(ProcessClass::ClusterRole role) {
 		ProcessClass::Fitness bestFitness = ProcessClass::NeverAssign;
-		for (const auto& it : id_worker) {
+		for (auto const& it : id_worker) {
 			if (it.second.priorityInfo.isExcluded ||
 			    it.second.details.interf.locality.dcId() != clusterControllerDcId) {
 				continue;
@@ -1537,9 +1537,9 @@ public:
 		  : bestFit(ProcessClass::NeverAssign), worstFit(ProcessClass::NeverAssign), role(ProcessClass::NoRole),
 		    count(0) {}
 
-		RoleFitness(const std::vector<WorkerDetails>& workers,
+		RoleFitness(std::vector<WorkerDetails> const& workers,
 		            ProcessClass::ClusterRole role,
-		            const std::map<Optional<Standalone<StringRef>>, int>& id_used)
+		            std::map<Optional<Standalone<StringRef>>, int> const& id_used)
 		  : role(role) {
 			// Every recruitment will attempt to recruit the preferred amount through GoodFit,
 			// So a recruitment which only has BestFit is not better than one that has a GoodFit process
@@ -1688,10 +1688,10 @@ public:
 	}
 
 	// Given datacenter ID, returns the primary and remote regions.
-	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions, Key dcId) {
+	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(std::vector<RegionInfo> const& regions, Key dcId) {
 		RegionInfo region;
 		RegionInfo remoteRegion;
-		for (const auto& r : regions) {
+		for (auto const& r : regions) {
 			if (r.dcId == dcId) {
 				region = r;
 			} else {
@@ -1803,7 +1803,7 @@ public:
 		}
 
 		if (req.configuration.backupWorkerEnabled) {
-			const int nBackup = std::max<int>(
+			int const nBackup = std::max<int>(
 			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
 			    req.maxOldLogRouters);
 			auto backupWorkers =
@@ -1811,7 +1811,7 @@ public:
 			std::transform(backupWorkers.begin(),
 			               backupWorkers.end(),
 			               std::back_inserter(result.backupWorkers),
-			               [](const WorkerDetails& w) { return w.interf; });
+			               [](WorkerDetails const& w) { return w.interf; });
 		}
 
 		if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
@@ -2047,13 +2047,13 @@ public:
 						}
 
 						if (req.configuration.backupWorkerEnabled) {
-							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+							int const nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = getWorkersForRoleInDatacenter(
 							    dcId, ProcessClass::Backup, nBackup, req.configuration, used);
 							std::transform(backupWorkers.begin(),
 							               backupWorkers.end(),
 							               std::back_inserter(result.backupWorkers),
-							               [](const WorkerDetails& w) { return w.interf; });
+							               [](WorkerDetails const& w) { return w.interf; });
 						}
 
 						break;
@@ -2117,18 +2117,18 @@ public:
 		}
 	}
 
-	void updateIdUsed(const std::vector<WorkerInterface>& workers,
+	void updateIdUsed(std::vector<WorkerInterface> const& workers,
 	                  std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 		for (auto& it : workers) {
 			id_used[it.locality.processId()]++;
 		}
 	}
 
-	void compareWorkers(const DatabaseConfiguration& conf,
-	                    const std::vector<WorkerInterface>& first,
-	                    const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
-	                    const std::vector<WorkerInterface>& second,
-	                    const std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
+	void compareWorkers(DatabaseConfiguration const& conf,
+	                    std::vector<WorkerInterface> const& first,
+	                    std::map<Optional<Standalone<StringRef>>, int> const& firstUsed,
+	                    std::vector<WorkerInterface> const& second,
+	                    std::map<Optional<Standalone<StringRef>>, int> const& secondUsed,
 	                    ProcessClass::ClusterRole role,
 	                    std::string description) {
 		std::vector<WorkerDetails> firstDetails;
@@ -2173,7 +2173,7 @@ public:
 				if (req.configuration.regions.size() > 1) {
 					auto [region, remoteRegion] =
 					    getPrimaryAndRemoteRegion(req.configuration.regions, req.configuration.regions[0].dcId);
-					for (const auto& satellite : region.satellites) {
+					for (auto const& satellite : region.satellites) {
 						if (satellite.dcId == remoteRegion.dcId) {
 							remoteDCUsedAsSatellite = true;
 						}
@@ -2245,7 +2245,7 @@ public:
 	}
 
 	// Check if txn system is recruited successfully in each region
-	void checkRegions(const std::vector<RegionInfo>& regions) {
+	void checkRegions(std::vector<RegionInfo> const& regions) {
 		if (desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 &&
 		    desiredDcIds.get().get()[0].get() == regions[0].dcId &&
 		    desiredDcIds.get().get()[1].get() == regions[1].dcId) {
@@ -2312,7 +2312,7 @@ public:
 		}
 	}
 
-	void updateIdUsed(const std::vector<WorkerDetails>& workers,
+	void updateIdUsed(std::vector<WorkerDetails> const& workers,
 	                  std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 		for (auto& it : workers) {
 			id_used[it.interf.locality.processId()]++;
@@ -2324,7 +2324,7 @@ public:
 	// This function returns true when the cluster controller determines it is worth forcing
 	// a cluster recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
-		const ServerDBInfo dbi = db.serverInfo->get();
+		ServerDBInfo const dbi = db.serverInfo->get();
 
 		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 			return false;
@@ -2406,7 +2406,7 @@ public:
 				}
 			}
 
-			for (const auto& worker : logSet.backupWorkers) {
+			for (auto const& worker : logSet.backupWorkers) {
 				auto workerIt = id_worker.find(worker.interf().locality.processId());
 				if (workerIt == id_worker.end()) {
 					TraceEvent("NewRecruitmentIsWorse", id)
@@ -2631,7 +2631,7 @@ public:
 		updateIdUsed(remote_tlogs, old_id_used);
 		RoleFitness oldRemoteTLogFit(remote_tlogs, ProcessClass::TLog, old_id_used);
 		std::vector<UID> exclusionWorkerIds;
-		auto fn = [](const WorkerDetails& in) { return in.interf.id(); };
+		auto fn = [](WorkerDetails const& in) { return in.interf.id(); };
 		std::transform(newTLogs.begin(), newTLogs.end(), std::back_inserter(exclusionWorkerIds), fn);
 		std::transform(newSatelliteTLogs.begin(), newSatelliteTLogs.end(), std::back_inserter(exclusionWorkerIds), fn);
 		RoleFitness newRemoteTLogFit = oldRemoteTLogFit;
@@ -2744,7 +2744,7 @@ public:
 		// Check backup worker fitness
 		updateIdUsed(backup_workers, old_id_used);
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup, old_id_used);
-		const int nBackup = backup_addresses.size();
+		int const nBackup = backup_addresses.size();
 		RoleFitness newBackupWorkersFit(getWorkersForRoleInDatacenter(clusterControllerDcId,
 		                                                              ProcessClass::Backup,
 		                                                              nBackup,
@@ -2832,21 +2832,21 @@ public:
 			return false;
 
 		auto& dbInfo = db.serverInfo->get();
-		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
-			for (const auto& tlog : tlogset.tLogs) {
+		for (auto const& tlogset : dbInfo.logSystemConfig.tLogs) {
+			for (auto const& tlog : tlogset.tLogs) {
 				if (tlog.present() && tlog.interf().filteredLocality.processId() == processId)
 					return true;
 			}
 		}
-		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
+		for (CommitProxyInterface const& interf : dbInfo.client.commitProxies) {
 			if (interf.processId == processId)
 				return true;
 		}
-		for (const GrvProxyInterface& interf : dbInfo.client.grvProxies) {
+		for (GrvProxyInterface const& interf : dbInfo.client.grvProxies) {
 			if (interf.processId == processId)
 				return true;
 		}
-		for (const ResolverInterface& interf : dbInfo.resolvers) {
+		for (ResolverInterface const& interf : dbInfo.resolvers) {
 			if (interf.locality.processId() == processId)
 				return true;
 		}
@@ -2859,9 +2859,9 @@ public:
 	// Returns true iff
 	// - role is master, or
 	// - role is a singleton AND worker's pid is being used for any non-singleton role
-	bool onMasterIsBetter(const WorkerDetails& worker, ProcessClass::ClusterRole role) const {
+	bool onMasterIsBetter(WorkerDetails const& worker, ProcessClass::ClusterRole role) const {
 		ASSERT(masterProcessId.present());
-		const auto& pid = worker.interf.locality.processId();
+		auto const& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
 		     role != ProcessClass::ConsistencyScan) ||
 		    pid == masterProcessId.get()) {
@@ -2876,23 +2876,23 @@ public:
 		updateKnownIds(&idUsed);
 
 		auto& dbInfo = db.serverInfo->get();
-		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
-			for (const auto& tlog : tlogset.tLogs) {
+		for (auto const& tlogset : dbInfo.logSystemConfig.tLogs) {
+			for (auto const& tlog : tlogset.tLogs) {
 				if (tlog.present()) {
 					idUsed[tlog.interf().filteredLocality.processId()]++;
 				}
 			}
 		}
 
-		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
+		for (CommitProxyInterface const& interf : dbInfo.client.commitProxies) {
 			ASSERT(interf.processId.present());
 			idUsed[interf.processId]++;
 		}
-		for (const GrvProxyInterface& interf : dbInfo.client.grvProxies) {
+		for (GrvProxyInterface const& interf : dbInfo.client.grvProxies) {
 			ASSERT(interf.processId.present());
 			idUsed[interf.processId]++;
 		}
-		for (const ResolverInterface& interf : dbInfo.resolvers) {
+		for (ResolverInterface const& interf : dbInfo.resolvers) {
 			ASSERT(interf.locality.processId().present());
 			idUsed[interf.locality.processId()]++;
 		}
@@ -2900,7 +2900,7 @@ public:
 	}
 
 	// Updates work health signals in `workerHealth` based on `req`.
-	void updateWorkerHealth(const UpdateWorkerHealthRequest& req) {
+	void updateWorkerHealth(UpdateWorkerHealthRequest const& req) {
 		std::string degradedPeersString;
 		for (int i = 0; i < req.degradedPeers.size(); ++i) {
 			degradedPeersString += (i == 0 ? "" : " ") + req.degradedPeers[i].toString();
@@ -2932,11 +2932,11 @@ public:
 			}
 
 			workerHealth[req.address] = {};
-			for (const auto& degradedPeer : req.degradedPeers) {
+			for (auto const& degradedPeer : req.degradedPeers) {
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
-			for (const auto& degradedPeer : req.disconnectedPeers) {
+			for (auto const& degradedPeer : req.disconnectedPeers) {
 				workerHealth[req.address].disconnectedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
@@ -2950,7 +2950,7 @@ public:
 		auto& health = workerHealth[req.address];
 
 		// Remove any recovered peers.
-		for (const auto& peer : req.recoveredPeers) {
+		for (auto const& peer : req.recoveredPeers) {
 			TraceEvent("ClusterControllerReceivedPeerRecovering")
 			    .suppressFor(10.0)
 			    .detail("Worker", req.address)
@@ -2961,7 +2961,7 @@ public:
 		}
 
 		// Update the worker's degradedPeers.
-		for (const auto& peer : req.degradedPeers) {
+		for (auto const& peer : req.degradedPeers) {
 			auto it = health.degradedPeers.find(peer);
 			if (it == health.degradedPeers.end()) {
 				health.degradedPeers[peer] = { currentTime, currentTime };
@@ -2971,7 +2971,7 @@ public:
 		}
 
 		// Update the worker's disconnectedPeers.
-		for (const auto& peer : req.disconnectedPeers) {
+		for (auto const& peer : req.disconnectedPeers) {
 			auto it = health.disconnectedPeers.find(peer);
 			if (it == health.disconnectedPeers.end()) {
 				health.disconnectedPeers[peer] = { currentTime, currentTime };
@@ -3030,7 +3030,7 @@ public:
 	};
 
 	// Returns true if and only if addr1 and addr2 are located in the same DC
-	bool processesInSameDC(const NetworkAddress& addr1, const NetworkAddress& addr2) const;
+	bool processesInSameDC(NetworkAddress const& addr1, NetworkAddress const& addr2) const;
 
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.
@@ -3041,8 +3041,8 @@ public:
 		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> degradedLinkDst2Src;
 		std::unordered_map<NetworkAddress, std::unordered_set<NetworkAddress>> disconnectedLinkDst2Src;
 		double currentTime = now();
-		for (const auto& [server, health] : workerHealth) {
-			for (const auto& [degradedPeer, times] : health.degradedPeers) {
+		for (auto const& [server, health] : workerHealth) {
+			for (auto const& [degradedPeer, times] : health.degradedPeers) {
 				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
 					// This degraded link is not long enough to be considered as degraded.
 					continue;
@@ -3052,7 +3052,7 @@ public:
 				}
 				degradedLinkDst2Src[degradedPeer].insert(server);
 			}
-			for (const auto& [disconnectedPeer, times] : health.disconnectedPeers) {
+			for (auto const& [disconnectedPeer, times] : health.disconnectedPeers) {
 				if (currentTime - times.startTime < SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL) {
 					// This degraded link is not long enough to be considered as degraded.
 					continue;
@@ -3061,20 +3061,20 @@ public:
 			}
 		}
 
-		auto deterministicDecendingOrder = [](const std::pair<int, NetworkAddress>& a,
-		                                      const std::pair<int, NetworkAddress>& b) -> bool {
+		auto deterministicDecendingOrder = [](std::pair<int, NetworkAddress> const& a,
+		                                      std::pair<int, NetworkAddress> const& b) -> bool {
 			return a.first > b.first || (a.first == b.first && a.second < b.second);
 		};
 
 		// Sort degraded peers based on the number of workers complaining about it.
 		std::vector<std::pair<int, NetworkAddress>> count2DegradedPeer;
-		for (const auto& [degradedPeer, complainers] : degradedLinkDst2Src) {
+		for (auto const& [degradedPeer, complainers] : degradedLinkDst2Src) {
 			count2DegradedPeer.push_back({ complainers.size(), degradedPeer });
 		}
 		std::sort(count2DegradedPeer.begin(), count2DegradedPeer.end(), deterministicDecendingOrder);
 
 		std::vector<std::pair<int, NetworkAddress>> count2DisconnectedPeer;
-		for (const auto& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
+		for (auto const& [disconnectedPeer, complainers] : disconnectedLinkDst2Src) {
 			count2DisconnectedPeer.push_back({ complainers.size(), disconnectedPeer });
 		}
 		std::sort(count2DisconnectedPeer.begin(), count2DisconnectedPeer.end(), deterministicDecendingOrder);
@@ -3092,8 +3092,8 @@ public:
 		// workers are degraded, this may indicates that the whole network between primary and satellite is bad.
 		std::unordered_set<NetworkAddress> currentDegradedServers;
 		int satelliteBadServerCount = 0;
-		for (const auto& [complainerCount, badServer] : count2DegradedPeer) {
-			for (const auto& complainer : degradedLinkDst2Src[badServer]) {
+		for (auto const& [complainerCount, badServer] : count2DegradedPeer) {
+			for (auto const& complainer : degradedLinkDst2Src[badServer]) {
 				if (currentDegradedServers.find(complainer) == currentDegradedServers.end()) {
 					currentDegradedServers.insert(badServer);
 					break;
@@ -3108,8 +3108,8 @@ public:
 		}
 
 		DegradationInfo currentDegradationInfo;
-		for (const auto& [complainerCount, badServer] : count2DisconnectedPeer) {
-			for (const auto& complainer : disconnectedLinkDst2Src[badServer]) {
+		for (auto const& [complainerCount, badServer] : count2DisconnectedPeer) {
+			for (auto const& complainer : disconnectedLinkDst2Src[badServer]) {
 				if (currentDegradationInfo.disconnectedServers.find(complainer) ==
 				    currentDegradationInfo.disconnectedServers.end()) {
 					currentDegradationInfo.disconnectedServers.insert(badServer);
@@ -3126,7 +3126,7 @@ public:
 
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
-		for (const auto& badServer : currentDegradedServers) {
+		for (auto const& badServer : currentDegradedServers) {
 			if (degradedLinkDst2Src[badServer].size() >= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE_MIN &&
 			    degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
@@ -3178,7 +3178,7 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
-		const bool ccExcluded = id_worker[clusterControllerProcessId].priorityInfo.isExcluded;
+		bool const ccExcluded = id_worker[clusterControllerProcessId].priorityInfo.isExcluded;
 		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
 		    .detail("DegradedServersSize", degradationInfo.degradedServers.size())
 		    .detail("DisconnectedServersSize", degradationInfo.disconnectedServers.size())
@@ -3195,7 +3195,7 @@ public:
 			return false;
 		}
 
-		const bool txnSystemContainsDegradedServers = transactionSystemContainsDegradedServers();
+		bool const txnSystemContainsDegradedServers = transactionSystemContainsDegradedServers();
 		TraceEvent(SevInfo, "ShouldTriggerRecoveryDueToDegradedServers")
 		    .detail("TransactionSystemContainsDegradedServers", txnSystemContainsDegradedServers);
 		return txnSystemContainsDegradedServers;
@@ -3245,8 +3245,8 @@ public:
 		return recentHealthTriggeredRecoveryTime.size();
 	}
 
-	bool isExcludedDegradedServer(const NetworkAddressList& a) const {
-		for (const auto& server : excludedDegradedServers) {
+	bool isExcludedDegradedServer(NetworkAddressList const& a) const {
+		for (auto const& server : excludedDegradedServers) {
 			if (a.contains(server.first))
 				return true;
 		}

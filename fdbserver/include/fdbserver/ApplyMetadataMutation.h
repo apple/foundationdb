@@ -37,7 +37,7 @@
 
 // Resolver's data for applyMetadataMutations() calls.
 struct ResolverData {
-	const UID dbgid;
+	UID const dbgid;
 	IKeyValueStore* txnStateStore = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	Arena arena;
@@ -90,7 +90,7 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
-                            const VectorRef<MutationRef>& mutations,
+                            VectorRef<MutationRef> const& mutations,
                             LogPushData* pToCommit,
                             bool& confChange,
                             Version version,
@@ -99,17 +99,17 @@ void applyMetadataMutations(SpanContext const& spanContext,
                             bool provisionalCommitProxy);
 
 void applyMetadataMutations(SpanContext const& spanContext,
-                            const UID& dbgid,
+                            UID const& dbgid,
                             Arena& arena,
-                            const VectorRef<MutationRef>& mutations,
+                            VectorRef<MutationRef> const& mutations,
                             IKeyValueStore* txnStateStore);
 
-bool containsMetadataMutation(const VectorRef<MutationRef>& mutations);
+bool containsMetadataMutation(VectorRef<MutationRef> const& mutations);
 
 // Resolver's version
 
 void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations);
+                            VectorRef<MutationRef> const& mutations);
 
 #endif

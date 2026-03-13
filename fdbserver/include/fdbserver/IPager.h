@@ -49,7 +49,7 @@ typedef uint32_t QueueID;
 
 // Pager Events
 enum class PagerEvents { CacheLookup = 0, CacheHit, CacheMiss, PageWrite, MAXEVENTS };
-static const char* const PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
+static char const* const PagerEventsStrings[] = { "Lookup", "Hit", "Miss", "Write", "Unknown" };
 // Reasons for page level events.
 enum class PagerEventReasons {
 	PointRead = 0,
@@ -61,11 +61,11 @@ enum class PagerEventReasons {
 	MetaData,
 	MAXEVENTREASONS
 };
-static const char* const PagerEventReasonsStrings[] = { "Get",    "FetchR",  "GetR", "GetRPF",
+static char const* const PagerEventReasonsStrings[] = { "Get",    "FetchR",  "GetR", "GetRPF",
 	                                                    "Commit", "LazyClr", "Meta", "Unknown" };
 
-static const unsigned int nonBtreeLevel = 0;
-static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEventReasonPairs = {
+static unsigned int const nonBtreeLevel = 0;
+static std::vector<std::pair<PagerEvents, PagerEventReasons>> const possibleEventReasonPairs = {
 	{ PagerEvents::CacheLookup, PagerEventReasons::Commit },
 	{ PagerEvents::CacheLookup, PagerEventReasons::LazyClear },
 	{ PagerEvents::CacheLookup, PagerEventReasons::PointRead },
@@ -84,7 +84,7 @@ static const std::vector<std::pair<PagerEvents, PagerEventReasons>> possibleEven
 	{ PagerEvents::PageWrite, PagerEventReasons::Commit },
 	{ PagerEvents::PageWrite, PagerEventReasons::LazyClear },
 };
-static const std::vector<std::pair<PagerEvents, PagerEventReasons>> L0PossibleEventReasonPairs = {
+static std::vector<std::pair<PagerEvents, PagerEventReasons>> const L0PossibleEventReasonPairs = {
 	{ PagerEvents::CacheLookup, PagerEventReasons::RangePrefetch },
 	{ PagerEvents::CacheLookup, PagerEventReasons::MetaData },
 	{ PagerEvents::CacheHit, PagerEventReasons::RangePrefetch },
@@ -130,7 +130,7 @@ enum PageType : uint8_t {
 //   x.setReference(new SomeReferenceCountedType()); //
 struct ArbitraryObject {
 	ArbitraryObject() : ptr(nullptr), onDestruct(nullptr) {}
-	ArbitraryObject(const ArbitraryObject&) = delete;
+	ArbitraryObject(ArbitraryObject const&) = delete;
 
 	~ArbitraryObject() { destructOnly(); }
 
@@ -226,13 +226,13 @@ public:
 	~ArenaPage() {}
 
 	// Before using these, either init() or postReadHeader and postReadPayload() must be called
-	const uint8_t* data() const { return pPayload; }
+	uint8_t const* data() const { return pPayload; }
 	uint8_t* mutateData() const { return (uint8_t*)pPayload; }
 	int dataSize() const { return payloadSize; }
 
 	StringRef dataAsStringRef() const { return StringRef((uint8_t*)pPayload, payloadSize); }
 
-	const uint8_t* rawData() const { return buffer; }
+	uint8_t const* rawData() const { return buffer; }
 	uint8_t* rawData() { return buffer; }
 	int rawSize() const { return bufferSize; }
 
@@ -495,10 +495,10 @@ public:
 		}
 	}
 
-	const Arena& getArena() const { return arena; }
+	Arena const& getArena() const { return arena; }
 
 	// Return pointer to encoding header.
-	const void* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
+	void const* getEncodingHeader() const { return encodingHeaderAvailable ? page->getEncodingHeader() : nullptr; }
 
 private:
 	Arena arena;
@@ -516,7 +516,7 @@ private:
 	// For convenience, it is unioned with a Page pointer which defines the page structure
 	union {
 		uint8_t* buffer;
-		const PageHeader* page;
+		PageHeader const* page;
 	};
 
 	// Pointer and length of page space available to the user
@@ -544,13 +544,13 @@ public:
 
 class IPagerSnapshot {
 public:
-	virtual Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
+	virtual Future<Reference<ArenaPage const>> getPhysicalPage(PagerEventReasons reason,
 	                                                           unsigned int level,
 	                                                           LogicalPageID pageID,
 	                                                           int priority,
 	                                                           bool cacheable,
 	                                                           bool nohit) = 0;
-	virtual Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
+	virtual Future<Reference<ArenaPage const>> getMultiPhysicalPage(PagerEventReasons reason,
 	                                                                unsigned int level,
 	                                                                VectorRef<LogicalPageID> pageIDs,
 	                                                                int priority,

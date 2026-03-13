@@ -456,8 +456,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
-			const KeyRef startKey = "\xff\xff/transactio"_sr;
-			const KeyRef endKey = "\xff\xff/transaction1"_sr;
+			KeyRef const startKey = "\xff\xff/transactio"_sr;
+			KeyRef const endKey = "\xff\xff/transaction1"_sr;
 			RangeResult result =
 			    co_await tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
 			// The whole transaction module should be empty
@@ -507,7 +507,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// begin and end keySelectors clamp up to the boundary of the module
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			const KeyRef key = "\xff\xff/cluster_file_path"_sr;
+			KeyRef const key = "\xff\xff/cluster_file_path"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(keyAfter(key), false, 2);
 			RangeResult result = co_await tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
@@ -519,7 +519,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->addReadConflictRange(singleKeyRange("readKey"_sr));
-			const KeyRef key = "\xff\xff/transaction/a_to_be_the_first"_sr;
+			KeyRef const key = "\xff\xff/transaction/a_to_be_the_first"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(key, false, 2);
 			RangeResult result = co_await tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
@@ -567,8 +567,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// base key of the end key selector not in (\xff\xff, \xff\xff\xff), throw key_outside_legal_range()
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			const KeySelector startKeySelector = KeySelectorRef("\xff\xff/test"_sr, true, -200);
-			const KeySelector endKeySelector = KeySelectorRef("test"_sr, true, -10);
+			KeySelector const startKeySelector = KeySelectorRef("\xff\xff/test"_sr, true, -200);
+			KeySelector const endKeySelector = KeySelectorRef("test"_sr, true, -10);
 			RangeResult result =
 			    co_await tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY));
 			ASSERT(false);
@@ -740,7 +740,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	bool getRangeResultInOrder(const RangeResult& result) {
+	bool getRangeResultInOrder(RangeResult const& result) {
 		for (int i = 0; i < result.size() - 1; ++i) {
 			if (result[i].key >= result[i + 1].key) {
 				TraceEvent(SevError, "TestFailure")
@@ -825,7 +825,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 							std::string new_processes_key(new_coordinator_process);
 							tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 							tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-							for (const auto& address : old_coordinators_processes) {
+							for (auto const& address : old_coordinators_processes) {
 								new_processes_key += "," + address;
 							}
 							tx->set("processes"_sr.withPrefix(
@@ -893,7 +893,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					       csNew.hostnames.size() + csNew.coords.size() == old_coordinators_processes.size() + 1);
 					std::vector<NetworkAddress> newCoordinators = co_await csNew.tryResolveHostnames();
 					// verify the coordinators' addresses
-					for (const auto& network_address : newCoordinators) {
+					for (auto const& network_address : newCoordinators) {
 						std::string address_str = network_address.toString();
 						ASSERT(std::find(old_coordinators_processes.begin(),
 						                 old_coordinators_processes.end(),
@@ -915,7 +915,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						std::string new_processes_key;
 						tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 						tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-						for (const auto& address : old_coordinators_processes) {
+						for (auto const& address : old_coordinators_processes) {
 							new_processes_key += new_processes_key.size() ? "," : "";
 							new_processes_key += address;
 						}

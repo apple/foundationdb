@@ -33,7 +33,7 @@ KeyRangeRef toPrefixRelativeRange(KeyRangeRef range, Optional<KeyRef> prefix) {
 	}
 }
 
-KeyRef keyBetween(const KeyRangeRef& keys) {
+KeyRef keyBetween(KeyRangeRef const& keys) {
 	int pos = 0; // will be the position of the first difference between keys.begin and keys.end
 	int minSize = std::min(keys.begin.size(), keys.end.size());
 	for (; pos < minSize && pos < CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT; pos++) {
@@ -51,7 +51,7 @@ KeyRef keyBetween(const KeyRangeRef& keys) {
 	return keys.end;
 }
 
-Key randomKeyBetween(const KeyRangeRef& keys) {
+Key randomKeyBetween(KeyRangeRef const& keys) {
 	if (keys.empty() || keys.singleKeyRange()) {
 		return keys.end;
 	}
@@ -156,7 +156,7 @@ std::string KeySelectorRef::toString() const {
 	}
 }
 
-std::string describe(const std::string& s) {
+std::string describe(std::string const& s) {
 	return s;
 }
 
@@ -212,7 +212,7 @@ TEST_CASE("/KeyRangeUtil/KeyRangeComplement") {
 	return Void();
 }
 
-std::string KeyValueStoreType::getStoreTypeStr(const StoreType& storeType) {
+std::string KeyValueStoreType::getStoreTypeStr(StoreType const& storeType) {
 	switch (storeType) {
 	case SSD_BTREE_V1:
 		return "ssd-1";
@@ -235,7 +235,7 @@ std::string KeyValueStoreType::getStoreTypeStr(const StoreType& storeType) {
 	}
 }
 
-KeyValueStoreType KeyValueStoreType::fromString(const std::string& str) {
+KeyValueStoreType KeyValueStoreType::fromString(std::string const& str) {
 	static std::map<std::string, StoreType> names = { { "ssd-1", SSD_BTREE_V1 },
 		                                              { "ssd-2", SSD_BTREE_V2 },
 		                                              { "ssd", SSD_BTREE_V2 },
@@ -272,7 +272,7 @@ TEST_CASE("/PerpetualStorageWiggleLocality/Validation") {
 }
 
 std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWiggleLocality(
-    const std::string& localityKeyValues) {
+    std::string const& localityKeyValues) {
 	// parsing format is like "datahall:0<;locality:filter>"
 	ASSERT(isValidPerpetualStorageWiggleLocality(localityKeyValues));
 
@@ -285,7 +285,7 @@ std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWi
 	std::vector<std::string> splitLocalityKeyValues;
 	boost::split(splitLocalityKeyValues, localityKeyValues, [](char c) { return c == ';'; });
 
-	for (const auto& localityKeyValue : splitLocalityKeyValues) {
+	for (auto const& localityKeyValue : splitLocalityKeyValues) {
 		ASSERT(!localityKeyValue.empty());
 
 		// get key and value from perpetual_storage_wiggle_locality.
@@ -299,9 +299,9 @@ std::vector<std::pair<Optional<Value>, Optional<Value>>> ParsePerpetualStorageWi
 	return parsedLocalities;
 }
 
-bool localityMatchInList(const std::vector<std::pair<Optional<Value>, Optional<Value>>>& localityKeyValues,
-                         const LocalityData& locality) {
-	for (const auto& [localityKey, localityValue] : localityKeyValues) {
+bool localityMatchInList(std::vector<std::pair<Optional<Value>, Optional<Value>>> const& localityKeyValues,
+                         LocalityData const& locality) {
+	for (auto const& [localityKey, localityValue] : localityKeyValues) {
 		if (locality.get(localityKey.get()) == localityValue) {
 			return true;
 		}

@@ -31,30 +31,30 @@ struct Hostname {
 	std::string service; // decimal port number
 	bool isTLS;
 
-	Hostname(const std::string& host, const std::string& service, bool isTLS)
+	Hostname(std::string const& host, std::string const& service, bool isTLS)
 	  : host(host), service(service), isTLS(isTLS) {}
 	Hostname() : host(""), service(""), isTLS(false) {}
 
-	bool operator==(const Hostname& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
-	bool operator!=(const Hostname& r) const { return !(*this == r); }
-	bool operator<(const Hostname& r) const {
+	bool operator==(Hostname const& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
+	bool operator!=(Hostname const& r) const { return !(*this == r); }
+	bool operator<(Hostname const& r) const {
 		if (isTLS != r.isTLS)
 			return isTLS < r.isTLS;
 		else if (host != r.host)
 			return host < r.host;
 		return service < r.service;
 	}
-	bool operator>(const Hostname& r) const { return r < *this; }
-	bool operator<=(const Hostname& r) const { return !(*this > r); }
-	bool operator>=(const Hostname& r) const { return !(*this < r); }
+	bool operator>(Hostname const& r) const { return r < *this; }
+	bool operator<=(Hostname const& r) const { return !(*this > r); }
+	bool operator>=(Hostname const& r) const { return !(*this < r); }
 
 	// Allow hostnames in forms like following:
 	//    hostname:1234
 	//    host.name:1234
 	//    host-name:1234
 	//    host-name_part1.host-name_part2:1234:tls
-	static bool isHostname(const std::string& s);
-	static Hostname parse(const std::string& s);
+	static bool isHostname(std::string const& s);
+	static Hostname parse(std::string const& s);
 
 	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
 

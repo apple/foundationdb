@@ -85,7 +85,7 @@ public:
 	}
 	operator int() const { return (int)value; }
 	constexpr static int8_t typeCount() { return (int)__COUNT; }
-	bool operator<(const RelocateReason& reason) { return (int)value < (int)reason.value; }
+	bool operator<(RelocateReason const& reason) { return (int)value < (int)reason.value; }
 
 private:
 	Value value;
@@ -94,7 +94,7 @@ private:
 extern int dataMovementPriority(DataMovementReason moveReason);
 extern DataMovementReason priorityToDataMovementReason(int priority);
 
-DataMoveType getDataMoveTypeFromDataMoveId(const UID& dataMoveId);
+DataMoveType getDataMoveTypeFromDataMoveId(UID const& dataMoveId);
 
 struct DDShardInfo;
 
@@ -106,11 +106,11 @@ struct DataMove {
 	}
 
 	// Checks if the DataMove is consistent with the shard.
-	void validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
+	void validateShard(DDShardInfo const& shard, KeyRangeRef range, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 
 	bool isCancelled() const { return this->cancelled; }
 
-	const DataMoveMetaData meta;
+	DataMoveMetaData const meta;
 	bool restore; // The data move is scheduled by a previous DD, and is being recovered now.
 	bool valid; // The data move data is integral.
 	bool cancelled; // The data move has been cancelled.
@@ -168,7 +168,7 @@ struct GetTopKMetricsReply {
 		KeyRange range;
 		StorageMetrics metrics;
 		KeyRangeStorageMetrics() = default;
-		KeyRangeStorageMetrics(const KeyRange& range, const StorageMetrics& s) : range(range), metrics(s) {}
+		KeyRangeStorageMetrics(KeyRange const& range, StorageMetrics const& s) : range(range), metrics(s) {}
 	};
 	std::vector<KeyRangeStorageMetrics> shardMetrics;
 	double minReadLoad = -1, maxReadLoad = -1;
@@ -198,15 +198,15 @@ public:
 	int getTopK() const { return topK; };
 
 	// Return true if a.score > b.score, return the largest topK in keys
-	static bool compare(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
-	                    const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+	static bool compare(GetTopKMetricsReply::KeyRangeStorageMetrics const& a,
+	                    GetTopKMetricsReply::KeyRangeStorageMetrics const& b) {
 		return compareByReadDensity(a, b);
 	}
 
 private:
 	// larger read density means higher score
-	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
-	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
+	static bool compareByReadDensity(GetTopKMetricsReply::KeyRangeStorageMetrics const& a,
+	                                 GetTopKMetricsReply::KeyRangeStorageMetrics const& b) {
 		return a.metrics.readLoadKSecond() / std::max(a.metrics.bytes * 1.0, 1.0) >
 		       b.metrics.readLoadKSecond() / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
@@ -218,7 +218,7 @@ struct GetMetricsListRequest {
 	Promise<Standalone<VectorRef<DDMetricsRef>>> reply;
 
 	GetMetricsListRequest() {}
-	GetMetricsListRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+	GetMetricsListRequest(KeyRange const& keys, int const shardLimit) : keys(keys), shardLimit(shardLimit) {}
 };
 
 struct BulkLoadShardRequest {
@@ -288,10 +288,10 @@ public:
 		    stats(makeReference<AsyncVar<Optional<StorageMetrics>>>()), teams(teams), whenCreated(whenCreated) {}
 
 		// Adds `newRange` to this physical shard and starts monitoring the shard.
-		void addRange(const KeyRange& newRange);
+		void addRange(KeyRange const& newRange);
 
 		// Removes `outRange` from this physical shard and updates monitored shards.
-		void removeRange(const KeyRange& outRange);
+		void removeRange(KeyRange const& outRange);
 
 		std::string toString() const { return fmt::format("{}", std::to_string(id)); }
 
@@ -311,7 +311,7 @@ public:
 
 	private:
 		// Inserts a new key range into this physical shard. `newRange` must not exist in this shard already.
-		void insertNewRangeData(const KeyRange& newRange);
+		void insertNewRangeData(KeyRange const& newRange);
 	};
 
 	// Generate a random physical shard ID, which is not UID().first() nor anonymousShardId.first()
@@ -324,7 +324,7 @@ public:
 	// physical shard is available
 	Optional<uint64_t> trySelectAvailablePhysicalShardFor(ShardsAffectedByTeamFailure::Team team,
 	                                                      StorageMetrics const& metrics,
-	                                                      const std::unordered_set<uint64_t>& excludedPhysicalShards,
+	                                                      std::unordered_set<uint64_t> const& excludedPhysicalShards,
 	                                                      uint64_t debugID);
 
 	// Step 2: get a remote team which has the input physical shard.
@@ -354,7 +354,7 @@ public:
 	                                   bool isRestore,
 	                                   std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
 	                                   uint64_t physicalShardID,
-	                                   const StorageMetrics& metrics,
+	                                   StorageMetrics const& metrics,
 	                                   uint64_t debugID);
 
 	// Update physicalShard metrics and return whether the keyRange needs to move out of its physical shard
@@ -468,7 +468,7 @@ struct RebalanceStorageQueueRequest {
 
 	RebalanceStorageQueueRequest() {}
 	RebalanceStorageQueueRequest(UID serverId,
-	                             const std::vector<ShardsAffectedByTeamFailure::Team>& teams,
+	                             std::vector<ShardsAffectedByTeamFailure::Team> const& teams,
 	                             bool primary)
 	  : serverId(serverId), teams(teams), primary(primary) {}
 };
@@ -538,9 +538,9 @@ struct TeamCollectionInterface {
 // Used to track the number of ongoing bulkload tasks for each storage server
 struct DDBulkLoadTaskBusyMap {
 public:
-	void addTask(const UID& ssid) { busyMap[ssid]++; }
+	void addTask(UID const& ssid) { busyMap[ssid]++; }
 
-	void removeTask(const UID& ssid) {
+	void removeTask(UID const& ssid) {
 		auto it = busyMap.find(ssid);
 		ASSERT(it != busyMap.end());
 		it->second--;
@@ -549,7 +549,7 @@ public:
 		}
 	}
 
-	int getTaskCount(const UID& ssid) {
+	int getTaskCount(UID const& ssid) {
 		auto it = busyMap.find(ssid);
 		if (it == busyMap.end()) {
 			return 0;
@@ -585,7 +585,7 @@ struct DDBulkLoadEngineTask {
 	DDBulkLoadEngineTask(BulkLoadTaskState coreState, Version commitVersion, Promise<BulkLoadAck> completeAck)
 	  : coreState(coreState), commitVersion(commitVersion), completeAck(completeAck) {}
 
-	bool operator==(const DDBulkLoadEngineTask& rhs) const {
+	bool operator==(DDBulkLoadEngineTask const& rhs) const {
 		return coreState == rhs.coreState && commitVersion == rhs.commitVersion;
 	}
 
@@ -608,7 +608,7 @@ public:
 
 	// Return true if there exists a bulk load job/task or the collection has not been initialized.
 	// This takes effect only when DDBulkLoad Mode is enabled.
-	bool bulkLoading(const KeyRange& range) {
+	bool bulkLoading(KeyRange const& range) {
 		if (!initialized) {
 			return true;
 		}
@@ -627,7 +627,7 @@ public:
 		return false;
 	}
 
-	void setBulkLoadJobRange(const KeyRange& range) {
+	void setBulkLoadJobRange(KeyRange const& range) {
 		bulkLoadJobRange = range;
 		initialized = true;
 		return;
@@ -656,7 +656,7 @@ public:
 	// DDTracker stops any shard boundary change overlapping the task range
 	// DDQueue attaches the task to following data moves until the task has been completed
 	// If there are overlapped old tasks, make it outdated by sending a signal to completeAck
-	void publishTask(const BulkLoadTaskState& bulkLoadTaskState,
+	void publishTask(BulkLoadTaskState const& bulkLoadTaskState,
 	                 Version commitVersion,
 	                 Promise<BulkLoadAck> completeAck) {
 		if (overlappingTaskSince(bulkLoadTaskState.getRange(), commitVersion)) {
@@ -698,7 +698,7 @@ public:
 	}
 
 	// This method is called when there is a data move assigned to run the bulk load task
-	void startTask(const BulkLoadTaskState& bulkLoadTaskState) {
+	void startTask(BulkLoadTaskState const& bulkLoadTaskState) {
 		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
 			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				throw bulkload_task_outdated();
@@ -712,7 +712,7 @@ public:
 	}
 
 	// Send complete signal to indicate this task has been completed
-	void terminateTask(const BulkLoadTaskState& bulkLoadTaskState) {
+	void terminateTask(BulkLoadTaskState const& bulkLoadTaskState) {
 		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
 			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
 				throw bulkload_task_outdated();
@@ -730,7 +730,7 @@ public:
 	}
 
 	// Erase any metadata on the map for the input bulkload task
-	void eraseTask(const BulkLoadTaskState& bulkLoadTaskState) {
+	void eraseTask(BulkLoadTaskState const& bulkLoadTaskState) {
 		std::vector<KeyRange> rangesToClear;
 		for (auto it : bulkLoadTaskMap.intersectingRanges(bulkLoadTaskState.getRange())) {
 			if (!it->value().present() || it->value().get().coreState.getTaskId() != bulkLoadTaskState.getTaskId()) {
@@ -742,7 +742,7 @@ public:
 			    .detail("Task", it->value().get().toString());
 			rangesToClear.push_back(it->range());
 		}
-		for (const auto& rangeToClear : rangesToClear) {
+		for (auto const& rangeToClear : rangesToClear) {
 			bulkLoadTaskMap.insert(rangeToClear, Optional<DDBulkLoadEngineTask>());
 		}
 		bulkLoadTaskMap.coalesce(normalKeys);
@@ -811,21 +811,21 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true) {};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true){};
 	// wiggle related actors will quit when this signal is set to true
 	void setStopSignal(bool value) { stopWiggleSignal.set(value); }
 	bool isStopped() const { return stopWiggleSignal.get(); }
 	// add server to wiggling queue
-	void addServer(const UID& serverId, const StorageMetadataType& metadata);
+	void addServer(UID const& serverId, StorageMetadataType const& metadata);
 	// remove server from wiggling queue
-	void removeServer(const UID& serverId);
+	void removeServer(UID const& serverId);
 	// update metadata and adjust priority_queue
-	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
-	bool contains(const UID& serverId) const { return pq_handles.contains(serverId); }
+	void updateMetadata(UID const& serverId, StorageMetadataType const& metadata);
+	bool contains(UID const& serverId) const { return pq_handles.contains(serverId); }
 	bool empty() const { return wiggle_pq.empty(); }
 
 	// It's guarantee that When a.metadata >= b.metadata, if !necessary(a) then !necessary(b)
-	bool necessary(const UID& serverId, const StorageMetadataType& metadata) const;
+	bool necessary(UID const& serverId, StorageMetadataType const& metadata) const;
 
 	// try to return the next storage server that is necessary to wiggle
 	Optional<UID> getNextServerId(bool necessaryOnly = true);

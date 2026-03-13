@@ -67,7 +67,7 @@ static_assert(static_cast<int>(FDB_BG_MUTATION_TYPE_CLEAR_RANGE) == static_cast<
 
 #define TSAV_ERROR(type, error) ((FDBFuture*)(ThreadFuture<type>(error())).extractPtr())
 
-extern "C" DLLEXPORT const char* fdb_get_error(fdb_error_t code) {
+extern "C" DLLEXPORT char const* fdb_get_error(fdb_error_t code) {
 	return Error::fromUnvalidatedCode(code).what();
 }
 
@@ -153,7 +153,7 @@ fdb_error_t fdb_setup_network_impl() {
 	CATCH_AND_RETURN(API->setupNetwork(););
 }
 
-fdb_error_t fdb_setup_network_v13(const char* localAddress) {
+fdb_error_t fdb_setup_network_v13(char const* localAddress) {
 	fdb_error_t errorCode =
 	    fdb_network_set_option(FDB_NET_OPTION_LOCAL_ADDRESS, (uint8_t const*)localAddress, strlen(localAddress));
 	if (errorCode != 0)
@@ -204,11 +204,11 @@ public:
 	  : callbackf(callbackf), f(f), userdata(userdata) {}
 
 	bool canFire(int notMadeActive) const override { return true; }
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	void error(const Error&, int& userParam) override {
+	void error(Error const&, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
@@ -231,7 +231,7 @@ fdb_error_t fdb_future_get_error_impl(FDBFuture* f) {
 	return TSAVB(f)->getErrorCode();
 }
 
-fdb_error_t fdb_future_get_error_v22(FDBFuture* f, const char** description) {
+fdb_error_t fdb_future_get_error_v22(FDBFuture* f, char const** description) {
 	if (!(TSAVB(f)->isError()))
 		return error_code_future_not_error;
 	if (description)
@@ -312,9 +312,9 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, Datab
 	CATCH_AND_RETURN(*outPtr = (DatabaseSharedState*)((TSAV(DatabaseSharedState*, f)->get())););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const char*** out_strings, int* out_count) {
-	CATCH_AND_RETURN(Standalone<VectorRef<const char*>> na = TSAV(Standalone<VectorRef<const char*>>, f)->get();
-	                 *out_strings = (const char**)na.begin();
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, char const*** out_strings, int* out_count) {
+	CATCH_AND_RETURN(Standalone<VectorRef<char const*>> na = TSAV(Standalone<VectorRef<char const*>>, f)->get();
+	                 *out_strings = (char const**)na.begin();
 	                 *out_count = na.size(););
 }
 
@@ -345,7 +345,7 @@ fdb_error_t fdb_result_get_keyvalue_array(FDBResult* r,
 	                 *out_more = rr.more;);
 }
 
-FDBFuture* fdb_create_cluster_v609(const char* cluster_file_path) {
+FDBFuture* fdb_create_cluster_v609(char const* cluster_file_path) {
 	char* path;
 	if (cluster_file_path) {
 		path = new char[strlen(cluster_file_path) + 1];
@@ -372,13 +372,13 @@ void fdb_cluster_destroy_v609(FDBCluster* c) {
 // This exists so that fdb_cluster_create_database doesn't need to call the public symbol fdb_create_database.
 // If it does and this is an external client loaded though the multi-version API, then it may inadvertently call
 // the version of the function in the primary library if it was loaded into the global symbols.
-fdb_error_t fdb_create_database_impl(const char* cluster_file_path, FDBDatabase** out_database) {
+fdb_error_t fdb_create_database_impl(char const* cluster_file_path, FDBDatabase** out_database) {
 	CATCH_AND_RETURN(*out_database =
 	                     (FDBDatabase*)API->createDatabase(cluster_file_path ? cluster_file_path : "").extractPtr(););
 }
 
 FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_name, int db_name_length) {
-	if (strncmp((const char*)db_name, "DB", db_name_length) != 0) {
+	if (strncmp((char const*)db_name, "DB", db_name_length) != 0) {
 		return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(invalid_database_name()).extractPtr();
 	}
 
@@ -391,11 +391,11 @@ FDBFuture* fdb_cluster_create_database_v609(FDBCluster* c, uint8_t const* db_nam
 	return (FDBFuture*)ThreadFuture<Reference<IDatabase>>(Reference<IDatabase>(DB(db))).extractPtr();
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database) {
+extern "C" DLLEXPORT fdb_error_t fdb_create_database(char const* cluster_file_path, FDBDatabase** out_database) {
 	return fdb_create_database_impl(cluster_file_path, out_database);
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+extern "C" DLLEXPORT fdb_error_t fdb_create_database_from_connection_string(char const* connection_string,
                                                                             FDBDatabase** out_database) {
 	CATCH_AND_RETURN(*out_database =
 	                     (FDBDatabase*)API->createDatabaseFromConnectionString(connection_string).extractPtr(););
@@ -589,14 +589,14 @@ FDBFuture* validate_and_update_parameters(int& limit,
 
 	/* _ITERATOR mode maps to one of the known streaming modes
 	   depending on iteration */
-	const int mode_bytes_array[] = { GetRangeLimits::BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 120000 };
+	int const mode_bytes_array[] = { GetRangeLimits::BYTE_LIMIT_UNLIMITED, 256, 1000, 4096, 120000 };
 
 	/* The progression used for FDB_STREAMING_MODE_ITERATOR.
 	   Goes 1.5 * previous. */
-	static const int iteration_progression[] = { 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000, 120000 };
+	static int const iteration_progression[] = { 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000, 120000 };
 
 	/* length(iteration_progression) */
-	static const int max_iteration = sizeof(iteration_progression) / sizeof(int);
+	static int const max_iteration = sizeof(iteration_progression) / sizeof(int);
 
 	if (mode == FDB_STREAMING_MODE_WANT_ALL)
 		mode = FDB_STREAMING_MODE_SERIAL;
@@ -910,7 +910,7 @@ extern "C" DLLEXPORT int fdb_get_max_api_version() {
 	return FDB_API_VERSION;
 }
 
-extern "C" DLLEXPORT const char* fdb_get_client_version() {
+extern "C" DLLEXPORT char const* fdb_get_client_version() {
 	return API->getClientVersion();
 }
 

@@ -61,7 +61,7 @@ struct FlowTesterStack {
 
 	void push(Standalone<StringRef> value) { push(Future<Standalone<StringRef>>(value)); }
 
-	void push(const StackItem& item) { data.push_back(item); }
+	void push(StackItem const& item) { data.push_back(item); }
 
 	void pushTuple(StringRef value, bool utf8 = false) {
 		FDB::Tuple t;

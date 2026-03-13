@@ -26,7 +26,7 @@
 #include "flow/config.h"
 
 // We don't align memory properly, and we need to tell lsan about that.
-extern "C" const char* __lsan_default_options(void) {
+extern "C" char const* __lsan_default_options(void) {
 	return "use_unaligned=1";
 }
 
@@ -120,9 +120,9 @@ Arena::Arena(size_t reservedSize) : impl(0) {
 		disallowAccess(impl.getPtr());
 	}
 }
-Arena::Arena(const Arena& r) = default;
+Arena::Arena(Arena const& r) = default;
 Arena::Arena(Arena&& r) noexcept = default;
-Arena& Arena::operator=(const Arena& r) = default;
+Arena& Arena::operator=(Arena const& r) = default;
 Arena& Arena::operator=(Arena&& r) noexcept = default;
 
 std::string StringRef::toHexString(int limit) const {
@@ -167,7 +167,7 @@ std::string StringRef::toFullHexStringPlain() const {
 	return s;
 }
 
-void Arena::dependsOn(const Arena& p) {
+void Arena::dependsOn(Arena const& p) {
 	// x.dependsOn(y) is a no-op if they refer to the same ArenaBlocks.
 	// They will already have the same lifetime.
 	if (p.impl && p.impl.getPtr() != impl.getPtr()) {
@@ -202,7 +202,7 @@ size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	return 0;
 }
 
-bool Arena::hasFree(size_t size, const void* address) {
+bool Arena::hasFree(size_t size, void const* address) {
 	if (impl) {
 		allowAccess(impl.getPtr());
 		auto result = impl->unused() >= size && impl->getNextData() == address;
@@ -251,11 +251,11 @@ int ArenaBlock::unused() const {
 	else
 		return bigSize - bigUsed;
 }
-const void* ArenaBlock::getData() const {
+void const* ArenaBlock::getData() const {
 	return this;
 }
-const void* ArenaBlock::getNextData() const {
-	return (const uint8_t*)getData() + used();
+void const* ArenaBlock::getNextData() const {
+	return (uint8_t const*)getData() + used();
 }
 
 size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
@@ -613,7 +613,7 @@ void testRangeBasedForLoop() {
 	}
 	ASSERT(xs.size() == size);
 	int i = 0;
-	for (const auto& x : xs) {
+	for (auto const& x : xs) {
 		ASSERT(x == StringRef(std::to_string(i++)));
 	}
 	ASSERT(i == size);
@@ -717,7 +717,7 @@ void testCopy() {
 	VectorRefLike<StringRef> ys(a, xs);
 	xs = Standalone<VectorRefLike<StringRef>>();
 	int i = 0;
-	for (const auto& y : ys) {
+	for (auto const& y : ys) {
 		ASSERT(y == StringRef(std::to_string(i++)));
 	}
 	ASSERT(i == size);
@@ -927,8 +927,8 @@ struct TestOptionalMapClass {
 	StringRef value;
 	Optional<StringRef> optionalValue;
 
-	const StringRef constValue;
-	const Optional<StringRef> constOptionalValue;
+	StringRef const constValue;
+	Optional<StringRef> const constOptionalValue;
 
 	StringRef getValue() const { return value; }
 	Optional<StringRef> getOptionalValue() const { return optionalValue; }

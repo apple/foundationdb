@@ -23,10 +23,10 @@
 
 namespace {
 
-Reference<LogSet> makeSingleLogSet(const std::vector<TLogInterface>& tlogs, bool isLocal = true) {
+Reference<LogSet> makeSingleLogSet(std::vector<TLogInterface> const& tlogs, bool isLocal = true) {
 	auto logSet = makeReference<LogSet>();
 	logSet->isLocal = isLocal;
-	for (const auto& tlog : tlogs) {
+	for (auto const& tlog : tlogs) {
 		logSet->logServers.push_back(
 		    makeReference<AsyncVar<OptionalInterface<TLogInterface>>>(OptionalInterface<TLogInterface>(tlog)));
 	}
@@ -35,17 +35,17 @@ Reference<LogSet> makeSingleLogSet(const std::vector<TLogInterface>& tlogs, bool
 
 std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
     int replicationFactor,
-    const std::vector<std::vector<UnknownCommittedVersions>>& perTLogUCV,
-    const std::vector<TLogInterface>& tlogs,
+    std::vector<std::vector<UnknownCommittedVersions>> const& perTLogUCV,
+    std::vector<TLogInterface> const& tlogs,
     bool nonAvailableTLogsCompletePolicy = true,
-    const std::vector<Version>& knownCommitted = {}) {
+    std::vector<Version> const& knownCommitted = {}) {
 	std::vector<TLogLockResult> lockResults;
 	lockResults.reserve(tlogs.size());
 	for (int i = 0; i < tlogs.size(); ++i) {
 		TLogLockResult result;
 		result.logId = tlogs[i].id();
 		result.knownCommittedVersion = (i < knownCommitted.size()) ? knownCommitted[i] : 0;
-		for (const auto& ucv : perTLogUCV[i]) {
+		for (auto const& ucv : perTLogUCV[i]) {
 			result.unknownCommittedVersions.push_back(ucv);
 		}
 		lockResults.push_back(result);

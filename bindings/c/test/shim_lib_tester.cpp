@@ -48,7 +48,7 @@ enum TesterOptionId {
 	OPT_API_VERSION
 };
 
-const int MIN_TESTABLE_API_VERSION = 400;
+int const MIN_TESTABLE_API_VERSION = 400;
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
     { { OPT_HELP, "-h", SO_NONE },
@@ -73,7 +73,7 @@ public:
 	bool disableLocalClient = false;
 };
 
-void printProgramUsage(const char* execName) {
+void printProgramUsage(char const* execName) {
 	printf("usage: %s [OPTIONS]\n"
 	       "\n",
 	       execName);
@@ -94,7 +94,7 @@ void printProgramUsage(const char* execName) {
 	       FDB_API_VERSION);
 }
 
-bool processIntOption(const std::string& optionName, const std::string& value, int minValue, int maxValue, int& res) {
+bool processIntOption(std::string const& optionName, std::string const& value, int minValue, int maxValue, int& res) {
 	char* endptr;
 	res = strtol(value.c_str(), &endptr, 10);
 	if (*endptr != '\0') {
@@ -109,7 +109,7 @@ bool processIntOption(const std::string& optionName, const std::string& value, i
 	return true;
 }
 
-bool processArg(TesterOptions& options, const CSimpleOpt& args) {
+bool processArg(TesterOptions& options, CSimpleOpt const& args) {
 	switch (args.OptionId()) {
 	case OPT_CONNFILE:
 		options.clusterFile = args.OptionArg();
@@ -185,7 +185,7 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 }
 
-void testBasicApi(const TesterOptions& options) {
+void testBasicApi(TesterOptions const& options) {
 	fdb::Database db(options.clusterFile);
 	fdb::Transaction tx = db.createTransaction();
 	while (true) {
@@ -195,7 +195,7 @@ void testBasicApi(const TesterOptions& options) {
 			tx.set(fdb::toBytesRef("key1"sv), fdb::toBytesRef("val1"sv));
 			fdb_check(tx.commit().blockUntilReady(), "Wait on commit failed");
 			break;
-		} catch (const fdb::Error& err) {
+		} catch (fdb::Error const& err) {
 			if (err.code() == error_code_timed_out) {
 				exit(1);
 			}
@@ -219,7 +219,7 @@ void testBasicApi(const TesterOptions& options) {
 // use for a test of this nature.  However, the future need for a test
 // of this nature can reasonably be anticipated, hence we retain
 // this comment and placeholder function.
-void testNewOnlyApi(const TesterOptions& options) {
+void testNewOnlyApi(TesterOptions const& options) {
 	// Implement when needed
 }
 
@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
 
 		fdb_check(fdb::network::stop(), "Stop network failed");
 		network_thread.join();
-	} catch (const std::runtime_error& err) {
+	} catch (std::runtime_error const& err) {
 		fmt::print(stderr, "runtime error caught: {}\n", err.what());
 		retCode = 1;
 	}

@@ -38,7 +38,7 @@ struct LoadContext {
 
 	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
 
-	const uint8_t* tryReadZeroCopy(const uint8_t* ptr, unsigned len) {
+	uint8_t const* tryReadZeroCopy(uint8_t const* ptr, unsigned len) {
 		if constexpr (Ar::ownsUnderlyingMemory) {
 			return ptr;
 		} else {
@@ -67,7 +67,7 @@ public:
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
-		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
+		uint8_t const* data = static_cast<ReaderImpl*>(this)->data();
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
@@ -107,7 +107,7 @@ public:
 	static constexpr bool ownsUnderlyingMemory = false;
 
 	template <class VersionOptions>
-	ObjectReader(const uint8_t* data, VersionOptions vo) : _data(data) {
+	ObjectReader(uint8_t const* data, VersionOptions vo) : _data(data) {
 		vo.read(*this);
 	}
 
@@ -119,12 +119,12 @@ public:
 		return t;
 	}
 
-	const uint8_t* data() { return _data; }
+	uint8_t const* data() { return _data; }
 
 	Arena& arena() { return _arena; }
 
 private:
-	const uint8_t* _data;
+	uint8_t const* _data;
 	Arena _arena;
 };
 
@@ -142,17 +142,17 @@ public:
 	static constexpr bool ownsUnderlyingMemory = true;
 
 	template <class VersionOptions>
-	ArenaObjectReader(Arena const& arena, const StringRef& input, VersionOptions vo)
+	ArenaObjectReader(Arena const& arena, StringRef const& input, VersionOptions vo)
 	  : _data(input.begin()), _arena(arena) {
 		vo.read(*this);
 	}
 
-	const uint8_t* data() { return _data; }
+	uint8_t const* data() { return _data; }
 
 	Arena& arena() { return _arena; }
 
 private:
-	const uint8_t* _data;
+	uint8_t const* _data;
 	Arena _arena;
 };
 
@@ -166,7 +166,7 @@ private:
 class ObjectWriter {
 	friend struct _IncludeVersion;
 	bool writeProtocolVersion = false;
-	ObjectWriter& operator<<(const ProtocolVersion& version) {
+	ObjectWriter& operator<<(ProtocolVersion const& version) {
 		writeProtocolVersion = true;
 		return *this;
 	}
@@ -177,7 +177,7 @@ class ObjectWriter {
 		explicit MemoryHelper(ObjectWriter* pObjectWriter) : pObjectWriter(pObjectWriter), numAllocations(0) {}
 
 		// expected to be called exactly once
-		uint8_t* allocate(const size_t size) {
+		uint8_t* allocate(size_t const size) {
 			++numAllocations;
 
 			pObjectWriter->size = size + (pObjectWriter->writeProtocolVersion ? sizeof(uint64_t) : 0);
@@ -231,7 +231,7 @@ public:
 	};
 
 	// takes (object size, allocator context pointer), returns pointer to allocated memory
-	typedef uint8_t* (*AllocatorFuncType)(const size_t, void*);
+	typedef uint8_t* (*AllocatorFuncType)(size_t const, void*);
 
 	// takes (wipe begin pointer, wipe length, allocator context pointer)
 	typedef void (*MarkForWipeFuncType)(uint8_t*, size_t, void*);
@@ -307,15 +307,15 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<Standalone<T>, Context> : Context {
-	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
+	LoadSaveHelper(Context const& context) : Context(context), helper(context) {}
 
-	void load(Standalone<T>& member, const uint8_t* current) {
+	void load(Standalone<T>& member, uint8_t const* current) {
 		helper.load(member.contents(), current);
 		this->addArena(member.arena());
 	}
 
 	template <class Writer>
-	RelativeOffset save(const Standalone<T>& member, Writer& writer, const VTableSet* vtables) {
+	RelativeOffset save(Standalone<T> const& member, Writer& writer, VTableSet const* vtables) {
 		return helper.save(member.contents(), writer, vtables);
 	}
 

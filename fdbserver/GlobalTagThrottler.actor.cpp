@@ -428,7 +428,7 @@ public:
 
 	int64_t autoThrottleCount() const {
 		int64_t result{ 0 };
-		for (const auto& [tag, stats] : tagStatistics) {
+		for (auto const& [tag, stats] : tagStatistics) {
 			if (stats.getQuota().present()) {
 				++result;
 			}
@@ -459,7 +459,7 @@ public:
 
 	void removeExpiredTags() {
 		for (auto it = tagStatistics.begin(); it != tagStatistics.end();) {
-			const auto& [tag, stats] = *it;
+			auto const& [tag, stats] = *it;
 			if (!stats.recentTransactionsAdded()) {
 				throughputTracker.removeTag(tag);
 				it = tagStatistics.erase(it);
@@ -578,11 +578,11 @@ public:
 
 	StorageQueueInfo getStorageQueueInfo() const {
 		StorageQueueInfo result(id, LocalityData({}, Value(id.toString()), {}, {}));
-		for (const auto& [tag, readCost] : readCosts) {
+		for (auto const& [tag, readCost] : readCosts) {
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
 			result.busiestReadTags.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
 		}
-		for (const auto& [tag, writeCost] : writeCosts) {
+		for (auto const& [tag, writeCost] : writeCosts) {
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
 			result.busiestWriteTags.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
 		}
@@ -639,7 +639,7 @@ public:
 
 	Map<UID, StorageQueueInfo> getStorageQueueInfos() const {
 		Map<UID, StorageQueueInfo> result;
-		for (const auto& storageServer : storageServers) {
+		for (auto const& storageServer : storageServers) {
 			auto const sqInfo = storageServer.getStorageQueueInfo();
 			result.insert(mapPair(sqInfo.id, sqInfo));
 		}

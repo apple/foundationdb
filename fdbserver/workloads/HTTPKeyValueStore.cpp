@@ -34,7 +34,7 @@
 
 #define DEBUG_HTTPKV false
 
-static const int maxClients = 100;
+static int const maxClients = 100;
 
 struct SimHTTPKVStore : NonCopyable, ReferenceCounted<SimHTTPKVStore> {
 	std::unordered_map<std::string, std::string> data;

@@ -54,9 +54,9 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<ThreadSafeDatabase>::delref(); }
 
-	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
-	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+	ThreadFuture<int64_t> rebootWorker(StringRef const& address, bool check, int duration) override;
+	ThreadFuture<Void> forceRecoveryWithDataLoss(StringRef const& dcid) override;
+	ThreadFuture<Void> createSnapshot(StringRef const& uid, StringRef const& snapshot_command) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
 	void setSharedState(DatabaseSharedState* p) override;
@@ -89,54 +89,54 @@ public:
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
+	ThreadFuture<Optional<Value>> get(KeyRef const& key, bool snapshot = false) override;
+	ThreadFuture<Key> getKey(KeySelectorRef const& key, bool snapshot = false) override;
+	ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                   KeySelectorRef const& end,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
+	ThreadFuture<RangeResult> getRange(KeySelectorRef const& begin,
+	                                   KeySelectorRef const& end,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeResult> getRange(KeyRangeRef const& keys,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
-	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               const StringRef& mapper,
+	ThreadFuture<MappedRangeResult> getMappedRange(KeySelectorRef const& begin,
+	                                               KeySelectorRef const& end,
+	                                               StringRef const& mapper,
 	                                               GetRangeLimits limits,
 	                                               bool snapshot,
 	                                               bool reverse) override;
-	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
+	ThreadFuture<Standalone<VectorRef<char const*>>> getAddressesForKey(KeyRef const& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
-	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
-	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRangeRef& range,
+	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(KeyRangeRef const& keys) override;
+	ThreadFuture<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRangeRef const& range,
 	                                                                int64_t chunkSize) override;
 
-	void addReadConflictRange(const KeyRangeRef& keys) override;
+	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void makeSelfConflicting();
 
-	void atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) override;
-	void set(const KeyRef& key, const ValueRef& value) override;
-	void clear(const KeyRef& begin, const KeyRef& end) override;
-	void clear(const KeyRangeRef& range) override;
-	void clear(const KeyRef& key) override;
+	void atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) override;
+	void set(KeyRef const& key, ValueRef const& value) override;
+	void clear(KeyRef const& begin, KeyRef const& end) override;
+	void clear(KeyRangeRef const& range) override;
+	void clear(KeyRef const& key) override;
 
-	ThreadFuture<Void> watch(const KeyRef& key) override;
+	ThreadFuture<Void> watch(KeyRef const& key) override;
 
-	void addWriteConflictRange(const KeyRangeRef& keys) override;
+	void addWriteConflictRange(KeyRangeRef const& keys) override;
 
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
@@ -176,7 +176,7 @@ private:
 class ThreadSafeApi : public IClientApi, ThreadSafeReferenceCounted<ThreadSafeApi> {
 public:
 	void selectApiVersion(int apiVersion) override;
-	const char* getClientVersion() override;
+	char const* getClientVersion() override;
 	void useFutureProtocolVersion() override;
 
 	void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -184,8 +184,8 @@ public:
 	void runNetwork() override;
 	void stopNetwork() override;
 
-	Reference<IDatabase> createDatabase(const char* clusterFilePath) override;
-	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
+	Reference<IDatabase> createDatabase(char const* clusterFilePath) override;
+	Reference<IDatabase> createDatabaseFromConnectionString(char const* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
 

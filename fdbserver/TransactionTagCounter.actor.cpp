@@ -96,7 +96,7 @@ public:
 				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
 			}
 
-			for (const auto& tagInfo : previousBusiestTags) {
+			for (auto const& tagInfo : previousBusiestTags) {
 				TraceEvent("BusyReadTag", thisServerID)
 				    .detail("Tag", printable(tagInfo.tag))
 				    .detail("TagCost", tagInfo.rate)

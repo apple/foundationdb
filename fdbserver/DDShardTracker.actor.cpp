@@ -141,9 +141,9 @@ bool ddLargeTeamEnabled() {
 
 // Returns the shard size bounds as well as whether `keys` a read hot shard.
 std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
-    const KeyRange& keys,
-    const Reference<AsyncVar<Optional<ShardMetrics>>>& shardMetrics,
-    const BandwidthStatus& bandwidthStatus) {
+    KeyRange const& keys,
+    Reference<AsyncVar<Optional<ShardMetrics>>> const& shardMetrics,
+    BandwidthStatus const& bandwidthStatus) {
 	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
 	bool readHotShard = false;
 	if (shardMetrics->get().present()) {
@@ -305,7 +305,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 						if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 							// update physicalShard metrics and return whether the keys needs to move out of
 							// physicalShard
-							const MoveKeyRangeOutPhysicalShard needToMove =
+							MoveKeyRangeOutPhysicalShard const needToMove =
 							    self()->physicalShardCollection->trackPhysicalShard(
 							        keys, metrics.first.get(), shardMetrics->get().get().metrics, initWithNewMetrics);
 							if (needToMove) {
@@ -355,7 +355,7 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			state KeyRange keys = waitNext(self->readHotShard.getFuture());
 			Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges = wait(self->db->getReadHotRanges(keys));
 
-			for (const auto& keyRange : readHotRanges) {
+			for (auto const& keyRange : readHotRanges) {
 				TraceEvent("ReadHotRangeLog")
 				    .detail("ReadDensity", keyRange.density)
 				    .detail("ReadBandwidth", keyRange.readBandwidthSec)
@@ -413,12 +413,12 @@ ACTOR Future<Void> changeSizes(DataDistributionTracker* self,
 	wait(yield(TaskPriority::DataDistribution));
 
 	int64_t newShardsStartingSize = 0;
-	for (const auto& size : sizes) {
+	for (auto const& size : sizes) {
 		newShardsStartingSize += size.get();
 	}
 
 	int64_t newSystemShardsStartingSize = 0;
-	for (const auto& systemSize : systemSizes) {
+	for (auto const& systemSize : systemSizes) {
 		newSystemShardsStartingSize += systemSize.get();
 	}
 
@@ -438,7 +438,7 @@ ACTOR Future<Void> changeSizes(DataDistributionTracker* self,
 }
 
 struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
-	explicit HasBeenTrueFor(const Optional<ShardMetrics>& value) {
+	explicit HasBeenTrueFor(Optional<ShardMetrics> const& value) {
 		if (value.present()) {
 			lowBandwidthStartTime = value.get().lastLowBandwidthStartTime;
 			trigger =
@@ -675,7 +675,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 // has been stuck and forced to exit. If that data move is an team unhealthy data move, we need to issue a new data
 // move.
 void createShardToBulkLoad(DataDistributionTracker* self,
-                           const BulkLoadTaskState& bulkLoadTaskState,
+                           BulkLoadTaskState const& bulkLoadTaskState,
                            Optional<int> cancelledDataMovePriority) {
 	KeyRange keys = bulkLoadTaskState.getRange();
 	ASSERT(!keys.empty());
@@ -748,8 +748,8 @@ void createShardToBulkLoad(DataDistributionTracker* self,
 Future<Void> shardMerger(DataDistributionTracker* self,
                          KeyRange const& keys,
                          Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
-	const UID actionId = deterministicRandom()->randomUniqueID();
-	const Severity stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
+	UID const actionId = deterministicRandom()->randomUniqueID();
+	Severity const stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
 	int64_t maxShardSize = self->maxShardSize->get().get();
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
@@ -795,8 +795,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 			// If going forward, give up when the next shard's stats are not yet present, or if the
 			// the shard is already over the merge bounds.
-			const int newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
-			const int64_t newSize =
+			int const newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
+			int64_t const newSize =
 			    newMetrics.present() ? (endingStats.bytes + newMetrics.get().metrics.bytes) : endingStats.bytes;
 			if (!newMetrics.present() || newCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT || newSize > maxShardSize) {
 				if (shardsMerged == 1) {
@@ -824,8 +824,8 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			// If going backward, stop when the stats are not present or if the shard is already over the merge
 			//  bounds. If this check triggers right away (if we have not merged anything) then return a trigger
 			//  on the previous shard changing "size".
-			const int newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
-			const int64_t newSize =
+			int const newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
+			int64_t const newSize =
 			    newMetrics.present() ? (endingStats.bytes + newMetrics.get().metrics.bytes) : endingStats.bytes;
 			if (!newMetrics.present() || newCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT || newSize > maxShardSize) {
 				if (shardsMerged == 1) {
@@ -1300,7 +1300,7 @@ void triggerStorageQueueRebalance(DataDistributionTracker* self, RebalanceStorag
 	int64_t maxShardWriteTraffic = 0;
 	KeyRange shardToMove;
 	ShardsAffectedByTeamFailure::Team selectedTeam;
-	for (const auto& team : req.teams) {
+	for (auto const& team : req.teams) {
 		for (auto const& shard : self->shardsAffectedByTeamFailure->getShardsFor(team)) {
 			for (auto it : self->shards->intersectingRanges(shard)) {
 				if (it->value().stats->get().present()) {
@@ -1406,13 +1406,13 @@ struct DataDistributionTrackerImpl {
 
 Future<Void> DataDistributionTracker::run(
     Reference<DataDistributionTracker> self,
-    const Reference<InitialDataDistribution>& initData,
-    const FutureStream<GetMetricsRequest>& getShardMetrics,
-    const FutureStream<GetTopKMetricsRequest>& getTopKMetrics,
-    const FutureStream<GetMetricsListRequest>& getShardMetricsList,
-    const FutureStream<Promise<int64_t>>& getAverageShardBytes,
-    const FutureStream<RebalanceStorageQueueRequest>& triggerStorageQueueRebalance,
-    const FutureStream<BulkLoadShardRequest>& triggerShardBulkLoading) {
+    Reference<InitialDataDistribution> const& initData,
+    FutureStream<GetMetricsRequest> const& getShardMetrics,
+    FutureStream<GetTopKMetricsRequest> const& getTopKMetrics,
+    FutureStream<GetMetricsListRequest> const& getShardMetricsList,
+    FutureStream<Promise<int64_t>> const& getAverageShardBytes,
+    FutureStream<RebalanceStorageQueueRequest> const& triggerStorageQueueRebalance,
+    FutureStream<BulkLoadShardRequest> const& triggerShardBulkLoading) {
 	self->getShardMetrics = getShardMetrics;
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
@@ -1493,7 +1493,7 @@ ACTOR Future<Void> trackKeyRangeInPhysicalShardMetrics(
 	}
 }
 
-void PhysicalShardCollection::PhysicalShard::insertNewRangeData(const KeyRange& newRange) {
+void PhysicalShardCollection::PhysicalShard::insertNewRangeData(KeyRange const& newRange) {
 	RangeData data;
 	data.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 	data.trackMetrics = trackKeyRangeInPhysicalShardMetrics(txnProcessor, newRange, data.stats, stats);
@@ -1501,10 +1501,10 @@ void PhysicalShardCollection::PhysicalShard::insertNewRangeData(const KeyRange& 
 	ASSERT(it.second);
 }
 
-void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) {
+void PhysicalShardCollection::PhysicalShard::addRange(KeyRange const& newRange) {
 	if (g_network->isSimulated()) {
 		// Test that new range must not overlap with any existing range in this shard.
-		for (const auto& [range, data] : rangeData) {
+		for (auto const& [range, data] : rangeData) {
 			ASSERT(!range.intersects(newRange));
 		}
 	}
@@ -1512,7 +1512,7 @@ void PhysicalShardCollection::PhysicalShard::addRange(const KeyRange& newRange) 
 	insertNewRangeData(newRange);
 }
 
-void PhysicalShardCollection::PhysicalShard::removeRange(const KeyRange& outRange) {
+void PhysicalShardCollection::PhysicalShard::removeRange(KeyRange const& outRange) {
 	std::vector<KeyRangeRef> updateRanges;
 	for (auto& [range, data] : rangeData) {
 		if (range.intersects(outRange)) {
@@ -1625,7 +1625,7 @@ void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
 		auto keyRangePiece = KeyRangeRef(it->range().begin, it->range().end);
 		ASSERT(physicalShardInstances.find(shardID) != physicalShardInstances.end());
 		bool exist = false;
-		for (const auto& [range, data] : physicalShardInstances[shardID].rangeData) {
+		for (auto const& [range, data] : physicalShardInstances[shardID].rangeData) {
 			if (range == keyRangePiece) {
 				exist = true;
 				break;
@@ -1647,7 +1647,7 @@ void PhysicalShardCollection::checkKeyRangePhysicalShardMapping() {
 Optional<uint64_t> PhysicalShardCollection::trySelectAvailablePhysicalShardFor(
     ShardsAffectedByTeamFailure::Team team,
     StorageMetrics const& moveInMetrics,
-    const std::unordered_set<uint64_t>& excludedPhysicalShards,
+    std::unordered_set<uint64_t> const& excludedPhysicalShards,
     uint64_t debugID) {
 	ASSERT(team.servers.size() > 0);
 	// Case: The team is not tracked in the mapping (teamPhysicalShardIDs)
@@ -1862,7 +1862,7 @@ void PhysicalShardCollection::updatePhysicalShardCollection(
     bool isRestore,
     std::vector<ShardsAffectedByTeamFailure::Team> selectedTeams,
     uint64_t physicalShardID,
-    const StorageMetrics& metrics,
+    StorageMetrics const& metrics,
     uint64_t debugID) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);

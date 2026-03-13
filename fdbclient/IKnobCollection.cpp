@@ -95,9 +95,9 @@ IKnobCollection& IKnobCollection::getMutableGlobalKnobCollection() {
 	return *globalKnobCollection();
 }
 
-void IKnobCollection::setupKnobs(const std::vector<std::pair<std::string, std::string>>& knobs) {
+void IKnobCollection::setupKnobs(std::vector<std::pair<std::string, std::string>> const& knobs) {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	for (const auto& [knobName, knobValueString] : knobs) {
+	for (auto const& [knobName, knobValueString] : knobs) {
 		try {
 			auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
 			g_knobs.setKnob(knobName, knobValue);

@@ -28,7 +28,7 @@
 #include "flow/ThreadHelper.actor.h"
 namespace fdb_cli {
 
-const KeyRef consistencyCheckSpecialKey = "\xff\xff/management/consistency_check_suspended"_sr;
+KeyRef const consistencyCheckSpecialKey = "\xff\xff/management/consistency_check_suspended"_sr;
 
 Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                           std::vector<StringRef> const& tokens,

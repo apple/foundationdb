@@ -85,7 +85,7 @@ void HistogramRegistry::clear() {
 
 #pragma region Histogram
 
-const char* const Histogram::UnitToStringMapper[] = { "milliseconds", "bytes", "bytes_per_second",
+char const* const Histogram::UnitToStringMapper[] = { "milliseconds", "bytes", "bytes_per_second",
 	                                                  "percentage",   "count", "none" };
 
 void Histogram::writeToLog(double elapsed) {
@@ -142,15 +142,15 @@ std::string Histogram::drawHistogram() {
 
 	std::stringstream result;
 
-	const char* verticalLine = "├\0";
-	const char* origin = "└\0";
-	const char* emptyCell = "------\0";
-	const char* halfCell = "---▄▄▄\0";
-	const char* fullCell = "---███\0";
-	const char* xFull = "---▀▀▀\0";
-	const char* xEmpty = "------\0";
-	const char* lineEnd = "--- \0";
-	const unsigned int width = std::strlen(emptyCell);
+	char const* verticalLine = "├\0";
+	char const* origin = "└\0";
+	char const* emptyCell = "------\0";
+	char const* halfCell = "---▄▄▄\0";
+	char const* fullCell = "---███\0";
+	char const* xFull = "---▀▀▀\0";
+	char const* xEmpty = "------\0";
+	char const* lineEnd = "--- \0";
+	unsigned int const width = std::strlen(emptyCell);
 
 	int max_lines = 23;
 	uint32_t total = 0;
@@ -167,8 +167,7 @@ std::string Histogram::drawHistogram() {
 	unsigned int lines = (maxPct < (max_lines - 3)) ? (unsigned int)maxPct : (max_lines - 3);
 
 	result << "Total Inputs: " << total << std::fixed << "\n";
-	result << "Percent"
-	       << "\n";
+	result << "Percent" << "\n";
 	for (int l = 0; l < lines; l++) {
 		double currHeight = (lines - l) * intervalSize;
 		double halfFullHeight = currHeight - intervalSize / 4;

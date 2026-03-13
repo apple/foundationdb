@@ -49,7 +49,7 @@ enum class TransactionPriorityType : int { PRIORITY_DEFAULT = 0, PRIORITY_BATCH 
 static_assert(sizeof(TransactionPriorityType) == 4, "transaction_profiling_analyzer.py assumes this field has size 4");
 
 struct Event {
-	Event(EventType t, double ts, const Optional<Standalone<StringRef>>& dc) : type(t), startTs(ts) {
+	Event(EventType t, double ts, Optional<Standalone<StringRef>> const& dc) : type(t), startTs(ts) {
 		if (dc.present())
 			dcId = dc.get();
 	}
@@ -111,7 +111,7 @@ struct EventGetVersion_V2 : public Event {
 // Version V3 of EventGetVersion starting at 6.3
 struct EventGetVersion_V3 : public Event {
 	EventGetVersion_V3(double ts,
-	                   const Optional<Standalone<StringRef>>& dcId,
+	                   Optional<Standalone<StringRef>> const& dcId,
 	                   double lat,
 	                   TransactionPriority priority,
 	                   Version version)
@@ -156,7 +156,7 @@ struct EventGetVersion_V3 : public Event {
 };
 
 struct EventGet : public Event {
-	EventGet(double ts, const Optional<Standalone<StringRef>>& dcId, double lat, int size, const KeyRef& in_key)
+	EventGet(double ts, Optional<Standalone<StringRef>> const& dcId, double lat, int size, KeyRef const& in_key)
 	  : Event(EventType::GET_LATENCY, ts, dcId), latency(lat), valueSize(size), key(in_key) {}
 	EventGet() {}
 
@@ -185,11 +185,11 @@ struct EventGet : public Event {
 
 struct EventGetRange : public Event {
 	EventGetRange(double ts,
-	              const Optional<Standalone<StringRef>>& dcId,
+	              Optional<Standalone<StringRef>> const& dcId,
 	              double lat,
 	              int size,
-	              const KeyRef& start_key,
-	              const KeyRef& end_key)
+	              KeyRef const& start_key,
+	              KeyRef const& end_key)
 	  : Event(EventType::GET_RANGE_LATENCY, ts, dcId), latency(lat), rangeSize(size), startKey(start_key),
 	    endKey(end_key) {}
 	EventGetRange() {}
@@ -274,12 +274,12 @@ struct EventCommit : public Event {
 // Version V2 of EventGetVersion starting at 6.3
 struct EventCommit_V2 : public Event {
 	EventCommit_V2(double ts,
-	               const Optional<Standalone<StringRef>>& dcId,
+	               Optional<Standalone<StringRef>> const& dcId,
 	               double lat,
 	               int mut,
 	               int bytes,
 	               Version version,
-	               const CommitTransactionRequest& commit_req)
+	               CommitTransactionRequest const& commit_req)
 	  : Event(EventType::COMMIT_LATENCY, ts, dcId), latency(lat), numMutations(mut), commitBytes(bytes),
 	    commitVersion(version), req(commit_req) {}
 	EventCommit_V2() {}
@@ -337,7 +337,7 @@ struct EventCommit_V2 : public Event {
 };
 
 struct EventGetError : public Event {
-	EventGetError(double ts, const Optional<Standalone<StringRef>>& dcId, int err_code, const KeyRef& in_key)
+	EventGetError(double ts, Optional<Standalone<StringRef>> const& dcId, int err_code, KeyRef const& in_key)
 	  : Event(EventType::ERROR_GET, ts, dcId), errCode(err_code), key(in_key) {}
 	EventGetError() {}
 
@@ -364,10 +364,10 @@ struct EventGetError : public Event {
 
 struct EventGetRangeError : public Event {
 	EventGetRangeError(double ts,
-	                   const Optional<Standalone<StringRef>>& dcId,
+	                   Optional<Standalone<StringRef>> const& dcId,
 	                   int err_code,
-	                   const KeyRef& start_key,
-	                   const KeyRef& end_key)
+	                   KeyRef const& start_key,
+	                   KeyRef const& end_key)
 	  : Event(EventType::ERROR_GET_RANGE, ts, dcId), errCode(err_code), startKey(start_key), endKey(end_key) {}
 	EventGetRangeError() {}
 
@@ -396,9 +396,9 @@ struct EventGetRangeError : public Event {
 
 struct EventCommitError : public Event {
 	EventCommitError(double ts,
-	                 const Optional<Standalone<StringRef>>& dcId,
+	                 Optional<Standalone<StringRef>> const& dcId,
 	                 int err_code,
-	                 const CommitTransactionRequest& commit_req)
+	                 CommitTransactionRequest const& commit_req)
 	  : Event(EventType::ERROR_COMMIT, ts, dcId), errCode(err_code), req(commit_req) {}
 	EventCommitError() {}
 

@@ -37,10 +37,10 @@ private:
 
 public:
 	// Sets a value for a given knob
-	void set(const std::string& name, const ParsedKnobValue value);
+	void set(std::string const& name, ParsedKnobValue const value);
 
 	// Gets a list of knobs for given type
-	const container_t& getKnobs() const;
+	container_t const& getKnobs() const;
 };
 
 // For knobs, temporarily change the values, the original values will be recovered
@@ -51,10 +51,10 @@ class KnobProtectiveGroup {
 	// Snapshots the current knob values base on those knob keys in overriddenKnobs
 	void snapshotOriginalKnobs();
 
-	void assignKnobs(const KnobKeyValuePairs& overrideKnobs);
+	void assignKnobs(KnobKeyValuePairs const& overrideKnobs);
 
 public:
-	KnobProtectiveGroup(const KnobKeyValuePairs& overridenKnobs_);
+	KnobProtectiveGroup(KnobKeyValuePairs const& overridenKnobs_);
 	~KnobProtectiveGroup();
 };
 

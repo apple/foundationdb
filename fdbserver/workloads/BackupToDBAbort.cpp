@@ -32,7 +32,7 @@ struct BackupToDBAbort : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	UID lockid;
 
-	explicit BackupToDBAbort(const WorkloadContext& wcx) : TestWorkload(wcx) {
+	explicit BackupToDBAbort(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		abortDelay = getOption(options, "abortDelay"_sr, 50.0);
 
 		addDefaultBackupRanges(backupRanges);
@@ -43,7 +43,7 @@ struct BackupToDBAbort : TestWorkload {
 		lockid = UID(0xbeeffeed, 0xdecaf00d);
 	}
 
-	Future<Void> setup(const Database& cx) override {
+	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
 		return _setup(cx);
@@ -94,7 +94,7 @@ struct BackupToDBAbort : TestWorkload {
 		}
 	}
 
-	Future<bool> check(const Database& cx) override {
+	Future<bool> check(Database const& cx) override {
 		TraceEvent("BDBA_UnlockPrimary").log();
 		// Too much of the tester framework expects the primary database to be unlocked, so we unlock it
 		// once all of the workloads have finished.

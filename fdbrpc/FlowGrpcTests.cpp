@@ -36,7 +36,7 @@ namespace fdbrpc_test {
 
 void generate_random_string(std::string* buffer, int size) {
 	buffer->clear();
-	const std::string characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+	std::string const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 	for (int i = 0; i < size; ++i) {
 		buffer->push_back(characters[deterministicRandom()->randomInt(0, characters.size())]);
 	}
@@ -193,7 +193,7 @@ int WriteTestFile(platform::TmpFile* file, int size) {
 			to_write = size % block_size;
 		}
 		generate_random_string(&buffer, to_write);
-		file->append((const uint8_t*)buffer.c_str(), to_write);
+		file->append((uint8_t const*)buffer.c_str(), to_write);
 		bytes_written += to_write;
 	}
 	std::cout << "Finished writing " << bytes_written << " bytes.\n";
@@ -201,7 +201,7 @@ int WriteTestFile(platform::TmpFile* file, int size) {
 	return bytes_written;
 }
 
-const int GPRC_FILE_TRANSFER_TEST_FILE_SIZE = 1024 * 1024 * 40;
+int const GPRC_FILE_TRANSFER_TEST_FILE_SIZE = 1024 * 1024 * 40;
 
 TEST_CASE("/fdbrpc/grpc/file_transfer") {
 	using platform::TmpFile;

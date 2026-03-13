@@ -87,18 +87,18 @@ using namespace boost::asio::ip;
 std::atomic<int64_t> net2RunLoopIterations(0);
 std::atomic<int64_t> net2RunLoopSleeps(0);
 
-volatile size_t net2backtraces_max = 10000;
-volatile void** volatile net2backtraces = nullptr;
-volatile size_t net2backtraces_offset = 0;
-volatile bool net2backtraces_overflow = false;
-volatile int net2backtraces_count = 0;
+size_t volatile net2backtraces_max = 10000;
+void volatile** volatile net2backtraces = nullptr;
+size_t volatile net2backtraces_offset = 0;
+bool volatile net2backtraces_overflow = false;
+int volatile net2backtraces_count = 0;
 
-volatile void** other_backtraces = nullptr;
+void volatile** other_backtraces = nullptr;
 sigset_t sigprof_set;
 
 void initProfiling() {
-	net2backtraces = new volatile void*[net2backtraces_max];
-	other_backtraces = new volatile void*[net2backtraces_max];
+	net2backtraces = new void volatile*[net2backtraces_max];
+	other_backtraces = new void volatile*[net2backtraces_max];
 
 	// According to folk wisdom, calling this once before setting up the signal handler makes
 	// it async signal safe in practice :-/
@@ -135,7 +135,7 @@ private:
 	                             double now);
 
 public:
-	Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics);
+	Net2(TLSConfig const& tlsConfig, bool useThreadPool, bool useMetrics);
 	void initTLS(ETLSInitState targetState) override;
 	void run() override;
 	void initMetrics() override;
@@ -144,30 +144,30 @@ public:
 	Future<Reference<IConnection>> connect(NetworkAddress toAddr, tcp::socket* existingSocket = nullptr) override;
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override;
 	Future<Reference<IConnection>> connectExternalWithHostname(NetworkAddress toAddr,
-	                                                           const std::string& hostname) override;
+	                                                           std::string const& hostname) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
 	// The mock DNS methods should only be used in simulation.
-	void addMockTCPEndpoint(const std::string& host,
-	                        const std::string& service,
-	                        const std::vector<NetworkAddress>& addresses) override {
+	void addMockTCPEndpoint(std::string const& host,
+	                        std::string const& service,
+	                        std::vector<NetworkAddress> const& addresses) override {
 		throw operation_failed();
 	}
 	// The mock DNS methods should only be used in simulation.
-	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
+	void removeMockTCPEndpoint(std::string const& host, std::string const& service) override {
 		throw operation_failed();
 	}
-	void parseMockDNSFromString(const std::string& s) override { throw operation_failed(); }
+	void parseMockDNSFromString(std::string const& s) override { throw operation_failed(); }
 	std::string convertMockDNSToString() override { throw operation_failed(); }
 
-	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
-	                                                       const std::string& service) override;
-	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
-	                                                                   const std::string& service) override;
-	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
-	                                                       const std::string& service) override;
-	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
-	                                                                   const std::string& service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(std::string const& host,
+	                                                       std::string const& service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(std::string const& host,
+	                                                                   std::string const& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(std::string const& host,
+	                                                       std::string const& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(std::string const& host,
+	                                                                   std::string const& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
 	// INetwork interface
@@ -200,7 +200,7 @@ public:
 	}
 
 	bool isSimulated() const override { return false; }
-	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override;
+	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, char const* name) override;
 
 	void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) override;
 	bool isAddressOnThisHost(NetworkAddress const& addr) const override;
@@ -216,7 +216,7 @@ public:
 
 	std::vector<flowGlobalType> globals;
 
-	const TLSConfig& getTLSConfig() const override { return tlsConfig; }
+	TLSConfig const& getTLSConfig() const override { return tlsConfig; }
 
 	bool checkRunnable() override;
 
@@ -357,12 +357,12 @@ static udp::endpoint udpEndpoint(NetworkAddress const& n) {
 
 class BindPromise {
 	Promise<Void> p;
-	std::variant<const char*, AuditedEvent> errContext;
+	std::variant<char const*, AuditedEvent> errContext;
 	UID errID;
 	NetworkAddress peerAddr;
 
 public:
-	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
+	BindPromise(char const* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
 	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 	BindPromise(BindPromise&& r) noexcept
@@ -372,9 +372,9 @@ public:
 
 	NetworkAddress getPeerAddr() const { return peerAddr; }
 
-	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
+	void setPeerAddr(NetworkAddress const& addr) { peerAddr = addr; }
 
-	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
+	void operator()(boost::system::error_code const& error, size_t bytesWritten = 0) {
 		try {
 			if (error) {
 				// Log the error...
@@ -383,7 +383,7 @@ public:
 					if (std::holds_alternative<AuditedEvent>(errContext))
 						traceEvent.emplace(SevWarn, std::get<AuditedEvent>(errContext), errID);
 					else
-						traceEvent.emplace(SevWarn, std::get<const char*>(errContext), errID);
+						traceEvent.emplace(SevWarn, std::get<char const*>(errContext), errID);
 					TraceEvent& evt = *traceEvent;
 					evt.suppressFor(1.0)
 					    .detail("ErrorCode", error.value())
@@ -569,7 +569,7 @@ private:
 			    .detail("Message", error.message());
 	}
 
-	void onReadError(const boost::system::error_code& error) {
+	void onReadError(boost::system::error_code const& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
@@ -578,7 +578,7 @@ private:
 		    .detail("Message", error.message());
 		closeSocket();
 	}
-	void onWriteError(const boost::system::error_code& error) {
+	void onWriteError(boost::system::error_code const& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
@@ -591,19 +591,19 @@ private:
 
 class ReadPromise {
 	Promise<int> p;
-	const char* errContext;
+	char const* errContext;
 	UID errID;
 	std::shared_ptr<udp::endpoint> endpoint = nullptr;
 
 public:
-	ReadPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
+	ReadPromise(char const* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	ReadPromise(ReadPromise const& other) = default;
 	ReadPromise(ReadPromise&& other) : p(std::move(other.p)), errContext(other.errContext), errID(other.errID) {}
 
 	std::shared_ptr<udp::endpoint>& getEndpoint() { return endpoint; }
 
 	Future<int> getFuture() { return p.getFuture(); }
-	void operator()(const boost::system::error_code& error, size_t bytesWritten) {
+	void operator()(boost::system::error_code const& error, size_t bytesWritten) {
 		try {
 			if (error) {
 				TraceEvent evt(SevWarn, errContext, errID);
@@ -746,14 +746,14 @@ private:
 			    .detail("Message", error.message());
 	}
 
-	void onReadError(const boost::system::error_code& error) {
+	void onReadError(boost::system::error_code const& error) {
 		TraceEvent(SevWarn, "N2_UDPReadError", id)
 		    .suppressFor(1.0)
 		    .detail("ErrorCode", error.value())
 		    .detail("Message", error.message());
 		closeSocket();
 	}
-	void onWriteError(const boost::system::error_code& error) {
+	void onWriteError(boost::system::error_code const& error) {
 		TraceEvent(SevWarn, "N2_UDPWriteError", id)
 		    .suppressFor(1.0)
 		    .detail("ErrorCode", error.value())
@@ -834,7 +834,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 
 		NetworkAddress getPeerAddress() const { return peerAddr; }
 
-		void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
+		void setPeerAddr(NetworkAddress const& addr) { peerAddr = addr; }
 
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
@@ -1318,7 +1318,7 @@ private:
 		ssl_sock.shutdown(shutdownError);
 	}
 
-	void onReadError(const boost::system::error_code& error) {
+	void onReadError(boost::system::error_code const& error) {
 		TraceEvent(SevWarn, "N2_ReadError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
@@ -1327,7 +1327,7 @@ private:
 		    .detail("Message", error.message());
 		closeSocket();
 	}
-	void onWriteError(const boost::system::error_code& error) {
+	void onWriteError(boost::system::error_code const& error) {
 		TraceEvent(SevWarn, "N2_WriteError", id)
 		    .suppressFor(1.0)
 		    .detail("PeerAddr", peer_address)
@@ -1395,7 +1395,7 @@ private:
 
 // 5MB for loading files into memory
 
-Net2::Net2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics)
+Net2::Net2(TLSConfig const& tlsConfig, bool useThreadPool, bool useMetrics)
   : globals(enumGlobal::COUNT), useThreadPool(useThreadPool), reactor(this),
     sslContextVar({ ReferencedObject<boost::asio::ssl::context>::from(
         boost::asio::ssl::context(boost::asio::ssl::context::tls)) }),
@@ -1444,7 +1444,7 @@ ACTOR static Future<Void> reloadCertificatesOnChange(
 	state int mismatches = 0;
 	state AsyncTrigger fileChanged;
 	state std::vector<Future<Void>> lifetimes;
-	const int& intervalSeconds = FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS;
+	int const& intervalSeconds = FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS;
 	lifetimes.push_back(watchFileForChanges(
 	    config.getCertificatePathSync(), &fileChanged, &intervalSeconds, "TLSCertificateRefreshStatError"));
 	lifetimes.push_back(
@@ -1484,7 +1484,7 @@ void Net2::initTLS(ETLSInitState targetState) {
 		auto onPolicyFailure = [this]() { this->countTLSPolicyFailures++; };
 		try {
 			boost::asio::ssl::context newContext(boost::asio::ssl::context::tls);
-			const LoadedTLSConfig& loaded = tlsConfig.loadSync();
+			LoadedTLSConfig const& loaded = tlsConfig.loadSync();
 			TraceEvent("Net2TLSConfig")
 			    .detail("CAPath", tlsConfig.getCAPathSync())
 			    .detail("CertificatePath", tlsConfig.getCertificatePathSync())
@@ -1600,7 +1600,7 @@ void Net2::run() {
 #endif
 
 	timeOffsetLogger = logTimeOffset();
-	const char* flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
+	char const* flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
 	if (flow_profiler_enabled != nullptr && *flow_profiler_enabled != '\0') {
 		// The empty string check is to allow running `FLOW_PROFILER_ENABLED= ./fdbserver` to force disabling flow
 		// profiling at startup.
@@ -1739,7 +1739,7 @@ void Net2::run() {
 			countRunLoopProfilingSignals += signal_count;
 
 			if (other_offset) {
-				volatile void** _traces = net2backtraces;
+				void volatile** _traces = net2backtraces;
 				net2backtraces = other_backtraces;
 				other_backtraces = _traces;
 
@@ -1958,7 +1958,7 @@ void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	}
 }
 
-THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) {
+THREAD_HANDLE Net2::startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, char const* name) {
 	return ::startThread(func, arg, stackSize, name);
 }
 
@@ -1980,7 +1980,7 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr) {
 	return connect(toAddr);
 }
 
-Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, const std::string& hostname) {
+Future<Reference<IConnection>> Net2::connectExternalWithHostname(NetworkAddress toAddr, std::string const& hostname) {
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connectWithHostname(&this->reactor.ios, this->sslContextVar.get(), toAddr, hostname);
@@ -2004,7 +2004,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
 	tcpResolver.async_resolve(
-	    host, service, [promise](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+	    host, service, [promise](boost::system::error_code const& ec, tcp::resolver::iterator iter) {
 		    if (ec) {
 			    promise.sendError(lookup_failed());
 			    return;
@@ -2049,12 +2049,12 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	return ret;
 }
 
-Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(std::string const& host, std::string const& service) {
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
-Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
-                                                                         const std::string& service) {
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(std::string const& host,
+                                                                         std::string const& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
@@ -2064,7 +2064,7 @@ Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const s
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
-std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(std::string const& host, std::string const& service) {
 	tcp::resolver tcpResolver(reactor.ios);
 	try {
 		auto iter = tcpResolver.resolve(host, service);
@@ -2090,8 +2090,8 @@ std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& 
 	}
 }
 
-std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
-                                                                         const std::string& service) {
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(std::string const& host,
+                                                                         std::string const& service) {
 	if (FLOW_KNOBS->ENABLE_COORDINATOR_DNS_CACHE) {
 		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
 		if (cache.present()) {
@@ -2246,7 +2246,7 @@ boost::asio::const_buffer SendBufferIterator::operator*() const {
 	return boost::asio::const_buffer(p->data() + p->bytes_sent, std::min(limit, p->bytes_written - p->bytes_sent));
 }
 
-INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool, bool useMetrics) {
+INetwork* newNet2(TLSConfig const& tlsConfig, bool useThreadPool, bool useMetrics) {
 	try {
 		N2::g_net2 = new N2::Net2(tlsConfig, useThreadPool, useMetrics);
 	} catch (boost::system::system_error e) {

@@ -47,7 +47,6 @@
 #include "flow/network.h"
 #include "flow/serialize.h"
 
-
 #ifdef WITH_SWIFT
 #include <swift/bridging>
 
@@ -68,13 +67,12 @@
 		static_assert(false, "TEST macros are deprecated, please use CODE_PROBE instead");                             \
 	} while (false)
 
-
 extern Optional<uint64_t> parse_with_suffix(std::string const& toparse, std::string const& default_unit = "");
 extern Optional<uint64_t> parseDuration(std::string const& str, std::string const& defaultUnit = "");
-extern std::string format(const char* form, ...);
+extern std::string format(char const* form, ...);
 
 // On success, returns the number of characters written. On failure, returns a negative number.
-extern int vsformat(std::string& outputString, const char* form, va_list args);
+extern int vsformat(std::string& outputString, char const* form, va_list args);
 
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
@@ -144,7 +142,7 @@ public:
 
 	template <class R>
 	ErrorOr<R> castTo() const {
-		return map<R>([](const T& v) { return (R)v; });
+		return map<R>([](T const& v) { return (R)v; });
 	}
 
 private:
@@ -159,11 +157,11 @@ public:
 	// If the ErrorOr is set, calls the function f on the value and returns the value. Otherwise, returns an ErrorOr
 	// with the same error value as this ErrorOr.
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	ErrorOr<MapRet<F>> map(const F& f) const& {
+	ErrorOr<MapRet<F>> map(F const& f) const& {
 		return present() ? ErrorOr<MapRet<F>>(f(get())) : ErrorOr<MapRet<F>>(getError());
 	}
 	template <class F, typename = EnableIfNotMemberPointer<F>>
-	ErrorOr<MapRet<F>> map(const F& f) && {
+	ErrorOr<MapRet<F>> map(F const& f) && {
 		return present() ? ErrorOr<MapRet<F>>(f(std::move(*this).get())) : ErrorOr<MapRet<F>>(getError());
 	}
 
@@ -344,16 +342,16 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 	using Member = ErrorOr<T>;
 	using alternatives = pack<Error, T>;
 	template <class Context>
-	static uint8_t index(const Member& variant, Context&) {
+	static uint8_t index(Member const& variant, Context&) {
 		return variant.present() ? 1 : 0;
 	}
 	template <class Context>
-	static bool empty(const Member& variant, Context&) {
+	static bool empty(Member const& variant, Context&) {
 		return false;
 	}
 
 	template <int i, class Context>
-	static const index_t<i, alternatives>& get(const Member& m, Context&) {
+	static index_t<i, alternatives> const& get(Member const& m, Context&) {
 		if constexpr (i == 0) {
 			return m.getError();
 		} else {
@@ -363,7 +361,7 @@ struct union_like_traits<ErrorOr<T>> : std::true_type {
 	}
 
 	template <int i, class Alternative, class Context>
-	static void assign(Member& m, const Alternative& a, Context&) {
+	static void assign(Member& m, Alternative const& a, Context&) {
 		if constexpr (i == 0) {
 			m = a;
 		} else {
@@ -383,9 +381,9 @@ public:
 	enum class SerializeType { None, Binary, Object };
 
 	CachedSerialization() : cacheType(SerializeType::None) {}
-	explicit CachedSerialization(const T& data) : data(data), cacheType(SerializeType::None) {}
+	explicit CachedSerialization(T const& data) : data(data), cacheType(SerializeType::None) {}
 
-	const T& read() const { return data; }
+	T const& read() const { return data; }
 
 	T& mutate() {
 		cacheType = SerializeType::None;
@@ -436,12 +434,12 @@ namespace detail {
 
 template <class T, class Context>
 struct LoadSaveHelper<CachedSerialization<T>, Context> : Context {
-	LoadSaveHelper(const Context& context) : Context(context), helper(context) {}
+	LoadSaveHelper(Context const& context) : Context(context), helper(context) {}
 
-	void load(CachedSerialization<T>& member, const uint8_t* current) { helper.load(member.mutate(), current); }
+	void load(CachedSerialization<T>& member, uint8_t const* current) { helper.load(member.mutate(), current); }
 
 	template <class Writer>
-	RelativeOffset save(const CachedSerialization<T>& member, Writer& writer, const VTableSet* vtables) {
+	RelativeOffset save(CachedSerialization<T> const& member, Writer& writer, VTableSet const* vtables) {
 		throw internal_error();
 	}
 
@@ -454,7 +452,7 @@ private:
 template <class V>
 struct serialize_raw<ErrorOr<EnsureTable<CachedSerialization<V>>>> : std::true_type {
 	template <class Context>
-	static uint8_t* save_raw(Context& context, const ErrorOr<EnsureTable<CachedSerialization<V>>>& obj) {
+	static uint8_t* save_raw(Context& context, ErrorOr<EnsureTable<CachedSerialization<V>>> const& obj) {
 		auto cache = obj.present() ? obj.get().asUnderlyingType().getCache()
 		                           : ObjectWriter::toValue(ErrorOr<EnsureTable<V>>(obj.getError()),
 		                                                   AssumeVersion(g_network->protocolVersion()));
@@ -576,7 +574,7 @@ private:
 	using Iterator = std::vector<Property>::const_iterator;
 
 	ActorLineage();
-	Iterator find(const std::string_view& name) const {
+	Iterator find(std::string_view const& name) const {
 		for (auto it = properties.cbegin(); it != properties.cend(); ++it) {
 			if (it->name == name) {
 				return it;
@@ -584,7 +582,7 @@ private:
 		}
 		return properties.end();
 	}
-	Property& findOrInsert(const std::string_view& name) {
+	Property& findOrInsert(std::string_view const& name) {
 		for (auto& property : properties) {
 			if (property.name == name) {
 				return property;
@@ -659,7 +657,7 @@ class LineageReference : public Reference<ActorLineage> {
 public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
-	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	LineageReference(LineageReference const& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
 	LineageReference(LineageReference&& r)
 	  : Reference<ActorLineage>(r.getPtr()), actorName_(r.actorName_), allocated_(r.allocated_) {
 		r.setPtrUnsafe(nullptr);
@@ -667,8 +665,8 @@ public:
 		r.allocated_ = false;
 	}
 
-	void setActorName(const char* name) { actorName_ = name; }
-	const char* actorName() const { return actorName_; }
+	void setActorName(char const* name) { actorName_ = name; }
+	char const* actorName() const { return actorName_; }
 	void allocate() {
 		Reference<ActorLineage>::setPtrUnsafe(new ActorLineage());
 		allocated_ = true;
@@ -679,7 +677,7 @@ private:
 	// The actor name has to be a property of the LineageReference because all
 	// actors store their own LineageReference copy, but not all actors point
 	// to their own ActorLineage.
-	const char* actorName_;
+	char const* actorName_;
 	bool allocated_;
 };
 
@@ -696,7 +694,7 @@ LineageReference getCurrentLineage();
 void replaceLineage(LineageReference* lineage);
 
 struct StackLineage : LineageProperties<StackLineage> {
-	static const std::string_view name;
+	static std::string_view const name;
 	StringRef actorName;
 };
 
@@ -920,12 +918,12 @@ class Promise;
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 using flow_swift::FlowCheckedContinuation;
 
-template<class T>
+template <class T>
 class
 #ifdef WITH_SWIFT
-SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
+    SWIFT_CONFORMS_TO_PROTOCOL(flow_swift.FlowCallbackForSwiftContinuationT)
 #endif
-FlowCallbackForSwiftContinuation : Callback<T> {
+        FlowCallbackForSwiftContinuation : Callback<T> {
 public:
 	using SwiftCC = flow_swift::FlowCheckedContinuation<T>;
 	using AssociatedFuture = Future<T>;
@@ -936,7 +934,7 @@ private:
 public:
 	FlowCallbackForSwiftContinuation() : continuationInstance(SwiftCC::init()) {}
 
-	void set(const void* _Nonnull pointerToContinuationInstance, Future<T> f, const void* _Nonnull thisPointer) {
+	void set(void const* _Nonnull pointerToContinuationInstance, Future<T> f, void const* _Nonnull thisPointer) {
 		// Verify Swift did not make a copy of the `self` value for this method
 		// call.
 		assert(this == thisPointer);
@@ -944,16 +942,16 @@ public:
 		// FIXME: Propagate `SwiftCC` to Swift using forward
 		// interop, without relying on passing it via a `void *`
 		// here. That will let us avoid this hack.
-		const void* _Nonnull opaqueStorage = pointerToContinuationInstance;
-		static_assert(sizeof(SwiftCC) == sizeof(const void*));
-		const SwiftCC ccCopy(*reinterpret_cast<const SwiftCC*>(&opaqueStorage));
+		void const* _Nonnull opaqueStorage = pointerToContinuationInstance;
+		static_assert(sizeof(SwiftCC) == sizeof(void const*));
+		SwiftCC const ccCopy(*reinterpret_cast<SwiftCC const*>(&opaqueStorage));
 		// Set the continuation instance.
 		continuationInstance.set(ccCopy);
 		// Add this callback to the future.
 		f.addCallbackAndClear(this);
 	}
 
-	void fire(const T& value) override {
+	void fire(T const& value) override {
 		Callback<T>::remove();
 		Callback<T>::next = nullptr;
 		continuationInstance.resume(value);
@@ -1000,26 +998,26 @@ public:
 	}
 
 	Future() : sav(nullptr) {}
-	Future(const Future<T>& rhs) : sav(rhs.sav) {
+	Future(Future<T> const& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
 	}
 	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) { rhs.sav = nullptr; }
-	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
+	Future(T const& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
 	Future(Never) : sav(new SAV<T>(1, 0)) { sav->send(Never()); }
-	Future(const Error& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
+	Future(Error const& error) : sav(new SAV<T>(1, 0)) { sav->sendError(error); }
 
 #ifndef NO_INTELLISENSE
 	template <class U>
-	Future(const U&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
+	Future(U const&, typename std::enable_if<std::is_assignable<T, U>::value, int*>::type = 0) {}
 #endif
 
 	~Future() {
 		if (sav)
 			sav->delFutureRef();
 	}
-	void operator=(const Future<T>& rhs) {
+	void operator=(Future<T> const& rhs) {
 		if (rhs.sav)
 			rhs.sav->addFutureRef();
 		if (sav)
@@ -1034,8 +1032,8 @@ public:
 			rhs.sav = nullptr;
 		}
 	}
-	bool operator==(const Future& rhs) { return rhs.sav == sav; }
-	bool operator!=(const Future& rhs) { return rhs.sav != sav; }
+	bool operator==(Future const& rhs) { return rhs.sav == sav; }
+	bool operator!=(Future const& rhs) { return rhs.sav != sav; }
 
 	void cancel() {
 		if (sav)
@@ -1097,10 +1095,10 @@ public:
 
 	// Swift can't call method that takes in a universal references (U&&),
 	// so provide a callable `send` method that copies the value.
-	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
+	void sendCopy(T const& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
 
 	template <class E>
-	void sendError(const E& exc) const {
+	void sendError(E const& exc) const {
 		sav->sendError(exc);
 	}
 
@@ -1115,7 +1113,7 @@ public:
 
 	bool isValid() const { return sav != nullptr; }
 	Promise() : sav(new SAV<T>(0, 1)) {}
-	Promise(const Promise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	Promise(Promise const& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	Promise(Promise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 
 	~Promise() {
@@ -1123,7 +1121,7 @@ public:
 			sav->delPromiseRef();
 	}
 
-	void operator=(const Promise& rhs) {
+	void operator=(Promise const& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
 		if (sav)
@@ -1159,7 +1157,8 @@ private:
 template <class T>
 struct NotifiedQueue : private SingleCallback<T>
 #ifndef WITH_SWIFT
-   , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+  ,
+                       FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
 #endif /* WITH_SWIFT */
 {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
@@ -1300,13 +1299,13 @@ public:
 		queue = nullptr;
 	}
 	FutureStream() : queue(nullptr) {}
-	FutureStream(const FutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
+	FutureStream(FutureStream const& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	FutureStream(FutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~FutureStream() {
 		if (queue)
 			queue->delFutureRef();
 	}
-	void operator=(const FutureStream& rhs) {
+	void operator=(FutureStream const& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
@@ -1320,8 +1319,8 @@ public:
 			rhs.queue = nullptr;
 		}
 	}
-	bool operator==(const FutureStream& rhs) { return rhs.queue == queue; }
-	bool operator!=(const FutureStream& rhs) { return rhs.queue != queue; }
+	bool operator==(FutureStream const& rhs) { return rhs.queue == queue; }
+	bool operator!=(FutureStream const& rhs) { return rhs.queue != queue; }
 
 	// FIXME: remove annotation after https://github.com/apple/swift/issues/64316 is fixed.
 	T pop() __attribute__((swift_attr("import_unsafe"))) { return queue->pop(); }
@@ -1372,10 +1371,10 @@ public:
 	// stream.send( request )
 	//   Unreliable at most once delivery: Delivers request unless there is a connection failure (zero or one times)
 
-	void send(const T& value) { queue->send(value); }
+	void send(T const& value) { queue->send(value); }
 	void sendCopy(T value) { queue->send(value); }
 	void send(T&& value) { queue->send(std::move(value)); }
-	void sendError(const Error& error) { queue->sendError(error); }
+	void sendError(Error const& error) { queue->sendError(error); }
 
 	// stream.getReply( request )
 	//   Reliable at least once delivery: Eventually delivers request at least once and returns one of the replies if
@@ -1384,12 +1383,12 @@ public:
 	//   If a reply is returned, request was or will be delivered one or more times.
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value) {
+	Future<REPLY_TYPE(X)> getReply(X const& value) {
 		send(value);
 		return getReplyPromise(value).getFuture();
 	}
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) {
+	Future<REPLY_TYPE(X)> getReply(X const& value, TaskPriority taskID) {
 		setReplyPriority(value, taskID);
 		return getReplyPromise(value).getFuture();
 	}
@@ -1412,9 +1411,9 @@ public:
 		return FutureStream<T>(queue);
 	}
 	PromiseStream() : queue(new NotifiedQueue<T>(0, 1)) {}
-	PromiseStream(const PromiseStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
+	PromiseStream(PromiseStream const& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
 	PromiseStream(PromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
-	void operator=(const PromiseStream& rhs) {
+	void operator=(PromiseStream const& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
 			queue->delPromiseRef();
@@ -1434,7 +1433,7 @@ public:
 		// queue = (NotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	bool operator==(const PromiseStream<T>& rhs) const { return queue == rhs.queue; }
+	bool operator==(PromiseStream<T> const& rhs) const { return queue == rhs.queue; }
 	bool isReady() const { return queue->isReady(); }
 	bool isEmpty() const { return !queue->isReady(); }
 
@@ -1504,8 +1503,7 @@ struct Actor : SAV<ReturnValue> {
 	int8_t actor_wait_state; // Negative values mean cancellation, 0 means not waiting, positive values identify the
 	                         // waiting callback group.
 
-	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/
-	}
+	Actor() : SAV<ReturnValue>(1, 1), actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING
@@ -1522,8 +1520,7 @@ struct Actor<void> {
 #endif
 	int8_t actor_wait_state; // 0 means not waiting, positive values identify the waiting callback group.
 
-	Actor() : actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/
-	}
+	Actor() : actor_wait_state(ACTOR_WAIT_STATE_NOT_WAITING) { /*++actorCount;*/ }
 	// ~Actor() { --actorCount; }
 
 #ifdef ENABLE_SAMPLING

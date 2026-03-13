@@ -32,8 +32,8 @@ struct Location {
 	StringRef name;
 };
 
-inline Location operator"" _loc(const char* str, size_t size) {
-	return Location{ StringRef(reinterpret_cast<const uint8_t*>(str), size) };
+inline Location operator"" _loc(char const* str, size_t size) {
+	return Location{ StringRef(reinterpret_cast<uint8_t const*>(str), size) };
 }
 
 enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
@@ -50,7 +50,7 @@ struct SpanContext {
 	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
 	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-	SpanContext(const SpanContext& span) = default;
+	SpanContext(SpanContext const& span) = default;
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
 	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
@@ -106,11 +106,11 @@ enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
 struct SpanEventRef {
 	SpanEventRef() {}
-	SpanEventRef(const StringRef& name,
-	             const double& time,
-	             const SmallVectorRef<KeyValueRef>& attributes = SmallVectorRef<KeyValueRef>())
+	SpanEventRef(StringRef const& name,
+	             double const& time,
+	             SmallVectorRef<KeyValueRef> const& attributes = SmallVectorRef<KeyValueRef>())
 	  : name(name), time(time), attributes(attributes) {}
-	SpanEventRef(Arena& arena, const SpanEventRef& other)
+	SpanEventRef(Arena& arena, SpanEventRef const& other)
 	  : name(arena, other.name), time(other.time), attributes(arena, other.attributes) {}
 	StringRef name;
 	double time = 0.0;
@@ -127,10 +127,10 @@ public:
 	// do this to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.actor.cpp
 	// and from below in the by the Span(location, parent, links) constructor. The Span(location, parent, links)
 	// constructor is used broadly and performs the copy of the parent's traceID and m_Flags.
-	Span(const SpanContext& context,
-	     const Location& location,
-	     const SpanContext& parentContext,
-	     const std::initializer_list<SpanContext>& links = {})
+	Span(SpanContext const& context,
+	     Location const& location,
+	     SpanContext const& parentContext,
+	     std::initializer_list<SpanContext> const& links = {})
 	  : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
 	    begin(g_network->now()) {
 		this->kind = SpanKind::SERVER;
@@ -144,7 +144,7 @@ public:
 	// Construct Span with a location, parent, and optional links.
 	// This constructor copies the parent's traceID creating a parent->child relationship between Spans.
 	// Additionally we inherit the m_Flags of the parent, thus enabling or disabling sampling to match the parent.
-	Span(const Location& location, const SpanContext& parent, const std::initializer_list<SpanContext>& links = {})
+	Span(Location const& location, SpanContext const& parent, std::initializer_list<SpanContext> const& links = {})
 	  : Span(SpanContext(parent.traceID, deterministicRandom()->randomUInt64(), parent.m_Flags),
 	         location,
 	         parent,
@@ -152,14 +152,14 @@ public:
 
 	// Construct Span without parent. Used for creating a root span, or when the parent is not known at construction
 	// time.
-	Span(const SpanContext& context, const Location& location) : Span(context, location, SpanContext()) {}
+	Span(SpanContext const& context, Location const& location) : Span(context, location, SpanContext()) {}
 
 	// We've determined for initial tracing release, spans with only a location will not be traced.
 	// Generally these are for background processes, some are called infrequently, while others may be high volume.
 	// TODO: review and address in subsequent PRs.
-	explicit Span(const Location& location) : Span(location, SpanContext()) {}
+	explicit Span(Location const& location) : Span(location, SpanContext()) {}
 
-	Span(const Span&) = delete;
+	Span(Span const&) = delete;
 	Span(Span&& o) {
 		arena = std::move(o.arena);
 		context = o.context;
@@ -181,7 +181,7 @@ public:
 	Span() {}
 	~Span();
 	Span& operator=(Span&& o);
-	Span& operator=(const Span&) = delete;
+	Span& operator=(Span const&) = delete;
 	void swap(Span& other) {
 		std::swap(arena, other.arena);
 		std::swap(context, other.context);
@@ -195,7 +195,7 @@ public:
 		std::swap(events, other.events);
 	}
 
-	Span& addLink(const SpanContext& linkContext) {
+	Span& addLink(SpanContext const& linkContext) {
 		links.push_back(arena, linkContext);
 		// Check if link is sampled, if so sample this span.
 		if (!context.isSampled() && linkContext.isSampled()) {
@@ -211,30 +211,30 @@ public:
 		return *this;
 	}
 
-	Span& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
+	Span& addLinks(std::initializer_list<SpanContext> const& linkContexts = {}) {
 		for (auto const& sc : linkContexts) {
 			addLink(sc);
 		}
 		return *this;
 	}
 
-	Span& addEvent(const SpanEventRef& event) {
+	Span& addEvent(SpanEventRef const& event) {
 		events.push_back_deep(arena, event);
 		return *this;
 	}
 
-	Span& addEvent(const StringRef& name,
-	               const double& time,
-	               const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
+	Span& addEvent(StringRef const& name,
+	               double const& time,
+	               SmallVectorRef<KeyValueRef> const& attrs = SmallVectorRef<KeyValueRef>()) {
 		return addEvent(SpanEventRef(name, time, attrs));
 	}
 
-	Span& addAttribute(const StringRef& key, const StringRef& value) {
+	Span& addAttribute(StringRef const& key, StringRef const& value) {
 		attributes.push_back_deep(arena, KeyValueRef(key, value));
 		return *this;
 	}
 
-	Span& setParent(const SpanContext& parent) {
+	Span& setParent(SpanContext const& parent) {
 		parentContext = parent;
 		context.traceID = parent.traceID;
 		context.spanID = deterministicRandom()->randomUInt64();

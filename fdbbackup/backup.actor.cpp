@@ -929,14 +929,14 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-const KeyRef exeAgent = "backup_agent"_sr;
-const KeyRef exeBackup = "fdbbackup"_sr;
-const KeyRef exeRestore = "fdbrestore"_sr;
-const KeyRef exeFastRestoreTool = "fastrestore_tool"_sr; // must be lower case
-const KeyRef exeDatabaseAgent = "dr_agent"_sr;
-const KeyRef exeDatabaseBackup = "fdbdr"_sr;
+KeyRef const exeAgent = "backup_agent"_sr;
+KeyRef const exeBackup = "fdbbackup"_sr;
+KeyRef const exeRestore = "fdbrestore"_sr;
+KeyRef const exeFastRestoreTool = "fastrestore_tool"_sr; // must be lower case
+KeyRef const exeDatabaseAgent = "dr_agent"_sr;
+KeyRef const exeDatabaseBackup = "fdbdr"_sr;
 
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 #ifdef _WIN32
 void parentWatcher(void* parentHandle) {
@@ -960,7 +960,7 @@ static void printBuildInformation() {
 	printf("%s", jsonBuildInformation().c_str());
 }
 
-const char* BlobCredentialInfo =
+char const* BlobCredentialInfo =
     "  BLOB CREDENTIALS\n"
     "     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
     "     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
@@ -975,7 +975,7 @@ const char* BlobCredentialInfo =
     "        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : "
     "\"SECRET\" } } }\n";
 
-static void printHelpTeaser(const char* name) {
+static void printHelpTeaser(char const* name) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", name);
 }
 
@@ -1023,7 +1023,7 @@ static void printAgentUsage(bool devhelp) {
 void printBackupContainerInfo() {
 	printf("                 Backup URL forms:\n\n");
 	std::vector<std::string> formats = IBackupContainer::getURLFormats();
-	for (const auto& f : formats)
+	for (auto const& f : formats)
 		printf("                     %s\n", f.c_str());
 	printf("\n");
 }
@@ -1410,7 +1410,7 @@ ProgramExe getProgramType(std::string programExe) {
 
 	// Check if backup agent
 	if ((programExe.length() >= exeAgent.size()) &&
-	    (programExe.compare(programExe.length() - exeAgent.size(), exeAgent.size(), (const char*)exeAgent.begin()) ==
+	    (programExe.compare(programExe.length() - exeAgent.size(), exeAgent.size(), (char const*)exeAgent.begin()) ==
 	     0)) {
 		enProgramExe = ProgramExe::AGENT;
 	}
@@ -1418,14 +1418,14 @@ ProgramExe getProgramType(std::string programExe) {
 	// Check if backup
 	else if ((programExe.length() >= exeBackup.size()) &&
 	         (programExe.compare(
-	              programExe.length() - exeBackup.size(), exeBackup.size(), (const char*)exeBackup.begin()) == 0)) {
+	              programExe.length() - exeBackup.size(), exeBackup.size(), (char const*)exeBackup.begin()) == 0)) {
 		enProgramExe = ProgramExe::BACKUP;
 	}
 
 	// Check if restore
 	else if ((programExe.length() >= exeRestore.size()) &&
 	         (programExe.compare(
-	              programExe.length() - exeRestore.size(), exeRestore.size(), (const char*)exeRestore.begin()) == 0)) {
+	              programExe.length() - exeRestore.size(), exeRestore.size(), (char const*)exeRestore.begin()) == 0)) {
 		enProgramExe = ProgramExe::RESTORE;
 	}
 
@@ -1433,7 +1433,7 @@ ProgramExe getProgramType(std::string programExe) {
 	else if ((programExe.length() >= exeFastRestoreTool.size()) &&
 	         (programExe.compare(programExe.length() - exeFastRestoreTool.size(),
 	                             exeFastRestoreTool.size(),
-	                             (const char*)exeFastRestoreTool.begin()) == 0)) {
+	                             (char const*)exeFastRestoreTool.begin()) == 0)) {
 		enProgramExe = ProgramExe::FASTRESTORE_TOOL;
 	}
 
@@ -1441,7 +1441,7 @@ ProgramExe getProgramType(std::string programExe) {
 	else if ((programExe.length() >= exeDatabaseAgent.size()) &&
 	         (programExe.compare(programExe.length() - exeDatabaseAgent.size(),
 	                             exeDatabaseAgent.size(),
-	                             (const char*)exeDatabaseAgent.begin()) == 0)) {
+	                             (char const*)exeDatabaseAgent.begin()) == 0)) {
 		enProgramExe = ProgramExe::DR_AGENT;
 	}
 
@@ -1449,7 +1449,7 @@ ProgramExe getProgramType(std::string programExe) {
 	else if ((programExe.length() >= exeDatabaseBackup.size()) &&
 	         (programExe.compare(programExe.length() - exeDatabaseBackup.size(),
 	                             exeDatabaseBackup.size(),
-	                             (const char*)exeDatabaseBackup.begin()) == 0)) {
+	                             (char const*)exeDatabaseBackup.begin()) == 0)) {
 		enProgramExe = ProgramExe::DB_BACKUP;
 	}
 
@@ -1666,7 +1666,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		int j = 0;
 		for (KeyBackedTag eachTag : backupTags) {
 			EBackupState status = tagStates[j].get();
-			const char* statusText = fba.getStateText(status);
+			char const* statusText = fba.getStateText(status);
 
 			// The object for this backup tag inside this instance's subdocument
 			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName);
@@ -2372,10 +2372,10 @@ ACTOR Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause
 	return Void();
 }
 
-Reference<IBackupContainer> openBackupContainer(const char* name,
-                                                const std::string& destinationContainer,
-                                                const Optional<std::string>& proxy,
-                                                const Optional<std::string>& encryptionKeyFile) {
+Reference<IBackupContainer> openBackupContainer(char const* name,
+                                                std::string const& destinationContainer,
+                                                Optional<std::string> const& proxy,
+                                                Optional<std::string> const& encryptionKeyFile) {
 	// Error, if no dest container was specified
 	if (destinationContainer.empty()) {
 		fprintf(stderr, "ERROR: No backup destination was specified.\n");
@@ -2653,7 +2653,7 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 	return Void();
 }
 
-ACTOR Future<Void> dumpBackupData(const char* name,
+ACTOR Future<Void> dumpBackupData(char const* name,
                                   std::string destinationContainer,
                                   Optional<std::string> proxy,
                                   Version beginVersion,
@@ -2684,7 +2684,7 @@ ACTOR Future<Void> dumpBackupData(const char* name,
 	return Void();
 }
 
-ACTOR Future<Void> expireBackupData(const char* name,
+ACTOR Future<Void> expireBackupData(char const* name,
                                     std::string destinationContainer,
                                     Optional<std::string> proxy,
                                     Version endVersion,
@@ -2760,7 +2760,7 @@ ACTOR Future<Void> expireBackupData(const char* name,
 	return Void();
 }
 
-ACTOR Future<Void> deleteBackupContainer(const char* name,
+ACTOR Future<Void> deleteBackupContainer(char const* name,
                                          std::string destinationContainer,
                                          Optional<std::string> proxy) {
 	try {
@@ -2796,7 +2796,7 @@ ACTOR Future<Void> deleteBackupContainer(const char* name,
 	return Void();
 }
 
-ACTOR Future<Void> describeBackup(const char* name,
+ACTOR Future<Void> describeBackup(char const* name,
                                   std::string destinationContainer,
                                   Optional<std::string> proxy,
                                   bool deep,
@@ -2825,7 +2825,7 @@ static void reportBackupQueryError(UID operationId, JsonBuilderObject& result, s
 	TraceEvent("BackupQueryFailure").detail("OperationId", operationId).detail("Reason", errorMessage);
 }
 
-std::pair<Version, Version> getMaxMinRestorableVersions(const BackupDescription& desc, bool mayOnlyApplyMutationLog) {
+std::pair<Version, Version> getMaxMinRestorableVersions(BackupDescription const& desc, bool mayOnlyApplyMutationLog) {
 	Version maxRestorableVersion = invalidVersion;
 	Version minRestorableVersion = invalidVersion;
 	if (desc.maxRestorableVersion.present()) {
@@ -2846,7 +2846,7 @@ std::pair<Version, Version> getMaxMinRestorableVersions(const BackupDescription&
 // If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
 // selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overridden to the version
 // resolved to that timestamp.
-ACTOR Future<Void> queryBackup(const char* name,
+ACTOR Future<Void> queryBackup(char const* name,
                                std::string destinationContainer,
                                Optional<std::string> proxy,
                                Standalone<VectorRef<KeyRangeRef>> keyRangesFilter,
@@ -2934,7 +2934,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			wait(store(fileSet, bc->getRestoreSet(snapshotVersion, keyRangesFilter)));
 			if (fileSet.present()) {
 				result["snapshot_version"] = fileSet.get().targetVersion;
-				for (const auto& rangeFile : fileSet.get().ranges) {
+				for (auto const& rangeFile : fileSet.get().ranges) {
 					JsonBuilderObject object;
 					object["file_name"] = rangeFile.fileName;
 					object["file_size"] = rangeFile.fileSize;
@@ -2945,7 +2945,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 					rangeFilesJson.push_back(object);
 					totalRangeFilesSize += rangeFile.fileSize;
 				}
-				for (const auto& log : fileSet.get().logs) {
+				for (auto const& log : fileSet.get().logs) {
 					JsonBuilderObject object;
 					object["file_name"] = log.fileName;
 					object["file_size"] = log.fileSize;
@@ -2984,7 +2984,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 
 		if (fileSet.present()) {
 			result["restore_version"] = fileSet.get().targetVersion;
-			for (const auto& rangeFile : fileSet.get().ranges) {
+			for (auto const& rangeFile : fileSet.get().ranges) {
 				JsonBuilderObject object;
 				object["file_name"] = rangeFile.fileName;
 				object["file_size"] = rangeFile.fileSize;
@@ -2995,7 +2995,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 				rangeFilesJson.push_back(object);
 				totalRangeFilesSize += rangeFile.fileSize;
 			}
-			for (const auto& log : fileSet.get().logs) {
+			for (auto const& log : fileSet.get().logs) {
 				JsonBuilderObject object;
 				object["file_name"] = log.fileName;
 				object["file_size"] = log.fileSize;
@@ -3060,7 +3060,7 @@ ACTOR Future<Void> listBackupTags(Database cx) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			std::vector<KeyBackedTag> tags = wait(getAllBackupTags(tr));
-			for (const auto& tag : tags) {
+			for (auto const& tag : tags) {
 				printf("%s\n", tag.tagName.c_str());
 			}
 			return Void();
@@ -3348,8 +3348,8 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 	return;
 }
 
-Version parseVersion(const char* str) {
-	StringRef s((const uint8_t*)str, strlen(str));
+Version parseVersion(char const* str) {
+	StringRef s((uint8_t const*)str, strlen(str));
 
 	if (s.endsWith("days"_sr) || s.endsWith("d"_sr)) {
 		float days;
@@ -3457,7 +3457,7 @@ static bool processOption(int argc, char* argv[], int& i, std::vector<char*>& op
 
 	for (auto* opt : allOptionArrays) {
 		for (int j = 0; opt[j].nId != END_MARKER.nId; ++j) {
-			const char* knownOpt = opt[j].pszArg;
+			char const* knownOpt = opt[j].pszArg;
 			size_t knownOptLen = strlen(knownOpt);
 			bool isPrefixOpt = knownOptLen > 1 && knownOpt[knownOptLen - 1] == '-';
 
@@ -3498,7 +3498,7 @@ static bool reorderArguments(int argc, char* argv[], int& newArgC, char**& newAr
 	std::vector<char*> options;
 
 	parameters.push_back(argv[0]); // program name
-	auto isOptions = [](const char* arg) -> bool { return arg && *arg == '-'; };
+	auto isOptions = [](char const* arg) -> bool { return arg && *arg == '-'; };
 
 	for (int i = 1; i < argc; ++i) {
 		char* arg = argv[i];
@@ -3919,7 +3919,7 @@ int main(int argc, char* argv[]) {
 			case OPT_EXPIRE_RESTORABLE_AFTER_VERSION:
 			case OPT_EXPIRE_MIN_RESTORABLE_DAYS:
 			case OPT_EXPIRE_DELETE_BEFORE_DAYS: {
-				const char* a = args->OptionArg();
+				char const* a = args->OptionArg();
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse expiration version `%s'\n", a);
@@ -4015,7 +4015,7 @@ int main(int argc, char* argv[]) {
 			case OPT_SNAPSHOTINTERVAL:
 			case OPT_INITIAL_SNAPSHOT_INTERVAL:
 			case OPT_MOD_ACTIVE_INTERVAL: {
-				const char* a = args->OptionArg();
+				char const* a = args->OptionArg();
 				int seconds;
 				if (!sscanf(a, "%d", &seconds)) {
 					fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
@@ -4085,7 +4085,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case OPT_ERRORLIMIT: {
-				const char* a = args->OptionArg();
+				char const* a = args->OptionArg();
 				if (!sscanf(a, "%d", &maxErrors)) {
 					fprintf(stderr, "ERROR: Could not parse max number of errors `%s'\n", a);
 					printHelpTeaser(newArgV[0]);
@@ -4094,7 +4094,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case OPT_RESTORE_BEGIN_VERSION: {
-				const char* a = args->OptionArg();
+				char const* a = args->OptionArg();
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse database beginVersion `%s'\n", a);
@@ -4105,7 +4105,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case OPT_RESTORE_VERSION: {
-				const char* a = args->OptionArg();
+				char const* a = args->OptionArg();
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
@@ -4116,7 +4116,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			case OPT_RESTORE_SNAPSHOT_VERSION: {
-				const char* a = args->OptionArg();
+				char const* a = args->OptionArg();
 				long long ver = 0;
 				if (!sscanf(a, "%lld", &ver)) {
 					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
@@ -4394,10 +4394,10 @@ int main(int argc, char* argv[]) {
 				// most cases.
 				int64_t timeout = 60000;
 				db->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
-				              Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
+				              Optional<StringRef>(StringRef((uint8_t const*)&timeout, sizeof(timeout))));
 				int64_t retryLimit = 5;
 				db->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
-				              Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
+				              Optional<StringRef>(StringRef((uint8_t const*)&retryLimit, sizeof(retryLimit))));
 			}
 
 			return result.present();
@@ -4420,10 +4420,10 @@ int main(int argc, char* argv[]) {
 				// most cases.
 				int64_t timeout = 60000;
 				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_TIMEOUT,
-				                    Optional<StringRef>(StringRef((const uint8_t*)&timeout, sizeof(timeout))));
+				                    Optional<StringRef>(StringRef((uint8_t const*)&timeout, sizeof(timeout))));
 				int64_t retryLimit = 5;
 				sourceDb->setOption(FDBDatabaseOptions::TRANSACTION_RETRY_LIMIT,
-				                    Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, sizeof(retryLimit))));
+				                    Optional<StringRef>(StringRef((uint8_t const*)&retryLimit, sizeof(retryLimit))));
 			}
 
 			return result.present();
@@ -4450,7 +4450,7 @@ int main(int argc, char* argv[]) {
 		if (restoreUserKeys) {
 			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
 		} else if (restoreSystemKeys) {
-			for (const auto& r : getSystemBackupRanges()) {
+			for (auto const& r : getSystemBackupRanges()) {
 				backupKeys.push_back_deep(backupKeys.arena(), r);
 			}
 		}
@@ -4831,7 +4831,7 @@ int main(int argc, char* argv[]) {
 			          << FastAllocator<4096>::pageCount << " " << FastAllocator<8192>::pageCount << " "
 			          << FastAllocator<16384>::pageCount << std::endl;
 
-			std::vector<std::pair<std::string, const char*>> typeNames;
+			std::vector<std::pair<std::string, char const*>> typeNames;
 			for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 				std::string s;
 
@@ -4858,7 +4858,7 @@ int main(int argc, char* argv[]) {
 			}
 			std::sort(typeNames.begin(), typeNames.end());
 			for (int i = 0; i < typeNames.size(); i++) {
-				const char* n = typeNames[i].second;
+				char const* n = typeNames[i].second;
 				auto& f = allocInstr[n];
 				printf("%+d\t%+d\t%d\t%d\t%s\n",
 				       f.allocCount,
@@ -4896,16 +4896,16 @@ int main() {
 
 	printf("=== Running ParsedArgs Tests ===\n");
 
-	auto testOptionParsing = [](std::initializer_list<const char*> args,
-	                            const std::vector<std::string>& expectedOptions = {},
+	auto testOptionParsing = [](std::initializer_list<char const*> args,
+	                            std::vector<std::string> const& expectedOptions = {},
 	                            bool shouldSucceed = true,
-	                            const char* testName = "",
+	                            char const* testName = "",
 	                            bool expectCSimpleOptions = false) -> bool {
 		printf("\n--- Test: %s ---\n", testName);
 		static std::vector<std::string> persistentArgs;
 		persistentArgs.clear();
 		persistentArgs.reserve(args.size());
-		for (const char* arg : args) {
+		for (char const* arg : args) {
 			persistentArgs.emplace_back(arg);
 		}
 		int argc = static_cast<int>(persistentArgs.size());
@@ -4952,10 +4952,10 @@ int main() {
 		if (actualOptions != expectedOptions) {
 			printf("%s: FAIL - Options mismatch\n", testName);
 			printf("      Expected options (%zu): ", expectedOptions.size());
-			for (const auto& opt : expectedOptions)
+			for (auto const& opt : expectedOptions)
 				printf("'%s' ", opt.c_str());
 			printf("\n      Actual options (%zu): ", actualOptions.size());
-			for (const auto& opt : actualOptions)
+			for (auto const& opt : actualOptions)
 				printf("'%s' ", opt.c_str());
 			printf("\n");
 			return false;
@@ -4989,7 +4989,7 @@ int main() {
 					printf("%s: FAIL - CSimpleOpt parsing failed\n", testName);
 					return false;
 				}
-			} catch (const std::exception& e) {
+			} catch (std::exception const& e) {
 				printf("%s: FAIL - CSimpleOpt exception: %s\n", testName, e.what());
 				return false;
 			}

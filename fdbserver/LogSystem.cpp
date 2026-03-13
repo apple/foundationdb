@@ -36,7 +36,7 @@ std::string LogSet::logRouterString() {
 }
 
 bool LogSet::hasLogRouter(UID id) const {
-	for (const auto& router : logRouters) {
+	for (auto const& router : logRouters) {
 		if (router->get().id() == id) {
 			return true;
 		}
@@ -45,7 +45,7 @@ bool LogSet::hasLogRouter(UID id) const {
 }
 
 bool LogSet::hasBackupWorker(UID id) const {
-	for (const auto& worker : backupWorkers) {
+	for (auto const& worker : backupWorkers) {
 		if (worker->get().id() == id) {
 			return true;
 		}
@@ -203,7 +203,7 @@ void LogSet::updateLocalitySet(std::vector<LocalityData> const& localities) {
 	}
 }
 
-bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
+bool LogSet::satisfiesPolicy(std::vector<LocalityEntry> const& locations) {
 	resultEntries.clear();
 
 	// Run the policy, assert if unable to satisfy
@@ -217,7 +217,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
                               std::vector<int>& locations,
                               int locationOffset,
                               bool allLocations,
-                              const Optional<Reference<LocalitySet>>& restrictedLogSet) {
+                              Optional<Reference<LocalitySet>> const& restrictedLogSet) {
 	if (locality == tagLocalitySatellite) {
 		for (auto& t : tags) {
 			if (t.locality == tagLocalityTxs || t.locality == tagLocalityLogRouter) {
@@ -332,7 +332,7 @@ std::vector<Standalone<StringRef>> LogPushData::getAllMessages() const {
 	return results;
 }
 
-void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
+void LogPushData::recordEmptyMessage(int loc, Standalone<StringRef> const& value) {
 	if (!messagesWritten[loc]) {
 		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
 		Standalone<StringRef> v = w.toValue();
@@ -397,7 +397,7 @@ void LogPushData::setMutations(uint32_t totalMutations, VectorRef<StringRef> mut
 	ASSERT_EQ(messagesWriter.size(), mutations.size());
 	BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
 	Standalone<StringRef> v = w.toValue();
-	const int header = v.size();
+	int const header = v.size();
 	for (int i = 0; i < mutations.size(); i++) {
 		BinaryWriter& wr = messagesWriter[i];
 		wr.serializeBytes(mutations[i].substr(header));

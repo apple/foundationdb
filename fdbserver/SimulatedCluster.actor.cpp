@@ -67,7 +67,7 @@
 #undef min
 
 extern "C" int g_expect_full_pointermap;
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 using namespace std::literals;
 
@@ -114,13 +114,13 @@ std::string describe(int const& val) {
 }
 
 template <>
-std::string describe(const SimulationStorageEngine& val) {
+std::string describe(SimulationStorageEngine const& val) {
 	return std::to_string(static_cast<uint32_t>(val));
 }
 
 namespace {
 
-bool isValidSimulationStorageEngineValue(const std::underlying_type_t<SimulationStorageEngine>& value) {
+bool isValidSimulationStorageEngineValue(std::underlying_type_t<SimulationStorageEngine> const& value) {
 	return value < static_cast<std::underlying_type_t<SimulationStorageEngine>>(
 	                   SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE);
 }
@@ -148,8 +148,8 @@ class TestConfig : public BasicTestConfig {
 		std::unordered_map<std::string_view, types> confMap;
 
 		struct visitor {
-			const value_type& value;
-			visitor(const value_type& v) : value(v) {}
+			value_type const& value;
+			visitor(value_type const& v) : value(v) {}
 			void operator()(int* val) const { *val = value.as_integer(); }
 			void operator()(Optional<int>* val) const { *val = value.as_integer(); }
 			void operator()(float* val) const { *val = value.as_floating(); }
@@ -162,7 +162,7 @@ class TestConfig : public BasicTestConfig {
 			void operator()(Optional<std::string>* val) const { *val = value.as_string(); }
 			void operator()(std::vector<int>* val) const {
 				auto arr = value.as_array();
-				for (const auto& i : arr) {
+				for (auto const& i : arr) {
 					val->emplace_back(i.as_integer());
 				}
 			}
@@ -173,7 +173,7 @@ class TestConfig : public BasicTestConfig {
 			}
 			void operator()(std::vector<std::string>* val) const {
 				auto arr = value.as_array();
-				for (const auto& i : arr) {
+				for (auto const& i : arr) {
 					val->emplace_back(i.as_string());
 				}
 			}
@@ -184,8 +184,8 @@ class TestConfig : public BasicTestConfig {
 			}
 			void operator()(std::set<SimulationStorageEngine>* val) const {
 				auto arr = value.as_array();
-				for (const auto& i : arr) {
-					const auto intVal = static_cast<uint8_t>(i.as_integer());
+				for (auto const& i : arr) {
+					auto const intVal = static_cast<uint8_t>(i.as_integer());
 					ASSERT(isValidSimulationStorageEngineValue(intVal));
 					val->insert(static_cast<SimulationStorageEngine>(intVal));
 				}
@@ -260,7 +260,7 @@ class TestConfig : public BasicTestConfig {
 	public:
 		~ConfigBuilder() {
 			TraceEvent evt("SimulatorConfigFromToml");
-			for (const auto& [configKey, configValue] : confMap) {
+			for (auto const& [configKey, configValue] : confMap) {
 				std::visit(trace_visitor(std::string(configKey), evt), configValue);
 			}
 		}
@@ -271,7 +271,7 @@ class TestConfig : public BasicTestConfig {
 			return *this;
 		}
 
-		void set(std::string_view key, const value_type& value) {
+		void set(std::string_view key, value_type const& value) {
 			auto iter = confMap.find(key);
 			if (iter == confMap.end()) {
 				std::cerr << "Unknown configuration attribute " << key << std::endl;
@@ -282,7 +282,7 @@ class TestConfig : public BasicTestConfig {
 		}
 	};
 
-	bool isIniFile(const char* fileName) {
+	bool isIniFile(char const* fileName) {
 		std::string name = fileName;
 		auto pos = name.find_last_of('.');
 		ASSERT(pos != std::string::npos && pos + 1 < name.size());
@@ -290,7 +290,7 @@ class TestConfig : public BasicTestConfig {
 		return extension == "txt"sv;
 	}
 
-	void loadIniFile(const char* testFile) {
+	void loadIniFile(char const* testFile) {
 		std::ifstream ifs;
 		ifs.open(testFile, std::ifstream::in);
 		if (!ifs.good())
@@ -443,15 +443,15 @@ public:
 	// Number of process classes explictly set as Stateless in all DCs
 	Optional<int> statelessProcessClassesPerDC;
 
-	bool tomlKeyPresent(const toml::value& data, std::string key) {
+	bool tomlKeyPresent(toml::value const& data, std::string key) {
 		if (data.is_table()) {
-			for (const auto& [k, v] : data.as_table()) {
+			for (auto const& [k, v] : data.as_table()) {
 				if (k == key || tomlKeyPresent(v, key)) {
 					return true;
 				}
 			}
 		} else if (data.is_array()) {
-			for (const auto& v : data.as_array()) {
+			for (auto const& v : data.as_array()) {
 				if (tomlKeyPresent(v, key)) {
 					return true;
 				}
@@ -460,7 +460,7 @@ public:
 		return false;
 	}
 
-	void readFromConfig(const char* testFile) {
+	void readFromConfig(char const* testFile) {
 		if (isIniFile(testFile)) {
 			loadIniFile(testFile);
 			return;
@@ -515,7 +515,7 @@ public:
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
 				auto conf = toml::find(file, "configuration").as_table();
-				for (const auto& [key, value] : conf) {
+				for (auto const& [key, value] : conf) {
 					if (key == "ClientInfoLogging") {
 						setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 					} else if (key == "restartInfoLocation") {
@@ -554,11 +554,11 @@ public:
 	}
 
 	TestConfig() = default;
-	TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
+	TestConfig(BasicTestConfig const& config) : BasicTestConfig(config) {}
 };
 
 template <class T>
-T simulate(const T& in) {
+T simulate(T const& in) {
 	BinaryWriter writer(AssumeVersion(g_network->protocolVersion()));
 	writer << in;
 	BinaryReader reader(writer.getData(), writer.getLength(), AssumeVersion(g_network->protocolVersion()));
@@ -756,7 +756,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				bool client = processClass == ProcessClass::TesterClass || processMode == BackupAgentOnly ||
 				              processMode == SimHTTPServer;
 				FlowTransport::createInstance(client, 1, WLTOKEN_RESERVED_COUNT, &allowList);
-				for (const auto& [keyName, key] : g_simulator->authKeys) {
+				for (auto const& [keyName, key] : g_simulator->authKeys) {
 					FlowTransport::transport().addPublicKey(keyName, key.toPublic());
 				}
 				Sim2FileSystem::newFileSystem();
@@ -1019,7 +1019,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
 					                                     : new ClusterConnectionFile(path));
 				}
-				const int listenPort = i * listenPerProcess + 1;
+				int const listenPort = i * listenPerProcess + 1;
 
 				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && ipProcessMode == FDBDOnly) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
@@ -1368,7 +1368,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			// Helper to translate the IP address stored in INI file to out IPAddress representation.
 			// After IPv6 work, we store the actual string representation of IP address, however earlier, it was
 			// instead the 32 bit integer value.
-			auto parseIp = [](const char* ipStr) -> IPAddress {
+			auto parseIp = [](char const* ipStr) -> IPAddress {
 				Optional<IPAddress> parsedIp = IPAddress::parse(ipStr);
 				if (parsedIp.present()) {
 					return parsedIp.get();
@@ -1379,7 +1379,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 
 			if (ip == nullptr) {
 				for (int i = 0; i < processes; i++) {
-					const char* val =
+					char const* val =
 					    ini.GetValue(machineIdString.c_str(), format("ipAddr%d", i * listenersPerProcess).c_str());
 					ipAddrs.push_back(parseIp(val));
 				}
@@ -1469,7 +1469,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 
 // Configuration details compiled in a structure used when setting up a simulated cluster
 struct SimulationConfig : public BasicSimulationConfig {
-	explicit SimulationConfig(const TestConfig& testConfig);
+	explicit SimulationConfig(TestConfig const& testConfig);
 	ISimulator::ExtraDatabaseMode extraDatabaseMode;
 	int extraDatabaseCount;
 	bool generateFearless;
@@ -1481,19 +1481,19 @@ struct SimulationConfig : public BasicSimulationConfig {
 private:
 	void setRandomConfig();
 	void setSimpleConfig();
-	void setSpecificConfig(const TestConfig& testConfig);
-	void setDatacenters(const TestConfig& testConfig);
-	void setStorageEngine(const TestConfig& testConfig);
-	void setRegions(const TestConfig& testConfig);
-	void setReplicationType(const TestConfig& testConfig);
-	void setMachineCount(const TestConfig& testConfig);
-	void setCoordinators(const TestConfig& testConfig);
-	void setProcessesPerMachine(const TestConfig& testConfig);
-	void setTss(const TestConfig& testConfig);
-	void generateNormalConfig(const TestConfig& testConfig);
+	void setSpecificConfig(TestConfig const& testConfig);
+	void setDatacenters(TestConfig const& testConfig);
+	void setStorageEngine(TestConfig const& testConfig);
+	void setRegions(TestConfig const& testConfig);
+	void setReplicationType(TestConfig const& testConfig);
+	void setMachineCount(TestConfig const& testConfig);
+	void setCoordinators(TestConfig const& testConfig);
+	void setProcessesPerMachine(TestConfig const& testConfig);
+	void setTss(TestConfig const& testConfig);
+	void generateNormalConfig(TestConfig const& testConfig);
 };
 
-SimulationConfig::SimulationConfig(const TestConfig& testConfig)
+SimulationConfig::SimulationConfig(TestConfig const& testConfig)
   : extraDatabaseMode(testConfig.extraDatabaseMode), extraDatabaseCount(testConfig.extraDatabaseCount) {
 	generateNormalConfig(testConfig);
 }
@@ -1502,13 +1502,13 @@ void SimulationConfig::set_config(std::string config) {
 	// The only mechanism we have for turning "single" into what single means
 	// is buildConfiguration()... :/
 	std::map<std::string, std::string> hack_map;
-	const auto buildResult = buildConfiguration(config, hack_map);
+	auto const buildResult = buildConfiguration(config, hack_map);
 	ASSERT(buildResult != ConfigurationResult::NO_OPTIONS_PROVIDED);
-	for (const auto& [configKey, configValue] : hack_map)
+	for (auto const& [configKey, configValue] : hack_map)
 		db.set(configKey, configValue);
 }
 
-[[maybe_unused]] StringRef StringRefOf(const char* s) {
+[[maybe_unused]] StringRef StringRefOf(char const* s) {
 	return StringRef((uint8_t*)s, strlen(s));
 }
 
@@ -1550,7 +1550,7 @@ void SimulationConfig::setSimpleConfig() {
 }
 
 // Overwrite previous options with ones specified by TestConfig
-void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
+void SimulationConfig::setSpecificConfig(TestConfig const& testConfig) {
 	if (testConfig.desiredTLogCount.present()) {
 		db.desiredTLogCount = testConfig.desiredTLogCount.get();
 	}
@@ -1570,7 +1570,7 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
-void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
+void SimulationConfig::setDatacenters(TestConfig const& testConfig) {
 
 #ifdef NO_MULTIREGION_TEST
 	if (testConfig.minimumRegions > 1 || (testConfig.generateFearless.present() && testConfig.generateFearless.get())) {
@@ -1629,7 +1629,7 @@ void shardedRocksDBStorageEngineConfig(SimulationConfig* simCfg) {
 	simCfg->set_config("ssd-sharded-rocksdb");
 }
 
-const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORAGE_ENGINE_CONFIG_MAPPER = {
+std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> const STORAGE_ENGINE_CONFIG_MAPPER = {
 	{ SimulationStorageEngine::SSD, ssdStorageEngineConfig },
 	{ SimulationStorageEngine::MEMORY, memoryStorageEngineConfig },
 	{ SimulationStorageEngine::RADIX_TREE, radixTreeStorageEngineConfig },
@@ -1639,7 +1639,7 @@ const std::unordered_map<SimulationStorageEngine, StorageEngineConfigFunc> STORA
 };
 
 // TODO: Figure out what is broken with the RocksDB engine in simulation.
-const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
+std::vector<SimulationStorageEngine> const SIMULATION_STORAGE_ENGINE = {
 	SimulationStorageEngine::SSD,        SimulationStorageEngine::MEMORY,
 	SimulationStorageEngine::RADIX_TREE, SimulationStorageEngine::REDWOOD,
 #ifdef WITH_ROCKSDB
@@ -1647,9 +1647,9 @@ const std::vector<SimulationStorageEngine> SIMULATION_STORAGE_ENGINE = {
 #endif
 };
 
-std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStorageEngine>& excluded) {
+std::string getExcludedStorageEngineTypesInString(std::set<SimulationStorageEngine> const& excluded) {
 	std::string str;
-	for (const auto& e : excluded) {
+	for (auto const& e : excluded) {
 		str += std::to_string(static_cast<uint32_t>(e));
 		str += ',';
 	}
@@ -1658,7 +1658,7 @@ std::string getExcludedStorageEngineTypesInString(const std::set<SimulationStora
 	return str;
 }
 
-SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConfig) {
+SimulationStorageEngine chooseSimulationStorageEngine(TestConfig const& testConfig) {
 	StringRef reason;
 	SimulationStorageEngine result = SimulationStorageEngine::SIMULATION_STORAGE_ENGINE_INVALID_VALUE;
 
@@ -1681,15 +1681,15 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 
 	} else {
 		std::unordered_set<SimulationStorageEngine> storageEngineAvailable;
-		for (const auto& storageEngine : SIMULATION_STORAGE_ENGINE) {
+		for (auto const& storageEngine : SIMULATION_STORAGE_ENGINE) {
 			storageEngineAvailable.insert(storageEngine);
 		}
-		for (const auto& storageEngineExcluded : testConfig.storageEngineExcludeTypes) {
+		for (auto const& storageEngineExcluded : testConfig.storageEngineExcludeTypes) {
 			storageEngineAvailable.erase(storageEngineExcluded);
 		}
 		ASSERT(storageEngineAvailable.size() > 0);
 		std::vector<SimulationStorageEngine> storageEngineCandidates;
-		for (const auto& storageEngine : storageEngineAvailable) {
+		for (auto const& storageEngine : storageEngineAvailable) {
 			if (storageEngine == SimulationStorageEngine::MEMORY) {
 				// Adjust the chance that Memory is selected
 				storageEngineCandidates.insert(
@@ -1732,13 +1732,13 @@ SimulationStorageEngine chooseSimulationStorageEngine(const TestConfig& testConf
 } // anonymous namespace
 
 // Sets storage engine based on testConfig details
-void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
+void SimulationConfig::setStorageEngine(TestConfig const& testConfig) {
 	auto storageEngineType = chooseSimulationStorageEngine(testConfig);
 	STORAGE_ENGINE_CONFIG_MAPPER.at(storageEngineType)(this);
 }
 
 // Sets replication type and TLogSpillType and Version
-void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
+void SimulationConfig::setReplicationType(TestConfig const& testConfig) {
 	replication_type = testConfig.simpleConfig
 	                       ? 1
 	                       : (std::max(testConfig.minimumReplication,
@@ -1816,7 +1816,7 @@ void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
 
 // Set the regions of the config, including the primary and remote options
 // This will also determine the replication types used for satellite and remote.
-void SimulationConfig::setRegions(const TestConfig& testConfig) {
+void SimulationConfig::setRegions(TestConfig const& testConfig) {
 	// The kill region workload relies on the fact that all "0", "2", and "4" are all of the possible primary dcids.
 	StatusObject primaryObj;
 	StatusObject primaryDcObj;
@@ -2033,7 +2033,7 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 
 // Sets the machine count based on the testConfig. May be overwritten later
 // if the end result is not a viable config.
-void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
+void SimulationConfig::setMachineCount(TestConfig const& testConfig) {
 	if (testConfig.machineCount.present()) {
 		machine_count = testConfig.machineCount.get();
 #ifdef ADDRESS_SANITIZER
@@ -2076,7 +2076,7 @@ void SimulationConfig::setMachineCount(const TestConfig& testConfig) {
 
 // Sets the coordinator count based on the testConfig. May be overwritten later
 // if the end result is not a viable config.
-void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
+void SimulationConfig::setCoordinators(TestConfig const& testConfig) {
 	if (testConfig.coordinators.present()) {
 		coordinators = testConfig.coordinators.get();
 	} else {
@@ -2089,7 +2089,7 @@ void SimulationConfig::setCoordinators(const TestConfig& testConfig) {
 }
 
 // Sets the processes per machine based on the testConfig.
-void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
+void SimulationConfig::setProcessesPerMachine(TestConfig const& testConfig) {
 	if (testConfig.processesPerMachine.present()) {
 		processes_per_machine = testConfig.processesPerMachine.get();
 	} else if (generateFearless) {
@@ -2102,7 +2102,7 @@ void SimulationConfig::setProcessesPerMachine(const TestConfig& testConfig) {
 
 // Sets the TSS configuration based on the testConfig.
 // Also configures the cluster behaviour through setting some flags on the simulator.
-void SimulationConfig::setTss(const TestConfig& testConfig) {
+void SimulationConfig::setTss(TestConfig const& testConfig) {
 	int tssCount = 0;
 	// TODO: Support TSS in SHARD_ENCODE_LOCATION_METADATA mode.
 	if (!testConfig.simpleConfig && !testConfig.disableTss && deterministicRandom()->random01() < 0.25) {
@@ -2136,7 +2136,7 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 // Generates and sets an appropriate configuration for the database according to
 // the provided testConfig. Some attributes are randomly generated for more coverage
 // of different combinations
-void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
+void SimulationConfig::generateNormalConfig(TestConfig const& testConfig) {
 	set_config("new");
 	// Some of these options will overwrite one another so the ordering is important.
 	// This is a bit inefficient but separates the different types of option setting paths for better readability.
@@ -2230,10 +2230,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	TraceEvent("SimulatorConfig").setMaxFieldLength(10000).detail("ConfigString", StringRef(startingConfigString));
 
-	const int dataCenters = simconfig.datacenters;
-	const int machineCount = simconfig.machine_count;
-	const int coordinatorCount = simconfig.coordinators;
-	const int processesPerMachine = simconfig.processes_per_machine;
+	int const dataCenters = simconfig.datacenters;
+	int const machineCount = simconfig.machine_count;
+	int const coordinatorCount = simconfig.coordinators;
+	int const processesPerMachine = simconfig.processes_per_machine;
 
 	// half the time, when we have more than 4 machines that are not the first in their dataCenter, assign classes
 	bool assignClasses = machineCount - dataCenters > 4 && deterministicRandom()->random01() < 0.5;
@@ -2396,7 +2396,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	}
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 
-	for (const auto& coordinators : extraCoordinatorAddresses) {
+	for (auto const& coordinators : extraCoordinatorAddresses) {
 		for (int i = 0; i < (coordinators.size() / 2) + 1; i++) {
 			TraceEvent("ProtectCoordinator")
 			    .detail("Address", coordinators[i])
@@ -2676,7 +2676,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 using namespace std::literals;
 
 // Populates the TestConfig fields according to what is found in the test file.
-[[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
+[[maybe_unused]] void checkTestConf(char const* testFile, TestConfig* testConfig) {}
 
 // Actor that waits for a specified simulation time and then resets the random seed
 ACTOR Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
@@ -2689,7 +2689,7 @@ ACTOR Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
 } // namespace
 
 ACTOR void simulationSetupAndRun(std::string dataFolder,
-                                 const char* testFile,
+                                 char const* testFile,
                                  bool rebooting,
                                  bool restoring,
                                  std::string whitelistBinPaths,
@@ -2898,7 +2898,7 @@ int getMaxSatelliteLogs() {
 	return std::max(1, std::min(6, minSatelliteMachines));
 }
 
-BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
+BasicSimulationConfig generateBasicSimulationConfig(BasicTestConfig const& testConfig) {
 	TestConfig config(testConfig);
 	return SimulationConfig(config);
 }

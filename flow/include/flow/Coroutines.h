@@ -136,7 +136,7 @@ public:
 
 	bool operator!=(Generator<T> const& other) const { return !(*this == other); }
 
-	const T& operator*() const& {
+	T const& operator*() const& {
 		auto& promise = handle.promise();
 		if (promise.error.isValid()) {
 			throw promise.error;

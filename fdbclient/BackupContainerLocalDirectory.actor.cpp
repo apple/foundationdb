@@ -32,7 +32,7 @@ namespace {
 
 class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
 public:
-	BackupFile(const std::string& fileName, Reference<IAsyncFile> file, const std::string& finalFullPath)
+	BackupFile(std::string const& fileName, Reference<IAsyncFile> file, std::string const& finalFullPath)
 	  : IBackupFile(fileName), m_file(file), m_writeOffset(0), m_finalFullPath(finalFullPath),
 	    m_blockSize(CLIENT_KNOBS->BACKUP_LOCAL_FILE_WRITE_BLOCK) {
 		if (BUGGIFY) {
@@ -41,8 +41,8 @@ public:
 		m_buffer.reserve(m_buffer.arena(), m_blockSize);
 	}
 
-	Future<Void> append(const void* data, int len) override {
-		m_buffer.append(m_buffer.arena(), (const uint8_t*)data, len);
+	Future<Void> append(void const* data, int len) override {
+		m_buffer.append(m_buffer.arena(), (uint8_t const*)data, len);
 
 		if (m_buffer.size() >= m_blockSize) {
 			return flush(m_blockSize);
@@ -115,7 +115,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 		                           [](std::string const& f) { return StringRef(f).endsWith(".lnk"_sr); }),
 		            files.end());
 
-	for (const auto& f : files) {
+	for (auto const& f : files) {
 		// Hide .part or .temp files.
 		StringRef s(f);
 		if (!s.endsWith(".part"_sr) && !s.endsWith(".temp"_sr))
@@ -140,8 +140,8 @@ std::string BackupContainerLocalDirectory::getURLFormat() {
 	return "file://</path/to/base/dir/>";
 }
 
-BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& url,
-                                                             const Optional<std::string>& encryptionKeyFileName) {
+BackupContainerLocalDirectory::BackupContainerLocalDirectory(std::string const& url,
+                                                             Optional<std::string> const& encryptionKeyFileName) {
 	setEncryptionKey(encryptionKeyFileName);
 
 	std::string path;
@@ -177,7 +177,7 @@ BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& 
 	m_path = path;
 }
 
-Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const std::string& url) {
+Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(std::string const& url) {
 	std::string path;
 	if (url.find("file://") != 0) {
 		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
@@ -206,7 +206,7 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	std::vector<std::string> dirs = platform::listDirectories(path);
 	std::vector<std::string> results;
 
-	for (const auto& r : dirs) {
+	for (auto const& r : dirs) {
 		if (r == "." || r == "..")
 			continue;
 		results.push_back(std::string("file://") + joinPath(path, r));
@@ -231,7 +231,7 @@ Future<bool> BackupContainerLocalDirectory::exists() {
 	return directoryExists(m_path);
 }
 
-Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std::string& path) {
+Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(std::string const& path) {
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
 	// Skip encryption for properties/ folder
 	if (usesEncryption() && !StringRef(path).startsWith("properties/"_sr)) {
@@ -288,7 +288,7 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	return f;
 }
 
-Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const std::string& path) {
+Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(std::string const& path) {
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::writeFile");
 	int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_CREATE |
 	            IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
@@ -303,18 +303,18 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });
 }
 
-Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& path, const std::string& contents) {
+Future<Void> BackupContainerLocalDirectory::writeEntireFile(std::string const& path, std::string const& contents) {
 	return writeEntireFileFallback(path, contents);
 }
 
-Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {
+Future<Void> BackupContainerLocalDirectory::deleteFile(std::string const& path) {
 	::deleteFile(joinPath(m_path, path));
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::deleteFile");
 	return Void();
 }
 
 Future<BackupContainerFileSystem::FilesAndSizesT> BackupContainerLocalDirectory::listFiles(
-    const std::string& path,
+    std::string const& path,
     std::function<bool(std::string const&)>) {
 	return listFiles_impl(path, m_path);
 }

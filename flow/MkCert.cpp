@@ -43,7 +43,7 @@
 
 namespace {
 
-[[noreturn]] void traceAndThrow(const char* condition, int line) {
+[[noreturn]] void traceAndThrow(char const* condition, int line) {
 	auto te = TraceEvent(SevWarnAlways, "MkCertOrKeyError");
 	te.suppressFor(10).detail("Line", line).detail("Condition", condition);
 	if (auto err = ::ERR_get_error()) {
@@ -51,7 +51,7 @@ namespace {
 			0,
 		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
-		te.detail("OpenSSLError", static_cast<const char*>(buf));
+		te.detail("OpenSSLError", static_cast<char const*>(buf));
 	}
 	throw tls_error();
 }
@@ -68,7 +68,7 @@ namespace mkcert {
 
 // Helper functions working with OpenSSL native types
 std::shared_ptr<X509> readX509CertPem(StringRef x509CertPem);
-StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert);
+StringRef writeX509CertPem(Arena& arena, std::shared_ptr<X509> const& nativeCert);
 
 struct CertAndKeyNative {
 	std::shared_ptr<X509> cert;
@@ -125,7 +125,7 @@ std::shared_ptr<X509> readX509CertPem(StringRef x509CertPem) {
 	return std::shared_ptr<X509>(ret, &::X509_free);
 }
 
-StringRef writeX509CertPem(Arena& arena, const std::shared_ptr<X509>& nativeCert) {
+StringRef writeX509CertPem(Arena& arena, std::shared_ptr<X509> const& nativeCert) {
 	auto mem = AutoCPointer(::BIO_new(::BIO_s_mem()), &::BIO_free);
 	OSSL_ASSERT(mem);
 	OSSL_ASSERT(::PEM_write_bio_X509(mem, nativeCert.get()));
@@ -216,7 +216,7 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	OSSL_ASSERT(0 < ::X509_set_pubkey(x, keypair.nativeHandle()));
 	auto subjectName = ::X509_get_subject_name(x);
 	OSSL_ASSERT(subjectName);
-	for (const auto& entry : spec.subjectName) {
+	for (auto const& entry : spec.subjectName) {
 		// field names are expected to null-terminate
 		auto fieldName = entry.field.toString();
 		OSSL_ASSERT(0 <
@@ -229,7 +229,7 @@ CertAndKeyNative makeCertNative(CertSpecRef spec, CertAndKeyNative issuer) {
 	auto ctx = X509V3_CTX{};
 	X509V3_set_ctx_nodb(&ctx);
 	::X509V3_set_ctx(&ctx, (isSelfSigned ? x : issuer.cert.get()), x, nullptr, nullptr, 0);
-	for (const auto& entry : spec.extensions) {
+	for (auto const& entry : spec.extensions) {
 		// extension field names and values are expected to null-terminate
 		auto extName = entry.field.toString();
 		auto extValue = entry.bytes.toString();
@@ -288,7 +288,7 @@ CertSpecRef CertSpecRef::make(Arena& arena, CertKind kind) {
 
 StringRef concatCertChain(Arena& arena, CertChainRef chain) {
 	auto len = 0;
-	for (const auto& entry : chain) {
+	for (auto const& entry : chain) {
 		len += entry.certPem.size();
 	}
 	if (len == 0)

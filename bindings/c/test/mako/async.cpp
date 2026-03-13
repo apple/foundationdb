@@ -38,7 +38,7 @@ void ResumableStateForPopulate::postNextTick() {
 }
 
 void ResumableStateForPopulate::runOneTick() {
-	const auto num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
+	auto const num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
 	for (auto i = key_checkpoint; i <= key_end; i++) {
 		genKey(keystr.data(), KEY_PREFIX, args, i);
 		randomString(valstr.data(), args.value_length);
@@ -53,7 +53,7 @@ void ResumableStateForPopulate::runOneTick() {
 					                       "commit for populate returned '{}'",
 					                       err.what());
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const auto f_rc = handleForOnError(tx, f, "ON_ERROR_FOR_POPULATE");
+						auto const f_rc = handleForOnError(tx, f, "ON_ERROR_FOR_POPULATE");
 						if (f_rc == FutureRC::ABORT) {
 							signalEnd();
 							return;
@@ -66,8 +66,8 @@ void ResumableStateForPopulate::runOneTick() {
 					watch_commit.stop();
 					watch_tx.setStop(watch_commit.getStop());
 					if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
-						const auto commit_latency = watch_commit.diff();
-						const auto tx_duration = watch_tx.diff();
+						auto const commit_latency = watch_commit.diff();
+						auto const tx_duration = watch_tx.diff();
 						stats.addLatency(OP_COMMIT, commit_latency);
 						stats.addLatency(OP_TRANSACTION, tx_duration);
 					}
@@ -134,7 +134,7 @@ repeat_immediate_steps:
 					                       err.what());
 					updateErrorStats(err, iter.op);
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
-						const auto rc = handleForOnError(
+						auto const rc = handleForOnError(
 						    tx, f, fmt::format("{}:{}", iter.opName(), iter.step), args.isAnyTimeoutEnabled());
 						onIterationEnd(rc);
 					});
@@ -157,10 +157,10 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	logr.debug("Step {}:{} succeeded", iter.opName(), iter.step);
 	// step successful
 	watch_step.stop();
-	const auto do_sample = stats.getOpCount(OP_TRANSACTION) % args.sampling == 0;
+	auto const do_sample = stats.getOpCount(OP_TRANSACTION) % args.sampling == 0;
 	if (iter.stepKind() == StepKind::COMMIT) {
 		// reset transaction boundary
-		const auto step_latency = watch_step.diff();
+		auto const step_latency = watch_step.diff();
 		if (do_sample) {
 			stats.addLatency(OP_COMMIT, step_latency);
 		}
@@ -175,7 +175,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 			needs_commit = true;
 		watch_op.setStop(watch_step.getStop());
 		if (do_sample) {
-			const auto op_latency = watch_op.diff();
+			auto const op_latency = watch_op.diff();
 			stats.addLatency(iter.op, op_latency);
 		}
 		stats.incrOpCount(iter.op);
@@ -195,7 +195,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				                       err.what());
 				updateErrorStats(err, OP_COMMIT);
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
-					const auto rc = handleForOnError(tx, f, "ON_ERROR", args.isAnyTimeoutEnabled());
+					auto const rc = handleForOnError(tx, f, "ON_ERROR", args.isAnyTimeoutEnabled());
 					onIterationEnd(rc);
 				});
 			} else {
@@ -203,8 +203,8 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 				watch_commit.stop();
 				watch_tx.setStop(watch_commit.getStop());
 				if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
-					const auto commit_latency = watch_commit.diff();
-					const auto tx_duration = watch_tx.diff();
+					auto const commit_latency = watch_commit.diff();
+					auto const tx_duration = watch_tx.diff();
 					stats.addLatency(OP_COMMIT, commit_latency);
 					stats.addLatency(OP_TRANSACTION, tx_duration);
 				}
@@ -220,7 +220,7 @@ void ResumableStateForRunWorkload::onTransactionSuccess() {
 		// transaction completed but no need to commit
 		watch_tx.stop();
 		if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
-			const auto tx_duration = watch_tx.diff();
+			auto const tx_duration = watch_tx.diff();
 			stats.addLatency(OP_TRANSACTION, tx_duration);
 		}
 		stats.incrOpCount(OP_TRANSACTION);

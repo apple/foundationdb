@@ -30,7 +30,7 @@ public:
 	// If all of the allowance is not used the unused units can be given back.
 	// For convenience, n can safely be negative.
 	virtual void returnUnused(int n) = 0;
-	virtual void killWaiters(const Error& e) = 0;
+	virtual void killWaiters(Error const& e) = 0;
 	virtual void wakeWaiters() = 0;
 	virtual void addref() = 0;
 	virtual void delref() = 0;
@@ -81,7 +81,7 @@ public:
 		p.send(Void());
 	}
 
-	void killWaiters(const Error& e) override {
+	void killWaiters(Error const& e) override {
 		Promise<Void> p;
 		p.swap(m_stop);
 		p.sendError(e);
@@ -106,5 +106,5 @@ public:
 	Future<Void> getAllowance(unsigned int n) override { return Void(); }
 	void returnUnused(int n) override {}
 	void wakeWaiters() override {}
-	void killWaiters(const Error& e) override {}
+	void killWaiters(Error const& e) override {}
 };

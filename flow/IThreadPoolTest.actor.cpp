@@ -42,7 +42,7 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 
 	void action(GetNameAction& a) {
 		pthread_t t = pthread_self();
-		const size_t arrayLen = 16;
+		size_t const arrayLen = 16;
 		char name[arrayLen];
 		int err = pthread_getname_np(t, name, arrayLen);
 		if (err != 0) {
@@ -93,7 +93,7 @@ struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
 
 	void action(GetNameAction& a) {
 		pthread_t t = pthread_self();
-		const size_t arrayLen = 16;
+		size_t const arrayLen = 16;
 		char name[arrayLen];
 		int err = pthread_getname_np(t, name, arrayLen);
 		if (err != 0) {

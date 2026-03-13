@@ -28,7 +28,7 @@ public:
 		loop {
 			wait(delay(5.0));
 			for (auto it = self->map.begin(); it != self->map.end();) {
-				const auto& [tag, expirableBands] = *it;
+				auto const& [tag, expirableBands] = *it;
 				if (now() - expirableBands.lastUpdated > SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER) {
 					CODE_PROBE(true, "LatencyBandsMap erasing expired tag");
 					it = self->map.erase(it);
@@ -52,7 +52,7 @@ Optional<LatencyBands*> LatencyBandsMap::getLatencyBands(TransactionTag tag) {
 	    tag, LatencyBands(name, id, loggingInterval, [tag](auto& te) { te.detail("Tag", printable(tag)); }));
 	auto& expirableBands = it->second;
 	if (inserted) {
-		for (const auto& threshold : thresholds) {
+		for (auto const& threshold : thresholds) {
 			expirableBands.latencyBands.addThreshold(threshold);
 		}
 	}

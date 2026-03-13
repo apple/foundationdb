@@ -35,7 +35,7 @@ FDB_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
 class ICheckpointIterator {
 public:
-	virtual Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) = 0;
+	virtual Future<RangeResult> nextBatch(int const rowLimit, int const ByteLimit) = 0;
 
 	virtual ~ICheckpointIterator() {}
 };
@@ -49,10 +49,10 @@ public:
 	virtual Future<Void> init(StringRef token) = 0;
 
 	// Scans the checkpoint, and returns the key-value pairs.
-	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
+	virtual Future<RangeResult> nextKeyValues(int const rowLimit, int const ByteLimit) = 0;
 
 	// Returns the next chunk of the serialized checkpoint.
-	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
+	virtual Future<Standalone<StringRef>> nextChunk(int const ByteLimit) = 0;
 
 	virtual Future<Void> close() = 0;
 
@@ -64,8 +64,8 @@ protected:
 	virtual ~ICheckpointReader() {}
 };
 
-ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
-                                       const CheckpointAsKeyValues checkpointAsKeyValues,
+ICheckpointReader* newCheckpointReader(CheckpointMetaData const& checkpoint,
+                                       CheckpointAsKeyValues const checkpointAsKeyValues,
                                        UID logID);
 
 // Delete a checkpoint.
@@ -77,7 +77,7 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
-                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+                                                 std::function<Future<Void>(CheckpointMetaData const&)> cFun = nullptr);
 
 // Same as above, except that the checkpoint is fetched as key-value pairs.
 ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
@@ -85,10 +85,10 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
     CheckpointMetaData initialState,
     std::string dir,
     std::vector<KeyRange> ranges,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+    std::function<Future<Void>(CheckpointMetaData const&)> cFun = nullptr);
 
-std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId);
-std::string fetchedCheckpointDir(const std::string& baseDir, const UID& checkpointId);
+std::string serverCheckpointDir(std::string const& baseDir, UID const& checkpointId);
+std::string fetchedCheckpointDir(std::string const& baseDir, UID const& checkpointId);
 #include "flow/unactorcompiler.h"
 
 #endif

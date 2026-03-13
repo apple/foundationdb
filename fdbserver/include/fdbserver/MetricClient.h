@@ -46,7 +46,7 @@ private:
 	MsgpackBuffer buf;
 	std::string address;
 	int port;
-	void send_packet(int fd, const void* data, size_t len);
+	void send_packet(int fd, void const* data, size_t len);
 
 public:
 	UDPMetricClient();

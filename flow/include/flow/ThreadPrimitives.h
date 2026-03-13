@@ -88,8 +88,8 @@ public:
 	}
 
 private:
-	ThreadSpinLock(const ThreadSpinLock&);
-	void operator=(const ThreadSpinLock&);
+	ThreadSpinLock(ThreadSpinLock const&);
+	void operator=(ThreadSpinLock const&);
 	std::atomic_flag isLocked = ATOMIC_FLAG_INIT;
 	// We want a spin lock to occupy a cache line in order to
 	// prevent false sharing.
@@ -101,7 +101,7 @@ class ThreadSpinLockHolder {
 
 public:
 	ThreadSpinLockHolder(ThreadSpinLock& lock) : lock(lock) { lock.enter(); }
-	ThreadSpinLockHolder(const ThreadSpinLockHolder& lock) = delete;
+	ThreadSpinLockHolder(ThreadSpinLockHolder const& lock) = delete;
 	~ThreadSpinLockHolder() { lock.leave(); }
 };
 
@@ -113,7 +113,7 @@ public:
 };
 class ThreadUnsafeSpinLockHolder {
 public:
-	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&) {};
+	ThreadUnsafeSpinLockHolder(ThreadUnsafeSpinLock&){};
 };
 
 #if FLOW_THREAD_SAFE

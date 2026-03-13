@@ -26,9 +26,9 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/SystemData.h"
 
-static const uint16_t invalidAccumulativeChecksumIndex = 0;
-static const uint16_t resolverAccumulativeChecksumIndex = 2;
-static const uint32_t initialAccumulativeChecksum = 0;
+static uint16_t const invalidAccumulativeChecksumIndex = 0;
+static uint16_t const resolverAccumulativeChecksumIndex = 2;
+static uint32_t const initialAccumulativeChecksum = 0;
 
 // Define the mapping from commitProxy Index to acsIndex
 inline uint16_t getCommitProxyAccumulativeChecksumIndex(uint16_t commitProxyIndex) {
@@ -51,7 +51,7 @@ inline bool tagSupportAccumulativeChecksum(Tag tag) {
 // Define how to aggregate ACS values of a vector of mutations from a starting ACS
 inline uint32_t aggregateAcs(uint32_t startAcs, Standalone<VectorRef<std::pair<Version, MutationRef>>> mutations) {
 	uint32_t newAcs = startAcs;
-	for (const auto& [version, mutation] : mutations) {
+	for (auto const& [version, mutation] : mutations) {
 		ASSERT(mutation.checksum.present());
 		newAcs = calculateAccumulativeChecksum(newAcs, mutation.checksum.get());
 	}
@@ -73,10 +73,10 @@ public:
 
 	// Called when commit proxy assigning tags to a mutation (e.g. mutation, private mutation)
 	// Update ACS value for the input tag assigned to the mutation
-	void addMutation(const MutationRef& mutation, Tag tag, LogEpoch epoch, UID commitProxyId, Version commitVersion);
+	void addMutation(MutationRef const& mutation, Tag tag, LogEpoch epoch, UID commitProxyId, Version commitVersion);
 
 	// Return read-only ACS map
-	const std::unordered_map<Tag, AccumulativeChecksumState>& getAcsTable() { return acsTable; }
+	std::unordered_map<Tag, AccumulativeChecksumState> const& getAcsTable() { return acsTable; }
 
 private:
 	uint16_t acsIndex; // Essentially, this is the ID of commit proxy
@@ -99,7 +99,7 @@ void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<Accumulativ
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                                      MutationRef& mutation,
-                                                     const std::vector<Tag>& inputTags,
+                                                     std::vector<Tag> const& inputTags,
                                                      uint16_t acsIndex,
                                                      LogEpoch epoch,
                                                      Version commitVersion,
@@ -107,7 +107,7 @@ void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<Accumulativ
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                                      MutationRef& mutation,
-                                                     const std::set<Tag>& inputTags,
+                                                     std::set<Tag> const& inputTags,
                                                      uint16_t acsIndex,
                                                      LogEpoch epoch,
                                                      Version commitVersion,
@@ -121,7 +121,7 @@ public:
 
 	// Called when SS pulls a non-ACS mutation
 	// Add the mutation to the mutation buffer
-	void addMutation(const MutationRef& mutation, UID ssid, Tag tag, Version ssVersion, Version mutationVersion);
+	void addMutation(MutationRef const& mutation, UID ssid, Tag tag, Version ssVersion, Version mutationVersion);
 
 	// Called when SS receives an ACS mutation
 	// Consume the current mutation buffer to generate ACS
@@ -129,14 +129,14 @@ public:
 	// Report error if ACS values are mismatch
 	// Update acs table using the ACS mutation
 	// Return acs state to persist (a mutation is issued to persist ACS state after this method is called)
-	Optional<AccumulativeChecksumState> processAccumulativeChecksum(const AccumulativeChecksumState& acsMutationState,
+	Optional<AccumulativeChecksumState> processAccumulativeChecksum(AccumulativeChecksumState const& acsMutationState,
 	                                                                UID ssid,
 	                                                                Tag tag,
 	                                                                Version ssVersion);
 
 	// Called when SS restores from persisted private data
 	// Overwrite existing acsState with the input acsState for the same acsIndex
-	void restore(const AccumulativeChecksumState& acsState, UID ssid, Tag tag, Version ssVersion);
+	void restore(AccumulativeChecksumState const& acsState, UID ssid, Tag tag, Version ssVersion);
 
 	// Called when SS applied pulled mutations in a round
 	// At this time, we are not expected to see any mutation

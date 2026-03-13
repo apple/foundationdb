@@ -29,19 +29,19 @@
 
 namespace {
 
-const char* FDB_LOCAL_CLIENT_LIBRARY_PATH_ENVVAR = "FDB_LOCAL_CLIENT_LIBRARY_PATH";
+char const* FDB_LOCAL_CLIENT_LIBRARY_PATH_ENVVAR = "FDB_LOCAL_CLIENT_LIBRARY_PATH";
 std::string g_fdbLocalClientLibraryPath;
 
 } // namespace
 
-extern "C" DLLEXPORT void fdb_shim_set_local_client_library_path(const char* filePath) {
+extern "C" DLLEXPORT void fdb_shim_set_local_client_library_path(char const* filePath) {
 	g_fdbLocalClientLibraryPath = filePath;
 }
 
 /* The callback of the fdb_c_shim layer that determines the path
    of the fdb_c library to be dynamically loaded
  */
-extern "C" void* fdb_shim_dlopen_callback(const char* libName) {
+extern "C" void* fdb_shim_dlopen_callback(char const* libName) {
 	std::string libPath;
 	if (!g_fdbLocalClientLibraryPath.empty()) {
 		libPath = g_fdbLocalClientLibraryPath;

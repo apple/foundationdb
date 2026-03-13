@@ -44,7 +44,7 @@ struct RangeLockOwner {
 
 public:
 	RangeLockOwner() = default;
-	RangeLockOwner(const std::string& ownerUniqueId, const std::string& description)
+	RangeLockOwner(std::string const& ownerUniqueId, std::string const& description)
 	  : ownerUniqueId(ownerUniqueId), description(description), logId(deterministicRandom()->randomUniqueID()),
 	    creationTime(now()) {
 		if (!isValid()) {
@@ -63,7 +63,7 @@ public:
 
 	RangeLockOwnerName getOwnerUniqueId() const { return ownerUniqueId; }
 
-	void setDescription(const std::string& inputDescription) {
+	void setDescription(std::string const& inputDescription) {
 		description = inputDescription;
 		return;
 	}
@@ -89,14 +89,14 @@ struct RangeLockState {
 public:
 	RangeLockState() = default;
 
-	RangeLockState(RangeLockType type, const RangeLockOwnerName& ownerUniqueId, const KeyRange& range)
+	RangeLockState(RangeLockType type, RangeLockOwnerName const& ownerUniqueId, KeyRange const& range)
 	  : lockType(type), ownerUniqueId(ownerUniqueId), range(range) {
 		ASSERT(isValid());
 	}
 
 	bool isValid() const { return lockType != RangeLockType::Invalid && !ownerUniqueId.empty(); }
 
-	static std::string rangeLockTypeString(const RangeLockType& type) {
+	static std::string rangeLockTypeString(RangeLockType const& type) {
 		if (type == RangeLockType::Invalid) {
 			return "invalid";
 		} else if (type == RangeLockType::ExclusiveReadLock) {
@@ -151,14 +151,14 @@ public:
 
 	std::vector<RangeLockState> getAllLockStats() const {
 		std::vector<RangeLockState> res;
-		for (const auto& [name, lock] : locks) {
+		for (auto const& [name, lock] : locks) {
 			res.push_back(lock);
 		}
 		return res;
 	}
 
 	bool isValid() const {
-		for (const auto& [owner, lock] : locks) {
+		for (auto const& [owner, lock] : locks) {
 			if (!lock.isValid()) {
 				return false; // Any invalid makes this set invalid
 			}
@@ -168,7 +168,7 @@ public:
 
 	std::string toString() const { return "RangeLockStateSet: " + describe(getAllLockStats()); }
 
-	const std::map<RangeLockUniqueString, RangeLockState>& getLocks() const { return locks; }
+	std::map<RangeLockUniqueString, RangeLockState> const& getLocks() const { return locks; }
 
 	bool operator==(RangeLockStateSet const& r) const {
 		auto rLocks = r.getLocks();
@@ -187,7 +187,7 @@ public:
 		return true;
 	}
 
-	void insertIfNotExist(const RangeLockState& inputLock) {
+	void insertIfNotExist(RangeLockState const& inputLock) {
 		ASSERT(inputLock.isValid());
 		if (inputLock.isLockedFor(RangeLockType::ExclusiveReadLock) && !locks.empty() &&
 		    locks.find(inputLock.getLockUniqueString()) == locks.end()) {
@@ -197,14 +197,14 @@ public:
 		return;
 	}
 
-	void remove(const RangeLockState& inputLock) {
+	void remove(RangeLockState const& inputLock) {
 		ASSERT(inputLock.isValid());
 		locks.erase(inputLock.getLockUniqueString());
 		return;
 	}
 
 	bool isLockedFor(RangeLockType lockType) const {
-		for (const auto& [owner, lock] : locks) {
+		for (auto const& [owner, lock] : locks) {
 			ASSERT(lock.isValid());
 			if (lock.isLockedFor(lockType)) {
 				return true;

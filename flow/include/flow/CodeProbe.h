@@ -150,7 +150,7 @@ template <>
 struct CodeProbeAnnotations<> {
 	static constexpr bool providesContext = false;
 	void hit(ICodeProbe* self) {}
-	void trace(const ICodeProbe*, BaseTraceEvent&, bool) const {}
+	void trace(ICodeProbe const*, BaseTraceEvent&, bool) const {}
 	constexpr bool expectContext(ExecutionContext context, bool prevHadSomeContext = false) const {
 		return !prevHadSomeContext;
 	}
@@ -186,7 +186,7 @@ struct CodeProbeAnnotations<Head, Tail...> {
 		return tail.shouldTrace(self);
 	}
 
-	void trace(const ICodeProbe* self, BaseTraceEvent& evt, bool condition) const {
+	void trace(ICodeProbe const* self, BaseTraceEvent& evt, bool condition) const {
 		if constexpr (Head::type == AnnotationType::Decoration) {
 			head.trace(self, evt, condition);
 		}
@@ -223,11 +223,11 @@ struct ICodeProbe {
 	bool operator!=(ICodeProbe const& other) const;
 
 	std::string_view filename() const;
-	virtual const char* filePath() const = 0;
+	virtual char const* filePath() const = 0;
 	virtual unsigned line() const = 0;
-	virtual const char* comment() const = 0;
-	virtual const char* condition() const = 0;
-	virtual const char* compilationUnit() const = 0;
+	virtual char const* comment() const = 0;
+	virtual char const* condition() const = 0;
+	virtual char const* compilationUnit() const = 0;
 	virtual void trace(bool) const = 0;
 	virtual bool shouldTrace() const = 0;
 	virtual bool wasHit() const = 0;
@@ -241,7 +241,7 @@ struct ICodeProbe {
 };
 
 void registerProbe(ICodeProbe const& probe);
-std::string functionNameFromInnerType(const char* name);
+std::string functionNameFromInnerType(char const* name);
 
 template <class FileName, class Condition, class Comment, class CompUnit, unsigned Line, class Annotations>
 struct CodeProbeImpl : ICodeProbe {
@@ -269,11 +269,11 @@ struct CodeProbeImpl : ICodeProbe {
 	bool wasHit() const override { return _hitCount > 0; }
 	unsigned hitCount() const override { return _hitCount; }
 
-	const char* filePath() const override { return FileName::value(); }
+	char const* filePath() const override { return FileName::value(); }
 	unsigned line() const override { return Line; }
-	const char* comment() const override { return Comment::value(); }
-	const char* condition() const override { return Condition::value(); }
-	const char* compilationUnit() const override { return CompUnit::value(); }
+	char const* comment() const override { return Comment::value(); }
+	char const* condition() const override { return Condition::value(); }
+	char const* compilationUnit() const override { return CompUnit::value(); }
 	bool expectInContext(ExecutionContext context) const override { return annotations.expectContext(context); }
 	std::string function() const override { return functionNameFromInnerType(typeid(FileName).name()); }
 	bool deduplicate() const override { return annotations.deduplicate(); }
@@ -304,22 +304,22 @@ CodeProbeImpl<FileName, Condition, Comment, CompUnit, Line, CodeProbeAnnotations
 
 #define _CODE_PROBE_IMPL(file, line, condition, comment, compUnit, fileType, condType, commentType, compUnitType, ...) \
 	struct fileType {                                                                                                  \
-		constexpr static const char* value() {                                                                         \
+		constexpr static char const* value() {                                                                         \
 			return file;                                                                                               \
 		}                                                                                                              \
 	};                                                                                                                 \
 	struct condType {                                                                                                  \
-		constexpr static const char* value() {                                                                         \
+		constexpr static char const* value() {                                                                         \
 			return #condition;                                                                                         \
 		}                                                                                                              \
 	};                                                                                                                 \
 	struct commentType {                                                                                               \
-		constexpr static const char* value() {                                                                         \
+		constexpr static char const* value() {                                                                         \
 			return comment;                                                                                            \
 		}                                                                                                              \
 	};                                                                                                                 \
 	struct compUnitType {                                                                                              \
-		constexpr static const char* value() {                                                                         \
+		constexpr static char const* value() {                                                                         \
 			return compUnit;                                                                                           \
 		}                                                                                                              \
 	};                                                                                                                 \

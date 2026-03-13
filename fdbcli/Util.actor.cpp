@@ -30,7 +30,7 @@
 
 namespace fdb_cli {
 
-bool tokencmp(StringRef token, const char* command) {
+bool tokencmp(StringRef token, char const* command) {
 	if (token.size() != strlen(command))
 		return false;
 
@@ -38,7 +38,7 @@ bool tokencmp(StringRef token, const char* command) {
 }
 
 void printUsage(StringRef command) {
-	const auto& helpMap = CommandFactory::commands();
+	auto const& helpMap = CommandFactory::commands();
 	auto i = helpMap.find(command.toString());
 	if (i != helpMap.end())
 		printf("Usage: %s\n", i->second.usage.c_str());
@@ -47,7 +47,7 @@ void printUsage(StringRef command) {
 }
 
 void printLongDesc(StringRef command) {
-	const auto& helpMap = CommandFactory::commands();
+	auto const& helpMap = CommandFactory::commands();
 	auto i = helpMap.find(command.toString());
 	if (i != helpMap.end())
 		printf("%s\n", i->second.long_desc.c_str());
@@ -73,7 +73,7 @@ ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransacti
 
 void addInterfacesFromKVs(RangeResult& kvs,
                           std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
-	for (const auto& kv : kvs) {
+	for (auto const& kv : kvs) {
 		ClientWorkerInterface workerInterf;
 		try {
 			// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version

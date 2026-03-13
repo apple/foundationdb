@@ -41,7 +41,7 @@ void swapWithThreadLocalGlobal(std::vector<int>& writeToOffsets) {
 	gWriteToOffsetsMemory.swap(writeToOffsets);
 }
 
-VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlignments) {
+VTable generate_vtable(size_t numMembers, std::vector<unsigned> const& sizesAlignments) {
 	if (numMembers == 0) {
 		return VTable{ 4, 4 };
 	}
@@ -55,7 +55,7 @@ VTable generate_vtable(size_t numMembers, const std::vector<unsigned>& sizesAlig
 	}
 	std::stable_sort(indexed.begin(),
 	                 indexed.end(),
-	                 [](const std::pair<unsigned, unsigned>& lhs, const std::pair<unsigned, unsigned>& rhs) {
+	                 [](std::pair<unsigned, unsigned> const& lhs, std::pair<unsigned, unsigned> const& rhs) {
 		                 return lhs.second > rhs.second;
 	                 });
 	VTable result;
@@ -130,7 +130,7 @@ struct Table3 {
 };
 
 TEST_CASE("flow/FlatBuffers/vtable2") {
-	const auto& vtable =
+	auto const& vtable =
 	    *detail::get_vtable<uint64_t, bool, std::string, int64_t, std::vector<uint16_t>, Table2, Table3>();
 	ASSERT(!(vtable[2] <= vtable[4] && vtable[4] < vtable[2] + 8));
 	return Void();
@@ -145,7 +145,7 @@ struct Nested2 {
 		serializer(ar, a, b, c);
 	}
 
-	friend bool operator==(const Nested2& lhs, const Nested2& rhs) {
+	friend bool operator==(Nested2 const& lhs, Nested2 const& rhs) {
 		return lhs.a == rhs.a && lhs.b == rhs.b && lhs.c == rhs.c;
 	}
 };
@@ -182,10 +182,10 @@ TEST_CASE("flow/FlatBuffers/collectVTables") {
 	Root root;
 	Arena arena;
 	TestContextArena context{ arena };
-	const auto* vtables = detail::get_vtableset(root, context);
+	auto const* vtables = detail::get_vtableset(root, context);
 	ASSERT(vtables == detail::get_vtableset(root, context));
-	const auto& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
-	const auto& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
+	auto const& root_vtable = *detail::get_vtable<uint8_t, std::vector<Nested2>, Nested>();
+	auto const& nested_vtable = *detail::get_vtable<uint8_t, std::vector<std::string>, int>();
 	int root_offset = vtables->getOffset(&root_vtable);
 	int nested_offset = vtables->getOffset(&nested_vtable);
 	ASSERT(!memcmp((uint8_t*)&root_vtable[0], &vtables->packed_tables[root_offset], root_vtable.size()));
@@ -193,7 +193,7 @@ TEST_CASE("flow/FlatBuffers/collectVTables") {
 	return Void();
 }
 
-void print_buffer(const uint8_t* out, int len) {
+void print_buffer(uint8_t const* out, int len) {
 	std::cout << std::hex << std::setfill('0');
 	for (int i = 0; i < len; ++i) {
 		if (i % 8 == 0) {
@@ -219,7 +219,7 @@ struct Arena {
 		return res;
 	}
 
-	size_t get_size(const uint8_t* ptr) const {
+	size_t get_size(uint8_t const* ptr) const {
 		for (auto& p : allocated) {
 			if (p.first == ptr) {
 				return p.second;
@@ -276,7 +276,7 @@ TEST_CASE("flow/FlatBuffers/serializeDeserializeMembers") {
 	Root root2 = root;
 	Arena arena;
 	TestContext context{ arena };
-	const auto* out = save_members(context, FileIdentifier{}, root.a, root.b, root.c);
+	auto const* out = save_members(context, FileIdentifier{}, root.a, root.b, root.c);
 
 	ASSERT(root.a == root2.a);
 	ASSERT(root.b == root2.b);
@@ -311,7 +311,7 @@ TEST_CASE("flow/FlatBuffers/variant") {
 	V v2;
 	Arena arena;
 	TestContext context{ arena };
-	const uint8_t* out;
+	uint8_t const* out;
 
 	v1 = 1;
 	out = save_members(context, FileIdentifier{}, v1);
@@ -340,7 +340,7 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 	std::vector<bool> x2;
 	Arena arena;
 	TestContext context{ arena };
-	const uint8_t* out;
+	uint8_t const* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
 	// print_buffer(out, arena.get_size(out));
@@ -353,10 +353,10 @@ TEST_CASE("flow/FlatBuffers/vectorBool") {
 
 template <>
 struct string_serialized_traits<Void> : std::true_type {
-	int32_t getSize(const Void& item) const { return 0; }
-	uint32_t save(uint8_t* out, const Void& t) const { return 0; }
+	int32_t getSize(Void const& item) const { return 0; }
+	uint32_t save(uint8_t* out, Void const& t) const { return 0; }
 	template <class Context>
-	uint32_t load(const uint8_t* data, Void& t, Context& context) {
+	uint32_t load(uint8_t const* data, Void& t, Context& context) {
 		return 0;
 	}
 };
@@ -374,11 +374,11 @@ struct Y1 {
 };
 
 struct Y1Hasher {
-	std::size_t operator()(const Y1& y) const noexcept { return std::hash<int>()(y.a); }
+	std::size_t operator()(Y1 const& y) const noexcept { return std::hash<int>()(y.a); }
 };
 
 struct Y1Equal {
-	bool operator()(const Y1& l, const Y1& r) const { return l.a == r.a; }
+	bool operator()(Y1 const& l, Y1 const& r) const { return l.a == r.a; }
 };
 
 struct Y2 {
@@ -408,7 +408,7 @@ TEST_CASE("/flow/FlatBuffers/nestedCompat") {
 	X<Y2> x2;
 	Arena arena;
 	TestContext context{ arena };
-	const uint8_t* out;
+	uint8_t const* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
 	load_members(out, context, x2);
@@ -432,7 +432,7 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 	decltype(x1) x2;
 	Arena arena;
 	TestContext context{ arena };
-	const uint8_t* out;
+	uint8_t const* out;
 
 	out = save_members(context, FileIdentifier{}, x1);
 	// print_buffer(out, arena.get_size(out));
@@ -444,7 +444,7 @@ TEST_CASE("/flow/FlatBuffers/struct") {
 TEST_CASE("/flow/FlatBuffers/file_identifier") {
 	Arena arena;
 	TestContext context{ arena };
-	const uint8_t* out;
+	uint8_t const* out;
 	constexpr FileIdentifier file_identifier{ 1234 };
 	Y1 y1;
 	out = save_members(context, file_identifier, y1);
@@ -470,7 +470,7 @@ TEST_CASE("/flow/FlatBuffers/VectorRef") {
 		{
 			::Arena arena;
 			VectorRef<StringRef> vec;
-			for (const auto& str : src) {
+			for (auto const& str : src) {
 				vec.push_back(arena, str);
 			}
 			ObjectWriter writer(Unversioned());
@@ -529,7 +529,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
 	std::vector<StringRef> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
-	for (const auto& x : xs) {
+	for (auto const& x : xs) {
 		ASSERT(x.empty());
 	}
 	return Void();
@@ -542,7 +542,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
 	std::vector<std::vector<Void>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
-	for (const auto& x : xs) {
+	for (auto const& x : xs) {
 		ASSERT(x.empty());
 	}
 	return Void();
@@ -555,7 +555,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
 	std::vector<VectorRef<Void>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
-	for (const auto& x : xs) {
+	for (auto const& x : xs) {
 		ASSERT(x.empty());
 	}
 	return Void();
@@ -569,7 +569,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
 	std::vector<VectorRef<Void, VecSerStrategy::String>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
-	for (const auto& x : xs) {
+	for (auto const& x : xs) {
 		ASSERT(x.empty());
 	}
 	return Void();
@@ -583,7 +583,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyUnorderedSet") {
 	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> xs;
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
-	for (const auto& x : xs) {
+	for (auto const& x : xs) {
 		ASSERT(x.empty());
 	}
 	return Void();

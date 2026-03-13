@@ -40,8 +40,8 @@
 class Void;
 
 std::string toIPVectorString(std::vector<uint32_t> ips);
-std::string toIPVectorString(const std::vector<IPAddress>& ips);
-std::string formatIpPort(const IPAddress& ip, uint16_t port);
+std::string toIPVectorString(std::vector<IPAddress> const& ips);
+std::string formatIpPort(IPAddress const& ip, uint16_t port);
 
 template <class T>
 class Future;
@@ -77,7 +77,7 @@ struct NetworkMetrics {
 	std::vector<struct PriorityStats> starvationTrackers;
 	struct PriorityStats starvationTrackerNetworkBusyness;
 
-	static const std::vector<int> starvationBins;
+	static std::vector<int> const starvationBins;
 
 	NetworkMetrics()
 	  : lastRunLoopBusyness(0), networkBusyness(0),
@@ -88,7 +88,7 @@ struct NetworkMetrics {
 	}
 
 	// Since networkBusyness is atomic we need to redefine copy assignment operator
-	NetworkMetrics& operator=(const NetworkMetrics& rhs) {
+	NetworkMetrics& operator=(NetworkMetrics const& rhs) {
 		for (int i = 0; i < SLOW_EVENT_BINS; i++) {
 			countSlowEvents[i] = rhs.countSlowEvents[i];
 		}
@@ -134,8 +134,8 @@ class TLSConfig;
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork;
 
 extern INetwork* g_network;
-extern INetwork* newNet2(const TLSConfig& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
-inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool = false, bool useMetrics = false) {
+extern INetwork* newNet2(TLSConfig const& tlsConfig, bool useThreadPool = false, bool useMetrics = false);
+inline INetwork* _swift_newNet2(TLSConfig const* tlsConfig, bool useThreadPool = false, bool useMetrics = false) {
 	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
 
@@ -176,7 +176,7 @@ public:
 		COUNT // Add new fields before this enumerator
 	};
 
-	virtual void longTaskCheck(const char* name) {}
+	virtual void longTaskCheck(char const* name) {}
 
 	// Provides a clock that advances at a similar rate on all connected endpoints
 	virtual double now() const = 0;
@@ -237,7 +237,7 @@ public:
 	virtual THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*),
 	                                  void* arg,
 	                                  int stackSize = 0,
-	                                  const char* name = nullptr) = 0;
+	                                  char const* name = nullptr) = 0;
 
 	// Devotes this thread to running the network (generally until stop())
 	virtual void run() = 0;
@@ -250,7 +250,7 @@ public:
 	virtual void initTLS(ETLSInitState targetState = CONFIG) {}
 
 	// Return the TLS Configuration
-	virtual const TLSConfig& getTLSConfig() const = 0;
+	virtual TLSConfig const& getTLSConfig() const = 0;
 
 	// Gets the number of free and total bytes available on the disk which contains directory
 	virtual void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) = 0;

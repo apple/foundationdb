@@ -57,7 +57,7 @@ public:
 		bool operator<=(location const& r) const { return !(*this > r); }
 		bool operator>=(location const& r) const { return !(*this < r); }
 
-		bool operator==(const location& r) const { return hi == r.hi && lo == r.lo; }
+		bool operator==(location const& r) const { return hi == r.hi && lo == r.lo; }
 	};
 
 	//! Find the first and last pages in the disk queue, and initialize invariants.
@@ -95,7 +95,7 @@ public:
 
 template <>
 struct Traceable<IDiskQueue::location> : std::true_type {
-	static std::string toString(const IDiskQueue::location& value) { return value; }
+	static std::string toString(IDiskQueue::location const& value) { return value; }
 };
 
 // FIXME: One should be able to use SFINAE to choose between serialize and serialize_unversioned.
@@ -104,7 +104,7 @@ void load(Ar& ar, IDiskQueue::location& loc) {
 	loc.serialize_unversioned(ar);
 }
 template <class Ar>
-void save(Ar& ar, const IDiskQueue::location& loc) {
+void save(Ar& ar, IDiskQueue::location const& loc) {
 	const_cast<IDiskQueue::location&>(loc).serialize_unversioned(ar);
 }
 

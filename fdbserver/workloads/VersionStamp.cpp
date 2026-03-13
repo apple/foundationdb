@@ -51,7 +51,7 @@ struct VersionStampWorkload : TestWorkload {
 		nodeCount = getOption(options, "nodeCount"_sr, (uint64_t)10000);
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 4);
 		failIfDataLost = getOption(options, "failIfDataLost"_sr, true);
-		const Key prefix = getOption(options, "prefix"_sr, "VS_"_sr);
+		Key const prefix = getOption(options, "prefix"_sr, "VS_"_sr);
 		vsKeyPrefix = "K_"_sr.withPrefix(prefix);
 		vsValuePrefix = "V_"_sr.withPrefix(prefix);
 		validateExtraDB = getOption(options, "validateExtraDB"_sr, false);
@@ -99,7 +99,7 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	Key versionStampKeyForIndex(uint64_t index, bool oldVSFormat) {
-		const size_t keySize = 38 + (oldVSFormat ? 0 : 2);
+		size_t const keySize = 38 + (oldVSFormat ? 0 : 2);
 		Key result = makeString(keySize);
 		uint8_t* data = mutateString(result);
 		memset(&data[0], 'V', keySize);
@@ -135,7 +135,7 @@ struct VersionStampWorkload : TestWorkload {
 		return true;
 	}
 
-	static std::pair<Version, Standalone<StringRef>> versionFromValue(const Standalone<StringRef>& value) {
+	static std::pair<Version, Standalone<StringRef>> versionFromValue(Standalone<StringRef> const& value) {
 		Version parsedVersion;
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
 		memcpy(&parsedVersion, value.begin(), sizeof(Version));
@@ -144,7 +144,7 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	// `key` needs to be the non-prefixed key, as we use a fixed offset for the versionstamp location.
-	static std::pair<Version, Standalone<StringRef>> versionFromKey(const Standalone<StringRef>& key) {
+	static std::pair<Version, Standalone<StringRef>> versionFromKey(Standalone<StringRef> const& key) {
 		Version parsedVersion;
 		Standalone<StringRef> parsedVersionstamp = makeString(10);
 		memcpy(&parsedVersion, &(key.begin())[24], sizeof(Version));
@@ -214,7 +214,7 @@ struct VersionStampWorkload : TestWorkload {
 
 				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
 				for (auto it : result) {
-					const Standalone<StringRef> key =
+					Standalone<StringRef> const key =
 					    it.key == metadataVersionKey ? metadataVersionKey : it.key.removePrefix(self->vsValuePrefix);
 					Version parsedVersion;
 					Standalone<StringRef> parsedVersionstamp;
@@ -222,9 +222,9 @@ struct VersionStampWorkload : TestWorkload {
 					ASSERT(parsedVersion <= readVersion);
 
 					//TraceEvent("VST_Check0a").detail("ItKey", printable(it.key)).detail("ItValue", printable(it.value)).detail("ParsedVersion", parsedVersion);
-					const auto& all_values_iter = self->key_commit.find(key);
+					auto const& all_values_iter = self->key_commit.find(key);
 					ASSERT(all_values_iter != self->key_commit.end()); // Reading a key that we didn't commit.
-					const auto& all_values = all_values_iter->second;
+					auto const& all_values = all_values_iter->second;
 
 					if (it.key == metadataVersionKey && !self->soleOwnerOfMetadataVersionKey) {
 						if (self->failIfDataLost) {
@@ -236,10 +236,10 @@ struct VersionStampWorkload : TestWorkload {
 							}
 						}
 					} else {
-						const auto& value_pair_iter =
+						auto const& value_pair_iter =
 						    std::find_if(all_values.cbegin(),
 						                 all_values.cend(),
-						                 [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) {
+						                 [parsedVersion](std::pair<Version, Standalone<StringRef>> const& pair) {
 							                 return pair.first == parsedVersion;
 						                 });
 						ASSERT(value_pair_iter !=
@@ -269,22 +269,22 @@ struct VersionStampWorkload : TestWorkload {
 
 				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
 				for (auto it : result) {
-					const Standalone<StringRef> key = it.key.removePrefix(self->vsKeyPrefix);
+					Standalone<StringRef> const key = it.key.removePrefix(self->vsKeyPrefix);
 					Version parsedVersion;
 					Standalone<StringRef> parsedVersionstamp;
 					std::tie(parsedVersion, parsedVersionstamp) = versionFromKey(key);
 
-					const Key vsKey = key.substr(4, 16);
+					Key const vsKey = key.substr(4, 16);
 					//TraceEvent("VST_Check1a").detail("ItKey", printable(it.key)).detail("VsKey", printable(vsKey)).detail("ItValue", printable(it.value)).detail("ParsedVersion", parsedVersion);
-					const auto& all_values_iter = self->versionStampKey_commit.find(vsKey);
+					auto const& all_values_iter = self->versionStampKey_commit.find(vsKey);
 					ASSERT(all_values_iter !=
 					       self->versionStampKey_commit.end()); // Reading a key that we didn't commit.
-					const auto& all_values = all_values_iter->second;
+					auto const& all_values = all_values_iter->second;
 
-					const auto& value_pair_iter =
+					auto const& value_pair_iter =
 					    std::find_if(all_values.cbegin(),
 					                 all_values.cend(),
-					                 [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) {
+					                 [parsedVersion](std::pair<Version, Standalone<StringRef>> const& pair) {
 						                 return pair.first == parsedVersion;
 					                 });
 					ASSERT(value_pair_iter != all_values.cend()); // The key exists, but we never wrote the timestamp.
@@ -407,15 +407,15 @@ struct VersionStampWorkload : TestWorkload {
 										error = true;
 										break;
 									}
-									const Version value_version = versionFromValue(vs_value.get()).first;
+									Version const value_version = versionFromValue(vs_value.get()).first;
 									//TraceEvent("VST_CommitUnknownRead").detail("VsValue", vs_value.present() ? printable(vs_value.get()) : "did not exist");
-									const auto& value_ts =
+									auto const& value_ts =
 									    key_commit[key == metadataVersionKey ? metadataVersionKey
 									                                         : key.removePrefix(vsValuePrefix)];
-									const auto& iter = std::find_if(
+									auto const& iter = std::find_if(
 									    value_ts.cbegin(),
 									    value_ts.cend(),
-									    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
+									    [value_version](std::pair<Version, Standalone<StringRef>> const& pair) {
 										    return value_version == pair.first;
 									    });
 									if (iter == value_ts.cend()) {
@@ -452,8 +452,8 @@ struct VersionStampWorkload : TestWorkload {
 					continue;
 				}
 
-				const Standalone<StringRef> vsKeyKey = versionStampKey.removePrefix(vsKeyPrefix).substr(4, 16);
-				const auto& committedVersionPair = std::make_pair(committedVersion, committedVersionStamp);
+				Standalone<StringRef> const vsKeyKey = versionStampKey.removePrefix(vsKeyPrefix).substr(4, 16);
+				auto const& committedVersionPair = std::make_pair(committedVersion, committedVersionStamp);
 				//TraceEvent("VST_CommitSuccess").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("VsKeyKey", printable(vsKeyKey)).detail("Clear", printable(range)).detail("Version", tr.getCommittedVersion()).detail("VsValue", printable(committedVersionPair.second));
 				key_commit[key == metadataVersionKey ? metadataVersionKey : key.removePrefix(vsValuePrefix)].push_back(
 				    committedVersionPair);

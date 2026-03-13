@@ -61,7 +61,7 @@ public:
 
 	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		lock.enter();
 		if (!hasBeenSet) {
 			hasBeenSet = true;
@@ -82,7 +82,7 @@ public:
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	void error(const Error& e, int& userParam) override {
+	void error(Error const& e, int& userParam) override {
 		ASSERT(future.isError());
 		lock.enter();
 		if (!hasBeenSet) {
@@ -236,9 +236,9 @@ public:
 	}
 
 private:
-	const Reference<FdbCApi> api;
+	Reference<FdbCApi> const api;
 	FdbCApi::FDBFuture* f;
-	const std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> extractValue;
+	std::function<T(FdbCApi::FDBFuture* f, FdbCApi* api)> const extractValue;
 	ThreadSpinLock lock;
 
 	int futureRefCount;
@@ -283,19 +283,19 @@ public:
 
 	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		sendResult(mapValue(source.get()));
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	void error(const Error& e, int& userParam) override {
+	void error(Error const& e, int& userParam) override {
 		sendResult(mapValue(source.getError()));
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
 private:
 	ThreadFuture<S> source;
-	const std::function<ErrorOr<T>(ErrorOr<S>)> mapValue;
+	std::function<ErrorOr<T>(ErrorOr<S>)> const mapValue;
 
 	void sendResult(ErrorOr<T> result) {
 		if (result.isError()) {
@@ -357,7 +357,7 @@ public:
 
 	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		if (mappedFuture.isValid()) {
 			sendResult(mappedFuture.get());
 		} else {
@@ -367,7 +367,7 @@ public:
 		ThreadSingleAssignmentVar<T>::delref();
 	}
 
-	void error(const Error& e, int& userParam) override {
+	void error(Error const& e, int& userParam) override {
 		if (mappedFuture.isValid()) {
 			sendResult(mappedFuture.getError());
 		} else {
@@ -382,7 +382,7 @@ private:
 	ThreadFuture<T> mappedFuture;
 	bool cancelled;
 	bool released;
-	const std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> mapValue;
+	std::function<ErrorOr<ThreadFuture<T>>(ErrorOr<S>)> const mapValue;
 
 	ThreadSpinLock lock;
 

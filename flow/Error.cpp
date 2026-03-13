@@ -47,7 +47,7 @@ bool Error::isDiskError() const {
 	return (error_code == error_code_io_error || error_code == error_code_io_timeout);
 }
 
-Error internal_error_impl(const char* file, int line) {
+Error internal_error_impl(char const* file, int line) {
 	fprintf(stderr, "Internal Error @ %s %d:\n  %s\n", file, line, platform::get_backtrace().c_str());
 
 	TraceEvent(SevError, "InternalError")
@@ -60,7 +60,7 @@ Error internal_error_impl(const char* file, int line) {
 	return Error(error_code_internal_error);
 }
 
-Error internal_error_impl(const char* msg, const char* file, int line) {
+Error internal_error_impl(char const* msg, char const* file, int line) {
 	fprintf(stderr, "Assertion %s failed @ %s %d:\n  %s\n", msg, file, line, platform::get_backtrace().c_str());
 
 	TraceEvent(SevError, "InternalError")
@@ -74,12 +74,12 @@ Error internal_error_impl(const char* msg, const char* file, int line) {
 	return Error(error_code_internal_error);
 }
 
-Error internal_error_impl(const char* a_nm,
+Error internal_error_impl(char const* a_nm,
                           std::string const& a,
-                          const char* op_nm,
-                          const char* b_nm,
+                          char const* op_nm,
+                          char const* b_nm,
                           std::string const& b,
-                          const char* file,
+                          char const* file,
                           int line) {
 	fprintf(stderr, "Assertion failed @ %s %d:\n", file, line);
 	fprintf(stderr, "  expression:\n");
@@ -154,16 +154,16 @@ ErrorCodeTable& Error::errorCodeTable() {
 	return table;
 }
 
-const char* Error::name() const {
-	const auto& table = errorCodeTable();
+char const* Error::name() const {
+	auto const& table = errorCodeTable();
 	auto it = table.find(error_code);
 	if (it == table.end())
 		return "UNKNOWN_ERROR";
 	return it->second.first;
 }
 
-const char* Error::what() const {
-	const auto& table = errorCodeTable();
+char const* Error::what() const {
+	auto const& table = errorCodeTable();
 	auto it = table.find(error_code);
 	if (it == table.end())
 		return "UNKNOWN_ERROR";
@@ -180,10 +180,10 @@ Error Error::asInjectedFault() const {
 	return e;
 }
 
-AttributeNotFoundError::AttributeNotFoundError(const std::string& missingAttribute_)
+AttributeNotFoundError::AttributeNotFoundError(std::string const& missingAttribute_)
   : Error(error_code_attribute_not_found), missingAttribute(missingAttribute_) {}
 
-const std::string& AttributeNotFoundError::getMissingAttribute() const {
+std::string const& AttributeNotFoundError::getMissingAttribute() const {
 	return missingAttribute;
 }
 
@@ -194,7 +194,7 @@ ErrorCodeTable::ErrorCodeTable() {
 #include "flow/error_definitions.h"
 }
 
-void ErrorCodeTable::addCode(int code, const char* name, const char* description) {
+void ErrorCodeTable::addCode(int code, char const* name, char const* description) {
 	(*this)[code] = std::make_pair(name, description);
 }
 
@@ -207,7 +207,7 @@ void breakpoint_me() {
 }
 
 // FIXME: combine with bindings/c/fdb_c.cpp fdb_error_predicate function
-const std::set<int> transactionRetryableErrors = { error_code_not_committed,
+std::set<int> const transactionRetryableErrors = { error_code_not_committed,
 	                                               error_code_transaction_too_old,
 	                                               error_code_future_version,
 	                                               error_code_commit_proxy_memory_limit_exceeded,

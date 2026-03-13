@@ -58,7 +58,7 @@ double ratePolicy(Reference<LocalitySet>& localitySet,
 		int largestMode = 0;
 		LocalityEntry largestEntry;
 
-		for (const auto& [entry, entryCount] : counterMap) {
+		for (auto const& [entry, entryCount] : counterMap) {
 			if (entryCount > largestMode) {
 				largestMode = entryCount;
 				largestEntry = entry;
@@ -90,7 +90,7 @@ int mostUsedZoneCount(Reference<LocalitySet>& logServerSet, std::vector<Locality
 		entries[value.get()]++;
 	}
 	int maxEntries = 0;
-	for (const auto& [_zoneId, entryCount] : entries) {
+	for (auto const& [_zoneId, entryCount] : entries) {
 		maxEntries = std::max(maxEntries, entryCount);
 	}
 	return maxEntries;
@@ -121,7 +121,7 @@ bool findBestPolicySetSimple(int targetUniqueValueCount,
 	ASSERT_WE_THINK(uniqueValueCount == entries.size());
 	std::vector<std::vector<int>> randomizedEntries;
 	randomizedEntries.resize(entries.size());
-	for (const auto& [_zoneId, entryIndexes] : entries) {
+	for (auto const& [_zoneId, entryIndexes] : entries) {
 		randomizedEntries.push_back(entryIndexes);
 	}
 	deterministicRandom()->randomShuffle(randomizedEntries);
@@ -931,18 +931,18 @@ Reference<IReplicationPolicy> randomAcrossPolicy(LocalitySet const& serverSet) {
 }
 
 int testReplication() {
-	const char* testTotalEnv = getenv("REPLICATION_TESTTOTAL");
-	const char* debugLevelEnv = getenv("REPLICATION_DEBUGLEVEL");
-	const char* policyTotalEnv = getenv("REPLICATION_POLICYTOTAL");
-	const char* policyIndexEnv = getenv("REPLICATION_POLICYINDEX");
-	const char* reportCacheEnv = getenv("REPLICATION_REPORTCACHE");
-	const char* stopOnErrorEnv = getenv("REPLICATION_STOPONERROR");
-	const char* skipTotalEnv = getenv("REPLICATION_SKIPTOTAL");
-	const char* validateEnv = getenv("REPLICATION_VALIDATE");
-	const char* findBestEnv = getenv("REPLICATION_FINDBEST");
-	const char* rateSampleEnv = getenv("REPLICATION_RATESAMPLE");
-	const char* policySampleEnv = getenv("REPLICATION_POLICYSAMPLE");
-	const char* policyMinEnv = getenv("REPLICATION_POLICYEXTRA");
+	char const* testTotalEnv = getenv("REPLICATION_TESTTOTAL");
+	char const* debugLevelEnv = getenv("REPLICATION_DEBUGLEVEL");
+	char const* policyTotalEnv = getenv("REPLICATION_POLICYTOTAL");
+	char const* policyIndexEnv = getenv("REPLICATION_POLICYINDEX");
+	char const* reportCacheEnv = getenv("REPLICATION_REPORTCACHE");
+	char const* stopOnErrorEnv = getenv("REPLICATION_STOPONERROR");
+	char const* skipTotalEnv = getenv("REPLICATION_SKIPTOTAL");
+	char const* validateEnv = getenv("REPLICATION_VALIDATE");
+	char const* findBestEnv = getenv("REPLICATION_FINDBEST");
+	char const* rateSampleEnv = getenv("REPLICATION_RATESAMPLE");
+	char const* policySampleEnv = getenv("REPLICATION_POLICYSAMPLE");
+	char const* policyMinEnv = getenv("REPLICATION_POLICYEXTRA");
 	int totalTests = testTotalEnv ? atoi(testTotalEnv) : 10000;
 	int skipTotal = skipTotalEnv ? atoi(skipTotalEnv) : 0;
 	int findBest = findBestEnv ? atoi(findBestEnv) : 0;
@@ -1047,7 +1047,7 @@ int testReplication() {
 }
 
 namespace {
-void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData* ld) {
+void filterLocalityDataForPolicy(std::set<std::string> const& keys, LocalityData* ld) {
 	for (auto iter = ld->_data.begin(); iter != ld->_data.end();) {
 		auto prev = iter;
 		iter++;

@@ -31,7 +31,7 @@ std::string TLogSet::toString() const {
 	              locality);
 }
 
-bool TLogSet::operator==(const TLogSet& rhs) const {
+bool TLogSet::operator==(TLogSet const& rhs) const {
 	if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor ||
 	    isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
 	    startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality ||
@@ -85,7 +85,7 @@ bool TLogSet::isEqualIds(TLogSet const& r) const {
 	return true;
 }
 
-bool OldTLogConf::operator==(const OldTLogConf& rhs) const {
+bool OldTLogConf::operator==(OldTLogConf const& rhs) const {
 	return tLogs == rhs.tLogs && epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
 	       recoverAt == rhs.recoverAt && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
 	       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
@@ -286,13 +286,13 @@ bool LogSystemConfig::isNextGenerationOf(LogSystemConfig const& r) const {
 }
 
 bool LogSystemConfig::hasTLog(UID tid) const {
-	for (const auto& log : tLogs) {
+	for (auto const& log : tLogs) {
 		if (std::find(log.tLogs.begin(), log.tLogs.end(), tid) != log.tLogs.end()) {
 			return true;
 		}
 	}
-	for (const auto& old : oldTLogs) {
-		for (const auto& log : old.tLogs) {
+	for (auto const& old : oldTLogs) {
+		for (auto const& log : old.tLogs) {
 			if (std::find(log.tLogs.begin(), log.tLogs.end(), tid) != log.tLogs.end()) {
 				return true;
 			}
@@ -302,13 +302,13 @@ bool LogSystemConfig::hasTLog(UID tid) const {
 }
 
 bool LogSystemConfig::hasLogRouter(UID rid) const {
-	for (const auto& log : tLogs) {
+	for (auto const& log : tLogs) {
 		if (std::find(log.logRouters.begin(), log.logRouters.end(), rid) != log.logRouters.end()) {
 			return true;
 		}
 	}
-	for (const auto& old : oldTLogs) {
-		for (const auto& log : old.tLogs) {
+	for (auto const& old : oldTLogs) {
+		for (auto const& log : old.tLogs) {
 			if (std::find(log.logRouters.begin(), log.logRouters.end(), rid) != log.logRouters.end()) {
 				return true;
 			}
@@ -318,13 +318,13 @@ bool LogSystemConfig::hasLogRouter(UID rid) const {
 }
 
 bool LogSystemConfig::hasBackupWorker(UID bid) const {
-	for (const auto& log : tLogs) {
+	for (auto const& log : tLogs) {
 		if (std::find(log.backupWorkers.begin(), log.backupWorkers.end(), bid) != log.backupWorkers.end()) {
 			return true;
 		}
 	}
-	for (const auto& old : oldTLogs) {
-		for (const auto& log : old.tLogs) {
+	for (auto const& old : oldTLogs) {
+		for (auto const& log : old.tLogs) {
 			if (std::count(log.backupWorkers.begin(), log.backupWorkers.end(), bid) > 0) {
 				return true;
 			}
@@ -334,7 +334,7 @@ bool LogSystemConfig::hasBackupWorker(UID bid) const {
 }
 
 Version LogSystemConfig::getEpochEndVersion(LogEpoch epoch) const {
-	for (const auto& old : oldTLogs) {
+	for (auto const& old : oldTLogs) {
 		if (old.epoch == epoch) {
 			return old.epochEnd;
 		}

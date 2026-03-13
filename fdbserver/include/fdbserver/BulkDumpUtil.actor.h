@@ -37,18 +37,18 @@ struct RangeDumpRawData {
 	Key lastKey;
 	int64_t kvsBytes;
 	RangeDumpRawData() = default;
-	RangeDumpRawData(const std::map<Key, Value>& kvs,
-	                 const std::map<Key, Value>& sampled,
-	                 const Key& lastKey,
+	RangeDumpRawData(std::map<Key, Value> const& kvs,
+	                 std::map<Key, Value> const& sampled,
+	                 Key const& lastKey,
 	                 int64_t kvsBytes)
 	  : kvs(kvs), sampled(sampled), lastKey(lastKey), kvsBytes(kvsBytes) {}
 };
 
 struct SSBulkDumpTask {
-	SSBulkDumpTask(const StorageServerInterface& targetServer,
-	               const std::vector<UID>& checksumServers,
-	               const BulkDumpState& bulkDumpState)
-	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
+	SSBulkDumpTask(StorageServerInterface const& targetServer,
+	               std::vector<UID> const& checksumServers,
+	               BulkDumpState const& bulkDumpState)
+	  : targetServer(targetServer), checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
 
 	std::string toString() const {
 		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [TargetServer]: " + targetServer.toString() +
@@ -62,8 +62,8 @@ struct SSBulkDumpTask {
 
 // Used by DD to generate a SSBulkDumpTask and send to SS
 // SS dumps the data based on the configuration of the SSBulkDumpTask
-SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                 const BulkDumpState& bulkDumpState);
+SSBulkDumpTask getSSBulkDumpTask(std::map<std::string, std::vector<StorageServerInterface>> const& locations,
+                                 BulkDumpState const& bulkDumpState);
 
 std::string generateRandomBulkDumpDataFileName(Version version);
 
@@ -77,22 +77,22 @@ std::string generateRandomBulkDumpDataFileName(Version version);
 //	<rootRemote>/<relativeFolder>/<dumpVersion>-data.sst (omitted for empty range)
 //	<rootRemote>/<relativeFolder>/<dumpVersion>-sample.sst (omitted if data size is too small to have a sample)
 std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
-                                                                         const std::string& relativeFolder,
-                                                                         const std::string& rootLocal,
-                                                                         const std::string& rootRemote);
+                                                                         std::string const& relativeFolder,
+                                                                         std::string const& rootLocal,
+                                                                         std::string const& rootRemote);
 
 // Persist the complete progress of bulkDump by writing the metadata with Complete phase
 // to the bulk dump system key space.
 ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState);
 
 // Define bulk dump job folder. Job is set by user. At most one job at a time globally.
-std::string generateBulkDumpJobFolder(const UID& jobId);
+std::string generateBulkDumpJobFolder(UID const& jobId);
 
 // Define task folder name.
-std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId);
+std::string getBulkDumpJobTaskFolder(UID const& jobId, UID const& taskId);
 
 // Define job root folder.
-std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
+std::string getBulkLoadJobRoot(std::string const& root, UID const& jobId);
 
 // Generate key-value data, byte sampling data, and manifest file.
 // Return BulkLoadManifest metadata (equivalent to content of the manifest file).

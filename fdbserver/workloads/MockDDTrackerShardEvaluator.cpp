@@ -145,7 +145,7 @@ public:
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
-		for (const auto& [reason, count] : rsReasonCounts) {
+		for (auto const& [reason, count] : rsReasonCounts) {
 			m.push_back(PerfMetric(RelocateReason(reason).toString(), count, Averaged::False));
 		}
 	}

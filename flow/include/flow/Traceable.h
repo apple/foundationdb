@@ -75,7 +75,7 @@ char base16Char(IntType c) {
 
 // forward declare format from flow.h as we
 // can't include flow.h here
-std::string format(const char* form, ...);
+std::string format(char const* form, ...);
 
 template <class T, class T2 = void>
 struct Traceable : std::false_type {};
@@ -102,11 +102,11 @@ FORMAT_TRACEABLE(unsigned long long int, "%llu");
 FORMAT_TRACEABLE(float, "%g");
 FORMAT_TRACEABLE(double, "%g");
 FORMAT_TRACEABLE(void*, "%p");
-FORMAT_TRACEABLE(volatile long, "%ld");
-FORMAT_TRACEABLE(volatile unsigned long, "%lu");
-FORMAT_TRACEABLE(volatile long long, "%lld");
-FORMAT_TRACEABLE(volatile unsigned long long, "%llu");
-FORMAT_TRACEABLE(volatile double, "%g");
+FORMAT_TRACEABLE(long volatile, "%ld");
+FORMAT_TRACEABLE(unsigned long volatile, "%lu");
+FORMAT_TRACEABLE(long long volatile, "%lld");
+FORMAT_TRACEABLE(unsigned long long volatile, "%llu");
+FORMAT_TRACEABLE(double volatile, "%g");
 
 template <class Enum>
 struct Traceable<Enum, std::enable_if_t<std::is_enum_v<Enum>>> : std::true_type {
@@ -115,18 +115,18 @@ struct Traceable<Enum, std::enable_if_t<std::is_enum_v<Enum>>> : std::true_type 
 
 template <class Str>
 struct TraceableString {
-	static auto begin(const Str& value) -> decltype(value.begin()) { return value.begin(); }
+	static auto begin(Str const& value) -> decltype(value.begin()) { return value.begin(); }
 
-	static bool atEnd(const Str& value, decltype(value.begin()) iter) { return iter == value.end(); }
+	static bool atEnd(Str const& value, decltype(value.begin()) iter) { return iter == value.end(); }
 
-	static std::string toString(const Str& value) { return value.toString(); }
+	static std::string toString(Str const& value) { return value.toString(); }
 };
 
 template <>
 struct TraceableString<std::string> {
-	static auto begin(const std::string& value) -> decltype(value.begin()) { return value.begin(); }
+	static auto begin(std::string const& value) -> decltype(value.begin()) { return value.begin(); }
 
-	static bool atEnd(const std::string& value, decltype(value.begin()) iter) { return iter == value.end(); }
+	static bool atEnd(std::string const& value, decltype(value.begin()) iter) { return iter == value.end(); }
 
 	template <class S>
 	static std::string toString(S&& value) {
@@ -136,41 +136,41 @@ struct TraceableString<std::string> {
 
 template <>
 struct TraceableString<std::string_view> {
-	static auto begin(const std::string_view& value) -> decltype(value.begin()) { return value.begin(); }
+	static auto begin(std::string_view const& value) -> decltype(value.begin()) { return value.begin(); }
 
-	static bool atEnd(const std::string_view& value, decltype(value.begin()) iter) { return iter == value.end(); }
+	static bool atEnd(std::string_view const& value, decltype(value.begin()) iter) { return iter == value.end(); }
 
-	static std::string toString(const std::string_view& value) { return std::string(value); }
+	static std::string toString(std::string_view const& value) { return std::string(value); }
 };
 
 template <>
-struct TraceableString<const char*> {
-	static const char* begin(const char* value) { return value; }
+struct TraceableString<char const*> {
+	static char const* begin(char const* value) { return value; }
 
-	static bool atEnd(const char* value, const char* iter) { return *iter == '\0'; }
+	static bool atEnd(char const* value, char const* iter) { return *iter == '\0'; }
 
-	static std::string toString(const char* value) { return std::string(value); }
+	static std::string toString(char const* value) { return std::string(value); }
 };
 
-std::string traceableStringToString(const char* value, size_t S);
+std::string traceableStringToString(char const* value, size_t S);
 
 template <size_t S>
 struct TraceableString<char[S]> {
 	static_assert(S > 0, "Only string literals are supported.");
-	static const char* begin(const char* value) { return value; }
+	static char const* begin(char const* value) { return value; }
 
-	static bool atEnd(const char* value, const char* iter) {
+	static bool atEnd(char const* value, char const* iter) {
 		return iter - value == S - 1; // Exclude trailing \0 byte
 	}
 
-	static std::string toString(const char* value) { return traceableStringToString(value, S); }
+	static std::string toString(char const* value) { return traceableStringToString(value, S); }
 };
 
 template <>
 struct TraceableString<char*> {
-	static const char* begin(char* value) { return value; }
+	static char const* begin(char* value) { return value; }
 
-	static bool atEnd(char* value, const char* iter) { return *iter == '\0'; }
+	static bool atEnd(char* value, char const* iter) { return *iter == '\0'; }
 
 	static std::string toString(char* value) { return std::string(value); }
 };
@@ -214,7 +214,7 @@ struct TraceableStringImpl : std::true_type {
 				}
 				result.push_back(*iter);
 			} else {
-				const uint8_t byte = *iter;
+				uint8_t const byte = *iter;
 				if (PRINTABLE_COMPRESS_NULLS && byte == 0) {
 					numNull++;
 				} else {
@@ -234,7 +234,7 @@ struct TraceableStringImpl : std::true_type {
 };
 
 template <>
-struct Traceable<const char*> : TraceableStringImpl<const char*> {};
+struct Traceable<char const*> : TraceableStringImpl<char const*> {};
 template <>
 struct Traceable<char*> : TraceableStringImpl<char*> {};
 template <size_t S>
@@ -246,7 +246,7 @@ struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 
 template <class T>
 struct Traceable<std::atomic<T>> : std::true_type {
-	static std::string toString(const std::atomic<T>& value) { return Traceable<T>::toString(value.load()); }
+	static std::string toString(std::atomic<T> const& value) { return Traceable<T>::toString(value.load()); }
 };
 
 template <class BooleanParamSub>
@@ -257,7 +257,7 @@ struct Traceable<BooleanParamSub, std::enable_if_t<std::is_base_of_v<BooleanPara
 // Adapter to redirect fmt::formatter calls to Traceable for a supported type
 template <typename T>
 struct FormatUsingTraceable : fmt::formatter<std::string> {
-	auto format(const T& val, fmt::format_context& ctx) const {
+	auto format(T const& val, fmt::format_context& ctx) const {
 		return fmt::formatter<std::string>::format(Traceable<T>::toString(val), ctx);
 	}
 };

@@ -76,13 +76,13 @@ struct fmt::formatter<Role> : fmt::formatter<std::string> {
 };
 
 template <class... Args>
-void logRaw(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+void logRaw(fmt::format_string<Args...> const& fmt_str, Args&&... args) {
 	std::cout << fmt::format(fmt_str, std::forward<Args>(args)...);
 	std::cout.flush();
 }
 
 template <class... Args>
-void log(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+void log(fmt::format_string<Args...> const& fmt_str, Args&&... args) {
 	// NOTE: The fmt::formatter<Role> can do the padding, but not this fmt::format expression
 	std::cout << fmt::format("[{}] ", role);
 	logRaw(fmt_str, std::forward<Args>(args)...);
@@ -103,10 +103,10 @@ struct fmt::formatter<ChainLength> : fmt::formatter<std::string> {
 
 template <>
 struct fmt::formatter<std::vector<std::pair<ChainLength, ChainLength>>> : fmt::formatter<std::string> {
-	auto format(const std::vector<std::pair<ChainLength, ChainLength>>& entries, fmt::format_context& ctx) const {
+	auto format(std::vector<std::pair<ChainLength, ChainLength>> const& entries, fmt::format_context& ctx) const {
 		fmt::format_to(ctx.out(), "[");
 		bool first = true;
-		for (const auto& entry : entries) {
+		for (auto const& entry : entries) {
 			fmt::format_to(ctx.out(), "{}{{ {}, {} }}", (first ? "" : ", "), entry.first, entry.second);
 			first = false;
 		}
@@ -114,7 +114,7 @@ struct fmt::formatter<std::vector<std::pair<ChainLength, ChainLength>>> : fmt::f
 	}
 };
 
-std::string drainPipe(const int pipeFd) {
+std::string drainPipe(int const pipeFd) {
 	int readRc = 0;
 	std::string ret;
 	char buf[PIPE_BUF];
@@ -136,7 +136,7 @@ struct TLSCreds {
 	std::string password;
 };
 
-TLSCreds makeCreds(const ChainLength chainLen, const mkcert::ESide side, StringRef password = {}) {
+TLSCreds makeCreds(ChainLength const chainLen, mkcert::ESide const side, StringRef password = {}) {
 	if (chainLen == 0 || chainLen == NO_TLS) {
 		return TLSCreds{ chainLen == NO_TLS, "", "", "", "" };
 	}
@@ -176,7 +176,7 @@ constexpr std::array<std::string_view, static_cast<size_t>(Result::LAST)> RESULT
 	                                                                                     "TIMEOUT" };
 template <>
 struct fmt::formatter<Result> : fmt::formatter<std::string> {
-	auto format(const Result& r, fmt::format_context& ctx) const {
+	auto format(Result const& r, fmt::format_context& ctx) const {
 		return fmt::format_to(ctx.out(), "{}", RESULT_STRING[static_cast<int>(r)]);
 	}
 };
@@ -229,7 +229,7 @@ struct SessionProbeReceiver final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
-void runServer(const Endpoint& endpoint, int addrPipe, int completionPipe) {
+void runServer(Endpoint const& endpoint, int addrPipe, int completionPipe) {
 	auto realAddr = FlowTransport::transport().getLocalAddresses().address;
 	log("Listening at {}", realAddr.toString());
 	log("Endpoint token is {}", endpoint.token.toString());
@@ -291,7 +291,7 @@ int runHost(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {
 		auto receiver = SessionProbeReceiver();
 		try {
 			transport.bind(addr, addr);
-		} catch (const Error& err) {
+		} catch (Error const& err) {
 			log("CAUGHT Error in bind: code={} what={}", err.code(), err.what());
 			return SERVER_BIND_ERROR;
 		}
@@ -370,25 +370,25 @@ Result getExpectedResult(ChainLength serverChainLen, ChainLength clientChainLen)
 	return expect;
 }
 
-std::pair<bool, std::string> waitPidStatusInterpreter(const char* procName, const int status) {
+std::pair<bool, std::string> waitPidStatusInterpreter(char const* procName, int const status) {
 	std::string prefix = fmt::format("{} subprocess ", procName);
 	std::string message;
 	if (WIFEXITED(status)) {
-		const auto exitStatus = WEXITSTATUS(status);
+		auto const exitStatus = WEXITSTATUS(status);
 		if (exitStatus == 0) {
 			return { true, fmt::format("{} waitpid() OK", prefix) };
 		}
 		message = fmt::format("{} exited with status {}", prefix, exitStatus);
 	} else if (WIFSIGNALED(status)) {
-		const auto signal = WTERMSIG(status);
+		auto const signal = WTERMSIG(status);
 		message = fmt::format("{} killed by signal {} - {}", prefix, signal, strsignal(signal));
 #ifdef WCOREDUMP
-		const auto coreDumped = WCOREDUMP(status);
+		auto const coreDumped = WCOREDUMP(status);
 		if (coreDumped)
 			message.append(std::string_view(" (core dumped)"));
 #endif // WCOREDUMP
 	} else if (WIFSTOPPED(status)) {
-		const auto signal = WSTOPSIG(status);
+		auto const signal = WSTOPSIG(status);
 		message = fmt::format("{} stopped by signal {} - {}", prefix, signal, strsignal(signal));
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wparentheses"
@@ -404,7 +404,7 @@ std::pair<bool, std::string> waitPidStatusInterpreter(const char* procName, cons
 	return { false, message };
 }
 
-bool waitPid(pid_t subProcPid, const char* procName, int expectStatus = WAITPID_ANY_STATUS) {
+bool waitPid(pid_t subProcPid, char const* procName, int expectStatus = WAITPID_ANY_STATUS) {
 	auto status = int{};
 	auto pid = ::waitpid(subProcPid, &status, 0);
 
@@ -436,7 +436,7 @@ int runTlsTest(ChainLength serverChainLen, ChainLength clientChainLen, std::stri
 		// make server and client trust each other
 		std::swap(serverCreds.caBytes, clientCreds.caBytes);
 	} else {
-		const auto password = "abc123"_sr;
+		auto const password = "abc123"_sr;
 		serverCreds = makeCreds(serverChainLen, mkcert::ESide::Server, password);
 		clientCreds = serverCreds;
 
@@ -570,7 +570,7 @@ int main(int argc, char** argv) {
 	inputs.insert(inputs.end(), 3, singleChainPair);
 
 	std::vector<std::string_view> failedPasswordTests;
-	for (const auto& testCase : std::array{ "no_bad_password", "client", "server" }) {
+	for (auto const& testCase : std::array{ "no_bad_password", "client", "server" }) {
 		if (runTlsTest(singleChainPair.first, singleChainPair.second, testCase)) {
 			failed.push_back(singleChainPair);
 			failedPasswordTests.push_back(testCase);
@@ -579,7 +579,7 @@ int main(int argc, char** argv) {
 
 	if (!failed.empty()) {
 		if (!failedPasswordTests.empty()) {
-			for (const auto& test : failedPasswordTests) {
+			for (auto const& test : failedPasswordTests) {
 				log(" {}, failed", test);
 			}
 		}

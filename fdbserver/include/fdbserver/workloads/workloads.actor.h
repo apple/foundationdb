@@ -61,9 +61,9 @@ struct WorkloadContext {
 	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
-	WorkloadContext(const WorkloadContext&);
+	WorkloadContext(WorkloadContext const&);
 	~WorkloadContext();
-	WorkloadContext& operator=(const WorkloadContext&) = delete;
+	WorkloadContext& operator=(WorkloadContext const&) = delete;
 };
 
 struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkload> {
@@ -78,7 +78,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -125,7 +125,7 @@ struct FailureInjectionWorkload : TestWorkload {
 	FailureInjectionWorkload(WorkloadContext const&);
 	virtual ~FailureInjectionWorkload() {}
 	virtual void initFailureInjectionMode(DeterministicRandom& random);
-	virtual bool shouldInject(DeterministicRandom& random, const WorkloadRequest& work, const unsigned count) const;
+	virtual bool shouldInject(DeterministicRandom& random, WorkloadRequest const& work, unsigned const count) const;
 
 	Future<Void> setupInjectionWorkload(Database const& cx, Future<Void> done);
 	Future<Void> startInjectionWorkload(Database const& cx, Future<Void> done);
@@ -160,7 +160,7 @@ struct CompoundWorkload : TestWorkload {
 	CompoundWorkload* add(Reference<TestWorkload>&& w);
 	void addFailureInjection(WorkloadRequest& work);
 	bool shouldInjectFailure(DeterministicRandom& random,
-	                         const WorkloadRequest& work,
+	                         WorkloadRequest const& work,
 	                         Reference<FailureInjectionWorkload> failureInjection) const;
 
 	std::string description() const override;
@@ -216,7 +216,7 @@ struct KVWorkload : TestWorkload {
 	Key keyForIndex(uint64_t index) const;
 	Key keyForIndex(uint64_t index, bool absent) const;
 	// the reverse process of keyForIndex() without division. Set absent=true to ignore the last byte in Key
-	int64_t indexForKey(const KeyRef& key, bool absent = false) const;
+	int64_t indexForKey(KeyRef const& key, bool absent = false) const;
 
 	virtual Value randomValue() const {
 		int length = deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1);
@@ -370,9 +370,9 @@ Future<Void> uniform(double* last, double meanInterval);
 
 void emplaceIndex(uint8_t* data, int offset, int64_t index);
 Key doubleToTestKey(double p);
-double testKeyToDouble(const KeyRef& p);
-Key doubleToTestKey(double p, const KeyRef& prefix);
-double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
+double testKeyToDouble(KeyRef const& p);
+Key doubleToTestKey(double p, KeyRef const& prefix);
+double testKeyToDouble(KeyRef const& p, KeyRef const& prefix);
 
 ACTOR Future<Void> databaseWarmer(Database cx);
 
@@ -398,7 +398,7 @@ Future<Void> quietDatabase(Database const& cx,
  * test execution, the success flag is kept unchanged.
  */
 Future<Void> testExpectedError(Future<Void> test,
-                               const char* testDescr,
+                               char const* testDescr,
                                Optional<Error> expectedError = Optional<Error>(),
                                Optional<bool*> successFlag = Optional<bool*>(),
                                std::map<std::string, std::string> details = {},

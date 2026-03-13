@@ -42,7 +42,7 @@ struct TxnTimeout : TestWorkload {
 	int txnsSucceeded{ 0 }; // Number of transactions that completed successfully
 	int txnsFailed{ 0 }; // Number of transactions that failed with unexpected errors
 
-	TxnTimeout(const WorkloadContext& wctx) : TestWorkload(wctx) {
+	TxnTimeout(WorkloadContext const& wctx) : TestWorkload(wctx) {
 		// Parse workload configuration from TOML test definition
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		actorsPerClient = getOption(options, "actorsPerClient"_sr, 1);
@@ -50,7 +50,7 @@ struct TxnTimeout : TestWorkload {
 		txnMinDuration = getOption(options, "txnMinDuration"_sr, 5.0);
 	}
 
-	Future<Void> setup(const Database& db) override {
+	Future<Void> setup(Database const& db) override {
 		TraceEvent("TxnTimeoutSetup")
 		    .detail("TestDuration", testDuration)
 		    .detail("ActorsPerClient", actorsPerClient)
@@ -63,7 +63,7 @@ struct TxnTimeout : TestWorkload {
 
 	static bool runTest() { return g_network->isSimulated() && !isGeneralBuggifyEnabled(); }
 
-	Future<Void> start(const Database& db) override {
+	Future<Void> start(Database const& db) override {
 		if (!runTest()) {
 			return Void();
 		}
@@ -71,7 +71,7 @@ struct TxnTimeout : TestWorkload {
 		return timeout(reportErrors(workload(this, db), "TxnTimeoutError"), testDuration, Void());
 	}
 
-	Future<bool> check(const Database& db) override {
+	Future<bool> check(Database const& db) override {
 		if (!runTest()) {
 			return true;
 		}
@@ -257,9 +257,9 @@ struct TxnTimeout : TestWorkload {
 				// The version delta is "best guess" because the newReadVersion could itself be stale, therefore
 				// the delta could be smaller than (sequencer commit version - readVersion)
 				Version versionDelta = newReadVersion - readVersion;
-				const bool isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-				const double txnDuration = now() - txnStartTime;
-				const bool tooMuchTimeHasPassed =
+				bool const isHighVersionJump = versionDelta > SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+				double const txnDuration = now() - txnStartTime;
+				bool const tooMuchTimeHasPassed =
 				    txnDuration >
 				    ((double)SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND);
 

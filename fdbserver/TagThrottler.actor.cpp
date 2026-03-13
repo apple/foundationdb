@@ -187,13 +187,13 @@ public:
 		std::vector<Future<Void>> futures;
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-			for (const auto& busyWriteTag : ss.busiestWriteTags) {
+			for (auto const& busyWriteTag : ss.busiestWriteTags) {
 				futures.push_back(tryUpdateAutoThrottling(busyWriteTag.tag,
 				                                          busyWriteTag.rate,
 				                                          busyWriteTag.fractionalBusyness,
 				                                          TagThrottledReason::BUSY_WRITE));
 			}
-			for (const auto& busyReadTag : ss.busiestReadTags) {
+			for (auto const& busyReadTag : ss.busiestReadTags) {
 				futures.push_back(tryUpdateAutoThrottling(
 				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ));
 			}

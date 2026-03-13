@@ -57,7 +57,7 @@
 
 // CLI for S3Client.
 
-extern const char* getSourceVersion();
+extern char const* getSourceVersion();
 
 namespace s3client_cli {
 
@@ -149,7 +149,7 @@ struct Params : public ReferenceCounted<Params> {
 	std::string tgt;
 	std::string command;
 	int whichIsBlobstoreURL = -1;
-	const std::string blobstore_enable_object_integrity_check = "blobstore_enable_object_integrity_check";
+	std::string const blobstore_enable_object_integrity_check = "blobstore_enable_object_integrity_check";
 	bool ls_recursive = false;
 
 	std::string toString() {
@@ -169,7 +169,7 @@ struct Params : public ReferenceCounted<Params> {
 				s.append(" LogGroup:").append(trace_log_group);
 			}
 		}
-		for (const auto& [knob, value] : knobs) {
+		for (auto const& [knob, value] : knobs) {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
 		}
 		s.append(", Source: ").append(src);
@@ -180,7 +180,7 @@ struct Params : public ReferenceCounted<Params> {
 	void updateKnobs() {
 		// Set default to 'true' for blobstore_enable_object_integrity_check if not explicitly set
 		bool blobstore_enable_object_integrity_check_set = false;
-		for (const std::pair p : knobs) {
+		for (std::pair const p : knobs) {
 			if (p.first == blobstore_enable_object_integrity_check) {
 				blobstore_enable_object_integrity_check_set = true;
 				break;
@@ -196,7 +196,7 @@ struct Params : public ReferenceCounted<Params> {
 	}
 };
 
-static int isBlobStoreURL(const std::string& url) {
+static int isBlobStoreURL(std::string const& url) {
 	return url.starts_with(BLOBSTORE_PREFIX);
 }
 
@@ -429,7 +429,7 @@ int main(int argc, char** argv) {
 
 		// Check for proxy from environment variable if not set via command line
 		if (!param->proxy.present()) {
-			const char* proxyEnv = getenv("FDB_PROXY");
+			char const* proxyEnv = getenv("FDB_PROXY");
 			if (proxyEnv != nullptr) {
 				param->proxy = std::string(proxyEnv);
 			}

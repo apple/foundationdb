@@ -25,8 +25,8 @@
 std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
 	JsonBuilderObject root;
 	JsonBuilderArray partitionsArray;
-	for (const auto& [tag, partitionList] : partitionMap) {
-		for (const auto& partition : partitionList) {
+	for (auto const& [tag, partitionList] : partitionMap) {
+		for (auto const& partition : partitionList) {
 			JsonBuilderObject partitionObj;
 			partitionObj["partitionId"] = partition.partitionId;
 			partitionObj["beginKey"] = partition.ranges.begin.printable();
@@ -42,7 +42,7 @@ std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
 // KeyRangeMap guarantees that key ranges are contiguous with no gaps in shards.
 ACTOR Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMap<ShardTrackedData>* shards) {
 	// TODO akanksha: Hardcoded for now.
-	state const int NUM_PARTITIONS = 100;
+	state int const NUM_PARTITIONS = 100;
 	state std::vector<std::pair<KeyRange, int64_t>> userShards; // Pair of shard key range and shard size in bytes.
 	state int64_t totalBytes = 0;
 
@@ -146,7 +146,7 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/VaryingSizes") 
 		                                                     { KeyRangeRef(key1, key2), 200000 },
 		                                                     { KeyRangeRef(key2, key3), 10000 },
 		                                                     { KeyRangeRef(key3, key4), 90000 } };
-	for (const auto& shard : testShards) {
+	for (auto const& shard : testShards) {
 		ShardTrackedData data;
 		StorageMetrics metrics;
 		metrics.bytes = shard.second;
@@ -180,7 +180,7 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/ZeroSizeShards"
 		                                                     { KeyRangeRef(key1, key2), 1000000 },
 		                                                     { KeyRangeRef(key2, key3), 0 } };
 
-	for (const auto& shard : testShards) {
+	for (auto const& shard : testShards) {
 		ShardTrackedData data;
 		StorageMetrics metrics;
 		metrics.bytes = shard.second;

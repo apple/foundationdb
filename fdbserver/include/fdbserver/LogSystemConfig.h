@@ -105,11 +105,11 @@ struct TLogSet {
 	TLogSet()
 	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid),
 	    startVersion(invalidVersion) {}
-	explicit TLogSet(const LogSet& rhs);
+	explicit TLogSet(LogSet const& rhs);
 
 	std::string toString() const;
 
-	bool operator==(const TLogSet& rhs) const;
+	bool operator==(TLogSet const& rhs) const;
 
 	bool isEqualIds(TLogSet const& r) const;
 
@@ -146,13 +146,13 @@ struct OldTLogConf {
 	LogEpoch epoch;
 
 	OldTLogConf() : epochBegin(0), epochEnd(0), recoverAt(0), logRouterTags(0), txsTags(0), epoch(0) {}
-	explicit OldTLogConf(const OldLogData&);
+	explicit OldTLogConf(OldLogData const&);
 
 	std::string toString() const {
 		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str());
 	}
 
-	bool operator==(const OldTLogConf& rhs) const;
+	bool operator==(OldTLogConf const& rhs) const;
 
 	bool isEqualIds(OldTLogConf const& r) const;
 
@@ -204,7 +204,7 @@ struct LogSystemConfig {
 
 	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const;
 
-	bool operator==(const LogSystemConfig& rhs) const { return isEqual(rhs); }
+	bool operator==(LogSystemConfig const& rhs) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const;
 

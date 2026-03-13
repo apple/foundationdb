@@ -40,7 +40,7 @@ struct MsgpackBuffer {
 	// This assumes that pos <= data_size
 	void edit_byte(uint8_t byte, size_t pos) { buffer[pos] = byte; }
 
-	void write_bytes(const uint8_t* buf, std::size_t n) {
+	void write_bytes(uint8_t const* buf, std::size_t n) {
 		resize(n);
 		std::copy(buf, buf + n, buffer.get() + data_size);
 		data_size += n;
@@ -77,10 +77,10 @@ inline void serialize_bool(bool val, MsgpackBuffer& buf) {
 // Writes the given value in big-endian format to the request. Sets the
 // first byte to msgpack_type.
 template <typename T>
-inline void serialize_value(const T& val, MsgpackBuffer& buf, uint8_t msgpack_type) {
+inline void serialize_value(T const& val, MsgpackBuffer& buf, uint8_t msgpack_type) {
 	buf.write_byte(msgpack_type);
 
-	const uint8_t* p = reinterpret_cast<const uint8_t*>(std::addressof(val));
+	uint8_t const* p = reinterpret_cast<uint8_t const*>(std::addressof(val));
 	for (size_t i = 0; i < sizeof(T); ++i) {
 		buf.write_byte(p[sizeof(T) - i - 1]);
 	}
@@ -89,7 +89,7 @@ inline void serialize_value(const T& val, MsgpackBuffer& buf, uint8_t msgpack_ty
 // Writes the given string to the request as a sequence of bytes. Inserts a
 // format byte at the beginning of the string according to the its length,
 // as specified by the msgpack specification.
-inline void serialize_string(const uint8_t* c, int length, MsgpackBuffer& buf) {
+inline void serialize_string(uint8_t const* c, int length, MsgpackBuffer& buf) {
 	if (length <= 31) {
 		// A size 0 string is ok. We still need to write a byte
 		// identifying the item as a string, but can set the size to 0.
@@ -99,8 +99,8 @@ inline void serialize_string(const uint8_t* c, int length, MsgpackBuffer& buf) {
 		buf.write_byte(static_cast<uint8_t>(length));
 	} else if (length <= 65535) {
 		buf.write_byte(0xda);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&length)[1]);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&length)[0]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&length)[1]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&length)[0]);
 	} else {
 		TraceEvent(SevWarn, "MsgpackSerializeString").detail("Failed to MessagePack encode very large string", length);
 		ASSERT_WE_THINK(false);
@@ -109,37 +109,37 @@ inline void serialize_string(const uint8_t* c, int length, MsgpackBuffer& buf) {
 	buf.write_bytes(c, length);
 }
 
-inline void serialize_string(const std::string& str, MsgpackBuffer& buf) {
-	serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), buf);
+inline void serialize_string(std::string const& str, MsgpackBuffer& buf) {
+	serialize_string(reinterpret_cast<uint8_t const*>(str.data()), str.size(), buf);
 }
 
 template <typename T, typename F>
-inline void serialize_vector(const std::vector<T>& vec, MsgpackBuffer& buf, F f) {
+inline void serialize_vector(std::vector<T> const& vec, MsgpackBuffer& buf, F f) {
 	size_t size = vec.size();
 	if (size <= 15) {
 		buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 	} else if (size <= 65535) {
 		buf.write_byte(0xdc);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[1]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[0]);
 	} else if (size <= std::numeric_limits<uint32_t>::max()) {
 		buf.write_byte(0xdd);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[3]);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[2]);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-		buf.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[3]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[2]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[1]);
+		buf.write_byte(reinterpret_cast<uint8_t const*>(&size)[0]);
 	} else {
 		TraceEvent(SevWarn, "MsgPackSerializeVector").detail("Failed to MessagePack encode large vector", size);
 		ASSERT_WE_THINK(false);
 	}
 	// Use the provided serializer function to serialize the individual types of the vector
-	for (const auto& val : vec) {
+	for (auto const& val : vec) {
 		f(val, buf);
 	}
 }
 
 template <class Map>
-inline void serialize_map(const Map& map, MsgpackBuffer& buf) {
+inline void serialize_map(Map const& map, MsgpackBuffer& buf) {
 	int size = map.size();
 
 	if (size <= 15) {
@@ -149,7 +149,7 @@ inline void serialize_map(const Map& map, MsgpackBuffer& buf) {
 		ASSERT_WE_THINK(false);
 	}
 
-	for (const auto& [key, value] : map) {
+	for (auto const& [key, value] : map) {
 		serialize_string(key.begin(), key.size(), buf);
 		serialize_string(value.begin(), value.size(), buf);
 	}
@@ -157,7 +157,7 @@ inline void serialize_map(const Map& map, MsgpackBuffer& buf) {
 
 // Serializes object T according to ext msgpack specification
 template <typename T, typename F>
-inline void serialize_ext(const T& t, MsgpackBuffer& buf, uint8_t type, F f) {
+inline void serialize_ext(T const& t, MsgpackBuffer& buf, uint8_t type, F f) {
 	buf.write_byte(0xc9);
 	// We don't know for sure the amount of bytes we'll be writing.
 	// So for now we set the payload size as zero and then we take the difference in data size
@@ -171,9 +171,9 @@ inline void serialize_ext(const T& t, MsgpackBuffer& buf, uint8_t type, F f) {
 	f(t, buf);
 	size_t updated_size = static_cast<size_t>(buf.data_size - prev_size);
 	ASSERT_WE_THINK(updated_size <= std::numeric_limits<uint32_t>::max());
-	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[3], byte_idx);
-	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[2], byte_idx + 1);
-	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[1], byte_idx + 2);
-	buf.edit_byte(reinterpret_cast<const uint8_t*>(&updated_size)[0], byte_idx + 3);
+	buf.edit_byte(reinterpret_cast<uint8_t const*>(&updated_size)[3], byte_idx);
+	buf.edit_byte(reinterpret_cast<uint8_t const*>(&updated_size)[2], byte_idx + 1);
+	buf.edit_byte(reinterpret_cast<uint8_t const*>(&updated_size)[1], byte_idx + 2);
+	buf.edit_byte(reinterpret_cast<uint8_t const*>(&updated_size)[0], byte_idx + 3);
 }
 #endif

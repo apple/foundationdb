@@ -58,7 +58,7 @@ ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread,
 
 } // namespace
 
-const double AsyncTaskThread::meanDelay = 0.01;
+double const AsyncTaskThread::meanDelay = 0.01;
 
 AsyncTaskThread::AsyncTaskThread() : thread([this] { run(this); }) {}
 

@@ -37,7 +37,7 @@ Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Referenc
 Future<Version> timeKeeperVersionFromDatetime(std::string const& datetime, Database const& db);
 
 // Helper function to check if a URL is a blobstore:// URL
-bool isBlobstoreUrl(const std::string& url);
+bool isBlobstoreUrl(std::string const& url);
 
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.
@@ -45,10 +45,10 @@ bool isBlobstoreUrl(const std::string& url);
 // TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
 class IBackupFile {
 public:
-	IBackupFile(const std::string& fileName) : m_fileName(fileName) {}
+	IBackupFile(std::string const& fileName) : m_fileName(fileName) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
-	virtual Future<Void> append(const void* data, int len) = 0;
+	virtual Future<Void> append(void const* data, int len) = 0;
 	virtual Future<Void> finish() = 0;
 	inline std::string getFileName() const { return m_fileName; }
 	virtual int64_t size() const = 0;
@@ -64,16 +64,16 @@ protected:
 // Structures for various backup components
 
 // Mutation log version written by old FileBackupAgent
-static const uint32_t BACKUP_AGENT_MLOG_VERSION = 2001;
+static uint32_t const BACKUP_AGENT_MLOG_VERSION = 2001;
 
 // Mutation log version written by BackupWorker
-static const uint32_t PARTITIONED_MLOG_VERSION = 4110;
+static uint32_t const PARTITIONED_MLOG_VERSION = 4110;
 
 // Snapshot file version written by FileBackupAgent
-static const uint32_t BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
+static uint32_t const BACKUP_AGENT_SNAPSHOT_FILE_VERSION = 1001;
 
 // Encrypted Snapshot file version written by FileBackupAgent
-static const uint32_t BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION = 1002;
+static uint32_t const BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION = 1002;
 
 struct LogFile {
 	Version beginVersion;
@@ -85,13 +85,13 @@ struct LogFile {
 	int totalTags = -1; // Total number of log router tags.
 
 	// Order by beginVersion, break ties with endVersion
-	bool operator<(const LogFile& rhs) const {
+	bool operator<(LogFile const& rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 
 	// Returns if this log file contains a subset of content of the given file
 	// by comparing version range and tag ID.
-	bool isSubset(const LogFile& rhs) const {
+	bool isSubset(LogFile const& rhs) const {
 		return beginVersion >= rhs.beginVersion && endVersion <= rhs.endVersion && tagId == rhs.tagId;
 	}
 
@@ -114,7 +114,7 @@ struct RangeFile {
 	int64_t fileSize;
 
 	// Order by version, break ties with name
-	bool operator<(const RangeFile& rhs) const {
+	bool operator<(RangeFile const& rhs) const {
 		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
 	}
 
@@ -147,7 +147,7 @@ struct KeyspaceSnapshotFile {
 	}
 
 	// Order by beginVersion, break ties with endVersion
-	bool operator<(const KeyspaceSnapshotFile& rhs) const {
+	bool operator<(KeyspaceSnapshotFile const& rhs) const {
 		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
 	}
 };
@@ -163,7 +163,7 @@ struct SnapshotMetadata {
 	bool isBulkDump() const { return snapshotType == "bulkdump"; }
 
 	// Factory for creating BulkDump metadata
-	static SnapshotMetadata bulkDump(const std::string& jobId, Version version, int64_t totalBytes, int64_t keys) {
+	static SnapshotMetadata bulkDump(std::string const& jobId, Version version, int64_t totalBytes, int64_t keys) {
 		SnapshotMetadata m;
 		m.snapshotType = "bulkdump";
 		m.bulkDumpJobId = jobId;
@@ -274,8 +274,8 @@ public:
 	// For BulkDump snapshots, pass SnapshotMetadata with snapshotType="bulkdump" and the job ID.
 	// For traditional range file snapshots, metadata can be omitted.
 	virtual Future<Void> writeKeyspaceSnapshotFile(
-	    const std::vector<std::string>& fileNames,
-	    const std::vector<std::pair<Key, Key>>& beginEndKeys,
+	    std::vector<std::string> const& fileNames,
+	    std::vector<std::pair<Key, Key>> const& beginEndKeys,
 	    int64_t totalBytes,
 	    IncludeKeyRangeMap includeKeyRangeMap,
 	    Optional<SnapshotMetadata> metadata = Optional<SnapshotMetadata>()) = 0;
@@ -284,11 +284,11 @@ public:
 	virtual Future<Void> writePartitionListFile(Version v, std::string contents) = 0;
 
 	// Open a file for read by name
-	virtual Future<Reference<IAsyncFile>> readFile(const std::string& name) = 0;
+	virtual Future<Reference<IAsyncFile>> readFile(std::string const& name) = 0;
 
 	// Returns the key ranges in the snapshot file. This is an expensive function
 	// and should only be used in simulation for sanity check.
-	virtual Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) = 0;
+	virtual Future<KeyRange> getSnapshotFileKeyRange(RangeFile const& file, Database cx) = 0;
 
 	struct ExpireProgress {
 		std::string step;
@@ -332,12 +332,12 @@ public:
 	                                                          Version beginVersion = -1) = 0;
 
 	// Get an IBackupContainer based on a container spec string
-	static Reference<IBackupContainer> openContainer(const std::string& url,
-	                                                 const Optional<std::string>& proxy,
-	                                                 const Optional<std::string>& encryptionKeyFileName);
+	static Reference<IBackupContainer> openContainer(std::string const& url,
+	                                                 Optional<std::string> const& proxy,
+	                                                 Optional<std::string> const& encryptionKeyFileName);
 	static std::vector<std::string> getURLFormats();
-	static Future<std::vector<std::string>> listContainers(const std::string& baseURL,
-	                                                       const Optional<std::string>& proxy);
+	static Future<std::vector<std::string>> listContainers(std::string const& baseURL,
+	                                                       Optional<std::string> const& proxy);
 
 	std::string const& getURL() const { return URL; }
 	Optional<std::string> const& getProxy() const { return proxy; }
@@ -363,28 +363,28 @@ class RangeMapFilters {
 public:
 	RangeMapFilters() = default;
 
-	explicit RangeMapFilters(const std::vector<KeyRange>& ranges) {
-		for (const auto& range : ranges) {
+	explicit RangeMapFilters(std::vector<KeyRange> const& ranges) {
+		for (auto const& range : ranges) {
 			rangeMap.insert(range, 1);
 		}
 		rangeMap.coalesce(allKeys);
 	}
 
 	void updateFilters(std::vector<std::string>& prefixes) {
-		for (const auto& prefix : prefixes) {
+		for (auto const& prefix : prefixes) {
 			rangeMap.insert(prefixRange(StringRef(prefix)), 1);
 		}
 		rangeMap.coalesce(allKeys);
 	}
 
 	// Returns if the mutation matches any filter ranges.
-	bool match(const MutationRef& m) const;
+	bool match(MutationRef const& m) const;
 
 	// Returns if the key-value pair matches any filter ranges.
-	bool match(const KeyValueRef& kv) const;
+	bool match(KeyValueRef const& kv) const;
 
 	// Returns if the range intersects with any filter ranges.
-	bool match(const KeyRangeRef& range) const;
+	bool match(KeyRangeRef const& range) const;
 
 private:
 	KeyRangeMap<int> rangeMap;
@@ -399,7 +399,7 @@ struct AccumulatedMutations {
 	// Add a KV pair for this mutation chunk set
 	// It will be accumulated onto serializedMutations if the chunk number is
 	// the next expected value.
-	void addChunk(int chunkNumber, const KeyValueRef& kv);
+	void addChunk(int chunkNumber, KeyValueRef const& kv);
 
 	// Returns true if both
 	//   - 1 or more chunks were added to this set
@@ -410,7 +410,7 @@ struct AccumulatedMutations {
 	// Returns true if a complete chunk contains any MutationRefs which intersect with any
 	// range in ranges.
 	// It is undefined behavior to run this if isComplete() does not return true.
-	bool matchesAnyRange(const RangeMapFilters& rangeMap) const;
+	bool matchesAnyRange(RangeMapFilters const& rangeMap) const;
 
 	std::vector<KeyValueRef> kvs;
 	std::string serializedMutations;
@@ -419,13 +419,13 @@ struct AccumulatedMutations {
 
 // Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
 // returns (commitVersion, chunkNumber)
-std::pair<Version, int32_t> decodeMutationLogKey(const StringRef& key);
+std::pair<Version, int32_t> decodeMutationLogKey(StringRef const& key);
 
 // Decodes an encoded list of mutations in the format of:
 //   [includeVersion:uint64_t][val_length:uint32_t][mutation_1][mutation_2]...[mutation_k],
 // where a mutation is encoded as:
 //   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
-std::vector<MutationRef> decodeMutationLogValue(const StringRef& value);
+std::vector<MutationRef> decodeMutationLogValue(StringRef const& value);
 } // namespace fileBackup
 
 #endif

@@ -78,7 +78,7 @@ struct RunResult run(struct ResultSet* rs,
 int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*),
             FDBDatabase* db,
             struct ResultSet* rs,
-            const char* kpiName) {
+            char const* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
 	int i = 0;
@@ -107,7 +107,7 @@ int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*),
 int runTestDb(struct RunResult (*testFxn)(struct ResultSet*, FDBDatabase*),
               FDBDatabase* db,
               struct ResultSet* rs,
-              const char* kpiName) {
+              char const* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
 	int i = 0;
@@ -163,11 +163,11 @@ void insertData(struct ResultSet* rs, FDBDatabase* db) {
 }
 
 fdb_error_t setRetryLimit(struct ResultSet* rs, FDBTransaction* tr, uint64_t limit) {
-	return fdb_transaction_set_option(tr, FDB_TR_OPTION_RETRY_LIMIT, (const uint8_t*)&limit, sizeof(uint64_t));
+	return fdb_transaction_set_option(tr, FDB_TR_OPTION_RETRY_LIMIT, (uint8_t const*)&limit, sizeof(uint64_t));
 }
 
 uint32_t FUTURE_LATENCY_COUNT = 100000;
-const char* FUTURE_LATENCY_KPI = "C future throughput (local client)";
+char const* FUTURE_LATENCY_KPI = "C future throughput (local client)";
 struct RunResult futureLatency(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -196,7 +196,7 @@ struct RunResult futureLatency(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t CLEAR_COUNT = 100000;
-const char* CLEAR_KPI = "C clear throughput (local client)";
+char const* CLEAR_KPI = "C clear throughput (local client)";
 struct RunResult clear(struct ResultSet* rs, FDBTransaction* tr) {
 	double start = getTime();
 	int i;
@@ -211,7 +211,7 @@ struct RunResult clear(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t CLEAR_RANGE_COUNT = 100000;
-const char* CLEAR_RANGE_KPI = "C clear range throughput (local client)";
+char const* CLEAR_RANGE_KPI = "C clear range throughput (local client)";
 struct RunResult clearRange(struct ResultSet* rs, FDBTransaction* tr) {
 	double start = getTime();
 	int i;
@@ -226,7 +226,7 @@ struct RunResult clearRange(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t SET_COUNT = 100000;
-const char* SET_KPI = "C set throughput (local client)";
+char const* SET_KPI = "C set throughput (local client)";
 struct RunResult set(struct ResultSet* rs, FDBTransaction* tr) {
 	double start = getTime();
 	int i;
@@ -241,7 +241,7 @@ struct RunResult set(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t PARALLEL_GET_COUNT = 10000;
-const char* PARALLEL_GET_KPI = "C parallel get throughput (local client)";
+char const* PARALLEL_GET_KPI = "C parallel get throughput (local client)";
 struct RunResult parallelGet(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -285,7 +285,7 @@ struct RunResult parallelGet(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t ALTERNATING_GET_SET_COUNT = 2000;
-const char* ALTERNATING_GET_SET_KPI = "C alternating get set throughput (local client)";
+char const* ALTERNATING_GET_SET_KPI = "C alternating get set throughput (local client)";
 struct RunResult alternatingGetSet(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -330,7 +330,7 @@ struct RunResult alternatingGetSet(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t SERIAL_GET_COUNT = 2000;
-const char* SERIAL_GET_KPI = "C serial get throughput (local client)";
+char const* SERIAL_GET_KPI = "C serial get throughput (local client)";
 struct RunResult serialGet(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -396,7 +396,7 @@ struct RunResult serialGet(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t GET_RANGE_COUNT = 100000;
-const char* GET_RANGE_KPI = "C get range throughput (local client)";
+char const* GET_RANGE_KPI = "C get range throughput (local client)";
 struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -406,7 +406,7 @@ struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 
 	double start = getTime();
 
-	const FDBKeyValue* outKv;
+	FDBKeyValue const* outKv;
 	int outCount;
 	fdb_bool_t outMore = 1;
 	int totalOut = 0;
@@ -485,7 +485,7 @@ struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t GET_KEY_COUNT = 2000;
-const char* GET_KEY_KPI = "C get key throughput (local client)";
+char const* GET_KEY_KPI = "C get key throughput (local client)";
 struct RunResult getKey(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -522,7 +522,7 @@ struct RunResult getKey(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t GET_SINGLE_KEY_RANGE_COUNT = 2000;
-const char* GET_SINGLE_KEY_RANGE_KPI = "C get_single_key_range throughput (local client)";
+char const* GET_SINGLE_KEY_RANGE_KPI = "C get_single_key_range throughput (local client)";
 struct RunResult getSingleKeyRange(struct ResultSet* rs, FDBTransaction* tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if (e)
@@ -530,7 +530,7 @@ struct RunResult getSingleKeyRange(struct ResultSet* rs, FDBTransaction* tr) {
 
 	double start = getTime();
 
-	const FDBKeyValue* outKv;
+	FDBKeyValue const* outKv;
 	int outCount;
 	fdb_bool_t outMore;
 
@@ -579,7 +579,7 @@ struct RunResult singleKey(struct ResultSet* rs, FDBTransaction* tr) {
 }
 
 uint32_t WRITE_TRANSACTION_COUNT = 1000;
-const char* WRITE_TRANSACTION_KPI = "C write_transaction throughput (local client)";
+char const* WRITE_TRANSACTION_KPI = "C write_transaction throughput (local client)";
 struct RunResult writeTransaction(struct ResultSet* rs, FDBDatabase* db) {
 	double start = getTime();
 

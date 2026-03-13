@@ -122,7 +122,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
 					actors.add(cancellableForwardPromise(
 					    readRangeReq.reply,
-					    fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
+					    fmap([](RangeResult const& result) { return IKVSReadRangeReply(result); },
 					         kvStore->readRange(readRangeReq.keys,
 					                            readRangeReq.rowLimit,
 					                            readRangeReq.byteLimit,

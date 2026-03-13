@@ -72,8 +72,8 @@ public:
 	limitReason_t limitReason;
 	std::vector<BusyTagInfo> busiestReadTags, busiestWriteTags;
 
-	StorageQueueInfo(const UID& id, const LocalityData& locality);
-	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
+	StorageQueueInfo(UID const& id, LocalityData const& locality);
+	StorageQueueInfo(UID const& rateKeeperID, UID const& id, LocalityData const& locality);
 	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
 	UpdateCommitCostRequest refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }

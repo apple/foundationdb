@@ -50,7 +50,7 @@ class RocksDBLogger {
 
 	// Main thread ID. Only triggers TraceEvent when on main thread. In FDB only the main thread contains information
 	// that could thread.
-	const std::thread::id mainThreadId;
+	std::thread::id const mainThreadId;
 
 	// The log record
 	std::vector<RocksDBLogRecord> logRecords;
@@ -73,7 +73,7 @@ public:
 
 class RocksDBLogForwarder : public rocksdb::Logger {
 	// The ID of the RocksDB instance
-	const UID id;
+	UID const id;
 
 	// The cache that stores the logs from RocksDB
 	details::RocksDBLogger logger;
@@ -82,17 +82,17 @@ public:
 	// Constructor
 	// id is the UID of the logger
 	// log_level specifies the log level
-	explicit RocksDBLogForwarder(const UID& id,
-	                             const rocksdb::InfoLogLevel log_level = rocksdb::InfoLogLevel::INFO_LEVEL);
+	explicit RocksDBLogForwarder(UID const& id,
+	                             rocksdb::InfoLogLevel const log_level = rocksdb::InfoLogLevel::INFO_LEVEL);
 
 	// Destructor
 	virtual ~RocksDBLogForwarder();
 
 	// Writes an entry to the log file
-	virtual void Logv(const char* format, va_list ap);
+	virtual void Logv(char const* format, va_list ap);
 
 	// Writes an entry to the log file, with a specified log level
-	virtual void Logv(const rocksdb::InfoLogLevel log_level, const char* format, va_list ap);
+	virtual void Logv(rocksdb::InfoLogLevel const log_level, char const* format, va_list ap);
 };
 
 #endif // WITH_ROCKSDB

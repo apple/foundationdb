@@ -72,7 +72,7 @@ public:
 
 		writer.EndObject();
 	}
-	void deserialize(const rapidjson::Value& obj) {
+	void deserialize(rapidjson::Value const& obj) {
 		errorGuarantee = obj["errorGuarantee"].GetDouble();
 		minValue = obj["minValue"].GetUint64();
 		maxValue = obj["maxValue"].GetUint64();
@@ -110,8 +110,8 @@ public:
 		sketches.resize(MAX_OP);
 	}
 
-	WorkflowStatistics(const WorkflowStatistics& other) = default;
-	WorkflowStatistics& operator=(const WorkflowStatistics& other) = default;
+	WorkflowStatistics(WorkflowStatistics const& other) = default;
+	WorkflowStatistics& operator=(WorkflowStatistics const& other) = default;
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -138,7 +138,7 @@ public:
 	uint64_t mean(int op) const noexcept { return sketches[op].mean(); }
 
 	// with 'this' as final aggregation, factor in 'other'
-	void combine(const WorkflowStatistics& other) {
+	void combine(WorkflowStatistics const& other) {
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
 			sketches[op].mergeWith(other.sketches[op]);
@@ -168,13 +168,13 @@ public:
 	}
 
 	void addLatency(int op, timediff_t diff) noexcept {
-		const auto latency_us = toIntegerMicroseconds(diff);
+		auto const latency_us = toIntegerMicroseconds(diff);
 		latency_samples[op]++;
 		sketches[op].addSample(latency_us);
 		latency_us_total[op] += latency_us;
 	}
 
-	void writeToFile(const std::string& filename, int op) const {
+	void writeToFile(std::string const& filename, int op) const {
 		rapidjson::StringBuffer ss;
 		rapidjson::Writer<rapidjson::StringBuffer> writer(ss);
 		sketches[op].serialize(writer);
@@ -182,7 +182,7 @@ public:
 		f << ss.GetString();
 	}
 
-	void updateLatencies(const std::vector<DDSketchMako> other_sketches) { sketches = other_sketches; }
+	void updateLatencies(std::vector<DDSketchMako> const other_sketches) { sketches = other_sketches; }
 
 	friend std::ofstream& operator<<(std::ofstream& os, WorkflowStatistics& stats);
 	friend std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats);
@@ -276,7 +276,7 @@ inline std::ifstream& operator>>(std::ifstream& is, WorkflowStatistics& stats) {
 	populateArray(stats.latency_samples, jsonLatencySamples);
 	populateArray(stats.latency_us_total, jsonLatencyUsTotal);
 	for (int op = 0; op < MAX_OP; op++) {
-		const std::string op_name = getOpName(op);
+		std::string const op_name = getOpName(op);
 		stats.sketches[op].deserialize(doc[op_name.c_str()]);
 	}
 

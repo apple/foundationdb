@@ -64,7 +64,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	Future<Void> start(const Database& cx) override { return _start(cx->clone()); }
+	Future<Void> start(Database const& cx) override { return _start(cx->clone()); }
 
 	Future<Void> _start(Database cx) { co_await timeout(conflictingClient(cx, this), testDuration, Void()); }
 
@@ -123,7 +123,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		} while (deterministicRandom()->random01() < addWriteConflictRangeProb);
 	}
 
-	void emptyConflictingKeysTest(const Reference<ReadYourWritesTransaction>& ryw) {
+	void emptyConflictingKeysTest(Reference<ReadYourWritesTransaction> const& ryw) {
 		// This test is called when you want to make sure there is no conflictingKeys,
 		// which means you will get an empty result form getRange(\xff\xff/transaction/conflicting_keys/,
 		// \xff\xff/transaction/conflicting_keys0)
@@ -202,7 +202,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 					tr2 = makeReference<ReadYourWritesTransaction>(cx);
 
-					const RangeResult conflictingKeyRanges = conflictingKeyRangesFuture.get();
+					RangeResult const conflictingKeyRanges = conflictingKeyRangesFuture.get();
 					ASSERT(conflictingKeyRanges.size() > 0);
 					ASSERT(conflictingKeyRanges.size() <= readConflictRanges.size() * 2);
 					ASSERT(conflictingKeyRanges.size() % 2 == 0);
@@ -256,7 +256,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 					}
 				} else {
 					// make sure no conflicts between tr2's readConflictRange and tr1's writeConflictRange
-					for (const KeyRange& rCR : readConflictRanges) {
+					for (KeyRange const& rCR : readConflictRanges) {
 						if (std::any_of(writeConflictRanges.begin(), writeConflictRanges.end(), [&rCR](KeyRange wCR) {
 							    bool result = wCR.intersects(rCR);
 							    if (result)

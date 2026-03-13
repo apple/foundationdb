@@ -232,7 +232,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	MasterInterface masterInterface;
 	LifetimeToken masterLifetime;
-	const ClusterControllerFullInterface
+	ClusterControllerFullInterface const
 	    clusterController; // If the cluster controller changes, this master will die, so this is immutable.
 
 	ReusableCoordinatedState cstate;
@@ -323,7 +323,7 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
                                     MasterInterface* newMaster);
 ACTOR Future<Void> cleanupRecoveryActorCollection(Reference<ClusterRecoveryData> self);
 ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
-bool isNormalClusterRecoveryError(const Error&);
+bool isNormalClusterRecoveryError(Error const&);
 
 #include "flow/unactorcompiler.h"
 

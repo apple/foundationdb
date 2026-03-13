@@ -53,7 +53,7 @@ struct TestTLogOptions {
 	uint32_t recover;
 	uint32_t replicaCount;
 
-	explicit TestTLogOptions(const UnitTestParameters& params) {
+	explicit TestTLogOptions(UnitTestParameters const& params) {
 		diskQueueBasename = params.get("diskQueueBasename").orDefault("folder");
 		diskQueueExtension = params.get("diskQueueFileExtension").orDefault("ext");
 		kvStoreExtension = params.get("diskQueueFileExtension").orDefault("fdr");
@@ -84,7 +84,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID) {};
+	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
 // test state
@@ -129,7 +129,7 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	Optional<Standalone<StringRef>> zoneID;
 	int8_t tagLocality;
 	uint32_t epoch;
-	const uint32_t primaryLocality = 0;
+	uint32_t const primaryLocality = 0;
 };
 
 #include "flow/unactorcompiler.h"

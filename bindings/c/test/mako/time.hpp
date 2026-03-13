@@ -55,8 +55,8 @@ public:
 	Stopwatch() noexcept : p1(), p2() {}
 	Stopwatch(StartAtCtor) noexcept { start(); }
 	Stopwatch(timepoint_t start_time) noexcept : p1(start_time), p2() {}
-	Stopwatch(const Stopwatch&) noexcept = default;
-	Stopwatch& operator=(const Stopwatch&) noexcept = default;
+	Stopwatch(Stopwatch const&) noexcept = default;
+	Stopwatch& operator=(Stopwatch const&) noexcept = default;
 	timepoint_t getStart() const noexcept { return p1; }
 	timepoint_t getStop() const noexcept { return p2; }
 	void start() noexcept { p1 = steady_clock::now(); }

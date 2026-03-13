@@ -71,7 +71,7 @@ public:
 
 	// Sets up a list of <knob, value> pairs. If encounter a failure,
 	// immediately throws the error.
-	static void setupKnobs(const std::vector<std::pair<std::string, std::string>>& knobs);
+	static void setupKnobs(std::vector<std::pair<std::string, std::string>> const& knobs);
 
 	// KnobValue mutations are no longer emitted via config DB.
 };

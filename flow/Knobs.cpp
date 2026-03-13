@@ -471,7 +471,7 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	return true;
 }
 
-ParsedKnobValue Knobs::getKnob(const std::string& name) const {
+ParsedKnobValue Knobs::getKnob(std::string const& name) const {
 	if (double_knobs.contains(name)) {
 		return ParsedKnobValue{ *double_knobs.at(name).value };
 	}
@@ -512,7 +512,7 @@ void Knobs::initKnob(int& knob, int value, std::string const& name) {
 	}
 }
 
-void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
+void Knobs::initKnob(std::string& knob, std::string const& value, std::string const& name) {
 	if (!explicitlySetKnobs.contains(toLower(name))) {
 		knob = value;
 		string_knobs[toLower(name)] = KnobValue<std::string>{ &knob };

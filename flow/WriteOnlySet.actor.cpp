@@ -30,7 +30,7 @@
 
 #ifdef ENABLE_SAMPLING
 template <class T, class IndexType, IndexType CAPACITY>
-auto WriteOnlySet<T, IndexType, CAPACITY>::insert(const Reference<T>& lineage) -> Index {
+auto WriteOnlySet<T, IndexType, CAPACITY>::insert(Reference<T> const& lineage) -> Index {
 	Index res;
 	if (!freeQueue.pop(res)) {
 		TraceEvent(SevWarnAlways, "NoCapacityInWriteOnlySet");
@@ -71,7 +71,7 @@ bool WriteOnlySet<T, IndexType, CAPACITY>::erase(Index idx) {
 }
 
 template <class T, class IndexType, IndexType CAPACITY>
-bool WriteOnlySet<T, IndexType, CAPACITY>::replace(Index idx, const Reference<T>& lineage) {
+bool WriteOnlySet<T, IndexType, CAPACITY>::replace(Index idx, Reference<T> const& lineage) {
 	auto lineagePtr = reinterpret_cast<uintptr_t>(lineage.getPtr());
 	if (lineage.isValid()) {
 		lineage->addref();
@@ -141,7 +141,7 @@ Reference<T> WriteOnlyVariable<T, IndexType>::get() {
 }
 
 template <class T, class IndexType>
-bool WriteOnlyVariable<T, IndexType>::replace(const Reference<T>& element) {
+bool WriteOnlyVariable<T, IndexType>::replace(Reference<T> const& element) {
 	return WriteOnlySet<T, IndexType, 1>::replace(0, element);
 }
 

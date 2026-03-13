@@ -64,18 +64,18 @@ struct Criteria {
 	MatchType match_type;
 	X509Location location;
 
-	Criteria(const std::string& s, MatchType mt, X509Location loc) : criteria(s), match_type(mt), location(loc) {}
-	Criteria(const std::string& s, MatchType mt) : Criteria(s, mt, X509Location::NAME) {}
-	Criteria(const std::string& s, X509Location loc) : Criteria(s, MatchType::EXACT, loc) {}
-	explicit Criteria(const std::string& s) : Criteria(s, MatchType::EXACT, X509Location::NAME) {}
+	Criteria(std::string const& s, MatchType mt, X509Location loc) : criteria(s), match_type(mt), location(loc) {}
+	Criteria(std::string const& s, MatchType mt) : Criteria(s, mt, X509Location::NAME) {}
+	Criteria(std::string const& s, X509Location loc) : Criteria(s, MatchType::EXACT, loc) {}
+	explicit Criteria(std::string const& s) : Criteria(s, MatchType::EXACT, X509Location::NAME) {}
 
-	bool operator==(const Criteria& c) const noexcept {
+	bool operator==(Criteria const& c) const noexcept {
 		return criteria == c.criteria && match_type == c.match_type && location == c.location;
 	}
 
-	bool operator!=(const Criteria& c) const noexcept { return !(*this == c); }
+	bool operator!=(Criteria const& c) const noexcept { return !(*this == c); }
 
-	bool operator<(const Criteria& c) const {
+	bool operator<(Criteria const& c) const {
 		if (criteria != c.criteria) {
 			return criteria < c.criteria;
 		} else if (match_type != c.match_type) {
@@ -152,43 +152,43 @@ public:
 
 	static TLSConfig* make() { return new TLSConfig(); }
 
-	void setCertificatePath(const std::string& path) {
+	void setCertificatePath(std::string const& path) {
 		tlsCertPath = path;
 		tlsCertBytes = "";
 	}
 
-	void setCertificateBytes(const std::string& bytes) {
+	void setCertificateBytes(std::string const& bytes) {
 		tlsCertBytes = bytes;
 		tlsCertPath = "";
 	}
 
-	void setKeyPath(const std::string& path) {
+	void setKeyPath(std::string const& path) {
 		tlsKeyPath = path;
 		tlsKeyBytes = "";
 	}
 
-	void setKeyBytes(const std::string& bytes) {
+	void setKeyBytes(std::string const& bytes) {
 		tlsKeyBytes = bytes;
 		tlsKeyPath = "";
 	}
 
-	void setCAPath(const std::string& path) {
+	void setCAPath(std::string const& path) {
 		tlsCAPath = path;
 		tlsCABytes = "";
 	}
 
-	void setCABytes(const std::string& bytes) {
+	void setCABytes(std::string const& bytes) {
 		tlsCABytes = bytes;
 		tlsCAPath = "";
 	}
 
-	void setDisablePlainTextConnection(const bool val) { tlsDisablePlainTextConnection = val; }
+	void setDisablePlainTextConnection(bool const val) { tlsDisablePlainTextConnection = val; }
 
-	void setPassword(const std::string& password) { tlsPassword = password; }
+	void setPassword(std::string const& password) { tlsPassword = password; }
 
 	void clearVerifyPeers() { tlsVerifyPeers.clear(); }
 
-	void addVerifyPeers(const std::string& verifyPeers) { tlsVerifyPeers.push_back(verifyPeers); }
+	void addVerifyPeers(std::string const& verifyPeers) { tlsVerifyPeers.push_back(verifyPeers); }
 
 	// Load all specified certificates into memory, and return an object that
 	// allows access to them.
@@ -217,7 +217,7 @@ public:
 #ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 private:
 #endif
-	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self); // FIXME
+	ACTOR static Future<LoadedTLSConfig> loadAsync(TLSConfig const* self); // FIXME
 	template <typename T>
 	friend class LoadAsyncActorState;
 
@@ -231,7 +231,7 @@ private:
 
 class TLSPolicy;
 
-void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context& context);
+void ConfigureSSLContext(LoadedTLSConfig const& loaded, boost::asio::ssl::context& context);
 
 // Set up SSL for stream object based on policy.
 // Optionally arm a callback that gets called with verify-outcome of each cert in peer certificate chain:
@@ -239,14 +239,14 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 // callback(true) will be called 3 times.
 void ConfigureSSLStream(Reference<TLSPolicy> policy,
                         boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
-                        const NetworkAddress& peerAddress,
+                        NetworkAddress const& peerAddress,
                         std::function<void(bool)> callback);
 
 class TLSPolicy : ReferenceCounted<TLSPolicy> {
 	void set_verify_peers(std::vector<std::string> verify_peers);
 
 public:
-	TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure);
+	TLSPolicy(LoadedTLSConfig const& loaded, std::function<void()> on_failure);
 	virtual ~TLSPolicy();
 
 	virtual void addref() { ReferenceCounted<TLSPolicy>::addref(); }
@@ -254,7 +254,7 @@ public:
 
 	static std::string ErrorString(boost::system::error_code e);
 
-	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx, const NetworkAddress& peerAddress);
+	bool verify_peer(bool preverified, X509_STORE_CTX* store_ctx, NetworkAddress const& peerAddress);
 
 	std::string toString() const;
 

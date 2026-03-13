@@ -135,7 +135,7 @@ struct MemoryLifetime : KVWorkload {
 					ASSERT(getKey_res1 == getKey_res2);
 				} else if (op == 3) {
 					Key getAddress_startKey = getRandomKey();
-					Standalone<VectorRef<const char*>> getAddress_res1 =
+					Standalone<VectorRef<char const*>> getAddress_res1 =
 					    co_await tr.getAddressesForKey(getAddress_startKey);
 					tr = ReadYourWritesTransaction(cx);
 					co_await delay(0.01);

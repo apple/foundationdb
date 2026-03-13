@@ -27,17 +27,17 @@
 #include "fdbclient/ServerKnobCollection.h"
 #include "fdbserver/Knobs.h"
 
-void KnobKeyValuePairs::set(const std::string& name, const ParsedKnobValue value) {
+void KnobKeyValuePairs::set(std::string const& name, ParsedKnobValue const value) {
 	ASSERT(!knobs.contains(name));
 
 	knobs[name] = value;
 }
 
-const KnobKeyValuePairs::container_t& KnobKeyValuePairs::getKnobs() const {
+KnobKeyValuePairs::container_t const& KnobKeyValuePairs::getKnobs() const {
 	return knobs;
 }
 
-KnobProtectiveGroup::KnobProtectiveGroup(const KnobKeyValuePairs& overriddenKnobKeyValuePairs_)
+KnobProtectiveGroup::KnobProtectiveGroup(KnobKeyValuePairs const& overriddenKnobKeyValuePairs_)
   : overriddenKnobs(overriddenKnobKeyValuePairs_) {
 	snapshotOriginalKnobs();
 	assignKnobs(overriddenKnobs);
@@ -48,7 +48,7 @@ KnobProtectiveGroup::~KnobProtectiveGroup() {
 }
 
 void KnobProtectiveGroup::snapshotOriginalKnobs() {
-	for (const auto& [name, _] : overriddenKnobs.getKnobs()) {
+	for (auto const& [name, _] : overriddenKnobs.getKnobs()) {
 		ParsedKnobValue value = CLIENT_KNOBS->getKnob(name);
 		if (std::get_if<NoKnobFound>(&value)) {
 			value = SERVER_KNOBS->getKnob(name);
@@ -66,10 +66,10 @@ void KnobProtectiveGroup::snapshotOriginalKnobs() {
 	}
 }
 
-void KnobProtectiveGroup::assignKnobs(const KnobKeyValuePairs& overrideKnobs) {
+void KnobProtectiveGroup::assignKnobs(KnobKeyValuePairs const& overrideKnobs) {
 	auto& mutableServerKnobs = dynamic_cast<ServerKnobCollection&>(IKnobCollection::getMutableGlobalKnobCollection());
 
-	for (const auto& [name, value] : overrideKnobs.getKnobs()) {
+	for (auto const& [name, value] : overrideKnobs.getKnobs()) {
 		Standalone<KnobValueRef> valueRef = KnobValueRef::create(value);
 		bool success = mutableServerKnobs.trySetKnob(name, valueRef);
 		if (!success) {

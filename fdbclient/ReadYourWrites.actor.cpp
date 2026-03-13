@@ -101,7 +101,7 @@ public:
 		it->skip(read.key);
 		state bool dependent = it->is_dependent();
 		if (it->is_kv()) {
-			const KeyValueRef* result = it->kv(ryw->arena);
+			KeyValueRef const* result = it->kv(ryw->arena);
 			if (result != nullptr) {
 				return result->value;
 			} else {
@@ -128,7 +128,7 @@ public:
 			it->skip(k);
 
 			ASSERT(it->is_kv());
-			const KeyValueRef* result = it->kv(ryw->arena);
+			KeyValueRef const* result = it->kv(ryw->arena);
 			if (result != nullptr) {
 				return result->value;
 			} else {
@@ -1170,8 +1170,8 @@ public:
 		    ryw, GetRangeReq<backwards>(read.begin, read.end, read.limits), it, result);
 
 		// Secondary getValue/getRanges.
-		for (const auto& mappedKeyValue : result) {
-			const auto& reqAndResult = mappedKeyValue.reqAndResult;
+		for (auto const& mappedKeyValue : result) {
+			auto const& reqAndResult = mappedKeyValue.reqAndResult;
 			if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
 				auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
 				// GetValueReq variation of addConflictRange require it to point at the right segment.
@@ -1364,7 +1364,7 @@ public:
 				// Stash away conflict ranges to read after commit
 				ryw->nativeReadRanges = ryw->tr.readConflictRanges();
 				ryw->nativeWriteRanges = ryw->tr.writeConflictRanges();
-				for (const auto& f : ryw->tr.getExtraReadConflictRanges()) {
+				for (auto const& f : ryw->tr.getExtraReadConflictRanges()) {
 					if (f.isReady() && f.get().first < f.get().second)
 						ryw->nativeReadRanges.push_back(
 						    ryw->nativeReadRanges.arena(),
@@ -1620,7 +1620,7 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 	}
 }
 
-Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
+Future<Optional<Value>> ReadYourWritesTransaction::get(Key const& key, Snapshot snapshot) {
 	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1684,7 +1684,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 	return result;
 }
 
-Future<Key> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot snapshot) {
+Future<Key> ReadYourWritesTransaction::getKey(KeySelector const& key, Snapshot snapshot) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1760,8 +1760,8 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	return result;
 }
 
-Future<RangeResult> ReadYourWritesTransaction::getRange(const KeySelector& begin,
-                                                        const KeySelector& end,
+Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector const& begin,
+                                                        KeySelector const& end,
                                                         int limit,
                                                         Snapshot snapshot,
                                                         Reverse reverse) {
@@ -1826,7 +1826,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	return result;
 }
 
-Future<Standalone<VectorRef<const char*>>> ReadYourWritesTransaction::getAddressesForKey(const Key& key) {
+Future<Standalone<VectorRef<char const*>>> ReadYourWritesTransaction::getAddressesForKey(Key const& key) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1836,13 +1836,13 @@ Future<Standalone<VectorRef<const char*>>> ReadYourWritesTransaction::getAddress
 
 	// If key >= allKeys.end, then our resulting address vector will be empty.
 
-	Future<Standalone<VectorRef<const char*>>> result =
+	Future<Standalone<VectorRef<char const*>>> result =
 	    waitOrError(tr.getAddressesForKey(key), resetPromise.getFuture());
 	reading.add(success(result));
 	return result;
 }
 
-Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyRange& keys) {
+Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(KeyRange const& keys) {
 	if (checkUsedDuringCommit()) {
 		throw used_during_commit();
 	}
@@ -1850,10 +1850,10 @@ Future<int64_t> ReadYourWritesTransaction::getEstimatedRangeSizeBytes(const KeyR
 		return resetPromise.getFuture().getError();
 
 	return map(waitOrError(tr.getDatabase()->getStorageMetrics(keys, -1), resetPromise.getFuture()),
-	           [](const StorageMetrics& m) { return m.bytes; });
+	           [](StorageMetrics const& m) { return m.bytes; });
 }
 
-Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(const KeyRange& range,
+Future<Standalone<VectorRef<KeyRef>>> ReadYourWritesTransaction::getRangeSplitPoints(KeyRange const& range,
                                                                                      int64_t chunkSize) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
@@ -2064,11 +2064,11 @@ RangeResult ReadYourWritesTransaction::getReadConflictRangeIntersecting(KeyRange
 		}
 	} else {
 		CoalescedKeyRefRangeMap<ValueRef> readConflicts{ "0"_sr, specialKeys.end };
-		for (const auto& range : tr.readConflictRanges())
+		for (auto const& range : tr.readConflictRanges())
 			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
-		for (const auto& range : nativeReadRanges)
+		for (auto const& range : nativeReadRanges)
 			readConflicts.insert(range.withPrefix(readConflictRangeKeysRange.begin, result.arena()), "1"_sr);
-		for (const auto& f : tr.getExtraReadConflictRanges()) {
+		for (auto const& f : tr.getExtraReadConflictRanges()) {
 			if (f.isReady() && f.get().first < f.get().second)
 				readConflicts.insert(KeyRangeRef(f.get().first, f.get().second)
 				                         .withPrefix(readConflictRangeKeysRange.begin, result.arena()),
@@ -2106,16 +2106,16 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 				    "1"_sr);
 		}
 	} else {
-		for (const auto& range : tr.writeConflictRanges())
+		for (auto const& range : tr.writeConflictRanges())
 			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
-		for (const auto& range : nativeWriteRanges)
+		for (auto const& range : nativeWriteRanges)
 			writeConflicts.insert(range.withPrefix(writeConflictRangeKeysRange.begin, result.arena()), "1"_sr);
 	}
 
-	for (const auto& k : versionStampKeys) {
+	for (auto const& k : versionStampKeys) {
 		KeyRange range;
 		if (versionStampFuture.isValid() && versionStampFuture.isReady() && !versionStampFuture.isError()) {
-			const auto& stamp = versionStampFuture.get();
+			auto const& stamp = versionStampFuture.get();
 			StringRef key(range.arena(), k); // Copy
 			ASSERT(k.size() >= 4);
 			int32_t pos;
@@ -2142,7 +2142,7 @@ RangeResult ReadYourWritesTransaction::getWriteConflictRangeIntersecting(KeyRang
 	return result;
 }
 
-void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& operand, uint32_t operationType) {
+void ReadYourWritesTransaction::atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) {
 	AddConflictRange addWriteConflict{ !options.getAndResetWriteConflictDisabled() };
 
 	if (checkUsedDuringCommit()) {
@@ -2222,7 +2222,7 @@ void ReadYourWritesTransaction::atomicOp(const KeyRef& key, const ValueRef& oper
 	RYWImpl::triggerWatches(this, k, Optional<ValueRef>(), false);
 }
 
-void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
+void ReadYourWritesTransaction::set(KeyRef const& key, ValueRef const& value) {
 	if (key == metadataVersionKey) {
 		throw client_invalid_operation();
 	}
@@ -2280,7 +2280,7 @@ void ReadYourWritesTransaction::set(const KeyRef& key, const ValueRef& value) {
 	RYWImpl::triggerWatches(this, key, value);
 }
 
-void ReadYourWritesTransaction::clear(const KeyRangeRef& range) {
+void ReadYourWritesTransaction::clear(KeyRangeRef const& range) {
 	AddConflictRange addWriteConflict{ !options.getAndResetWriteConflictDisabled() };
 
 	if (checkUsedDuringCommit()) {
@@ -2329,7 +2329,7 @@ void ReadYourWritesTransaction::clear(const KeyRangeRef& range) {
 	RYWImpl::triggerWatches(this, r, Optional<ValueRef>());
 }
 
-void ReadYourWritesTransaction::clear(const KeyRef& key) {
+void ReadYourWritesTransaction::clear(KeyRef const& key) {
 	AddConflictRange addWriteConflict{ !options.getAndResetWriteConflictDisabled() };
 
 	if (checkUsedDuringCommit()) {
@@ -2363,7 +2363,7 @@ void ReadYourWritesTransaction::clear(const KeyRef& key) {
 	RYWImpl::triggerWatches(this, r, Optional<ValueRef>());
 }
 
-Future<Void> ReadYourWritesTransaction::watch(const Key& key) {
+Future<Void> ReadYourWritesTransaction::watch(Key const& key) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}

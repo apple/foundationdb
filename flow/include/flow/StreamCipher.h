@@ -82,7 +82,7 @@ class EncryptionStreamCipher final : NonCopyable, public ReferenceCounted<Encryp
 	StreamCipher cipher;
 
 public:
-	EncryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
+	EncryptionStreamCipher(StreamCipherKey const* key, StreamCipher::IV const& iv);
 	StringRef encrypt(unsigned char const* plaintext, int len, Arena&);
 	StringRef finish(Arena&);
 };
@@ -91,7 +91,7 @@ class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<Decryp
 	StreamCipher cipher;
 
 public:
-	DecryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
+	DecryptionStreamCipher(StreamCipherKey const* key, StreamCipher::IV const& iv);
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
 };

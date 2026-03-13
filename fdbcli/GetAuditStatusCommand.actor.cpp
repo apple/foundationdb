@@ -198,7 +198,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 			printUsage(tokens[0]);
 			return false;
 		}
-		const UID id = UID::fromString(tokens[3].toString());
+		UID const id = UID::fromString(tokens[3].toString());
 		AuditStorageState res = wait(getAuditState(cx, type, id));
 		fmt::println("Audit result is:\n{}", res.toString());
 	} else if (tokencmp(tokens[2], "progress")) {
@@ -206,7 +206,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 			printUsage(tokens[0]);
 			return false;
 		}
-		const UID id = UID::fromString(tokens[3].toString());
+		UID const id = UID::fromString(tokens[3].toString());
 		state AuditStorageState res = wait(getAuditState(cx, type, id));
 		if (res.getPhase() == AuditPhase::Running) {
 			wait(getAuditProgress(cx, res.getType(), res.id, res.range));
@@ -219,7 +219,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 			count = std::stoi(tokens[3].toString());
 		}
 		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count));
-		for (const auto& it : res) {
+		for (auto const& it : res) {
 			fmt::println("Audit result is:\n{}", it.toString());
 		}
 	} else if (tokencmp(tokens[2], "phase")) {
@@ -233,7 +233,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 			count = std::stoi(tokens[4].toString());
 		}
 		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count, phase));
-		for (const auto& it : res) {
+		for (auto const& it : res) {
 			fmt::println("Audit result is:\n{}", it.toString());
 		}
 	} else {

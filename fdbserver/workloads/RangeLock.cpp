@@ -28,7 +28,7 @@
 
 struct RangeLocking : TestWorkload {
 	static constexpr auto NAME = "RangeLocking";
-	const bool enabled;
+	bool const enabled;
 	bool pass;
 	bool shouldExit = false;
 	bool verboseLogging = false; // enable to log range lock and commit history
@@ -149,10 +149,10 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
-	std::string getLockRangesString(const std::vector<std::pair<KeyRange, RangeLockState>>& locks) {
+	std::string getLockRangesString(std::vector<std::pair<KeyRange, RangeLockState>> const& locks) {
 		std::string res = "";
 		int count = 0;
-		for (const auto& [lockedRange, _lockState] : locks) {
+		for (auto const& [lockedRange, _lockState] : locks) {
 			res = res + lockedRange.toString();
 			if (count < locks.size()) {
 				res = res + ", ";
@@ -266,7 +266,7 @@ struct RangeLocking : TestWorkload {
 		}
 	}
 
-	bool operationRejectByLocking(RangeLocking* self, const KVOperation& kvOperation) {
+	bool operationRejectByLocking(RangeLocking* self, KVOperation const& kvOperation) {
 		KeyRange rangeToCheck;
 		if (std::holds_alternative<KeyRange>(kvOperation.params)) {
 			rangeToCheck = std::get<KeyRange>(kvOperation.params);
@@ -282,7 +282,7 @@ struct RangeLocking : TestWorkload {
 	}
 
 	void updateInMemoryKVSStatus(RangeLocking* self) {
-		for (const auto& operation : self->kvOperations) {
+		for (auto const& operation : self->kvOperations) {
 			if (self->operationRejectByLocking(self, operation)) {
 				continue;
 			}
@@ -293,12 +293,12 @@ struct RangeLocking : TestWorkload {
 			} else {
 				KeyRange clearRange = std::get<KeyRange>(operation.params);
 				std::vector<Key> keysToClear;
-				for (const auto& [key, value] : self->kvs) {
+				for (auto const& [key, value] : self->kvs) {
 					if (clearRange.contains(key)) {
 						keysToClear.push_back(key);
 					}
 				}
-				for (const auto& key : keysToClear) {
+				for (auto const& key : keysToClear) {
 					self->kvs.erase(key);
 				}
 			}
@@ -307,7 +307,7 @@ struct RangeLocking : TestWorkload {
 	}
 
 	void updateInMemoryLockStatus(RangeLocking* self) {
-		for (const auto& operation : self->lockRangeOperations) {
+		for (auto const& operation : self->lockRangeOperations) {
 			self->lockedRangeMap.insert(operation.range, operation.lock);
 		}
 		return;
@@ -346,7 +346,7 @@ struct RangeLocking : TestWorkload {
 		std::vector<std::pair<KeyRange, RangeLockState>> res;
 		co_await store(res, findExclusiveReadLockOnRange(cx, normalKeys));
 		std::vector<KeyRange> ranges;
-		for (const auto& [lockedRange, _lockState] : res) {
+		for (auto const& [lockedRange, _lockState] : res) {
 			ranges.push_back(lockedRange);
 		}
 		co_return coalesceRangeList(ranges);
@@ -365,7 +365,7 @@ struct RangeLocking : TestWorkload {
 	Future<Void> checkKVCorrectness(RangeLocking* self, Database cx) {
 		std::map<Key, Value> currentKvsInDB;
 		co_await store(currentKvsInDB, self->getKVSFromDB(self, cx));
-		for (const auto& [key, value] : currentKvsInDB) {
+		for (auto const& [key, value] : currentKvsInDB) {
 			if (self->kvs.find(key) == self->kvs.end()) {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
 				    .detail("Ops", "CheckDBUniqueKey")
@@ -383,7 +383,7 @@ struct RangeLocking : TestWorkload {
 				co_return;
 			}
 		}
-		for (const auto& [key, value] : self->kvs) {
+		for (auto const& [key, value] : self->kvs) {
 			if (currentKvsInDB.find(key) == currentKvsInDB.end()) {
 				TraceEvent(SevError, "RangeLockWorkLoadHistory")
 				    .detail("Ops", "CheckMemoryUniqueKey")
@@ -399,7 +399,7 @@ struct RangeLocking : TestWorkload {
 			e.setMaxFieldLength(-1);
 			e.detail("Ops", "CheckAllKVCorrect");
 			int i = 0;
-			for (const auto& [key, value] : currentKvsInDB) {
+			for (auto const& [key, value] : currentKvsInDB) {
 				e.detail("Key" + std::to_string(i), key);
 				e.detail("Value" + std::to_string(i), value);
 				i++;
@@ -441,7 +441,7 @@ struct RangeLocking : TestWorkload {
 			e.setMaxFieldLength(-1);
 			e.detail("Ops", "CheckAllLockCorrect");
 			int i = 0;
-			for (const auto& range : currentLockRangesInDB) {
+			for (auto const& range : currentLockRangesInDB) {
 				e.detail("Range" + std::to_string(i), range);
 				i++;
 			}
@@ -489,7 +489,7 @@ struct RangeLocking : TestWorkload {
 			iteration++;
 		}
 		std::vector<std::pair<KeyRange, RangeLockState>> locks2 = co_await findExclusiveReadLockOnRange(cx, normalKeys);
-		for (const auto& [lockedRange, lockState] : locks2) {
+		for (auto const& [lockedRange, lockState] : locks2) {
 			TraceEvent("RangeLockWorkloadProgress")
 			    .detail("Phase", "BeforeLockRelease")
 			    .detail("Range", lockedRange)
@@ -497,7 +497,7 @@ struct RangeLocking : TestWorkload {
 		}
 		co_await releaseExclusiveReadLockByUser(cx, self->rangeLockOwnerName);
 		std::vector<std::pair<KeyRange, RangeLockState>> locks = co_await findExclusiveReadLockOnRange(cx, normalKeys);
-		for (const auto& [lockedRange, lockState] : locks) {
+		for (auto const& [lockedRange, lockState] : locks) {
 			TraceEvent("RangeLockWorkloadProgress")
 			    .detail("Phase", "AfterLockRelease")
 			    .detail("Range", lockedRange)
@@ -508,9 +508,9 @@ struct RangeLocking : TestWorkload {
 		TraceEvent("RangeLockWorkloadProgress").detail("Phase", "End");
 	}
 
-	bool sameRangeList(const std::vector<KeyRange>& rangesA,
-	                   const std::vector<KeyRange>& rangesB,
-	                   const RangeLockOwnerName& owner) {
+	bool sameRangeList(std::vector<KeyRange> const& rangesA,
+	                   std::vector<KeyRange> const& rangesB,
+	                   RangeLockOwnerName const& owner) {
 		if (rangesA.size() != rangesB.size()) {
 			TraceEvent(SevError, "RangeLockWorkloadTestUnlockRangeByUserMismatch")
 			    .detail("RangesA", describe(rangesA))
@@ -518,7 +518,7 @@ struct RangeLocking : TestWorkload {
 			    .detail("Owner", owner);
 			return false;
 		}
-		for (const auto& rangeA : rangesA) {
+		for (auto const& rangeA : rangesA) {
 			if (std::find(rangesB.begin(), rangesB.end(), rangeA) == rangesB.end()) {
 				TraceEvent(SevError, "RangeLockWorkloadTestUnlockRangeByUserMismatch")
 				    .detail("RangesA", describe(rangesA))
@@ -527,7 +527,7 @@ struct RangeLocking : TestWorkload {
 				return false;
 			}
 		}
-		for (const auto& rangeB : rangesB) {
+		for (auto const& rangeB : rangesB) {
 			if (std::find(rangesA.begin(), rangesA.end(), rangeB) == rangesA.end()) {
 				TraceEvent(SevError, "RangeLockWorkloadTestUnlockRangeByUserMismatch")
 				    .detail("RangesA", describe(rangesA))
@@ -593,7 +593,7 @@ struct RangeLocking : TestWorkload {
 				ASSERT(locksPerUser.empty());
 			} else {
 				std::vector<KeyRange> lockedRangeFromMetadata;
-				for (const auto& [lockedRange, lockState] : locksPerUser) {
+				for (auto const& [lockedRange, lockState] : locksPerUser) {
 					ASSERT(lockedRange == lockState.getRange());
 					lockedRangeFromMetadata.push_back(lockedRange);
 				}

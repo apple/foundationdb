@@ -43,7 +43,7 @@ struct PerfMetric {
 	std::string format_code() const { return m_format_code; }
 	bool averaged() const { return m_averaged; }
 
-	PerfMetric withPrefix(const std::string& pre) const {
+	PerfMetric withPrefix(std::string const& pre) const {
 		return PerfMetric(pre + name(), value(), Averaged{ averaged() }, format_code());
 	}
 

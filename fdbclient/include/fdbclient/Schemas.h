@@ -27,15 +27,15 @@
 #include "fdbclient/FDBTypes.h"
 
 struct JSONSchemas {
-	static const KeyRef statusSchema;
-	static const KeyRef clusterConfigurationSchema;
-	static const KeyRef latencyBandConfigurationSchema;
-	static const KeyRef dataDistributionStatsSchema;
-	static const KeyRef logHealthSchema;
-	static const KeyRef storageHealthSchema;
-	static const KeyRef aggregateHealthSchema;
-	static const KeyRef managementApiErrorSchema;
-	static const KeyRef faultToleranceStatusSchema;
+	static KeyRef const statusSchema;
+	static KeyRef const clusterConfigurationSchema;
+	static KeyRef const latencyBandConfigurationSchema;
+	static KeyRef const dataDistributionStatsSchema;
+	static KeyRef const logHealthSchema;
+	static KeyRef const storageHealthSchema;
+	static KeyRef const aggregateHealthSchema;
+	static KeyRef const managementApiErrorSchema;
+	static KeyRef const faultToleranceStatusSchema;
 };
 
 #endif /* FDBCLIENT_SCHEMAS_H */

@@ -171,7 +171,7 @@ public:
 		++countFileLogicalWrites;
 		++countLogicalWrites;
 		// Standalone<StringRef> copy = StringRef((const uint8_t*)data, length);
-		return write_impl(fd, err, StringRef((const uint8_t*)data, length), offset);
+		return write_impl(fd, err, StringRef((uint8_t const*)data, length), offset);
 	}
 	Future<Void> truncate(int64_t size) override {
 		++countFileLogicalWrites;
@@ -251,7 +251,7 @@ public:
 private:
 	struct ErrorInfo : ReferenceCounted<ErrorInfo>, FastAllocated<ErrorInfo> {
 		Error err;
-		void set(const Error& e) {
+		void set(Error const& e) {
 			if (err.code() == invalid_error_code)
 				err = e;
 		}
@@ -309,7 +309,7 @@ private:
 		return oflags;
 	}
 
-	static void error(const char* context,
+	static void error(char const* context,
 	                  int fd,
 	                  eio_req* r,
 	                  Reference<ErrorInfo> const& err = Reference<ErrorInfo>()) {

@@ -69,10 +69,10 @@ ACTOR Future<Void> printHealthyZone(Reference<IDatabase> db) {
 
 namespace fdb_cli {
 
-const KeyRangeRef maintenanceSpecialKeyRange =
+KeyRangeRef const maintenanceSpecialKeyRange =
     KeyRangeRef("\xff\xff/management/maintenance/"_sr, "\xff\xff/management/maintenance0"_sr);
 // The special key, if present, means data distribution is disabled for storage failures;
-const KeyRef ignoreSSFailureSpecialKey = "\xff\xff/management/maintenance/IgnoreSSFailures"_sr;
+KeyRef const ignoreSSFailureSpecialKey = "\xff\xff/management/maintenance/IgnoreSSFailures"_sr;
 
 // add a zone to maintenance and specify the maintenance duration
 ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning) {

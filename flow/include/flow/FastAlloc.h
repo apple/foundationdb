@@ -79,7 +79,7 @@ struct AllocInstrInfo {
 	}
 	inline void dealloc(int64_t count = 1) { deallocCount += count; }
 };
-extern std::map<const char*, AllocInstrInfo> allocInstr;
+extern std::map<char const*, AllocInstrInfo> allocInstr;
 #define INSTRUMENT_ALLOCATE(name) (allocInstr[(name)].alloc())
 #define INSTRUMENT_RELEASE(name) (allocInstr[(name)].dealloc())
 
@@ -99,7 +99,7 @@ extern std::unordered_map<uint32_t, BackTraceAccount> backTraceLookup;
 
 extern ThreadSpinLock memLock;
 extern thread_local bool memSample_entered;
-extern const size_t SAMPLE_BYTES;
+extern size_t const SAMPLE_BYTES;
 
 #else
 #define INSTRUMENT_ALLOCATE(name)
@@ -125,7 +125,7 @@ public:
 	static long long getActiveThreads();
 
 #ifdef ALLOC_INSTRUMENTATION
-	static volatile int32_t pageCount;
+	static int32_t volatile pageCount;
 #endif
 
 	FastAllocator() = delete;
@@ -135,8 +135,8 @@ private:
 	static unsigned long vLock;
 #endif
 
-	static const int magazine_size = kFastAllocMagazineBytes / Size;
-	static const int PSize = Size / sizeof(void*);
+	static int const magazine_size = kFastAllocMagazineBytes / Size;
+	static int const PSize = Size / sizeof(void*);
 	struct GlobalData;
 	struct ThreadData {
 		void* freelist;
@@ -217,8 +217,8 @@ public:
 void* allocate(size_t);
 void invalidate(void*);
 
-void trackWipedArea(const uint8_t* begin, int size);
-std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet();
+void trackWipedArea(uint8_t const* begin, int size);
+std::vector<std::pair<uint8_t const*, int>> const& getWipedAreaSet();
 
 } // namespace keepalive_allocator
 

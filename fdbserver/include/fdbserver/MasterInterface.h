@@ -115,7 +115,7 @@ struct ResolverMoveRef {
 
 	ResolverMoveRef() : dest(0) {}
 	ResolverMoveRef(KeyRangeRef const& range, int dest) : range(range), dest(dest) {}
-	ResolverMoveRef(Arena& a, const ResolverMoveRef& copyFrom) : range(a, copyFrom.range), dest(copyFrom.dest) {}
+	ResolverMoveRef(Arena& a, ResolverMoveRef const& copyFrom) : range(a, copyFrom.range), dest(copyFrom.dest) {}
 
 	bool operator==(ResolverMoveRef const& rhs) const { return range == rhs.range && dest == rhs.dest; }
 	bool operator!=(ResolverMoveRef const& rhs) const { return range != rhs.range || dest != rhs.dest; }
@@ -190,8 +190,8 @@ struct SWIFT_CXX_IMPORT_OWNED UpdateRecoveryDataRequest {
 	UpdateRecoveryDataRequest() = default;
 	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
 	                          Version lastEpochEnd,
-	                          const std::vector<CommitProxyInterface>& commitProxies,
-	                          const std::vector<ResolverInterface>& resolvers,
+	                          std::vector<CommitProxyInterface> const& commitProxies,
+	                          std::vector<ResolverInterface> const& resolvers,
 	                          Optional<int64_t> versionEpoch,
 	                          int8_t primaryLocality)
 	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
@@ -270,13 +270,13 @@ struct NotifiedValue {
 	using ValueType = decltype(std::declval<T>().get());
 	explicit NotifiedValue(ValueType v = 0) : value(std::make_shared<T>(v)) {}
 
-	[[nodiscard]] __attribute__((swift_attr("import_unsafe"))) Future<Void> whenAtLeast(const ValueType& limit) {
+	[[nodiscard]] __attribute__((swift_attr("import_unsafe"))) Future<Void> whenAtLeast(ValueType const& limit) {
 		return value->whenAtLeast(limit);
 	}
 
 	[[nodiscard]] ValueType get() const { return value->get(); }
 
-	void set(const ValueType& v) { value->set(v); }
+	void set(ValueType const& v) { value->set(v); }
 
 private:
 	std::shared_ptr<T> value;

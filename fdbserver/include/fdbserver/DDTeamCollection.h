@@ -66,10 +66,10 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 
 	TSSPairState() : active(false) {}
 
-	TSSPairState(const LocalityData& locality)
+	TSSPairState(LocalityData const& locality)
 	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
 
-	bool inDataZone(const LocalityData& locality) const {
+	bool inDataZone(LocalityData const& locality) const {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
 	}
 
@@ -331,13 +331,13 @@ protected:
 
 	// Returns a server team from given "servers", empty team if not found.
 	// When "wantHealthy" is true, only return if the team is healthy.
-	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
+	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(std::vector<UID> const& servers, bool wantHealthy);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 
 	void resetLocalitySet();
 
-	bool satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount = -1) const;
+	bool satisfiesPolicy(std::vector<Reference<TCServerInfo>> const& team, int amount = -1) const;
 
 	Future<Void> interruptableBuildTeams();
 
@@ -346,11 +346,11 @@ protected:
 	Future<Void> addSubsetOfEmergencyTeams();
 
 	// Check if server or machine has a valid locality based on configured replication policy
-	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, const LocalityData& locality) const;
+	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, LocalityData const& locality) const;
 
 	void evaluateTeamQuality() const;
 
-	int overlappingMembers(const std::vector<UID>& team) const;
+	int overlappingMembers(std::vector<UID> const& team) const;
 
 	int overlappingMachineMembers(std::vector<Standalone<StringRef>> const& team) const;
 
@@ -436,7 +436,7 @@ protected:
 	// buildTeams will not count teams larger than teamSize against the desired teams.
 	Future<Void> buildTeams();
 
-	bool shouldHandleServer(const StorageServerInterface& newServer) const;
+	bool shouldHandleServer(StorageServerInterface const& newServer) const;
 
 	// Check if the serverTeam belongs to a machine team; If not, create the machine team
 	// Note: This function may make the machine team number larger than the desired machine team number
@@ -456,7 +456,7 @@ protected:
 	// Adds storage servers held on process of which the Process id is “id” into excludeServers which prevent
 	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
 	// Return a vector of futures wait for all data is moved to other teams.
-	Future<Void> excludeStorageServersForWiggle(const UID& id);
+	Future<Void> excludeStorageServersForWiggle(UID const& id);
 
 	// Include wiggled storage servers by setting their status from `WIGGLING`
 	// to `NONE`. The storage recruiter will recruit them as new storage servers
@@ -516,7 +516,7 @@ protected:
 	// once the cluster is healthy again.
 	Future<Void> perpetualStorageWiggler(AsyncVar<bool>& stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
 
-	int numExistingSSOnAddr(const AddressExclusion& addr) const;
+	int numExistingSSOnAddr(AddressExclusion const& addr) const;
 
 	Future<Void> initializeStorage(RecruitStorageReply candidateWorker,
 	                               DDEnabledState const& ddEnabledState,
@@ -642,7 +642,7 @@ protected:
 		addTeam(newTeamServers, isInitialTeam);
 	}
 
-	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
+	void addTeam(std::vector<Reference<TCServerInfo>> const& newTeamServers,
 	             IsInitialTeam,
 	             IsRedundantTeam = IsRedundantTeam::False);
 
@@ -698,10 +698,10 @@ public:
 	void removeLaggingStorageServer(Key zoneId);
 
 	// whether server is under wiggling process, but wiggle is paused for some healthy compliance.
-	bool isWigglePausedServer(const UID& server) const;
+	bool isWigglePausedServer(UID const& server) const;
 
 	// Returns a random healthy team, which does not contain excludeServer.
-	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer);
+	std::vector<UID> getRandomHealthyTeam(UID const& excludeServer);
 
 	Future<Void> getTeam(GetTeamRequest);
 

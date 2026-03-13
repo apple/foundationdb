@@ -27,7 +27,7 @@
 
 // ---- FlowGrpc definitions ------
 
-void FlowGrpc::init(TLSConfig* tls_config, const std::optional<NetworkAddress>& server_addr) {
+void FlowGrpc::init(TLSConfig* tls_config, std::optional<NetworkAddress> const& server_addr) {
 	TraceEvent("FlowGrpcInit");
 	FlowGrpc* fg = new FlowGrpc();
 	g_network->setGlobal(INetwork::enGrpcState, (flowGlobalType)fg);
@@ -45,7 +45,7 @@ void FlowGrpc::init(TLSConfig* tls_config, const std::optional<NetworkAddress>& 
 
 // ---- GrpcServer definitions ------
 
-GrpcServer::GrpcServer(const NetworkAddress& addr, std::shared_ptr<GrpcCredentialProvider> provider)
+GrpcServer::GrpcServer(NetworkAddress const& addr, std::shared_ptr<GrpcCredentialProvider> provider)
   : pool_(1), address_(addr), credential_provider_(provider) {
 
 	if (provider == nullptr) {
@@ -192,22 +192,22 @@ void GrpcServer::registerService(std::shared_ptr<grpc::Service> service) {
 	on_services_changed_.trigger();
 }
 
-void GrpcServer::registerRoleServices(const UID& owner_id, const ServiceList& services) {
+void GrpcServer::registerRoleServices(UID const& owner_id, ServiceList const& services) {
 	ASSERT(g_network->isOnMainThread());
-	for (const auto& svc : services) {
+	for (auto const& svc : services) {
 		registered_services_[owner_id].push_back(svc);
 	}
 	on_services_changed_.trigger();
 }
 
-Future<Void> GrpcServer::deregisterRoleServices(const UID& owner_id) {
+Future<Void> GrpcServer::deregisterRoleServices(UID const& owner_id) {
 	ASSERT(g_network->isOnMainThread());
 	co_await stopServer();
 	registered_services_.erase(owner_id);
 	on_services_changed_.trigger();
 }
 
-void GrpcServer::deregisterRoleServicesSync(const UID& owner_id) {
+void GrpcServer::deregisterRoleServicesSync(UID const& owner_id) {
 	ASSERT(g_network->isOnMainThread());
 	stopServerSyncInternal();
 	registered_services_.erase(owner_id);

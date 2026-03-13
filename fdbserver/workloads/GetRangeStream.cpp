@@ -73,7 +73,7 @@ struct GetRangeStream : TestWorkload {
 				    KeySelector(firstGreaterOrEqual(next), next.arena()),
 				    KeySelector(firstGreaterOrEqual(end)),
 				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
-				for (const auto& [k, v] : range) {
+				for (auto const& [k, v] : range) {
 					if (printKVPairs) {
 						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 					}
@@ -104,7 +104,7 @@ struct GetRangeStream : TestWorkload {
 				                                        GetRangeLimits());
 				while (true) {
 					Standalone<RangeResultRef> range = co_await results.getFuture();
-					for (const auto& [k, v] : range) {
+					for (auto const& [k, v] : range) {
 						if (printKVPairs) {
 							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
 						}

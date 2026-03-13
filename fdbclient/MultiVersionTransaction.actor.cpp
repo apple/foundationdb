@@ -84,12 +84,12 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<Optional<Value>> DLTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<Optional<Value>> DLTransaction::get(KeyRef const& key, bool snapshot) {
 	FdbCApi::FDBFuture* f = api->transactionGet(tr, key.begin(), key.size(), snapshot);
 
 	return toThreadFuture<Optional<Value>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t present;
-		const uint8_t* value;
+		uint8_t const* value;
 		int valueLength;
 		FdbCApi::fdb_error_t error = api->futureGetValue(f, &present, &value, &valueLength);
 		ASSERT(!error);
@@ -102,12 +102,12 @@ ThreadFuture<Optional<Value>> DLTransaction::get(const KeyRef& key, bool snapsho
 	});
 }
 
-ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<Key> DLTransaction::getKey(KeySelectorRef const& key, bool snapshot) {
 	FdbCApi::FDBFuture* f =
 	    api->transactionGetKey(tr, key.getKey().begin(), key.getKey().size(), key.orEqual, key.offset, snapshot);
 
 	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const uint8_t* key;
+		uint8_t const* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
@@ -117,16 +117,16 @@ ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot
 	});
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                  const KeySelectorRef& end,
+ThreadFuture<RangeResult> DLTransaction::getRange(KeySelectorRef const& begin,
+                                                  KeySelectorRef const& end,
                                                   int limit,
                                                   bool snapshot,
                                                   bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                  const KeySelectorRef& end,
+ThreadFuture<RangeResult> DLTransaction::getRange(KeySelectorRef const& begin,
+                                                  KeySelectorRef const& end,
                                                   GetRangeLimits limits,
                                                   bool snapshot,
                                                   bool reverse) {
@@ -146,7 +146,7 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
 	                                                 snapshot,
 	                                                 reverse);
 	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
+		FdbCApi::FDBKeyValue const* kvs;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
@@ -157,21 +157,21 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
 	});
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot, bool reverse) {
+ThreadFuture<RangeResult> DLTransaction::getRange(KeyRangeRef const& keys, int limit, bool snapshot, bool reverse) {
 	return getRange(
 	    firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
+ThreadFuture<RangeResult> DLTransaction::getRange(KeyRangeRef const& keys,
                                                   GetRangeLimits limits,
                                                   bool snapshot,
                                                   bool reverse) {
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                              const KeySelectorRef& end,
-                                                              const StringRef& mapper,
+ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(KeySelectorRef const& begin,
+                                                              KeySelectorRef const& end,
+                                                              StringRef const& mapper,
                                                               GetRangeLimits limits,
                                                               bool snapshot,
                                                               bool reverse) {
@@ -193,7 +193,7 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       snapshot,
 	                                                       reverse);
 	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBMappedKeyValue* kvms;
+		FdbCApi::FDBMappedKeyValue const* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
@@ -205,17 +205,17 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	});
 }
 
-ThreadFuture<Standalone<VectorRef<const char*>>> DLTransaction::getAddressesForKey(const KeyRef& key) {
+ThreadFuture<Standalone<VectorRef<char const*>>> DLTransaction::getAddressesForKey(KeyRef const& key) {
 	FdbCApi::FDBFuture* f = api->transactionGetAddressesForKey(tr, key.begin(), key.size());
 
-	return toThreadFuture<Standalone<VectorRef<const char*>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const char** addresses;
+	return toThreadFuture<Standalone<VectorRef<char const*>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		char const** addresses;
 		int count;
 		FdbCApi::fdb_error_t error = api->futureGetStringArray(f, &addresses, &count);
 		ASSERT(!error);
 
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Standalone<VectorRef<const char*>>(VectorRef<const char*>(addresses, count), Arena());
+		return Standalone<VectorRef<char const*>>(VectorRef<char const*>(addresses, count), Arena());
 	});
 }
 
@@ -227,7 +227,7 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 	FdbCApi::FDBFuture* f = api->transactionGetVersionstamp(tr);
 
 	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const uint8_t* str;
+		uint8_t const* str;
 		int strLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &str, &strLength);
 		ASSERT(!error);
@@ -237,7 +237,7 @@ ThreadFuture<Standalone<StringRef>> DLTransaction::getVersionstamp() {
 	});
 }
 
-ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(KeyRangeRef const& keys) {
 	if (!api->transactionGetEstimatedRangeSizeBytes) {
 		return unsupported_operation();
 	}
@@ -252,7 +252,7 @@ ThreadFuture<int64_t> DLTransaction::getEstimatedRangeSizeBytes(const KeyRangeRe
 	});
 }
 
-ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(KeyRangeRef const& range,
                                                                                int64_t chunkSize) {
 	if (!api->transactionGetRangeSplitPoints) {
 		return unsupported_operation();
@@ -261,7 +261,7 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 	    tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size(), chunkSize);
 
 	return toThreadFuture<Standalone<VectorRef<KeyRef>>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKey* splitKeys;
+		FdbCApi::FDBKey const* splitKeys;
 		int keysArrayLength;
 		FdbCApi::fdb_error_t error = api->futureGetKeyArray(f, &splitKeys, &keysArrayLength);
 		ASSERT(!error);
@@ -270,39 +270,39 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> DLTransaction::getRangeSplitPoints(c
 	});
 }
 
-void DLTransaction::addReadConflictRange(const KeyRangeRef& keys) {
+void DLTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	throwIfError(api->transactionAddConflictRange(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_READ));
 }
 
-void DLTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
+void DLTransaction::atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) {
 	api->transactionAtomicOp(
 	    tr, key.begin(), key.size(), value.begin(), value.size(), static_cast<FDBMutationType>(operationType));
 }
 
-void DLTransaction::set(const KeyRef& key, const ValueRef& value) {
+void DLTransaction::set(KeyRef const& key, ValueRef const& value) {
 	api->transactionSet(tr, key.begin(), key.size(), value.begin(), value.size());
 }
 
-void DLTransaction::clear(const KeyRef& begin, const KeyRef& end) {
+void DLTransaction::clear(KeyRef const& begin, KeyRef const& end) {
 	api->transactionClearRange(tr, begin.begin(), begin.size(), end.begin(), end.size());
 }
 
-void DLTransaction::clear(const KeyRangeRef& range) {
+void DLTransaction::clear(KeyRangeRef const& range) {
 	api->transactionClearRange(tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size());
 }
 
-void DLTransaction::clear(const KeyRef& key) {
+void DLTransaction::clear(KeyRef const& key) {
 	api->transactionClear(tr, key.begin(), key.size());
 }
 
-ThreadFuture<Void> DLTransaction::watch(const KeyRef& key) {
+ThreadFuture<Void> DLTransaction::watch(KeyRef const& key) {
 	FdbCApi::FDBFuture* f = api->transactionWatch(tr, key.begin(), key.size());
 
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-void DLTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
+void DLTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 	throwIfError(api->transactionAddConflictRange(
 	    tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size(), FDB_CONFLICT_RANGE_TYPE_WRITE));
 }
@@ -422,7 +422,7 @@ void DLDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef
 	                                    value.present() ? value.get().size() : 0));
 }
 
-ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<int64_t> DLDatabase::rebootWorker(StringRef const& address, bool check, int duration) {
 	if (!api->databaseRebootWorker) {
 		return unsupported_operation();
 	}
@@ -436,7 +436,7 @@ ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool ch
 	});
 }
 
-ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
+ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(StringRef const& dcid) {
 	if (!api->databaseForceRecoveryWithDataLoss) {
 		return unsupported_operation();
 	}
@@ -445,7 +445,7 @@ ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) 
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
+ThreadFuture<Void> DLDatabase::createSnapshot(StringRef const& uid, StringRef const& snapshot_command) {
 	if (!api->databaseCreateSnapshot) {
 		return unsupported_operation();
 	}
@@ -506,7 +506,7 @@ ThreadFuture<Standalone<StringRef>> DLDatabase::getClientStatus() {
 	}
 	FdbCApi::FDBFuture* f = api->databaseGetClientStatus(db);
 	return toThreadFuture<Standalone<StringRef>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const uint8_t* str;
+		uint8_t const* str;
 		int strLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &str, &strLength);
 		ASSERT(!error);
@@ -527,7 +527,7 @@ ThreadFuture<Standalone<StringRef>> DLDatabase::getClientStatus() {
 // requireFunction - Determines the behavior if the function is not present. If true, an error is thrown. If false,
 //                   the function pointer will be set to nullptr.
 template <class T>
-void loadClientFunction(T* fp, void* lib, std::string libPath, const char* functionName, bool requireFunction) {
+void loadClientFunction(T* fp, void* lib, std::string libPath, char const* functionName, bool requireFunction) {
 	*(void**)(fp) = loadFunction(lib, functionName);
 	if (*fp == nullptr && requireFunction) {
 		TraceEvent(SevError, "ErrorLoadingFunction").detail("LibraryPath", libPath).detail("Function", functionName);
@@ -717,7 +717,7 @@ void DLApi::selectApiVersion(int apiVersion) {
 	throwIfError(api->setNetworkOption(static_cast<FDBNetworkOption>(FDBNetworkOptions::EXTERNAL_CLIENT), nullptr, 0));
 }
 
-const char* DLApi::getClientVersion() {
+char const* DLApi::getClientVersion() {
 	if (!api->getClientVersion) {
 		return "unknown";
 	}
@@ -768,7 +768,7 @@ void DLApi::stopNetwork() {
 	}
 }
 
-Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
+Reference<IDatabase> DLApi::createDatabase609(char const* clusterFilePath) {
 	FdbCApi::FDBFuture* f = api->createCluster(clusterFilePath);
 
 	auto clusterFuture = toThreadFuture<FdbCApi::FDBCluster*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
@@ -804,7 +804,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 	return makeReference<DLDatabase>(api, dbFuture);
 }
 
-Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
+Reference<IDatabase> DLApi::createDatabase(char const* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
 		throwIfError(api->createDatabase(clusterFilePath, &db));
@@ -814,7 +814,7 @@ Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	}
 }
 
-Reference<IDatabase> DLApi::createDatabaseFromConnectionString(const char* connectionString) {
+Reference<IDatabase> DLApi::createDatabaseFromConnectionString(char const* connectionString) {
 	if (api->createDatabaseFromConnectionString == nullptr) {
 		throw unsupported_operation();
 	}
@@ -931,16 +931,16 @@ ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	return executeOperation(&ITransaction::getReadVersion);
 }
 
-ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<Optional<Value>> MultiVersionTransaction::get(KeyRef const& key, bool snapshot) {
 	return executeOperation(&ITransaction::get, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<Key> MultiVersionTransaction::getKey(KeySelectorRef const& key, bool snapshot) {
 	return executeOperation(&ITransaction::getKey, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(KeySelectorRef const& begin,
+                                                            KeySelectorRef const& end,
                                                             int limit,
                                                             bool snapshot,
                                                             bool reverse) {
@@ -952,8 +952,8 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef
 	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(KeySelectorRef const& begin,
+                                                            KeySelectorRef const& end,
                                                             GetRangeLimits limits,
                                                             bool snapshot,
                                                             bool reverse) {
@@ -965,7 +965,7 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef
 	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(KeyRangeRef const& keys,
                                                             int limit,
                                                             bool snapshot,
                                                             bool reverse) {
@@ -976,7 +976,7 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+ThreadFuture<RangeResult> MultiVersionTransaction::getRange(KeyRangeRef const& keys,
                                                             GetRangeLimits limits,
                                                             bool snapshot,
                                                             bool reverse) {
@@ -987,9 +987,9 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	                                     std::forward<bool>(reverse));
 }
 
-ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                        const KeySelectorRef& end,
-                                                                        const StringRef& mapper,
+ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(KeySelectorRef const& begin,
+                                                                        KeySelectorRef const& end,
+                                                                        StringRef const& mapper,
                                                                         GetRangeLimits limits,
                                                                         bool snapshot,
                                                                         bool reverse) {
@@ -1006,66 +1006,66 @@ ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {
 	return executeOperation(&ITransaction::getVersionstamp);
 }
 
-ThreadFuture<Standalone<VectorRef<const char*>>> MultiVersionTransaction::getAddressesForKey(const KeyRef& key) {
+ThreadFuture<Standalone<VectorRef<char const*>>> MultiVersionTransaction::getAddressesForKey(KeyRef const& key) {
 	return executeOperation(&ITransaction::getAddressesForKey, key);
 }
 
-void MultiVersionTransaction::addReadConflictRange(const KeyRangeRef& keys) {
+void MultiVersionTransaction::addReadConflictRange(KeyRangeRef const& keys) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->addReadConflictRange(keys);
 	}
 }
 
-ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(const KeyRangeRef& keys) {
+ThreadFuture<int64_t> MultiVersionTransaction::getEstimatedRangeSizeBytes(KeyRangeRef const& keys) {
 	return executeOperation(&ITransaction::getEstimatedRangeSizeBytes, keys);
 }
 
-ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSplitPoints(const KeyRangeRef& range,
+ThreadFuture<Standalone<VectorRef<KeyRef>>> MultiVersionTransaction::getRangeSplitPoints(KeyRangeRef const& range,
                                                                                          int64_t chunkSize) {
 	return executeOperation(&ITransaction::getRangeSplitPoints, range, std::forward<int64_t>(chunkSize));
 }
 
-void MultiVersionTransaction::atomicOp(const KeyRef& key, const ValueRef& value, uint32_t operationType) {
+void MultiVersionTransaction::atomicOp(KeyRef const& key, ValueRef const& value, uint32_t operationType) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->atomicOp(key, value, operationType);
 	}
 }
 
-void MultiVersionTransaction::set(const KeyRef& key, const ValueRef& value) {
+void MultiVersionTransaction::set(KeyRef const& key, ValueRef const& value) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->set(key, value);
 	}
 }
 
-void MultiVersionTransaction::clear(const KeyRef& begin, const KeyRef& end) {
+void MultiVersionTransaction::clear(KeyRef const& begin, KeyRef const& end) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->clear(begin, end);
 	}
 }
 
-void MultiVersionTransaction::clear(const KeyRangeRef& range) {
+void MultiVersionTransaction::clear(KeyRangeRef const& range) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->clear(range);
 	}
 }
 
-void MultiVersionTransaction::clear(const KeyRef& key) {
+void MultiVersionTransaction::clear(KeyRef const& key) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->clear(key);
 	}
 }
 
-ThreadFuture<Void> MultiVersionTransaction::watch(const KeyRef& key) {
+ThreadFuture<Void> MultiVersionTransaction::watch(KeyRef const& key) {
 	return executeOperation(&ITransaction::watch, key);
 }
 
-void MultiVersionTransaction::addWriteConflictRange(const KeyRangeRef& keys) {
+void MultiVersionTransaction::addWriteConflictRange(KeyRangeRef const& keys) {
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		tr.transaction->addWriteConflictRange(keys);
@@ -1407,7 +1407,7 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 	}
 }
 
-ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& address, bool check, int duration) {
+ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(StringRef const& address, bool check, int duration) {
 	if (dbState->db) {
 		return dbState->db->rebootWorker(address, check, duration);
 	}
@@ -1432,11 +1432,11 @@ ThreadFuture<T> MultiVersionDatabase::executeOperation(ThreadFuture<T> (IDatabas
 	return abortableFuture(ThreadFuture<T>(Never()), db.onChange);
 }
 
-ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
+ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(StringRef const& dcid) {
 	return executeOperation(&IDatabase::forceRecoveryWithDataLoss, dcid);
 }
 
-ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
+ThreadFuture<Void> MultiVersionDatabase::createSnapshot(StringRef const& uid, StringRef const& snapshot_command) {
 	return executeOperation(&IDatabase::createSnapshot, uid, snapshot_command);
 }
 
@@ -1744,7 +1744,7 @@ void MultiVersionDatabase::DatabaseState::close() {
 
 namespace {
 
-const char* initializationStateToString(MultiVersionDatabase::InitializationState initState) {
+char const* initializationStateToString(MultiVersionDatabase::InitializationState initState) {
 	switch (initState) {
 	case MultiVersionDatabase::InitializationState::INITIALIZING:
 		return "initializing";
@@ -1903,7 +1903,7 @@ void MultiVersionApi::selectApiVersion(int apiVersion) {
 	this->apiVersion = newApiVersion;
 }
 
-const char* MultiVersionApi::getClientVersion() {
+char const* MultiVersionApi::getClientVersion() {
 	return localClient->api->getClientVersion();
 }
 
@@ -2368,7 +2368,7 @@ void MultiVersionApi::runNetwork() {
 
 	try {
 		localClient->api->runNetwork();
-	} catch (const Error& e) {
+	} catch (Error const& e) {
 		closeTraceFile();
 		throw e;
 	}
@@ -2446,11 +2446,11 @@ Reference<IDatabase> MultiVersionApi::createDatabase(ClusterConnectionRecord con
 	}
 }
 
-Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath) {
+Reference<IDatabase> MultiVersionApi::createDatabase(char const* clusterFilePath) {
 	return createDatabase(ClusterConnectionRecord::fromFile(clusterFilePath));
 }
 
-Reference<IDatabase> MultiVersionApi::createDatabaseFromConnectionString(const char* connectionString) {
+Reference<IDatabase> MultiVersionApi::createDatabaseFromConnectionString(char const* connectionString) {
 	return createDatabase(ClusterConnectionRecord::fromConnectionString(connectionString));
 }
 
@@ -2461,13 +2461,13 @@ void MultiVersionApi::updateSupportedVersions() {
 		// not mutating the client, so just call on one instance of each client version.
 		// thread 0 always exists.
 		runOnExternalClients(0, [&versionStr](Reference<ClientInfo> client) {
-			const char* ver = client->api->getClientVersion();
+			char const* ver = client->api->getClientVersion();
 			versionStr.append(versionStr.arena(), (uint8_t*)ver, (int)strlen(ver));
 			versionStr.append(versionStr.arena(), (uint8_t*)";", 1);
 		});
 
 		if (!localClient->failed) {
-			const char* local = localClient->api->getClientVersion();
+			char const* local = localClient->api->getClientVersion();
 			versionStr.append(versionStr.arena(), (uint8_t*)local, (int)strlen(local));
 		} else {
 			versionStr.resize(versionStr.arena(), std::max(0, versionStr.size() - 1));
@@ -2684,7 +2684,7 @@ bool ClientInfo::canReplace(Reference<ClientInfo> other) const {
 	return !protocolVersion.isCompatible(other->protocolVersion);
 }
 
-std::string ClientInfo::getTraceFileIdentifier(const std::string& baseIdentifier) {
+std::string ClientInfo::getTraceFileIdentifier(std::string const& baseIdentifier) {
 	std::string versionStr = releaseVersion;
 	std::replace(versionStr.begin(), versionStr.end(), '.', '_');
 	return format("%s_v%st%d", baseIdentifier.c_str(), versionStr.c_str(), threadIndex);
@@ -2733,12 +2733,12 @@ public:
 
 	bool canFire(int notMadeActive) const override { return true; }
 
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		ASSERT(!f.isError() && !expectedValue.isError() && f.get() == expectedValue.get());
 		delete this;
 	}
 
-	void error(const Error& e, int& userParam) override {
+	void error(Error const& e, int& userParam) override {
 		ASSERT(legalErrors.count(e.code()) > 0 ||
 		       (f.isError() && expectedValue.isError() && f.getError().code() == expectedValue.getError().code()));
 		delete this;
@@ -2896,7 +2896,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 	__lsan::ScopedDisabler disableLeakChecks;
 #endif
 
-	volatile bool* done = (volatile bool*)arg;
+	bool volatile* done = (bool volatile*)arg;
 	try {
 		for (int i = 0; i < 25; ++i) {
 			FutureInfo f = createVarOnMainThread(false);
@@ -2994,11 +2994,11 @@ public:
 	  : callbackf(callbackf), f(f), userdata(userdata) {}
 
 	bool canFire(int notMadeActive) const override { return true; }
-	void fire(const Void& unused, int& userParam) override {
+	void fire(Void const& unused, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}
-	void error(const Error& e, int& userParam) override {
+	void error(Error const& e, int& userParam) override {
 		(*callbackf)(f, userdata);
 		delete this;
 	}

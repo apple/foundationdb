@@ -58,7 +58,8 @@
  * ensure a compile error in such cases, and attempt to make the compile error
  * slightly informative.
  */
-#define This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION() { == == = }
+#define This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION()                                            \
+	{ == == = }
 #define FDB_REMOVED_FUNCTION This_FoundationDB_API_function_is_removed_at_this_FDB_API_VERSION(0)
 
 #include <stdint.h>
@@ -70,7 +71,7 @@
 extern "C" {
 #endif
 
-DLLEXPORT const char* fdb_get_error(fdb_error_t code);
+DLLEXPORT char const* fdb_get_error(fdb_error_t code);
 
 DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_error_t code);
 
@@ -102,21 +103,21 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(
 
 #pragma pack(push, 4)
 typedef struct key {
-	const uint8_t* key;
+	uint8_t const* key;
 	int key_length;
 } FDBKey;
 #if FDB_API_VERSION >= 630
 typedef struct keyvalue {
-	const uint8_t* key;
+	uint8_t const* key;
 	int key_length;
-	const uint8_t* value;
+	uint8_t const* value;
 	int value_length;
 } FDBKeyValue;
 #else
 typedef struct keyvalue {
-	const void* key;
+	void const* key;
 	int key_length;
-	const void* value;
+	void const* value;
 	int value_length;
 } FDBKeyValue;
 #endif
@@ -179,9 +180,9 @@ typedef struct mappedkeyvalue {
 
 #pragma pack(push, 4)
 typedef struct keyrange {
-	const uint8_t* begin_key;
+	uint8_t const* begin_key;
 	int begin_key_length;
-	const uint8_t* end_key;
+	uint8_t const* end_key;
 	int end_key_length;
 } FDBKeyRange;
 
@@ -207,7 +208,7 @@ typedef struct readgranulecontext {
 	void* userContext;
 
 	/* Returns a unique id for the load. Asynchronous to support queueing multiple in parallel. */
-	int64_t (*start_load_f)(const char* filename,
+	int64_t (*start_load_f)(char const* filename,
 	                        int filenameLength,
 	                        int64_t offset,
 	                        int64_t length,
@@ -256,7 +257,7 @@ typedef struct bgencryptionctx {
 } FDBBGEncryptionCtx;
 
 typedef struct bgfilepointer {
-	const uint8_t* filename_ptr;
+	uint8_t const* filename_ptr;
 	int filename_length;
 	int64_t file_offset;
 	int64_t file_length;
@@ -268,9 +269,9 @@ typedef struct bgfilepointer {
 typedef struct bgmutation {
 	/* FDBBGMutationType */ uint8_t type;
 	int64_t version;
-	const uint8_t* param1_ptr;
+	uint8_t const* param1_ptr;
 	int param1_length;
-	const uint8_t* param2_ptr;
+	uint8_t const* param2_ptr;
 	int param2_length;
 } FDBBGMutation;
 
@@ -344,7 +345,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key_array(FDBFuture* f,
                                                                   int* out_count);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_string_array(FDBFuture* f,
-                                                                     const char*** out_strings,
+                                                                     char const*** out_strings,
                                                                      int* out_count);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyrange_array(FDBFuture* f,
@@ -361,9 +362,9 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_result_get_keyvalue_array(FDBResult
 
 /* TODO: add other return types as we need them */
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(const char* cluster_file_path, FDBDatabase** out_database);
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database(char const* cluster_file_path, FDBDatabase** out_database);
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database_from_connection_string(const char* connection_string,
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_create_database_from_connection_string(char const* connection_string,
                                                                                     FDBDatabase** out_database);
 
 DLLEXPORT void fdb_database_destroy(FDBDatabase* d);
@@ -565,7 +566,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points(F
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_select_api_version_impl(int runtime_version, int header_version);
 
 DLLEXPORT int fdb_get_max_api_version(void);
-DLLEXPORT const char* fdb_get_client_version(void);
+DLLEXPORT char const* fdb_get_client_version(void);
 
 /* LEGACY API VERSIONS */
 
@@ -594,7 +595,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_cluster(FDBFuture* f, FD
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_database(FDBFuture* f, FDBDatabase** out_database);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_create_cluster(const char* cluster_file_path);
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_create_cluster(char const* cluster_file_path);
 
 DLLEXPORT void fdb_cluster_destroy(FDBCluster* c);
 
@@ -616,7 +617,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_cluster_create_database(FDBCluster* 
 #endif
 
 #if FDB_API_VERSION < 23
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_error(FDBFuture* f, const char** out_description /* = NULL */);
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_error(FDBFuture* f, char const** out_description /* = NULL */);
 
 DLLEXPORT fdb_bool_t fdb_future_is_error(FDBFuture* f);
 #else
@@ -638,7 +639,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_key(FDBTransaction* 
                                                                 fdb_bool_t or_equal,
                                                                 int offset);
 
-DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_setup_network(const char* local_address);
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_setup_network(char const* local_address);
 
 DLLEXPORT void fdb_transaction_set_option(FDBTransaction* tr, FDBTransactionOption option);
 

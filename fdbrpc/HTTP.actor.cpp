@@ -37,7 +37,7 @@
 namespace HTTP {
 
 // AWS V4 headers require this encoding for its signature calculation
-std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
+std::string awsV4URIEncode(std::string const& s, bool encodeSlash) {
 	std::string o;
 	o.reserve(s.size() * 3);
 	char buf[4];
@@ -54,7 +54,7 @@ std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
 	return o;
 }
 
-std::string urlEncode(const std::string& s) {
+std::string urlEncode(std::string const& s) {
 	std::string o;
 	o.reserve(s.size() * 3);
 	char buf[4];
@@ -68,7 +68,7 @@ std::string urlEncode(const std::string& s) {
 	return o;
 }
 
-std::string urlDecode(const std::string& encoded) {
+std::string urlDecode(std::string const& encoded) {
 	std::string decoded;
 	decoded.reserve(encoded.size());
 	for (size_t i = 0; i < encoded.length(); ++i) {
@@ -154,7 +154,7 @@ bool verifyMD5(HTTPData<std::string>* data, bool fail_if_header_missing, Optiona
 std::string IncomingResponse::toString() const {
 	std::string r = fmt::format("Response Code: {0}\n", code);
 	r += fmt::format("Response ContentLen: {0}\n", data.contentLen);
-	for (const auto& [headerName, headerValue] : data.headers)
+	for (auto const& [headerName, headerValue] : data.headers)
 		r += fmt::format("Response Header: {0}: {1}\n", headerName, headerValue);
 	r.append("-- RESPONSE CONTENT--\n");
 	// Limit the length of the response content to 1024 bytes for logging.
@@ -171,7 +171,7 @@ std::string IncomingResponse::toString() const {
 }
 
 void writeHeaders(HTTP::Headers const& headers, PacketWriter& writer) {
-	for (const auto& [headerName, headerValue] : headers) {
+	for (auto const& [headerName, headerValue] : headers) {
 		writer.serializeBytes(headerName);
 		writer.serializeBytes(": "_sr);
 		writer.serializeBytes(headerValue);
@@ -258,7 +258,7 @@ ACTOR Future<int> read_into_string(Reference<IConnection> conn, std::string* buf
 // either it is found or the connection ends, at which point connection_failed is thrown and buf contains
 // everything that was read up to that point.
 ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
-                                                const char* delim,
+                                                char const* delim,
                                                 std::string* buf,
                                                 size_t pos) {
 	state size_t sPos = pos;
@@ -917,10 +917,10 @@ ACTOR Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
 	return remoteConnection;
 }
 
-Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
-                                            const std::string& remoteService,
-                                            const std::string& proxyHost,
-                                            const std::string& proxyService) {
+Future<Reference<IConnection>> proxyConnect(std::string const& remoteHost,
+                                            std::string const& remoteService,
+                                            std::string const& proxyHost,
+                                            std::string const& proxyService) {
 	return proxyConnectImpl(remoteHost, remoteService, proxyHost, proxyService);
 }
 

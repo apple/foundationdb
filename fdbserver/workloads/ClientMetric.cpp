@@ -25,12 +25,12 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/Tuple.h"
 
-static const StringRef sampleTrInfoKey =
+static StringRef const sampleTrInfoKey =
     "\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/XXXX/"_sr;
-static const auto versionStampIndex = sampleTrInfoKey.toString().find('S');
-static const int versionStampLength = 10;
+static auto const versionStampIndex = sampleTrInfoKey.toString().find('S');
+static int const versionStampLength = 10;
 
-static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
+static Key const CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
 
 struct ClientMetricWorkload : TestWorkload {
 	static constexpr auto NAME = "ClientMetric";
@@ -108,12 +108,12 @@ struct ClientMetricWorkload : TestWorkload {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				std::string sampleRateStr = "default";
 				std::string sizeLimitStr = "default";
-				const double sampleRateDbl =
+				double const sampleRateDbl =
 				    cx->globalConfig->get<double>(fdbClientInfoTxnSampleRate, std::numeric_limits<double>::infinity());
 				if (!std::isinf(sampleRateDbl)) {
 					sampleRateStr = std::to_string(sampleRateDbl);
 				}
-				const int64_t sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
+				int64_t const sizeLimit = cx->globalConfig->get<int64_t>(fdbClientInfoTxnSizeLimit, -1);
 				if (sizeLimit != -1) {
 					sizeLimitStr = std::to_string(sizeLimit);
 				}

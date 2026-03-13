@@ -139,7 +139,7 @@ struct MiniCycleWorkload : TestWorkload {
 	Key keyForIndex(int n) { return key(n); }
 	Key key(int n) { return doubleToTestKey(n, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
-	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
+	int fromValue(ValueRef const& v) { return testKeyToDouble(v, keyPrefix); }
 
 	// cycleSize returns the length of each mini-cycle besides the last,
 	// which is cycleSize + remainder nodes in length
@@ -154,11 +154,11 @@ struct MiniCycleWorkload : TestWorkload {
 	int endKey(int clientId) { return cycleSize(clientId) + cycleOffset(clientId); }
 
 	Standalone<KeyValueRef> operator()(int n) {
-		const uint64_t val = (n + 1) % endKey(clientId) ? n + 1 : beginKey(clientId);
+		uint64_t const val = (n + 1) % endKey(clientId) ? n + 1 : beginKey(clientId);
 		return KeyValueRef(key(n), value(val));
 	}
 
-	void badRead(const char* name, int r, Transaction& tr) {
+	void badRead(char const* name, int r, Transaction& tr) {
 		TraceEvent(SevError, "MiniCycleBadRead")
 		    .detail(name, r)
 		    .detail("Key", printable(key(r)))
@@ -229,7 +229,7 @@ struct MiniCycleWorkload : TestWorkload {
 		}
 	}
 
-	void logTestData(const VectorRef<KeyValueRef>& data) {
+	void logTestData(VectorRef<KeyValueRef> const& data) {
 		TraceEvent("TestFailureDetail").log();
 		int index = 0;
 		for (auto& entry : data) {
@@ -241,7 +241,7 @@ struct MiniCycleWorkload : TestWorkload {
 		}
 	}
 
-	bool cycleCheckData(const VectorRef<KeyValueRef>& data, Version v, int clientID) {
+	bool cycleCheckData(VectorRef<KeyValueRef> const& data, Version v, int clientID) {
 		if (data.size() != cycleSize(clientId)) {
 			logTestData(data);
 			TraceEvent(SevError, "TestFailure")

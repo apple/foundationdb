@@ -83,8 +83,8 @@ public:
 
 	std::tuple<size_t, size_t, size_t> size() const { return std::make_tuple(0, 0, 0); }
 
-	const_iterator find(const StringRef& key) const { return data.find(key); }
-	iterator find(const StringRef& key) { return data.find(key); }
+	const_iterator find(StringRef const& key) const { return data.find(key); }
+	iterator find(StringRef const& key) { return data.find(key); }
 	const_iterator begin() const { return data.begin(); }
 	iterator begin() { return data.begin(); }
 	const_iterator cbegin() const { return begin(); }
@@ -92,20 +92,20 @@ public:
 	iterator end() { return data.end(); }
 	const_iterator cend() const { return end(); }
 
-	const_iterator lower_bound(const StringRef& key) const { return data.lower_bound(key); }
-	iterator lower_bound(const StringRef& key) { return data.lower_bound(key); }
-	const_iterator upper_bound(const StringRef& key) const { return data.upper_bound(key); }
-	iterator upper_bound(const StringRef& key) { return data.upper_bound(key); }
+	const_iterator lower_bound(StringRef const& key) const { return data.lower_bound(key); }
+	iterator lower_bound(StringRef const& key) { return data.lower_bound(key); }
+	const_iterator upper_bound(StringRef const& key) const { return data.upper_bound(key); }
+	iterator upper_bound(StringRef const& key) { return data.upper_bound(key); }
 	const_iterator previous(const_iterator i) const { return data.previous(i); }
 	const_iterator previous(iterator i) const { return data.previous(const_iterator{ i }); }
 	iterator previous(iterator i) { return data.previous(i); }
 
 	void erase(iterator begin, iterator end) { data.erase(begin, end); }
-	iterator insert(const StringRef& key, const StringRef& val, bool replaceExisting = true) {
+	iterator insert(StringRef const& key, StringRef const& val, bool replaceExisting = true) {
 		KeyValueMapPair pair(key, val);
 		return data.insert(pair, pair.arena.getSize() + data.getElementBytes(), replaceExisting);
 	}
-	int insert(const std::vector<std::pair<KeyValueMapPair, uint64_t>>& pairs, bool replaceExisting = true) {
+	int insert(std::vector<std::pair<KeyValueMapPair, uint64_t>> const& pairs, bool replaceExisting = true) {
 		return data.insert(pairs, replaceExisting);
 	}
 

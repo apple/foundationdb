@@ -54,23 +54,23 @@ struct MoveInShardMetaData {
 	bool conductBulkLoad = false;
 
 	MoveInShardMetaData() = default;
-	MoveInShardMetaData(const UID& id,
-	                    const UID& dataMoveId,
+	MoveInShardMetaData(UID const& id,
+	                    UID const& dataMoveId,
 	                    std::vector<KeyRange> ranges,
-	                    const Version version,
+	                    Version const version,
 	                    MoveInPhase phase,
 	                    bool conductBulkLoad)
 	  : id(id), dataMoveId(dataMoveId), ranges(ranges), createVersion(version), highWatermark(version),
 	    phase(static_cast<int8_t>(phase)), startTime(now()), conductBulkLoad(conductBulkLoad) {}
-	MoveInShardMetaData(const UID& id,
-	                    const UID& dataMoveId,
+	MoveInShardMetaData(UID const& id,
+	                    UID const& dataMoveId,
 	                    std::vector<KeyRange> ranges,
-	                    const Version version,
+	                    Version const version,
 	                    bool conductBulkLoad)
 	  : MoveInShardMetaData(id, dataMoveId, ranges, version, MoveInPhase::Fetching, conductBulkLoad) {}
-	MoveInShardMetaData(const UID& dataMoveId,
+	MoveInShardMetaData(UID const& dataMoveId,
 	                    std::vector<KeyRange> ranges,
-	                    const Version version,
+	                    Version const version,
 	                    bool conductBulkLoad)
 	  : MoveInShardMetaData(deterministicRandom()->randomUniqueID(),
 	                        dataMoveId,
@@ -79,7 +79,7 @@ struct MoveInShardMetaData {
 	                        MoveInPhase::Fetching,
 	                        conductBulkLoad) {}
 
-	bool operator<(const MoveInShardMetaData& rhs) const {
+	bool operator<(MoveInShardMetaData const& rhs) const {
 		return this->ranges.front().begin < rhs.ranges.front().begin;
 	}
 
@@ -125,18 +125,18 @@ private:
 
 KeyRange persistMoveInShardsKeyRange();
 
-KeyRange persistUpdatesKeyRange(const UID& id);
+KeyRange persistUpdatesKeyRange(UID const& id);
 
-Key persistUpdatesKey(const UID& id, const Version version);
+Key persistUpdatesKey(UID const& id, Version const version);
 
 Version decodePersistUpdateVersion(KeyRef versionKey);
 
-Key persistMoveInShardKey(const UID& id);
+Key persistMoveInShardKey(UID const& id);
 
-UID decodeMoveInShardKey(const KeyRef& key);
+UID decodeMoveInShardKey(KeyRef const& key);
 
-Value moveInShardValue(const MoveInShardMetaData& meta);
+Value moveInShardValue(MoveInShardMetaData const& meta);
 
-MoveInShardMetaData decodeMoveInShardValue(const ValueRef& value);
+MoveInShardMetaData decodeMoveInShardValue(ValueRef const& value);
 
 #endif

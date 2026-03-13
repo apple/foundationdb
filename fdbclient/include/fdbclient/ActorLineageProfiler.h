@@ -36,13 +36,13 @@ void samplingProfilerUpdateWindow(std::optional<std::any> window);
 
 struct IALPCollectorBase {
 	virtual std::optional<std::any> collect(ActorLineage*) = 0;
-	virtual const std::string_view& name() = 0;
+	virtual std::string_view const& name() = 0;
 	IALPCollectorBase();
 };
 
 template <class T>
 struct IALPCollector : IALPCollectorBase {
-	const std::string_view& name() override { return T::name; }
+	std::string_view const& name() override { return T::name; }
 };
 
 struct Sample : std::enable_shared_from_this<Sample> {
@@ -160,8 +160,8 @@ public:
 	 * \param to The max age of all returned samples.
 	 */
 	std::vector<std::shared_ptr<Sample>> get(double from = 0.0, double to = std::numeric_limits<double>::max()) const;
-	void collect(const Reference<ActorLineage>& lineage);
-	const SampleCollector& collector() const { return _collector; }
+	void collect(Reference<ActorLineage> const& lineage);
+	SampleCollector const& collector() const { return _collector; }
 	SampleCollector& collector() { return _collector; }
 	Reference<ActorLineage> getLineage() { return _currentLineage; }
 };

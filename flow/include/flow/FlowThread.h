@@ -196,7 +196,7 @@ template <class T>
 class ThreadFutureStream {
 public:
 	ThreadFutureStream() : queue(nullptr) {}
-	ThreadFutureStream(const ThreadFutureStream& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
+	ThreadFutureStream(ThreadFutureStream const& rhs) : queue(rhs.queue) { queue->addFutureRef(); }
 	ThreadFutureStream(ThreadFutureStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	explicit ThreadFutureStream(ThreadNotifiedQueue<T>* queue) : queue(queue) {}
 	~ThreadFutureStream() {
@@ -217,7 +217,7 @@ public:
 		queue = nullptr;
 	}
 
-	void operator=(const ThreadFutureStream& rhs) {
+	void operator=(ThreadFutureStream const& rhs) {
 		rhs.queue->addFutureRef();
 		if (queue)
 			queue->delFutureRef();
@@ -233,8 +233,8 @@ public:
 		}
 	}
 
-	bool operator==(const ThreadFutureStream& rhs) { return rhs.queue == queue; }
-	bool operator!=(const ThreadFutureStream& rhs) { return rhs.queue != queue; }
+	bool operator==(ThreadFutureStream const& rhs) { return rhs.queue == queue; }
+	bool operator!=(ThreadFutureStream const& rhs) { return rhs.queue != queue; }
 
 	T pop() {
 		ASSERT(g_network->isOnMainThread());
@@ -255,14 +255,14 @@ template <class T>
 class ThreadReturnPromiseStream {
 public:
 	ThreadReturnPromiseStream() : queue(new ThreadNotifiedQueue<T>(0, 1)) {}
-	ThreadReturnPromiseStream(const ThreadReturnPromiseStream& rhs) = delete;
+	ThreadReturnPromiseStream(ThreadReturnPromiseStream const& rhs) = delete;
 	ThreadReturnPromiseStream(ThreadReturnPromiseStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
 	~ThreadReturnPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();
 	}
 
-	void send(const T& value) { queue->send(value); }
+	void send(T const& value) { queue->send(value); }
 	void send(T&& value) { queue->send(std::forward<T>(value)); }
 	void sendError(Error error) { queue->sendError(error); }
 
@@ -271,7 +271,7 @@ public:
 		return ThreadFutureStream<T>(queue);
 	}
 
-	void operator=(const ThreadReturnPromiseStream& rhs) {
+	void operator=(ThreadReturnPromiseStream const& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
 			queue->delPromiseRef();
@@ -297,7 +297,7 @@ private:
 // Fixes IDE build.
 #ifndef NO_INTELLISENSE
 template <class T>
-T waitNext(const ThreadFutureStream<T>&);
+T waitNext(ThreadFutureStream<T> const&);
 #endif
 
 #endif

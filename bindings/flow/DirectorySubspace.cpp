@@ -94,11 +94,11 @@ Reference<DirectoryLayer> DirectorySubspace::getDirectoryLayer() {
 	return directoryLayer;
 }
 
-const Standalone<StringRef> DirectorySubspace::getLayer() const {
+Standalone<StringRef> const DirectorySubspace::getLayer() const {
 	return layer;
 }
 
-const IDirectory::Path DirectorySubspace::getPath() const {
+IDirectory::Path const DirectorySubspace::getPath() const {
 	return path;
 }
 

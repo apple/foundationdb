@@ -11,22 +11,22 @@
 
 namespace {
 
-void usage(const char* execName, std::ostream& out) {
+void usage(char const* execName, std::ostream& out) {
 	out << "USAGE: " << execName << " [OPTIONS] [--] file [file]..." << std::endl;
 	out << '\t' << "-h|--help: print this help" << std::endl;
 }
 
 struct Error {
-	const char* msg = "";
+	char const* msg = "";
 	bool isFatal = false;
-	const char* what() const { return msg; }
+	char const* what() const { return msg; }
 };
 
 struct Actor {
 	template <class Str>
 	explicit Actor(std::unordered_map<std::string, unsigned long>& results, unsigned long id, Str&& name)
 	  : results(results), id(id), name(std::forward<Str>(name)) {}
-	Actor(const Actor&) = delete;
+	Actor(Actor const&) = delete;
 	~Actor() { collect(); }
 	std::unordered_map<std::string, unsigned long>& results;
 	unsigned long id;
@@ -65,7 +65,7 @@ class Traces {
 	std::unordered_map<unsigned long, std::shared_ptr<Actor>> actors;
 	std::unordered_map<std::string, unsigned long> results;
 
-	std::vector<std::string> split(const std::string& str, char delim) {
+	std::vector<std::string> split(std::string const& str, char delim) {
 		std::vector<std::string> res;
 		std::string::size_type pos = 0;
 		while (pos < str.size()) {
@@ -82,7 +82,7 @@ class Traces {
 
 public:
 	void print(std::ostream& out) const {
-		for (const auto& r : results) {
+		for (auto const& r : results) {
 			out << r.first << ' ' << r.second << std::endl;
 		}
 	}
@@ -103,7 +103,7 @@ public:
 			}
 			unsigned long timestamp = std::stoul(v[0]);
 			int op = std::stoi(v[1]);
-			const auto& name = v[2];
+			auto const& name = v[2];
 			unsigned long id = std::stoul(v[3]);
 			if (op == OP_CREATE) {
 				actors[id] = std::make_shared<Actor>(results, id, name);
@@ -167,7 +167,7 @@ int main(int argc, char* argv[]) {
 		std::cerr << "ERROR: No file" << std::endl;
 	}
 	Traces traces;
-	for (const auto& file : files) {
+	for (auto const& file : files) {
 		std::fstream in(file.c_str(), std::ios_base::in);
 		if (!in) {
 			std::cerr << "Error: can't open file: " << file << std::endl;

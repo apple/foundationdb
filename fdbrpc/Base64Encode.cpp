@@ -23,8 +23,8 @@
 namespace {
 
 // work around GCC bug 87476 (~9.0)
-static const uint8_t urlEncodedTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-static const uint8_t regularBase64Table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static uint8_t const urlEncodedTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+static uint8_t const regularBase64Table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 template <bool UrlEncode>
 uint8_t encodeValue(uint8_t valueIn) noexcept {
@@ -36,9 +36,9 @@ uint8_t encodeValue(uint8_t valueIn) noexcept {
 }
 
 template <bool UrlEncode>
-int doEncode(const uint8_t* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept {
-	const uint8_t* plainchar = plaintextIn;
-	const uint8_t* const plaintextEnd = plaintextIn + lengthIn;
+int doEncode(uint8_t const* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept {
+	uint8_t const* plainchar = plaintextIn;
+	uint8_t const* const plaintextEnd = plaintextIn + lengthIn;
 	uint8_t* codechar = codeOut;
 	uint8_t result = 0;
 	uint8_t fragment = 0;
@@ -112,7 +112,7 @@ StringRef doEncodeWithArena(Arena& arena, StringRef plainText) {
 
 namespace base64 {
 
-int encode(const uint8_t* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept {
+int encode(uint8_t const* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept {
 	return doEncode<false>(plaintextIn, lengthIn, codeOut);
 }
 
@@ -126,7 +126,7 @@ StringRef encode(Arena& arena, StringRef plainText) {
 
 namespace url {
 
-int encode(const uint8_t* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept {
+int encode(uint8_t const* __restrict plaintextIn, int lengthIn, uint8_t* __restrict codeOut) noexcept {
 	return doEncode<true>(plaintextIn, lengthIn, codeOut);
 }
 

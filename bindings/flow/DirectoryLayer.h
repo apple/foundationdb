@@ -58,21 +58,21 @@ public:
 	Future<bool> removeIfExists(Reference<Transaction> const& tr, Path const& path = Path());
 
 	Reference<DirectoryLayer> getDirectoryLayer();
-	const Standalone<StringRef> getLayer() const;
-	const Path getPath() const;
+	Standalone<StringRef> const getLayer() const;
+	Path const getPath() const;
 
-	static const Subspace DEFAULT_NODE_SUBSPACE;
-	static const Subspace DEFAULT_CONTENT_SUBSPACE;
-	static const StringRef PARTITION_LAYER;
+	static Subspace const DEFAULT_NODE_SUBSPACE;
+	static Subspace const DEFAULT_CONTENT_SUBSPACE;
+	static StringRef const PARTITION_LAYER;
 
 	// private:
-	static const uint8_t LITTLE_ENDIAN_LONG_ONE[8];
-	static const StringRef HIGH_CONTENTION_KEY;
-	static const StringRef LAYER_KEY;
-	static const StringRef VERSION_KEY;
-	static const int64_t SUB_DIR_KEY;
-	static const uint32_t VERSION[3];
-	static const StringRef DEFAULT_NODE_SUBSPACE_PREFIX;
+	static uint8_t const LITTLE_ENDIAN_LONG_ONE[8];
+	static StringRef const HIGH_CONTENTION_KEY;
+	static StringRef const LAYER_KEY;
+	static StringRef const VERSION_KEY;
+	static int64_t const SUB_DIR_KEY;
+	static uint32_t const VERSION[3];
+	static StringRef const DEFAULT_NODE_SUBSPACE_PREFIX;
 
 	struct Node {
 		Node() {}

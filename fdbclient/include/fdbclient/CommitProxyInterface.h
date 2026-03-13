@@ -181,8 +181,8 @@ struct CommitID {
 	CommitID() : version(invalidVersion), txnBatchId(0) {}
 	CommitID(Version version,
 	         uint16_t txnBatchId,
-	         const Optional<Value>& metadataVersion,
-	         const Optional<Standalone<VectorRef<int>>>& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>())
+	         Optional<Value> const& metadataVersion,
+	         Optional<Standalone<VectorRef<int>>> const& conflictingKRIndices = Optional<Standalone<VectorRef<int>>>())
 	  : version(version), txnBatchId(txnBatchId), metadataVersion(metadataVersion),
 	    conflictingKRIndices(conflictingKRIndices) {}
 };
@@ -490,12 +490,12 @@ struct GetHealthMetricsReply {
 	Standalone<StringRef> serialized;
 	HealthMetrics healthMetrics;
 
-	explicit GetHealthMetricsReply(const HealthMetrics& healthMetrics = HealthMetrics())
+	explicit GetHealthMetricsReply(HealthMetrics const& healthMetrics = HealthMetrics())
 	  : healthMetrics(healthMetrics) {
 		update(healthMetrics, true, true);
 	}
 
-	void update(const HealthMetrics& healthMetrics, bool detailedInput, bool detailedOutput) {
+	void update(HealthMetrics const& healthMetrics, bool detailedInput, bool detailedOutput) {
 		this->healthMetrics.update(healthMetrics, detailedInput, detailedOutput);
 		BinaryWriter bw(IncludeVersion());
 		bw << this->healthMetrics;
@@ -544,7 +544,7 @@ struct GetDDMetricsRequest {
 	ReplyPromise<struct GetDDMetricsReply> reply;
 
 	GetDDMetricsRequest() {}
-	explicit GetDDMetricsRequest(KeyRange const& keys, const int shardLimit) : keys(keys), shardLimit(shardLimit) {}
+	explicit GetDDMetricsRequest(KeyRange const& keys, int const shardLimit) : keys(keys), shardLimit(shardLimit) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

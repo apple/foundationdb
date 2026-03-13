@@ -28,7 +28,7 @@ public:
 	fdb::Key keyPrefix;
 	Random random;
 
-	SetAndGetWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
+	SetAndGetWorkload(WorkloadConfig const& config) : WorkloadBase(config) {
 		keyPrefix = fdb::toBytesRef(fmt::format("{}/", workloadId));
 	}
 

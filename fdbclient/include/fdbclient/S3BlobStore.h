@@ -44,13 +44,13 @@ struct BlobStoreConnectionPoolKey {
 	std::string region;
 	bool isTLS;
 
-	BlobStoreConnectionPoolKey(const std::string& host,
-	                           const std::string& service,
-	                           const std::string& region,
+	BlobStoreConnectionPoolKey(std::string const& host,
+	                           std::string const& service,
+	                           std::string const& region,
 	                           bool isTLS)
 	  : host(host), service(service), region(region), isTLS(isTLS) {}
 
-	bool operator==(const BlobStoreConnectionPoolKey& other) const {
+	bool operator==(BlobStoreConnectionPoolKey const& other) const {
 		return isTLS == other.isTLS && host == other.host && service == other.service && region == other.region;
 	}
 };
@@ -58,7 +58,7 @@ struct BlobStoreConnectionPoolKey {
 namespace std {
 template <>
 struct hash<BlobStoreConnectionPoolKey> {
-	std::size_t operator()(const BlobStoreConnectionPoolKey& key) const {
+	std::size_t operator()(BlobStoreConnectionPoolKey const& key) const {
 		std::size_t seed = 0;
 		boost::hash_combine(seed, std::hash<std::string>{}(key.host));
 		boost::hash_combine(seed, std::hash<std::string>{}(key.service));
@@ -75,7 +75,7 @@ class S3BlobStoreEndpoint : public ReferenceCounted<S3BlobStoreEndpoint> {
 public:
 	struct Stats {
 		Stats() : requests_successful(0), requests_failed(0), bytes_sent(0) {}
-		Stats operator-(const Stats& rhs);
+		Stats operator-(Stats const& rhs);
 		void clear() { memset(this, 0, sizeof(*this)); }
 		json_spirit::mObject getJSON();
 
@@ -215,7 +215,7 @@ public:
 		}
 
 		// CROSS_PROCESS_FIX: Copy constructor with cross-process detection
-		ReusableConnection(const ReusableConnection& other)
+		ReusableConnection(ReusableConnection const& other)
 		  : conn(other.conn), expirationTime(other.expirationTime), creatingProcess(other.creatingProcess) {
 			if (g_network && g_network->isSimulated() && creatingProcess.isValid() &&
 			    creatingProcess != g_network->getLocalAddress()) {
@@ -226,7 +226,7 @@ public:
 		}
 
 		// CROSS_PROCESS_FIX: Assignment operator with cross-process detection
-		ReusableConnection& operator=(const ReusableConnection& other) {
+		ReusableConnection& operator=(ReusableConnection const& other) {
 			if (this != &other) {
 				conn = other.conn;
 				expirationTime = other.expirationTime;
@@ -312,7 +312,7 @@ public:
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
-		const char* resource = "";
+		char const* resource = "";
 		if (withResource)
 			resource = "<name>";
 		return format("blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/"
@@ -325,8 +325,8 @@ public:
 	// Parse url and return a S3BlobStoreEndpoint
 	// If the url has parameters that S3BlobStoreEndpoint can't consume then an error will be thrown unless
 	// ignored_parameters is given in which case the unconsumed parameters will be added to it.
-	static Reference<S3BlobStoreEndpoint> fromString(const std::string& url,
-	                                                 const Optional<std::string>& proxy,
+	static Reference<S3BlobStoreEndpoint> fromString(std::string const& url,
+	                                                 Optional<std::string> const& proxy,
 	                                                 std::string* resourceFromURL,
 	                                                 std::string* error,
 	                                                 ParametersT* ignored_parameters);
@@ -336,7 +336,7 @@ public:
 	std::string getResourceURL(std::string resource, std::string params) const;
 
 	// Construct a resource path for S3 operations
-	std::string constructResourcePath(const std::string& bucket, const std::string& object) const;
+	std::string constructResourcePath(std::string const& bucket, std::string const& object) const;
 
 	// FIXME: add periodic connection reaper to pool
 	// local connection pool for this blobstore
@@ -378,8 +378,8 @@ public:
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
 
 	// Set headers in the AWS V4 authorization format. $date and $datestamp are used for unit testing
-	void setV4AuthHeaders(const std::string& verb,
-	                      const std::string& resource,
+	void setV4AuthHeaders(std::string const& verb,
+	                      std::string const& resource,
 	                      HTTP::Headers& headers,
 	                      std::string date = "",
 	                      std::string datestamp = "");
@@ -393,7 +393,7 @@ public:
 
 	Future<Reference<HTTP::IncomingResponse>> doRequest(std::string const& verb,
 	                                                    std::string const& resource,
-	                                                    const HTTP::Headers& headers,
+	                                                    HTTP::Headers const& headers,
 	                                                    UnsentPacketQueue* pContent,
 	                                                    int contentLen,
 	                                                    std::set<unsigned int> successCodes);

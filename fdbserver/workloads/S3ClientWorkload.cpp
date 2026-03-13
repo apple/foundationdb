@@ -42,7 +42,7 @@
 // ../src/foundationdb/tests/slow/S3ClientWorkload.toml
 struct S3ClientWorkload : TestWorkload {
 	static constexpr auto NAME = "S3ClientWorkload";
-	const bool enabled;
+	bool const enabled;
 	bool pass;
 	std::string s3Url;
 	std::string credentials;

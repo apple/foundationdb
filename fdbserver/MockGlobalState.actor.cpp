@@ -195,7 +195,7 @@ public:
 	}
 };
 
-bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardStatus status) const {
+bool MockStorageServer::allShardStatusEqual(KeyRangeRef const& range, MockShardStatus status) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 
@@ -206,7 +206,7 @@ bool MockStorageServer::allShardStatusEqual(const KeyRangeRef& range, MockShardS
 	return true;
 }
 
-bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const {
+bool MockStorageServer::allShardStatusIn(KeyRangeRef const& range, std::set<MockShardStatus> const& status) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	ASSERT(!ranges.empty()); // at least the range is allKeys
 
@@ -218,7 +218,7 @@ bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::se
 	return true;
 }
 
-void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus status) {
+void MockStorageServer::setShardStatus(KeyRangeRef const& range, MockShardStatus status) {
 	auto ranges = serverKeys.intersectingRanges(range);
 	// ranges at least has allKeys
 	ASSERT(!ranges.empty());
@@ -264,7 +264,7 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 	}
 }
 
-void MockStorageServer::coalesceCompletedRange(const KeyRangeRef& range) {
+void MockStorageServer::coalesceCompletedRange(KeyRangeRef const& range) {
 	auto ranges = serverKeys.intersectingRanges(range);
 	// ranges at least has allKeys
 	ASSERT(!ranges.empty());
@@ -298,8 +298,8 @@ void MockStorageServer::coalesceCompletedRange(const KeyRangeRef& range) {
 
 // split the out range [a, d) based on the inner range's boundary [b, c). The result would be [a,b), [b,c), [c,d). The
 // size of the new shards are randomly split from old size of [a, d)
-void MockStorageServer::threeWayShardSplitting(const KeyRangeRef& outerRange,
-                                               const KeyRangeRef& innerRange,
+void MockStorageServer::threeWayShardSplitting(KeyRangeRef const& outerRange,
+                                               KeyRangeRef const& innerRange,
                                                uint64_t outerRangeSize) {
 	ASSERT(outerRange.contains(innerRange));
 	if (outerRange == innerRange) {
@@ -320,7 +320,7 @@ void MockStorageServer::threeWayShardSplitting(const KeyRangeRef& outerRange,
 
 // split the range [a,c) with split point b. The result would be [a, b), [b, c). The
 // size of the new shards are randomly split from old size of [a, c)
-void MockStorageServer::twoWayShardSplitting(const KeyRangeRef& range, const KeyRef& splitPoint, uint64_t rangeSize) {
+void MockStorageServer::twoWayShardSplitting(KeyRangeRef const& range, KeyRef const& splitPoint, uint64_t rangeSize) {
 	if (splitPoint == range.begin || !range.contains(splitPoint)) {
 		return;
 	}
@@ -335,7 +335,7 @@ void MockStorageServer::twoWayShardSplitting(const KeyRangeRef& range, const Key
 	serverKeys[left].shardSize = leftSize;
 }
 
-void MockStorageServer::removeShard(const KeyRangeRef& range) {
+void MockStorageServer::removeShard(KeyRangeRef const& range) {
 	auto rangeSize = sumRangeSize(range);
 	usedDiskSpace -= rangeSize;
 	serverKeys.insert(range, MockStorageServer::ShardInfo{ MockShardStatus::UNSET, 0 });
@@ -344,7 +344,7 @@ void MockStorageServer::removeShard(const KeyRangeRef& range) {
 	metrics.notifyNotReadable(range);
 }
 
-uint64_t MockStorageServer::sumRangeSize(const KeyRangeRef& range) const {
+uint64_t MockStorageServer::sumRangeSize(KeyRangeRef const& range) const {
 	auto ranges = serverKeys.intersectingRanges(range);
 	uint64_t totalSize = 0;
 	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
@@ -357,13 +357,13 @@ void MockStorageServer::addActor(Future<Void> future) {
 	actors.add(future);
 }
 
-void MockStorageServer::getSplitPoints(const SplitRangeRequest& req) {}
+void MockStorageServer::getSplitPoints(SplitRangeRequest const& req) {}
 
-Future<Void> MockStorageServer::waitMetricsForReal(const WaitMetricsRequest& req) {
+Future<Void> MockStorageServer::waitMetricsForReal(WaitMetricsRequest const& req) {
 	return MockStorageServerImpl::waitMetricsForReal(this, req);
 }
 
-void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
+void MockStorageServer::getStorageMetrics(GetStorageMetricsRequest const& req) {
 	StorageBytes storageBytes(
 	    totalDiskSpace - usedDiskSpace, totalDiskSpace, usedDiskSpace, totalDiskSpace - usedDiskSpace);
 	metrics.getStorageMetrics(
@@ -371,15 +371,15 @@ void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
 	// FIXME: MockStorageServer does not support bytesDurable yet
 }
 
-void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) {
+void MockStorageServer::getSplitMetrics(SplitMetricsRequest const& req) {
 	this->metrics.splitMetrics(req);
 }
 
-void MockStorageServer::getHotRangeMetrics(const ReadHotSubRangeRequest& req) {
+void MockStorageServer::getHotRangeMetrics(ReadHotSubRangeRequest const& req) {
 	this->metrics.getReadHotRanges(req);
 }
 
-int64_t MockStorageServer::getHotShardsMetrics(const KeyRange& range) {
+int64_t MockStorageServer::getHotShardsMetrics(KeyRange const& range) {
 	return 0;
 }
 
@@ -517,7 +517,7 @@ void MockStorageServer::notifyWriteMetrics(KeyRef const& key, int64_t size) {
 	metrics.notify(key, s);
 }
 
-void MockStorageServer::signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes) {
+void MockStorageServer::signalFetchKeys(KeyRangeRef const& range, int64_t rangeTotalBytes) {
 	if (!allShardStatusEqual(range, MockShardStatus::COMPLETED)) {
 		actors.add(MockStorageServerImpl::waitFetchKeysFinish(this, { range, rangeTotalBytes }));
 	}
@@ -591,7 +591,7 @@ std::shared_ptr<MockGlobalState>& MockGlobalState::g_mockState() {
 	return res;
 }
 
-void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf) {
+void MockGlobalState::initializeClusterLayout(BasicSimulationConfig const& conf) {
 	fmt::print("MGS Cluster Layout: {} dc, {} machines, {} processes per machine.\n",
 	           conf.datacenters,
 	           conf.machine_count,
@@ -625,7 +625,7 @@ void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf)
 	}
 }
 
-void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
+void MockGlobalState::initializeAsEmptyDatabaseMGS(DatabaseConfiguration const& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	ASSERT(!seedProcesses.empty());
 	configuration = conf;
@@ -663,7 +663,7 @@ void MockGlobalState::addStoragePerProcess(uint64_t defaultDiskSpace) {
 	}
 }
 
-bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard) {
+bool MockGlobalState::serverIsSourceForShard(UID const& serverId, KeyRangeRef shard, bool inFlightShard) {
 	if (!allServers.contains(serverId))
 		return false;
 
@@ -676,15 +676,15 @@ bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef sh
 	// check keyServers
 	auto teams = shardMapping->getTeamsForFirstShard(shard);
 	if (inFlightShard) {
-		return std::any_of(teams.second.begin(), teams.second.end(), [&serverId](const Team& team) {
+		return std::any_of(teams.second.begin(), teams.second.end(), [&serverId](Team const& team) {
 			return team.hasServer(serverId);
 		});
 	}
 	return std::any_of(
-	    teams.first.begin(), teams.first.end(), [&serverId](const Team& team) { return team.hasServer(serverId); });
+	    teams.first.begin(), teams.first.end(), [&serverId](Team const& team) { return team.hasServer(serverId); });
 }
 
-bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shard) {
+bool MockGlobalState::serverIsDestForShard(UID const& serverId, KeyRangeRef shard) {
 	TraceEvent(SevDebug, "ServerIsDestForShard")
 	    .detail("ServerId", serverId)
 	    .detail("Keys", shard)
@@ -702,31 +702,31 @@ bool MockGlobalState::serverIsDestForShard(const UID& serverId, KeyRangeRef shar
 
 	// check keyServers
 	auto teams = shardMapping->getTeamsForFirstShard(shard);
-	return !teams.second.empty() && std::any_of(teams.first.begin(), teams.first.end(), [&serverId](const Team& team) {
+	return !teams.second.empty() && std::any_of(teams.first.begin(), teams.first.end(), [&serverId](Team const& team) {
 		return team.hasServer(serverId);
 	});
 }
 
-bool MockGlobalState::allShardsRemovedFromServer(const UID& serverId) {
+bool MockGlobalState::allShardsRemovedFromServer(UID const& serverId) {
 	return allServers.contains(serverId) && shardMapping->getNumberOfShards(serverId) == 0;
 }
 
 Future<std::pair<Optional<StorageMetrics>, int>> MockGlobalState::waitStorageMetrics(
-    const KeyRange& keys,
-    const StorageMetrics& min,
-    const StorageMetrics& max,
-    const StorageMetrics& permittedError,
+    KeyRange const& keys,
+    StorageMetrics const& min,
+    StorageMetrics const& max,
+    StorageMetrics const& permittedError,
     int shardLimit,
     int expectedShardCount) {
 	return MockGlobalStateImpl::waitStorageMetrics(
 	    this, keys, min, max, permittedError, shardLimit, expectedShardCount);
 }
 
-Reference<LocationInfo> buildLocationInfo(const std::vector<StorageServerInterface>& interfaces) {
+Reference<LocationInfo> buildLocationInfo(std::vector<StorageServerInterface> const& interfaces) {
 	// construct the location info with the servers
 	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> serverRefs;
 	serverRefs.reserve(interfaces.size());
-	for (const auto& interf : interfaces) {
+	for (auto const& interf : interfaces) {
 		serverRefs.push_back(makeReference<ReferencedInterface<StorageServerInterface>>(interf));
 	}
 
@@ -788,7 +788,7 @@ Future<std::vector<KeyRangeLocationInfo>> MockGlobalState::getKeyRangeLocations(
 	return results;
 }
 
-std::vector<StorageServerInterface> MockGlobalState::extractStorageServerInterfaces(const std::vector<UID>& ids) const {
+std::vector<StorageServerInterface> MockGlobalState::extractStorageServerInterfaces(std::vector<UID> const& ids) const {
 	std::vector<StorageServerInterface> interfaces;
 	for (auto& id : ids) {
 		interfaces.emplace_back(allServers.at(id)->ssi);
@@ -796,10 +796,10 @@ std::vector<StorageServerInterface> MockGlobalState::extractStorageServerInterfa
 	return interfaces;
 }
 
-Future<Standalone<VectorRef<KeyRef>>> MockGlobalState::splitStorageMetrics(const KeyRange& keys,
-                                                                           const StorageMetrics& limit,
-                                                                           const StorageMetrics& estimated,
-                                                                           const Optional<int>& minSplitBytes) {
+Future<Standalone<VectorRef<KeyRef>>> MockGlobalState::splitStorageMetrics(KeyRange const& keys,
+                                                                           StorageMetrics const& limit,
+                                                                           StorageMetrics const& estimated,
+                                                                           Optional<int> const& minSplitBytes) {
 	return MockGlobalStateImpl::splitStorageMetrics(this, keys, limit, estimated, minSplitBytes);
 }
 
@@ -811,7 +811,7 @@ std::vector<Future<Void>> MockGlobalState::runAllMockServers() {
 	}
 	return futures;
 }
-Future<Void> MockGlobalState::runMockServer(const UID& id) {
+Future<Void> MockGlobalState::runMockServer(UID const& id) {
 	return allServers.at(id)->run();
 }
 
@@ -1077,9 +1077,9 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 }
 
 namespace {
-inline bool locationInfoEqualsToTeam(Reference<LocationInfo> loc, const std::vector<UID>& ids) {
+inline bool locationInfoEqualsToTeam(Reference<LocationInfo> loc, std::vector<UID> const& ids) {
 	return loc->locations()->size() == ids.size() &&
-	       std::all_of(ids.begin(), ids.end(), [loc](const UID& id) { return loc->locations()->hasInterface(id); });
+	       std::all_of(ids.begin(), ids.end(), [loc](UID const& id) { return loc->locations()->hasInterface(id); });
 }
 }; // namespace
 TEST_CASE("/MockGlobalState/MockStorageServer/GetKeyLocations") {

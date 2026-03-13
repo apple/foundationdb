@@ -37,24 +37,24 @@ namespace fdbctl {
 
 //-- Coordinators ----
 Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
-                                     const GetCoordinatorsRequest* req,
+                                     GetCoordinatorsRequest const* req,
                                      GetCoordinatorsReply* rep);
 Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
-                                        const ChangeCoordinatorsRequest* req,
+                                        ChangeCoordinatorsRequest const* req,
                                         ChangeCoordinatorsReply* rep);
 
 //-- Database Configure ----
-Future<grpc::Status> configure(Reference<IDatabase> db, const ConfigureRequest* req, ConfigureReply* rep);
+Future<grpc::Status> configure(Reference<IDatabase> db, ConfigureRequest const* req, ConfigureReply* rep);
 
 //-- Status ----
-Future<grpc::Status> getStatus(Reference<IDatabase> db, const GetStatusRequest* req, GetStatusReply* rep);
+Future<grpc::Status> getStatus(Reference<IDatabase> db, GetStatusRequest const* req, GetStatusReply* rep);
 
 //-- Workers ----
-Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest* req, GetWorkersReply* rep);
-Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req, IncludeReply* rep);
-Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req, ExcludeReply* rep);
-Future<grpc::Status> excludeStatus(Reference<IDatabase> db, const ExcludeStatusRequest* req, ExcludeStatusReply* rep);
-Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillReply* rep);
+Future<grpc::Status> getWorkers(Reference<IDatabase> db, GetWorkersRequest const* req, GetWorkersReply* rep);
+Future<grpc::Status> include(Reference<IDatabase> db, IncludeRequest const* req, IncludeReply* rep);
+Future<grpc::Status> exclude(Reference<IDatabase> db, ExcludeRequest const* req, ExcludeReply* rep);
+Future<grpc::Status> excludeStatus(Reference<IDatabase> db, ExcludeStatusRequest const* req, ExcludeStatusReply* rep);
+Future<grpc::Status> kill(Reference<IDatabase> db, KillRequest const* req, KillReply* rep);
 
 namespace utils {
 Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
@@ -74,27 +74,27 @@ Future<bool> getWorkersProcessData(Reference<IDatabase> db, std::vector<ProcessD
 namespace special_keys {
 
 // TODO: Point fdbcli ones to this.
-const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
-const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
-const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
+KeyRef const clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators/cluster_description"_sr;
+KeyRef const coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
+KeyRef const coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 
 // Special key ranges for include/exclude functionality
-const KeyRange excludedServersSpecialKeyRange =
+KeyRange const excludedServersSpecialKeyRange =
     KeyRangeRef("\xff\xff/management/excluded/"_sr, "\xff\xff/management/excluded0"_sr);
-const KeyRange failedServersSpecialKeyRange =
+KeyRange const failedServersSpecialKeyRange =
     KeyRangeRef("\xff\xff/management/failed/"_sr, "\xff\xff/management/failed0"_sr);
-const KeyRange excludedLocalitySpecialKeyRange =
+KeyRange const excludedLocalitySpecialKeyRange =
     KeyRangeRef("\xff\xff/management/excluded_locality/"_sr, "\xff\xff/management/excluded_locality0"_sr);
-const KeyRange failedLocalitySpecialKeyRange =
+KeyRange const failedLocalitySpecialKeyRange =
     KeyRangeRef("\xff\xff/management/failed_locality/"_sr, "\xff\xff/management/failed_locality0"_sr);
-const KeyRef excludedForceOptionSpecialKey = "\xff\xff/management/options/excluded/force"_sr;
-const KeyRef failedForceOptionSpecialKey = "\xff\xff/management/options/failed/force"_sr;
-const KeyRef excludedLocalityForceOptionSpecialKey = "\xff\xff/management/options/excluded_locality/force"_sr;
-const KeyRef failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/failed_locality/force"_sr;
-const KeyRangeRef exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
+KeyRef const excludedForceOptionSpecialKey = "\xff\xff/management/options/excluded/force"_sr;
+KeyRef const failedForceOptionSpecialKey = "\xff\xff/management/options/failed/force"_sr;
+KeyRef const excludedLocalityForceOptionSpecialKey = "\xff\xff/management/options/excluded_locality/force"_sr;
+KeyRef const failedLocalityForceOptionSpecialKey = "\xff\xff/management/options/failed_locality/force"_sr;
+KeyRangeRef const exclusionInProgressSpecialKeyRange("\xff\xff/management/in_progress_exclusion/"_sr,
                                                      "\xff\xff/management/in_progress_exclusion0"_sr);
 
-const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
+KeyRef const workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 } // namespace special_keys
 } // namespace fdbctl
 

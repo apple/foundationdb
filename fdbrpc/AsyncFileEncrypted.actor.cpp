@@ -28,7 +28,7 @@ class AsyncFileEncryptedImpl {
 public:
 	// Determine the initialization for the first block of a file based on a hash of
 	// the filename.
-	static auto getFirstBlockIV(const std::string& filename) {
+	static auto getFirstBlockIV(std::string const& filename) {
 		StreamCipher::IV iv;
 		auto salt = basename(filename);
 		auto pos = salt.find('.');
@@ -114,7 +114,7 @@ public:
 		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
 		state unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
-			const auto chunkSize = std::min(length, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE - self->offsetInBlock);
+			auto const chunkSize = std::min(length, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE - self->offsetInBlock);
 			Arena arena;
 			auto encrypted = self->encryptor->encrypt(input, chunkSize, arena);
 			std::copy(encrypted.begin(), encrypted.end(), &self->writeBuffer[self->offsetInBlock]);
@@ -247,7 +247,7 @@ AsyncFileEncrypted::RandomCache::RandomCache(size_t maxSize) : maxSize(maxSize) 
 	vec.reserve(maxSize);
 }
 
-void AsyncFileEncrypted::RandomCache::insert(uint32_t block, const Standalone<StringRef>& value) {
+void AsyncFileEncrypted::RandomCache::insert(uint32_t block, Standalone<StringRef> const& value) {
 	auto [_, found] = hashMap.insert({ block, value });
 	if (found) {
 		return;
@@ -272,7 +272,7 @@ Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t bl
 // then reads this data back from the file in random increments, then confirms that
 // the bytes read match the bytes written.
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
-	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
+	state int const bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
 	state std::vector<unsigned char> writeBuffer(bytes, 0);
 	deterministicRandom()->randomBytes(&writeBuffer.front(), bytes);
 	state std::vector<unsigned char> readBuffer(bytes, 0);

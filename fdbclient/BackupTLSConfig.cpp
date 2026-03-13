@@ -29,7 +29,7 @@
 
 void BackupTLSConfig::setupBlobCredentials() {
 	// Add blob credentials files from the environment to the list collected from the command line.
-	const char* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+	char const* blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
 	if (blobCredsFromENV != nullptr) {
 		StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 		do {

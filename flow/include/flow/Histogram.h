@@ -59,7 +59,7 @@ HistogramRegistry& GetHistogramRegistry();
 class Histogram final : public ReferenceCounted<Histogram> {
 public:
 	enum class Unit { milliseconds = 0, bytes, bytes_per_second, percentageLinear, countLinear, MAXHISTOGRAMUNIT };
-	static const char* const UnitToStringMapper[];
+	static char const* const UnitToStringMapper[];
 
 	Histogram(Reference<HistogramRegistry> regis,
 	          std::string const& group = "",

@@ -109,7 +109,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 			co_await waitForAllReady(requests);
 			int failedRequests = 0;
 			int errors = 0;
-			for (const auto& resp : requests) {
+			for (auto const& resp : requests) {
 				if (resp.isError()) {
 					testFailed = true;
 					++errors;

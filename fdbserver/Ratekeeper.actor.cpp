@@ -29,7 +29,7 @@
 
 #include "flow/actorcompiler.h" // must be last include
 
-const char* limitReasonName[] = {
+char const* limitReasonName[] = {
 	"workload",
 	"storage_server_write_queue_size",
 	"storage_server_write_bandwidth_mvcc",
@@ -49,7 +49,7 @@ int limitReasonEnd = limitReason_t_end;
 
 // NOTE: This has a corresponding table in Script.cs (see RatekeeperReason graph)
 // IF UPDATING THIS ARRAY, UPDATE SCRIPT.CS!
-const char* limitReasonDesc[] = {
+char const* limitReasonDesc[] = {
 	"Workload or read performance.",
 	"Storage server performance (storage queue).",
 	"Storage server MVCC memory.",
@@ -124,8 +124,8 @@ public:
 				self->lastSSListFetchedTimestamp = now();
 
 				std::map<UID, StorageServerInterface> newServers;
-				for (const auto& [ssi, _] : results) {
-					const UID serverId = ssi.id();
+				for (auto const& [ssi, _] : results) {
+					UID const serverId = ssi.id();
 					newServers[serverId] = ssi;
 
 					if (oldServers.contains(serverId)) {
@@ -139,7 +139,7 @@ public:
 					}
 				}
 
-				for (const auto& it : oldServers) {
+				for (auto const& it : oldServers) {
 					serverChanges.send(std::make_pair(it.first, Optional<StorageServerInterface>()));
 				}
 
@@ -242,7 +242,7 @@ public:
 				}
 
 				// Storage related stats should be consistent.
-				for (const auto& [id, _] : self->storageServerInterfaces) {
+				for (auto const& [id, _] : self->storageServerInterfaces) {
 					ASSERT(self->storageQueueInfo.find(id) != self->storageQueueInfo.end());
 					ASSERT(self->healthMetrics.storageStats.find(id) != self->healthMetrics.storageStats.end());
 				}
@@ -300,7 +300,7 @@ public:
 			when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 				wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 
-				const UID& id = change.first;
+				UID const& id = change.first;
 				if (change.second.present()) {
 					if (!change.second.get().isTss()) {
 
@@ -337,7 +337,7 @@ public:
 				// Backup's restore range can't be throttled, otherwise restore would fail,
 				// i.e., "ApplyMutationsError".
 				KeyRangeRef applyMutationRange("\xfe\xff\xfe"_sr, "\xfe\xff\xff\xff"_sr);
-				for (const auto& shard : reply.hotShards) {
+				for (auto const& shard : reply.hotShards) {
 					if (!shard.intersects(applyMutationRange)) {
 						setReq.throttledShards.push_back(shard);
 					} else {
@@ -357,7 +357,7 @@ public:
 				    .detail("Shard", shard)
 				    .detail("DelayUntil", setReq.expirationTime);
 			}
-			for (const auto& cpi : dbInfo->get().client.commitProxies) {
+			for (auto const& cpi : dbInfo->get().client.commitProxies) {
 				cpi.setThrottledShard.send(setReq);
 			}
 		}
@@ -661,7 +661,7 @@ void Ratekeeper::updateCommitCostEstimation(
 		if (tagCostIt == costEstimation.end()) {
 			continue;
 		}
-		for (const auto& [tagName, cost] : tagCostIt->second) {
+		for (auto const& [tagName, cost] : tagCostIt->second) {
 			it->value.addCommitCost(tagName, cost);
 		}
 	}
@@ -932,7 +932,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	{
 		Version minSSVer = std::numeric_limits<Version>::max();
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
-		for (const auto& it : storageQueueInfo) {
+		for (auto const& it : storageQueueInfo) {
 			auto& ss = it.value;
 			// Keep version-lag based throttling consistent with queue/durability lag calculations:
 			// ignore storage servers until they are accepting requests.
@@ -949,7 +949,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		}
 
 		Version maxTLVer = std::numeric_limits<Version>::min();
-		for (const auto& it : tlogQueueInfo) {
+		for (auto const& it : tlogQueueInfo) {
 			auto& tl = it.value;
 			if (!tl.valid) {
 				continue;
@@ -1138,7 +1138,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	}
 
 	if (deterministicRandom()->random01() < 0.1) {
-		const std::string& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
+		std::string const& name = limits->rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), id)
 		    .detail("TPSLimit", limits->tpsLimit)
 		    .detail("Reason", limitReason)
@@ -1198,7 +1198,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	return Void();
 }
 
-StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, const LocalityData& locality_)
+StorageQueueInfo::StorageQueueInfo(UID const& ratekeeperID_, UID const& id_, LocalityData const& locality_)
   : valid(false), ratekeeperID(ratekeeperID_), id(id_), locality(locality_), acceptingRequests(false),
     smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
@@ -1208,7 +1208,7 @@ StorageQueueInfo::StorageQueueInfo(const UID& ratekeeperID_, const UID& id_, con
 	lastReply.instanceID = -1;
 }
 
-StorageQueueInfo::StorageQueueInfo(const UID& id_, const LocalityData& locality_)
+StorageQueueInfo::StorageQueueInfo(UID const& id_, LocalityData const& locality_)
   : StorageQueueInfo(UID(), id_, locality_) {}
 
 void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost) {
@@ -1249,7 +1249,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 	TransactionCommitCostEstimation maxCost;
 	double maxRate = 0;
 	std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKWriters;
-	for (const auto& [tag, cost] : tagCostEst) {
+	for (auto const& [tag, cost] : tagCostEst) {
 		double rate = cost.getCostSum() / elapsed;
 		double busyness = static_cast<double>(maxCost.getCostSum()) / totalWriteCosts;
 		if (rate < SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {

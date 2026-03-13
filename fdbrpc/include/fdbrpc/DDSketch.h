@@ -39,8 +39,8 @@ namespace fastLogger {
 // e*log(2)/log(r)*log(1+s), and we approximate log(1+s) with a cubic function.
 // See more details on Datadog's paper, or CubicallyInterpolatedMapping.java in
 // https://github.com/DataDog/sketches-java/
-inline const double correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
-constexpr inline const double A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
+inline double const correctingFactor = 1.00988652862227438516; // = 7 / (10 * log(2));
+constexpr inline double const A = 6.0 / 35.0, B = -3.0 / 5.0, C = 10.0 / 7.0;
 
 inline double fastlog(double value) {
 	int e;
@@ -188,7 +188,7 @@ public:
 
 	std::vector<uint32_t> getSamples() const { return buckets; }
 
-	DDSketchBase<Impl, T>& mergeWith(const DDSketchBase<Impl, T>& anotherSketch) {
+	DDSketchBase<Impl, T>& mergeWith(DDSketchBase<Impl, T> const& anotherSketch) {
 		// Must have the same guarantee
 		ASSERT(fabs(errorGuarantee - anotherSketch.errorGuarantee) < EPS &&
 		       anotherSketch.buckets.size() == buckets.size());

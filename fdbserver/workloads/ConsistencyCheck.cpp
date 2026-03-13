@@ -621,7 +621,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<struct ProcessInfo*> protectedProcessesToKill;
 
 		std::map<NetworkAddress, std::set<UID>> statefulProcesses;
-		for (const auto& ss : storageServers) {
+		for (auto const& ss : storageServers) {
 			statefulProcesses[ss.address()].insert(ss.id());
 			// A process may have two addresses (same ip, different ports)
 			if (ss.secondaryAddress().present()) {
@@ -633,7 +633,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("SecondaryAddress",
 			            ss.secondaryAddress().present() ? ss.secondaryAddress().get().toString() : "Unset");
 		}
-		for (const auto& log : logs) {
+		for (auto const& log : logs) {
 			statefulProcesses[log.address()].insert(log.id());
 			if (log.secondaryAddress().present()) {
 				statefulProcesses[log.secondaryAddress().get()].insert(log.id());
@@ -645,7 +645,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			            log.secondaryAddress().present() ? log.secondaryAddress().get().toString() : "Unset");
 		}
 		// Coordinators are also stateful processes
-		for (const auto& cWorker : coordWorkers) {
+		for (auto const& cWorker : coordWorkers) {
 			statefulProcesses[cWorker.address()].insert(cWorker.id());
 			if (cWorker.secondaryAddress().present()) {
 				statefulProcesses[cWorker.secondaryAddress().get()].insert(cWorker.id());
@@ -674,7 +674,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    .detail("SecondaryAddress",
 			            itr->interf.secondaryAddress().present() ? itr->interf.secondaryAddress().get().toString()
 			                                                     : "Unset");
-			for (const auto& id : stores.get()) {
+			for (auto const& id : stores.get()) {
 				if (statefulProcesses[itr->interf.address()].contains(id)) {
 					continue;
 				}
@@ -726,7 +726,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 		std::set<NetworkAddress> workerAddresses;
 
-		for (const auto& it : workers) {
+		for (auto const& it : workers) {
 			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
 			ISimulator::ProcessInfo* info = g_simulator->getProcessByAddress(addr);
 			if (!info || info->failed) {
@@ -753,7 +753,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	static ProcessClass::Fitness getBestAvailableFitness(
-	    const std::vector<ProcessClass::ClassType>& availableClassTypes,
+	    std::vector<ProcessClass::ClassType> const& availableClassTypes,
 	    ProcessClass::ClusterRole role) {
 		ProcessClass::Fitness bestAvailableFitness = ProcessClass::NeverAssign;
 		for (auto classType : availableClassTypes) {
@@ -795,7 +795,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 
 				std::set<Optional<Standalone<StringRef>>> checkDuplicates;
-				for (const auto& addr : oldCoordinators) {
+				for (auto const& addr : oldCoordinators) {
 					auto findResult = addr_locality.find(addr);
 					if (findResult != addr_locality.end()) {
 						if (checkDuplicates.contains(findResult->second.zoneId())) {
@@ -828,7 +828,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		std::map<NetworkAddress, WorkerDetails> allWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToAllClassTypes;
-		for (const auto& worker : allWorkers) {
+		for (auto const& worker : allWorkers) {
 			allWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToAllClassTypes.contains(dc))
@@ -838,7 +838,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		std::map<NetworkAddress, WorkerDetails> nonExcludedWorkerProcessMap;
 		std::map<Optional<Key>, std::vector<ProcessClass::ClassType>> dcToNonExcludedClassTypes;
-		for (const auto& worker : nonExcludedWorkers) {
+		for (auto const& worker : nonExcludedWorkers) {
 			nonExcludedWorkerProcessMap[worker.interf.address()] = worker;
 			Optional<Key> dc = worker.interf.locality.dcId();
 			if (!dcToNonExcludedClassTypes.contains(dc))
@@ -939,7 +939,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check commit proxy
 		ProcessClass::Fitness bestCommitProxyFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::CommitProxy);
-		for (const auto& commitProxy : db.client.commitProxies) {
+		for (auto const& commitProxy : db.client.commitProxies) {
 			if (!nonExcludedWorkerProcessMap.contains(commitProxy.address()) ||
 			    nonExcludedWorkerProcessMap[commitProxy.address()].processClass.machineClassFitness(
 			        ProcessClass::CommitProxy) != bestCommitProxyFitness) {
@@ -957,7 +957,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check grv proxy
 		ProcessClass::Fitness bestGrvProxyFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::GrvProxy);
-		for (const auto& grvProxy : db.client.grvProxies) {
+		for (auto const& grvProxy : db.client.grvProxies) {
 			if (!nonExcludedWorkerProcessMap.contains(grvProxy.address()) ||
 			    nonExcludedWorkerProcessMap[grvProxy.address()].processClass.machineClassFitness(
 			        ProcessClass::GrvProxy) != bestGrvProxyFitness) {
@@ -975,7 +975,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// Check resolver
 		ProcessClass::Fitness bestResolverFitness =
 		    getBestAvailableFitness(dcToNonExcludedClassTypes[masterDcId], ProcessClass::Resolver);
-		for (const auto& resolver : db.resolvers) {
+		for (auto const& resolver : db.resolvers) {
 			if (!nonExcludedWorkerProcessMap.contains(resolver.address()) ||
 			    nonExcludedWorkerProcessMap[resolver.address()].processClass.machineClassFitness(
 			        ProcessClass::Resolver) != bestResolverFitness) {

@@ -329,7 +329,7 @@ Reference<TCMachineInfo> TCMachineInfo::clone() const {
 	return result;
 }
 
-TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry) : localityEntry(entry) {
+TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, LocalityEntry const& entry) : localityEntry(entry) {
 	ASSERT(serversOnMachine.empty());
 	serversOnMachine.push_back(server);
 
@@ -343,7 +343,7 @@ std::string TCMachineInfo::getServersIDStr() const {
 	if (serversOnMachine.empty())
 		return "[unset]";
 
-	for (const auto& server : serversOnMachine) {
+	for (auto const& server : serversOnMachine) {
 		ss << server->getId().toString() << " ";
 	}
 
@@ -365,7 +365,7 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 	if (machineIDs.empty())
 		return "[unset]";
 
-	for (const auto& id : machineIDs) {
+	for (auto const& id : machineIDs) {
 		ss << id.contents().toString() << " ";
 	}
 
@@ -392,7 +392,7 @@ std::string TCTeamInfo::serversToString(std::vector<UID> servers) {
 
 	std::sort(servers.begin(), servers.end());
 	std::stringstream ss;
-	for (const auto& id : servers) {
+	for (auto const& id : servers) {
 		ss << id.toString() << " ";
 	}
 
@@ -402,7 +402,7 @@ std::string TCTeamInfo::serversToString(std::vector<UID> servers) {
 std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() const {
 	std::vector<StorageServerInterface> v;
 	v.reserve(servers.size());
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		v.push_back(server->getLastKnownInterface());
 	}
 	return v;
@@ -440,7 +440,7 @@ int64_t TCTeamInfo::getReadInFlightToTeam() const {
 
 Optional<int64_t> TCTeamInfo::getLongestStorageQueueSize() const {
 	int64_t longestQueueSize = 0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->metricsPresent()) {
 			longestQueueSize = std::max(longestQueueSize, server->getStorageQueueSize());
 		} else {
@@ -452,7 +452,7 @@ Optional<int64_t> TCTeamInfo::getLongestStorageQueueSize() const {
 
 Optional<int> TCTeamInfo::getMaxOngoingBulkLoadTaskCount() const {
 	int count = 0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->metricsPresent()) {
 			count = std::max(count, server->getMaxOngoingBulkLoadTaskCount());
 		} else {
@@ -487,7 +487,7 @@ double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) con
 	// FIXME: consider team load variance
 	double sum = 0;
 	int size = 0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->metricsPresent()) {
 			auto replyValue = server->getMetrics().load.readLoadKSecond();
 			ASSERT(replyValue >= 0);
@@ -501,7 +501,7 @@ double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) con
 
 double TCTeamInfo::getAverageCPU() const {
 	double sum = 0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		auto& stats = server->getStorageStats();
 		// If storage server hasn't gotten the health metrics updated, we assume it's too busy to respond so
 		// return 100.0;
@@ -512,9 +512,9 @@ double TCTeamInfo::getAverageCPU() const {
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->metricsPresent()) {
-			const auto [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
+			auto const [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
 			minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
 		}
 	}
@@ -525,7 +525,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 // return the min ratio of servers in this team
 double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->metricsPresent()) {
 			auto [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
 			bytesAvailable = std::max((int64_t)0, bytesAvailable);
@@ -544,7 +544,7 @@ bool TCTeamInfo::allServersHaveHealthyAvailableSpace() const {
 	bool result = true;
 	double minAvailableSpaceRatio =
 	    SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO + SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (!server->metricsPresent() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
 			result = false;
 			break;
@@ -560,7 +560,7 @@ bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
 }
 
 bool TCTeamInfo::isOptimal() const {
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
 			return false;
 		}
@@ -568,19 +568,19 @@ bool TCTeamInfo::isOptimal() const {
 	return true;
 }
 
-bool TCTeamInfo::hasServer(const UID& server) const {
+bool TCTeamInfo::hasServer(UID const& server) const {
 	return std::find(serverIDs.begin(), serverIDs.end(), server) != serverIDs.end();
 }
 
 bool TCTeamInfo::hasWigglePausedServer() const {
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->isWigglePausedServer())
 			return true;
 	}
 	return false;
 }
 
-void TCTeamInfo::addServers(const std::vector<UID>& servers) {
+void TCTeamInfo::addServers(std::vector<UID> const& servers) {
 	serverIDs.reserve(servers.size());
 	for (int i = 0; i < servers.size(); i++) {
 		serverIDs.push_back(servers[i]);
@@ -590,7 +590,7 @@ void TCTeamInfo::addServers(const std::vector<UID>& servers) {
 int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;
-	for (const auto& server : servers) {
+	for (auto const& server : servers) {
 		if (server->metricsPresent()) {
 			added++;
 			bytesSum += server->loadBytes();

@@ -38,7 +38,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		}
 	}
 
-	static constexpr const char* NAME = "RestoreMultiRanges";
+	static constexpr char const* NAME = "RestoreMultiRanges";
 
 	static Future<Void> clearDatabase(Database cx) {
 		Transaction tr(cx);
@@ -75,7 +75,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		}
 	}
 
-	static void logTestData(const VectorRef<KeyValueRef>& data) {
+	static void logTestData(VectorRef<KeyValueRef> const& data) {
 		TraceEvent("TestFailureDetail").log();
 		int index = 0;
 		for (auto& entry : data) {

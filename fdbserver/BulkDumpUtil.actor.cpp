@@ -30,14 +30,14 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
-                                 const BulkDumpState& bulkDumpState) {
+SSBulkDumpTask getSSBulkDumpTask(std::map<std::string, std::vector<StorageServerInterface>> const& locations,
+                                 BulkDumpState const& bulkDumpState) {
 	StorageServerInterface targetServer;
 	std::vector<UID> checksumServers;
 	int dcid = 0;
-	for (const auto& [_, dcServers] : locations) {
+	for (auto const& [_, dcServers] : locations) {
 		if (dcid == 0) {
-			const int idx = deterministicRandom()->randomInt(0, dcServers.size());
+			int const idx = deterministicRandom()->randomInt(0, dcServers.size());
 			targetServer = dcServers[idx];
 		}
 		for (int i = 0; i < dcServers.size(); i++) {
@@ -64,18 +64,18 @@ std::string generateBulkDumpByteSampleFileName(Version version) {
 	return std::to_string(version) + "-sample.sst";
 }
 
-std::string getBulkDumpJobTaskFolder(const UID& jobId, const UID& taskId) {
+std::string getBulkDumpJobTaskFolder(UID const& jobId, UID const& taskId) {
 	return joinPath(jobId.toString(), taskId.toString());
 }
 
 std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version dumpVersion,
-                                                                         const std::string& relativeFolder,
-                                                                         const std::string& rootLocal,
-                                                                         const std::string& rootRemote) {
+                                                                         std::string const& relativeFolder,
+                                                                         std::string const& rootLocal,
+                                                                         std::string const& rootRemote) {
 	// Generate file names based on data version
-	const std::string manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
-	const std::string dataFileName = generateBulkDumpDataFileName(dumpVersion);
-	const std::string byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
+	std::string const manifestFileName = generateBulkDumpManifestFileName(dumpVersion);
+	std::string const dataFileName = generateBulkDumpDataFileName(dumpVersion);
+	std::string const byteSampleFileName = generateBulkDumpByteSampleFileName(dumpVersion);
 	BulkLoadFileSet fileSetLocal(
 	    rootLocal, relativeFolder, manifestFileName, dataFileName, byteSampleFileName, BulkLoadChecksum());
 	BulkLoadFileSet fileSetRemote(
@@ -86,7 +86,7 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 // Generate SST file given the input sortedKVS to the input filePath.
 // TODO(BulkDump): This copy of sortedKVS can be a slow task if data is large.
 void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UID logId) {
-	const std::string absFilePath = abspath(filePath);
+	std::string const absFilePath = abspath(filePath);
 	// Check file
 	if (fileExists(absFilePath)) {
 		TraceEvent(SevWarn, "SSBulkDumpRetriableError", logId)
@@ -98,7 +98,7 @@ void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UI
 	// Dump data to file
 	std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 	sstWriter->open(absFilePath);
-	for (const auto& [key, value] : sortedKVS) {
+	for (auto const& [key, value] : sortedKVS) {
 		sstWriter->write(key, value); // assuming sorted
 	}
 	if (!sstWriter->finish()) {
@@ -173,7 +173,7 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
-bool validateSourceDestinationFileSets(const BulkLoadFileSet& source, const BulkLoadFileSet& destination) {
+bool validateSourceDestinationFileSets(BulkLoadFileSet const& source, BulkLoadFileSet const& destination) {
 	// Manifest file must be present
 	if (!source.hasManifestFile() || !destination.hasManifestFile()) {
 		return false;

@@ -113,15 +113,15 @@ void FileTraceLogWriter::lastError(int err) {
 	}
 }
 
-void FileTraceLogWriter::write(const std::string& str) {
+void FileTraceLogWriter::write(std::string const& str) {
 	write(str.data(), str.size());
 }
 
-void FileTraceLogWriter::write(const StringRef& str) {
-	write(reinterpret_cast<const char*>(str.begin()), str.size());
+void FileTraceLogWriter::write(StringRef const& str) {
+	write(reinterpret_cast<char const*>(str.begin()), str.size());
 }
 
-void FileTraceLogWriter::write(const char* str, size_t len) {
+void FileTraceLogWriter::write(char const* str, size_t len) {
 	if (traceFileFD < 0) {
 		return;
 	}
@@ -238,7 +238,7 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 		try {
 			// Rename/finalize any stray files ending in tracePartialFileSuffix for this process.
 			if (!tracePartialFileSuffix.empty()) {
-				for (const auto& f : platform::listFiles(directory, tracePartialFileSuffix)) {
+				for (auto const& f : platform::listFiles(directory, tracePartialFileSuffix)) {
 					if (f.substr(0, processName.length()) == processName) {
 						renameFile(f, f.substr(0, f.size() - tracePartialFileSuffix.size()));
 					}

@@ -167,8 +167,8 @@ void ShardsAffectedByTeamFailure::moveShard(KeyRangeRef keys, std::vector<Team> 
 }
 
 void ShardsAffectedByTeamFailure::rawMoveShard(KeyRangeRef keys,
-                                               const std::vector<Team>& srcTeams,
-                                               const std::vector<Team>& destinationTeams) {
+                                               std::vector<Team> const& srcTeams,
+                                               std::vector<Team> const& destinationTeams) {
 	auto it = shard_teams.rangeContaining(keys.begin);
 	std::vector<std::pair<std::pair<std::vector<Team>, std::vector<Team>>, KeyRange>> modifiedShards;
 	ASSERT(it->range() == keys);
@@ -238,14 +238,14 @@ auto ShardsAffectedByTeamFailure::getAllRanges() const -> decltype(shard_teams):
 	return shard_teams.ranges();
 }
 
-void ShardsAffectedByTeamFailure::assignRangeToTeams(KeyRangeRef keys, const std::vector<Team>& destinationTeam) {
+void ShardsAffectedByTeamFailure::assignRangeToTeams(KeyRangeRef keys, std::vector<Team> const& destinationTeam) {
 	defineShard(keys);
 	moveShard(keys, destinationTeam);
 	finishMove(keys);
 }
 
 bool ShardsAffectedByTeamFailure::removeFailedServerForSingleRange(ShardsAffectedByTeamFailure::Team& team,
-                                                                   const UID& id,
+                                                                   UID const& id,
                                                                    KeyRangeRef keys) {
 	if (team.hasServer(id)) {
 		erase(team, keys);
@@ -256,7 +256,7 @@ bool ShardsAffectedByTeamFailure::removeFailedServerForSingleRange(ShardsAffecte
 	return false;
 }
 
-void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, const UID& serverID) {
+void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, UID const& serverID) {
 	auto rs = shard_teams.intersectingRanges(keys);
 	for (auto it = rs.begin(); it != rs.end(); ++it) {
 		// first team vector

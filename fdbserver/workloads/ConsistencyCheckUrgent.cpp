@@ -96,7 +96,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 					KeyRange rangeToCheck = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
 					Value valueToCheck = Standalone(readResult[i].value);
 					bool toAdd = false;
-					for (const auto& range : ranges) {
+					for (auto const& range : ranges) {
 						if (rangeToCheck.intersects(range) == true) {
 							toAdd = true;
 							break;

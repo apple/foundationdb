@@ -48,10 +48,10 @@ PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_detectConflict
     g_combine("D.Combine", skc), g_checkRead("D.CheckRead", skc), g_checkBatch("D.CheckIntraBatch", skc),
     g_merge("D.MergeWrite", skc), g_removeBefore("D.RemoveBefore", skc);
 
-static force_inline int compare(const StringRef& a, const StringRef& b) {
-	const size_t aSize = a.size();
-	const size_t bSize = b.size();
-	const size_t minSize = std::min(aSize, bSize);
+static force_inline int compare(StringRef const& a, StringRef const& b) {
+	size_t const aSize = a.size();
+	size_t const bSize = b.size();
+	size_t const minSize = std::min(aSize, bSize);
 	int c = memcmp(a.begin(), b.begin(), minSize);
 	if (c)
 		return (c > 0) - (c < 0); // normalize to +1/-1
@@ -75,7 +75,7 @@ struct ReadConflictRange {
 	                  Arena* cKRArena = nullptr)
 	  : begin(begin), end(end), version(version), transaction(transaction), indexInTx(indexInTx),
 	    conflictingKeyRange(cKR), cKRArena(cKRArena) {}
-	bool operator<(const ReadConflictRange& rhs) const { return compare(begin, rhs.begin) < 0; }
+	bool operator<(ReadConflictRange const& rhs) const { return compare(begin, rhs.begin) < 0; }
 };
 
 struct KeyInfo {
@@ -90,12 +90,12 @@ struct KeyInfo {
 	  : key(key), pIndex(pIndex), begin(begin), write(write), transaction(transaction) {}
 };
 
-force_inline int extra_ordering(const KeyInfo& ki) {
+force_inline int extra_ordering(KeyInfo const& ki) {
 	return ki.begin * 2 + (ki.write ^ ki.begin);
 }
 
 // returns true if done with string
-force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputCharacter) {
+force_inline bool getCharacter(KeyInfo const& ki, int character, int& outputCharacter) {
 	// normal case
 	if (character < ki.key.size()) {
 		outputCharacter = 5 + ki.key.begin()[character];
@@ -118,7 +118,7 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 	return true;
 }
 
-bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
+bool operator<(KeyInfo const& lhs, KeyInfo const& rhs) {
 	int i = std::min(lhs.key.size(), rhs.key.size());
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
 	if (c != 0)
@@ -136,7 +136,7 @@ bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
 	return extra_ordering(lhs) < extra_ordering(rhs);
 }
 
-bool operator==(const KeyInfo& lhs, const KeyInfo& rhs) {
+bool operator==(KeyInfo const& lhs, KeyInfo const& rhs) {
 	return !(lhs < rhs || rhs < lhs);
 }
 
@@ -255,7 +255,7 @@ private:
 
 		// Return a node with initialized value but uninitialized pointers
 		// Memory layout: *this, (level+1) Node*, (level+1) Version, value
-		static Node* create(const StringRef& value, int level) {
+		static Node* create(StringRef const& value, int level) {
 			int nodeSize = sizeof(Node) + value.size() + (level + 1) * (sizeof(Node*) + sizeof(Version));
 
 			Node* n;
@@ -310,7 +310,7 @@ private:
 		int nPointers, valueLength;
 	};
 
-	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
+	static force_inline bool less(uint8_t const* a, int aLen, uint8_t const* b, int bLen) {
 		int c = memcmp(a, b, std::min(aLen, bLen));
 		if (c < 0)
 			return true;
@@ -342,9 +342,9 @@ public:
 		StringRef value;
 
 		Finger() = default;
-		Finger(Node* header, const StringRef& ptr) : x(header), value(ptr) {}
+		Finger(Node* header, StringRef const& ptr) : x(header), value(ptr) {}
 
-		void init(const StringRef& value, Node* header) {
+		void init(StringRef const& value, Node* header) {
 			this->value = value;
 			x = header;
 			alreadyChecked = nullptr;
@@ -355,8 +355,8 @@ public:
 		force_inline void prefetch() {
 			Node* next = x->getNext(level - 1);
 			if (next) {
-				_mm_prefetch((const char*)next, _MM_HINT_T0);
-				_mm_prefetch((const char*)next + 64, _MM_HINT_T0);
+				_mm_prefetch((char const*)next, _MM_HINT_T0);
+				_mm_prefetch((char const*)next + 64, _MM_HINT_T0);
 			}
 		}
 
@@ -429,10 +429,10 @@ public:
 	}
 	void swap(SkipList& other) { std::swap(header, other.header); }
 
-	void addConflictRanges(const Finger* fingers, int rangeCount, Version version) {
+	void addConflictRanges(Finger const* fingers, int rangeCount, Version version) {
 		for (int r = rangeCount - 1; r >= 0; r--) {
-			const Finger& startF = fingers[r * 2];
-			const Finger& endF = fingers[r * 2 + 1];
+			Finger const& startF = fingers[r * 2];
+			Finger const& endF = fingers[r * 2 + 1];
 
 			if (endF.found() == nullptr)
 				insert(endF, endF.finger[0]->getMaxVersion(0));
@@ -443,7 +443,7 @@ public:
 	}
 
 	void detectConflicts(ReadConflictRange* ranges, int count, bool* transactionConflictStatus) {
-		const int M = 16;
+		int const M = 16;
 		int nextJob[M];
 		CheckMax inProgress[M];
 		if (!count)
@@ -521,13 +521,13 @@ public:
 		swap(input[0]);
 	}
 
-	void find(const StringRef* values, Finger* results, int* temp, int count) {
+	void find(StringRef const* values, Finger* results, int* temp, int count) {
 		// Relying on the ordering of values, descend until the values aren't all in the
 		// same part of the tree
 
 		// vtune: 11 parts
 		results[0].init(values[0], header);
-		const StringRef& endValue = values[count - 1];
+		StringRef const& endValue = values[count - 1];
 		while (results[0].level > 1) {
 			results[0].nextLevel();
 			Node* ac = results[0].alreadyChecked;
@@ -587,9 +587,9 @@ public:
 
 			// double prefetch gives +25% speed (single threaded)
 			Node* next = x->getNext(0);
-			_mm_prefetch((const char*)next, _MM_HINT_T0);
+			_mm_prefetch((char const*)next, _MM_HINT_T0);
 			next = x->getNext(1);
-			_mm_prefetch((const char*)next, _MM_HINT_T0);
+			_mm_prefetch((char const*)next, _MM_HINT_T0);
 
 			bool isAbove = x->getMaxVersion(0) >= v;
 			if (isAbove || wasAbove) { // f.nextItem
@@ -610,7 +610,7 @@ public:
 	}
 
 private:
-	void remove(const Finger& start, const Finger& end) {
+	void remove(Finger const& start, Finger const& end) {
 		if (start.finger[0] == end.finger[0])
 			return;
 
@@ -630,7 +630,7 @@ private:
 		}
 	}
 
-	void insert(const Finger& f, Version version) {
+	void insert(Finger const& f, Version version) {
 		int level = randomLevel();
 		// std::cout << std::string((const char*)value,length) << " level: " << level << std::endl;
 		Node* x = Node::create(f.value, level);
@@ -652,7 +652,7 @@ private:
 		}
 	}
 
-	void insert(const StringRef& value, Version version) {
+	void insert(StringRef const& value, Version version) {
 		Finger f(header, value);
 		while (!f.finished())
 			f.nextLevel();
@@ -669,7 +669,7 @@ private:
 		VectorRef<int>* conflictingKeyRange; // nullptr if report_conflicting_keys is not enabled.
 		Arena* cKRArena; // nullptr if report_conflicting_keys is not enabled.
 
-		void init(const ReadConflictRange& r,
+		void init(ReadConflictRange const& r,
 		          Node* header,
 		          bool* tCS,
 		          int indexInTx,
@@ -762,7 +762,7 @@ private:
 	};
 
 	// Splits the SkipLists so that those after finger is moved to "right".
-	void split(const Finger& f, SkipList& right) {
+	void split(Finger const& f, SkipList& right) {
 		ASSERT(!right.header->getNext(0)); // right must be empty
 		right.header->setMaxVersion(0, f.finger[0]->getMaxVersion(0));
 		for (int l = 0; l < MaxLevels; l++) {
@@ -830,8 +830,8 @@ bool ConflictBatch::ignoreWriteSet() const {
 	return bugs && deterministicRandom()->random01() < bugs->ignoreWriteSetProbability;
 }
 
-void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOldestVersion) {
-	const int t = transactionCount++;
+void ConflictBatch::addTransaction(CommitTransactionRef const& tr, Version newOldestVersion) {
+	int const t = transactionCount++;
 
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
@@ -858,7 +858,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 		}
 
 		for (int r = 0; r < info->readRanges.size(); r++) {
-			const KeyRangeRef& range = tr.read_conflict_ranges[r];
+			KeyRangeRef const& range = tr.read_conflict_ranges[r];
 			points.emplace_back(range.begin, true, false, t, &info->readRanges[r].first);
 			points.emplace_back(range.end, false, false, t, &info->readRanges[r].second);
 			combinedReadConflictRanges.emplace_back(range.begin,
@@ -871,7 +871,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 			                                        tr.report_conflicting_keys ? resolveBatchReplyArena : nullptr);
 		}
 		for (int r = 0; r < info->writeRanges.size(); r++) {
-			const KeyRangeRef& range = tr.write_conflict_ranges[r];
+			KeyRangeRef const& range = tr.write_conflict_ranges[r];
 			points.emplace_back(range.begin, true, true, t, &info->writeRanges[r].first);
 			points.emplace_back(range.end, false, true, t, &info->writeRanges[r].second);
 		}
@@ -893,13 +893,13 @@ public:
 		if (end <= begin)
 			return;
 
-		const size_t wordBegin = static_cast<size_t>(begin) / 64;
-		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
+		size_t const wordBegin = static_cast<size_t>(begin) / 64;
+		size_t const wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
 
 		if (wordBegin == wordEnd) {
 			// Single word case
-			const size_t bitStart = static_cast<size_t>(begin) % 64;
-			const size_t numBits = static_cast<size_t>(end - begin);
+			size_t const bitStart = static_cast<size_t>(begin) % 64;
+			size_t const numBits = static_cast<size_t>(end - begin);
 
 			ASSERT(numBits <= 64); // Single word should never span > 64 bits
 			uint64_t mask;
@@ -923,8 +923,8 @@ public:
 		if (end <= begin)
 			return false;
 
-		const size_t wordBegin = static_cast<size_t>(begin) / 64;
-		const size_t wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
+		size_t const wordBegin = static_cast<size_t>(begin) / 64;
+		size_t const wordEnd = static_cast<size_t>(end - 1) / 64; // Last word containing bits (inclusive)
 
 		for (size_t w = wordBegin; w <= wordEnd; w++) { // Check all words including wordEnd
 			uint64_t mask = ~0ULL;
@@ -951,7 +951,7 @@ void ConflictBatch::checkIntraBatchConflicts() {
 
 	MiniConflictSet mcs(index);
 	for (int t = 0; t < transactionInfo.size(); t++) {
-		const TransactionInfo& tr = *transactionInfo[t];
+		TransactionInfo const& tr = *transactionInfo[t];
 		if (transactionConflictStatus[t])
 			continue;
 		bool conflict = tr.tooOld;
@@ -1040,13 +1040,13 @@ void ConflictBatch::addConflictRanges(Version now,
                                       std::vector<std::pair<StringRef, StringRef>>::iterator begin,
                                       std::vector<std::pair<StringRef, StringRef>>::iterator end,
                                       SkipList* part) {
-	const int count = end - begin;
+	int const count = end - begin;
 	static_assert(sizeof(*begin) == sizeof(StringRef) * 2,
 	              "Write Conflict Range type not convertible to two StringPtrs");
-	const StringRef* strings = reinterpret_cast<const StringRef*>(&*begin);
-	const int stringCount = count * 2;
+	StringRef const* strings = reinterpret_cast<StringRef const*>(&*begin);
+	int const stringCount = count * 2;
 
-	const int stripeSize = 16;
+	int const stripeSize = 16;
 	SkipList::Finger fingers[stripeSize];
 	int temp[stripeSize];
 	int stripes = (stringCount + stripeSize - 1) / stripeSize;
@@ -1068,7 +1068,7 @@ void ConflictBatch::mergeWriteConflictRanges(Version now) {
 
 void ConflictBatch::combineWriteConflictRanges() {
 	int activeWriteCount = 0;
-	for (const KeyInfo& point : points) {
+	for (KeyInfo const& point : points) {
 		if (point.write && !transactionConflictStatus[point.transaction]) {
 			if (point.begin) {
 				activeWriteCount++;
@@ -1088,7 +1088,7 @@ StringRef setK(Arena& arena, int i) {
 	char t[sizeof(i)];
 	*(int*)t = i;
 
-	const int keySize = 16;
+	int const keySize = 16;
 
 	char* ss = new (arena) char[keySize];
 	for (int c = 0; c < keySize - sizeof(i); c++)
@@ -1096,7 +1096,7 @@ StringRef setK(Arena& arena, int i) {
 	for (int c = 0; c < sizeof(i); c++)
 		ss[c + keySize - sizeof(i)] = t[sizeof(i) - 1 - c];
 
-	return StringRef((const uint8_t*)ss, keySize);
+	return StringRef((uint8_t const*)ss, keySize);
 }
 
 void miniConflictSetTest() {
@@ -1167,8 +1167,8 @@ void skipListTest() {
 
 	Arena testDataArena;
 	VectorRef<VectorRef<KeyRangeRef>> testData;
-	const int batches = 500; // deterministicRandom()->randomInt(500, 5000);
-	const int data_per_batch = 5000;
+	int const batches = 500; // deterministicRandom()->randomInt(500, 5000);
+	int const data_per_batch = 5000;
 	testData.resize(testDataArena, batches);
 	std::vector<std::vector<uint8_t>> success(batches);
 	std::vector<std::vector<uint8_t>> success2(batches);
@@ -1192,7 +1192,7 @@ void skipListTest() {
 	start = timer();
 	std::vector<std::vector<int>> nonConflict(batches);
 	Version version = 0;
-	for (const auto& data : testData) {
+	for (auto const& data : testData) {
 		Arena buf;
 		std::vector<CommitTransactionRef> trs;
 		double t = timer();
@@ -1215,7 +1215,7 @@ void skipListTest() {
 
 		t = timer();
 		ConflictBatch batch(cs);
-		for (const auto& tr : trs) {
+		for (auto const& tr : trs) {
 			batch.addTransaction(tr, version);
 		}
 		g_add += timer() - t;
@@ -1242,7 +1242,7 @@ void skipListTest() {
 	printf("                  %0.3f Mkeys/sec\n", cranges * 2 / elapsed / 1e6);
 
 	printf("Performance counters:\n");
-	for (const auto& counter : skc) {
+	for (auto const& counter : skc) {
 		printf("%20s: %s\n", counter->getMetric().name().c_str(), counter->getMetric().formatted().c_str());
 	}
 
@@ -1280,19 +1280,19 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	};
 
 	auto testCase = [](size_t size,
-	                   const std::vector<std::pair<int, int>>& setOperations,
-	                   const std::vector<std::pair<int, int>>& anyQueries) {
+	                   std::vector<std::pair<int, int>> const& setOperations,
+	                   std::vector<std::pair<int, int>> const& anyQueries) {
 		MiniConflictSet mcs(size);
 		ReferenceMiniConflictSet ref(size);
 
 		// Apply set operations to both implementations
-		for (const auto& op : setOperations) {
+		for (auto const& op : setOperations) {
 			mcs.set(op.first, op.second);
 			ref.set(op.first, op.second);
 		}
 
 		// Compare any() results
-		for (const auto& query : anyQueries) {
+		for (auto const& query : anyQueries) {
 			bool mcsResult = mcs.any(query.first, query.second);
 			bool refResult = ref.any(query.first, query.second);
 			ASSERT(mcsResult == refResult);
@@ -1453,7 +1453,7 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	// This test ensures set() and any() work correctly when ranges start/end at or near
 	// word boundaries, catching off-by-one errors and incorrect mask calculations.
 	{
-		const int testSize = 320; // 5 words
+		int const testSize = 320; // 5 words
 		std::vector<std::pair<int, int>> setOps, queries;
 
 		// Test every word boundary systematically
@@ -1523,7 +1523,7 @@ TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {
 	// issues that only appear when dealing with many 64-bit words. This catches performance
 	// issues and ensures correctness scales beyond typical use cases.
 	{
-		const int largeSize = 10000;
+		int const largeSize = 10000;
 		std::vector<std::pair<int, int>> setOps, queries;
 
 		// Large ranges across many words

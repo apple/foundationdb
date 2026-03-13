@@ -46,7 +46,7 @@ UDPMetricClient::UDPMetricClient()
 
 // Since MSG_DONTWAIT isn't defined for Windows, we need to add a
 // ifndef guard here to avoid any compilation issues
-void UDPMetricClient::send_packet(int fd, const void* data, size_t len) {
+void UDPMetricClient::send_packet(int fd, void const* data, size_t len) {
 #ifndef WIN32
 	::send(fd, data, len, MSG_DONTWAIT);
 #endif
@@ -64,20 +64,20 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 		std::vector<OTEL::OTELGauge> gauges;
 
 		// Define custom serialize functions
-		auto f_sums = [](const std::vector<OTEL::OTELSum>& vec, MsgpackBuffer& buf) {
-			typedef void (*func_ptr)(const OTEL::OTELSum&, MsgpackBuffer&);
+		auto f_sums = [](std::vector<OTEL::OTELSum> const& vec, MsgpackBuffer& buf) {
+			typedef void (*func_ptr)(OTEL::OTELSum const&, MsgpackBuffer&);
 			func_ptr f = OTEL::serialize;
 			serialize_vector(vec, buf, f);
 		};
 
-		auto f_hists = [](const std::vector<OTEL::OTELHistogram>& vec, MsgpackBuffer& buf) {
-			typedef void (*func_ptr)(const OTEL::OTELHistogram&, MsgpackBuffer&);
+		auto f_hists = [](std::vector<OTEL::OTELHistogram> const& vec, MsgpackBuffer& buf) {
+			typedef void (*func_ptr)(OTEL::OTELHistogram const&, MsgpackBuffer&);
 			func_ptr f = OTEL::serialize;
 			serialize_vector(vec, buf, f);
 		};
 
-		auto f_gauge = [](const std::vector<OTEL::OTELGauge>& vec, MsgpackBuffer& buf) {
-			typedef void (*func_ptr)(const OTEL::OTELGauge&, MsgpackBuffer&);
+		auto f_gauge = [](std::vector<OTEL::OTELGauge> const& vec, MsgpackBuffer& buf) {
+			typedef void (*func_ptr)(OTEL::OTELGauge const&, MsgpackBuffer&);
 			func_ptr f = OTEL::serialize;
 			serialize_vector(vec, buf, f);
 		};
@@ -85,7 +85,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 		std::vector<OTEL::OTELSum> currentSums;
 		size_t current_msgpack = 0;
 		for (auto& [_, s] : metrics->sumMap) {
-			const auto msgpackBytes = s.getMsgpackBytes();
+			auto const msgpackBytes = s.getMsgpackBytes();
 			if (current_msgpack < MAX_OTELSUM_PACKET_SIZE) {
 				currentSums.push_back(std::move(s));
 				current_msgpack += msgpackBytes;
@@ -96,7 +96,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 			}
 		}
 		if (!sums.empty()) {
-			for (const auto& currSums : sums) {
+			for (auto const& currSums : sums) {
 				serialize_ext(currSums, buf, OTEL::OTELMetricType::Sum, f_sums);
 				send_packet(socket_fd, buf.buffer.get(), buf.data_size);
 				int error = errno;
@@ -109,7 +109,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 		// Each histogram should be in a separate because of their large sizes
 		// Expected DDSketch size is ~4200 entries * 9 bytes = 37800
 		for (auto& [_, h] : metrics->histMap) {
-			const std::vector<OTEL::OTELHistogram> singleHist{ std::move(h) };
+			std::vector<OTEL::OTELHistogram> const singleHist{ std::move(h) };
 			serialize_ext(singleHist, buf, OTEL::OTELMetricType::Hist, f_hists);
 			send_packet(socket_fd, buf.buffer.get(), buf.data_size);
 			int error = errno;
@@ -132,7 +132,7 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 		}
 	} else if (model == MetricsDataModel::STATSD) {
 		std::string messages;
-		for (const auto& msg : metrics->statsd_message) {
+		for (auto const& msg : metrics->statsd_message) {
 			// Account for max udp packet size (+1 since we add '\n')
 			if (messages.size() + msg.size() + 1 < IUDPSocket::MAX_PACKET_SIZE) {
 				messages += (std::move(msg) + '\n');

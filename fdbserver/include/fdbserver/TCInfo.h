@@ -142,7 +142,7 @@ public:
 
 	Reference<TCMachineInfo> clone() const;
 
-	explicit TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry& entry);
+	explicit TCMachineInfo(Reference<TCServerInfo> server, LocalityEntry const& entry);
 
 	std::string getServersIDStr() const;
 };
@@ -210,7 +210,7 @@ public:
 
 	std::vector<UID> const& getServerIDs() const override { return serverIDs; }
 
-	const std::vector<Reference<TCServerInfo>>& getServers() const { return servers; }
+	std::vector<Reference<TCServerInfo>> const& getServers() const { return servers; }
 
 	std::string getServerIDsStr() const;
 
@@ -259,10 +259,10 @@ public:
 	void addref() const override { ReferenceCounted<TCTeamInfo>::addref(); }
 	void delref() const override { ReferenceCounted<TCTeamInfo>::delref(); }
 
-	bool hasServer(const UID& server) const;
+	bool hasServer(UID const& server) const;
 	bool hasWigglePausedServer() const;
 
-	void addServers(const std::vector<UID>& servers) override;
+	void addServers(std::vector<UID> const& servers) override;
 
 private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all

@@ -800,19 +800,19 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	// Finds the localities list that can be excluded from the safe killable addresses list.
 	// If excluding based on a particular locality of the safe process, kills any other process, that
 	// particular locality is not included in the killable localities list.
-	std::unordered_set<std::string> getLocalitiesFromAddresses(const std::vector<AddressExclusion>& addresses) {
+	std::unordered_set<std::string> getLocalitiesFromAddresses(std::vector<AddressExclusion> const& addresses) {
 		std::unordered_map<std::string, int> allLocalitiesCount;
 		std::unordered_map<std::string, int> killableLocalitiesCount;
 		auto processes = getServers();
-		for (const auto& processInfo : processes) {
+		for (auto const& processInfo : processes) {
 			std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
-			for (const auto& l : localityData) {
+			for (auto const& l : localityData) {
 				allLocalitiesCount[LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second]++;
 			}
 
 			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
 			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
-				for (const auto& l : localityData) {
+				for (auto const& l : localityData) {
 					killableLocalitiesCount[LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
 					                        l.second]++;
 				}
@@ -820,18 +820,18 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		}
 
 		std::unordered_set<std::string> toKillLocalities;
-		for (const auto& l : killableLocalitiesCount) {
+		for (auto const& l : killableLocalitiesCount) {
 			if (l.second == allLocalitiesCount[l.first]) {
 				toKillLocalities.insert(l.first);
 			}
 		}
 
-		for (const auto& processInfo : processes) {
+		for (auto const& processInfo : processes) {
 			AddressExclusion pAddr(processInfo->address.ip, processInfo->address.port);
 			if (std::find(addresses.begin(), addresses.end(), pAddr) != addresses.end()) {
 				std::map<std::string, std::string> localityData = processInfo->locality.getAllData();
 				bool found = false;
-				for (const auto& l : localityData) {
+				for (auto const& l : localityData) {
 					if (toKillLocalities.contains(LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" +
 					                              l.second)) {
 						found = true;

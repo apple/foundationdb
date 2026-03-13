@@ -31,7 +31,7 @@
 // NOTE: We should avoid the shared class become an insanely large class, think twice before add member to it.
 class DDSharedContext : public ReferenceCounted<DDSharedContext> {
 public:
-	const std::unique_ptr<DDEnabledState>
+	std::unique_ptr<DDEnabledState> const
 	    ddEnabledState; // Note: can't be reset because the underlying object is shared with snapshot server
 
 	DataDistributorInterface interface;
@@ -48,7 +48,7 @@ public:
 
 	DDSharedContext() = default;
 
-	explicit DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) { interface = iface; }
+	explicit DDSharedContext(DataDistributorInterface const& iface) : DDSharedContext(iface.id()) { interface = iface; }
 
 	explicit DDSharedContext(UID id)
 	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}

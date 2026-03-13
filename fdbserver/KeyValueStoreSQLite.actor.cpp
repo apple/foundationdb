@@ -33,7 +33,7 @@
 
 extern "C" {
 #include "sqliteInt.h"
-u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
+u32 sqlite3VdbeSerialGet(unsigned char const*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
 #include "fdbserver/VFSAsync.h"
@@ -81,7 +81,7 @@ struct PageChecksumCodec {
 	bool silent;
 
 	struct SumType {
-		bool operator==(const SumType& rhs) const { return part1 == rhs.part1 && part2 == rhs.part2; }
+		bool operator==(SumType const& rhs) const { return part1 == rhs.part1 && part2 == rhs.part2; }
 		uint32_t part1;
 		uint32_t part2;
 		std::string toString() { return format("0x%08x%08x", part1, part2); }
@@ -301,7 +301,7 @@ struct SQLiteDB : NonCopyable {
 		}
 	}
 
-	void checkError(const char* context, int rc) {
+	void checkError(char const* context, int rc) {
 		// if (deterministicRandom()->random01() < .001) rc = SQLITE_INTERRUPT;
 		if (rc) {
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this
@@ -410,7 +410,7 @@ class Statement : NonCopyable {
 	sqlite3_stmt* stmt;
 
 public:
-	Statement(SQLiteDB& db, const char* sql) : db(db), stmt(nullptr) {
+	Statement(SQLiteDB& db, char const* sql) : db(db), stmt(nullptr) {
 		db.checkError("prepare", sqlite3_prepare_v2(db.db, sql, -1, &stmt, nullptr));
 	}
 	~Statement() {
@@ -449,13 +449,13 @@ public:
 		__assume(false); // NOT REACHED
 	}
 	StringRef column(int i) {
-		return StringRef((const uint8_t*)sqlite3_column_blob(stmt, i), sqlite3_column_bytes(stmt, i));
+		return StringRef((uint8_t const*)sqlite3_column_blob(stmt, i), sqlite3_column_bytes(stmt, i));
 	}
 };
 
 void hexdump(FILE* fout, StringRef val) {
 	int buflen = val.size();
-	const unsigned char* buf = val.begin();
+	unsigned char const* buf = val.begin();
 	int i, j;
 	for (i = 0; i < buflen; i += 32) {
 		fprintf(fout, "%06x: ", i);
@@ -626,7 +626,7 @@ Optional<KeyValueRef> decodeKVFragment(StringRef encoded, uint32_t* index = null
 		return Optional<KeyValueRef>();
 
 	d += sqlite3GetVarint(d, (u64*)&len1);
-	const uint8_t indexLen = *d++;
+	uint8_t const indexLen = *d++;
 	ASSERT(indexLen <= 4);
 	d += sqlite3GetVarint(d, (u64*)&len2);
 	ASSERT(d == encoded.begin() + h);
@@ -653,8 +653,8 @@ Optional<KeyValueRef> decodeKVFragment(StringRef encoded, uint32_t* index = null
 		if (indexLen == 0)
 			*index = 0;
 		else {
-			const uint8_t* begin = d + len1;
-			const uint8_t* end = begin + indexLen;
+			uint8_t const* begin = d + len1;
+			uint8_t const* end = begin + indexLen;
 			*index = (uint8_t)*begin++;
 			while (begin < end) {
 				*index <<= 8;
@@ -835,8 +835,8 @@ struct RawCursor {
 				seekResult = moveTo(kv.key, true);
 			}
 
-			const int primaryPageUsable = SERVER_KNOBS->SQLITE_FRAGMENT_PRIMARY_PAGE_USABLE;
-			const int overflowPageUsable = SERVER_KNOBS->SQLITE_FRAGMENT_OVERFLOW_PAGE_USABLE;
+			int const primaryPageUsable = SERVER_KNOBS->SQLITE_FRAGMENT_PRIMARY_PAGE_USABLE;
+			int const overflowPageUsable = SERVER_KNOBS->SQLITE_FRAGMENT_OVERFLOW_PAGE_USABLE;
 
 			int fragments = 1;
 			int valuePerFragment = kv.value.size();
@@ -1099,7 +1099,7 @@ struct RawCursor {
 				int fragments = 0;
 				do {
 					++fragments;
-					const ValueRef& val = kv.get().value;
+					ValueRef const& val = kv.get().value;
 					if (forward) {
 						uint8_t* w = wptr;
 						wptr += val.size();
@@ -1601,7 +1601,7 @@ void SQLiteDB::createFromScratch() {
 }
 
 struct ThreadSafeCounter {
-	volatile int64_t counter;
+	int64_t volatile counter;
 	ThreadSafeCounter() : counter(0) {}
 	void operator++() { interlockedIncrement64(&counter); }
 	void operator--() { interlockedDecrement64(&counter); }
@@ -1619,8 +1619,8 @@ public:
 	KeyValueStoreType getType() const override { return type; }
 	StorageBytes getStorageBytes() const override;
 
-	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
-	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
+	void set(KeyValueRef keyValue, Arena const* arena = nullptr) override;
+	void clear(KeyRangeRef range, Arena const* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override;
@@ -1655,10 +1655,10 @@ private:
 
 	int64_t readsRequested, writesRequested;
 	ThreadSafeCounter readsComplete;
-	volatile int64_t writesComplete;
-	volatile SpringCleaningStats springCleaningStats;
-	volatile int64_t diskBytesUsed;
-	volatile int64_t freeListPages;
+	int64_t volatile writesComplete;
+	SpringCleaningStats volatile springCleaningStats;
+	int64_t volatile diskBytesUsed;
+	int64_t volatile freeListPages;
 
 	std::vector<Reference<ReadCursor>> readCursors;
 	Reference<IAsyncFile> dbFile, walFile;
@@ -1692,7 +1692,7 @@ private:
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID) {};
+			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& rv) {
@@ -1720,7 +1720,7 @@ private:
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID) {};
+			  : key(key), maxLength(maxLength), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& rv) {
@@ -1762,10 +1762,10 @@ private:
 		int commits;
 		int setsThisCommit;
 		bool freeTableEmpty; // true if we are sure the freetable (pages pending lazy deletion) is empty
-		volatile int64_t& writesComplete;
-		volatile SpringCleaningStats& springCleaningStats;
-		volatile int64_t& diskBytesUsed;
-		volatile int64_t& freeListPages;
+		int64_t volatile& writesComplete;
+		SpringCleaningStats volatile& springCleaningStats;
+		int64_t volatile& diskBytesUsed;
+		int64_t volatile& freeListPages;
 		UID dbgid;
 		std::vector<Reference<ReadCursor>>& readThreads;
 		bool checkAllChecksumsOnOpen;
@@ -1775,10 +1775,10 @@ private:
 		                bool isBtreeV2,
 		                bool checkAllChecksumsOnOpen,
 		                bool checkIntegrityOnOpen,
-		                volatile int64_t& writesComplete,
-		                volatile SpringCleaningStats& springCleaningStats,
-		                volatile int64_t& diskBytesUsed,
-		                volatile int64_t& freeListPages,
+		                int64_t volatile& writesComplete,
+		                SpringCleaningStats volatile& springCleaningStats,
+		                int64_t volatile& diskBytesUsed,
+		                int64_t volatile& freeListPages,
 		                UID dbgid,
 		                std::vector<Reference<ReadCursor>>* pReadThreads)
 		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), cursor(nullptr), commits(), setsThisCommit(),
@@ -1951,7 +1951,7 @@ private:
 			double lazyDeleteTime = 0;
 			double vacuumTime = 0;
 
-			const double lazyDeleteBatchProbability =
+			double const lazyDeleteBatchProbability =
 			    1.0 / (1 + SERVER_KNOBS->SPRING_CLEANING_VACUUMS_PER_LAZY_DELETE_PAGE *
 			                   std::max(1, SERVER_KNOBS->SPRING_CLEANING_LAZY_DELETE_BATCH_SIZE));
 			bool vacuumFinished = false;
@@ -2232,11 +2232,11 @@ void KeyValueStoreSQLite::startReadThreads() {
 	g_network->setCurrentTask(taskId);
 }
 
-void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
+void KeyValueStoreSQLite::set(KeyValueRef keyValue, Arena const* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
-void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
+void KeyValueStoreSQLite::clear(KeyRangeRef range, Arena const* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }
@@ -2360,9 +2360,9 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	state Key endk = allKeys.end;
 	state bool debug = false;
 
-	const char* startKey = getenv("FDB_DUMP_STARTKEY");
-	const char* endKey = getenv("FDB_DUMP_ENDKEY");
-	const char* debugS = getenv("FDB_DUMP_DEBUG");
+	char const* startKey = getenv("FDB_DUMP_STARTKEY");
+	char const* endKey = getenv("FDB_DUMP_ENDKEY");
+	char const* debugS = getenv("FDB_DUMP_DEBUG");
 	if (startKey != nullptr)
 		k = StringRef(unprintable(std::string(startKey)));
 	if (endKey != nullptr)
@@ -2380,7 +2380,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 		RangeResult kv = wait(store->readRange(KeyRangeRef(k, endk), 1000));
 		for (auto& one : kv) {
 			int size = 0;
-			const uint8_t* data = nullptr;
+			uint8_t const* data = nullptr;
 
 			size = one.key.size();
 			data = one.key.begin();

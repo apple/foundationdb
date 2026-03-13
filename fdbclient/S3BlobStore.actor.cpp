@@ -83,7 +83,7 @@ json_spirit::mObject S3BlobStoreEndpoint::Stats::getJSON() {
 	return o;
 }
 
-S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::Stats::operator-(const Stats& rhs) {
+S3BlobStoreEndpoint::Stats S3BlobStoreEndpoint::Stats::operator-(Stats const& rhs) {
 	Stats r;
 	r.requests_failed = requests_failed - rhs.requests_failed;
 	r.requests_successful = requests_successful - rhs.requests_successful;
@@ -218,10 +218,10 @@ std::string guessRegionFromDomain(std::string domain) {
 		return "us-east-1";
 	}
 
-	static const std::vector<const char*> knownServices = { "s3.", "cos.", "oss-", "obs." };
+	static std::vector<char const*> const knownServices = { "s3.", "cos.", "oss-", "obs." };
 	boost::algorithm::to_lower(domain);
 
-	for (const auto& service : knownServices) {
+	for (auto const& service : knownServices) {
 
 		std::size_t p = domain.find(service);
 		if (p == std::string::npos || (p >= 1 && domain[p - 1] != '.')) {
@@ -241,8 +241,8 @@ std::string guessRegionFromDomain(std::string domain) {
 	return "";
 }
 
-Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string& url,
-                                                               const Optional<std::string>& proxy,
+Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const& url,
+                                                               Optional<std::string> const& proxy,
                                                                std::string* resourceFromURL,
                                                                std::string* error,
                                                                ParametersT* ignored_parameters) {
@@ -439,7 +439,7 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 		params.append(knobParams);
 	}
 
-	for (const auto& [k, v] : extraHeaders) {
+	for (auto const& [k, v] : extraHeaders) {
 		if (!params.empty()) {
 			params.append("&");
 		}
@@ -456,7 +456,7 @@ std::string S3BlobStoreEndpoint::getResourceURL(std::string resource, std::strin
 	return r;
 }
 
-std::string S3BlobStoreEndpoint::constructResourcePath(const std::string& bucket, const std::string& object) const {
+std::string S3BlobStoreEndpoint::constructResourcePath(std::string const& bucket, std::string const& object) const {
 	std::string resource;
 
 	if (host.find(bucket + ".") != 0) {
@@ -673,7 +673,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 	state std::string content;
 
 	// Event type to be logged in the event of an exception
-	state const char* errorEventType = "BlobCredentialFileError";
+	state char const* errorEventType = "BlobCredentialFileError";
 
 	try {
 		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
@@ -899,7 +899,7 @@ void S3BlobStoreEndpoint::returnConnection(ReusableConnection& rconn) {
 	rconn.conn = Reference<IConnection>();
 }
 
-std::string awsCanonicalURI(const std::string& resource, std::vector<std::string>& queryParameters, bool isV4) {
+std::string awsCanonicalURI(std::string const& resource, std::vector<std::string>& queryParameters, bool isV4) {
 	StringRef resourceRef(resource);
 	resourceRef.eat("/");
 	std::string canonicalURI("/" + resourceRef.toString());
@@ -965,7 +965,7 @@ std::string parseErrorCodeFromS3(std::string xmlResponse) {
 	}
 }
 
-bool isS3TokenError(const std::string& s3Error) {
+bool isS3TokenError(std::string const& s3Error) {
 	return s3Error == "InvalidToken" || s3Error == "ExpiredToken";
 }
 
@@ -1064,7 +1064,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 	}
 
 	// Merge extraHeaders into headers
-	for (const auto& [k, v] : bstore->extraHeaders) {
+	for (auto const& [k, v] : bstore->extraHeaders) {
 		std::string& fieldValue = req->data.headers[k];
 		if (!fieldValue.empty()) {
 			fieldValue.append(",");
@@ -1103,7 +1103,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 		req->data.headers["Host"] = bstore->host;
 		req->data.headers["Accept"] = "application/xml";
 		// Re-merge extraHeaders
-		for (const auto& [k, v] : bstore->extraHeaders) {
+		for (auto const& [k, v] : bstore->extraHeaders) {
 			std::string& fieldValue = req->data.headers[k];
 			if (!fieldValue.empty()) {
 				fieldValue.append(",");
@@ -1439,7 +1439,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<S3BlobS
 
 Future<Reference<HTTP::IncomingResponse>> S3BlobStoreEndpoint::doRequest(std::string const& verb,
                                                                          std::string const& resource,
-                                                                         const HTTP::Headers& headers,
+                                                                         HTTP::Headers const& headers,
                                                                          UnsentPacketQueue* pContent,
                                                                          int contentLen,
                                                                          std::set<unsigned int> successCodes) {
@@ -1515,9 +1515,9 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 			continuationToken.clear();
 
 			while (n != nullptr) {
-				const char* name = n->name();
+				char const* name = n->name();
 				if (strcmp(name, "IsTruncated") == 0) {
-					const char* val = n->value();
+					char const* val = n->value();
 					if (strcmp(val, "true") == 0) {
 						more = true;
 					} else if (strcmp(val, "false") == 0) {
@@ -1549,7 +1549,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 				} else if (strcmp(name, "CommonPrefixes") == 0) {
 					xml_node<>* prefixNode = n->first_node("Prefix");
 					while (prefixNode != nullptr) {
-						const char* prefix = prefixNode->value();
+						char const* prefix = prefixNode->value();
 						// If recursing, queue a sub-request, otherwise add the common prefix to the result.
 						if (maxDepth > 0) {
 							if (!recurseFilter || recurseFilter(prefix)) {
@@ -1685,7 +1685,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 					if (nameNode == nullptr) {
 						throw http_bad_response();
 					}
-					const char* name = nameNode->value();
+					char const* name = nameNode->value();
 					buckets.push_back(name);
 
 					bucketNode = bucketNode->next_sibling("Bucket");
@@ -1738,7 +1738,7 @@ std::string S3BlobStoreEndpoint::hmac_sha1(Credentials const& creds, std::string
 	return SHA1::from_string(kopad);
 }
 
-static void sha256(const unsigned char* data, const size_t len, unsigned char* hash) {
+static void sha256(unsigned char const* data, size_t const len, unsigned char* hash) {
 	SHA256_CTX sha256;
 	SHA256_Init(&sha256);
 	SHA256_Update(&sha256, data, len);
@@ -1747,7 +1747,7 @@ static void sha256(const unsigned char* data, const size_t len, unsigned char* h
 
 std::string sha256_hex(std::string str) {
 	unsigned char hash[SHA256_DIGEST_LENGTH];
-	sha256((const unsigned char*)str.c_str(), str.size(), hash);
+	sha256((unsigned char const*)str.c_str(), str.size(), hash);
 	std::stringstream ss;
 	for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
 		ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
@@ -1758,7 +1758,7 @@ std::string sha256_hex(std::string str) {
 // Return base64'd SHA256 hash of input string.
 std::string sha256_base64(std::string str) {
 	unsigned char hash[SHA256_DIGEST_LENGTH];
-	sha256((const unsigned char*)str.c_str(), str.size(), hash);
+	sha256((unsigned char const*)str.c_str(), str.size(), hash);
 	std::string hashAsStr = std::string((char*)hash, SHA256_DIGEST_LENGTH);
 	std::string sig = base64::encoder::from_string(hashAsStr);
 	// base64 encoded blocks end in \n so remove last character.
@@ -1856,14 +1856,14 @@ void S3BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 		headersList.push_back({ "content-type", trim_copy(headers["Content-Type"]) + "\n" });
 	if (headers.find("Content-MD5") != headers.end())
 		headersList.push_back({ "content-md5", trim_copy(headers["Content-MD5"]) + "\n" });
-	for (const auto& [headerName, headerValue] : headers) {
+	for (auto const& [headerName, headerValue] : headers) {
 		if (StringRef(headerName).startsWith("x-amz"_sr))
 			headersList.push_back({ to_lower_copy(headerName), trim_copy(headerValue) + "\n" });
 	}
 	std::sort(headersList.begin(), headersList.end());
 	std::string canonicalHeaders;
 	std::string signedHeaders;
-	for (const auto& [headerName, headerValue] : headersList) {
+	for (auto const& [headerName, headerValue] : headersList) {
 		canonicalHeaders += headerName + ":" + headerValue;
 		signedHeaders += headerName + ";";
 	}
@@ -1916,7 +1916,7 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 	msg.append("\n");
 	msg.append(date);
 	msg.append("\n");
-	for (const auto& [headerName, headerValue] : headers) {
+	for (auto const& [headerName, headerValue] : headers) {
 		StringRef name = headerName;
 		if (name.startsWith("x-amz"_sr) || name.startsWith("x-icloud"_sr)) {
 			msg.append(headerName);

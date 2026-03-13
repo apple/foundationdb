@@ -44,11 +44,11 @@
 
 class LoaderVersionBatchState : RoleVersionBatchState {
 public:
-	static const int NOT_INIT = 0;
-	static const int INIT = 1;
-	static const int LOAD_FILE = 2;
-	static const int SEND_MUTATIONS = 3;
-	static const int INVALID = 4;
+	static int const NOT_INIT = 0;
+	static int const INIT = 1;
+	static int const LOAD_FILE = 2;
+	static int const SEND_MUTATIONS = 3;
+	static int const INVALID = 4;
 
 	explicit LoaderVersionBatchState(int newState) { vbState = newState; }
 
@@ -136,7 +136,7 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 	double start;
 
 	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched, double start)
-	  : batchIndex(batchIndex), toSched(toSched), start(start) {};
+	  : batchIndex(batchIndex), toSched(toSched), start(start){};
 	RestoreLoaderSchedSendLoadParamRequest() = default;
 
 	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {
@@ -145,9 +145,8 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "RestoreLoaderSchedSendLoadParamRequest: "
-		   << " batchIndex:" << batchIndex << " toSchedFutureIsReady:" << toSched.getFuture().isReady()
-		   << " start:" << start;
+		ss << "RestoreLoaderSchedSendLoadParamRequest: " << " batchIndex:" << batchIndex
+		   << " toSchedFutureIsReady:" << toSched.getFuture().isReady() << " start:" << start;
 		return ss.str();
 	}
 };

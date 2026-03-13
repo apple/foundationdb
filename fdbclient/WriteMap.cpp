@@ -54,7 +54,7 @@ bool OperationStack::isDependent() const {
 	       singletonOperation.type != MutationRef::SetVersionstampedKey;
 }
 
-bool OperationStack::operator==(const OperationStack& r) const {
+bool OperationStack::operator==(OperationStack const& r) const {
 	if (size() != r.size())
 		return false;
 

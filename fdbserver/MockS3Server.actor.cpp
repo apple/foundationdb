@@ -73,10 +73,10 @@
 
 // MockS3 persistence file extensions and constants
 namespace {
-constexpr const char* DEFAULT_MOCKS3_PERSISTENCE_DIR = "simfdb/mocks3";
-constexpr const char* OBJECT_DATA_SUFFIX = ".data";
-constexpr const char* OBJECT_META_SUFFIX = ".meta.json";
-constexpr const char* MULTIPART_STATE_SUFFIX = ".state.json";
+constexpr char const* DEFAULT_MOCKS3_PERSISTENCE_DIR = "simfdb/mocks3";
+constexpr char const* OBJECT_DATA_SUFFIX = ".data";
+constexpr char const* OBJECT_META_SUFFIX = ".meta.json";
+constexpr char const* MULTIPART_STATE_SUFFIX = ".state.json";
 constexpr size_t OBJECT_META_SUFFIX_LEN = 10; // strlen(".meta.json")
 constexpr size_t MULTIPART_STATE_SUFFIX_LEN = 11; // strlen(".state.json")
 } // namespace
@@ -91,9 +91,9 @@ struct MockS3GlobalStorage {
 		double lastModified;
 
 		ObjectData() : lastModified(now()) {}
-		ObjectData(const std::string& data) : content(data), lastModified(now()) { etag = generateETag(data); }
+		ObjectData(std::string const& data) : content(data), lastModified(now()) { etag = generateETag(data); }
 
-		static std::string generateETag(const std::string& content) {
+		static std::string generateETag(std::string const& content) {
 			return "\"" + HTTP::computeMD5Sum(content) + "\"";
 		}
 	};
@@ -107,7 +107,7 @@ struct MockS3GlobalStorage {
 		double initiated;
 
 		MultipartUpload() = default;
-		MultipartUpload(const std::string& b, const std::string& o) : bucket(b), object(o), initiated(now()) {
+		MultipartUpload(std::string const& b, std::string const& o) : bucket(b), object(o), initiated(now()) {
 			uploadId = deterministicRandom()->randomUniqueID().toString();
 		}
 	};
@@ -137,7 +137,7 @@ struct MockS3GlobalStorage {
 	// Enable persistence to specified directory
 	// Note: When using simulation filesystem, directories are created automatically by file open()
 	// and each simulated machine has its own isolated directory structure
-	void enablePersistence(const std::string& dir) {
+	void enablePersistence(std::string const& dir) {
 		persistenceDir = dir;
 		persistenceEnabled = true;
 		persistenceLoaded = false;
@@ -148,23 +148,23 @@ struct MockS3GlobalStorage {
 
 	// Get paths for persistence files
 	// Note: Object names with slashes map directly to filesystem directory structure
-	std::string getObjectDataPath(const std::string& bucket, const std::string& object) const {
+	std::string getObjectDataPath(std::string const& bucket, std::string const& object) const {
 		return persistenceDir + "/objects/" + bucket + "/" + object + OBJECT_DATA_SUFFIX;
 	}
 
-	std::string getObjectMetaPath(const std::string& bucket, const std::string& object) const {
+	std::string getObjectMetaPath(std::string const& bucket, std::string const& object) const {
 		return persistenceDir + "/objects/" + bucket + "/" + object + OBJECT_META_SUFFIX;
 	}
 
-	std::string getMultipartStatePath(const std::string& uploadId) const {
+	std::string getMultipartStatePath(std::string const& uploadId) const {
 		return persistenceDir + "/multipart/" + uploadId + MULTIPART_STATE_SUFFIX;
 	}
 
-	std::string getMultipartPartPath(const std::string& uploadId, int partNum) const {
+	std::string getMultipartPartPath(std::string const& uploadId, int partNum) const {
 		return persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum);
 	}
 
-	std::string getMultipartPartMetaPath(const std::string& uploadId, int partNum) const {
+	std::string getMultipartPartMetaPath(std::string const& uploadId, int partNum) const {
 		return persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum) + OBJECT_META_SUFFIX;
 	}
 };
@@ -178,7 +178,7 @@ static MockS3GlobalStorage& getGlobalStorage() {
 
 // Helper: Create all parent directories for a file path
 // Uses platform::createDirectory which handles recursive creation and EEXIST errors
-static void createParentDirectories(const std::string& filePath) {
+static void createParentDirectories(std::string const& filePath) {
 	size_t lastSlash = filePath.find_last_of('/');
 	if (lastSlash != std::string::npos && lastSlash > 0) {
 		std::string parentDir = filePath.substr(0, lastSlash);
@@ -280,7 +280,7 @@ ACTOR static Future<Void> deletePersistedFile(std::string path) {
 }
 
 // JSON Serialization using rapidjson
-static std::string serializeObjectMeta(const MockS3GlobalStorage::ObjectData& obj) {
+static std::string serializeObjectMeta(MockS3GlobalStorage::ObjectData const& obj) {
 	using namespace rapidjson;
 	Document doc;
 	doc.SetObject();
@@ -290,7 +290,7 @@ static std::string serializeObjectMeta(const MockS3GlobalStorage::ObjectData& ob
 	doc.AddMember("lastModified", obj.lastModified, allocator);
 
 	Value tagsObj(kObjectType);
-	for (const auto& tag : obj.tags) {
+	for (auto const& tag : obj.tags) {
 		tagsObj.AddMember(Value(tag.first.c_str(), allocator), Value(tag.second.c_str(), allocator), allocator);
 	}
 	doc.AddMember("tags", tagsObj, allocator);
@@ -302,7 +302,7 @@ static std::string serializeObjectMeta(const MockS3GlobalStorage::ObjectData& ob
 }
 
 // JSON Deserialization using rapidjson
-static void deserializeObjectMeta(const std::string& jsonStr, MockS3GlobalStorage::ObjectData& obj) {
+static void deserializeObjectMeta(std::string const& jsonStr, MockS3GlobalStorage::ObjectData& obj) {
 	using namespace rapidjson;
 	Document doc;
 	doc.Parse(jsonStr.c_str());
@@ -319,7 +319,7 @@ static void deserializeObjectMeta(const std::string& jsonStr, MockS3GlobalStorag
 	}
 }
 
-static std::string serializeMultipartState(const MockS3GlobalStorage::MultipartUpload& upload) {
+static std::string serializeMultipartState(MockS3GlobalStorage::MultipartUpload const& upload) {
 	using namespace rapidjson;
 	Document doc;
 	doc.SetObject();
@@ -331,7 +331,7 @@ static std::string serializeMultipartState(const MockS3GlobalStorage::MultipartU
 	doc.AddMember("initiated", upload.initiated, allocator);
 
 	Value partsArray(kArrayType);
-	for (const auto& part : upload.parts) {
+	for (auto const& part : upload.parts) {
 		Value partObj(kObjectType);
 		partObj.AddMember("partNum", part.first, allocator);
 		partObj.AddMember("etag", Value(part.second.first.c_str(), allocator), allocator);
@@ -345,7 +345,7 @@ static std::string serializeMultipartState(const MockS3GlobalStorage::MultipartU
 	return buffer.GetString();
 }
 
-static void deserializeMultipartState(const std::string& jsonStr, MockS3GlobalStorage::MultipartUpload& upload) {
+static void deserializeMultipartState(std::string const& jsonStr, MockS3GlobalStorage::MultipartUpload& upload) {
 	using namespace rapidjson;
 	Document doc;
 	doc.Parse(jsonStr.c_str());
@@ -376,7 +376,7 @@ ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceD
 ACTOR static Future<Void> loadMockS3PersistedStateImpl();
 Future<Void> loadMockS3PersistedStateFuture();
 
-static std::string serializePartMeta(const std::string& etag) {
+static std::string serializePartMeta(std::string const& etag) {
 	using namespace rapidjson;
 	Document doc;
 	doc.SetObject();
@@ -478,7 +478,7 @@ ACTOR static Future<Void> persistMultipartState(std::string uploadId) {
 		return Void();
 	}
 
-	const auto& upload = uploadIter->second;
+	auto const& upload = uploadIter->second;
 	persistenceDir = storage.persistenceDir;
 	parts = upload.parts;
 
@@ -564,7 +564,7 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 		auto uploadIter = storage.multipartUploads.find(uploadId);
 		maxPart = 100; // Conservative estimate
 		if (uploadIter != storage.multipartUploads.end()) {
-			for (const auto& part : uploadIter->second.parts) {
+			for (auto const& part : uploadIter->second.parts) {
 				maxPart = std::max(maxPart, part.first);
 			}
 		}
@@ -703,7 +703,7 @@ public:
 		return Void();
 	}
 
-	void parseS3Request(const std::string& resource,
+	void parseS3Request(std::string const& resource,
 	                    std::string& bucket,
 	                    std::string& object,
 	                    std::map<std::string, std::string>& queryParams) {
@@ -758,7 +758,7 @@ public:
 	// Parse HTTP Range header: "bytes=start-end"
 	// Returns true if parsing succeeded, false otherwise
 	// Sets rangeStart and rangeEnd to the parsed values
-	static bool parseRangeHeader(const std::string& rangeHeader, int64_t& rangeStart, int64_t& rangeEnd) {
+	static bool parseRangeHeader(std::string const& rangeHeader, int64_t& rangeStart, int64_t& rangeEnd) {
 		if (rangeHeader.empty()) {
 			return false;
 		}
@@ -802,7 +802,7 @@ public:
 		// This makes multipart initiation idempotent - retries return the same upload ID
 		// This matches real S3 behavior where you can have multiple concurrent uploads for the same object
 		std::string existingUploadId;
-		for (const auto& pair : getGlobalStorage().multipartUploads) {
+		for (auto const& pair : getGlobalStorage().multipartUploads) {
 			if (pair.second.bucket == bucket && pair.second.object == object) {
 				existingUploadId = pair.first;
 				TraceEvent("MockS3MultipartStartIdempotent")
@@ -1258,7 +1258,7 @@ public:
 			return Void();
 		}
 
-		const ObjectData& obj = objectIter->second;
+		ObjectData const& obj = objectIter->second;
 		std::string etag = obj.etag;
 		size_t contentSize = obj.content.size();
 		std::string preview = contentSize > 0 ? obj.content.substr(0, std::min((size_t)20, contentSize)) : "EMPTY";
@@ -1312,10 +1312,10 @@ public:
 		}
 
 		// Collect all matching objects first
-		std::vector<std::pair<std::string, const ObjectData*>> matchingObjects;
-		for (const auto& objectPair : bucketIter->second) {
-			const std::string& objectName = objectPair.first;
-			const ObjectData& objectData = objectPair.second;
+		std::vector<std::pair<std::string, ObjectData const*>> matchingObjects;
+		for (auto const& objectPair : bucketIter->second) {
+			std::string const& objectName = objectPair.first;
+			ObjectData const& objectData = objectPair.second;
 
 			// Apply prefix filter
 			if (!prefix.empty() && objectName.find(prefix) != 0) {
@@ -1362,8 +1362,8 @@ public:
 		size_t totalMatching = matchingObjects.size();
 
 		for (size_t i = startIndex; i < matchingObjects.size() && count < maxKeys; i++) {
-			const std::string& objectName = matchingObjects[i].first;
-			const ObjectData* objectData = matchingObjects[i].second;
+			std::string const& objectName = matchingObjects[i].first;
+			ObjectData const* objectData = matchingObjects[i].second;
 
 			xml += "<Contents>\n";
 			xml += "<Key>" + objectName + "</Key>\n";
@@ -1450,8 +1450,8 @@ public:
 
 	void sendError(Reference<HTTP::OutgoingResponse> response,
 	               int code,
-	               const std::string& errorCode,
-	               const std::string& message) {
+	               std::string const& errorCode,
+	               std::string const& message) {
 
 		TraceEvent("MockS3Error").detail("Code", code).detail("ErrorCode", errorCode).detail("Message", message);
 
@@ -1466,7 +1466,7 @@ public:
 		sendXMLResponse(response, code, xml);
 	}
 
-	void sendXMLResponse(Reference<HTTP::OutgoingResponse> response, int code, const std::string& xml) {
+	void sendXMLResponse(Reference<HTTP::OutgoingResponse> response, int code, std::string const& xml) {
 		TraceEvent("MockS3SendXMLResponse_Start")
 		    .detail("Code", code)
 		    .detail("XMLSize", xml.size())
@@ -1501,7 +1501,7 @@ public:
 		    .detail("XMLSize", xml.size());
 	}
 
-	std::map<std::string, std::string> parseTagsXML(const std::string& xml) {
+	std::map<std::string, std::string> parseTagsXML(std::string const& xml) {
 		std::map<std::string, std::string> tags;
 
 		// Simplified XML parsing for tags - this would need a proper XML parser in production
@@ -1520,10 +1520,10 @@ public:
 		return tags;
 	}
 
-	std::string generateTagsXML(const std::map<std::string, std::string>& tags) {
+	std::string generateTagsXML(std::map<std::string, std::string> const& tags) {
 		std::string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Tagging><TagSet>";
 
-		for (const auto& tag : tags) {
+		for (auto const& tag : tags) {
 			xml += "<Tag><Key>" + tag.first + "</Key><Value>" + tag.second + "</Value></Tag>";
 		}
 
@@ -1656,7 +1656,7 @@ void clearMockS3Storage() {
 }
 
 // Enable persistence for MockS3 storage
-void enableMockS3Persistence(const std::string& persistenceDir) {
+void enableMockS3Persistence(std::string const& persistenceDir) {
 	getGlobalStorage().enablePersistence(persistenceDir);
 	TraceEvent("MockS3PersistenceConfigured").detail("Directory", persistenceDir);
 }
@@ -2182,7 +2182,7 @@ ACTOR Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std:
 	return Void();
 }
 
-Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress, const std::string& persistenceDir) {
+Future<Void> startMockS3ServerReal(NetworkAddress const& listenAddress, std::string const& persistenceDir) {
 	return startMockS3ServerReal_impl(listenAddress, persistenceDir);
 }
 

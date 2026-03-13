@@ -27,7 +27,7 @@ using fdb::Value;
 
 class WatchAndWaitWorkload : public ApiWorkload {
 public:
-	WatchAndWaitWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
+	WatchAndWaitWorkload(WorkloadConfig const& config) : ApiWorkload(config) {}
 	int getMaxSelfBlockingFutures() override {
 		// One watch future running concurrently waits for a commit of a transaction which sets the value.
 		return 1;

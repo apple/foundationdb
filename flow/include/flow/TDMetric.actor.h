@@ -44,12 +44,12 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 enum MetricsDataModel { STATSD = 0, OTLP, NONE };
-MetricsDataModel knobToMetricModel(const std::string& knob);
+MetricsDataModel knobToMetricModel(std::string const& knob);
 
 struct MetricNameRef {
 	MetricNameRef() {}
-	MetricNameRef(const StringRef& type, const StringRef& name, const StringRef& id) : type(type), name(name), id(id) {}
-	MetricNameRef(Arena& a, const MetricNameRef& copyFrom)
+	MetricNameRef(StringRef const& type, StringRef const& name, StringRef const& id) : type(type), name(name), id(id) {}
+	MetricNameRef(Arena& a, MetricNameRef const& copyFrom)
 	  : type(a, copyFrom.type), name(a, copyFrom.name), id(a, copyFrom.id) {}
 
 	StringRef type, name, id;
@@ -74,7 +74,7 @@ struct MetricNameRef {
 
 extern std::string reduceFilename(std::string const& filename);
 
-inline bool operator<(const MetricNameRef& l, const MetricNameRef& r) {
+inline bool operator<(MetricNameRef const& l, MetricNameRef const& r) {
 	int cmp = l.type.compare(r.type);
 	if (cmp == 0) {
 		cmp = l.name.compare(r.name);
@@ -84,11 +84,11 @@ inline bool operator<(const MetricNameRef& l, const MetricNameRef& r) {
 	return cmp < 0;
 }
 
-inline bool operator==(const MetricNameRef& l, const MetricNameRef& r) {
+inline bool operator==(MetricNameRef const& l, MetricNameRef const& r) {
 	return l.type == r.type && l.name == r.name && l.id == r.id;
 }
 
-inline bool operator!=(const MetricNameRef& l, const MetricNameRef& r) {
+inline bool operator!=(MetricNameRef const& l, MetricNameRef const& r) {
 	return !(l == r);
 }
 
@@ -124,7 +124,7 @@ public:
 // Key generator for metric keys for various things.
 struct MetricKeyRef {
 	MetricKeyRef() : level(-1) {}
-	MetricKeyRef(Arena& a, const MetricKeyRef& copyFrom)
+	MetricKeyRef(Arena& a, MetricKeyRef const& copyFrom)
 	  : prefix(a, copyFrom.prefix), name(a, copyFrom.name), address(a, copyFrom.address),
 	    fieldName(a, copyFrom.fieldName), fieldType(a, copyFrom.fieldType), level(copyFrom.level) {}
 
@@ -141,7 +141,7 @@ struct MetricKeyRef {
 	}
 
 	template <typename T>
-	inline MetricKeyRef withField(const T& field) const {
+	inline MetricKeyRef withField(T const& field) const {
 		MetricKeyRef mk(*this);
 		mk.fieldName = field.name();
 		mk.fieldType = field.typeName();
@@ -373,23 +373,25 @@ struct make_index_sequence_impl<End, index_sequence<Indices...>, End> {
 
 // The code that actually implements tuple_map
 template <size_t I, typename F, typename... Tuples>
-auto tuple_zip_invoke(F f, const Tuples&... ts) -> decltype(f(std::get<I>(ts)...)) {
+auto tuple_zip_invoke(F f, Tuples const&... ts) -> decltype(f(std::get<I>(ts)...)) {
 	return f(std::get<I>(ts)...);
 }
 
 template <typename F, size_t... Is, typename... Tuples>
-auto tuple_map_impl(F f, index_sequence<Is...>, const Tuples&... ts)
-    -> decltype(std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...)) {
+auto tuple_map_impl(F f,
+                    index_sequence<Is...>,
+                    Tuples const&... ts) -> decltype(std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...)) {
 	return std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...);
 }
 
 // tuple_map( f(a,b), (a1,a2,a3), (b1,b2,b3) ) = (f(a1,b1), f(a2,b2), f(a3,b3))
 template <typename F, typename Tuple, typename... Tuples>
-auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_impl(
-    f,
-    typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
-    t,
-    ts...)) {
+auto tuple_map(F f, Tuple const& t, Tuples const&... ts)
+    -> decltype(tuple_map_impl(
+        f,
+        typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
+        t,
+        ts...)) {
 	return tuple_map_impl(
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
@@ -591,7 +593,7 @@ public:
 	}
 
 	// Read header at position, update it with previousHeader, overwrite old header with new header.
-	static void updateSerializedHeader(StringRef buf, const Header& patch) {
+	static void updateSerializedHeader(StringRef buf, Header const& patch) {
 		BinaryReader r(buf, AssumeVersion(g_network->protocolVersion()));
 		Header h;
 		r >> h;
@@ -672,7 +674,7 @@ public:
 
 	// Flush this level's data to the output batch.
 	// This function must NOT be called again until any callbacks added to batch have been completed.
-	void flush(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) {
+	void flush(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
 		// Don't do anything if there is no data in the queue to flush.
 		if (metrics.empty() || metrics.front().start == 0)
 			return;
@@ -744,7 +746,7 @@ struct EventField : public Descriptor {
 	}
 
 	// Writes and Event metric field registration key
-	void registerField(const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys) {
+	void registerField(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) {
 		fieldKeys.push_back(mk.withField(*this).packFieldRegKey());
 	}
 };
@@ -771,8 +773,8 @@ struct BaseMetric {
 
 	virtual void rollMetric(uint64_t t) = 0;
 
-	virtual void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) = 0;
-	virtual void registerFields(const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys) {};
+	virtual void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) = 0;
+	virtual void registerFields(MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) {};
 
 	// Set the metric's config.  An assert will fail if the metric is enabled before the metrics collection is
 	// available.
@@ -823,7 +825,7 @@ struct BaseEventMetric : BaseMetric {
 	BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
 
 	// Needed for MetricUtil
-	alignas(8) static const StringRef metricType;
+	alignas(8) static StringRef const metricType;
 	Void getValue() const { return Void(); }
 	~BaseEventMetric() override {}
 
@@ -954,7 +956,7 @@ struct EventMetric final : E, ReferenceCounted<EventMetric<E>>, MetricUtil<Event
 	}
 
 	template <size_t... Is>
-	void registerFields(index_sequence<Is...>, const MetricKeyRef& mk, std::vector<Standalone<StringRef>>& fieldKeys) {
+	void registerFields(index_sequence<Is...>, MetricKeyRef const& mk, std::vector<Standalone<StringRef>>& fieldKeys) {
 #ifdef NO_INTELLISENSE
 		auto _ = { (std::get<Is>(values).registerField(mk, fieldKeys), Void())... };
 		(void)_;
@@ -967,11 +969,11 @@ private:
 
 // A field Descriptor compatible with EventField but with name set at runtime
 struct DynamicDescriptor {
-	DynamicDescriptor(const char* name) : _name(StringRef((uint8_t*)name, strlen(name))) {}
+	DynamicDescriptor(char const* name) : _name(StringRef((uint8_t*)name, strlen(name))) {}
 	StringRef name() const { return _name; }
 
 private:
-	const Standalone<StringRef> _name;
+	Standalone<StringRef> const _name;
 };
 
 template <typename T>
@@ -995,7 +997,7 @@ struct DynamicFieldBase {
 	virtual void setValueFrom(DynamicFieldBase* src, StringRef eventType) = 0;
 
 	// Create a new field of the same type and with the same current value as this one and with the given name
-	virtual std::unique_ptr<DynamicFieldBase> createNewWithValue(const char* name) = 0;
+	virtual std::unique_ptr<DynamicFieldBase> createNewWithValue(char const* name) = 0;
 
 	// This does a fairly cheap and "safe" downcast without using dynamic_cast / RTTI by checking that the pointer value
 	// of the const char * type string is the same as getDerivedTypeName for this object.
@@ -1016,7 +1018,7 @@ struct DynamicFieldBase {
 template <typename T>
 struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescriptor> {
 	typedef EventField<T, DynamicDescriptor> EventFieldType;
-	DynamicField(const char* name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
+	DynamicField(char const* name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
 
 	StringRef fieldName() const override { return EventFieldType::name(); }
 
@@ -1052,7 +1054,7 @@ struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescri
 			         // value.
 	}
 
-	std::unique_ptr<DynamicFieldBase> createNewWithValue(const char* name) override {
+	std::unique_ptr<DynamicFieldBase> createNewWithValue(char const* name) override {
 		auto n = std::make_unique<DynamicField<T>>(name);
 		n->set(value);
 		return n;
@@ -1112,7 +1114,7 @@ public:
 
 	// Set (or create) a new field in the event
 	template <typename ValueType>
-	void setField(const char* fieldName, const ValueType& value) {
+	void setField(char const* fieldName, ValueType const& value) {
 		StringRef fname((uint8_t*)fieldName, strlen(fieldName));
 		auto& p = fields[fname];
 		// DynamicFieldBase *&p = fields[fname];
@@ -1271,7 +1273,7 @@ struct ContinuousMetric final : NonCopyable,
                                 MetricUtil<ContinuousMetric<T>, T>,
                                 BaseMetric {
 	// Needed for MetricUtil
-	alignas(8) static const StringRef metricType;
+	alignas(8) static StringRef const metricType;
 
 private:
 	EventField<TimeAndValue<T>> field;
@@ -1288,7 +1290,7 @@ public:
 
 	T getValue() const { return tv.value; }
 
-	void flushData(const MetricKeyRef& mk, uint64_t rollTime, MetricBatch& batch) override {
+	void flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) override {
 		if (!recorded) {
 			batch.scope.updates.emplace_back(mk.packLatestKey(), getLatestAsValue());
 			recorded = true;
@@ -1316,7 +1318,7 @@ public:
 
 	void onDisable() override { change(); }
 
-	void set(const T& v) {
+	void set(T const& v) {
 		if (v != tv.value) {
 			if (enabled)
 				change();
@@ -1325,7 +1327,7 @@ public:
 	}
 
 	// requires += on T
-	void add(const T& delta) {
+	void add(T const& delta) {
 		if (delta != T()) {
 			if (enabled)
 				change();
@@ -1430,7 +1432,7 @@ struct MetricHandle {
 
 template <class T>
 struct Traceable<MetricHandle<T>> : Traceable<typename T::ValueType> {
-	static std::string toString(const MetricHandle<T>& value) {
+	static std::string toString(MetricHandle<T> const& value) {
 		return Traceable<typename T::ValueType>::toString(value.getValue());
 	}
 };
@@ -1438,7 +1440,7 @@ struct Traceable<MetricHandle<T>> : Traceable<typename T::ValueType> {
 template <class T>
 struct SpecialTraceMetricType<MetricHandle<T>> : SpecialTraceMetricType<typename T::ValueType> {
 	using parent = SpecialTraceMetricType<typename T::ValueType>;
-	static auto getValue(const MetricHandle<T>& value) { return parent::getValue(value.getValue()); }
+	static auto getValue(MetricHandle<T> const& value) { return parent::getValue(value.getValue()); }
 };
 
 typedef MetricHandle<Int64Metric> Int64MetricHandle;
@@ -1454,8 +1456,8 @@ enum StatsDMetric { GAUGE = 0, COUNTER };
 
 class IMetric {
 public:
-	const UID id;
-	const MetricsDataModel model;
+	UID const id;
+	MetricsDataModel const model;
 	IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
@@ -1474,20 +1476,20 @@ public:
 	}
 };
 
-std::string createStatsdMessage(const std::string& name,
+std::string createStatsdMessage(std::string const& name,
                                 StatsDMetric type,
-                                const std::string& val,
-                                const std::vector<std::pair<std::string, std::string>>& tags);
+                                std::string const& val,
+                                std::vector<std::pair<std::string, std::string>> const& tags);
 
-std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val);
+std::string createStatsdMessage(std::string const& name, StatsDMetric type, std::string const& val);
 
-std::vector<std::string> splitString(const std::string& str, const std::string& delimit);
+std::vector<std::string> splitString(std::string const& str, std::string const& delimit);
 
-bool verifyStatsdMessage(const std::string& msg);
+bool verifyStatsdMessage(std::string const& msg);
 
-void createOtelGauge(UID id, const std::string& name, double value);
+void createOtelGauge(UID id, std::string const& name, double value);
 
-void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>&);
+void createOtelGauge(UID id, std::string const& name, double value, std::vector<OTEL::Attribute> const&);
 
 #include "flow/unactorcompiler.h"
 

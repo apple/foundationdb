@@ -174,7 +174,7 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 struct StorageServerMetaInfo : public StorageServerInterface {
 	Optional<StorageMetadataType> metadata;
 
-	StorageServerMetaInfo(const StorageServerInterface& interface,
+	StorageServerMetaInfo(StorageServerInterface const& interface,
 	                      Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
 	  : StorageServerInterface(interface), metadata(metadata) {}
 };
@@ -188,10 +188,10 @@ struct ServerCacheInfo {
 		if (tags.size())
 			return;
 
-		for (const auto& info : src_info) {
+		for (auto const& info : src_info) {
 			tags.push_back(info->tag);
 		}
-		for (const auto& info : dest_info) {
+		for (auto const& info : dest_info) {
 			tags.push_back(info->tag);
 		}
 		uniquify(tags);
@@ -228,7 +228,7 @@ struct GetValueRequest : TimedRequest {
 	bool verify() const { return true; }
 
 	GetValueRequest(SpanContext spanContext,
-	                const Key& key,
+	                Key const& key,
 	                Version ver,
 	                Optional<TagSet> tags,
 	                Optional<ReadOptions> options,
@@ -271,7 +271,7 @@ struct WatchValueRequest {
 	bool verify() const { return true; }
 
 	WatchValueRequest(SpanContext spanContext,
-	                  const Key& key,
+	                  Key const& key,
 	                  Optional<Value> value,
 	                  Version ver,
 	                  Optional<TagSet> tags,
@@ -549,24 +549,24 @@ struct StorageMetrics {
 	int64_t bytesReadPerKSecond = 0;
 	int64_t opsReadPerKSecond = 0;
 
-	static const int64_t infinity = 1LL << 60;
+	static int64_t const infinity = 1LL << 60;
 
 	// the read load model coming from both read ops and read bytes
 	int64_t readLoadKSecond() const;
 
-	bool allLessOrEqual(const StorageMetrics& rhs) const {
+	bool allLessOrEqual(StorageMetrics const& rhs) const {
 		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
 		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&
 		       opsReadPerKSecond <= rhs.opsReadPerKSecond;
 	}
-	void operator+=(const StorageMetrics& rhs) {
+	void operator+=(StorageMetrics const& rhs) {
 		bytes += rhs.bytes;
 		bytesWrittenPerKSecond += rhs.bytesWrittenPerKSecond;
 		iosPerKSecond += rhs.iosPerKSecond;
 		bytesReadPerKSecond += rhs.bytesReadPerKSecond;
 		opsReadPerKSecond += rhs.opsReadPerKSecond;
 	}
-	void operator-=(const StorageMetrics& rhs) {
+	void operator-=(StorageMetrics const& rhs) {
 		bytes -= rhs.bytes;
 		bytesWrittenPerKSecond -= rhs.bytesWrittenPerKSecond;
 		iosPerKSecond -= rhs.iosPerKSecond;
@@ -596,12 +596,12 @@ struct StorageMetrics {
 		x.negate();
 		return x;
 	}
-	StorageMetrics operator+(const StorageMetrics& r) const {
+	StorageMetrics operator+(StorageMetrics const& r) const {
 		StorageMetrics x(*this);
 		x += r;
 		return x;
 	}
-	StorageMetrics operator-(const StorageMetrics& r) const {
+	StorageMetrics operator-(StorageMetrics const& r) const {
 		StorageMetrics x(r);
 		x.negate();
 		x += *this;
@@ -717,7 +717,7 @@ struct ReadHotRangeWithMetrics {
 	  : keys(keys), density(readBandwidth / std::max((int64_t)1, bytes)), readBandwidthSec(readBandwidth), bytes(bytes),
 	    readOpsSec(readOpsKSec) {}
 
-	ReadHotRangeWithMetrics(Arena& arena, const ReadHotRangeWithMetrics& rhs)
+	ReadHotRangeWithMetrics(Arena& arena, ReadHotRangeWithMetrics const& rhs)
 	  : keys(arena, rhs.keys), density(rhs.density), readBandwidthSec(rhs.readBandwidthSec), bytes(rhs.bytes),
 	    readOpsSec(rhs.readOpsSec) {}
 
@@ -886,7 +886,7 @@ struct GetCheckpointRequest {
 	GetCheckpointRequest(std::vector<KeyRange> ranges,
 	                     Version version,
 	                     CheckpointFormat format,
-	                     const Optional<UID>& actionId)
+	                     Optional<UID> const& actionId)
 	  : version(version), ranges(ranges), format(format), actionId(actionId) {}
 
 	template <class Ar>
@@ -968,7 +968,7 @@ struct OverlappingChangeFeedEntry {
 	Version stopVersion;
 	Version feedMetadataVersion;
 
-	bool operator==(const OverlappingChangeFeedEntry& r) const {
+	bool operator==(OverlappingChangeFeedEntry const& r) const {
 		return feedId == r.feedId && range == r.range && emptyVersion == r.emptyVersion &&
 		       stopVersion == r.stopVersion && feedMetadataVersion == r.feedMetadataVersion;
 	}
@@ -982,7 +982,7 @@ struct OverlappingChangeFeedEntry {
 	  : feedId(feedId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion),
 	    feedMetadataVersion(feedMetadataVersion) {}
 
-	OverlappingChangeFeedEntry(Arena& arena, const OverlappingChangeFeedEntry& rhs)
+	OverlappingChangeFeedEntry(Arena& arena, OverlappingChangeFeedEntry const& rhs)
 	  : feedId(arena, rhs.feedId), range(arena, rhs.range), emptyVersion(rhs.emptyVersion),
 	    stopVersion(rhs.stopVersion), feedMetadataVersion(rhs.feedMetadataVersion) {}
 
@@ -1210,7 +1210,7 @@ struct GetStorageCheckSumReply {
 	uint8_t checkSumMethod;
 
 	GetStorageCheckSumReply() {}
-	GetStorageCheckSumReply(const std::vector<CheckSumMetaData>& checkSums, CheckSumMethod checkSumMethod)
+	GetStorageCheckSumReply(std::vector<CheckSumMetaData> const& checkSums, CheckSumMethod checkSumMethod)
 	  : checkSums(checkSums), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
 
 	template <class Ar>
@@ -1227,7 +1227,7 @@ struct GetStorageCheckSumRequest {
 	ReplyPromise<GetStorageCheckSumReply> reply;
 
 	GetStorageCheckSumRequest() {}
-	GetStorageCheckSumRequest(const std::vector<std::pair<KeyRange, Optional<Version>>>& ranges,
+	GetStorageCheckSumRequest(std::vector<std::pair<KeyRange, Optional<Version>>> const& ranges,
 	                          Optional<UID> actionId,
 	                          CheckSumMethod checkSumMethod)
 	  : ranges(ranges), actionId(actionId), checkSumMethod(static_cast<uint8_t>(checkSumMethod)) {}
@@ -1245,8 +1245,8 @@ struct BulkDumpRequest {
 	ReplyPromise<BulkDumpState> reply;
 
 	BulkDumpRequest() {}
-	BulkDumpRequest(const std::vector<UID>& checksumServers, const BulkDumpState& bulkDumpState)
-	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState) {};
+	BulkDumpRequest(std::vector<UID> const& checksumServers, BulkDumpState const& bulkDumpState)
+	  : checksumServers(checksumServers), bulkDumpState(bulkDumpState){};
 
 	std::string toString() const {
 		return "[BulkDumpState]: " + bulkDumpState.toString() + ", [ChecksumServers]: " + describe(checksumServers);

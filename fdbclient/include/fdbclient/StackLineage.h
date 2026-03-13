@@ -33,8 +33,8 @@ struct StackLineageCollector : IALPCollector<StackLineage> {
 		auto vec = lineage->stack(&StackLineage::actorName);
 
 		std::vector<std::string_view> res;
-		for (const auto& str : vec) {
-			res.push_back(std::string_view(reinterpret_cast<const char*>(str.begin()), str.size()));
+		for (auto const& str : vec) {
+			res.push_back(std::string_view(reinterpret_cast<char const*>(str.begin()), str.size()));
 		}
 		return res;
 	}

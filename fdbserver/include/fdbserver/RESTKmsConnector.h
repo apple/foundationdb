@@ -26,7 +26,7 @@
 
 class RESTKmsConnector : public KmsConnector {
 public:
-	RESTKmsConnector(const std::string& conStr) : KmsConnector(conStr) {}
+	RESTKmsConnector(std::string const& conStr) : KmsConnector(conStr) {}
 	Future<Void> connectorCore(KmsConnectorInterface interf);
 };
 

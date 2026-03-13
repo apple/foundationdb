@@ -33,24 +33,24 @@ public:
 
 	static std::string getURLFormat();
 
-	BackupContainerLocalDirectory(const std::string& url, Optional<std::string> const& encryptionKeyFileName);
+	BackupContainerLocalDirectory(std::string const& url, Optional<std::string> const& encryptionKeyFileName);
 
-	static Future<std::vector<std::string>> listURLs(const std::string& url);
+	static Future<std::vector<std::string>> listURLs(std::string const& url);
 
 	Future<Void> create() final;
 
 	// The container exists if the folder it resides in exists
 	Future<bool> exists() final;
 
-	Future<Reference<IAsyncFile>> readFile(const std::string& path) final;
+	Future<Reference<IAsyncFile>> readFile(std::string const& path) final;
 
-	Future<Reference<IBackupFile>> writeFile(const std::string& path) final;
+	Future<Reference<IBackupFile>> writeFile(std::string const& path) final;
 
-	Future<Void> writeEntireFile(const std::string& path, const std::string& contents) final;
+	Future<Void> writeEntireFile(std::string const& path, std::string const& contents) final;
 
-	Future<Void> deleteFile(const std::string& path) final;
+	Future<Void> deleteFile(std::string const& path) final;
 
-	Future<FilesAndSizesT> listFiles(const std::string& path, std::function<bool(std::string const&)>) final;
+	Future<FilesAndSizesT> listFiles(std::string const& path, std::function<bool(std::string const&)>) final;
 
 	Future<Void> deleteContainer(int* pNumDeleted) final;
 

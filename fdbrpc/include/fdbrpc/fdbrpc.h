@@ -70,7 +70,7 @@ public:
 
 	// If already a remote endpoint, returns that.  Otherwise makes this
 	//   a local endpoint and returns that.
-	const Endpoint& getEndpoint(TaskPriority taskID) {
+	Endpoint const& getEndpoint(TaskPriority taskID) {
 		ASSERT(taskID != TaskPriority::UnknownEndpoint);
 		if (!endpoint.isValid()) {
 			m_isLocalEndpoint = true;
@@ -85,7 +85,7 @@ public:
 		endpoint = e;
 	}
 
-	void setPeerCompatibilityPolicy(const PeerCompatibilityPolicy& policy) { peerCompatibilityPolicy_ = policy; }
+	void setPeerCompatibilityPolicy(PeerCompatibilityPolicy const& policy) { peerCompatibilityPolicy_ = policy; }
 
 	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
 		return peerCompatibilityPolicy_.orDefault(NetworkMessageReceiver::peerCompatibilityPolicy());
@@ -98,7 +98,7 @@ public:
 		FlowTransport::transport().addWellKnownEndpoint(endpoint, this, taskID);
 	}
 
-	const Endpoint& getRawEndpoint() { return endpoint; }
+	Endpoint const& getRawEndpoint() { return endpoint; }
 };
 
 template <class T>
@@ -107,7 +107,7 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 	using FastAllocated<NetSAV<T>>::operator delete;
 
 	NetSAV(int futures, int promises) : SAV<T>(futures, promises) {}
-	NetSAV(int futures, int promises, const Endpoint& remoteEndpoint)
+	NetSAV(int futures, int promises, Endpoint const& remoteEndpoint)
 	  : SAV<T>(futures, promises), FlowReceiver(remoteEndpoint, false) {}
 
 	void destroy() override { delete this; }
@@ -134,18 +134,16 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-    // Swift can't call method that takes in a universal references (U&&),
-    // so provide a callable `send` method that copies the value.
-    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
-        sav->send(valueCopy);
-    }
+	// Swift can't call method that takes in a universal references (U&&),
+	// so provide a callable `send` method that copies the value.
+	void sendCopy(T const& valueCopy) const SWIFT_NAME(send(_:)) { sav->send(valueCopy); }
 	template <class E>
-	void sendError(const E& exc) const {
+	void sendError(E const& exc) const {
 		sav->sendError(exc);
 	}
 
 	void send(Never) { sendError(never_reply()); }
-  // SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
+	// SWIFT: Convenience method, since there is also a Swift.Never, so Never() could be confusing
 	void sendNever() const { send(Never()); }
 
 	Future<T> getFuture() const {
@@ -155,22 +153,22 @@ public:
 	bool isSet() const { return sav->isSet(); }
 	bool isValid() const { return sav != nullptr; }
 	ReplyPromise() : sav(new NetSAV<T>(0, 1)) {}
-	explicit ReplyPromise(const PeerCompatibilityPolicy& policy) : ReplyPromise() {
+	explicit ReplyPromise(PeerCompatibilityPolicy const& policy) : ReplyPromise() {
 		sav->setPeerCompatibilityPolicy(policy);
 	}
-	ReplyPromise(const ReplyPromise& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
+	ReplyPromise(ReplyPromise const& rhs) : sav(rhs.sav) { sav->addPromiseRef(); }
 	ReplyPromise(ReplyPromise&& rhs) noexcept : sav(rhs.sav) { rhs.sav = 0; }
 	~ReplyPromise() {
 		if (sav)
 			sav->delPromiseRef();
 	}
 
-	ReplyPromise(const Endpoint& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
-	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const {
+	ReplyPromise(Endpoint const& endpoint) : sav(new NetSAV<T>(0, 1, endpoint)) {}
+	Endpoint const& getEndpoint(TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint) const {
 		return sav->getEndpoint(taskID);
 	}
 
-	void operator=(const ReplyPromise& rhs) {
+	void operator=(ReplyPromise const& rhs) {
 		if (rhs.sav)
 			rhs.sav->addPromiseRef();
 		if (sav)
@@ -204,7 +202,7 @@ private:
 };
 
 template <class Ar, class T>
-void save(Ar& ar, const ReplyPromise<T>& value) {
+void save(Ar& ar, ReplyPromise<T> const& value) {
 	auto const& ep = value.getEndpoint().token;
 	ar << ep;
 }
@@ -229,7 +227,7 @@ struct serializable_traits<ReplyPromise<T>> : std::true_type {
 			p = ReplyPromise<T>(endpoint);
 			networkSender(p.getFuture(), endpoint);
 		} else {
-			const auto& ep = p.getEndpoint().token;
+			auto const& ep = p.getEndpoint().token;
 			serializer(ar, ep);
 		}
 	}
@@ -273,7 +271,7 @@ void setReplyPriority(ReplyPromise<Reply>& p, TaskPriority taskID) {
 }
 
 template <class Reply>
-void setReplyPriority(const ReplyPromise<Reply>& p, TaskPriority taskID) {
+void setReplyPriority(ReplyPromise<Reply> const& p, TaskPriority taskID) {
 	p.getEndpoint(taskID);
 }
 
@@ -310,7 +308,7 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	Future<Void> failures;
 
 	AcknowledgementReceiver() : ready(nullptr) {}
-	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
+	AcknowledgementReceiver(Endpoint const& remoteEndpoint) : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
 
 	bool isPublic() const override { return true; }
 
@@ -355,7 +353,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises)
 	  : NotifiedQueue<T>(futures, promises), onConnect(nullptr) {}
-	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises, Endpoint const& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true), onConnect(nullptr) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
 		acknowledgements.failures = tagError<Void>(FlowTransport::transport().loadedDisconnect(), operation_obsolete());
@@ -482,7 +480,7 @@ public:
 	}
 
 	template <class E>
-	void sendError(const E& exc) const {
+	void sendError(E const& exc) const {
 		if (queue->isRemoteEndpoint()) {
 			if (!queue->sentError && !queue->acknowledgements.failures.isError()) {
 				queue->sentError = true;
@@ -502,7 +500,7 @@ public:
 		return FutureStream<T>(queue);
 	}
 	ReplyPromiseStream() : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1)), errors(new SAV<Void>(0, 1)) {}
-	ReplyPromiseStream(const ReplyPromiseStream& rhs) : queue(rhs.queue), errors(rhs.errors) {
+	ReplyPromiseStream(ReplyPromiseStream const& rhs) : queue(rhs.queue), errors(rhs.errors) {
 		queue->addPromiseRef();
 		if (errors) {
 			errors->addPromiseRef();
@@ -512,7 +510,7 @@ public:
 		rhs.queue = nullptr;
 		rhs.errors = nullptr;
 	}
-	explicit ReplyPromiseStream(const Endpoint& endpoint)
+	explicit ReplyPromiseStream(Endpoint const& endpoint)
 	  : queue(new NetNotifiedQueueWithAcknowledgements<T>(0, 1, endpoint)), errors(nullptr) {}
 
 	// Used by endStreamOnDisconnect to detect when all references to the ReplyPromiseStream have been dropped
@@ -525,7 +523,7 @@ public:
 		return res;
 	}
 
-	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
+	void setRequestStreamEndpoint(Endpoint const& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
 	bool connected() const { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
 
@@ -550,10 +548,10 @@ public:
 
 	// The endpoints of a ReplyPromiseStream must be initialized at Task::ReadSocket, because with lower priorities
 	// a delay(0) in FlowTransport deliver can cause out of order delivery.
-	const Endpoint& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
+	Endpoint const& getEndpoint() const { return queue->getEndpoint(TaskPriority::ReadSocket); }
 
-	bool operator==(const ReplyPromiseStream<T>& rhs) const { return queue == rhs.queue; }
-	bool operator!=(const ReplyPromiseStream<T>& rhs) const { return !(*this == rhs); }
+	bool operator==(ReplyPromiseStream<T> const& rhs) const { return queue == rhs.queue; }
+	bool operator!=(ReplyPromiseStream<T> const& rhs) const { return !(*this == rhs); }
 
 	bool isEmpty() const { return !queue->isReady(); }
 
@@ -606,7 +604,7 @@ public:
 	// client
 	void setByteLimit(int64_t byteLimit) const { queue->acknowledgements.bytesLimit = byteLimit; }
 
-	void operator=(const ReplyPromiseStream& rhs) {
+	void operator=(ReplyPromiseStream const& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
 			queue->delPromiseRef();
@@ -640,7 +638,7 @@ private:
 };
 
 template <class Ar, class T>
-void save(Ar& ar, const ReplyPromiseStream<T>& value) {
+void save(Ar& ar, ReplyPromiseStream<T> const& value) {
 	auto const& ep = value.getEndpoint().token;
 	ar << ep;
 }
@@ -663,7 +661,7 @@ struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
 			auto endpoint = FlowTransport::transport().loadedEndpoint(token);
 			p = ReplyPromiseStream<T>(endpoint);
 		} else {
-			const auto& ep = p.getEndpoint().token;
+			auto const& ep = p.getEndpoint().token;
 			serializer(ar, ep);
 		}
 	}
@@ -695,7 +693,7 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 	static_assert(!IsPublic || HasVerify<T>, "Public request stream objects need to implement bool T::verify()");
 
 	NetNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
-	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint)
+	NetNotifiedQueue(int futures, int promises, Endpoint const& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {}
 
 	void destroy() override { delete this; }
@@ -750,7 +748,7 @@ public:
 	//   If a reply is returned, request was or will be delivered one or more times.
 	//   If cancelled, request was or will be delivered zero or more times.
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value) const {
+	Future<REPLY_TYPE(X)> getReply(X const& value) const {
 		// Ensure the same request isn't used multiple times
 		ASSERT(!getReplyPromise(value).getFuture().isReady());
 		if (queue->isRemoteEndpoint()) {
@@ -762,7 +760,7 @@ public:
 		return reportEndpointFailure(getReplyPromise(value).getFuture(), getEndpoint());
 	}
 	template <class X>
-	Future<REPLY_TYPE(X)> getReply(const X& value, TaskPriority taskID) const {
+	Future<REPLY_TYPE(X)> getReply(X const& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		return getReply(value);
 	}
@@ -783,7 +781,7 @@ public:
 	//   failure, request was or will be delivered zero or one times. The caller must be capable of retrying if this
 	//   request returns failure
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value, TaskPriority taskID) const {
+	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(X const& value, TaskPriority taskID) const {
 		setReplyPriority(value, taskID);
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc =
@@ -805,7 +803,7 @@ public:
 	}
 
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(const X& value) const {
+	Future<ErrorOr<REPLY_TYPE(X)>> tryGetReply(X const& value) const {
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
@@ -833,7 +831,7 @@ public:
 	//   The caller sends acknowledgements to the remote endpoint so that at most 2MB of replies is ever inflight.
 
 	template <class X>
-	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(const X& value) const {
+	ReplyPromiseStream<REPLYSTREAM_TYPE(X)> getReplyStream(X const& value) const {
 		if (queue->isRemoteEndpoint()) {
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
@@ -868,7 +866,7 @@ public:
 	//   If it returns failure, the failure detector considers the endpoint failed permanently or for the given amount
 	//   of time See IFailureMonitor::onFailedFor() for an explanation of the duration and slope parameters.
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value,
+	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(X const& value,
 	                                                       double sustainedFailureDuration,
 	                                                       double sustainedFailureSlope,
 	                                                       TaskPriority taskID) const {
@@ -880,7 +878,7 @@ public:
 	}
 
 	template <class X>
-	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(const X& value,
+	Future<ErrorOr<REPLY_TYPE(X)>> getReplyUnlessFailedFor(X const& value,
 	                                                       double sustainedFailureDuration,
 	                                                       double sustainedFailureSlope) const {
 		// If it is local endpoint, no need for failure monitoring
@@ -895,7 +893,7 @@ public:
 		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
 	}
 
-	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
+	explicit RequestStream(Endpoint const& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
 
 	SWIFT_CXX_IMPORT_UNSAFE FutureStream<T> getFuture() const {
 		queue->addFutureRef();
@@ -905,9 +903,9 @@ public:
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
-	RequestStream(const RequestStream& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
+	RequestStream(RequestStream const& rhs) : queue(rhs.queue) { queue->addPromiseRef(); }
 	RequestStream(RequestStream&& rhs) noexcept : queue(rhs.queue) { rhs.queue = 0; }
-	void operator=(const RequestStream& rhs) {
+	void operator=(RequestStream const& rhs) {
 		rhs.queue->addPromiseRef();
 		if (queue)
 			queue->delPromiseRef();
@@ -927,7 +925,7 @@ public:
 		// queue = (NetNotifiedQueue<T>*)0xdeadbeef;
 	}
 
-	const Endpoint& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
+	Endpoint const& getEndpoint(TaskPriority taskID = TaskPriority::DefaultEndpoint) const {
 		return queue->getEndpoint(taskID);
 	}
 
@@ -935,8 +933,8 @@ public:
 		queue->makeWellKnownEndpoint(Endpoint::Token(-1, wlTokenID), taskID);
 	}
 
-	bool operator==(const RequestStream<T, IsPublic>& rhs) const { return queue == rhs.queue; }
-	bool operator!=(const RequestStream<T, IsPublic>& rhs) const { return !(*this == rhs); }
+	bool operator==(RequestStream<T, IsPublic> const& rhs) const { return queue == rhs.queue; }
+	bool operator!=(RequestStream<T, IsPublic> const& rhs) const { return !(*this == rhs); }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
@@ -955,7 +953,7 @@ template <class T>
 using PublicRequestStream = RequestStream<T, true>;
 
 template <class Ar, class T, bool P>
-void save(Ar& ar, const RequestStream<T, P>& value) {
+void save(Ar& ar, RequestStream<T, P> const& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
 	UNSTOPPABLE_ASSERT(
@@ -978,7 +976,7 @@ struct serializable_traits<RequestStream<T, P>> : std::true_type {
 			serializer(ar, endpoint);
 			stream = RequestStream<T, P>(endpoint);
 		} else {
-			const auto& ep = stream.getEndpoint();
+			auto const& ep = stream.getEndpoint();
 			serializer(ar, ep);
 			if constexpr (Archiver::isSerializing) { // Don't assert this when collecting vtable for flatbuffers
 				UNSTOPPABLE_ASSERT(ep.getPrimaryAddress()

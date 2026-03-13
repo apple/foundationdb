@@ -65,7 +65,7 @@ struct LogProtocolMessage {
 	static bool startsLogProtocolMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_LogProtocolMessage; }
 	template <class Ar>
 	static bool isNextIn(Ar& ar) {
-		return startsLogProtocolMessage(*(const uint8_t*)ar.peekBytes(1));
+		return startsLogProtocolMessage(*(uint8_t const*)ar.peekBytes(1));
 	}
 };
 

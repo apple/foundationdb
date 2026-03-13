@@ -137,21 +137,21 @@ public:
 	std::vector<LocalityEntry> const& getGroupEntries() const { return _localitygroup->_entryArray; }
 
 	std::string getLocalEntryInfo(int localIndex) const {
-		const AttribKey machineKey = keyIndex("zoneid");
+		AttribKey const machineKey = keyIndex("zoneid");
 		auto& entry = getEntry(localIndex);
 		auto value = getValueViaEntry(entry, machineKey);
 		return format("(%3d) %-10s", entry._id, valueText(value.get()).c_str());
 	}
 
 	std::string getEntryInfo(LocalityEntry const& entry) const {
-		const AttribKey machineHash = keyIndex("zoneid");
+		AttribKey const machineHash = keyIndex("zoneid");
 		auto value = getValueViaEntry(entry, machineHash);
 		return format("(%3d) %-10s", entry._id, value.present() ? valueText(value.get()).c_str() : "(unset)");
 	}
 
 	static void staticDisplayEntries(LocalitySet const& localitySet,
 	                                 std::vector<LocalityEntry> const& entryArray,
-	                                 const char* name = "zone") {
+	                                 char const* name = "zone") {
 		for (auto& entry : entryArray) {
 			printf("   %s: %s\n", name, localitySet.getEntryInfo(entry).c_str());
 		}
@@ -159,11 +159,11 @@ public:
 
 	static void staticDisplayEntries(Reference<LocalitySet> const& fromServers,
 	                                 std::vector<LocalityEntry> const& entryArray,
-	                                 const char* name = "zone") {
+	                                 char const* name = "zone") {
 		staticDisplayEntries(*fromServers, entryArray, name);
 	}
 
-	void DisplayEntries(const char* name = "zone") const { staticDisplayEntries(*this, getEntries(), name); }
+	void DisplayEntries(char const* name = "zone") const { staticDisplayEntries(*this, getEntries(), name); }
 
 	// This function is used to create an subset containing all of the entries within
 	// the specified value for the given key
@@ -475,11 +475,11 @@ protected:
 			return *this;
 		}
 		int getMemoryUsed() const { return sizeof(_attribute) + sizeof(_resultset) + _resultset->getMemoryUsed(); }
-		static bool compareKeyValue(const LocalityCacheRecord& lhs, const LocalityCacheRecord& rhs) {
+		static bool compareKeyValue(LocalityCacheRecord const& lhs, LocalityCacheRecord const& rhs) {
 			return (lhs._attribute.first < rhs._attribute.first) ||
 			       (!(rhs._attribute.first < lhs._attribute.first) && (lhs._attribute.second < rhs._attribute.second));
 		}
-		static bool compareKey(const LocalityCacheRecord& lhs, const LocalityCacheRecord& rhs) {
+		static bool compareKey(LocalityCacheRecord const& lhs, LocalityCacheRecord const& rhs) {
 			return (lhs._attribute.first < rhs._attribute.first);
 		}
 	};

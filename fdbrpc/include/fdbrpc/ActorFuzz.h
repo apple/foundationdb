@@ -27,12 +27,12 @@ inline void throw_operation_failed() {
 }
 #ifdef OPEN_FOR_IDE
 bool testFuzzActor(Future<int> (*actor)(FutureStream<int>, PromiseStream<int>, Future<Void>),
-                   const char* desc,
+                   char const* desc,
                    std::vector<int> const& expectedOutput);
 #else
 // This is in dsltest.actor.cpp:
 bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<int> const&, Future<Void> const&),
-                   const char* desc,
+                   char const* desc,
                    std::vector<int> const& expectedOutput);
 #endif
 

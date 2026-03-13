@@ -75,7 +75,7 @@ GrvProxyTagThrottler::GrvProxyTagThrottler(double maxThrottleDuration)
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {}
 
 void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates) {
-	for (const auto& [tag, rate] : newRates) {
+	for (auto const& [tag, rate] : newRates) {
 		auto it = queues.find(tag);
 		if (it == queues.end()) {
 			queues[tag] = TagQueue(rate);
@@ -93,7 +93,7 @@ void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates
 
 	// TODO: Use std::erase_if in C++20
 	for (auto it = queues.begin(); it != queues.end();) {
-		const auto& [tag, queue] = *it;
+		auto const& [tag, queue] = *it;
 		if (queue.requests.empty() && !queue.rateInfo.present()) {
 			it = queues.erase(it);
 		} else {
@@ -222,7 +222,7 @@ GrvProxyTagThrottler::ReleaseTransactionsResult GrvProxyTagThrottler::releaseTra
 	// End release windows for all tag queues
 	{
 		TransactionTagMap<uint32_t> transactionsReleasedMap;
-		for (const auto& [tag, count] : transactionsReleased) {
+		for (auto const& [tag, count] : transactionsReleased) {
 			transactionsReleasedMap[tag] = count;
 		}
 		for (auto& [tag, queue] : queues) {
@@ -253,7 +253,7 @@ ACTOR static Future<Void> mockClient(GrvProxyTagThrottler* throttler,
                                      TransactionTagMap<uint32_t>* counters) {
 	state Future<Void> timer;
 	state TransactionTagMap<uint32_t> tags;
-	for (const auto& tag : tagSet) {
+	for (auto const& tag : tagSet) {
 		tags[tag] = batchSize;
 	}
 	loop {
@@ -292,7 +292,7 @@ ACTOR static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
 	deterministicRandom()->randomShuffle(reqs);
 
 	// Send requests to throttler and assert that responses are received in FIFO order
-	for (const auto& req : reqs) {
+	for (auto const& req : reqs) {
 		throttler->addRequest(req);
 	}
 	state std::vector<Future<Void>> futures;

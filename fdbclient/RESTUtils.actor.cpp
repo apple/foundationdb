@@ -48,12 +48,12 @@ RESTConnectionPool::~RESTConnectionPool() {
 	}
 }
 
-const std::unordered_map<std::string, RESTConnectionType> RESTConnectionType::supportedConnTypes = {
+std::unordered_map<std::string, RESTConnectionType> const RESTConnectionType::supportedConnTypes = {
 	{ "http", RESTConnectionType("http", RESTConnectionType::NOT_SECURE_CONNECTION) },
 	{ "https", RESTConnectionType("https", RESTConnectionType::SECURE_CONNECTION) }
 };
 
-RESTConnectionType RESTConnectionType::getConnectionType(const std::string& protocol) {
+RESTConnectionType RESTConnectionType::getConnectionType(std::string const& protocol) {
 	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
 	if (itr == RESTConnectionType::supportedConnTypes.end()) {
 		TraceEvent("RESTConnectionTypeUnsupportedPrototocol").detail("Protocol", protocol);
@@ -63,12 +63,12 @@ RESTConnectionType RESTConnectionType::getConnectionType(const std::string& prot
 	return itr->second;
 }
 
-bool RESTConnectionType::isProtocolSupported(const std::string& protocol) {
+bool RESTConnectionType::isProtocolSupported(std::string const& protocol) {
 	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
 	return itr != RESTConnectionType::supportedConnTypes.end();
 }
 
-bool RESTConnectionType::isSecure(const std::string& protocol) {
+bool RESTConnectionType::isSecure(std::string const& protocol) {
 	auto itr = RESTConnectionType::supportedConnTypes.find(protocol);
 	if (itr == RESTConnectionType::supportedConnTypes.end()) {
 		TraceEvent("RESTConnectionTypeUnsupportedPrototocol").detail("Protocol", protocol);
@@ -99,10 +99,10 @@ RESTClientKnobs::RESTClientKnobs() {
 	knobMap["rtom"] = std::addressof(request_timeout_secs);
 }
 
-void RESTClientKnobs::set(const std::unordered_map<std::string, int>& knobSettings) {
+void RESTClientKnobs::set(std::unordered_map<std::string, int> const& knobSettings) {
 
-	for (const auto& itr : knobSettings) {
-		const auto& kItr = RESTClientKnobs::knobMap.find(itr.first);
+	for (auto const& itr : knobSettings) {
+		auto const& kItr = RESTClientKnobs::knobMap.find(itr.first);
 		if (kItr == RESTClientKnobs::knobMap.end()) {
 			TraceEvent("RESTClientInvalidKnobName").detail("KnobName", itr.first);
 			throw rest_invalid_rest_client_knob();
@@ -174,14 +174,14 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 }
 
 Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTConnectionPoolKey connectKey,
-                                                                           const bool isSecure,
-                                                                           const int maxConnLife) {
+                                                                           bool const isSecure,
+                                                                           int const maxConnLife) {
 	return connect_impl(Reference<RESTConnectionPool>::addRef(this), connectKey, isSecure, maxConnLife);
 }
 
 void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
                                           ReusableConnection& rconn,
-                                          const int maxConnections) {
+                                          int const maxConnections) {
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
 		TraceEvent("RESTUtilReturnConnStart")
 		    .detail("Host", connectKey.first)
@@ -215,15 +215,15 @@ void RESTConnectionPool::returnConnection(RESTConnectionPoolKey connectKey,
 	rconn.conn = Reference<IConnection>();
 }
 
-RESTUrl::RESTUrl(const std::string& fUrl) {
+RESTUrl::RESTUrl(std::string const& fUrl) {
 	parseUrl(fUrl);
 }
 
-RESTUrl::RESTUrl(const std::string& fullUrl, const std::string& b) : body(b) {
+RESTUrl::RESTUrl(std::string const& fullUrl, std::string const& b) : body(b) {
 	parseUrl(fullUrl);
 }
 
-void RESTUrl::parseUrl(const std::string& fullUrl) {
+void RESTUrl::parseUrl(std::string const& fullUrl) {
 	// Sample valid URIs
 	// 1. With 'host' & 'resource' := '<protocol>://<host>/<resource>'
 	// 2. With 'host', 'service' & 'resource' := '<protocol>://<host>:port/<resource>'

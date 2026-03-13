@@ -60,7 +60,7 @@ struct ClientVersionRef {
 
 	size_t expectedSize() const { return clientVersion.size() + sourceVersion.size() + protocolVersion.size(); }
 
-	bool operator<(const ClientVersionRef& rhs) const {
+	bool operator<(ClientVersionRef const& rhs) const {
 		if (protocolVersion != rhs.protocolVersion) {
 			return protocolVersion < rhs.protocolVersion;
 		}

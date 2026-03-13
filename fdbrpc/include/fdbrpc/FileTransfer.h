@@ -31,15 +31,15 @@
 #include "fdbrpc/file_transfer/file_transfer.grpc.pb.h"
 
 class FileTransferServiceImpl final : public fdbrpc::FileTransferService::Service {
-	const int DEFAULT_CHUNK_SIZE = 1024 * 1024;
+	int const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 
 public:
 	grpc::Status DownloadFile(grpc::ServerContext* context,
-	                          const fdbrpc::DownloadRequest* request,
+	                          fdbrpc::DownloadRequest const* request,
 	                          grpc::ServerWriter<fdbrpc::DownloadChunk>* writer) override;
 
 	grpc::Status GetFileInfo(grpc::ServerContext* context,
-	                         const fdbrpc::GetFileInfoRequest* request,
+	                         fdbrpc::GetFileInfoRequest const* request,
 	                         fdbrpc::GetFileInfoReply* response) override;
 
 	//-- Testing --
@@ -59,7 +59,7 @@ class FileTransferClient {
 public:
 	FileTransferClient(std::shared_ptr<grpc::Channel> channel) : stub_(fdbrpc::FileTransferService::NewStub(channel)) {}
 
-	std::optional<fdbrpc::GetFileInfoReply> GetFileInfo(const std::string& filename, bool get_crc_checksum = false);
+	std::optional<fdbrpc::GetFileInfoReply> GetFileInfo(std::string const& filename, bool get_crc_checksum = false);
 
 	// Downloads a file from a remote server and saves it locally.
 	//
@@ -75,14 +75,14 @@ public:
 	// Returns:
 	//  std::optional<size_t> The size of the downloaded file in bytes if successful, or std::nullopt if the download
 	//  failed. `output_filename` is deleted on failure.
-	std::optional<size_t> DownloadFile(const std::string& filename,
-	                                   const std::string& output_filename,
+	std::optional<size_t> DownloadFile(std::string const& filename,
+	                                   std::string const& output_filename,
 	                                   bool verify = true);
 
 private:
 	// If download fails, delete the file from disk.
 	// TODO: Add ability to resume.
-	const bool delete_on_close_ = true;
+	bool const delete_on_close_ = true;
 
 	std::unique_ptr<fdbrpc::FileTransferService::Stub> stub_;
 };

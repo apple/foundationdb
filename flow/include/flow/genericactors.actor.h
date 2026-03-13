@@ -363,7 +363,7 @@ template <class T, class F>
 auto mapAsync(std::vector<Future<T>> const& what, F const& actorFunc) {
 	std::vector<std::invoke_result_t<F, T>> ret;
 	ret.reserve(what.size());
-	for (const auto& f : what)
+	for (auto const& f : what)
 		ret.push_back(mapAsync(f, actorFunc));
 	return ret;
 }
@@ -417,7 +417,7 @@ template <class T, class F>
 auto map(std::vector<Future<T>> const& what, F const& func) {
 	std::vector<Future<std::invoke_result_t<F, T>>> ret;
 	ret.reserve(what.size());
-	for (const auto& f : what)
+	for (auto const& f : what)
 		ret.push_back(map(f, func));
 	return ret;
 }
@@ -532,7 +532,7 @@ struct WorkerCache {
 	// of this? It doesn't provide true at most once behavior because things are removed from the cache after they have
 	// terminated.
 	bool exists(UID id) { return id_interface.count(id) != 0; }
-	void set(UID id, const Future<T>& onReady) {
+	void set(UID id, Future<T> const& onReady) {
 		ASSERT(!exists(id));
 		id_interface[id] = onReady;
 	}
@@ -653,7 +653,7 @@ protected:
 		P() : value() {}
 	};
 	std::map<K, P> items;
-	const V defaultValue;
+	V const defaultValue;
 	bool destructing;
 
 	template <typename Iterator>
@@ -885,7 +885,7 @@ Future<Void> resetAfter(Reference<AsyncVar<T>> var,
                         T val,
                         int warningLimit = -1,
                         double warningResetDelay = 0,
-                        const char* context = nullptr) {
+                        char const* context = nullptr) {
 	state bool isEqual = var->get() == val;
 	state Future<Void> resetDelay = isEqual ? Never() : delay(time);
 	state int resetCount = 0;
@@ -961,12 +961,12 @@ Future<T> timeoutErrorIfCleared(Future<T> what,
 	}
 }
 
-Future<bool> allTrue(const std::vector<Future<bool>>& all);
+Future<bool> allTrue(std::vector<Future<bool>> const& all);
 Future<Void> anyTrue(std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output);
 Future<Void> cancelOnly(std::vector<Future<Void>> const& futures);
 Future<Void> timeoutWarningCollector(FutureStream<Void> const& input,
                                      double const& logDelay,
-                                     const char* const& context,
+                                     char const* const& context,
                                      UID const& id);
 ACTOR Future<bool> quorumEqualsTrue(std::vector<Future<bool>> futures, int required);
 
@@ -984,7 +984,7 @@ Future<Void> streamHelper(PromiseStream<T> output, PromiseStream<Error> errors, 
 }
 
 template <class T>
-Future<Void> makeStream(const std::vector<Future<T>>& futures, PromiseStream<T>& stream, PromiseStream<Error>& errors) {
+Future<Void> makeStream(std::vector<Future<T>> const& futures, PromiseStream<T>& stream, PromiseStream<Error>& errors) {
 	std::vector<Future<Void>> forwarders;
 	forwarders.reserve(futures.size());
 	for (int f = 0; f < futures.size(); f++)
@@ -1043,7 +1043,7 @@ struct Quorum final : SAV<Void> {
 template <class T>
 class QuorumCallback : public Callback<T> {
 public:
-	void fire(const T& value) override {
+	void fire(T const& value) override {
 		Callback<T>::remove();
 		Callback<T>::next = 0;
 		head->oneSuccess();
@@ -1056,14 +1056,14 @@ public:
 
 private:
 	template <class U>
-	friend Future<Void> quorum(const Future<U>* pItems, int itemCount, int n);
+	friend Future<Void> quorum(Future<U> const* pItems, int itemCount, int n);
 	Quorum<T>* head;
 	QuorumCallback() = default;
 	QuorumCallback(Future<T> future, Quorum<T>* head) : head(head) { future.addCallbackAndClear(this); }
 };
 
 template <class T>
-Future<Void> quorum(const Future<T>* pItems, int itemCount, int n) {
+Future<Void> quorum(Future<T> const* pItems, int itemCount, int n) {
 	ASSERT(n >= 0 && n <= itemCount);
 
 	int size = Quorum<T>::sizeFor(itemCount);
@@ -1158,7 +1158,7 @@ Future<std::vector<T>> appendAll(std::vector<Future<std::vector<T>>> input) {
 
 	std::vector<T> output;
 	size_t sz = 0;
-	for (const auto& f : input) {
+	for (auto const& f : input) {
 		sz += f.get().size();
 	}
 	output.reserve(sz);
@@ -1203,7 +1203,7 @@ Future<T> waitAndForward(FutureStream<T> input) {
 }
 
 ACTOR template <class T>
-Future<T> reportErrorsExcept(Future<T> in, const char* context, UID id, std::set<int> const* pExceptErrors) {
+Future<T> reportErrorsExcept(Future<T> in, char const* context, UID id, std::set<int> const* pExceptErrors) {
 	try {
 		T t = wait(in);
 		return t;
@@ -1215,7 +1215,7 @@ Future<T> reportErrorsExcept(Future<T> in, const char* context, UID id, std::set
 }
 
 template <class T>
-Future<T> reportErrors(Future<T> const& in, const char* context, UID id = UID()) {
+Future<T> reportErrors(Future<T> const& in, char const* context, UID id = UID()) {
 	return reportErrorsExcept(in, context, id, nullptr);
 }
 
@@ -1671,7 +1671,7 @@ struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 
 private:
 	std::list<std::pair<Promise<Void>, int64_t>> takers;
-	const int64_t permits;
+	int64_t const permits;
 	int64_t active;
 	Promise<Void> broken_on_destruct;
 
@@ -1775,7 +1775,7 @@ struct NotifiedInt {
 private:
 	typedef std::pair<int64_t, Promise<Void>> Item;
 	struct ItemCompare {
-		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
+		bool operator()(Item const& a, Item const& b) { return a.first > b.first; }
 	};
 	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
 	int64_t val;
@@ -1829,8 +1829,8 @@ private:
 	IndexedSet<int64_t, int64_t> outstanding;
 	NotifiedInt minOutstanding;
 	int64_t nextPermitNumber;
-	const int64_t unrestrictedPermits;
-	const int64_t boundedPermits;
+	int64_t const unrestrictedPermits;
+	int64_t const boundedPermits;
 
 	void updateMinOutstanding() {
 		auto it = outstanding.index(unrestrictedPermits - 1);
@@ -2330,7 +2330,7 @@ Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<Async
 
 template <class Output>
 Reference<IAsyncListener<Output>> IAsyncListener<Output>::create(Reference<AsyncVar<Output>> const& input) {
-	auto identity = [](const auto& x) { return x; };
+	auto identity = [](auto const& x) { return x; };
 	return makeReference<IAsyncListenerImpl::AsyncListener<Output, Output, decltype(identity)>>(input, identity);
 }
 

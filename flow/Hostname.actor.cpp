@@ -29,12 +29,12 @@
 
 namespace {
 
-const static std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
-const static std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
+static std::regex const validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
+static std::regex const ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
 
 } // anonymous namespace
 
-bool Hostname::isHostname(const std::string& str) {
+bool Hostname::isHostname(std::string const& str) {
 	try {
 		return !std::regex_match(str, ipv4Validation) && std::regex_match(str, validation);
 	} catch (std::exception e) {
@@ -43,7 +43,7 @@ bool Hostname::isHostname(const std::string& str) {
 	}
 }
 
-Hostname Hostname::parse(const std::string& s) {
+Hostname Hostname::parse(std::string const& s) {
 	if (s.empty() || !Hostname::isHostname(s)) {
 		throw connection_string_invalid();
 	}
@@ -60,7 +60,7 @@ Hostname Hostname::parse(const std::string& s) {
 	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
 }
 
-ACTOR Future<Optional<NetworkAddress>> resolveImpl(const Hostname* self) {
+ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname const* self) {
 	try {
 		std::vector<NetworkAddress> addresses =
 		    wait(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service));
@@ -76,7 +76,7 @@ ACTOR Future<Optional<NetworkAddress>> resolveImpl(const Hostname* self) {
 	}
 }
 
-ACTOR Future<NetworkAddress> resolveWithRetryImpl(const Hostname* self) {
+ACTOR Future<NetworkAddress> resolveWithRetryImpl(Hostname const* self) {
 	state double resolveInterval = FLOW_KNOBS->HOSTNAME_RESOLVE_INIT_INTERVAL;
 	loop {
 		try {

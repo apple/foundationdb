@@ -50,7 +50,7 @@ struct VersionedMutationSerialized {
 	VersionedMutationSerialized() = default;
 	explicit VersionedMutationSerialized(MutationRef mutation, LogMessageVersion version)
 	  : mutation(mutation), version(version) {}
-	explicit VersionedMutationSerialized(Arena& arena, const VersionedMutationSerialized& vm)
+	explicit VersionedMutationSerialized(Arena& arena, VersionedMutationSerialized const& vm)
 	  : mutation(arena, vm.mutation), version(vm.version) {}
 
 	template <class Ar>
@@ -64,7 +64,7 @@ struct SampledMutation {
 	long size;
 
 	explicit SampledMutation(KeyRef key, long size) : key(key), size(size) {}
-	explicit SampledMutation(Arena& arena, const SampledMutation& sm) : key(arena, sm.key), size(sm.size) {}
+	explicit SampledMutation(Arena& arena, SampledMutation const& sm) : key(arena, sm.key), size(sm.size) {}
 	SampledMutation() = default;
 
 	int totalSize() { return key.size() + sizeof(size); }
@@ -82,12 +82,12 @@ using SampledMutationsVec = Standalone<VectorRef<SampledMutation>>;
 
 enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
 std::string getRoleStr(RestoreRole role);
-extern const std::vector<std::string> RestoreRoleStr;
+extern std::vector<std::string> const RestoreRoleStr;
 extern int numRoles;
 
 std::string getHexString(StringRef input);
 
-bool debugFRMutation(const char* context, Version version, MutationRef const& mutation);
+bool debugFRMutation(char const* context, Version version, MutationRef const& mutation);
 
 struct RestoreSimpleRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 16448937;

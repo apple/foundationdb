@@ -14,7 +14,7 @@ TEST_CASE("/flow/WipedString/basic") {
 		auto randomString = rng.randomAlphaNumeric(rng.randomInt(1, 1000));
 		// keeps arena-allocated memory from being really freed, for test purposes
 		auto kaScope = keepalive_allocator::ActiveScope();
-		const uint8_t* begin = nullptr;
+		uint8_t const* begin = nullptr;
 		int size = 0;
 		{
 			StringRef rs(randomString);
@@ -52,7 +52,7 @@ void fillRandom(VectorRef<int>& vi, Arena& arena, int minLen = 1, int maxLen = 1
 }
 
 void fillRandom(StringRef& s, Arena& arena, int minLen = 1, int maxLen = 100) {
-	const auto len = deterministicRandom()->randomInt(minLen, maxLen + 1);
+	auto const len = deterministicRandom()->randomInt(minLen, maxLen + 1);
 	s = StringRef(arena, deterministicRandom()->randomAlphaNumeric(len));
 }
 

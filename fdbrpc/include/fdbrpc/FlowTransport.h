@@ -53,13 +53,13 @@ public:
 	Token token{};
 
 	Endpoint() {}
-	Endpoint(const NetworkAddressList& addresses, Token token) : addresses(addresses), token(token) {
+	Endpoint(NetworkAddressList const& addresses, Token token) : addresses(addresses), token(token) {
 		choosePrimaryAddress();
 	}
 
 	static Token wellKnownToken(int wlTokenID) { return UID(-1, wlTokenID); }
 
-	static Endpoint wellKnown(const NetworkAddressList& addresses, int wlTokenID) {
+	static Endpoint wellKnown(NetworkAddressList const& addresses, int wlTokenID) {
 		return Endpoint(addresses, wellKnownToken(wlTokenID));
 	}
 
@@ -77,7 +77,7 @@ public:
 
 	// Return the primary network address, which is the first network address among
 	// all addresses this endpoint listens to.
-	const NetworkAddress& getPrimaryAddress() const { return addresses.address; }
+	NetworkAddress const& getPrimaryAddress() const { return addresses.address; }
 
 	NetworkAddress getStableAddress() const { return addresses.getTLSAddress(); }
 
@@ -122,7 +122,7 @@ public:
 namespace std {
 template <>
 struct hash<Endpoint> {
-	size_t operator()(const Endpoint& ep) const { return ep.token.hash() + ep.addresses.address.hash(); }
+	size_t operator()(Endpoint const& ep) const { return ep.token.hash() + ep.addresses.address.hash(); }
 };
 } // namespace std
 
@@ -228,7 +228,7 @@ public:
 	NetworkAddressList getLocalAddresses() const;
 
 	// Returns all peers that the FlowTransport is monitoring.
-	const std::unordered_map<NetworkAddress, Reference<Peer>>& getAllPeers() const;
+	std::unordered_map<NetworkAddress, Reference<Peer>> const& getAllPeers() const;
 
 	// Returns the set of all peers that have attempted to connect, but have incompatible protocol versions
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
@@ -237,10 +237,10 @@ public:
 	Future<Void> onIncompatibleChanged();
 
 	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
-	void addPeerReference(const Endpoint&, bool isStream);
+	void addPeerReference(Endpoint const&, bool isStream);
 
 	// Signal that a peer connection is no longer being used
-	void removePeerReference(const Endpoint&, bool isStream);
+	void removePeerReference(Endpoint const&, bool isStream);
 
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 	void addEndpoint(Endpoint& endpoint, NetworkMessageReceiver*, TaskPriority taskID);
@@ -248,7 +248,7 @@ public:
 	void addEndpoints(std::vector<std::pair<class FlowReceiver*, TaskPriority>> const& streams);
 
 	// The given local endpoint no longer delivers messages to the given receiver or uses resources
-	void removeEndpoint(const Endpoint&, NetworkMessageReceiver*);
+	void removeEndpoint(Endpoint const&, NetworkMessageReceiver*);
 
 	// Sets endpoint to a new local endpoint (without changing its token) which delivers messages to the given receiver
 	// Implementations may have limitations on when this function is called and what endpoint.token may be!
@@ -257,7 +257,7 @@ public:
 	// sendReliable will keep trying to deliver the data to the destination until cancelReliable is called. It will
 	// retry sending if the connection is closed or the failure manager reports the destination become available (edge
 	// triggered).
-	ReliablePacket* sendReliable(ISerializeSource const& what, const Endpoint& destination);
+	ReliablePacket* sendReliable(ISerializeSource const& what, Endpoint const& destination);
 
 	// Makes Packet "unreliable" (either the data or a connection close event will be delivered eventually). It can
 	// still be used safely to send a reply to a "reliable" request.
@@ -271,7 +271,7 @@ public:
 	void resetConnection(NetworkAddress address);
 
 	Reference<Peer> sendUnreliable(ISerializeSource const& what,
-	                               const Endpoint& destination,
+	                               Endpoint const& destination,
 	                               bool openConnection); // { cancelReliable(sendReliable(what,destination)); }
 
 	bool incompatibleOutgoingConnectionsPresent();
@@ -290,7 +290,7 @@ public:
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
-	Endpoint loadedEndpoint(const UID& token);
+	Endpoint loadedEndpoint(UID const& token);
 	Future<Void> loadedDisconnect();
 
 	HealthMonitor* healthMonitor();
@@ -305,17 +305,17 @@ public:
 	void removeAllPublicKeys();
 
 	// Synchronously load and apply JWKS (RFC 7517) public key file with which to verify authorization tokens.
-	void loadPublicKeyFile(const std::string& publicKeyFilePath);
+	void loadPublicKeyFile(std::string const& publicKeyFilePath);
 
 	// Periodically read JWKS (RFC 7517) public key file to refresh public key set.
-	void watchPublicKeyFile(const std::string& publicKeyFilePath);
+	void watchPublicKeyFile(std::string const& publicKeyFilePath);
 
 private:
 	class TransportData* self;
 };
 
 inline bool Endpoint::isLocal() const {
-	const auto& localAddrs = FlowTransport::transport().getLocalAddresses();
+	auto const& localAddrs = FlowTransport::transport().getLocalAddresses();
 	return addresses.address == localAddrs.address ||
 	       (localAddrs.secondaryAddress.present() && addresses.address == localAddrs.secondaryAddress.get());
 }

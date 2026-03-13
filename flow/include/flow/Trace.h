@@ -109,7 +109,7 @@ enum class ErrorKind : uint8_t {
 	BugDetected,
 };
 
-const int NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
+int const NUM_MAJOR_LEVELS_OF_EVENTS = SevMaxUsed / 10 + 1;
 
 class TraceEventFields {
 public:
@@ -127,10 +127,10 @@ public:
 	bool isAnnotated() const;
 	void setAnnotated();
 
-	void addField(const std::string& key, const std::string& value);
+	void addField(std::string const& key, std::string const& value);
 	void addField(std::string&& key, std::string&& value);
 
-	const Field& operator[](int index) const;
+	Field const& operator[](int index) const;
 	bool tryGetValue(std::string key, std::string& outValue) const;
 	std::string getValue(std::string key) const;
 	bool tryGetInt(std::string key, int& outVal, bool permissive = false) const;
@@ -171,7 +171,7 @@ inline void load(Archive& ar, TraceEventFields& value) {
 	}
 }
 template <class Archive>
-inline void save(Archive& ar, const TraceEventFields& value) {
+inline void save(Archive& ar, TraceEventFields const& value) {
 	ar << (uint32_t)value.size();
 
 	for (auto itr : value) {
@@ -181,20 +181,20 @@ inline void save(Archive& ar, const TraceEventFields& value) {
 
 class TraceBatch {
 public:
-	void addEvent(const char* name, uint64_t id, const char* location);
-	void addAttach(const char* name, uint64_t id, uint64_t to);
+	void addEvent(char const* name, uint64_t id, char const* location);
+	void addAttach(char const* name, uint64_t id, uint64_t to);
 	void addBuggify(int activated, int line, std::string file);
 	void dump();
 
 private:
 	struct EventInfo {
 		TraceEventFields fields;
-		EventInfo(double time, double monotonicTime, const char* name, uint64_t id, const char* location);
+		EventInfo(double time, double monotonicTime, char const* name, uint64_t id, char const* location);
 	};
 
 	struct AttachInfo {
 		TraceEventFields fields;
-		AttachInfo(double time, const char* name, uint64_t id, uint64_t to);
+		AttachInfo(double time, char const* name, uint64_t id, uint64_t to);
 	};
 
 	struct BuggifyInfo {
@@ -228,7 +228,7 @@ TRACE_METRIC_TYPE(double, double);
 
 class AuditedEvent;
 
-inline constexpr AuditedEvent operator""_audit(const char*, size_t) noexcept;
+inline constexpr AuditedEvent operator""_audit(char const*, size_t) noexcept;
 
 class AuditedEvent {
 	// special TraceEvents that may bypass throttling or suppression
@@ -245,19 +245,19 @@ class AuditedEvent {
 		"N2_AcceptHandshakeUnknownError",
 		"UnauthorizedAccessPrevented",
 	};
-	const char* eventType;
+	char const* eventType;
 	int len;
 	bool valid;
-	explicit constexpr AuditedEvent(const char* type, int len) noexcept
+	explicit constexpr AuditedEvent(char const* type, int len) noexcept
 	  : eventType(type), len(len),
 	    valid(std::find(std::begin(auditTopics), std::end(auditTopics), std::string_view(type, len)) !=
 	          std::end(auditTopics)) // whitelist looked up during compile time
 	{}
 
-	friend constexpr AuditedEvent operator""_audit(const char*, size_t) noexcept;
+	friend constexpr AuditedEvent operator""_audit(char const*, size_t) noexcept;
 
 public:
-	constexpr const char* type() const noexcept { return eventType; }
+	constexpr char const* type() const noexcept { return eventType; }
 
 	constexpr std::string_view typeSv() const noexcept { return std::string_view(eventType, len); }
 
@@ -266,7 +266,7 @@ public:
 
 // This, along with private AuditedEvent constructor, guarantees that AuditedEvent is always created with a string
 // literal
-inline constexpr AuditedEvent operator""_audit(const char* eventType, size_t len) noexcept {
+inline constexpr AuditedEvent operator""_audit(char const* eventType, size_t len) noexcept {
 	return AuditedEvent(eventType, len);
 }
 
@@ -288,7 +288,7 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 
 	template <class T>
 	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(std::string&& key,
-	                                                                                                 const T& value) {
+	                                                                                                 T const& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
@@ -298,8 +298,8 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 	}
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(const char* key,
-	                                                                                                 const T& value) {
+	typename std::enable_if<Traceable<T>::value && !std::is_enum_v<T>, BaseTraceEvent&>::type detail(char const* key,
+	                                                                                                 T const& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key, value, s);
@@ -308,17 +308,17 @@ struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 		return *this;
 	}
 	template <class T>
-	typename std::enable_if<std::is_enum<T>::value, BaseTraceEvent&>::type detail(const char* key, T value) {
+	typename std::enable_if<std::is_enum<T>::value, BaseTraceEvent&>::type detail(char const* key, T value) {
 		if (enabled && init()) {
 			setField(key, int64_t(value));
 			return detailImpl(std::string(key), format("%d", value), false);
 		}
 		return *this;
 	}
-	BaseTraceEvent& detailf(std::string key, const char* valueFormat, ...);
+	BaseTraceEvent& detailf(std::string key, char const* valueFormat, ...);
 	// Logs a formatted message with a fixed key ("LogMessage") for the case
 	// where all you want to do is log a message.
-	BaseTraceEvent& log(const char* format, ...);
+	BaseTraceEvent& log(char const* format, ...);
 
 protected:
 	class State {
@@ -337,9 +337,9 @@ protected:
 				value = Type::FORCED;
 		}
 
-		State(const State& other) noexcept = default;
+		State(State const& other) noexcept = default;
 		State(State&& other) noexcept : value(other.value) { other.value = Type::DISABLED; }
-		State& operator=(const State& other) noexcept = default;
+		State& operator=(State const& other) noexcept = default;
 		State& operator=(State&& other) noexcept {
 			if (this != &other) {
 				value = other.value;
@@ -347,8 +347,8 @@ protected:
 			}
 			return *this;
 		}
-		bool operator==(const State& other) const noexcept = default;
-		bool operator!=(const State& other) const noexcept = default;
+		bool operator==(State const& other) const noexcept = default;
+		bool operator!=(State const& other) const noexcept = default;
 
 		explicit operator bool() const noexcept { return value == Type::ENABLED || value == Type::FORCED; }
 
@@ -368,35 +368,35 @@ protected:
 	};
 
 	BaseTraceEvent();
-	BaseTraceEvent(Severity, const char* type, UID id = UID());
+	BaseTraceEvent(Severity, char const* type, UID id = UID());
 
 	template <class T>
-	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
-	                                                                                const T& value,
-	                                                                                const std::string&) {
+	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type addMetric(char const* key,
+	                                                                                T const& value,
+	                                                                                std::string const&) {
 		setField(key, SpecialTraceMetricType<T>::getValue(value));
 	}
 
 	template <class T>
-	typename std::enable_if<!SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
-	                                                                                 const T&,
-	                                                                                 const std::string& value) {
+	typename std::enable_if<!SpecialTraceMetricType<T>::value, void>::type addMetric(char const* key,
+	                                                                                 T const&,
+	                                                                                 std::string const& value) {
 		setField(key, value);
 	}
 
-	void setField(const char* key, int64_t value);
-	void setField(const char* key, double value);
-	void setField(const char* key, const std::string& value);
+	void setField(char const* key, int64_t value);
+	void setField(char const* key, double value);
+	void setField(char const* key, std::string const& value);
 	void setThreadId();
 
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
-	BaseTraceEvent& detailfNoMetric(std::string&& key, const char* valueFormat, ...);
+	BaseTraceEvent& detailfNoMetric(std::string&& key, char const* valueFormat, ...);
 	BaseTraceEvent& detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField = true);
 
 public:
-	BaseTraceEvent& backtrace(const std::string& prefix = "");
-	BaseTraceEvent& trackLatest(const std::string& trackingKey);
+	BaseTraceEvent& backtrace(std::string const& prefix = "");
+	BaseTraceEvent& trackLatest(std::string const& trackingKey);
 	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
 	// disables truncation. This should be called before the field whose length you want to change, and it can be
 	// changed multiple times in a single event.
@@ -435,7 +435,7 @@ public:
 
 	std::unique_ptr<DynamicEventMetric> tmpEventMetric; // This just just a place to store fields
 
-	const TraceEventFields& getFields() const { return fields; }
+	TraceEventFields const& getFields() const { return fields; }
 	Severity getSeverity() const { return severity; }
 
 	template <class Object>
@@ -461,7 +461,7 @@ protected:
 	TraceEventFields fields;
 	Severity severity;
 	ErrorKind errorKind{ ErrorKind::Unset };
-	const char* type;
+	char const* type;
 	UID id;
 	Error err;
 
@@ -483,8 +483,8 @@ protected:
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
 struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 	TraceEvent() {}
-	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, UID id = UID());
+	TraceEvent(char const* type, UID id = UID()); // Assumes SevInfo severity
+	TraceEvent(Severity, char const* type, UID id = UID());
 	TraceEvent(struct TraceInterval&, UID id = UID());
 	TraceEvent(Severity severity, struct TraceInterval& interval, UID id = UID());
 	TraceEvent(AuditedEvent, UID id = UID());
@@ -501,7 +501,7 @@ struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 
 	// Exposed for Swift which cannot use std::enable_if
 	template <class T>
-	void addDetail(std::string key, const T& value) {
+	void addDetail(std::string key, T const& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
@@ -513,12 +513,12 @@ struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 class StringRef;
 
 struct TraceInterval {
-	TraceInterval(const char* type, UID id = UID()) : type(type), pairID(id), count(-1), severity(SevInfo) {}
+	TraceInterval(char const* type, UID id = UID()) : type(type), pairID(id), count(-1), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
 
-	const char* type;
+	char const* type;
 	UID pairID;
 	int count;
 	Severity severity;
@@ -526,7 +526,7 @@ struct TraceInterval {
 
 struct LatestEventCache {
 public:
-	void set(std::string tag, const TraceEventFields& fields);
+	void set(std::string tag, TraceEventFields const& fields);
 	TraceEventFields get(std::string const& tag);
 	std::vector<TraceEventFields> getAll();
 	std::vector<TraceEventFields> getAllUnsafe();
@@ -535,7 +535,7 @@ public:
 	void clear();
 
 	// Latest error tracking only tracks errors when called from the main thread. Other errors are silently ignored.
-	void setLatestError(const TraceEventFields& contents);
+	void setLatestError(TraceEventFields const& contents);
 	TraceEventFields getLatestError();
 
 private:
@@ -548,7 +548,7 @@ extern LatestEventCache latestEventCache;
 struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 	std::string trackingKey;
 
-	EventCacheHolder(const std::string& trackingKey) : trackingKey(trackingKey) {}
+	EventCacheHolder(std::string const& trackingKey) : trackingKey(trackingKey) {}
 
 	~EventCacheHolder() { latestEventCache.clear(trackingKey); }
 };
@@ -567,7 +567,7 @@ class Optional;
 using OptionalStdString = Optional<std::string>;
 using OptionalInt64 = Optional<int64_t>;
 
-void openTraceFile(const Optional<NetworkAddress>& na,
+void openTraceFile(Optional<NetworkAddress> const& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory = ".",
@@ -595,10 +595,10 @@ bool validateTraceClockSource(std::string source);
 void addTraceRole(std::string const& role);
 void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
-void setTraceLogGroup(const std::string& role);
+void setTraceLogGroup(std::string const& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
 bool isTraceLocalAddressSet();
-void setTraceLocalAddress(const NetworkAddress& addr);
+void setTraceLocalAddress(NetworkAddress const& addr);
 void disposeTraceFileWriter();
 std::string getTraceFormatExtension();
 uint64_t getTraceThreadId();

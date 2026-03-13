@@ -104,7 +104,7 @@ void populateVersionVector(VersionVector& vv,
                            int tagCount,
                            int localityCount,
                            int maxTagId,
-                           const uint64_t maxCommitVersionDelta) {
+                           uint64_t const maxCommitVersionDelta) {
 	std::vector<uint16_t> ids;
 	std::vector<int8_t> localities;
 	Version minVersion;

@@ -46,7 +46,7 @@ std::unordered_set<CompressionFilter> getSupportedFilters() {
 
 std::unordered_set<CompressionFilter> CompressionUtils::supportedFilters = getSupportedFilters();
 
-StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
+StringRef CompressionUtils::compress(CompressionFilter const filter, StringRef const& data, Arena& arena) {
 	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
@@ -61,7 +61,7 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 	throw internal_error(); // We should never get here
 }
 
-StringRef CompressionUtils::compress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena) {
+StringRef CompressionUtils::compress(CompressionFilter const filter, StringRef const& data, int level, Arena& arena) {
 	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
@@ -69,7 +69,7 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 	}
 #ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
-		const char* src = reinterpret_cast<const char*>(data.begin());
+		char const* src = reinterpret_cast<char const*>(data.begin());
 		size_t destSize = ZSTD_compressBound(data.size());
 		std::unique_ptr<uint8_t[]> dest = std::make_unique<uint8_t[]>(destSize);
 		size_t bytes = ZSTD_compress(dest.get(), destSize, src, data.size(), level);
@@ -82,7 +82,7 @@ StringRef CompressionUtils::compress(const CompressionFilter filter, const Strin
 	throw internal_error(); // We should never get here
 }
 
-StringRef CompressionUtils::decompress(const CompressionFilter filter, const StringRef& data, Arena& arena) {
+StringRef CompressionUtils::decompress(CompressionFilter const filter, StringRef const& data, Arena& arena) {
 	checkFilterSupported(filter);
 
 	if (filter == CompressionFilter::NONE) {
@@ -90,7 +90,7 @@ StringRef CompressionUtils::decompress(const CompressionFilter filter, const Str
 	}
 #ifdef ZSTD_LIB_SUPPORTED
 	if (filter == CompressionFilter::ZSTD) {
-		const char* src = reinterpret_cast<const char*>(data.begin());
+		char const* src = reinterpret_cast<char const*>(data.begin());
 		size_t destSize = ZSTD_decompressBound(src, data.size());
 		std::unique_ptr<uint8_t[]> dest = std::make_unique<uint8_t[]>(destSize);
 		size_t bytes = ZSTD_decompress(dest.get(), destSize, src, data.size());
@@ -146,7 +146,7 @@ void forceLinkCompressionUtilsTest() {}
 namespace {
 void testCompression(CompressionFilter filter) {
 	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
+	int const size = deterministicRandom()->randomInt(512, 1024);
 	Standalone<StringRef> uncompressed = makeString(size);
 	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
 
@@ -159,7 +159,7 @@ void testCompression(CompressionFilter filter) {
 
 void testCompression2(CompressionFilter filter) {
 	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
+	int const size = deterministicRandom()->randomInt(512, 1024);
 	std::string s(size, 'x');
 	Standalone<StringRef> uncompressed = Standalone<StringRef>(StringRef(s));
 	printf("Size before: %d\n", (int)uncompressed.size());
@@ -178,7 +178,7 @@ void testCompression2(CompressionFilter filter) {
 
 TEST_CASE("/CompressionUtils/noCompression") {
 	Arena arena;
-	const int size = deterministicRandom()->randomInt(512, 1024);
+	int const size = deterministicRandom()->randomInt(512, 1024);
 	Standalone<StringRef> uncompressed = makeString(size);
 	deterministicRandom()->randomBytes(mutateString(uncompressed), size);
 

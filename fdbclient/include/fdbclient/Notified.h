@@ -36,7 +36,7 @@ template <class T, class ValueType = T>
 struct Notified {
 	explicit Notified(ValueType v = 0) { val = v; }
 
-	[[nodiscard]] Future<Void> whenAtLeast(const ValueType& limit) {
+	[[nodiscard]] Future<Void> whenAtLeast(ValueType const& limit) {
 		if (val >= limit)
 			return Void();
 		Promise<Void> p;
@@ -46,7 +46,7 @@ struct Notified {
 
 	[[nodiscard]] ValueType get() const { return val; }
 
-	void initMetric(const StringRef& name, const StringRef& id) {
+	void initMetric(StringRef const& name, StringRef const& id) {
 		if constexpr (IsMetricHandle<T>::value) {
 			ValueType v = val;
 			val.init(name, id);
@@ -57,7 +57,7 @@ struct Notified {
 		}
 	}
 
-	void set(const ValueType& v) {
+	void set(ValueType const& v) {
 		ASSERT(v >= val);
 		if (v != val) {
 			val = v;
@@ -74,7 +74,7 @@ struct Notified {
 		}
 	}
 
-	void operator=(const ValueType& v) { set(v); }
+	void operator=(ValueType const& v) { set(v); }
 
 	Notified(Notified&& r) noexcept : waiting(std::move(r.waiting)), val(std::move(r.val)) {}
 	void operator=(Notified&& r) noexcept {
@@ -87,7 +87,7 @@ struct Notified {
 private:
 	using Item = std::pair<ValueType, Promise<Void>>;
 	struct ItemCompare {
-		bool operator()(const Item& a, const Item& b) { return a.first > b.first; }
+		bool operator()(Item const& a, Item const& b) { return a.first > b.first; }
 	};
 	std::priority_queue<Item, std::vector<Item>, ItemCompare> waiting;
 	T val;

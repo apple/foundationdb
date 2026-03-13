@@ -157,7 +157,7 @@ inline static T& makeDependent(T& value) {
 #define THREAD_FUNC static void __cdecl
 #define THREAD_FUNC_RETURN void
 #define THREAD_HANDLE void*
-THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, const char* name = nullptr);
+THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, char const* name = nullptr);
 #define THREAD_RETURN return
 #elif defined(__unixish__)
 #define THREAD_FUNC static void*
@@ -165,7 +165,7 @@ THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, const
 #define THREAD_HANDLE pthread_t
 // The last parameter is an optional name for the thread. It is only supported on Linux and has a
 // limit of 16 characters.
-THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, const char* name = nullptr);
+THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, char const* name = nullptr);
 #define THREAD_RETURN return NULL
 #else
 #error How do I start a new thread on this platform?
@@ -201,7 +201,7 @@ void setThreadPriority(int pri);
 // for what this is about.
 #define DEBUG_DETERMINISM 0
 
-std::string removeWhitespace(const std::string& t);
+std::string removeWhitespace(std::string const& t);
 
 // Not all fields are returned on all platforms.
 // Check the implementations of getDiskStatistics to see exactly what
@@ -262,7 +262,7 @@ struct SystemStatisticsState;
 struct IPAddress;
 
 SystemStatistics getSystemStatistics(std::string const& dataFolder,
-                                     const IPAddress* ip,
+                                     IPAddress const* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails);
 
@@ -306,14 +306,14 @@ double timer_monotonic(); // Returns a high precision monotonic clock which is a
                           // at startup, but might not be a globally accurate time.
 uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
-void getLocalTime(const
+void getLocalTime(
 #if defined(__cplusplus)
-                  std::time_t
+    std::time_t
 #else
-                  time_t
+    time_t
 #endif
-                      * timep,
-                  struct tm* result);
+        const* timep,
+    struct tm* result);
 
 // get GMT time string from an epoch seconds double
 std::string epochsToGMTString(double epochs);
@@ -342,7 +342,7 @@ bool directoryExists(std::string const& path);
 int64_t fileSize(std::string const& filename);
 
 // Returns last modified time of the file.
-time_t fileModifiedTime(const std::string& filename);
+time_t fileModifiedTime(std::string const& filename);
 
 // Returns true if file is deleted, false if it was not found, throws platform_error() otherwise
 // Consider using IAsyncFileSystem::filesystem()->deleteFile() instead, especially if you need durability!
@@ -363,7 +363,7 @@ std::string readFileBytes(std::string const& filename, size_t maxSize);
 size_t readFileBytes(std::string const& filename, uint8_t* buff, size_t len);
 
 // Write data buffer into file
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count, bool append = false);
+void writeFileBytes(std::string const& filename, uint8_t const* data, size_t count, bool append = false);
 
 // Write text into file
 void writeFile(std::string const& filename, std::string const& content);
@@ -389,7 +389,7 @@ std::string cleanPath(std::string const& path);
 //   /a/.
 //   /a/./
 //   /a//..//
-std::string popPath(const std::string& path);
+std::string popPath(std::string const& path);
 
 // abspath() resolves the given path to a canonical form.
 // If path is relative, the result will be based on the current working directory.
@@ -428,7 +428,7 @@ std::vector<std::string> listDirectories(std::string const& directory);
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
 
 // Tag the given file as "temporary", i.e. not really needing commits to disk
-void makeTemporary(const char* filename);
+void makeTemporary(char const* filename);
 
 void setCloseOnExec(int fd);
 
@@ -437,8 +437,8 @@ void outOfMemory();
 
 int getRandomSeed();
 
-bool getEnvironmentVar(const char* name, std::string& value);
-int setEnvironmentVar(const char* name, const char* value, int overwrite);
+bool getEnvironmentVar(char const* name, std::string& value);
+int setEnvironmentVar(char const* name, char const* value, int overwrite);
 
 std::string getWorkingDirectory();
 
@@ -470,12 +470,12 @@ int eraseDirectoryRecursive(std::string const& directory);
 struct TmpFile {
 public:
 	TmpFile();
-	TmpFile(const std::string& tempDir);
-	TmpFile(const std::string& tempDir, std::string const& prefix);
+	TmpFile(std::string const& tempDir);
+	TmpFile(std::string const& tempDir, std::string const& prefix);
 	~TmpFile();
 	size_t read(uint8_t* buff, size_t len);
-	void write(const uint8_t* buff, size_t len);
-	void append(const uint8_t* buff, size_t len);
+	void write(uint8_t const* buff, size_t len);
+	void append(uint8_t const* buff, size_t len);
 	bool destroyFile();
 	std::string getFileName() const { return filename; }
 
@@ -483,7 +483,7 @@ private:
 	std::string filename;
 	constexpr static std::string_view defaultPrefix = "fdbtmp";
 
-	void createTmpFile(const std::string_view dir, const std::string_view prefix);
+	void createTmpFile(std::string_view const dir, std::string_view const prefix);
 };
 
 } // namespace platform
@@ -550,57 +550,57 @@ inline static uint64_t __rdtsc() {
 
 #ifdef _WIN32
 #include <intrin.h>
-inline static int32_t interlockedIncrement(volatile int32_t* a) {
+inline static int32_t interlockedIncrement(int32_t volatile* a) {
 	return _InterlockedIncrement((long*)a);
 }
-inline static int64_t interlockedIncrement64(volatile int64_t* a) {
+inline static int64_t interlockedIncrement64(int64_t volatile* a) {
 	return _InterlockedIncrement64(a);
 }
-inline static int32_t interlockedDecrement(volatile int32_t* a) {
+inline static int32_t interlockedDecrement(int32_t volatile* a) {
 	return _InterlockedDecrement((long*)a);
 }
-inline static int64_t interlockedDecrement64(volatile int64_t* a) {
+inline static int64_t interlockedDecrement64(int64_t volatile* a) {
 	return _InterlockedDecrement64(a);
 }
-inline static int32_t interlockedCompareExchange(volatile int32_t* a, int32_t b, int32_t c) {
+inline static int32_t interlockedCompareExchange(int32_t volatile* a, int32_t b, int32_t c) {
 	return _InterlockedCompareExchange((long*)a, (long)b, (long)c);
 }
-inline static int64_t interlockedExchangeAdd64(volatile int64_t* a, int64_t b) {
+inline static int64_t interlockedExchangeAdd64(int64_t volatile* a, int64_t b) {
 	return _InterlockedExchangeAdd64(a, b);
 }
-inline static int64_t interlockedExchange64(volatile int64_t* a, int64_t b) {
+inline static int64_t interlockedExchange64(int64_t volatile* a, int64_t b) {
 	return _InterlockedExchange64(a, b);
 }
-inline static int64_t interlockedOr64(volatile int64_t* a, int64_t b) {
+inline static int64_t interlockedOr64(int64_t volatile* a, int64_t b) {
 	return _InterlockedOr64(a, b);
 }
 #elif defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
 #ifndef __aarch64__
 #include <xmmintrin.h>
 #endif
-inline static int32_t interlockedIncrement(volatile int32_t* a) {
+inline static int32_t interlockedIncrement(int32_t volatile* a) {
 	return __sync_add_and_fetch(a, 1);
 }
-inline static int64_t interlockedIncrement64(volatile int64_t* a) {
+inline static int64_t interlockedIncrement64(int64_t volatile* a) {
 	return __sync_add_and_fetch(a, 1);
 }
-inline static int32_t interlockedDecrement(volatile int32_t* a) {
+inline static int32_t interlockedDecrement(int32_t volatile* a) {
 	return __sync_add_and_fetch(a, -1);
 }
-inline static int64_t interlockedDecrement64(volatile int64_t* a) {
+inline static int64_t interlockedDecrement64(int64_t volatile* a) {
 	return __sync_add_and_fetch(a, -1);
 }
-inline static int32_t interlockedCompareExchange(volatile int32_t* a, int32_t b, int32_t c) {
+inline static int32_t interlockedCompareExchange(int32_t volatile* a, int32_t b, int32_t c) {
 	return __sync_val_compare_and_swap(a, c, b);
 }
-inline static int64_t interlockedExchangeAdd64(volatile int64_t* a, int64_t b) {
+inline static int64_t interlockedExchangeAdd64(int64_t volatile* a, int64_t b) {
 	return __sync_fetch_and_add(a, b);
 }
-inline static int64_t interlockedExchange64(volatile int64_t* a, int64_t b) {
+inline static int64_t interlockedExchange64(int64_t volatile* a, int64_t b) {
 	__sync_synchronize();
 	return __sync_lock_test_and_set(a, b);
 }
-inline static int64_t interlockedOr64(volatile int64_t* a, int64_t b) {
+inline static int64_t interlockedOr64(int64_t volatile* a, int64_t b) {
 	return __sync_fetch_and_or(a, b);
 }
 #else
@@ -610,27 +610,27 @@ inline static int64_t interlockedOr64(volatile int64_t* a, int64_t b) {
 template <class T>
 inline static T* interlockedExchangePtr(T* volatile* a, T* b) {
 	static_assert(sizeof(T*) == sizeof(int64_t), "Port me!");
-	return (T*)interlockedExchange64((volatile int64_t*)a, (int64_t)b);
+	return (T*)interlockedExchange64((int64_t volatile*)a, (int64_t)b);
 }
 
 #if FLOW_THREAD_SAFE
 #define thread_volatile volatile
-inline static int64_t flowInterlockedExchangeAdd64(volatile int64_t* p, int64_t a) {
+inline static int64_t flowInterlockedExchangeAdd64(int64_t volatile* p, int64_t a) {
 	return interlockedExchangeAdd64(p, a);
 }
-inline static int64_t flowInterlockedIncrement64(volatile int64_t* p) {
+inline static int64_t flowInterlockedIncrement64(int64_t volatile* p) {
 	return interlockedIncrement64(p);
 }
-inline static int64_t flowInterlockedDecrement64(volatile int64_t* p) {
+inline static int64_t flowInterlockedDecrement64(int64_t volatile* p) {
 	return interlockedDecrement64(p);
 }
-inline static int64_t flowInterlockedExchange64(volatile int64_t* p, int64_t a) {
+inline static int64_t flowInterlockedExchange64(int64_t volatile* p, int64_t a) {
 	return interlockedExchange64(p, a);
 }
-inline static int64_t flowInterlockedOr64(volatile int64_t* p, int64_t a) {
+inline static int64_t flowInterlockedOr64(int64_t volatile* p, int64_t a) {
 	return interlockedOr64(p, a);
 }
-inline static int64_t flowInterlockedAnd64(volatile int64_t* p, int64_t a) {
+inline static int64_t flowInterlockedAnd64(int64_t volatile* p, int64_t a) {
 	return interlockedAnd64(p, a);
 }
 #else
@@ -762,10 +762,10 @@ inline static void aligned_free(void* ptr) {
 
 // lib_path may be a relative or absolute path or a name to be
 // resolved by whatever linker is hanging around on this system
-bool isLibraryLoaded(const char* lib_path);
-void* loadLibrary(const char* lib_path);
+bool isLibraryLoaded(char const* lib_path);
+void* loadLibrary(char const* lib_path);
 void closeLibrary(void* handle);
-void* loadFunction(void* lib, const char* func_name);
+void* loadFunction(void* lib, char const* func_name);
 
 std::string exePath();
 
@@ -829,7 +829,7 @@ int64_t getNumProfilesCaptured();
 #endif
 
 // Logs a critical error message and exits the program
-EXTERNC void criticalError(int exitCode, const char* type, const char* message);
+EXTERNC void criticalError(int exitCode, char const* type, char const* message);
 EXTERNC void flushAndExit(int exitCode);
 
 // Initialization code that's run at the beginning of every entry point (except fdbmonitor)
@@ -878,17 +878,17 @@ EXTERNC void setProfilingEnabled(int enabled);
 	                             DTRACE_PROBE)                                                                         \
 	(foundationdb, __VA_ARGS__)
 
-extern void fdb_probe_actor_create(const char* name, unsigned long id);
-extern void fdb_probe_actor_destroy(const char* name, unsigned long id);
-extern void fdb_probe_actor_enter(const char* name, unsigned long, int index);
-extern void fdb_probe_actor_exit(const char* name, unsigned long, int index);
+extern void fdb_probe_actor_create(char const* name, unsigned long id);
+extern void fdb_probe_actor_destroy(char const* name, unsigned long id);
+extern void fdb_probe_actor_enter(char const* name, unsigned long, int index);
+extern void fdb_probe_actor_exit(char const* name, unsigned long, int index);
 #else
 #define FDB_TRACE_PROBE_STRING_CONCAT(h, t) h##t
 #define FDB_TRACE_PROBE(...)
-inline void fdb_probe_actor_create(const char* name, unsigned long id) {}
-inline void fdb_probe_actor_destroy(const char* name, unsigned long id) {}
-inline void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {}
-inline void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {}
+inline void fdb_probe_actor_create(char const* name, unsigned long id) {}
+inline void fdb_probe_actor_destroy(char const* name, unsigned long id) {}
+inline void fdb_probe_actor_enter(char const* name, unsigned long id, int index) {}
+inline void fdb_probe_actor_exit(char const* name, unsigned long id, int index) {}
 #endif
 
 #if defined(__aarch64__)

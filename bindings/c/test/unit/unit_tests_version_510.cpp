@@ -77,21 +77,21 @@ TEST_CASE("SET_AND_GET") {
 	// Set a key-value pair
 	std::string key = prefix + "testKey";
 	std::string value = "testValue";
-	fdb_transaction_set(tr.tr, (const uint8_t*)key.c_str(), key.size(), (const uint8_t*)value.c_str(), value.size());
+	fdb_transaction_set(tr.tr, (uint8_t const*)key.c_str(), key.size(), (uint8_t const*)value.c_str(), value.size());
 
 	Future commitFuture{ fdb_transaction_commit(tr.tr) };
 	fdb_check(fdb_future_block_until_ready(commitFuture.f));
 
 	Transaction tr2;
 	fdb_check(fdb_database_create_transaction(db, &tr2.tr));
-	Future getFuture{ fdb_transaction_get(tr2.tr, (const uint8_t*)key.c_str(), key.size(), 0) };
+	Future getFuture{ fdb_transaction_get(tr2.tr, (uint8_t const*)key.c_str(), key.size(), 0) };
 	fdb_check(fdb_future_block_until_ready(getFuture.f));
 
-	const uint8_t* valueOut;
+	uint8_t const* valueOut;
 	int valueLen;
 	fdb_bool_t present;
 	fdb_check(fdb_future_get_value(getFuture.f, &present, &valueOut, &valueLen));
-	std::string retrievedValue((const char*)valueOut, valueLen);
+	std::string retrievedValue((char const*)valueOut, valueLen);
 
 	CHECK(retrievedValue == value);
 }
@@ -123,7 +123,7 @@ int main(int argc, char** argv) {
 		Future clusterFuture{ fdb_create_cluster(argv[1]) };
 		fdb_check(fdb_future_block_until_ready(clusterFuture.f));
 		fdb_check(fdb_future_get_cluster(clusterFuture.f, &cluster));
-		Future databaseFuture{ fdb_cluster_create_database(cluster, (const uint8_t*)"DB", 2) };
+		Future databaseFuture{ fdb_cluster_create_database(cluster, (uint8_t const*)"DB", 2) };
 		fdb_check(fdb_future_block_until_ready(databaseFuture.f));
 		fdb_check(fdb_future_get_database(databaseFuture.f, &db));
 		fdb_cluster_destroy(cluster);

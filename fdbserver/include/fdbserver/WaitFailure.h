@@ -25,10 +25,10 @@
 #include "flow/flow.h"
 #include "fdbrpc/fdbrpc.h"
 
-Future<Void> waitFailureServer(const FutureStream<ReplyPromise<Void>>& waitFailure);
+Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> const& waitFailure);
 
 // talks to a wait failure server, returns Void on failure
-Future<Void> waitFailureClient(const RequestStream<ReplyPromise<Void>>& waitFailure,
+Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> const& waitFailure,
                                double const& failureReactionTime = 0,
                                double const& failureReactionSlope = 0,
                                bool const& trace = false,
@@ -36,12 +36,12 @@ Future<Void> waitFailureClient(const RequestStream<ReplyPromise<Void>>& waitFail
                                TaskPriority const& taskID = TaskPriority::DefaultEndpoint);
 
 // talks to a wait failure server, returns Void on failure, reaction time is always waited
-Future<Void> waitFailureClientStrict(const RequestStream<ReplyPromise<Void>>& waitFailure,
+Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> const& waitFailure,
                                      double const& failureReactionTime = 0,
                                      TaskPriority const& taskID = TaskPriority::DefaultEndpoint);
 
 // talks to a wait failure server, updates failed to be true or false based on failure status.
-Future<Void> waitFailureTracker(const RequestStream<ReplyPromise<Void>>& waitFailure,
+Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> const& waitFailure,
                                 Reference<AsyncVar<bool>> const& failed,
                                 double const& failureReactionTime = 0,
                                 double const& failureReactionSlope = 0,

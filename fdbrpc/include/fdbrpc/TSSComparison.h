@@ -74,7 +74,7 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	}
 
 	template <class Req>
-	void recordLatency(const Req& req, double ssLatency, double tssLatency);
+	void recordLatency(Req const& req, double ssLatency, double tssLatency);
 
 	// only record a small number of the detailed mismatches per client per metrics window
 	bool shouldRecordDetailedMismatch() {
@@ -112,12 +112,12 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 };
 
 template <class Rep>
-bool TSS_doCompare(const Rep& src, const Rep& tss);
+bool TSS_doCompare(Rep const& src, Rep const& tss);
 
 template <class Req, class Type>
-const char* LB_mismatchTraceName(const Req& req, const Type& type);
+char const* LB_mismatchTraceName(Req const& req, Type const& type);
 
 template <class Req, class Rep, class Type>
-void TSS_traceMismatch(TraceEvent& event, const Req& req, const Rep& src, const Rep& tss, const Type& type);
+void TSS_traceMismatch(TraceEvent& event, Req const& req, Rep const& src, Rep const& tss, Type const& type);
 
 #endif

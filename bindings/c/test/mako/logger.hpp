@@ -29,10 +29,10 @@
 
 namespace mako {
 
-constexpr const int VERBOSE_NONE = 0; // will still print errors
-constexpr const int VERBOSE_DEFAULT = 1; // will print info and work stats
-constexpr const int VERBOSE_WARN = 2; // will print expected errors
-constexpr const int VERBOSE_DEBUG = 3; // will print everything
+constexpr int const VERBOSE_NONE = 0; // will still print errors
+constexpr int const VERBOSE_DEFAULT = 1; // will print info and work stats
+constexpr int const VERBOSE_WARN = 2; // will print expected errors
+constexpr int const VERBOSE_DEBUG = 3; // will print everything
 
 template <ProcKind P>
 using ProcKindConstant = std::integral_constant<ProcKind, P>;
@@ -75,8 +75,8 @@ public:
 	Logger(WorkerProcess, int verbosity, int process_id, int thread_id = -1) noexcept
 	  : proc(WorkerProcess::value), verbosity(verbosity), process_id(process_id), thread_id(thread_id) {}
 
-	Logger(const Logger&) noexcept = default;
-	Logger& operator=(const Logger&) noexcept = default;
+	Logger(Logger const&) noexcept = default;
+	Logger& operator=(Logger const&) noexcept = default;
 
 	void setVerbosity(int value) noexcept {
 		assert(value >= VERBOSE_NONE && value <= VERBOSE_DEBUG);
@@ -86,11 +86,11 @@ public:
 	template <typename... Args>
 	void printWithLogLevel(int log_level,
 	                       std::string_view header,
-	                       const fmt::format_string<Args...>& fmt_str,
+	                       fmt::format_string<Args...> const& fmt_str,
 	                       Args&&... args) {
 		assert(log_level >= VERBOSE_NONE && log_level <= VERBOSE_DEBUG);
 		if (log_level <= verbosity) {
-			const auto fp = log_level == VERBOSE_NONE ? stderr : stdout;
+			auto const fp = log_level == VERBOSE_NONE ? stderr : stdout;
 			// 500B inline buffer
 			auto buf = fmt::memory_buffer{};
 			putHeader(buf, header);
@@ -100,22 +100,22 @@ public:
 	}
 
 	template <typename... Args>
-	void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	void error(fmt::format_string<Args...> const& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_NONE, "ERROR", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	void info(fmt::format_string<Args...> const& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_DEFAULT, "INFO", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void warn(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	void warn(fmt::format_string<Args...> const& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_WARN, "WARNING", fmt_str, std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>
-	void debug(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	void debug(fmt::format_string<Args...> const& fmt_str, Args&&... args) {
 		printWithLogLevel(VERBOSE_DEBUG, "DEBUG", fmt_str, std::forward<Args>(args)...);
 	}
 

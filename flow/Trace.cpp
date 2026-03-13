@@ -106,9 +106,9 @@ LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
 
 static TransientThresholdMetricSample<Standalone<StringRef>>* traceEventThrottlerCache;
-static const char* TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
-static const char* TRACE_EVENT_INVALID_SUPPRESSION = "InvalidSuppression_";
-static const char* TRACE_EVENT_INVALID_AUDIT_LOG_TYPE = "InvalidAuditLogType_";
+static char const* TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
+static char const* TRACE_EVENT_INVALID_SUPPRESSION = "InvalidSuppression_";
+static char const* TRACE_EVENT_INVALID_AUDIT_LOG_TYPE = "InvalidAuditLogType_";
 static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
 
 struct TraceLog {
@@ -146,7 +146,7 @@ private:
 
 		void refreshRolesString() {
 			rolesString = "";
-			for (const auto& itr : roles) {
+			for (auto const& itr : roles) {
 				if (!rolesString.empty()) {
 					rolesString += ",";
 				}
@@ -265,7 +265,7 @@ public:
 			double getTimeEstimate() const override { return .001; }
 		};
 		void action(WriteBuffer& a) {
-			for (const auto& event : a.events) {
+			for (auto const& event : a.events) {
 				logWriter->write(formatter->formatEvent(event));
 			}
 
@@ -277,7 +277,7 @@ public:
 		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
-			explicit Ping() {};
+			explicit Ping(){};
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {
@@ -432,7 +432,7 @@ public:
 		}
 	}
 
-	void logMetrics(int severity, const char* name, UID id, uint64_t event_ts) {
+	void logMetrics(int severity, char const* name, UID id, uint64_t event_ts) {
 		ASSERT(TraceEvent::isNetworkThread() && logTraceEventMetrics);
 
 		EventMetricHandle<TraceEventNameID>* m = nullptr;
@@ -542,7 +542,7 @@ public:
 				f.getBlocking();
 
 				opened = false;
-			} catch (const std::exception& e) {
+			} catch (std::exception const& e) {
 				fprintf(stderr, "Error closing trace file: %s\n", e.what());
 			}
 		}
@@ -570,12 +570,12 @@ public:
 		}
 	}
 
-	void setLogGroup(const std::string& logGroup) {
+	void setLogGroup(std::string const& logGroup) {
 		MutexHolder holder(mutex);
 		this->logGroup = logGroup;
 	}
 
-	void addUniversalTraceField(const std::string& name, const std::string& value) {
+	void addUniversalTraceField(std::string const& name, std::string const& value) {
 		MutexHolder holder(mutex);
 		ASSERT(universalFields.count(name) == 0);
 		universalFields[name] = value;
@@ -586,7 +586,7 @@ public:
 		return this->localAddress;
 	}
 
-	void setLocalAddress(const NetworkAddress& addr) {
+	void setLocalAddress(NetworkAddress const& addr) {
 		MutexHolder holder(mutex);
 		this->localAddress = addr;
 	}
@@ -637,7 +637,7 @@ void LatestEventCache::clear() {
 	latest[getAddressIndex()].clear();
 }
 
-void LatestEventCache::set(std::string tag, const TraceEventFields& contents) {
+void LatestEventCache::set(std::string tag, TraceEventFields const& contents) {
 	latest[getAddressIndex()][tag] = contents;
 }
 
@@ -667,7 +667,7 @@ std::vector<TraceEventFields> LatestEventCache::getAllUnsafe() {
 	return all;
 }
 
-void LatestEventCache::setLatestError(const TraceEventFields& contents) {
+void LatestEventCache::setLatestError(TraceEventFields const& contents) {
 	if (TraceEvent::isNetworkThread()) { // The latest event cache doesn't track errors that happen on other threads
 		latestErrors[getAddressIndex()] = contents;
 	}
@@ -775,7 +775,7 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const Optional<NetworkAddress>& na,
+void openTraceFile(Optional<NetworkAddress> const& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory,
@@ -843,11 +843,11 @@ void removeTraceRole(std::string const& role) {
 	g_traceLog.removeRole(role);
 }
 
-void setTraceLogGroup(const std::string& logGroup) {
+void setTraceLogGroup(std::string const& logGroup) {
 	g_traceLog.setLogGroup(logGroup);
 }
 
-void addUniversalTraceField(const std::string& name, const std::string& value) {
+void addUniversalTraceField(std::string const& name, std::string const& value) {
 	g_traceLog.addUniversalTraceField(name, value);
 }
 
@@ -855,7 +855,7 @@ bool isTraceLocalAddressSet() {
 	return g_traceLog.getLocalAddress().present();
 }
 
-void setTraceLocalAddress(const NetworkAddress& addr) {
+void setTraceLocalAddress(NetworkAddress const& addr) {
 	g_traceLog.setLocalAddress(addr);
 }
 
@@ -874,7 +874,7 @@ BaseTraceEvent::BaseTraceEvent() : enabled(), initialized(true), logged(true) {
 	//  fprintf(stderr, "[%s:%d](%s) init BaseTraceEvent [%p] \n", __FILE_NAME__, __LINE__, __FUNCTION__,
 	//          this);
 }
-BaseTraceEvent::BaseTraceEvent(Severity severity, const char* type, UID id)
+BaseTraceEvent::BaseTraceEvent(Severity severity, char const* type, UID id)
   : enabled(severity), initialized(false), logged(false), severity(severity), type(type), id(id) {
 	//  fprintf(stderr, "[%s:%d](%s) init BaseTraceEvent [%p] type: %s \n", __FILE_NAME__, __LINE__, __FUNCTION__,
 	//          this, type);
@@ -945,11 +945,11 @@ Future<Void> pingTraceLogWriterThread() {
 	return g_traceLog.pingWriterThread();
 }
 
-TraceEvent::TraceEvent(const char* type, UID id) : BaseTraceEvent(SevInfo, type, id) {
+TraceEvent::TraceEvent(char const* type, UID id) : BaseTraceEvent(SevInfo, type, id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
-TraceEvent::TraceEvent(Severity severity, const char* type, UID id) : BaseTraceEvent(severity, type, id) {
+TraceEvent::TraceEvent(Severity severity, char const* type, UID id) : BaseTraceEvent(severity, type, id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
@@ -1138,25 +1138,25 @@ BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& valu
 	return *this;
 }
 
-void BaseTraceEvent::setField(const char* key, int64_t value) {
+void BaseTraceEvent::setField(char const* key, int64_t value) {
 	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, value);
 	--g_allocation_tracing_disabled;
 }
 
-void BaseTraceEvent::setField(const char* key, double value) {
+void BaseTraceEvent::setField(char const* key, double value) {
 	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, value);
 	--g_allocation_tracing_disabled;
 }
 
-void BaseTraceEvent::setField(const char* key, const std::string& value) {
+void BaseTraceEvent::setField(char const* key, std::string const& value) {
 	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, Standalone<StringRef>(value));
 	--g_allocation_tracing_disabled;
 }
 
-BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat, ...) {
+BaseTraceEvent& BaseTraceEvent::detailf(std::string key, char const* valueFormat, ...) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -1170,7 +1170,7 @@ BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat
 	return *this;
 }
 
-BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
+BaseTraceEvent& BaseTraceEvent::log(char const* valueFormat, ...) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -1185,7 +1185,7 @@ BaseTraceEvent& BaseTraceEvent::log(const char* valueFormat, ...) {
 	return *this;
 }
 
-BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
+BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, char const* valueFormat, ...) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -1202,7 +1202,7 @@ BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* v
 	return *this;
 }
 
-BaseTraceEvent& BaseTraceEvent::trackLatest(const std::string& trackingKey) {
+BaseTraceEvent& BaseTraceEvent::trackLatest(std::string const& trackingKey) {
 	ASSERT(!logged);
 	this->trackingKey = trackingKey;
 	ASSERT(!this->trackingKey.empty() && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
@@ -1324,7 +1324,7 @@ unsigned long BaseTraceEvent::CountEventsLoggedAt(Severity sev) {
 	return TraceEvent::eventCounts[sev / 10];
 }
 
-BaseTraceEvent& BaseTraceEvent::backtrace(const std::string& prefix) {
+BaseTraceEvent& BaseTraceEvent::backtrace(std::string const& prefix) {
 	ASSERT(!logged);
 	if (this->severity == SevError || !enabled)
 		return *this; // We'll backtrace this later in ~TraceEvent
@@ -1476,7 +1476,7 @@ bool TraceBatch::dumpImmediately() {
 	return (g_network->isSimulated() || FLOW_KNOBS->AUTOMATIC_TRACE_DUMP);
 }
 
-void TraceBatch::addEvent(const char* name, uint64_t id, const char* location) {
+void TraceBatch::addEvent(char const* name, uint64_t id, char const* location) {
 	if (FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
 		return;
 	}
@@ -1488,7 +1488,7 @@ void TraceBatch::addEvent(const char* name, uint64_t id, const char* location) {
 		g_traceLog.annotateEvent(eventInfo.fields);
 }
 
-void TraceBatch::addAttach(const char* name, uint64_t id, uint64_t to) {
+void TraceBatch::addAttach(char const* name, uint64_t id, uint64_t to) {
 	if (FLOW_KNOBS->MIN_TRACE_SEVERITY > TRACE_BATCH_IMPLICIT_SEVERITY) {
 		return;
 	}
@@ -1552,9 +1552,9 @@ void TraceBatch::dump() {
 
 TraceBatch::EventInfo::EventInfo(double time,
                                  double monotonicTime,
-                                 const char* name,
+                                 char const* name,
                                  uint64_t id,
-                                 const char* location) {
+                                 char const* location) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	// Include monotonic time for computing elapsed time between events on the same machine.
@@ -1568,7 +1568,7 @@ TraceBatch::EventInfo::EventInfo(double time,
 	fields.addField("Location", location);
 }
 
-TraceBatch::AttachInfo::AttachInfo(double time, const char* name, uint64_t id, uint64_t to) {
+TraceBatch::AttachInfo::AttachInfo(double time, char const* name, uint64_t id, uint64_t to) {
 	fields.addField("Severity", format("%d", (int)TRACE_BATCH_IMPLICIT_SEVERITY));
 	fields.addField("Time", format("%.6f", time));
 	if (FLOW_KNOBS && FLOW_KNOBS->TRACE_DATETIME_ENABLED) {
@@ -1593,7 +1593,7 @@ TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::
 
 TraceEventFields::TraceEventFields() : bytes(0), annotated(false) {}
 
-void TraceEventFields::addField(const std::string& key, const std::string& value) {
+void TraceEventFields::addField(std::string const& key, std::string const& value) {
 	bytes += key.size() + value.size();
 	fields.emplace_back(key, value);
 }
@@ -1627,7 +1627,7 @@ void TraceEventFields::setAnnotated() {
 	annotated = true;
 }
 
-const TraceEventFields::Field& TraceEventFields::operator[](int index) const {
+TraceEventFields::Field const& TraceEventFields::operator[](int index) const {
 	ASSERT(index >= 0 && index < size());
 	return fields.at(index);
 }
@@ -1802,7 +1802,7 @@ std::string TraceEventFields::toString() const {
 	return str;
 }
 
-std::string traceableStringToString(const char* value, size_t S) {
+std::string traceableStringToString(char const* value, size_t S) {
 	if (g_network) {
 		ASSERT_WE_THINK(S > 0 && value[S - 1] == '\0');
 	}

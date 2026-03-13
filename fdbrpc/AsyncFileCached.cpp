@@ -83,7 +83,7 @@ Future<Reference<IAsyncFile>> AsyncFileCached::open_impl(std::string filename, i
 
 template <bool writing>
 Future<Void> AsyncFileCached::read_write_impl(AsyncFileCached* self,
-                                              typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+                                              typename std::conditional_t<writing, uint8_t const*, uint8_t*> data,
                                               int length,
                                               int64_t offset) {
 	if constexpr (writing) {

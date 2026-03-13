@@ -32,7 +32,7 @@
 
 namespace FdbApiTester {
 
-int WorkloadConfig::getIntOption(const std::string& name, int defaultVal) const {
+int WorkloadConfig::getIntOption(std::string const& name, int defaultVal) const {
 	auto iter = options.find(name);
 	if (iter == options.end()) {
 		return defaultVal;
@@ -47,7 +47,7 @@ int WorkloadConfig::getIntOption(const std::string& name, int defaultVal) const 
 	}
 }
 
-double WorkloadConfig::getFloatOption(const std::string& name, double defaultVal) const {
+double WorkloadConfig::getFloatOption(std::string const& name, double defaultVal) const {
 	auto iter = options.find(name);
 	if (iter == options.end()) {
 		return defaultVal;
@@ -62,7 +62,7 @@ double WorkloadConfig::getFloatOption(const std::string& name, double defaultVal
 	}
 }
 
-bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) const {
+bool WorkloadConfig::getBoolOption(std::string const& name, bool defaultVal) const {
 	auto iter = options.find(name);
 	if (iter == options.end()) {
 		return defaultVal;
@@ -79,7 +79,7 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 	}
 }
 
-WorkloadBase::WorkloadBase(const WorkloadConfig& config)
+WorkloadBase::WorkloadBase(WorkloadConfig const& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
     failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
@@ -163,11 +163,11 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	    maxTxTimeoutMs > 0);
 }
 
-void WorkloadBase::info(const std::string& msg) {
+void WorkloadBase::info(std::string const& msg) {
 	fmt::print(stderr, "[{}] {}\n", workloadId, msg);
 }
 
-void WorkloadBase::error(const std::string& msg) {
+void WorkloadBase::error(std::string const& msg) {
 	fmt::print(stderr, "[{}] ERROR: {}\n", workloadId, msg);
 	numErrors++;
 	if (numErrors > maxErrors && !failed) {
@@ -204,14 +204,14 @@ void WorkloadManager::run() {
 	std::vector<std::shared_ptr<IWorkload>> initialWorkloads;
 	{
 		std::unique_lock<std::mutex> lock(mutex);
-		for (const auto& iter : workloads) {
+		for (auto const& iter : workloads) {
 			initialWorkloads.push_back(iter.second.ref);
 		}
 	}
-	for (const auto& iter : initialWorkloads) {
+	for (auto const& iter : initialWorkloads) {
 		iter->init(this);
 	}
-	for (const auto& iter : initialWorkloads) {
+	for (auto const& iter : initialWorkloads) {
 		iter->start();
 	}
 	scheduler->join();
@@ -250,7 +250,7 @@ void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	}
 }
 
-void WorkloadManager::openControlPipes(const std::string& inputPipeName, const std::string& outputPipeName) {
+void WorkloadManager::openControlPipes(std::string const& inputPipeName, std::string const& outputPipeName) {
 	if (!inputPipeName.empty()) {
 		ctrlInputThread = std::thread(&WorkloadManager::readControlInput, this, inputPipeName);
 	}
@@ -291,7 +291,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 
 void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
 	statsTimer = scheduler->scheduleWithDelay(timeIntervalMs, [this, timeIntervalMs]() {
-		for (const auto& workload : getActiveWorkloads()) {
+		for (auto const& workload : getActiveWorkloads()) {
 			workload->printStats();
 		}
 		this->schedulePrintStatistics(timeIntervalMs);
@@ -301,7 +301,7 @@ void WorkloadManager::schedulePrintStatistics(int timeIntervalMs) {
 std::vector<std::shared_ptr<IWorkload>> WorkloadManager::getActiveWorkloads() {
 	std::unique_lock<std::mutex> lock(mutex);
 	std::vector<std::shared_ptr<IWorkload>> res;
-	for (const auto& iter : workloads) {
+	for (auto const& iter : workloads) {
 		res.push_back(iter.second.ref);
 	}
 	return res;
@@ -352,7 +352,7 @@ void WorkloadManager::confirmProgress(IWorkload* workload) {
 	}
 }
 
-std::shared_ptr<IWorkload> IWorkloadFactory::create(std::string const& name, const WorkloadConfig& config) {
+std::shared_ptr<IWorkload> IWorkloadFactory::create(std::string const& name, WorkloadConfig const& config) {
 	auto it = factories().find(name);
 	if (it == factories().end())
 		return {}; // or throw?

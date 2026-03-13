@@ -61,7 +61,7 @@ struct AsyncFileHandle : public ReferenceCounted<AsyncFileHandle> {
 };
 
 struct AsyncFileWorkload : TestWorkload {
-	static const int _PAGE_SIZE;
+	static int const _PAGE_SIZE;
 
 	// If true, then the underlying AsyncFile will be assumed to be performing unbuffered IO, which requires special
 	// alignments

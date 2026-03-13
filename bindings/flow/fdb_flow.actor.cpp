@@ -104,9 +104,9 @@ public:
 
 	Reference<Transaction> createTransaction() override;
 	void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
-	Future<int64_t> rebootWorker(const StringRef& address, bool check = false, int duration = 0) override;
-	Future<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
-	Future<Void> createSnapshot(const StringRef& uid, const StringRef& snap_command) override;
+	Future<int64_t> rebootWorker(StringRef const& address, bool check = false, int duration = 0) override;
+	Future<Void> forceRecoveryWithDataLoss(StringRef const& dcid) override;
+	Future<Void> createSnapshot(StringRef const& uid, StringRef const& snap_command) override;
 
 private:
 	FDBDatabase* db;
@@ -128,31 +128,31 @@ public:
 	void setReadVersion(Version v) override;
 	Future<Version> getReadVersion() override;
 
-	Future<Optional<FDBStandalone<ValueRef>>> get(const Key& key, bool snapshot = false) override;
-	Future<FDBStandalone<KeyRef>> getKey(const KeySelector& key, bool snapshot = false) override;
+	Future<Optional<FDBStandalone<ValueRef>>> get(Key const& key, bool snapshot = false) override;
+	Future<FDBStandalone<KeyRef>> getKey(KeySelector const& key, bool snapshot = false) override;
 
-	Future<Void> watch(const Key& key) override;
+	Future<Void> watch(Key const& key) override;
 
 	using Transaction::getRange;
-	Future<FDBStandalone<RangeResultRef>> getRange(const KeySelector& begin,
-	                                               const KeySelector& end,
+	Future<FDBStandalone<RangeResultRef>> getRange(KeySelector const& begin,
+	                                               KeySelector const& end,
 	                                               GetRangeLimits limits = GetRangeLimits(),
 	                                               bool snapshot = false,
 	                                               bool reverse = false,
 	                                               FDBStreamingMode streamingMode = FDB_STREAMING_MODE_SERIAL) override;
 
-	Future<int64_t> getEstimatedRangeSizeBytes(const KeyRange& keys) override;
-	Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(const KeyRange& range, int64_t chunkSize) override;
+	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override;
+	Future<FDBStandalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) override;
 
 	void addReadConflictRange(KeyRangeRef const& keys) override;
 	void addReadConflictKey(KeyRef const& key) override;
 	void addWriteConflictRange(KeyRangeRef const& keys) override;
 	void addWriteConflictKey(KeyRef const& key) override;
 
-	void atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) override;
-	void set(const KeyRef& key, const ValueRef& value) override;
-	void clear(const KeyRangeRef& range) override;
-	void clear(const KeyRef& key) override;
+	void atomicOp(KeyRef const& key, ValueRef const& operand, FDBMutationType operationType) override;
+	void set(KeyRef const& key, ValueRef const& value) override;
+	void clear(KeyRangeRef const& range) override;
+	void clear(KeyRef const& key) override;
 
 	Future<Void> commit() override;
 	Version getCommittedVersion() override;
@@ -292,7 +292,7 @@ void DatabaseImpl::setDatabaseOption(FDBDatabaseOption option, Optional<StringRe
 		throw_on_error(fdb_database_set_option(db, option, nullptr, 0));
 }
 
-Future<int64_t> DatabaseImpl::rebootWorker(const StringRef& address, bool check, int duration) {
+Future<int64_t> DatabaseImpl::rebootWorker(StringRef const& address, bool check, int duration) {
 	return backToFuture<int64_t>(fdb_database_reboot_worker(db, address.begin(), address.size(), check, duration),
 	                             [](Reference<CFuture> f) {
 		                             int64_t res;
@@ -303,7 +303,7 @@ Future<int64_t> DatabaseImpl::rebootWorker(const StringRef& address, bool check,
 	                             });
 }
 
-Future<Void> DatabaseImpl::forceRecoveryWithDataLoss(const StringRef& dcid) {
+Future<Void> DatabaseImpl::forceRecoveryWithDataLoss(StringRef const& dcid) {
 	return backToFuture<Void>(fdb_database_force_recovery_with_data_loss(db, dcid.begin(), dcid.size()),
 	                          [](Reference<CFuture> f) {
 		                          throw_on_error(fdb_future_get_error(f->f));
@@ -311,7 +311,7 @@ Future<Void> DatabaseImpl::forceRecoveryWithDataLoss(const StringRef& dcid) {
 	                          });
 }
 
-Future<Void> DatabaseImpl::createSnapshot(const StringRef& uid, const StringRef& snap_command) {
+Future<Void> DatabaseImpl::createSnapshot(StringRef const& uid, StringRef const& snap_command) {
 	return backToFuture<Void>(
 	    fdb_database_create_snapshot(db, uid.begin(), uid.size(), snap_command.begin(), snap_command.size()),
 	    [](Reference<CFuture> f) {
@@ -338,7 +338,7 @@ Future<Version> TransactionImpl::getReadVersion() {
 	});
 }
 
-Future<Optional<FDBStandalone<ValueRef>>> TransactionImpl::get(const Key& key, bool snapshot) {
+Future<Optional<FDBStandalone<ValueRef>>> TransactionImpl::get(Key const& key, bool snapshot) {
 	return backToFuture<Optional<FDBStandalone<ValueRef>>>(
 	    fdb_transaction_get(tr, key.begin(), key.size(), snapshot), [](Reference<CFuture> f) {
 		    fdb_bool_t present;
@@ -355,14 +355,14 @@ Future<Optional<FDBStandalone<ValueRef>>> TransactionImpl::get(const Key& key, b
 	    });
 }
 
-Future<Void> TransactionImpl::watch(const Key& key) {
+Future<Void> TransactionImpl::watch(Key const& key) {
 	return backToFuture<Void>(fdb_transaction_watch(tr, key.begin(), key.size()), [](Reference<CFuture> f) {
 		throw_on_error(fdb_future_get_error(f->f));
 		return Void();
 	});
 }
 
-Future<FDBStandalone<KeyRef>> TransactionImpl::getKey(const KeySelector& key, bool snapshot) {
+Future<FDBStandalone<KeyRef>> TransactionImpl::getKey(KeySelector const& key, bool snapshot) {
 	return backToFuture<FDBStandalone<KeyRef>>(
 	    fdb_transaction_get_key(tr, key.key.begin(), key.key.size(), key.orEqual, key.offset, snapshot),
 	    [](Reference<CFuture> f) {
@@ -375,8 +375,8 @@ Future<FDBStandalone<KeyRef>> TransactionImpl::getKey(const KeySelector& key, bo
 	    });
 }
 
-Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelector& begin,
-                                                                const KeySelector& end,
+Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(KeySelector const& begin,
+                                                                KeySelector const& end,
                                                                 GetRangeLimits limits,
                                                                 bool snapshot,
                                                                 bool reverse,
@@ -410,7 +410,7 @@ Future<FDBStandalone<RangeResultRef>> TransactionImpl::getRange(const KeySelecto
 	    });
 }
 
-Future<int64_t> TransactionImpl::getEstimatedRangeSizeBytes(const KeyRange& keys) {
+Future<int64_t> TransactionImpl::getEstimatedRangeSizeBytes(KeyRange const& keys) {
 	return backToFuture<int64_t>(fdb_transaction_get_estimated_range_size_bytes(
 	                                 tr, keys.begin.begin(), keys.begin.size(), keys.end.begin(), keys.end.size()),
 	                             [](Reference<CFuture> f) {
@@ -420,7 +420,7 @@ Future<int64_t> TransactionImpl::getEstimatedRangeSizeBytes(const KeyRange& keys
 	                             });
 }
 
-Future<FDBStandalone<VectorRef<KeyRef>>> TransactionImpl::getRangeSplitPoints(const KeyRange& range,
+Future<FDBStandalone<VectorRef<KeyRef>>> TransactionImpl::getRangeSplitPoints(KeyRange const& range,
                                                                               int64_t chunkSize) {
 	return backToFuture<FDBStandalone<VectorRef<KeyRef>>>(
 	    fdb_transaction_get_range_split_points(
@@ -452,19 +452,19 @@ void TransactionImpl::addWriteConflictKey(KeyRef const& key) {
 	return addWriteConflictRange(KeyRange(KeyRangeRef(key, keyAfter(key))));
 }
 
-void TransactionImpl::atomicOp(const KeyRef& key, const ValueRef& operand, FDBMutationType operationType) {
+void TransactionImpl::atomicOp(KeyRef const& key, ValueRef const& operand, FDBMutationType operationType) {
 	fdb_transaction_atomic_op(tr, key.begin(), key.size(), operand.begin(), operand.size(), operationType);
 }
 
-void TransactionImpl::set(const KeyRef& key, const ValueRef& value) {
+void TransactionImpl::set(KeyRef const& key, ValueRef const& value) {
 	fdb_transaction_set(tr, key.begin(), key.size(), value.begin(), value.size());
 }
 
-void TransactionImpl::clear(const KeyRangeRef& range) {
+void TransactionImpl::clear(KeyRangeRef const& range) {
 	fdb_transaction_clear_range(tr, range.begin.begin(), range.begin.size(), range.end.begin(), range.end.size());
 }
 
-void TransactionImpl::clear(const KeyRef& key) {
+void TransactionImpl::clear(KeyRef const& key) {
 	fdb_transaction_clear(tr, key.begin(), key.size());
 }
 

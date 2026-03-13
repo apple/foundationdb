@@ -20,8 +20,8 @@
 
 #include "flow/FaultInjection.h"
 
-bool (*should_inject_fault)(const char* context, const char* file, int line, int error_code) = 0;
-bool (*should_inject_blob_fault)(const char* context, const char* file, int line, int error_code) = 0;
+bool (*should_inject_fault)(char const* context, char const* file, int line, int error_code) = 0;
+bool (*should_inject_blob_fault)(char const* context, char const* file, int line, int error_code) = 0;
 bool faultInjectionActivated = true;
 
 void enableFaultInjection(bool enabled) {

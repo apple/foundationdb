@@ -61,7 +61,7 @@ private:
 
 	std::function<void()> onError;
 
-	void write(const char* str, size_t size);
+	void write(char const* str, size_t size);
 
 public:
 	FileTraceLogWriter(std::string const& directory,
@@ -78,7 +78,7 @@ public:
 
 	void lastError(int err);
 
-	void write(const std::string& str) override;
+	void write(std::string const& str) override;
 	void write(StringRef const& str) override;
 	void open() override;
 	void close() override;

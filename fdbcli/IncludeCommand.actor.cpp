@@ -50,7 +50,7 @@ ACTOR Future<Void> includeLocalities(Reference<IDatabase> db,
 					tr->clear(fdb_cli::excludedLocalitySpecialKeyRange);
 				}
 			} else {
-				for (const auto& l : localities) {
+				for (auto const& l : localities) {
 					Key locality = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 					                      : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
 					tr->clear(locality);

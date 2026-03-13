@@ -45,7 +45,7 @@ struct MachineInfo {
 	std::set<std::string> closingFiles;
 	Optional<Standalone<StringRef>> machineId;
 
-	const uint16_t remotePortStart;
+	uint16_t const remotePortStart;
 	std::vector<uint16_t> usedRemotePorts;
 
 	MachineInfo() : machineProcess(nullptr), remotePortStart(1000) {}

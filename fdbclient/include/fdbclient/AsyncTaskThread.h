@@ -42,7 +42,7 @@ class AsyncTask final : public IAsyncTask {
 	F func;
 
 public:
-	AsyncTask(const F& func) : func(func) {}
+	AsyncTask(F const& func) : func(func) {}
 
 	void operator()() override { func(); }
 	bool isTerminate() const override { return false; }
@@ -57,7 +57,7 @@ class AsyncTaskThread {
 	static void run(AsyncTaskThread* self);
 
 	template <class F>
-	void addTask(const F& func) {
+	void addTask(F const& func) {
 		bool wakeUp = false;
 		{
 			std::lock_guard<std::mutex> g(m);
@@ -68,7 +68,7 @@ class AsyncTaskThread {
 		}
 	}
 
-	static const double meanDelay;
+	static double const meanDelay;
 
 public:
 	AsyncTaskThread();
@@ -78,8 +78,8 @@ public:
 	~AsyncTaskThread();
 
 	template <class F>
-	auto execAsync(const F& func, TaskPriority priority = TaskPriority::DefaultOnMainThread)
-	    -> Future<decltype(func())> {
+	auto execAsync(F const& func,
+	               TaskPriority priority = TaskPriority::DefaultOnMainThread) -> Future<decltype(func())> {
 		if (g_network->isSimulated()) {
 			return map(delayJittered(meanDelay), [func](Void _) { return func(); });
 		}

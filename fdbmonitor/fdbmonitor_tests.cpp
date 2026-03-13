@@ -7,21 +7,21 @@
 namespace fdbmonitor {
 namespace tests {
 
-void assert_msg(const bool cond, const std::string& msg) {
+void assert_msg(bool const cond, std::string const& msg) {
 	if (!cond) {
 		printf("%s\n", msg.c_str());
 		std::abort();
 	}
 }
 
-int testPathFunction(const char* name, std::function<std::string(std::string)> fun, std::string a, std::string b) {
+int testPathFunction(char const* name, std::function<std::string(std::string)> fun, std::string a, std::string b) {
 	std::string o = fun(a);
 	bool r = b == o;
 	printf("%s: %s(%s) = %s expected %s\n", r ? "PASS" : "FAIL", name, a.c_str(), o.c_str(), b.c_str());
 	return r ? 0 : 1;
 }
 
-int testPathFunction2(const char* name,
+int testPathFunction2(char const* name,
                       std::function<std::string(std::string, bool)> fun,
                       std::string a,
                       bool x,
@@ -130,11 +130,11 @@ void testPathOps() {
 
 void testEnvVarUtils() {
 	// Ensure key-value extraction works
-	const std::pair<std::string, std::string> keyValuePair1{ "FOO", "BAR" };
+	std::pair<std::string, std::string> const keyValuePair1{ "FOO", "BAR" };
 	assert(keyValuePair1 == EnvVarUtils::extractKeyAndValue("FOO=BAR"));
-	const std::pair<std::string, std::string> keyValuePair2{ "x", "y" };
+	std::pair<std::string, std::string> const keyValuePair2{ "x", "y" };
 	assert(keyValuePair2 == EnvVarUtils::extractKeyAndValue("x=y"));
-	const std::pair<std::string, std::string> keyValuePair3{ "MALLOC_CONF",
+	std::pair<std::string, std::string> const keyValuePair3{ "MALLOC_CONF",
 		                                                     "prof:true,lg_prof_interval:30,prof_prefix:jeprof.out" };
 	assert(keyValuePair3 ==
 	       EnvVarUtils::extractKeyAndValue("MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:jeprof.out"));

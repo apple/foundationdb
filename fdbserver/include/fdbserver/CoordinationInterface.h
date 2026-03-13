@@ -53,7 +53,7 @@ struct GenerationRegInterface {
 	GenerationRegInterface() {}
 	GenerationRegInterface(NetworkAddress const& remote);
 	GenerationRegInterface(INetwork* local);
-	GenerationRegInterface(Hostname const& hostname) : hostname(hostname) {};
+	GenerationRegInterface(Hostname const& hostname) : hostname(hostname){};
 };
 
 struct UniqueGeneration {
@@ -182,7 +182,7 @@ struct LeaderHeartbeatReply {
 	}
 };
 
-inline bool operator==(const LeaderHeartbeatReply& lhs, const LeaderHeartbeatReply& rhs) {
+inline bool operator==(LeaderHeartbeatReply const& lhs, LeaderHeartbeatReply const& rhs) {
 	return lhs.value == rhs.value;
 }
 

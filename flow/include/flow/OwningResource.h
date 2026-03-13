@@ -69,9 +69,9 @@ class ResourceRef {
 protected:
 	Reference<Resource<T>> resourceRef;
 
-	ResourceRef(const Reference<Resource<T>>& ref) : resourceRef(ref) {}
+	ResourceRef(Reference<Resource<T>> const& ref) : resourceRef(ref) {}
 	ResourceRef(Reference<Resource<T>>&& ref) : resourceRef(std::move(ref)) {}
-	ResourceRef& operator=(const Reference<Resource<T>>& ref) {
+	ResourceRef& operator=(Reference<Resource<T>> const& ref) {
 		resourceRef = ref.resourceRef;
 		return *this;
 	}
@@ -121,8 +121,8 @@ public:
 template <typename T>
 class ResourceWeakRef : public details::ResourceRef<T> {
 public:
-	ResourceWeakRef(const ResourceOwningRef<T>& ref) : details::ResourceRef<T>(ref.resourceRef) {}
-	ResourceWeakRef(const ResourceWeakRef& ref) : details::ResourceRef<T>(ref.resourceRef) {}
+	ResourceWeakRef(ResourceOwningRef<T> const& ref) : details::ResourceRef<T>(ref.resourceRef) {}
+	ResourceWeakRef(ResourceWeakRef const& ref) : details::ResourceRef<T>(ref.resourceRef) {}
 };
 
 // A unique reference that takes the ownership of the self object. The self object is widely used as the "global"
@@ -136,10 +136,10 @@ using ActorOwningSelfRef = ResourceOwningRef<T>;
 template <typename T>
 class ActorWeakSelfRef : public ResourceWeakRef<T> {
 public:
-	ActorWeakSelfRef(const ResourceOwningRef<T>& ref) : ResourceWeakRef<T>(ref) {}
-	ActorWeakSelfRef(const ResourceWeakRef<T>& ref) : ResourceWeakRef<T>(ref) {}
-	ActorWeakSelfRef(const ActorWeakSelfRef<T>& ref)
-	  : ResourceWeakRef<T>(static_cast<const ResourceWeakRef<T>&>(ref)) {}
+	ActorWeakSelfRef(ResourceOwningRef<T> const& ref) : ResourceWeakRef<T>(ref) {}
+	ActorWeakSelfRef(ResourceWeakRef<T> const& ref) : ResourceWeakRef<T>(ref) {}
+	ActorWeakSelfRef(ActorWeakSelfRef<T> const& ref)
+	  : ResourceWeakRef<T>(static_cast<ResourceWeakRef<T> const&>(ref)) {}
 
 	// Retrieves the resource as a pointer, throws operation_cancelled if the resource is not available
 	T* operator->() const {

@@ -120,7 +120,7 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 	return true;
 }
 
-std::vector<const char*> rangeConfigGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
+std::vector<char const*> rangeConfigGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
 	if (tokens.size() == 1) {
 		return { "<show|set|update>", "[ARGS]" };
 	}
@@ -128,12 +128,12 @@ std::vector<const char*> rangeConfigGenerator(std::vector<StringRef> const& toke
 	if (cmd == "show"_sr && tokens.size() == 2) {
 		return { "[includeDefault]" };
 	} else if (cmd == "set"_sr || cmd == "update"_sr) {
-		static std::vector<const char*> opts = {
+		static std::vector<char const*> opts = {
 			"<BEGINKEY>", "<ENDKEY>", "[default]", "[replication <N>]", "[teamID <N>]"
 		};
 		// Subtract the two known tokens, command and subcommand, and then possibly two more tokens for begin and end if
 		// present
-		return std::vector<const char*>(opts.begin() + std::min<size_t>(tokens.size(), 4) - 2, opts.end());
+		return std::vector<char const*>(opts.begin() + std::min<size_t>(tokens.size(), 4) - 2, opts.end());
 	} else {
 		return {};
 	}

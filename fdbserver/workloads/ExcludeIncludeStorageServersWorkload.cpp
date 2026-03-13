@@ -116,10 +116,10 @@ struct ExcludeIncludeStorageServersWorkload : TestWorkload {
 				}
 
 				// get all log routers and remove from SS candidate set
-				for (const auto& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
-					for (const auto& logRouter : tLogSet.logRouters) {
+				for (auto const& tLogSet : self->dbInfo->get().logSystemConfig.tLogs) {
+					for (auto const& logRouter : tLogSet.logRouters) {
 						if (logRouter.present()) {
-							const auto& logRouterInterf = logRouter.interf();
+							auto const& logRouterInterf = logRouter.interf();
 							servers.erase(
 							    AddressExclusion(logRouterInterf.address().ip, logRouterInterf.address().port));
 						}

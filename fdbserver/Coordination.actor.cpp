@@ -39,7 +39,7 @@
 
 namespace {
 
-const std::string fileCoordinatorPrefix = "coordination-";
+std::string const fileCoordinatorPrefix = "coordination-";
 
 class LivenessChecker {
 	double threshold;
@@ -485,13 +485,13 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 // Generation register values are stored without prefixing in the coordinated state, but always begin with an
 // alphanumeric character (they are always derived from a ClusterConnectionString key). Forwarding values are stored in
 // this range:
-const KeyRangeRef fwdKeys("\xff"
+KeyRangeRef const fwdKeys("\xff"
                           "fwd"_sr,
                           "\xff"
                           "fwe"_sr);
 
 // The time when forwarding was last set is stored in this range:
-const KeyRangeRef fwdTimeKeys("\xff"
+KeyRangeRef const fwdTimeKeys("\xff"
                               "fwdTime"_sr,
                               "\xff"
                               "fwdTimf"_sr);
@@ -890,7 +890,7 @@ Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey,
 	std::string absDataFolder = abspath(dataFolder);
 	std::vector<std::string> returnList = platform::listDirectories(absDataFolder);
 	std::vector<Future<Void>> futures;
-	for (const auto& dirEntry : returnList) {
+	for (auto const& dirEntry : returnList) {
 		if (dirEntry == "." || dirEntry == "..") {
 			continue;
 		}
@@ -898,7 +898,7 @@ Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey,
 		TraceEvent(SevInfo, "UpdatingCoordDataForProcess").detail("ProcessDataDir", processDir);
 		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
 		bool isCoord = false;
-		for (const auto& fileEntry : returnFiles) {
+		for (auto const& fileEntry : returnFiles) {
 			if (fileEntry.rfind(fileCoordinatorPrefix, 0) == 0) {
 				isCoord = true;
 			}

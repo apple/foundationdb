@@ -104,7 +104,7 @@ public:
 		r.mask = -1;
 	}
 
-	bool operator==(const Deque& r) const {
+	bool operator==(Deque const& r) const {
 		if (size() != r.size())
 			return false;
 		for (uint32_t i = 0; i < size(); i++)
@@ -112,11 +112,11 @@ public:
 				return false;
 		return true;
 	}
-	bool operator!=(const Deque& r) const { return !(*this == r); }
+	bool operator!=(Deque const& r) const { return !(*this == r); }
 
 	~Deque() { cleanup(); }
 
-	void push_back(const T& val) {
+	void push_back(T const& val) {
 		if (full())
 			grow();
 		new (&arr[end & mask]) T(val);

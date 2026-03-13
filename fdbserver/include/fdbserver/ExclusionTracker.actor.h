@@ -86,13 +86,13 @@ struct ExclusionTracker {
 
 				state std::set<AddressExclusion> newExcluded;
 				state std::set<AddressExclusion> newFailed;
-				for (const auto& r : excludedResults) {
+				for (auto const& r : excludedResults) {
 					AddressExclusion addr = decodeExcludedServersKey(r.key);
 					if (addr.isValid()) {
 						newExcluded.insert(addr);
 					}
 				}
-				for (const auto& r : failedResults) {
+				for (auto const& r : failedResults) {
 					AddressExclusion addr = decodeFailedServersKey(r.key);
 					if (addr.isValid()) {
 						newFailed.insert(addr);

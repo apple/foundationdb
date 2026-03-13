@@ -163,7 +163,7 @@ bool getJwkBigNumMember(Arena& arena,
 #define RSA_DECLARE_DECODED_REQUIRED_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_REQUIRED(member, "RSA")
 #define RSA_DECLARE_DECODED_OPTIONAL_BN_MEMBER(member) DECL_DECODED_BN_MEMBER_OPTIONAL(member, "RSA")
 
-StringRef bigNumToBase64Url(Arena& arena, const BIGNUM* bn) {
+StringRef bigNumToBase64Url(Arena& arena, BIGNUM const* bn) {
 	auto len = BN_num_bytes(bn);
 	auto buf = new (arena) uint8_t[len];
 	::BN_bn2bin(bn, buf);
@@ -411,7 +411,7 @@ Optional<PublicOrPrivateKey> parseRsaKey(StringRef b64n,
 }
 
 template <class Value>
-Optional<PublicOrPrivateKey> parseKey(const Value& key, StringRef kty, int keyIndex) {
+Optional<PublicOrPrivateKey> parseKey(Value const& key, StringRef kty, int keyIndex) {
 	if (kty == "EC"_sr) {
 		DECLARE_JWK_REQUIRED_STRING_MEMBER(key, alg);
 		if (alg != "ES256"_sr) {
@@ -463,7 +463,7 @@ Optional<PublicOrPrivateKey> parseKey(const Value& key, StringRef kty, int keyIn
 bool encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
                  StringRef keyName,
                  EVP_PKEY* pKey,
-                 const bool isPublic) {
+                 bool const isPublic) {
 	auto arena = Arena();
 	writer.StartObject();
 	writer.Key("kty");
@@ -578,7 +578,7 @@ bool encodeEcKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 bool encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
                   StringRef keyName,
                   EVP_PKEY* pKey,
-                  const bool isPublic) {
+                  bool const isPublic) {
 	auto arena = Arena();
 	writer.StartObject();
 	writer.Key("kty");
@@ -656,7 +656,7 @@ bool encodeRsaKey(rapidjson::Writer<rapidjson::StringBuffer>& writer,
 }
 
 // Add exactly one object to context of writer. Object shall contain JWK-encoded public or private key
-bool encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef keyName, const PublicOrPrivateKey& key) {
+bool encodeKey(rapidjson::Writer<rapidjson::StringBuffer>& writer, StringRef keyName, PublicOrPrivateKey const& key) {
 	auto const isPublic = key.isPublic();
 	auto pKey = std::add_pointer_t<EVP_PKEY>();
 	auto alg = PKeyAlgorithm{};
@@ -746,7 +746,7 @@ void testPrivateKey(PrivateKey (*factory)()) {
 
 Optional<JsonWebKeySet> JsonWebKeySet::parse(StringRef jwksString, VectorRef<StringRef> allowedUses) {
 	auto d = rapidjson::Document();
-	d.Parse(reinterpret_cast<const char*>(jwksString.begin()), jwksString.size());
+	d.Parse(reinterpret_cast<char const*>(jwksString.begin()), jwksString.size());
 	if (d.HasParseError()) {
 		JWKS_PARSE_ERROR("ParseError")
 		    .detail("Message", GetParseError_En(d.GetParseError()))
@@ -802,7 +802,7 @@ Optional<StringRef> JsonWebKeySet::toStringRef(Arena& arena) {
 	writer.StartObject();
 	writer.Key("keys");
 	writer.StartArray();
-	for (const auto& [keyName, key] : keys) {
+	for (auto const& [keyName, key] : keys) {
 		if (!encodeKey(writer, keyName, key)) {
 			return {};
 		}

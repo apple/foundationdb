@@ -46,8 +46,8 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	}
 
 	bool shouldInject(DeterministicRandom& random,
-	                  const WorkloadRequest& work,
-	                  const unsigned alreadyAdded) const override {
+	                  WorkloadRequest const& work,
+	                  unsigned const alreadyAdded) const override {
 		return work.useDatabase && 0.25 / (1 + alreadyAdded) > random.random01();
 	}
 

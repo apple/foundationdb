@@ -41,8 +41,8 @@ std::map<Standalone<StringRef>, Reference<Transaction>> trMap;
 
 // NOTE: This was taken from within fdb_c.cpp (where it is defined as a static within the get_range function).
 // If that changes, this will also have to be changed.
-const int ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
-const int MAX_ITERATION = sizeof(ITERATION_PROGRESSION) / sizeof(int);
+int const ITERATION_PROGRESSION[] = { 256, 1000, 4096, 6144, 9216, 13824, 20736, 31104, 46656, 69984, 80000 };
+int const MAX_ITERATION = sizeof(ITERATION_PROGRESSION) / sizeof(int);
 
 static Future<Void> runTest(Reference<FlowTesterData> const& data,
                             Reference<Database> const& db,
@@ -328,7 +328,7 @@ ACTOR Future<Void> printFlowTesterStack(FlowTesterStack* stack) {
 //
 
 struct PushFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		Tuple t = Tuple::unpack(instruction->instruction);
@@ -337,22 +337,22 @@ struct PushFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* PushFunc::name = "PUSH";
+char const* PushFunc::name = "PUSH";
 REGISTER_INSTRUCTION_FUNC(PushFunc);
 
 struct DupFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		data->stack.dup();
 		return Void();
 	}
 };
-const char* DupFunc::name = "DUP";
+char const* DupFunc::name = "DUP";
 REGISTER_INSTRUCTION_FUNC(DupFunc);
 
 struct EmptyStackFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		// wait(printFlowTesterStack(&(data->stack)));
@@ -361,22 +361,22 @@ struct EmptyStackFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* EmptyStackFunc::name = "EMPTY_STACK";
+char const* EmptyStackFunc::name = "EMPTY_STACK";
 REGISTER_INSTRUCTION_FUNC(EmptyStackFunc);
 
 struct SwapFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		wait(stackSwap(&(data->stack)));
 		return Void();
 	}
 };
-const char* SwapFunc::name = "SWAP";
+char const* SwapFunc::name = "SWAP";
 REGISTER_INSTRUCTION_FUNC(SwapFunc);
 
 struct PopFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -386,33 +386,33 @@ struct PopFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* PopFunc::name = "POP";
+char const* PopFunc::name = "POP";
 REGISTER_INSTRUCTION_FUNC(PopFunc);
 
 struct SubFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		wait(stackSub(&(data->stack)));
 		return Void();
 	}
 };
-const char* SubFunc::name = "SUB";
+char const* SubFunc::name = "SUB";
 REGISTER_INSTRUCTION_FUNC(SubFunc);
 
 struct ConcatFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		wait(stackConcat(&(data->stack)));
 		return Void();
 	}
 };
-const char* ConcatFunc::name = "CONCAT";
+char const* ConcatFunc::name = "CONCAT";
 REGISTER_INSTRUCTION_FUNC(ConcatFunc);
 
 struct LogStackFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> logStack(Reference<FlowTesterData> data,
 	                                   std::map<int, StackItem> entries,
@@ -460,7 +460,7 @@ struct LogStackFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* LogStackFunc::name = "LOG_STACK";
+char const* LogStackFunc::name = "LOG_STACK";
 REGISTER_INSTRUCTION_FUNC(LogStackFunc);
 
 //
@@ -553,18 +553,18 @@ ACTOR Future<Standalone<StringRef>> getKey(Future<FDBStandalone<KeyRef>> f, Stan
 }
 
 struct NewTransactionFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		trMap[data->trName] = data->db->createTransaction();
 		return Void();
 	}
 };
-const char* NewTransactionFunc::name = "NEW_TRANSACTION";
+char const* NewTransactionFunc::name = "NEW_TRANSACTION";
 REGISTER_INSTRUCTION_FUNC(NewTransactionFunc);
 
 struct UseTransactionFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -577,11 +577,11 @@ struct UseTransactionFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* UseTransactionFunc::name = "USE_TRANSACTION";
+char const* UseTransactionFunc::name = "USE_TRANSACTION";
 REGISTER_INSTRUCTION_FUNC(UseTransactionFunc);
 
 struct OnErrorFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -596,11 +596,11 @@ struct OnErrorFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* OnErrorFunc::name = "ON_ERROR";
+char const* OnErrorFunc::name = "ON_ERROR";
 REGISTER_INSTRUCTION_FUNC(OnErrorFunc);
 
 struct SetFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
@@ -632,11 +632,11 @@ struct SetFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* SetFunc::name = "SET";
+char const* SetFunc::name = "SET";
 REGISTER_INSTRUCTION_FUNC(SetFunc);
 
 struct GetFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -652,11 +652,11 @@ struct GetFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetFunc::name = "GET";
+char const* GetFunc::name = "GET";
 REGISTER_INSTRUCTION_FUNC(GetFunc);
 
 struct GetEstimatedRangeSize : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
@@ -675,11 +675,11 @@ struct GetEstimatedRangeSize : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetEstimatedRangeSize::name = "GET_ESTIMATED_RANGE_SIZE";
+char const* GetEstimatedRangeSize::name = "GET_ESTIMATED_RANGE_SIZE";
 REGISTER_INSTRUCTION_FUNC(GetEstimatedRangeSize);
 
 struct GetRangeSplitPoints : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(3);
@@ -703,11 +703,11 @@ struct GetRangeSplitPoints : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetRangeSplitPoints::name = "GET_RANGE_SPLIT_POINTS";
+char const* GetRangeSplitPoints::name = "GET_RANGE_SPLIT_POINTS";
 REGISTER_INSTRUCTION_FUNC(GetRangeSplitPoints);
 
 struct GetKeyFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(4);
@@ -734,11 +734,11 @@ struct GetKeyFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetKeyFunc::name = "GET_KEY";
+char const* GetKeyFunc::name = "GET_KEY";
 REGISTER_INSTRUCTION_FUNC(GetKeyFunc);
 
 struct GetReadVersionFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Version v = wait(instruction->tr->getReadVersion());
@@ -747,23 +747,23 @@ struct GetReadVersionFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetReadVersionFunc::name = "GET_READ_VERSION";
+char const* GetReadVersionFunc::name = "GET_READ_VERSION";
 REGISTER_INSTRUCTION_FUNC(GetReadVersionFunc);
 
 struct SetReadVersionFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		instruction->tr->setReadVersion(data->lastVersion);
 		return Void();
 	}
 };
-const char* SetReadVersionFunc::name = "SET_READ_VERSION";
+char const* SetReadVersionFunc::name = "SET_READ_VERSION";
 REGISTER_INSTRUCTION_FUNC(SetReadVersionFunc);
 
 // GET_COMMITTED_VERSION
 struct GetCommittedVersionFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		data->lastVersion = instruction->tr->getCommittedVersion();
@@ -771,12 +771,12 @@ struct GetCommittedVersionFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetCommittedVersionFunc::name = "GET_COMMITTED_VERSION";
+char const* GetCommittedVersionFunc::name = "GET_COMMITTED_VERSION";
 REGISTER_INSTRUCTION_FUNC(GetCommittedVersionFunc);
 
 // GET_APPROXIMATE_SIZE
 struct GetApproximateSizeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		int64_t _ = wait(instruction->tr->getApproximateSize());
@@ -785,36 +785,36 @@ struct GetApproximateSizeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetApproximateSizeFunc::name = "GET_APPROXIMATE_SIZE";
+char const* GetApproximateSizeFunc::name = "GET_APPROXIMATE_SIZE";
 REGISTER_INSTRUCTION_FUNC(GetApproximateSizeFunc);
 
 // GET_VERSIONSTAMP
 struct GetVersionstampFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		data->stack.push(waitForValue(instruction->tr->getVersionstamp()));
 		return Void();
 	}
 };
-const char* GetVersionstampFunc::name = "GET_VERSIONSTAMP";
+char const* GetVersionstampFunc::name = "GET_VERSIONSTAMP";
 REGISTER_INSTRUCTION_FUNC(GetVersionstampFunc);
 
 // COMMIT
 struct CommitFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		data->stack.push(waitForVoid(holdWhile(instruction->tr, instruction->tr->commit())));
 		return Void();
 	}
 };
-const char* CommitFunc::name = "COMMIT";
+char const* CommitFunc::name = "COMMIT";
 REGISTER_INSTRUCTION_FUNC(CommitFunc);
 
 // WAIT_FUTURE
 struct WaitFutureFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -826,12 +826,12 @@ struct WaitFutureFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* WaitFutureFunc::name = "WAIT_FUTURE";
+char const* WaitFutureFunc::name = "WAIT_FUTURE";
 REGISTER_INSTRUCTION_FUNC(WaitFutureFunc);
 
 // CLEAR
 struct ClearFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -857,35 +857,35 @@ struct ClearFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* ClearFunc::name = "CLEAR";
+char const* ClearFunc::name = "CLEAR";
 REGISTER_INSTRUCTION_FUNC(ClearFunc);
 
 // RESET
 struct ResetFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		instruction->tr->reset();
 		return Void();
 	}
 };
-const char* ResetFunc::name = "RESET";
+char const* ResetFunc::name = "RESET";
 REGISTER_INSTRUCTION_FUNC(ResetFunc);
 
 // CANCEL
 struct CancelFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		instruction->tr->cancel();
 		return Void();
 	}
 };
-const char* CancelFunc::name = "CANCEL";
+char const* CancelFunc::name = "CANCEL";
 REGISTER_INSTRUCTION_FUNC(CancelFunc);
 
 struct GetRangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(5);
@@ -929,11 +929,11 @@ struct GetRangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetRangeFunc::name = "GET_RANGE";
+char const* GetRangeFunc::name = "GET_RANGE";
 REGISTER_INSTRUCTION_FUNC(GetRangeFunc);
 
 struct GetRangeStartsWithFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(4);
@@ -973,11 +973,11 @@ struct GetRangeStartsWithFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetRangeStartsWithFunc::name = "GET_RANGE_STARTS_WITH";
+char const* GetRangeStartsWithFunc::name = "GET_RANGE_STARTS_WITH";
 REGISTER_INSTRUCTION_FUNC(GetRangeStartsWithFunc);
 
 struct ClearRangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
@@ -1007,11 +1007,11 @@ struct ClearRangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* ClearRangeFunc::name = "CLEAR_RANGE";
+char const* ClearRangeFunc::name = "CLEAR_RANGE";
 REGISTER_INSTRUCTION_FUNC(ClearRangeFunc);
 
 struct ClearRangeStartWithFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1037,11 +1037,11 @@ struct ClearRangeStartWithFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* ClearRangeStartWithFunc::name = "CLEAR_RANGE_STARTS_WITH";
+char const* ClearRangeStartWithFunc::name = "CLEAR_RANGE_STARTS_WITH";
 REGISTER_INSTRUCTION_FUNC(ClearRangeStartWithFunc);
 
 struct GetRangeSelectorFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(10);
@@ -1108,13 +1108,13 @@ struct GetRangeSelectorFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* GetRangeSelectorFunc::name = "GET_RANGE_SELECTOR";
+char const* GetRangeSelectorFunc::name = "GET_RANGE_SELECTOR";
 REGISTER_INSTRUCTION_FUNC(GetRangeSelectorFunc);
 
 // Tuple Operations
 // TUPLE_PACK
 struct TuplePackFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1167,12 +1167,12 @@ struct TuplePackFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* TuplePackFunc::name = "TUPLE_PACK";
+char const* TuplePackFunc::name = "TUPLE_PACK";
 REGISTER_INSTRUCTION_FUNC(TuplePackFunc);
 
 // TUPLE_UNPACK
 struct TupleUnpackFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1190,12 +1190,12 @@ struct TupleUnpackFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* TupleUnpackFunc::name = "TUPLE_UNPACK";
+char const* TupleUnpackFunc::name = "TUPLE_UNPACK";
 REGISTER_INSTRUCTION_FUNC(TupleUnpackFunc);
 
 // TUPLE_RANGE
 struct TupleRangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1251,12 +1251,12 @@ struct TupleRangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* TupleRangeFunc::name = "TUPLE_RANGE";
+char const* TupleRangeFunc::name = "TUPLE_RANGE";
 REGISTER_INSTRUCTION_FUNC(TupleRangeFunc);
 
 // TUPLE_SORT
 struct TupleSortFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1285,12 +1285,12 @@ struct TupleSortFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* TupleSortFunc::name = "TUPLE_SORT";
+char const* TupleSortFunc::name = "TUPLE_SORT";
 REGISTER_INSTRUCTION_FUNC(TupleSortFunc);
 
 // ENCODE_FLOAT
 struct EncodeFloatFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
@@ -1312,12 +1312,12 @@ struct EncodeFloatFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* EncodeFloatFunc::name = "ENCODE_FLOAT";
+char const* EncodeFloatFunc::name = "ENCODE_FLOAT";
 REGISTER_INSTRUCTION_FUNC(EncodeFloatFunc);
 
 // ENCODE_DOUBLE
 struct EncodeDoubleFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
@@ -1339,12 +1339,12 @@ struct EncodeDoubleFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* EncodeDoubleFunc::name = "ENCODE_DOUBLE";
+char const* EncodeDoubleFunc::name = "ENCODE_DOUBLE";
 REGISTER_INSTRUCTION_FUNC(EncodeDoubleFunc);
 
 // DECODE_FLOAT
 struct DecodeFloatFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
@@ -1363,12 +1363,12 @@ struct DecodeFloatFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DecodeFloatFunc::name = "DECODE_FLOAT";
+char const* DecodeFloatFunc::name = "DECODE_FLOAT";
 REGISTER_INSTRUCTION_FUNC(DecodeFloatFunc);
 
 // DECODE_DOUBLE
 struct DecodeDoubleFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		std::vector<StackItem> items = data->stack.pop();
@@ -1386,13 +1386,13 @@ struct DecodeDoubleFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DecodeDoubleFunc::name = "DECODE_DOUBLE";
+char const* DecodeDoubleFunc::name = "DECODE_DOUBLE";
 REGISTER_INSTRUCTION_FUNC(DecodeDoubleFunc);
 
 // Thread Operations
 // START_THREAD
 struct StartThreadFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1409,7 +1409,7 @@ struct StartThreadFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* StartThreadFunc::name = "START_THREAD";
+char const* StartThreadFunc::name = "START_THREAD";
 REGISTER_INSTRUCTION_FUNC(StartThreadFunc);
 
 ACTOR template <class Function>
@@ -1428,7 +1428,7 @@ Future<decltype(std::declval<Function>()(Reference<ReadTransaction>()).getValue(
 
 // WAIT_EMPTY
 struct WaitEmptyFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1454,12 +1454,12 @@ private:
 		return Void();
 	}
 };
-const char* WaitEmptyFunc::name = "WAIT_EMPTY";
+char const* WaitEmptyFunc::name = "WAIT_EMPTY";
 REGISTER_INSTRUCTION_FUNC(WaitEmptyFunc);
 
 // DISABLE_WRITE_CONFLICT
 struct DisableWriteConflictFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		if (instruction->tr) {
@@ -1468,12 +1468,12 @@ struct DisableWriteConflictFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* DisableWriteConflictFunc::name = "DISABLE_WRITE_CONFLICT";
+char const* DisableWriteConflictFunc::name = "DISABLE_WRITE_CONFLICT";
 REGISTER_INSTRUCTION_FUNC(DisableWriteConflictFunc);
 
 // READ_CONFLICT_KEY
 struct ReadConflictKeyFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1489,12 +1489,12 @@ struct ReadConflictKeyFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* ReadConflictKeyFunc::name = "READ_CONFLICT_KEY";
+char const* ReadConflictKeyFunc::name = "READ_CONFLICT_KEY";
 REGISTER_INSTRUCTION_FUNC(ReadConflictKeyFunc);
 
 // WRITE_CONFLICT_KEY
 struct WriteConflictKeyFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop();
@@ -1510,12 +1510,12 @@ struct WriteConflictKeyFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* WriteConflictKeyFunc::name = "WRITE_CONFLICT_KEY";
+char const* WriteConflictKeyFunc::name = "WRITE_CONFLICT_KEY";
 REGISTER_INSTRUCTION_FUNC(WriteConflictKeyFunc);
 
 // READ_CONFLICT_RANGE
 struct ReadConflictRangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
@@ -1533,12 +1533,12 @@ struct ReadConflictRangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* ReadConflictRangeFunc::name = "READ_CONFLICT_RANGE";
+char const* ReadConflictRangeFunc::name = "READ_CONFLICT_RANGE";
 REGISTER_INSTRUCTION_FUNC(ReadConflictRangeFunc);
 
 // WRITE_CONFLICT_RANGE
 struct WriteConflictRangeFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(2);
@@ -1557,12 +1557,12 @@ struct WriteConflictRangeFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* WriteConflictRangeFunc::name = "WRITE_CONFLICT_RANGE";
+char const* WriteConflictRangeFunc::name = "WRITE_CONFLICT_RANGE";
 REGISTER_INSTRUCTION_FUNC(WriteConflictRangeFunc);
 
 // ATOMIC_OP
 struct AtomicOPFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		state std::vector<StackItem> items = data->stack.pop(3);
@@ -1601,12 +1601,12 @@ struct AtomicOPFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* AtomicOPFunc::name = "ATOMIC_OP";
+char const* AtomicOPFunc::name = "ATOMIC_OP";
 REGISTER_INSTRUCTION_FUNC(AtomicOPFunc);
 
 // UNIT_TESTS
 struct UnitTestsFunc : InstructionFunc {
-	static const char* name;
+	static char const* name;
 
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		ASSERT(data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(1020)));
@@ -1629,38 +1629,38 @@ struct UnitTestsFunc : InstructionFunc {
 		}
 		API::selectAPIVersion(fdb->getAPIVersion());
 
-		const uint64_t locationCacheSize = 100001;
-		const uint64_t maxWatches = 10001;
-		const uint64_t timeout = 60 * 1000;
-		const uint64_t noTimeout = 0;
-		const uint64_t retryLimit = 50;
-		const uint64_t noRetryLimit = -1;
-		const uint64_t maxRetryDelay = 100;
-		const uint64_t sizeLimit = 100000;
-		const uint64_t maxFieldLength = 1000;
+		uint64_t const locationCacheSize = 100001;
+		uint64_t const maxWatches = 10001;
+		uint64_t const timeout = 60 * 1000;
+		uint64_t const noTimeout = 0;
+		uint64_t const retryLimit = 50;
+		uint64_t const noRetryLimit = -1;
+		uint64_t const maxRetryDelay = 100;
+		uint64_t const sizeLimit = 100000;
+		uint64_t const maxFieldLength = 1000;
 
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_LOCATION_CACHE_SIZE,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&locationCacheSize, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&locationCacheSize, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MAX_WATCHES,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&maxWatches, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&maxWatches, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_DATACENTER_ID, Optional<StringRef>("dc_id"_sr));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MACHINE_ID, Optional<StringRef>("machine_id"_sr));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_ENABLE);
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE);
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_LOGGING_MAX_FIELD_LENGTH,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&maxFieldLength, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&maxFieldLength, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_TIMEOUT,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&timeout, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_TIMEOUT,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&noTimeout, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&noTimeout, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_MAX_RETRY_DELAY,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&maxRetryDelay, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&sizeLimit, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&sizeLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&retryLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_RETRY_LIMIT,
-		                            Optional<StringRef>(StringRef((const uint8_t*)&noRetryLimit, 8)));
+		                            Optional<StringRef>(StringRef((uint8_t const*)&noRetryLimit, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_CAUSAL_READ_RISKY);
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_INCLUDE_PORT_IN_ADDRESS);
 
@@ -1674,13 +1674,13 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_MAX_FIELD_LENGTH,
-		              Optional<StringRef>(StringRef((const uint8_t*)&maxFieldLength, 8)));
+		              Optional<StringRef>(StringRef((uint8_t const*)&maxFieldLength, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT,
-		              Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
+		              Optional<StringRef>(StringRef((uint8_t const*)&timeout, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_RETRY_LIMIT,
-		              Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
+		              Optional<StringRef>(StringRef((uint8_t const*)&retryLimit, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_MAX_RETRY_DELAY,
-		              Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
+		              Optional<StringRef>(StringRef((uint8_t const*)&maxRetryDelay, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_USED_DURING_COMMIT_PROTECTION_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_ENABLE,
 		              Optional<StringRef>("my_transaction"_sr));
@@ -1695,7 +1695,7 @@ struct UnitTestsFunc : InstructionFunc {
 		return Void();
 	}
 };
-const char* UnitTestsFunc::name = "UNIT_TESTS";
+char const* UnitTestsFunc::name = "UNIT_TESTS";
 REGISTER_INSTRUCTION_FUNC(UnitTestsFunc);
 
 ACTOR static Future<Void> getInstructions(Reference<FlowTesterData> data, StringRef prefix) {
@@ -1923,7 +1923,7 @@ int main(int argc, char** argv) {
 
 			flushAndExit(FDB_EXIT_SUCCESS);*/
 		}
-		StringRef prefix((const uint8_t*)argv[1], strlen(argv[1]));
+		StringRef prefix((uint8_t const*)argv[1], strlen(argv[1]));
 		int apiVersion;
 		sscanf(argv[2], "%d", &apiVersion);
 		std::string clusterFilename;

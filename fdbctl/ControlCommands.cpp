@@ -29,7 +29,7 @@ namespace fdbctl {
 //-- Coordinators ----
 
 Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
-                                     const GetCoordinatorsRequest* req,
+                                     GetCoordinatorsRequest const* req,
                                      GetCoordinatorsReply* rep) {
 	Reference<ITransaction> tr = db->createTransaction();
 
@@ -42,7 +42,7 @@ Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
 
 			std::vector<std::string> process_addresses;
 			boost::split(process_addresses, processes.get().toString(), [](char c) { return c == ','; });
-			for (const auto& p : process_addresses) {
+			for (auto const& p : process_addresses) {
 				rep->add_coordinators(p);
 			}
 
@@ -60,7 +60,7 @@ Future<grpc::Status> getCoordinators(Reference<IDatabase> db,
 }
 
 Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
-                                        const ChangeCoordinatorsRequest* req,
+                                        ChangeCoordinatorsRequest const* req,
                                         ChangeCoordinatorsReply* rep) {
 	int retries = 0;
 	int notEnoughMachineResults = 0;
@@ -91,10 +91,10 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 				std::set<Hostname> new_coordinators_hostnames;
 				std::vector<std::string> newCoordinatorsList;
 
-				for (const auto& new_coord : req->new_coordinator_addresses()) {
+				for (auto const& new_coord : req->new_coordinator_addresses()) {
 					try {
 						if (Hostname::isHostname(new_coord)) {
-							const auto& hostname = Hostname::parse(new_coord);
+							auto const& hostname = Hostname::parse(new_coord);
 							if (new_coordinators_hostnames.contains(hostname)) {
 								co_return grpc::Status(
 								    grpc::StatusCode::INVALID_ARGUMENT,
@@ -103,7 +103,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 							new_coordinators_hostnames.insert(hostname);
 							newCoordinatorsList.push_back(hostname.toString());
 						} else {
-							const auto& addr = NetworkAddress::parse(new_coord);
+							auto const& addr = NetworkAddress::parse(new_coord);
 							if (new_coordinators_addresses.contains(addr)) {
 								co_return grpc::Status(
 								    grpc::StatusCode::INVALID_ARGUMENT,
@@ -179,7 +179,7 @@ Reference<ITransaction> getTransaction(Reference<IDatabase> db, Reference<ITrans
 
 //-- Status ----
 
-Future<grpc::Status> getStatus(Reference<IDatabase> db, const GetStatusRequest* req, GetStatusReply* rep) {
+Future<grpc::Status> getStatus(Reference<IDatabase> db, GetStatusRequest const* req, GetStatusReply* rep) {
 	Reference<ITransaction> tr = db->createTransaction();
 
 	loop {
@@ -208,7 +208,7 @@ Future<grpc::Status> getStatus(Reference<IDatabase> db, const GetStatusRequest* 
 
 //-- Workers ----
 
-void localityDataToProto(const LocalityData& loc, Worker::Locality* proto) {
+void localityDataToProto(LocalityData const& loc, Worker::Locality* proto) {
 	if (loc.isPresent(LocalityData::keyProcessId))
 		proto->set_process_id(loc.processId()->toString());
 
@@ -225,7 +225,7 @@ void localityDataToProto(const LocalityData& loc, Worker::Locality* proto) {
 		proto->set_data_hall_id(loc.dataHallId()->toString());
 }
 
-Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest* req, GetWorkersReply* rep) {
+Future<grpc::Status> getWorkers(Reference<IDatabase> db, GetWorkersRequest const* req, GetWorkersReply* rep) {
 	Reference<ITransaction> tr = db->createTransaction();
 
 	int numRetries = 0;
@@ -296,11 +296,11 @@ Future<grpc::Status> getWorkers(Reference<IDatabase> db, const GetWorkersRequest
 	}
 }
 
-Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req, IncludeReply* rep) {
+Future<grpc::Status> include(Reference<IDatabase> db, IncludeRequest const* req, IncludeReply* rep) {
 	std::vector<AddressExclusion> addresses;
 	std::vector<std::string> localities;
 
-	for (const auto& addr_str : req->addresses()) {
+	for (auto const& addr_str : req->addresses()) {
 		auto a = AddressExclusion::parse(StringRef(addr_str));
 		if (!a.isValid()) {
 			co_return grpc::Status(
@@ -326,7 +326,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 				}
 			} else {
 				// Include specific addresses
-				for (const auto& s : addresses) {
+				for (auto const& s : addresses) {
 					Key addr = req->failed()
 					               ? special_keys::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
 					               : special_keys::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
@@ -338,7 +338,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 				}
 
 				// Include specific localities
-				for (const auto& l : localities) {
+				for (auto const& l : localities) {
 					Key locality = req->failed() ? special_keys::failedLocalitySpecialKeyRange.begin.withSuffix(l)
 					                             : special_keys::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
 					tr->clear(locality);
@@ -361,7 +361,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 
 void addInterfacesFromKVs(RangeResult& kvs,
                           std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
-	for (const auto& kv : kvs) {
+	for (auto const& kv : kvs) {
 		ClientWorkerInterface workerInterf =
 		    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 		ClientLeaderRegInterface leaderInterf(workerInterf.address());
@@ -401,7 +401,7 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 	co_return;
 }
 
-Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillReply* rep) {
+Future<grpc::Status> kill(Reference<IDatabase> db, KillRequest const* req, KillReply* rep) {
 	// TODO: Handle duration_seconds
 	// TODO: What if asked to kill itself?
 	if (req->all() && !req->addresses().empty()) {
@@ -419,11 +419,11 @@ Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillR
 
 	std::vector<std::string> addressesVec;
 	if (req->all()) {
-		for (const auto& [address, _] : address_interface) {
+		for (auto const& [address, _] : address_interface) {
 			addressesVec.push_back(address.toString());
 		}
 	} else if (!req->addresses().empty()) {
-		for (const auto& addr : req->addresses()) {
+		for (auto const& addr : req->addresses()) {
 			if (!address_interface.contains(StringRef(addr))) {
 				co_return grpc::Status(grpc::StatusCode::UNKNOWN, fmt::format("process `{}' not recognized", addr));
 			}
@@ -444,7 +444,7 @@ Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillR
 }
 
 namespace utils {
-inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
+inline KeyRef const errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
 	ThreadFuture<Optional<Value>> errorMsgF = tr->get(errorMsgSpecialKey);
 	Optional<Value> errorMsg = co_await safeThreadFutureToFuture(errorMsgF);

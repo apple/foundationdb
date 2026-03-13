@@ -31,7 +31,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-json_spirit::mValue readJSONStrictly(const std::string& s) {
+json_spirit::mValue readJSONStrictly(std::string const& s) {
 	json_spirit::mValue val;
 	std::string::const_iterator i = s.begin();
 	if (!json_spirit::read_range(i, s.end(), val)) {
@@ -60,9 +60,9 @@ uint64_t JSONDoc::expires_reference_version = std::numeric_limits<uint64_t>::max
 
 // Template specializations for mergeOperator
 template <>
-json_spirit::mObject JSONDoc::mergeOperator<bool>(const std::string& op,
-                                                  const json_spirit::mObject& op_a,
-                                                  const json_spirit::mObject& op_b,
+json_spirit::mObject JSONDoc::mergeOperator<bool>(std::string const& op,
+                                                  json_spirit::mObject const& op_a,
+                                                  json_spirit::mObject const& op_b,
                                                   bool const& a,
                                                   bool const& b) {
 	if (op == "$and")
@@ -73,18 +73,18 @@ json_spirit::mObject JSONDoc::mergeOperator<bool>(const std::string& op,
 }
 
 template <>
-json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mArray>(const std::string& op,
-                                                                 const json_spirit::mObject& op_a,
-                                                                 const json_spirit::mObject& op_b,
+json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mArray>(std::string const& op,
+                                                                 json_spirit::mObject const& op_a,
+                                                                 json_spirit::mObject const& op_b,
                                                                  json_spirit::mArray const& a,
                                                                  json_spirit::mArray const& b) {
 	throw std::exception();
 }
 
 template <>
-json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mObject>(const std::string& op,
-                                                                  const json_spirit::mObject& op_a,
-                                                                  const json_spirit::mObject& op_b,
+json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mObject>(std::string const& op,
+                                                                  json_spirit::mObject const& op_a,
+                                                                  json_spirit::mObject const& op_b,
                                                                   json_spirit::mObject const& a,
                                                                   json_spirit::mObject const& b) {
 	if (op == "$count_keys") {
@@ -100,9 +100,9 @@ json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mObject>(const std::str
 
 // If the types for a and B differ then pass them as mValues to this specialization.
 template <>
-json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mValue>(const std::string& op,
-                                                                 const json_spirit::mObject& op_a,
-                                                                 const json_spirit::mObject& op_b,
+json_spirit::mObject JSONDoc::mergeOperator<json_spirit::mValue>(std::string const& op,
+                                                                 json_spirit::mObject const& op_a,
+                                                                 json_spirit::mObject const& op_b,
                                                                  json_spirit::mValue const& a,
                                                                  json_spirit::mValue const& b) {
 	// Returns { $latest : <a or b>, timestamp: <a or b timestamp> }
@@ -184,14 +184,14 @@ void JSONDoc::cleanOps(json_spirit::mObject& obj) {
 	}
 }
 
-void JSONDoc::mergeInto(json_spirit::mObject& dst, const json_spirit::mObject& src) {
+void JSONDoc::mergeInto(json_spirit::mObject& dst, json_spirit::mObject const& src) {
 	for (auto& i : src) {
 		// printf("Merging key: %s\n", i.first.c_str());
 		mergeValueInto(dst[i.first], i.second);
 	}
 }
 
-void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue& src) {
+void JSONDoc::mergeValueInto(json_spirit::mValue& dst, json_spirit::mValue const& src) {
 	if (src.is_null())
 		return;
 
@@ -213,10 +213,10 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 	case json_spirit::obj_type: {
 		// Refs to the objects, for convenience.
 		json_spirit::mObject& aObj = dst.get_obj();
-		const json_spirit::mObject& bObj = src.get_obj();
+		json_spirit::mObject const& bObj = src.get_obj();
 
-		const std::string& op = getOperator(aObj);
-		const std::string& opB = getOperator(bObj);
+		std::string const& op = getOperator(aObj);
+		std::string const& opB = getOperator(bObj);
 
 		// Operators must be the same, which could mean both are empty (if these objects are not operators)
 		if (op != opB) {
@@ -232,7 +232,7 @@ void JSONDoc::mergeValueInto(json_spirit::mValue& dst, const json_spirit::mValue
 
 		// Get the operator values
 		json_spirit::mValue& a = aObj.at(op);
-		const json_spirit::mValue& b = bObj.at(op);
+		json_spirit::mValue const& b = bObj.at(op);
 
 		// First try the operators that are type-agnostic
 		try {

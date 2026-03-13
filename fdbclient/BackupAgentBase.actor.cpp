@@ -104,33 +104,33 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	return ts;
 }
 
-const Key BackupAgentBase::keyFolderId = "config_folderid"_sr;
-const Key BackupAgentBase::keyBeginVersion = "beginVersion"_sr;
-const Key BackupAgentBase::keyEndVersion = "endVersion"_sr;
-const Key BackupAgentBase::keyPrevBeginVersion = "prevBeginVersion"_sr;
-const Key BackupAgentBase::keyConfigBackupTag = "config_backup_tag"_sr;
-const Key BackupAgentBase::keyConfigLogUid = "config_log_uid"_sr;
-const Key BackupAgentBase::keyConfigBackupRanges = "config_backup_ranges"_sr;
-const Key BackupAgentBase::keyConfigStopWhenDoneKey = "config_stop_when_done"_sr;
-const Key BackupAgentBase::keyStateStop = "state_stop"_sr;
-const Key BackupAgentBase::keyStateStatus = "state_status"_sr;
-const Key BackupAgentBase::keyStateLogBeginVersion = "last_begin_version"_sr;
-const Key BackupAgentBase::keyLastUid = "last_uid"_sr;
-const Key BackupAgentBase::keyBeginKey = "beginKey"_sr;
-const Key BackupAgentBase::keyEndKey = "endKey"_sr;
-const Key BackupAgentBase::keyDrVersion = "drVersion"_sr;
-const Key BackupAgentBase::destUid = "destUid"_sr;
-const Key BackupAgentBase::backupStartVersion = "backupStartVersion"_sr;
+Key const BackupAgentBase::keyFolderId = "config_folderid"_sr;
+Key const BackupAgentBase::keyBeginVersion = "beginVersion"_sr;
+Key const BackupAgentBase::keyEndVersion = "endVersion"_sr;
+Key const BackupAgentBase::keyPrevBeginVersion = "prevBeginVersion"_sr;
+Key const BackupAgentBase::keyConfigBackupTag = "config_backup_tag"_sr;
+Key const BackupAgentBase::keyConfigLogUid = "config_log_uid"_sr;
+Key const BackupAgentBase::keyConfigBackupRanges = "config_backup_ranges"_sr;
+Key const BackupAgentBase::keyConfigStopWhenDoneKey = "config_stop_when_done"_sr;
+Key const BackupAgentBase::keyStateStop = "state_stop"_sr;
+Key const BackupAgentBase::keyStateStatus = "state_status"_sr;
+Key const BackupAgentBase::keyStateLogBeginVersion = "last_begin_version"_sr;
+Key const BackupAgentBase::keyLastUid = "last_uid"_sr;
+Key const BackupAgentBase::keyBeginKey = "beginKey"_sr;
+Key const BackupAgentBase::keyEndKey = "endKey"_sr;
+Key const BackupAgentBase::keyDrVersion = "drVersion"_sr;
+Key const BackupAgentBase::destUid = "destUid"_sr;
+Key const BackupAgentBase::backupStartVersion = "backupStartVersion"_sr;
 
-const Key BackupAgentBase::keyTagName = "tagname"_sr;
-const Key BackupAgentBase::keyStates = "state"_sr;
-const Key BackupAgentBase::keyConfig = "config"_sr;
-const Key BackupAgentBase::keyErrors = "errors"_sr;
-const Key BackupAgentBase::keyRanges = "ranges"_sr;
-const Key BackupAgentBase::keyTasks = "tasks"_sr;
-const Key BackupAgentBase::keyFutures = "futures"_sr;
-const Key BackupAgentBase::keySourceStates = "source_states"_sr;
-const Key BackupAgentBase::keySourceTagName = "source_tagname"_sr;
+Key const BackupAgentBase::keyTagName = "tagname"_sr;
+Key const BackupAgentBase::keyStates = "state"_sr;
+Key const BackupAgentBase::keyConfig = "config"_sr;
+Key const BackupAgentBase::keyErrors = "errors"_sr;
+Key const BackupAgentBase::keyRanges = "ranges"_sr;
+Key const BackupAgentBase::keyTasks = "tasks"_sr;
+Key const BackupAgentBase::keyFutures = "futures"_sr;
+Key const BackupAgentBase::keySourceStates = "source_states"_sr;
+Key const BackupAgentBase::keySourceTagName = "source_tagname"_sr;
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key) {
 	if (source) {
@@ -244,7 +244,7 @@ TEST_CASE("/backup/logversion") {
 	}
 	Key backupUid = "backupUid0"_sr;
 	int blockSize = deterministicRandom()->coinflip() ? CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE : 100'000;
-	for (const auto v : versions) {
+	for (auto const v : versions) {
 		Key k = getLogKey(v, backupUid, blockSize);
 		Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(v, v + 1, backupUid, blockSize);
 		ASSERT(ranges[0].contains(k));
@@ -427,14 +427,14 @@ void logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std:
 	tr->set(keyErrors, message);
 }
 
-Future<Void> logError(Database cx, Key keyErrors, const std::string& message) {
+Future<Void> logError(Database cx, Key keyErrors, std::string const& message) {
 	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 		logErrorWorker(tr, keyErrors, message);
 		return Future<Void>(Void());
 	});
 }
 
-Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message) {
+Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string const& message) {
 	return logError(tr->getDatabase(), keyErrors, message);
 }
 
@@ -1220,8 +1220,8 @@ BackupAgentBase::EnumState BackupAgentBase::getState(std::string const& stateTex
 	return enState;
 }
 
-const char* BackupAgentBase::getStateText(EnumState enState) {
-	const char* stateText;
+char const* BackupAgentBase::getStateText(EnumState enState) {
+	char const* stateText;
 
 	switch (enState) {
 	case EnumState::STATE_ERRORED:
@@ -1256,7 +1256,7 @@ const char* BackupAgentBase::getStateText(EnumState enState) {
 	return stateText;
 }
 
-const char* BackupAgentBase::getStateName(EnumState enState) {
+char const* BackupAgentBase::getStateName(EnumState enState) {
 	switch (enState) {
 	case EnumState::STATE_ERRORED:
 		return "Errored";

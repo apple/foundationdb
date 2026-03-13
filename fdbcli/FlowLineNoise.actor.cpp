@@ -108,7 +108,7 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
 
 	linenoiseHistorySetMaxLen(maxHistoryLines);
 	linenoiseSetMultiLine(multiline);
-	linenoiseSetCompletionCallback([](const char* line, linenoiseCompletions* lc) {
+	linenoiseSetCompletionCallback([](char const* line, linenoiseCompletions* lc) {
 		// This code will run in the thread pool
 		std::vector<std::string> completions;
 		onMainThread([line, &completions]() -> Future<Void> {
@@ -118,7 +118,7 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
 		for (auto const& c : completions)
 			linenoiseAddCompletion(lc, c.c_str());
 	});
-	linenoiseSetHintsCallback([](const char* line, int* color, int* bold) -> char* {
+	linenoiseSetHintsCallback([](char const* line, int* color, int* bold) -> char* {
 		Hint h = onMainThread([line]() -> Future<Hint> { return hint_callback(line); }).getBlocking();
 		if (!h.valid)
 			return nullptr;
@@ -146,7 +146,7 @@ Future<Optional<std::string>> LineNoise::read(std::string const& prompt) {
 ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
 	state boost::asio::signal_set signals(*ios, SIGINT);
 	Promise<Void> result;
-	signals.async_wait([result](const boost::system::error_code& error, int signal_number) {
+	signals.async_wait([result](boost::system::error_code const& error, int signal_number) {
 		if (error) {
 			result.sendError(io_error());
 		} else {

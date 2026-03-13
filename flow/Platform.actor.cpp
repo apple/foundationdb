@@ -188,8 +188,8 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-std::string removeWhitespace(const std::string& t) {
-	static const std::string ws(" \t\r");
+std::string removeWhitespace(std::string const& t) {
+	static std::string const ws(" \t\r");
 	std::string str = t;
 	size_t found = str.find_last_not_of(ws);
 	if (found != std::string::npos)
@@ -220,7 +220,7 @@ __int64 FiletimeAsInt64(FILETIME& t) {
 #endif
 
 #ifdef _WIN32
-bool handlePdhStatus(const PDH_STATUS& status, std::string message) {
+bool handlePdhStatus(PDH_STATUS const& status, std::string message) {
 	if (status != ERROR_SUCCESS) {
 		TraceEvent(SevWarnAlways, message.c_str()).GetLastError().detail("Status", status);
 		return false;
@@ -428,7 +428,7 @@ void getMemoryInfo(std::map<StringRef, int64_t>& request, std::stringstream& mem
 	if (count == 0)
 		return;
 
-	keyValueReader<std::string, int64_t>(memInfoStream, [&](const std::string& key, const int64_t& value) -> bool {
+	keyValueReader<std::string, int64_t>(memInfoStream, [&](std::string const& key, int64_t const& value) -> bool {
 		auto item = request.find(StringRef(key));
 		if (item != std::end(request)) {
 			item->second = value;
@@ -506,7 +506,7 @@ void getMachineRAMInfoImpl(MachineRAMInfo& memInfo) {
 std::map<std::string, int64_t> reportCGroupCpuStat() {
 	// Default path to the cpu,cpuacct
 	// See manpages for cgroup
-	static const std::string PATH_TO_CPU_CPUACCT = "/sys/fs/cgroup/cpu,cpuacct/cpu.stat";
+	static std::string const PATH_TO_CPU_CPUACCT = "/sys/fs/cgroup/cpu,cpuacct/cpu.stat";
 
 	std::map<std::string, int64_t> result;
 	std::ifstream ifs(PATH_TO_CPU_CPUACCT);
@@ -514,7 +514,7 @@ std::map<std::string, int64_t> reportCGroupCpuStat() {
 		return result;
 	}
 
-	keyValueReader<std::string, int64_t>(ifs, [&](const std::string& key, const int64_t& value) -> bool {
+	keyValueReader<std::string, int64_t>(ifs, [&](std::string const& key, int64_t const& value) -> bool {
 		result[key] = value;
 		return true;
 	});
@@ -680,12 +680,12 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 }
 
 #ifdef __unixish__
-const char* getInterfaceName(const IPAddress& _ip) {
+char const* getInterfaceName(IPAddress const& _ip) {
 	INJECT_FAULT(platform_error, "getInterfaceName"); // Get interface name failed
 	static char iname[20];
 
 	struct ifaddrs* interfaces = nullptr;
-	const char* ifa_name = nullptr;
+	char const* ifa_name = nullptr;
 
 	if (getifaddrs(&interfaces)) {
 		TraceEvent(SevWarnAlways, "GetInterfaceAddrs").GetLastError();
@@ -725,7 +725,7 @@ const char* getInterfaceName(const IPAddress& _ip) {
 #endif
 
 #if defined(__linux__)
-void getNetworkTraffic(const IPAddress& ip,
+void getNetworkTraffic(IPAddress const& ip,
                        uint64_t& bytesSent,
                        uint64_t& bytesReceived,
                        uint64_t& outSegs,
@@ -734,7 +734,7 @@ void getNetworkTraffic(const IPAddress& ip,
 	    platform_error,
 	    "getNetworkTraffic"); // getNetworkTraffic: Even though this function doesn't throw errors, the equivalents for
 	                          // other platforms do, and since all of our simulation testing is on Linux...
-	const char* ifa_name = nullptr;
+	char const* ifa_name = nullptr;
 	try {
 		ifa_name = getInterfaceName(ip);
 	} catch (Error& e) {
@@ -974,14 +974,14 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #if defined(__FreeBSD__)
-void getNetworkTraffic(const IPAddress ip,
+void getNetworkTraffic(IPAddress const ip,
                        uint64_t& bytesSent,
                        uint64_t& bytesReceived,
                        uint64_t& outSegs,
                        uint64_t& retransSegs) {
 	INJECT_FAULT(platform_error, "getNetworkTraffic"); // Get Network traffic failed
 
-	const char* ifa_name = nullptr;
+	char const* ifa_name = nullptr;
 	try {
 		ifa_name = getInterfaceName(ip);
 	} catch (Error& e) {
@@ -1166,14 +1166,14 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #ifdef __APPLE__
-void getNetworkTraffic(const IPAddress& ip,
+void getNetworkTraffic(IPAddress const& ip,
                        uint64_t& bytesSent,
                        uint64_t& bytesReceived,
                        uint64_t& outSegs,
                        uint64_t& retransSegs) {
 	INJECT_FAULT(platform_error, "getNetworkTraffic"); // Get network traffic failed (macOS)
 
-	const char* ifa_name = nullptr;
+	char const* ifa_name = nullptr;
 	try {
 		ifa_name = getInterfaceName(ip);
 	} catch (Error& e) {
@@ -1254,7 +1254,7 @@ DiskStatistics getDiskStatistics(std::string const& directory) {
 		throw e;
 	}
 
-	const char* dev = strrchr(buf.f_mntfromname, '/');
+	char const* dev = strrchr(buf.f_mntfromname, '/');
 	if (!dev) {
 		TraceEvent(SevError, "GetDiskStatisticsStrrchrError").detail("Directory", directory).GetLastError();
 		throw platform_error();
@@ -1349,7 +1349,7 @@ DiskStatistics getDiskStatistics(std::string const& directory) {
 #endif // __APPLE__
 
 #if defined(_WIN32)
-std::vector<std::string> expandWildcardPath(const char* wildcardPath) {
+std::vector<std::string> expandWildcardPath(char const* wildcardPath) {
 	PDH_STATUS Status;
 	char* EndOfPaths;
 	char* Paths = nullptr;
@@ -1393,7 +1393,7 @@ Cleanup:
 	return results;
 }
 
-std::vector<HCOUNTER> addCounters(HQUERY Query, const char* path) {
+std::vector<HCOUNTER> addCounters(HQUERY Query, char const* path) {
 	std::vector<HCOUNTER> counters;
 
 	std::vector<std::string> paths = expandWildcardPath(path);
@@ -1548,7 +1548,7 @@ void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
 #endif
 
 SystemStatistics getSystemStatistics(std::string const& dataFolder,
-                                     const IPAddress* ip,
+                                     IPAddress const* ip,
                                      SystemStatisticsState** statState,
                                      bool logDetails) {
 	if ((*statState) == nullptr)
@@ -1791,7 +1791,7 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 struct OffsetTimer {
 	double secondsPerCount, offset;
 
-	static const int64_t FILETIME_C_EPOCH =
+	static int64_t const FILETIME_C_EPOCH =
 	    11644473600LL *
 	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
 
@@ -1879,7 +1879,7 @@ double timer_monotonic() {
 
 double timer() {
 #ifdef _WIN32
-	static const int64_t FILETIME_C_EPOCH =
+	static int64_t const FILETIME_C_EPOCH =
 	    11644473600LL *
 	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
 	FILETIME fileTime;
@@ -1901,7 +1901,7 @@ double timer() {
 
 uint64_t timer_int() {
 #ifdef _WIN32
-	static const int64_t FILETIME_C_EPOCH =
+	static int64_t const FILETIME_C_EPOCH =
 	    11644473600LL *
 	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
 	FILETIME fileTime;
@@ -1921,7 +1921,7 @@ uint64_t timer_int() {
 #endif
 };
 
-void getLocalTime(const time_t* timep, struct tm* result) {
+void getLocalTime(time_t const* timep, struct tm* result) {
 #ifdef _WIN32
 	if (localtime_s(result, timep) != 0) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
@@ -1957,7 +1957,7 @@ std::vector<std::string> getEnvironmentKnobOptions() {
 #if defined(__FreeBSD__)
 	extern char** environ;
 #endif
-	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
+	constexpr size_t const ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
 	std::vector<std::string> knobOptions;
 #if defined(_WIN32)
 	auto e = GetEnvironmentStrings();
@@ -2031,7 +2031,7 @@ void setMemoryQuota(size_t limit) {
 }
 
 #ifdef _WIN32
-static int ModifyPrivilege(const char* szPrivilege, bool fEnable) {
+static int ModifyPrivilege(char const* szPrivilege, bool fEnable) {
 	HRESULT hr = S_OK;
 	TOKEN_PRIVILEGES NewState;
 	LUID luid;
@@ -2079,9 +2079,9 @@ static void enableLargePages() {
 	ModifyPrivilege(SE_LOCK_MEMORY_NAME, true);
 	largePagesPrivilegeEnabled = true;
 #else
-	// SOMEDAY: can/should we teach the client how to enable large pages
-	// on Linux? Or just rely on the system to have been configured as
-	// desired?
+		// SOMEDAY: can/should we teach the client how to enable large pages
+		// on Linux? Or just rely on the system to have been configured as
+		// desired?
 #endif
 }
 
@@ -2288,8 +2288,8 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		if (!f)
 			throw io_error();
 #ifdef _WIN32
-		// In Windows case, ReplaceFile API is used which preserves the ownership,
-		// ACLs and other attributes of the original file
+			// In Windows case, ReplaceFile API is used which preserves the ownership,
+			// ACLs and other attributes of the original file
 #elif defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
@@ -2440,7 +2440,7 @@ bool createDirectory(std::string const& directory) {
 			// check if directory already exists
 			// necessary due to old kernel bugs
 			struct stat s;
-			const char* dirname = directory.c_str();
+			char const* dirname = directory.c_str();
 			if (stat(dirname, &s) != -1 && S_ISDIR(s.st_mode)) {
 				TraceEvent("DirectoryAlreadyExists").detail("Directory", dirname).detail("IgnoredError", mkdirErrno);
 				continue;
@@ -2470,7 +2470,7 @@ bool createDirectory(std::string const& directory) {
 
 } // namespace platform
 
-const uint8_t separatorChar = CANONICAL_PATH_SEPARATOR;
+uint8_t const separatorChar = CANONICAL_PATH_SEPARATOR;
 StringRef separator(&separatorChar, 1);
 StringRef dotdot = ".."_sr;
 
@@ -2506,13 +2506,13 @@ std::string cleanPath(std::string const& path) {
 		if (i != 0) {
 			result.append(1, CANONICAL_PATH_SEPARATOR);
 		}
-		result.append((const char*)finalParts[i].begin(), finalParts[i].size());
+		result.append((char const*)finalParts[i].begin(), finalParts[i].size());
 	}
 
 	return result.empty() ? "." : result;
 }
 
-std::string popPath(const std::string& path) {
+std::string popPath(std::string const& path) {
 	int i = path.size() - 1;
 	// Skip over any trailing separators
 	while (i >= 0 && path[i] == CANONICAL_PATH_SEPARATOR) {
@@ -2584,7 +2584,7 @@ std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist)
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	char result[PATH_MAX];
 	// Must resolve links, so first try realpath on the whole thing
-	const char* r = realpath(path.c_str(), result);
+	char const* r = realpath(path.c_str(), result);
 	if (r == nullptr) {
 		// If the error was ENOENT and the path doesn't have to exist,
 		// try to resolve symlinks in progressively shorter prefixes of the path
@@ -2623,7 +2623,7 @@ std::string basename(std::string const& filename) {
 
 std::string getUserHomeDirectory() {
 #if defined(__unixish__)
-	const char* ret = getenv("HOME");
+	char const* ret = getenv("HOME");
 	if (!ret) {
 		if (struct passwd* pw = getpwuid(getuid())) {
 			ret = pw->pw_dir;
@@ -2842,7 +2842,7 @@ void threadYield() {
 
 namespace platform {
 
-void makeTemporary(const char* filename) {
+void makeTemporary(char const* filename) {
 #ifdef _WIN32
 	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
 #endif
@@ -2863,7 +2863,7 @@ void setCloseOnExec(int fd) {
 } // namespace platform
 
 #ifdef _WIN32
-THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const char* name) {
+THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, char const* name) {
 	return (void*)_beginthread(func, stackSize, arg);
 }
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
@@ -2893,7 +2893,7 @@ void* runFunc(void* a) {
 	return nullptr;
 }
 
-THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const char* name) {
+THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, char const* name) {
 	pthread_t t;
 	pthread_attr_t attr;
 
@@ -2994,7 +2994,7 @@ int64_t fileSize(std::string const& filename) {
 #endif
 }
 
-time_t fileModifiedTime(const std::string& filename) {
+time_t fileModifiedTime(std::string const& filename) {
 #ifdef _WIN32
 	struct _stati64 file_status;
 	if (_stati64(filename.c_str(), &file_status) != 0)
@@ -3055,7 +3055,7 @@ std::string readFileBytes(std::string const& filename, size_t maxSize) {
 	return ret;
 }
 
-void writeFileBytes(std::string const& filename, const uint8_t* data, size_t count, bool append) {
+void writeFileBytes(std::string const& filename, uint8_t const* data, size_t count, bool append) {
 	auto fflags = std::fstream::out | std::fstream::binary;
 	if (append)
 		fflags |= std::fstream::app;
@@ -3065,16 +3065,16 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 		throw io_error();
 	}
 
-	ofs.write((const char*)data, count);
+	ofs.write((char const*)data, count);
 }
 
 void writeFile(std::string const& filename, std::string const& content) {
-	writeFileBytes(filename, (const uint8_t*)(content.c_str()), content.size());
+	writeFileBytes(filename, (uint8_t const*)(content.c_str()), content.size());
 }
 
 namespace platform {
 
-bool getEnvironmentVar(const char* name, std::string& value) {
+bool getEnvironmentVar(char const* name, std::string& value) {
 #if defined(__unixish__)
 	char* val = getenv(name);
 	if (val) {
@@ -3104,7 +3104,7 @@ bool getEnvironmentVar(const char* name, std::string& value) {
 #endif
 }
 
-int setEnvironmentVar(const char* name, const char* value, int overwrite) {
+int setEnvironmentVar(char const* name, char const* value, int overwrite) {
 #if defined(_WIN32)
 	int errcode = 0;
 	if (!overwrite) {
@@ -3135,7 +3135,7 @@ std::string getWorkingDirectory() {
 
 } // namespace platform
 
-extern std::string format(const char* form, ...);
+extern std::string format(char const* form, ...);
 
 namespace platform {
 std::string getDefaultConfigPath() {
@@ -3188,7 +3188,7 @@ namespace platform {
 void outOfMemory() {
 #ifdef ALLOC_INSTRUMENTATION
 	delete[] g_extra_memory;
-	std::vector<std::pair<std::string, const char*>> typeNames;
+	std::vector<std::pair<std::string, char const*>> typeNames;
 	for (auto i = allocInstr.begin(); i != allocInstr.end(); ++i) {
 		std::string s;
 #ifdef __linux__
@@ -3213,7 +3213,7 @@ void outOfMemory() {
 	}
 	std::sort(typeNames.begin(), typeNames.end());
 	for (int i = 0; i < typeNames.size(); i++) {
-		const char* n = typeNames[i].second;
+		char const* n = typeNames[i].second;
 		auto& f = allocInstr[n];
 		if (f.maxAllocated > 10000)
 			TraceEvent("AllocInstrument")
@@ -3290,7 +3290,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 #elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
 	int error = nftw(
 	    dir.c_str(),
-	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
+	    [](char const* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
 		    int r = remove(fpath);
 		    if (r == 0)
 			    ++__eraseDirectoryRecursiveCount;
@@ -3317,12 +3317,12 @@ TmpFile::TmpFile() : filename("") {
 	createTmpFile(boost::filesystem::temp_directory_path().string(), TmpFile::defaultPrefix);
 }
 
-TmpFile::TmpFile(const std::string& tmpDir) : filename("") {
+TmpFile::TmpFile(std::string const& tmpDir) : filename("") {
 	std::string dir = removeWhitespace(tmpDir);
 	createTmpFile(dir, TmpFile::defaultPrefix);
 }
 
-TmpFile::TmpFile(const std::string& tmpDir, const std::string& prefix) : filename("") {
+TmpFile::TmpFile(std::string const& tmpDir, std::string const& prefix) : filename("") {
 	std::string dir = removeWhitespace(tmpDir);
 	createTmpFile(dir, prefix);
 }
@@ -3333,7 +3333,7 @@ TmpFile::~TmpFile() {
 	}
 }
 
-void TmpFile::createTmpFile(const std::string_view dir, const std::string_view prefix) {
+void TmpFile::createTmpFile(std::string_view const dir, std::string_view const prefix) {
 	std::string modelPattern = "%%%%-%%%%-%%%%-%%%%";
 	boost::format fmter("%s/%s-%s");
 	std::string modelPath = boost::str(boost::format(fmter % dir % prefix % modelPattern));
@@ -3354,11 +3354,11 @@ size_t TmpFile::read(uint8_t* buff, size_t len) {
 	return readFileBytes(filename, buff, len);
 }
 
-void TmpFile::write(const uint8_t* buff, size_t len) {
+void TmpFile::write(uint8_t const* buff, size_t len) {
 	writeFileBytes(filename, buff, len, false);
 }
 
-void TmpFile::append(const uint8_t* buff, size_t len) {
+void TmpFile::append(uint8_t const* buff, size_t len) {
 	writeFileBytes(filename, buff, len, true);
 }
 
@@ -3374,7 +3374,7 @@ bool TmpFile::destroyFile() {
 
 } // namespace platform
 
-extern "C" void criticalError(int exitCode, const char* type, const char* message) {
+extern "C" void criticalError(int exitCode, char const* type, char const* message) {
 	// Be careful!  This function may be called asynchronously from a thread or in other weird conditions
 
 	fprintf(stderr, "ERROR: %s\n", message);
@@ -3439,7 +3439,7 @@ ImageInfo getImageInfo() {
 #include <link.h>
 #endif
 
-platform::ImageInfo getImageInfo(const void* symbol) {
+platform::ImageInfo getImageInfo(void const* symbol) {
 	Dl_info info;
 	platform::ImageInfo imageInfo;
 
@@ -3467,7 +3467,7 @@ platform::ImageInfo getImageInfo(const void* symbol) {
 platform::ImageInfo getCachedImageInfo() {
 	// The use of "getCachedImageInfo" is arbitrary and was a best guess at a good way to get the image of the
 	//  most likely candidate for the "real" flow library or binary
-	static platform::ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
+	static platform::ImageInfo info = getImageInfo((void const*)&getCachedImageInfo);
 	return info;
 }
 
@@ -3548,7 +3548,7 @@ std::string format_backtrace(void** addresses, int numAddresses) {
 }
 } // namespace platform
 
-bool isLibraryLoaded(const char* lib_path) {
+bool isLibraryLoaded(char const* lib_path) {
 #if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
@@ -3564,7 +3564,7 @@ bool isLibraryLoaded(const char* lib_path) {
 	return dlobj != nullptr;
 }
 
-void* loadLibrary(const char* lib_path) {
+void* loadLibrary(char const* lib_path) {
 #if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
@@ -3591,7 +3591,7 @@ void* loadLibrary(const char* lib_path) {
 	return dlobj;
 }
 
-void* loadFunction(void* lib, const char* func_name) {
+void* loadFunction(void* lib, char const* func_name) {
 	void* dlfcn = nullptr;
 
 #if defined(__unixish__)
@@ -3786,11 +3786,11 @@ void registerCrashHandler() {
 }
 
 #ifdef __linux__
-extern volatile void** net2backtraces;
-extern volatile size_t net2backtraces_offset;
-extern volatile size_t net2backtraces_max;
-extern volatile bool net2backtraces_overflow;
-extern volatile int net2backtraces_count;
+extern void volatile** net2backtraces;
+extern size_t volatile net2backtraces_offset;
+extern size_t volatile net2backtraces_max;
+extern bool volatile net2backtraces_overflow;
+extern int volatile net2backtraces_count;
 extern std::atomic<int64_t> net2RunLoopIterations;
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
@@ -3810,18 +3810,18 @@ thread_local bool profileThread = false;
 
 // The thread ID of the profiled thread. This can be compared against the current thread ID
 // to see if we are on the profiled thread. Can be used in the signal handler.
-volatile int64_t profileThreadId = -1;
+int64_t volatile profileThreadId = -1;
 
 #ifdef __linux__
 struct sigaction chainedAction;
 #endif
 
-volatile bool profilingEnabled = 1;
+bool volatile profilingEnabled = 1;
 volatile thread_local bool flowProfilingEnabled = 1;
 
-volatile int64_t numProfilesDisabled = 0;
-volatile int64_t numProfilesOverflowed = 0;
-volatile int64_t numProfilesCaptured = 0;
+int64_t volatile numProfilesDisabled = 0;
+int64_t volatile numProfilesOverflowed = 0;
+int64_t volatile numProfilesCaptured = 0;
 
 int64_t getNumProfilesDisabled() {
 	if (profileThread) {
@@ -3876,7 +3876,7 @@ void profileHandler(int sig) {
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in
 	// the signal handler
 	ProfilingSample* ps =
-	    const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
+	    const_cast<ProfilingSample*>((ProfilingSample volatile*)(net2backtraces + net2backtraces_offset));
 
 	// We can only read the check thread time in a signal handler if the atomic is lock free.
 	// We can't get the time from a timer() call because it's not signal safe.
@@ -3929,9 +3929,9 @@ void* checkThread(void* arg) {
 	double lastSaturatedSignal = 0;
 	double lastSlowTaskBlockedLog = 0;
 
-	const double minSlowTaskLogInterval =
+	double const minSlowTaskLogInterval =
 	    std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
-	const double minSaturationLogInterval =
+	double const minSaturationLogInterval =
 	    std::max(FLOW_KNOBS->SATURATION_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 	double slowTaskLogInterval = minSlowTaskLogInterval;
@@ -4007,16 +4007,16 @@ void* checkThread(void* arg) {
 }
 
 #if defined(DTRACE_PROBES)
-void fdb_probe_actor_create(const char* name, unsigned long id) {
+void fdb_probe_actor_create(char const* name, unsigned long id) {
 	FDB_TRACE_PROBE(actor_create, name, id);
 }
-void fdb_probe_actor_destroy(const char* name, unsigned long id) {
+void fdb_probe_actor_destroy(char const* name, unsigned long id) {
 	FDB_TRACE_PROBE(actor_destroy, name, id);
 }
-void fdb_probe_actor_enter(const char* name, unsigned long id, int index) {
+void fdb_probe_actor_enter(char const* name, unsigned long id, int index) {
 	FDB_TRACE_PROBE(actor_enter, name, id, index);
 }
-void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
+void fdb_probe_actor_exit(char const* name, unsigned long id, int index) {
 	FDB_TRACE_PROBE(actor_exit, name, id, index);
 }
 #endif
@@ -4221,7 +4221,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 }
 #endif
 
-int testPathFunction(const char* name,
+int testPathFunction(char const* name,
                      std::function<std::string(std::string)> fun,
                      std::string a,
                      ErrorOr<std::string> b) {
@@ -4246,7 +4246,7 @@ int testPathFunction(const char* name,
 	return r ? 0 : 1;
 }
 
-int testPathFunction2(const char* name,
+int testPathFunction2(char const* name,
                       std::function<std::string(std::string, bool, bool)> fun,
                       std::string a,
                       bool resolveLinks,
@@ -4282,7 +4282,7 @@ int testPathFunction2(const char* name,
 }
 
 #ifndef _WIN32
-void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
+void platformSpecificDirectoryOpsTests(std::string const& cwd, int& errors) {
 	// Create some symlinks and test resolution (or non-resolution) of them
 	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
 	ASSERT(symlink("../backups/four", "simfdb/backups/five") == 0);
@@ -4337,7 +4337,7 @@ void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 	                            joinPath(cwd, "simfdb/backups/one/"));
 }
 #else
-void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {}
+void platformSpecificDirectoryOpsTests(std::string const& cwd, int& errors) {}
 #endif
 
 TEST_CASE("/flow/Platform/directoryOps") {

@@ -29,26 +29,26 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const KeyRef fdbClientInfoTxnSampleRate = "config/fdb_client_info/client_txn_sample_rate"_sr;
-const KeyRef fdbClientInfoTxnSizeLimit = "config/fdb_client_info/client_txn_size_limit"_sr;
+KeyRef const fdbClientInfoTxnSampleRate = "config/fdb_client_info/client_txn_sample_rate"_sr;
+KeyRef const fdbClientInfoTxnSizeLimit = "config/fdb_client_info/client_txn_size_limit"_sr;
 
-const KeyRef transactionTagSampleRate = "config/transaction_tag_sample_rate"_sr;
-const KeyRef transactionTagSampleCost = "config/transaction_tag_sample_cost"_sr;
+KeyRef const transactionTagSampleRate = "config/transaction_tag_sample_rate"_sr;
+KeyRef const transactionTagSampleCost = "config/transaction_tag_sample_cost"_sr;
 
-const KeyRef samplingFrequency = "visibility/sampling/frequency"_sr;
-const KeyRef samplingWindow = "visibility/sampling/window"_sr;
+KeyRef const samplingFrequency = "visibility/sampling/frequency"_sr;
+KeyRef const samplingWindow = "visibility/sampling/window"_sr;
 
 GlobalConfig::GlobalConfig(DatabaseContext* cx) : cx(cx), lastUpdate(0) {}
 
 void GlobalConfig::applyChanges(Transaction& tr,
-                                const VectorRef<KeyValueRef>& insertions,
-                                const VectorRef<KeyRangeRef>& clears) {
+                                VectorRef<KeyValueRef> const& insertions,
+                                VectorRef<KeyRangeRef> const& clears) {
 	VersionHistory vh{ 0 };
-	for (const auto& kv : insertions) {
+	for (auto const& kv : insertions) {
 		vh.mutations.emplace_back_deep(vh.mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
 		tr.set(kv.key.withPrefix(globalConfigKeysPrefix), kv.value);
 	}
-	for (const auto& range : clears) {
+	for (auto const& range : clears) {
 		vh.mutations.emplace_back_deep(vh.mutations.arena(),
 		                               MutationRef(MutationRef::ClearRange, range.begin, range.end));
 		tr.clear(
@@ -71,7 +71,7 @@ Key GlobalConfig::prefixedKey(KeyRef key) {
 	return key.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::GLOBALCONFIG).begin);
 }
 
-const Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
+Reference<ConfigValue> const GlobalConfig::get(KeyRef name) {
 	auto it = data.find(name);
 	if (it == data.end()) {
 		return Reference<ConfigValue>();
@@ -79,9 +79,9 @@ const Reference<ConfigValue> GlobalConfig::get(KeyRef name) {
 	return it->second;
 }
 
-const std::map<KeyRef, Reference<ConfigValue>> GlobalConfig::get(KeyRangeRef range) {
+std::map<KeyRef, Reference<ConfigValue>> const GlobalConfig::get(KeyRangeRef range) {
 	std::map<KeyRef, Reference<ConfigValue>> results;
-	for (const auto& [key, value] : data) {
+	for (auto const& [key, value] : data) {
 		if (range.contains(key)) {
 			results[key] = value;
 		}
@@ -166,7 +166,7 @@ ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnow
 			                                       &GrvProxyInterface::refreshGlobalConfig,
 			                                       GlobalConfigRefreshRequest{ lastKnown }),
 			                      CLIENT_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT));
-			for (const auto& kv : reply.result) {
+			for (auto const& kv : reply.result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
 				self->insert(systemKey, kv.value);
 			}
@@ -187,7 +187,7 @@ ACTOR Future<Version> GlobalConfig::refresh(GlobalConfig* self, Version lastKnow
 
 // Applies updates to the local copy of the global configuration when this
 // process receives an updated history.
-ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo* dbInfo) {
+ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, ClientDBInfo const* dbInfo) {
 	loop {
 		try {
 			if (self->initialized.canBeSet()) {
@@ -224,12 +224,12 @@ ACTOR Future<Void> GlobalConfig::updater(GlobalConfig* self, const ClientDBInfo*
 							// Apply history in order, from lowest version to highest
 							// version. Mutation history should already be stored in
 							// ascending version order.
-							for (const auto& vh : dbInfo->history) {
+							for (auto const& vh : dbInfo->history) {
 								if (vh.version <= self->lastUpdate) {
 									continue; // already applied this mutation
 								}
 
-								for (const auto& mutation : vh.mutations.contents()) {
+								for (auto const& mutation : vh.mutations.contents()) {
 									if (mutation.type == MutationRef::SetValue) {
 										self->insert(mutation.param1, mutation.param2);
 									} else if (mutation.type == MutationRef::ClearRange) {

@@ -76,7 +76,7 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 	Key keyForIndex(int n) { return key(n); }
 	Key key(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }
 	Value value(int n) { return doubleToTestKey(n, keyPrefix); }
-	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
+	int fromValue(ValueRef const& v) { return testKeyToDouble(v, keyPrefix); }
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
 	Future<Void> checkSize(Database cx) {

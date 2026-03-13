@@ -14,10 +14,10 @@
 
 #include "flow/ActorContext.h"
 
-std::unordered_map<UID, std::string> loadUIDActorMapping(const std::string& build_directory_path) {
+std::unordered_map<UID, std::string> loadUIDActorMapping(std::string const& build_directory_path) {
 	std::unordered_map<UID, std::string> identifierToActor;
 
-	for (const auto& dirEntry : std::filesystem::recursive_directory_iterator(build_directory_path)) {
+	for (auto const& dirEntry : std::filesystem::recursive_directory_iterator(build_directory_path)) {
 		if (!dirEntry.is_regular_file()) {
 			continue;
 		}
@@ -47,16 +47,16 @@ std::unordered_map<UID, std::string> loadUIDActorMapping(const std::string& buil
 }
 
 void dumpActorContextTree(std::ostream& stream,
-                          const DecodedActorContext& decoded,
-                          const std::unordered_map<UID, std::string>& identifierToActor) {
+                          DecodedActorContext const& decoded,
+                          std::unordered_map<UID, std::string> const& identifierToActor) {
 
 	std::unordered_map<ActorID, std::vector<ActorID>> spawnInfo;
-	for (const auto& [actorID, _1, parentID] : decoded.context) {
+	for (auto const& [actorID, _1, parentID] : decoded.context) {
 		spawnInfo[parentID].push_back(actorID);
 	}
 
 	std::unordered_map<ActorID, std::string> actorNames;
-	for (const auto& [actorID, actorIdentifier, _1] : decoded.context) {
+	for (auto const& [actorID, actorIdentifier, _1] : decoded.context) {
 		actorNames[actorID] = identifierToActor.at(actorIdentifier);
 	}
 
@@ -67,10 +67,10 @@ void dumpActorContextTree(std::ostream& stream,
 	actorQueue.push_back({ INIT_ACTOR_ID, 0 });
 
 	while (!actorQueue.empty()) {
-		const auto [actorID, depth] = actorQueue.front();
+		auto const [actorID, depth] = actorQueue.front();
 		actorQueue.pop_front();
 		if (spawnInfo.count(actorID)) {
-			for (const auto childID : spawnInfo.at(actorID)) {
+			for (auto const childID : spawnInfo.at(actorID)) {
 				actorQueue.push_front({ childID, depth + 1 });
 			}
 		}
@@ -84,18 +84,18 @@ void dumpActorContextTree(std::ostream& stream,
 }
 
 void dumpActorContextStack(std::ostream& stream,
-                           const DecodedActorContext& decoded,
-                           const std::unordered_map<UID, std::string>& identifierToActor) {
-	for (const auto& [actorID, actorIdentifier, spawnerActorID] : decoded.context) {
-		const std::string& actorName = identifierToActor.at(actorIdentifier);
+                           DecodedActorContext const& decoded,
+                           std::unordered_map<UID, std::string> const& identifierToActor) {
+	for (auto const& [actorID, actorIdentifier, spawnerActorID] : decoded.context) {
+		std::string const& actorName = identifierToActor.at(actorIdentifier);
 		stream << std::setw(12) << actorID << " " << actorName
 		       << (actorID == decoded.currentRunningActor ? "  <ACTIVE>" : "") << std::endl;
 	}
 }
 
 void decodeClass(std::ostream& stream,
-                 const std::string& classIdentifier,
-                 const std::unordered_map<UID, std::string>& identifierToActor) {
+                 std::string const& classIdentifier,
+                 std::unordered_map<UID, std::string> const& identifierToActor) {
 	UID uid = UID::fromString(classIdentifier);
 	stream << classIdentifier << " -- " << identifierToActor.at(uid) << std::endl;
 }
@@ -123,7 +123,7 @@ int main(int argc, char* argv[]) {
 		buildDirectory = varMap["fdb-build-directory"].as<std::string>();
 	}
 
-	const auto lib = loadUIDActorMapping(buildDirectory);
+	auto const lib = loadUIDActorMapping(buildDirectory);
 	if (varMap.count("decode-class") != 0) {
 		decodeClass(std::cout, varMap["decode-class"].as<std::string>(), lib);
 		return 0;
@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
 		encodedContext += line;
 	}
 
-	const auto decodedActorContext = decodeActorContext(encodedContext);
+	auto const decodedActorContext = decodeActorContext(encodedContext);
 	switch (decodedActorContext.dumpType) {
 	case ActorContextDumpType::FULL_CONTEXT:
 		dumpActorContextTree(std::cout, decodedActorContext, lib);

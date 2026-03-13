@@ -122,7 +122,7 @@ UID DeterministicRandom::randomUniqueID() {
 }
 
 char DeterministicRandom::randomAlphaNumeric() {
-	static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+	static char const alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 	char c = alphanum[gen64() % 62];
 	if (randLog && useRandLog)
 		fprintf(randLog, "Rchar %c\n", c);
@@ -138,13 +138,13 @@ std::string DeterministicRandom::randomAlphaNumeric(int length) {
 }
 
 void DeterministicRandom::randomBytes(uint8_t* buf, int length) {
-	constexpr const int unitLen = sizeof(decltype(gen64()));
+	constexpr int const unitLen = sizeof(decltype(gen64()));
 	for (int i = 0; i < length; i += unitLen) {
 		auto val = gen64();
 		memcpy(buf + i, &val, std::min(unitLen, length - i));
 	}
 	if (randLog && useRandLog) {
-		constexpr const int cutOff = 32;
+		constexpr int const cutOff = 32;
 		bool tooLong = length > cutOff;
 		fmt::print(randLog,
 		           "Rbytes[{}] {}{}\n",
@@ -154,7 +154,7 @@ void DeterministicRandom::randomBytes(uint8_t* buf, int length) {
 	}
 }
 
-bool DeterministicRandom::truePercent(const int percent) {
+bool DeterministicRandom::truePercent(int const percent) {
 	ASSERT_GT(percent, 0);
 	ASSERT_LT(percent, 100);
 	return this->randomInt(1, 101) <= percent;

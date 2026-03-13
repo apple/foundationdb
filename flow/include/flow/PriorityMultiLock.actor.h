@@ -192,12 +192,12 @@ public:
 	int getRunnersCount() const { return concurrency - available; }
 	int getWaitersCount() const { return waiting; }
 
-	int getWaitersCount(const unsigned int priority) const {
+	int getWaitersCount(unsigned int const priority) const {
 		ASSERT(priority < priorities.size());
 		return priorities[priority].queue.size();
 	}
 
-	int getRunnersCount(const unsigned int priority) const {
+	int getRunnersCount(unsigned int const priority) const {
 		ASSERT(priority < priorities.size());
 		return priorities[priority].runners;
 	}
@@ -230,7 +230,7 @@ private:
 		// Priority number for convenience, matches *this's index in PML priorities vector
 		int priority;
 
-		std::string toString(const PriorityMultiLock* pml) const {
+		std::string toString(PriorityMultiLock const* pml) const {
 			return format("priority=%d weight=%d run=%d wait=%d cap=%d",
 			              priority,
 			              weight,

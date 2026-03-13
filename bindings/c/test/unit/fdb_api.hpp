@@ -105,7 +105,7 @@ class KeyFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_key when using the KeyFuture
 	// type. Its behavior is identical to fdb_future_get_key.
-	fdb_error_t get(const uint8_t** out_key, int* out_key_length);
+	fdb_error_t get(uint8_t const** out_key, int* out_key_length);
 
 private:
 	friend class Transaction;
@@ -117,7 +117,7 @@ class ValueFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_value when using the
 	// ValueFuture type. Its behavior is identical to fdb_future_get_value.
-	fdb_error_t get(fdb_bool_t* out_present, const uint8_t** out_value, int* out_value_length);
+	fdb_error_t get(fdb_bool_t* out_present, uint8_t const** out_value, int* out_value_length);
 
 private:
 	friend class Transaction;
@@ -129,7 +129,7 @@ public:
 	// Call this function instead of fdb_future_get_string_array when using the
 	// StringArrayFuture type. Its behavior is identical to
 	// fdb_future_get_string_array.
-	fdb_error_t get(const char*** out_strings, int* out_count);
+	fdb_error_t get(char const*** out_strings, int* out_count);
 
 private:
 	friend class Transaction;
@@ -141,7 +141,7 @@ public:
 	// Call this function instead of fdb_future_get_keyvalue_array when using
 	// the KeyValueArrayFuture type. Its behavior is identical to
 	// fdb_future_get_keyvalue_array.
-	fdb_error_t get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+	fdb_error_t get(FDBKeyValue const** out_kv, int* out_count, fdb_bool_t* out_more);
 
 private:
 	friend class Transaction;
@@ -153,7 +153,7 @@ public:
 	// Call this function instead of fdb_future_get_mappedkeyvalue_array when using
 	// the MappedKeyValueArrayFuture type. Its behavior is identical to
 	// fdb_future_get_mappedkeyvalue_array.
-	fdb_error_t get(const FDBMappedKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+	fdb_error_t get(FDBMappedKeyValue const** out_kv, int* out_count, fdb_bool_t* out_more);
 
 private:
 	friend class Transaction;
@@ -165,7 +165,7 @@ public:
 	// Call this function instead of fdb_future_get_keyrange_array when using
 	// the KeyRangeArrayFuture type. Its behavior is identical to
 	// fdb_future_get_keyrange_array.
-	fdb_error_t get(const FDBKeyRange** out_keyranges, int* out_count);
+	fdb_error_t get(FDBKeyRange const** out_keyranges, int* out_count);
 
 private:
 	friend class Transaction;
@@ -193,7 +193,7 @@ public:
 	// Call this function instead of fdb_result_get_keyvalue_array when using
 	// the KeyValueArrayREsult type. Its behavior is identical to
 	// fdb_result_get_keyvalue_array.
-	fdb_error_t get(const FDBKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+	fdb_error_t get(FDBKeyValue const** out_kv, int* out_count, fdb_bool_t* out_more);
 
 private:
 	friend class Transaction;
@@ -204,15 +204,15 @@ private:
 class Database final {
 public:
 	static Int64Future reboot_worker(FDBDatabase* db,
-	                                 const uint8_t* address,
+	                                 uint8_t const* address,
 	                                 int address_length,
 	                                 fdb_bool_t check,
 	                                 int duration);
-	static EmptyFuture force_recovery_with_data_loss(FDBDatabase* db, const uint8_t* dcid, int dcid_length);
+	static EmptyFuture force_recovery_with_data_loss(FDBDatabase* db, uint8_t const* dcid, int dcid_length);
 	static EmptyFuture create_snapshot(FDBDatabase* db,
-	                                   const uint8_t* uid,
+	                                   uint8_t const* uid,
 	                                   int uid_length,
-	                                   const uint8_t* snap_command,
+	                                   uint8_t const* snap_command,
 	                                   int snap_command_length);
 };
 
@@ -232,7 +232,7 @@ public:
 	void cancel();
 
 	// Wrapper around fdb_transaction_set_option.
-	fdb_error_t set_option(FDBTransactionOption option, const uint8_t* value, int value_length);
+	fdb_error_t set_option(FDBTransactionOption option, uint8_t const* value, int value_length);
 
 	// Wrapper around fdb_transaction_set_read_version.
 	void set_read_version(int64_t version);
@@ -258,7 +258,7 @@ public:
 
 	// Returns a future which will be set to the key in the database matching the
 	// passed key selector.
-	KeyFuture get_key(const uint8_t* key_name,
+	KeyFuture get_key(uint8_t const* key_name,
 	                  int key_name_length,
 	                  fdb_bool_t or_equal,
 	                  int offset,
@@ -268,11 +268,11 @@ public:
 	StringArrayFuture get_addresses_for_key(std::string_view key);
 
 	// Returns a future which will be set to an FDBKeyValue array.
-	KeyValueArrayFuture get_range(const uint8_t* begin_key_name,
+	KeyValueArrayFuture get_range(uint8_t const* begin_key_name,
 	                              int begin_key_name_length,
 	                              fdb_bool_t begin_or_equal,
 	                              int begin_offset,
-	                              const uint8_t* end_key_name,
+	                              uint8_t const* end_key_name,
 	                              int end_key_name_length,
 	                              fdb_bool_t end_or_equal,
 	                              int end_offset,
@@ -285,15 +285,15 @@ public:
 
 	// WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
 	// AND disabling read-your-writes. Returns a future which will be set to an FDBKeyValue array.
-	MappedKeyValueArrayFuture get_mapped_range(const uint8_t* begin_key_name,
+	MappedKeyValueArrayFuture get_mapped_range(uint8_t const* begin_key_name,
 	                                           int begin_key_name_length,
 	                                           fdb_bool_t begin_or_equal,
 	                                           int begin_offset,
-	                                           const uint8_t* end_key_name,
+	                                           uint8_t const* end_key_name,
 	                                           int end_key_name_length,
 	                                           fdb_bool_t end_or_equal,
 	                                           int end_offset,
-	                                           const uint8_t* mapper_name,
+	                                           uint8_t const* mapper_name,
 	                                           int mapper_name_length,
 	                                           int limit,
 	                                           int target_bytes,
@@ -324,7 +324,7 @@ public:
 	void set(std::string_view key, std::string_view value);
 
 	// Wrapper around fdb_transaction_atomic_op.
-	void atomic_op(std::string_view key, const uint8_t* param, int param_length, FDBMutationType operationType);
+	void atomic_op(std::string_view key, uint8_t const* param, int param_length, FDBMutationType operationType);
 
 	// Wrapper around fdb_transaction_get_committed_version.
 	fdb_error_t get_committed_version(int64_t* out_version);

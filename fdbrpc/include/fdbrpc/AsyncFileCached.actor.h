@@ -57,7 +57,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	    bi::list<EvictablePage, bi::member_hook<EvictablePage, bi::list_member_hook<>, &EvictablePage::member_hook>>;
 	enum CacheEvictionType { RANDOM = 0, LRU = 1 };
 
-	static CacheEvictionType evictionPolicyStringToEnum(const std::string& policy) {
+	static CacheEvictionType evictionPolicyStringToEnum(std::string const& policy) {
 		std::string cep = policy;
 		std::transform(cep.begin(), cep.end(), cep.begin(), ::tolower);
 		if (cep != "random" && cep != "lru")
@@ -131,7 +131,7 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 	int pageSize;
 	int64_t maxPages;
 	Int64MetricHandle cacheEvictions;
-	const CacheEvictionType cacheEvictionType;
+	CacheEvictionType const cacheEvictionType;
 };
 
 struct AFCPage;
@@ -186,7 +186,7 @@ public:
 			wait(self->currentTruncate);
 		++self->countFileCacheWrites;
 		++self->countCacheWrites;
-		Future<Void> f = read_write_impl<true>(self, static_cast<const uint8_t*>(data), length, offset);
+		Future<Void> f = read_write_impl<true>(self, static_cast<uint8_t const*>(data), length, offset);
 		if (!f.isReady()) {
 			++self->countFileCacheWritesBlocked;
 			++self->countCacheWritesBlocked;
@@ -299,7 +299,7 @@ private:
 	Int64MetricHandle countCacheReadBytes;
 
 	AsyncFileCached(Reference<IAsyncFile> uncached,
-	                const std::string& filename,
+	                std::string const& filename,
 	                int64_t length,
 	                Reference<EvictablePageCache> pageCache)
 	  : filename(filename), uncached(uncached), length(length), prevLength(length), pageCache(pageCache),
@@ -365,7 +365,7 @@ private:
 
 	template <bool writing>
 	static Future<Void> read_write_impl(AsyncFileCached* self,
-	                                    typename std::conditional_t<writing, const uint8_t*, uint8_t*> data,
+	                                    typename std::conditional_t<writing, uint8_t const*, uint8_t*> data,
 	                                    int length,
 	                                    int64_t offset);
 

@@ -34,7 +34,7 @@ struct VersionHistory {
 	Version version;
 	Standalone<VectorRef<MutationRef>> mutations;
 
-	bool operator<(const VersionHistory& other) const { return version < other.version; }
+	bool operator<(VersionHistory const& other) const { return version < other.version; }
 
 	int expectedSize() const { return sizeof(version) + mutations.expectedSize(); }
 

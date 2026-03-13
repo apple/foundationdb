@@ -21,7 +21,7 @@
 #include "fdbclient/JsonBuilder.h"
 #include <iostream>
 
-JsonBuilderObject JsonBuilder::makeMessage(const char* name, const char* description) {
+JsonBuilderObject JsonBuilder::makeMessage(char const* name, char const* description) {
 	JsonBuilderObject out;
 	out["name"] = name;
 	out["description"] = description;
@@ -30,12 +30,12 @@ JsonBuilderObject JsonBuilder::makeMessage(const char* name, const char* descrip
 
 // dst must have at least len + 3 bytes available (".e" becomes "0.0e0")
 // Returns bytes written, or 0 on failure.
-int JsonBuilder::coerceAsciiNumberToJSON(const char* s, int len, char* dst) {
+int JsonBuilder::coerceAsciiNumberToJSON(char const* s, int len, char* dst) {
 	if (len == 0) {
 		return 0;
 	}
 
-	const char* send = s + len;
+	char const* send = s + len;
 	char* wptr = dst;
 	bool dot = false;
 

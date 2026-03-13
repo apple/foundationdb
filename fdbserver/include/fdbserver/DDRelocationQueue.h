@@ -80,17 +80,17 @@ public:
 	bool isRestore() const;
 	Optional<KeyRange> getParentRange() const;
 
-	bool operator>(const RelocateData& rhs) const;
-	bool operator==(const RelocateData& rhs) const;
-	bool operator!=(const RelocateData& rhs) const;
+	bool operator>(RelocateData const& rhs) const;
+	bool operator==(RelocateData const& rhs) const;
+	bool operator!=(RelocateData const& rhs) const;
 };
 
 struct RelocateDecision {
-	const RelocateData& rd;
-	const std::vector<UID>& destIds;
-	const std::vector<UID>& extraIds;
-	const StorageMetrics& metrics;
-	const Optional<StorageMetrics>& parentMetrics;
+	RelocateData const& rd;
+	std::vector<UID> const& destIds;
+	std::vector<UID> const& extraIds;
+	StorageMetrics const& metrics;
+	Optional<StorageMetrics> const& parentMetrics;
 };
 
 // DDQueue uses Busyness to throttle too many movement to/from a same server
@@ -123,7 +123,7 @@ struct DDQueueInitParams {
 
 // DDQueue receives RelocateShard from any other DD components and schedules the actual movements
 class DDQueue : public IDDRelocationQueue, public ReferenceCounted<DDQueue> {
-	const DDEnabledState* ddEnabledState = nullptr;
+	DDEnabledState const* ddEnabledState = nullptr;
 
 public:
 	friend struct DDQueueImpl;
@@ -151,11 +151,11 @@ public:
 
 		std::unordered_map<UID, ReasonItem> counter;
 
-		std::string toString(const Item& item) const {
+		std::string toString(Item const& item) const {
 			return format("%d %d %d %d", item[0], item[1], item[2], item[3]);
 		}
 
-		void traceReasonItem(TraceEvent* event, const ReasonItem& item) const {
+		void traceReasonItem(TraceEvent* event, ReasonItem const& item) const {
 			for (int i = 0; i < item.size(); ++i) {
 				if (std::accumulate(item[i].cbegin(), item[i].cend(), 0) > 0) {
 					// "PQSD" corresponding to CounterType
@@ -164,11 +164,11 @@ public:
 			}
 		}
 
-		bool countNonZero(const ReasonItem& item, CountType type) const {
-			return std::any_of(item.cbegin(), item.cend(), [type](const Item& item) { return item[(int)type] > 0; });
+		bool countNonZero(ReasonItem const& item, CountType type) const {
+			return std::any_of(item.cbegin(), item.cend(), [type](Item const& item) { return item[(int)type] > 0; });
 		}
 
-		void increase(const UID& id, RelocateReason reason, CountType type) {
+		void increase(UID const& id, RelocateReason reason, CountType type) {
 			int idx = (int)(reason);
 			// if (idx < 0 || idx >= RelocateReason::typeCount()) {
 			// 	TraceEvent(SevWarnAlways, "ServerCounterDebug").detail("Reason", reason.toString());
@@ -198,17 +198,17 @@ public:
 	public:
 		void clear() { counter.clear(); }
 
-		int get(const UID& id, RelocateReason reason, CountType type) const {
+		int get(UID const& id, RelocateReason reason, CountType type) const {
 			return counter.at(id)[(int)reason][(int)type];
 		}
 
-		void increaseForTeam(const std::vector<UID>& ids, RelocateReason reason, CountType type) {
+		void increaseForTeam(std::vector<UID> const& ids, RelocateReason reason, CountType type) {
 			for (auto& id : ids) {
 				increase(id, reason, type);
 			}
 		}
 
-		void traceAll(const UID& debugId = UID()) const {
+		void traceAll(UID const& debugId = UID()) const {
 			auto it = counter.cbegin();
 			int count = 0;
 			for (; count < SERVER_KNOBS->DD_QUEUE_COUNTER_MAX_LOG && it != counter.cend(); ++count, ++it) {
@@ -332,40 +332,40 @@ public:
 	// This function cannot handle relocation requests which split a shard into three pieces
 	void queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFrom);
 
-	void completeSourceFetch(const RelocateData& results);
+	void completeSourceFetch(RelocateData const& results);
 
-	void logRelocation(const RelocateData& rd, const char* title);
+	void logRelocation(RelocateData const& rd, char const* title);
 
-	void launchQueuedWork(KeyRange keys, const DDEnabledState* ddEnabledState);
+	void launchQueuedWork(KeyRange keys, DDEnabledState const* ddEnabledState);
 
-	void launchQueuedWork(const std::set<UID>& serversToLaunchFrom, const DDEnabledState* ddEnabledState);
+	void launchQueuedWork(std::set<UID> const& serversToLaunchFrom, DDEnabledState const* ddEnabledState);
 
-	void launchQueuedWork(RelocateData launchData, const DDEnabledState* ddEnabledState);
+	void launchQueuedWork(RelocateData launchData, DDEnabledState const* ddEnabledState);
 
 	// For each relocateData rd in the queue, check if there exist inflight relocate data whose keyrange is overlapped
 	// with rd. If there exist, cancel them by cancelling their actors and reducing the src servers' busyness of those
 	// canceled inflight relocateData. Launch the relocation for the rd.
 	void launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>> combined,
-	                      const DDEnabledState* ddEnabledState);
+	                      DDEnabledState const* ddEnabledState);
 
 	int getHighestPriorityRelocation() const;
 
 	// return true if the servers are throttled as source for read rebalance
-	bool timeThrottle(const std::vector<UID>& ids) const;
+	bool timeThrottle(std::vector<UID> const& ids) const;
 
-	void updateLastAsSource(const std::vector<UID>& ids, double t = now());
+	void updateLastAsSource(std::vector<UID> const& ids, double t = now());
 
 	// Schedules cancellation of a data move.
-	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDEnabledState* ddEnabledState);
+	void enqueueCancelledDataMove(UID dataMoveId, KeyRange range, DDEnabledState const* ddEnabledState);
 
 	Future<Void> periodicalRefreshCounter();
 
 	int getUnhealthyRelocationCount() const override;
 
-	Future<SrcDestTeamPair> getSrcDestTeams(const int& teamCollectionIndex,
-	                                        const GetTeamRequest& srcReq,
-	                                        const GetTeamRequest& destReq,
-	                                        const int& priority,
+	Future<SrcDestTeamPair> getSrcDestTeams(int const& teamCollectionIndex,
+	                                        GetTeamRequest const& srcReq,
+	                                        GetTeamRequest const& destReq,
+	                                        int const& priority,
 	                                        TraceEvent* traceEvent);
 
 	Future<bool> rebalanceReadLoad(DataMovementReason moveReason,
@@ -384,7 +384,7 @@ public:
 	                        Reference<AsyncVar<bool>> processingUnhealthy,
 	                        Reference<AsyncVar<bool>> processingWiggle,
 	                        FutureStream<Promise<int>> getUnhealthyRelocationCount,
-	                        const DDEnabledState* ddEnabledState);
+	                        DDEnabledState const* ddEnabledState);
 
 	explicit DDQueue(DDQueueInitParams const& params);
 };

@@ -55,7 +55,7 @@ struct SpanContextMessage {
 	static bool startsSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_SpanContextMessage; }
 	template <class Ar>
 	static bool isNextIn(Ar& ar) {
-		return startsSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
+		return startsSpanContextMessage(*(uint8_t const*)ar.peekBytes(1));
 	}
 };
 

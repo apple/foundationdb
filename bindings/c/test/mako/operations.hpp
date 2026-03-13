@@ -88,7 +88,7 @@ struct Operation {
 	bool needsCommit() const noexcept { return needs_commit_; }
 };
 
-extern const std::array<Operation, MAX_OP> opTable;
+extern std::array<Operation, MAX_OP> const opTable;
 
 force_inline char const* getOpName(int ops_code) {
 	if (ops_code >= 0 && ops_code < MAX_OP)
@@ -99,18 +99,18 @@ force_inline char const* getOpName(int ops_code) {
 struct OpIterator {
 	int op, count, step;
 
-	bool operator==(const OpIterator& other) const noexcept {
+	bool operator==(OpIterator const& other) const noexcept {
 		return op == other.op && count == other.count && step == other.step;
 	}
 
-	bool operator!=(const OpIterator& other) const noexcept { return !(*this == other); }
+	bool operator!=(OpIterator const& other) const noexcept { return !(*this == other); }
 
 	StepKind stepKind() const noexcept { return opTable[op].stepKind(step); }
 
 	char const* opName() const noexcept { return getOpName(op); }
 };
 
-constexpr const OpIterator OpEnd = OpIterator{ MAX_OP, -1, -1 };
+constexpr OpIterator const OpEnd = OpIterator{ MAX_OP, -1, -1 };
 
 force_inline OpIterator getOpBegin(Arguments const& args) noexcept {
 	for (auto op = 0; op < MAX_OP; op++) {

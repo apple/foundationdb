@@ -25,7 +25,7 @@ namespace FdbApiTester {
 
 class CancelTransactionWorkload : public ApiWorkload {
 public:
-	CancelTransactionWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
+	CancelTransactionWorkload(WorkloadConfig const& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType { OP_CANCEL_GET, OP_CANCEL_AFTER_FIRST_GET, OP_LAST = OP_CANCEL_AFTER_FIRST_GET };
@@ -40,7 +40,7 @@ private:
 		execTransaction(
 		    [keys](auto ctx) {
 			    std::vector<fdb::Future> futures;
-			    for (const auto& key : *keys) {
+			    for (auto const& key : *keys) {
 				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    ctx->done();
@@ -59,7 +59,7 @@ private:
 		execTransaction(
 		    [this, keys, tenantId](auto ctx) {
 			    std::vector<fdb::Future> futures;
-			    for (const auto& key : *keys) {
+			    for (auto const& key : *keys) {
 				    futures.push_back(ctx->tx().get(key, false).eraseType());
 			    }
 			    for (int i = 0; i < keys->size(); i++) {

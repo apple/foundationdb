@@ -27,14 +27,14 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
-const std::string simulationBulkLoadFolder = joinPath("simfdb", "bulkload");
+std::string const simulationBulkLoadFolder = joinPath("simfdb", "bulkload");
 
 struct BulkLoadTaskTestUnit {
 	BulkLoadTaskTestUnit() = default;
 
 	size_t getTotalBytes() const {
 		size_t bytes = 0;
-		for (const auto& kv : data) {
+		for (auto const& kv : data) {
 			bytes = bytes + kv.expectedSize(); // This size is different from size used by fetchKeys
 		}
 		return bytes;
@@ -55,7 +55,7 @@ struct BulkLoadTaskTestUnit {
 
 struct BulkLoading : TestWorkload {
 	static constexpr auto NAME = "BulkLoadingWorkload";
-	const bool enabled = true;
+	bool const enabled = true;
 	bool pass = true;
 	bool debugging = false;
 	bool backgroundTrafficEnabled = deterministicRandom()->coinflip();
@@ -286,8 +286,8 @@ struct BulkLoading : TestWorkload {
 		co_return true;
 	}
 
-	bool keyContainedInRanges(const Key& key, const std::vector<KeyRange>& ranges) {
-		for (const auto& range : ranges) {
+	bool keyContainedInRanges(Key const& key, std::vector<KeyRange> const& ranges) {
+		for (auto const& range : ranges) {
 			if (range.contains(key)) {
 				return true;
 			}
@@ -362,7 +362,7 @@ struct BulkLoading : TestWorkload {
 			keys.insert(key);
 		}
 		std::vector<KeyValue> res;
-		for (const auto& key : keys) {
+		for (auto const& key : keys) {
 			Value val = self->getRandomStringRef();
 			res.push_back(Standalone(KeyValueRef(key, val)));
 		}
@@ -370,9 +370,9 @@ struct BulkLoading : TestWorkload {
 	}
 
 	BulkLoadFileSet generateSSTFiles(BulkLoading* self, std::string rootPath, BulkLoadTaskTestUnit task) {
-		const std::string dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
-		const std::string dataFileName = dataFileNameBase + "-data.sst";
-		const std::string sampleFileName = dataFileNameBase + "-sample.sst";
+		std::string const dataFileNameBase = deterministicRandom()->randomUniqueID().toString();
+		std::string const dataFileName = dataFileNameBase + "-data.sst";
+		std::string const sampleFileName = dataFileNameBase + "-sample.sst";
 		BulkLoadFileSet res(rootPath, "", generateEmptyManifestFileName(), dataFileName, "", BulkLoadChecksum());
 		std::string folder = res.getFolder();
 		platform::eraseDirectoryRecursive(folder);
@@ -381,7 +381,7 @@ struct BulkLoading : TestWorkload {
 		std::unique_ptr<IRocksDBSstFileWriter> sstWriter = newRocksDBSstFileWriter();
 		sstWriter->open(abspath(dataFile));
 		std::vector<KeyValue> bytesSample;
-		for (const auto& kv : task.data) {
+		for (auto const& kv : task.data) {
 			ByteSampleInfo sampleInfo = isKeyValueInSample(kv);
 			if (sampleInfo.inSample) {
 				Key sampleKey = kv.key;
@@ -404,7 +404,7 @@ struct BulkLoading : TestWorkload {
 			e.detail("Task", task.bulkLoadTask.toString());
 			e.detail("LoadKeyCount", task.data.size());
 			int counter = 0;
-			for (const auto& kv : task.data) {
+			for (auto const& kv : task.data) {
 				e.detail("Key" + std::to_string(counter), kv.key);
 				e.detail("Val" + std::to_string(counter), kv.value);
 				counter++;
@@ -416,7 +416,7 @@ struct BulkLoading : TestWorkload {
 		std::string bytesSampleFile = res.getBytesSampleFileFullPath();
 		if (bytesSample.size() > 0) {
 			sstWriter->open(abspath(bytesSampleFile));
-			for (const auto& kv : bytesSample) {
+			for (auto const& kv : bytesSample) {
 				sstWriter->write(kv.key, kv.value);
 			}
 			TraceEvent("BulkLoadingByteSampleProduced")
@@ -434,9 +434,9 @@ struct BulkLoading : TestWorkload {
 		return res;
 	}
 
-	std::vector<Key> getAllKeys(const std::vector<KeyValue>& kvs) {
+	std::vector<Key> getAllKeys(std::vector<KeyValue> const& kvs) {
 		std::vector<Key> res;
-		for (const auto& kv : kvs) {
+		for (auto const& kv : kvs) {
 			res.push_back(kv.key);
 		}
 		return res;
@@ -482,7 +482,7 @@ struct BulkLoading : TestWorkload {
 				e.setMaxEventLength(-1);
 				e.setMaxFieldLength(-1);
 				int counter = 0;
-				for (const auto& kv : kvs) {
+				for (auto const& kv : kvs) {
 					e.detail("Key" + std::to_string(counter), kv.key);
 					e.detail("Val" + std::to_string(counter), kv.value);
 					counter++;
@@ -491,7 +491,7 @@ struct BulkLoading : TestWorkload {
 				e1.setMaxEventLength(-1);
 				e1.setMaxFieldLength(-1);
 				counter = 0;
-				for (const auto& kv : kvsdb) {
+				for (auto const& kv : kvsdb) {
 					e1.detail("Key" + std::to_string(counter), kv.key);
 					e1.detail("Val" + std::to_string(counter), kv.value);
 					counter++;
@@ -550,7 +550,7 @@ struct BulkLoading : TestWorkload {
 		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 1));
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
-		for (const auto& errorTask : errorTasks) {
+		for (auto const& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange());
 		}
 		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
@@ -562,7 +562,7 @@ struct BulkLoading : TestWorkload {
 		std::vector<KeyValue> kvs;
 		for (int j = 0; j < taskUnits.size(); j++) {
 			bool rangeTaskError = false;
-			for (const auto& errorRange : errorRanges) {
+			for (auto const& errorRange : errorRanges) {
 				if (taskUnits[j].getRange() == errorRange) {
 					rangeTaskError = true;
 					break;
@@ -598,7 +598,7 @@ struct BulkLoading : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				for (const auto& kv : kvs) {
+				for (auto const& kv : kvs) {
 					tr.set(kv.key, kv.value);
 				}
 				co_await tr.commit();
@@ -661,7 +661,7 @@ struct BulkLoading : TestWorkload {
 		}
 		// Wait until all tasks have completed
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
-		for (const auto& errorTask : errorTasks) {
+		for (auto const& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange()); // for any error range, do not check data
 		}
 		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 0)); // trigger DD restart
@@ -686,7 +686,7 @@ struct BulkLoading : TestWorkload {
 			}
 			// Check if the range is error
 			bool taskError = false;
-			for (const auto& errorRange : errorRanges) {
+			for (auto const& errorRange : errorRanges) {
 				if (errorRange == range.range()) {
 					taskError = true;
 				}

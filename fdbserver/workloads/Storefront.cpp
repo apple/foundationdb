@@ -86,7 +86,7 @@ struct StorefrontWorkload : TestWorkload {
 	    return x;
 	}*/
 
-	static inline int valueToInt(const StringRef& v) {
+	static inline int valueToInt(StringRef const& v) {
 		int x = 0;
 		sscanf(v.toString().c_str(), "%d", &x);
 		return x;

@@ -52,8 +52,8 @@ struct ConsistencyScanInterface {
 	void initEndpoints() {}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return waitFailure.getEndpoint().getPrimaryAddress(); }
-	bool operator==(const ConsistencyScanInterface& r) const { return id() == r.id(); }
-	bool operator!=(const ConsistencyScanInterface& r) const { return !(*this == r); }
+	bool operator==(ConsistencyScanInterface const& r) const { return id() == r.id(); }
+	bool operator!=(ConsistencyScanInterface const& r) const { return !(*this == r); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {

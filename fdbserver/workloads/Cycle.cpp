@@ -101,11 +101,11 @@ struct CycleWorkload : TestWorkload, Arena {
 		Key endKey = beginKey.withSuffix(" end"_sr);
 		return KeyRangeRef(beginKey, endKey);
 	}
-	int fromValue(const ValueRef& v) { return testKeyToDouble(v, keyPrefix); }
+	int fromValue(ValueRef const& v) { return testKeyToDouble(v, keyPrefix); }
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(key(n), value((n + 1) % nodeCount)); }
 
-	void badRead(const char* name, int r, Transaction& tr) {
+	void badRead(char const* name, int r, Transaction& tr) {
 		TraceEvent(SevError, "CycleBadRead")
 		    .detail(name, r)
 		    .detail("Key", printable(key(r)))
@@ -186,7 +186,7 @@ struct CycleWorkload : TestWorkload, Arena {
 		}
 	}
 
-	void logTestData(const VectorRef<KeyValueRef>& data) {
+	void logTestData(VectorRef<KeyValueRef> const& data) {
 		TraceEvent("TestFailureDetail").log();
 		int index = 0;
 		for (auto& entry : data) {
@@ -198,7 +198,7 @@ struct CycleWorkload : TestWorkload, Arena {
 		}
 	}
 
-	bool cycleCheckData(const VectorRef<KeyValueRef>& data, Version v) {
+	bool cycleCheckData(VectorRef<KeyValueRef> const& data, Version v) {
 		if (data.size() != nodeCount) {
 			logTestData(data);
 			TraceEvent(SevError, "TestFailure")

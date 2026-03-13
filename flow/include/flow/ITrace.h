@@ -29,8 +29,8 @@ struct ITraceLogWriter {
 	virtual void open() = 0;
 	virtual void roll() = 0;
 	virtual void close() = 0;
-	virtual void write(const std::string&) = 0;
-	virtual void write(const StringRef&) = 0;
+	virtual void write(std::string const&) = 0;
+	virtual void write(StringRef const&) = 0;
 	virtual void sync() = 0;
 
 	virtual void addref() = 0;
@@ -40,10 +40,10 @@ struct ITraceLogWriter {
 class TraceEventFields;
 
 struct ITraceLogFormatter {
-	virtual const char* getExtension() const = 0;
-	virtual const char* getHeader() const = 0; // Called when starting a new file
-	virtual const char* getFooter() const = 0; // Called when ending a file
-	virtual std::string formatEvent(const TraceEventFields&) const = 0; // Called for each event
+	virtual char const* getExtension() const = 0;
+	virtual char const* getHeader() const = 0; // Called when starting a new file
+	virtual char const* getFooter() const = 0; // Called when ending a file
+	virtual std::string formatEvent(TraceEventFields const&) const = 0; // Called for each event
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

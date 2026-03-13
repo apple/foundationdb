@@ -78,11 +78,11 @@ std::string addPrefix(std::string prefix, std::string lines) {
 // Classes can add compatibility by either specializing toString<T> or implementing
 //   std::string toString() const;
 template <typename T>
-std::string toString(const T& o) {
+std::string toString(T const& o) {
 	return o.toString();
 }
 
-std::string toString(const std::string& s) {
+std::string toString(std::string const& s) {
 	return s;
 }
 
@@ -109,12 +109,12 @@ std::string toString(bool b) {
 }
 
 template <typename T>
-std::string toString(const Standalone<T>& s) {
+std::string toString(Standalone<T> const& s) {
 	return toString((T)s);
 }
 
 template <typename T>
-std::string toString(const T* begin, const T* end) {
+std::string toString(T const* begin, T const* end) {
 	std::string r = "{";
 
 	bool comma = false;
@@ -132,20 +132,20 @@ std::string toString(const T* begin, const T* end) {
 }
 
 template <typename T>
-std::string toString(const std::vector<T>& v) {
+std::string toString(std::vector<T> const& v) {
 	return toString(&v.front(), &v.back() + 1);
 }
 
 template <typename T>
-std::string toString(const VectorRef<T>& v) {
+std::string toString(VectorRef<T> const& v) {
 	return toString(v.begin(), v.end());
 }
 
 template <typename K, typename V>
-std::string toString(const std::map<K, V>& m) {
+std::string toString(std::map<K, V> const& m) {
 	std::string r = "{";
 	bool comma = false;
-	for (const auto& [key, value] : m) {
+	for (auto const& [key, value] : m) {
 		if (comma) {
 			r += ", ";
 		} else {
@@ -160,10 +160,10 @@ std::string toString(const std::map<K, V>& m) {
 }
 
 template <typename K, typename V>
-std::string toString(const std::unordered_map<K, V>& u) {
+std::string toString(std::unordered_map<K, V> const& u) {
 	std::string r = "{";
 	bool comma = false;
-	for (const auto& n : u) {
+	for (auto const& n : u) {
 		if (comma) {
 			r += ", ";
 		} else {
@@ -178,7 +178,7 @@ std::string toString(const std::unordered_map<K, V>& u) {
 }
 
 template <typename T>
-std::string toString(const Optional<T>& o) {
+std::string toString(Optional<T> const& o) {
 	if (o.present()) {
 		return toString(o.get());
 	}
@@ -186,7 +186,7 @@ std::string toString(const Optional<T>& o) {
 }
 
 template <typename F, typename S>
-std::string toString(const std::pair<F, S>& o) {
+std::string toString(std::pair<F, S> const& o) {
 	return format("{%s, %s}", toString(o.first).c_str(), toString(o.second).c_str());
 }
 
@@ -240,24 +240,24 @@ constexpr static int ioMaxPriority = 3;
 //  - must be supported by toString(object) (see above)
 template <typename T, typename Enable = void>
 struct FIFOQueueCodec {
-	static T readFromBytes(const uint8_t* src, int& bytesRead) {
+	static T readFromBytes(uint8_t const* src, int& bytesRead) {
 		T x;
 		bytesRead = x.readFromBytes(src);
 		return x;
 	}
-	static int bytesNeeded(const T& x) { return x.bytesNeeded(); }
-	static int writeToBytes(uint8_t* dst, const T& x) { return x.writeToBytes(dst); }
+	static int bytesNeeded(T const& x) { return x.bytesNeeded(); }
+	static int writeToBytes(uint8_t* dst, T const& x) { return x.writeToBytes(dst); }
 };
 
 template <typename T>
 struct FIFOQueueCodec<T, typename std::enable_if<std::is_trivially_copyable<T>::value>::type> {
 	static_assert(std::is_trivially_copyable<T>::value);
-	static T readFromBytes(const uint8_t* src, int& bytesRead) {
+	static T readFromBytes(uint8_t const* src, int& bytesRead) {
 		bytesRead = sizeof(T);
 		return *(T*)src;
 	}
-	static int bytesNeeded(const T& x) { return sizeof(T); }
-	static int writeToBytes(uint8_t* dst, const T& x) {
+	static int bytesNeeded(T const& x) { return sizeof(T); }
+	static int writeToBytes(uint8_t* dst, T const& x) {
 		*(T*)dst = x;
 		return sizeof(T);
 	}
@@ -329,7 +329,7 @@ public:
 		PhysicalPageID extentEndPageID;
 		uint16_t itemSpace;
 		// Get pointer to data after page header
-		const uint8_t* begin() const { return (const uint8_t*)(this + 1); }
+		uint8_t const* begin() const { return (uint8_t const*)(this + 1); }
 		uint8_t* begin() { return (uint8_t*)(this + 1); }
 	};
 #pragma pack(pop)
@@ -423,7 +423,7 @@ public:
 		}
 
 		// Since cursors can have async operations pending which modify their state they can't be copied cleanly
-		Cursor(const Cursor& other) = delete;
+		Cursor(Cursor const& other) = delete;
 
 		~Cursor() { cancel(); }
 
@@ -434,7 +434,7 @@ public:
 		}
 
 		// A read cursor can be initialized from a pop cursor
-		void initReadOnly(const Cursor& c, bool readExtents = false) {
+		void initReadOnly(Cursor const& c, bool readExtents = false) {
 			ASSERT(c.mode == READONLY || c.mode == POP);
 			init(c.queue, READONLY, c.pageID, readExtents, false, c.endPageID, c.offset);
 		}
@@ -725,7 +725,7 @@ public:
 			return Void();
 		}
 
-		void write(const T& item) {
+		void write(T const& item) {
 			// Start the write.  It may complete immediately if no IO was being waited on
 			Future<Void> w = write_impl(this, item);
 			// If it didn't complete immediately, then store the future in operation
@@ -784,7 +784,7 @@ public:
 		// Otherwise, return nothing and do not advance the cursor.
 		// If locked is true, this call owns the mutex, which would have been locked by readNext() before a recursive
 		// call. See waitThenReadNext() for more detail.
-		Future<Optional<T>> readNext(const Optional<T>& inclusiveMaximum = {}, FlowMutex::Lock* lock = nullptr) {
+		Future<Optional<T>> readNext(Optional<T> const& inclusiveMaximum = {}, FlowMutex::Lock* lock = nullptr) {
 			if ((mode != POP && mode != READONLY) || pageID == invalidPhysicalPageID || pageID == endPageID) {
 				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", toString().c_str());
 				return Optional<T>();
@@ -827,7 +827,7 @@ public:
 			debug_printf("FIFOQueue::Cursor(%s) readNext reading at current position\n", toString().c_str());
 			ASSERT(offset < p->endOffset);
 			int bytesRead;
-			const T result = Codec::readFromBytes(p->begin() + offset, bytesRead);
+			T const result = Codec::readFromBytes(p->begin() + offset, bytesRead);
 
 			if (inclusiveMaximum.present() && inclusiveMaximum.get() < result) {
 				debug_printf("FIFOQueue::Cursor(%s) not popping %s, exceeds upper bound %s\n",
@@ -903,8 +903,8 @@ public:
 		newTailPage.cancel();
 	}
 
-	FIFOQueue(const FIFOQueue& other) = delete;
-	void operator=(const FIFOQueue& rhs) = delete;
+	FIFOQueue(FIFOQueue const& other) = delete;
+	void operator=(FIFOQueue const& rhs) = delete;
 
 	// Create a new queue at newPageID
 	void create(IPager2* p, PhysicalPageID newPageID, std::string queueName, QueueID id, bool extent) {
@@ -930,7 +930,7 @@ public:
 	}
 
 	// Load an existing queue from its queue state
-	void recover(IPager2* p, const QueueState& qs, std::string queueName, bool loadExtents = true) {
+	void recover(IPager2* p, QueueState const& qs, std::string queueName, bool loadExtents = true) {
 		debug_printf("FIFOQueue(%s) recover from queue state %s\n", queueName.c_str(), qs.toString().c_str());
 		pager = p;
 		pagerError = pager->getError();
@@ -1035,7 +1035,7 @@ public:
 					throw;
 				}
 
-				const QueuePage* p = (const QueuePage*)(page->data());
+				QueuePage const* p = (QueuePage const*)(page->data());
 				int bytesRead;
 
 				// Now loop over all entries inside the current page
@@ -1153,12 +1153,12 @@ public:
 		return s;
 	}
 
-	void pushBack(const T& item) {
+	void pushBack(T const& item) {
 		debug_printf("FIFOQueue(%s) pushBack(%s)\n", name.c_str(), toString(item).c_str());
 		tailWriter.write(item);
 	}
 
-	void pushFront(const T& item) {
+	void pushFront(T const& item) {
 		debug_printf("FIFOQueue(%s) pushFront(%s)\n", name.c_str(), toString(item).c_str());
 		headWriter.write(item);
 	}
@@ -1340,7 +1340,7 @@ public:
 	// For debugging
 	std::string name;
 
-	void toTraceEvent(TraceEvent& e, const char* prefix) const {
+	void toTraceEvent(TraceEvent& e, char const* prefix) const {
 		e.detail(format("%sRecords", prefix), numEntries);
 		e.detail(format("%sPages", prefix), numPages);
 		e.detail(format("%sRecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
@@ -1372,11 +1372,11 @@ struct RedwoodMetrics {
 		std::string toString(unsigned int level, double elapsed) const {
 			std::string result;
 
-			const auto& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
+			auto const& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
 			PagerEvents prevEvent = pairs.front().first;
 			std::string lineStart = (level == 0) ? "" : "\t";
 
-			for (const auto& p : pairs) {
+			for (auto const& p : pairs) {
 				if (p.first != prevEvent) {
 					result += "\n";
 					result += lineStart;
@@ -1394,8 +1394,8 @@ struct RedwoodMetrics {
 		}
 
 		void toTraceEvent(TraceEvent* t, unsigned int level) const {
-			const auto& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
-			for (const auto& p : pairs) {
+			auto const& pairs = (level == 0 ? L0PossibleEventReasonPairs : possibleEventReasonPairs);
+			for (auto const& p : pairs) {
 				std::string name =
 				    format(level == 0 ? "" : "L%d", level) +
 				    format("%s%s", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
@@ -1797,7 +1797,7 @@ public:
 
 	// Get the object for i if it exists, else return nullptr.
 	// If the object exists, its eviction order will NOT change as this is not a cache hit.
-	ObjectType* getIfExists(const IndexType& index) {
+	ObjectType* getIfExists(IndexType const& index) {
 		auto i = cache.find(index);
 		if (i != cache.end()) {
 			++i->second.hits;
@@ -1807,7 +1807,7 @@ public:
 	}
 
 	// If index is in cache and not on the prioritized eviction order list, move it there.
-	void prioritizeEviction(const IndexType& index) {
+	void prioritizeEviction(IndexType const& index) {
 		auto i = cache.find(index);
 		if (i != cache.end() && i->second.ownedByEvictor) {
 			pEvictor->moveOut(i->second, prioritizedEvictions);
@@ -1818,7 +1818,7 @@ public:
 	// After a get(), the object for i is the last in evictionOrder.
 	// If noHit is set, do not consider this access to be cache hit if the object is present
 	// If noMiss is set, do not consider this access to be a cache miss if the object is not present
-	ObjectType& get(const IndexType& index, int size, bool noHit = false) {
+	ObjectType& get(IndexType const& index, int size, bool noHit = false) {
 		Entry& entry = cache[index];
 
 		// If entry is linked into an evictionOrder
@@ -1948,7 +1948,7 @@ public:
 		Version version;
 		LogicalPageID pageID;
 
-		bool operator<(const DelayedFreePage& rhs) const { return version < rhs.version; }
+		bool operator<(DelayedFreePage const& rhs) const { return version < rhs.version; }
 
 		std::string toString() const {
 			return format("DelayedFreePage{%s @%" PRId64 "}", ::toString(pageID).c_str(), version);
@@ -1978,7 +1978,7 @@ public:
 
 		Type getType() const { return getTypeOf(newPageID); }
 
-		bool operator<(const RemappedPage& rhs) const { return version < rhs.version; }
+		bool operator<(RemappedPage const& rhs) const { return version < rhs.version; }
 
 		std::string toString() const {
 			return format("RemappedPage(%c: %s -> %s %s}",
@@ -1993,7 +1993,7 @@ public:
 		QueueID queueID;
 		LogicalPageID extentID;
 
-		bool operator<(const ExtentUsedListEntry& rhs) const { return queueID < rhs.queueID; }
+		bool operator<(ExtentUsedListEntry const& rhs) const { return queueID < rhs.queueID; }
 
 		std::string toString() const {
 			return format("ExtentUsedListEntry{%s @%s}", ::toString(extentID).c_str(), ::toString(queueID).c_str());
@@ -3884,9 +3884,9 @@ private:
 	};
 
 	struct SnapshotEntryLessThanVersion {
-		bool operator()(Version v, const SnapshotEntry& snapshot) { return v < snapshot.version; }
+		bool operator()(Version v, SnapshotEntry const& snapshot) { return v < snapshot.version; }
 
-		bool operator()(const SnapshotEntry& snapshot, Version v) { return snapshot.version < v; }
+		bool operator()(SnapshotEntry const& snapshot, Version v) { return snapshot.version < v; }
 	};
 
 	// TODO: Better data structure
@@ -3903,7 +3903,7 @@ public:
 	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version) : pager(pager), version(version), metaKey(meta) {}
 	~DWALPagerSnapshot() override {}
 
-	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
+	Future<Reference<ArenaPage const>> getPhysicalPage(PagerEventReasons reason,
 	                                                   unsigned int level,
 	                                                   LogicalPageID pageID,
 	                                                   int priority,
@@ -3911,10 +3911,10 @@ public:
 	                                                   bool noHit) override {
 
 		return map(pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit),
-		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
+		           [=](Reference<ArenaPage> p) { return Reference<ArenaPage const>(std::move(p)); });
 	}
 
-	Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
+	Future<Reference<ArenaPage const>> getMultiPhysicalPage(PagerEventReasons reason,
 	                                                        unsigned int level,
 	                                                        VectorRef<PhysicalPageID> pageIDs,
 	                                                        int priority,
@@ -3922,7 +3922,7 @@ public:
 	                                                        bool noHit) override {
 
 		return map(pager->readMultiPage(reason, level, pageIDs, priority, cacheable, noHit),
-		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
+		           [=](Reference<ArenaPage> p) { return Reference<ArenaPage const>(std::move(p)); });
 	}
 
 	Key getMetaKey() const override { return metaKey; }
@@ -3973,7 +3973,7 @@ struct SplitStringRef {
 
 	SplitStringRef(StringRef a = StringRef(), StringRef b = StringRef()) : a(a), b(b) {}
 
-	SplitStringRef(Arena& arena, const SplitStringRef& toCopy) : a(toStringRef(arena)), b() {}
+	SplitStringRef(Arena& arena, SplitStringRef const& toCopy) : a(toStringRef(arena)), b() {}
 
 	SplitStringRef prefix(int len) const {
 		if (len <= a.size()) {
@@ -4004,12 +4004,12 @@ struct SplitStringRef {
 	std::string toHexString() const { return format("%s%s", a.toHexString().c_str(), b.toHexString().c_str()); }
 
 	struct const_iterator {
-		const uint8_t* ptr;
-		const uint8_t* end{ nullptr };
-		const uint8_t* next{ nullptr };
+		uint8_t const* ptr;
+		uint8_t const* end{ nullptr };
+		uint8_t const* next{ nullptr };
 
-		inline bool operator==(const const_iterator& rhs) const { return ptr == rhs.ptr; }
-		inline bool operator!=(const const_iterator& rhs) const { return !(*this == rhs); }
+		inline bool operator==(const_iterator const& rhs) const { return ptr == rhs.ptr; }
+		inline bool operator!=(const_iterator const& rhs) const { return !(*this == rhs); }
 
 		inline const_iterator& operator++() {
 			++ptr;
@@ -4035,7 +4035,7 @@ struct SplitStringRef {
 	inline const_iterator end() const { return { b.end() }; }
 
 	template <typename StringT>
-	int compare(const StringT& rhs) const {
+	int compare(StringT const& rhs) const {
 		auto j = begin();
 		auto k = rhs.begin();
 		auto jEnd = end();
@@ -4073,7 +4073,7 @@ struct RedwoodRecordRef {
 
 	RedwoodRecordRef(KeyRef key = KeyRef(), Optional<ValueRef> value = {}) : key(key), value(value) {}
 
-	RedwoodRecordRef(Arena& arena, const RedwoodRecordRef& toCopy) : key(arena, toCopy.key) {
+	RedwoodRecordRef(Arena& arena, RedwoodRecordRef const& toCopy) : key(arena, toCopy.key) {
 		if (toCopy.value.present()) {
 			value = ValueRef(arena, toCopy.value.get());
 		}
@@ -4094,15 +4094,15 @@ struct RedwoodRecordRef {
 	}
 
 	inline void setChildPage(BTreeNodeLinkRef id) {
-		value = ValueRef((const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID));
+		value = ValueRef((uint8_t const*)id.begin(), id.size() * sizeof(LogicalPageID));
 	}
 
 	inline void setChildPage(Arena& arena, BTreeNodeLinkRef id) {
-		value = ValueRef(arena, (const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID));
+		value = ValueRef(arena, (uint8_t const*)id.begin(), id.size() * sizeof(LogicalPageID));
 	}
 
 	inline RedwoodRecordRef withPageID(BTreeNodeLinkRef id) const {
-		return RedwoodRecordRef(key, ValueRef((const uint8_t*)id.begin(), id.size() * sizeof(LogicalPageID)));
+		return RedwoodRecordRef(key, ValueRef((uint8_t const*)id.begin(), id.size() * sizeof(LogicalPageID)));
 	}
 
 	inline RedwoodRecordRef withoutValue() const { return RedwoodRecordRef(key); }
@@ -4118,13 +4118,13 @@ struct RedwoodRecordRef {
 	}
 
 	// Find the common key prefix between two records, assuming that the first skipLen bytes are the same
-	inline int getCommonPrefixLen(const RedwoodRecordRef& other, int skipLen = 0) const {
+	inline int getCommonPrefixLen(RedwoodRecordRef const& other, int skipLen = 0) const {
 		return skipLen + commonPrefixLength(key, other.key, skipLen);
 	}
 
 	// Compares and orders by key, version, chunk.total, chunk.start, value
 	// This is the same order that delta compression uses for prefix borrowing
-	int compare(const RedwoodRecordRef& rhs, int skip = 0) const {
+	int compare(RedwoodRecordRef const& rhs, int skip = 0) const {
 		int keySkip = std::min(skip, key.size());
 		int cmp = key.compareSuffix(rhs.key, keySkip);
 
@@ -4134,13 +4134,13 @@ struct RedwoodRecordRef {
 		return cmp;
 	}
 
-	bool sameUserKey(const StringRef& k, int skipLen) const {
+	bool sameUserKey(StringRef const& k, int skipLen) const {
 		// Keys are the same if the sizes are the same and either the skipLen is longer or the non-skipped suffixes are
 		// the same.
 		return (key.size() == k.size()) && (key.substr(skipLen) == k.substr(skipLen));
 	}
 
-	bool sameExceptValue(const RedwoodRecordRef& rhs, int skipLen = 0) const { return sameUserKey(rhs.key, skipLen); }
+	bool sameExceptValue(RedwoodRecordRef const& rhs, int skipLen = 0) const { return sameUserKey(rhs.key, skipLen); }
 
 	// TODO: Use SplitStringRef (unless it ends up being slower)
 	KeyRef key;
@@ -4307,7 +4307,7 @@ struct RedwoodRecordRef {
 		bool getDeleted() const { return flags & IS_DELETED; }
 
 		// DeltaTree interface
-		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
+		RedwoodRecordRef apply(RedwoodRecordRef const& base, Arena& arena) const {
 			int keyPrefixLen = getKeyPrefixLength();
 			int keySuffixLen = getKeySuffixLength();
 			int valueLen = hasValue() ? getValueLength() : 0;
@@ -4328,11 +4328,11 @@ struct RedwoodRecordRef {
 		}
 
 		// DeltaTree interface
-		RedwoodRecordRef apply(const Partial& cache) {
+		RedwoodRecordRef apply(Partial const& cache) {
 			return RedwoodRecordRef(cache, hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 
-		RedwoodRecordRef apply(Arena& arena, const Partial& baseKey, Optional<Partial>& cache) {
+		RedwoodRecordRef apply(Arena& arena, Partial const& baseKey, Optional<Partial>& cache) {
 			int keyPrefixLen = getKeyPrefixLength();
 			int keySuffixLen = getKeySuffixLength();
 			int valueLen = hasValue() ? getValueLength() : 0;
@@ -4353,7 +4353,7 @@ struct RedwoodRecordRef {
 			return RedwoodRecordRef(k, hasValue() ? ValueRef(pData, valueLen) : Optional<ValueRef>());
 		}
 
-		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
+		RedwoodRecordRef apply(Arena& arena, RedwoodRecordRef const& base, Optional<Partial>& cache) {
 			return apply(arena, base.key, cache);
 		}
 
@@ -4397,43 +4397,43 @@ struct RedwoodRecordRef {
 			              prefixLen,
 			              keySuffixLen,
 			              valueLen,
-			              StringRef((const uint8_t*)this, size()).toHexString().c_str());
+			              StringRef((uint8_t const*)this, size()).toHexString().c_str());
 		}
 	};
 
 	// Using this class as an alternative for Delta enables reading a DeltaTree2<RecordRef> while only decoding
 	// its values, so the Reader does not require the original prev/next ancestors.
 	struct DeltaValueOnly : Delta {
-		RedwoodRecordRef apply(const RedwoodRecordRef& base, Arena& arena) const {
+		RedwoodRecordRef apply(RedwoodRecordRef const& base, Arena& arena) const {
 			return RedwoodRecordRef(KeyRef(), hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 
-		RedwoodRecordRef apply(const Partial& cache) {
+		RedwoodRecordRef apply(Partial const& cache) {
 			return RedwoodRecordRef(KeyRef(), hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 
-		RedwoodRecordRef apply(Arena& arena, const RedwoodRecordRef& base, Optional<Partial>& cache) {
+		RedwoodRecordRef apply(Arena& arena, RedwoodRecordRef const& base, Optional<Partial>& cache) {
 			cache = KeyRef();
 			return RedwoodRecordRef(KeyRef(), hasValue() ? Optional<ValueRef>(getValue()) : Optional<ValueRef>());
 		}
 	};
 #pragma pack(pop)
 
-	bool operator==(const RedwoodRecordRef& rhs) const { return compare(rhs) == 0; }
+	bool operator==(RedwoodRecordRef const& rhs) const { return compare(rhs) == 0; }
 
-	bool operator!=(const RedwoodRecordRef& rhs) const { return compare(rhs) != 0; }
+	bool operator!=(RedwoodRecordRef const& rhs) const { return compare(rhs) != 0; }
 
-	bool operator<(const RedwoodRecordRef& rhs) const { return compare(rhs) < 0; }
+	bool operator<(RedwoodRecordRef const& rhs) const { return compare(rhs) < 0; }
 
-	bool operator>(const RedwoodRecordRef& rhs) const { return compare(rhs) > 0; }
+	bool operator>(RedwoodRecordRef const& rhs) const { return compare(rhs) > 0; }
 
-	bool operator<=(const RedwoodRecordRef& rhs) const { return compare(rhs) <= 0; }
+	bool operator<=(RedwoodRecordRef const& rhs) const { return compare(rhs) <= 0; }
 
-	bool operator>=(const RedwoodRecordRef& rhs) const { return compare(rhs) >= 0; }
+	bool operator>=(RedwoodRecordRef const& rhs) const { return compare(rhs) >= 0; }
 
 	// Worst case overhead means to assume that either the prefix length or the suffix length
 	// could contain the full key size
-	int deltaSize(const RedwoodRecordRef& base, int skipLen, bool worstCaseOverhead) const {
+	int deltaSize(RedwoodRecordRef const& base, int skipLen, bool worstCaseOverhead) const {
 		int prefixLen = getCommonPrefixLen(base, skipLen);
 		int keySuffixLen = key.size() - prefixLen;
 		int valueLen = value.present() ? value.get().size() : 0;
@@ -4449,7 +4449,7 @@ struct RedwoodRecordRef {
 	}
 
 	// commonPrefix between *this and base can be passed if known
-	int writeDelta(Delta& d, const RedwoodRecordRef& base, int keyPrefixLen = -1) const {
+	int writeDelta(Delta& d, RedwoodRecordRef const& base, int keyPrefixLen = -1) const {
 		d.flags = value.present() ? Delta::HAS_VALUE : 0;
 
 		if (keyPrefixLen < 0) {
@@ -4558,11 +4558,11 @@ struct BTreePage {
 
 	bool isLeaf() const { return height == 1; }
 
-	std::string toString(const char* context,
+	std::string toString(char const* context,
 	                     BTreeNodeLinkRef id,
 	                     Version ver,
-	                     const RedwoodRecordRef& lowerBound,
-	                     const RedwoodRecordRef& upperBound) const {
+	                     RedwoodRecordRef const& lowerBound,
+	                     RedwoodRecordRef const& upperBound) const {
 		std::string r;
 		r += format("BTreePage op=%s %s @%" PRId64
 		            " ptr=%p height=%d count=%d kvBytes=%d\n  lowerBound: %s\n  upperBound: %s\n",
@@ -4764,9 +4764,9 @@ public:
 		Version version;
 		BTreeNodeLink pageID;
 
-		bool operator<(const LazyClearQueueEntry& rhs) const { return version < rhs.version; }
+		bool operator<(LazyClearQueueEntry const& rhs) const { return version < rhs.version; }
 
-		int readFromBytes(const uint8_t* src) {
+		int readFromBytes(uint8_t const* src) {
 			height = *(uint8_t*)src;
 			ASSERT(height < 0xf0);
 			src += sizeof(uint8_t);
@@ -4947,7 +4947,7 @@ public:
 
 		loop {
 			state int toPop = SERVER_KNOBS->REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES;
-			state std::vector<std::pair<LazyClearQueueEntry, Future<Reference<const ArenaPage>>>> entries;
+			state std::vector<std::pair<LazyClearQueueEntry, Future<Reference<ArenaPage const>>>> entries;
 			entries.reserve(toPop);
 
 			// Take up to batchSize pages from front of queue
@@ -4973,9 +4973,9 @@ public:
 
 			state int i;
 			for (i = 0; i < entries.size(); ++i) {
-				Reference<const ArenaPage> p = wait(entries[i].second);
-				const LazyClearQueueEntry& entry = entries[i].first;
-				const BTreePage& btPage = *(const BTreePage*)p->data();
+				Reference<ArenaPage const> p = wait(entries[i].second);
+				LazyClearQueueEntry const& entry = entries[i].first;
+				BTreePage const& btPage = *(BTreePage const*)p->data();
 				ASSERT(btPage.height == entry.height);
 				auto& metrics = g_redwoodMetrics.level(entry.height).metrics;
 
@@ -5268,9 +5268,9 @@ public:
 		struct iterator : public MutationsT::iterator {
 			typedef MutationsT::iterator Base;
 			iterator() = default;
-			iterator(const MutationsT::iterator& i) : Base(i) {}
+			iterator(MutationsT::iterator const& i) : Base(i) {}
 
-			const KeyRef& key() { return (*this)->first; }
+			KeyRef const& key() { return (*this)->first; }
 
 			RangeMutation& mutation() { return (*this)->second; }
 		};
@@ -5278,26 +5278,26 @@ public:
 		struct const_iterator : public MutationsT::const_iterator {
 			typedef MutationsT::const_iterator Base;
 			const_iterator() = default;
-			const_iterator(const MutationsT::const_iterator& i) : Base(i) {}
-			const_iterator(const MutationsT::iterator& i) : Base(i) {}
+			const_iterator(MutationsT::const_iterator const& i) : Base(i) {}
+			const_iterator(MutationsT::iterator const& i) : Base(i) {}
 
-			const KeyRef& key() { return (*this)->first; }
+			KeyRef const& key() { return (*this)->first; }
 
-			const RangeMutation& mutation() { return (*this)->second; }
+			RangeMutation const& mutation() { return (*this)->second; }
 		};
 
 		// Return a T constructed in arena
 		template <typename T>
-		T copyToArena(const T& object) {
+		T copyToArena(T const& object) {
 			return T(arena, object);
 		}
 
-		const_iterator upper_bound(const KeyRef& k) const { return mutations.upper_bound(k); }
+		const_iterator upper_bound(KeyRef const& k) const { return mutations.upper_bound(k); }
 
-		const_iterator lower_bound(const KeyRef& k) const { return mutations.lower_bound(k); }
+		const_iterator lower_bound(KeyRef const& k) const { return mutations.lower_bound(k); }
 
 		// erase [begin, end) from the mutation map
-		void erase(const const_iterator& begin, const const_iterator& end) { mutations.erase(begin, end); }
+		void erase(const_iterator const& begin, const_iterator const& end) { mutations.erase(begin, end); }
 
 		// Find or create a mutation buffer boundary for bound and return an iterator to it
 		iterator insert(KeyRef boundary) {
@@ -5517,7 +5517,7 @@ private:
 		// Try to add a record of the given delta size to the page.
 		// If force is true, the page will be expanded to make the record fit if needed.
 		// Return value is whether or not the record was added to the page.
-		bool addRecord(const RedwoodRecordRef& rec, const RedwoodRecordRef& nextRecord, int deltaSize, bool force) {
+		bool addRecord(RedwoodRecordRef const& rec, RedwoodRecordRef const& nextRecord, int deltaSize, bool force) {
 
 			int nodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(largeDeltaTree);
 
@@ -5553,8 +5553,8 @@ private:
 	};
 
 	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
-	std::vector<PageToBuild> splitPages(const RedwoodRecordRef* lowerBound,
-	                                    const RedwoodRecordRef* upperBound,
+	std::vector<PageToBuild> splitPages(RedwoodRecordRef const* lowerBound,
+	                                    RedwoodRecordRef const* upperBound,
 	                                    int prefixLen,
 	                                    VectorRef<RedwoodRecordRef> records,
 	                                    unsigned int height) {
@@ -5640,8 +5640,8 @@ private:
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their ArenaPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree* self,
-	                                                                        const RedwoodRecordRef* lowerBound,
-	                                                                        const RedwoodRecordRef* upperBound,
+	                                                                        RedwoodRecordRef const* lowerBound,
+	                                                                        RedwoodRecordRef const* upperBound,
 	                                                                        VectorRef<RedwoodRecordRef> entries,
 	                                                                        unsigned int height,
 	                                                                        Version v,
@@ -5873,7 +5873,7 @@ private:
 		return records;
 	}
 
-	ACTOR static Future<Reference<const ArenaPage>> readPage(VersionedBTree* self,
+	ACTOR static Future<Reference<ArenaPage const>> readPage(VersionedBTree* self,
 	                                                         PagerEventReasons reason,
 	                                                         unsigned int level,
 	                                                         IPagerSnapshot* snapshot,
@@ -5887,19 +5887,19 @@ private:
 		             toString(id).c_str(),
 		             snapshot->getVersion());
 
-		state Reference<const ArenaPage> page;
+		state Reference<ArenaPage const> page;
 		if (id.size() == 1) {
-			Reference<const ArenaPage> p =
+			Reference<ArenaPage const> p =
 			    wait(snapshot->getPhysicalPage(reason, level, id.front(), priority, cacheable, false));
 			page = std::move(p);
 		} else {
 			ASSERT(!id.empty());
-			Reference<const ArenaPage> p =
+			Reference<ArenaPage const> p =
 			    wait(snapshot->getMultiPhysicalPage(reason, level, id, priority, cacheable, false));
 			page = std::move(p);
 		}
 		debug_printf("readPage() op=readComplete %s @%" PRId64 " \n", toString(id).c_str(), snapshot->getVersion());
-		const BTreePage* btPage = (const BTreePage*)page->data();
+		BTreePage const* btPage = (BTreePage const*)page->data();
 		auto& metrics = g_redwoodMetrics.level(btPage->height).metrics;
 		metrics.pageRead += 1;
 		metrics.pageReadExt += (id.size() - 1);
@@ -5908,9 +5908,9 @@ private:
 	}
 
 	// Get cursor into a BTree node, creating decode cache from boundaries if needed
-	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page,
-	                                               const RedwoodRecordRef& lowerBound,
-	                                               const RedwoodRecordRef& upperBound) {
+	inline BTreePage::BinaryTree::Cursor getCursor(ArenaPage const* page,
+	                                               RedwoodRecordRef const& lowerBound,
+	                                               RedwoodRecordRef const& upperBound) {
 
 		Reference<BTreePage::BinaryTree::DecodeCache> cache;
 
@@ -5941,7 +5941,7 @@ private:
 	}
 
 	// Get cursor into a BTree node from a child link
-	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page, const BTreePage::BinaryTree::Cursor& link) {
+	inline BTreePage::BinaryTree::Cursor getCursor(ArenaPage const* page, BTreePage::BinaryTree::Cursor const& link) {
 		if (!page->extra.valid()) {
 			return getCursor(page, link.get(), link.next().getOrUpperBound());
 		}
@@ -5988,7 +5988,7 @@ private:
 		newID.resize(*arena, oldID.size());
 
 		if (REDWOOD_DEBUG) {
-			const BTreePage* btPage = (const BTreePage*)page->mutateData();
+			BTreePage const* btPage = (BTreePage const*)page->mutateData();
 			BTreePage::BinaryTree::DecodeCache* cache = page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>();
 
 			debug_printf_always(
@@ -6001,7 +6001,7 @@ private:
 			              .c_str());
 		}
 
-		state unsigned int height = (unsigned int)((const BTreePage*)page->data())->height;
+		state unsigned int height = (unsigned int)((BTreePage const*)page->data())->height;
 		ASSERT(height < 0xf0);
 		if (oldID.size() == 1) {
 			page->setLogicalPageInfo(oldID.front(), parentID);
@@ -6034,7 +6034,7 @@ private:
 	}
 
 	// Copy page to a new page which shares the same DecodeCache with the old page
-	static Reference<ArenaPage> clonePageForUpdate(Reference<const ArenaPage> page) {
+	static Reference<ArenaPage> clonePageForUpdate(Reference<ArenaPage const> page) {
 		Reference<ArenaPage> newPage = page->clone();
 
 		if (page->extra.valid()) {
@@ -6153,7 +6153,7 @@ private:
 		}
 
 		// Get the first record for this range AFTER applying whatever changes were made
-		const RedwoodRecordRef* getFirstBoundary() const {
+		RedwoodRecordRef const* getFirstBoundary() const {
 			if (childrenChanged) {
 				if (newLinks.empty()) {
 					return nullptr;
@@ -6188,7 +6188,7 @@ private:
 
 	struct InternalPageModifier {
 		InternalPageModifier() {}
-		InternalPageModifier(Reference<const ArenaPage> p,
+		InternalPageModifier(Reference<ArenaPage const> p,
 		                     bool alreadyCloned,
 		                     bool updating,
 		                     ParentInfo* parentInfo,
@@ -6198,7 +6198,7 @@ private:
 
 		// Whether updating the existing page is allowed
 		bool updating;
-		Reference<const ArenaPage> page;
+		Reference<ArenaPage const> page;
 
 		// Whether or not page has been cloned for update
 		bool clonedPage;
@@ -6230,7 +6230,7 @@ private:
 
 		// end is the cursor position of the first record of the unvisited child link range, which
 		// is needed if the insert requires switching from update to rebuild mode.
-		void insert(BTreePage::BinaryTree::Cursor end, const VectorRef<RedwoodRecordRef>& recs) {
+		void insert(BTreePage::BinaryTree::Cursor end, VectorRef<RedwoodRecordRef> const& recs) {
 			int i = 0;
 			if (updating) {
 				cloneForUpdate();
@@ -6239,7 +6239,7 @@ private:
 
 				// TODO: insert recs in a random order to avoid new subtree being entirely right child links
 				while (i != recs.size()) {
-					const RedwoodRecordRef& rec = recs[i];
+					RedwoodRecordRef const& rec = recs[i];
 					debug_printf("internal page (updating) insert: %s\n", rec.toString(false).c_str());
 
 					bool canInsert = end.insert(rec, 0, maxHeightAllowed);
@@ -6271,7 +6271,7 @@ private:
 			if (!updating) {
 				rebuild.reserve(rebuild.arena(), rebuild.size() + recs.size());
 				while (i != recs.size()) {
-					const RedwoodRecordRef& rec = recs[i];
+					RedwoodRecordRef const& rec = recs[i];
 					debug_printf("internal page (rebuilding) insert: %s\n", rec.toString(false).c_str());
 					rebuild.push_back(rebuild.arena(), rec);
 					++i;
@@ -6295,7 +6295,7 @@ private:
 		}
 
 		// This must be called for each of the InternalPageSliceUpdates in sorted order.
-		void applyUpdate(InternalPageSliceUpdate& u, const RedwoodRecordRef* nextBoundary) {
+		void applyUpdate(InternalPageSliceUpdate& u, RedwoodRecordRef const* nextBoundary) {
 			debug_printf("applyUpdate nextBoundary=(%p) %s\n",
 			             nextBoundary,
 			             (nextBoundary != nullptr) ? nextBoundary->toString(false).c_str() : "");
@@ -6394,14 +6394,14 @@ private:
 			}
 		}
 
-		state Reference<const ArenaPage> page = wait(
+		state Reference<ArenaPage const> page = wait(
 		    readPage(self, PagerEventReasons::Commit, height, batch->snapshot.getPtr(), rootID, height, false, true));
 
 		// If the page exists in the cache, it must be copied before modification.
 		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
 		// memory and it gets evicted from the cache.
 		// If the page is not in the cache, then no copy is needed so we will initialize pageCopy to page
-		state Reference<const ArenaPage> pageCopy;
+		state Reference<ArenaPage const> pageCopy;
 
 		state BTreePage* btPage = (BTreePage*)page->mutateData();
 		if (height != btPage->height) {
@@ -6820,8 +6820,8 @@ private:
 				if (next == mEnd) {
 					// Check for uniform clearedness or unchangedness for the range mutation where it overlaps u's
 					// subtree
-					const KeyRef& mutationBoundaryKey = mBegin.key();
-					const RangeMutation& range = mBegin.mutation();
+					KeyRef const& mutationBoundaryKey = mBegin.key();
+					RangeMutation const& range = mBegin.mutation();
 					bool uniform;
 					if (range.clearAfterBoundary) {
 						// If the mutation range after the boundary key is cleared, then the mutation boundary key must
@@ -7224,13 +7224,13 @@ public:
 	class BTreeCursor {
 	public:
 		struct PathEntry {
-			Reference<const ArenaPage> page;
+			Reference<ArenaPage const> page;
 			BTreePage::BinaryTree::Cursor cursor;
 #if REDWOOD_DEBUG
 			BTreeNodeLink id;
 #endif
 
-			const BTreePage* btPage() const { return (const BTreePage*)page->data(); };
+			BTreePage const* btPage() const { return (BTreePage const*)page->data(); };
 		};
 
 	private:
@@ -7283,7 +7283,7 @@ public:
 			return r;
 		}
 
-		const RedwoodRecordRef get() { return path.back().cursor.get(); }
+		RedwoodRecordRef const get() { return path.back().cursor.get(); }
 
 		bool inRoot() const { return path.size() == 1; }
 
@@ -7292,7 +7292,7 @@ public:
 		PathEntry& back() { return path.back(); }
 		void popPath() { path.pop_back(); }
 
-		Future<Void> pushPage(const BTreePage::BinaryTree::Cursor& link) {
+		Future<Void> pushPage(BTreePage::BinaryTree::Cursor const& link) {
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(btree,
 			                    reason,
@@ -7302,7 +7302,7 @@ public:
 			                    ioMaxPriority,
 			                    false,
 			                    !options.present() || options.get().cacheResult || path.back().btPage()->height != 2),
-			           [=](Reference<const ArenaPage> p) {
+			           [=](Reference<ArenaPage const> p) {
 				           BTreePage::BinaryTree::Cursor cursor = btree->getCursor(p.getPtr(), link);
 #if REDWOOD_DEBUG
 				           path.push_back({ p, cursor, link.get().getChildPage() });
@@ -7324,7 +7324,7 @@ public:
 		Future<Void> pushPage(BTreeNodeLinkRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
 			return map(readPage(btree, reason, btree->m_header.height, pager.getPtr(), id, ioMaxPriority, false, true),
-			           [=](Reference<const ArenaPage> p) {
+			           [=](Reference<ArenaPage const> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd), id });
 #else
@@ -7677,12 +7677,12 @@ public:
 
 	Future<Void> getErrorNoDelay() const { return m_errorPromise.getFuture() || m_tree->getError(); };
 
-	void clear(KeyRangeRef range, const Arena* arena = 0) override {
+	void clear(KeyRangeRef range, Arena const* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
 
-	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
+	void set(KeyValueRef keyValue, Arena const* arena = nullptr) override {
 		debug_printf("SET %s\n", printable(keyValue).c_str());
 		m_tree->set(keyValue);
 	}
@@ -7870,7 +7870,7 @@ public:
 		}));
 	}
 
-	~KeyValueStoreRedwood() override {};
+	~KeyValueStoreRedwood() override{};
 
 private:
 	std::string m_filename;
@@ -8065,7 +8065,7 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	// Now read the range from the tree in reverse order and compare to the saved results
 	wait(cur.seekLT(end));
 
-	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
+	state std::reverse_iterator<KeyValueRef const*> r = results.rbegin();
 
 	while (cur.isValid() && cur.get().key >= start) {
 		++*pRecordsRead;
@@ -8268,7 +8268,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
 struct IntIntPair {
 	IntIntPair() {}
 	IntIntPair(int k, int v) : k(k), v(v) {}
-	IntIntPair(Arena& arena, const IntIntPair& toCopy) { *this = toCopy; }
+	IntIntPair(Arena& arena, IntIntPair const& toCopy) { *this = toCopy; }
 
 	typedef IntIntPair Partial;
 
@@ -8279,11 +8279,11 @@ struct IntIntPair {
 		int dk;
 		int dv;
 
-		IntIntPair apply(const IntIntPair& base, Arena& arena) { return { base.k + dk, base.v + dv }; }
+		IntIntPair apply(IntIntPair const& base, Arena& arena) { return { base.k + dk, base.v + dv }; }
 
-		IntIntPair apply(const Partial& cache) { return cache; }
+		IntIntPair apply(Partial const& cache) { return cache; }
 
-		IntIntPair apply(Arena& arena, const IntIntPair& base, Optional<Partial>& cache) {
+		IntIntPair apply(Arena& arena, IntIntPair const& base, Optional<Partial>& cache) {
 			cache = IntIntPair(base.k + dk, base.v + dv);
 			return cache.get();
 		}
@@ -8305,7 +8305,7 @@ struct IntIntPair {
 	};
 
 	// For IntIntPair, skipLen will be in units of fields, not bytes
-	int getCommonPrefixLen(const IntIntPair& other, int skip = 0) const {
+	int getCommonPrefixLen(IntIntPair const& other, int skip = 0) const {
 		if (k == other.k) {
 			if (v == other.v) {
 				return 2;
@@ -8315,7 +8315,7 @@ struct IntIntPair {
 		return 0;
 	}
 
-	int compare(const IntIntPair& rhs, int skip = 0) const {
+	int compare(IntIntPair const& rhs, int skip = 0) const {
 		if (skip == 2) {
 			return 0;
 		}
@@ -8327,17 +8327,17 @@ struct IntIntPair {
 		return cmp;
 	}
 
-	bool operator==(const IntIntPair& rhs) const { return compare(rhs) == 0; }
-	bool operator!=(const IntIntPair& rhs) const { return compare(rhs) != 0; }
+	bool operator==(IntIntPair const& rhs) const { return compare(rhs) == 0; }
+	bool operator!=(IntIntPair const& rhs) const { return compare(rhs) != 0; }
 
-	bool operator<(const IntIntPair& rhs) const { return compare(rhs) < 0; }
-	bool operator>(const IntIntPair& rhs) const { return compare(rhs) > 0; }
-	bool operator<=(const IntIntPair& rhs) const { return compare(rhs) <= 0; }
-	bool operator>=(const IntIntPair& rhs) const { return compare(rhs) >= 0; }
+	bool operator<(IntIntPair const& rhs) const { return compare(rhs) < 0; }
+	bool operator>(IntIntPair const& rhs) const { return compare(rhs) > 0; }
+	bool operator<=(IntIntPair const& rhs) const { return compare(rhs) <= 0; }
+	bool operator>=(IntIntPair const& rhs) const { return compare(rhs) >= 0; }
 
-	int deltaSize(const IntIntPair& base, int skipLen, bool worstcase) const { return sizeof(Delta); }
+	int deltaSize(IntIntPair const& base, int skipLen, bool worstcase) const { return sizeof(Delta); }
 
-	int writeDelta(Delta& d, const IntIntPair& base, int commonPrefix = -1) const {
+	int writeDelta(Delta& d, IntIntPair const& base, int commonPrefix = -1) const {
 		d.prefixSource = false;
 		d.deleted = false;
 		d.dk = k - base.k;
@@ -8376,7 +8376,7 @@ int deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	return deltaSize;
 }
 
-RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std::string& valueBuffer) {
+RedwoodRecordRef randomRedwoodRecordRef(std::string const& keyBuffer, std::string const& valueBuffer) {
 	RedwoodRecordRef rec;
 	rec.key = StringRef((uint8_t*)keyBuffer.data(), deterministicRandom()->randomInt(0, keyBuffer.size()));
 	if (deterministicRandom()->coinflip()) {
@@ -8387,7 +8387,7 @@ RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std:
 }
 
 void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
-	std::pair<const char*, unsigned int> metrics[] = { { "BTreePreload", metric.btreeLeafPreload },
+	std::pair<char const*, unsigned int> metrics[] = { { "BTreePreload", metric.btreeLeafPreload },
 		                                               { "BTreePreloadExt", metric.btreeLeafPreloadExt },
 		                                               { "", 0 },
 		                                               { "OpSet", metric.opSet },
@@ -8443,7 +8443,7 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 
 	auto const& evictor = DWALPager::PageCacheT::Evictor::getEvictor();
 
-	std::pair<const char*, int64_t> cacheMetrics[] = { { "PageCacheCount", evictor->getCountUsed() },
+	std::pair<char const*, int64_t> cacheMetrics[] = { { "PageCacheCount", evictor->getCountUsed() },
 		                                               { "PageCacheMoved", evictor->getCountMoved() },
 		                                               { "PageCacheSize", evictor->getSizeUsed() },
 		                                               { "DecodeCacheSize", evictor->reservedSize } };
@@ -8464,7 +8464,7 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 	for (int i = 1; i < btreeLevels + 1; ++i) {
 		auto& metric = levels[i].metrics;
 
-		std::pair<const char*, unsigned int> metrics[] = {
+		std::pair<char const*, unsigned int> metrics[] = {
 			{ "PageBuild", metric.pageBuild },
 			{ "PageBuildExt", metric.pageBuildExt },
 			{ "PageModify", metric.pageModify },
@@ -8498,7 +8498,7 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 			*s += format("\nLevel %d\n\t", i);
 
 			for (auto& m : metrics) {
-				const char* name = m.first;
+				char const* name = m.first;
 				bool rate = elapsed != 0;
 				if (*name == '-') {
 					++name;
@@ -8688,7 +8688,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(false) == 4);
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
 
-	const int N = deterministicRandom()->randomInt(200, 1000);
+	int const N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
 	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
@@ -8812,7 +8812,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		double start = timer();
 
 		for (int i = 0; i < 20000000; ++i) {
-			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
+			RedwoodRecordRef const& query = items[deterministicRandom()->randomInt(0, items.size())];
 			if (!c.seekLessThanOrEqual(query)) {
 				printf("Not found!  query=%s\n", query.toString().c_str());
 				ASSERT(false);
@@ -8839,7 +8839,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		}
 
 		for (int i = 0; i < 5000000; ++i) {
-			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
+			RedwoodRecordRef const& query = items[deterministicRandom()->randomInt(0, items.size())];
 			DeltaTree<RedwoodRecordRef>::Cursor& c = cursors[deterministicRandom()->randomInt(0, cursors.size())];
 			if (!c.seekLessThanOrEqual(query)) {
 				printf("Not found!  query=%s\n", query.toString().c_str());
@@ -8865,7 +8865,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	ASSERT(DeltaTree2<RedwoodRecordRef>::Node::headerSize(true) == 8);
 	ASSERT(sizeof(DeltaTree2<RedwoodRecordRef>::DecodedNode) == 28);
 
-	const int N = deterministicRandom()->randomInt(200, 1000);
+	int const N = deterministicRandom()->randomInt(200, 1000);
 
 	RedwoodRecordRef prev;
 	RedwoodRecordRef next("\xff\xff\xff\xff"_sr);
@@ -8990,7 +8990,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 		double start = timer();
 
 		for (int i = 0; i < 20000000; ++i) {
-			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
+			RedwoodRecordRef const& query = items[deterministicRandom()->randomInt(0, items.size())];
 			if (!c.seekLessThanOrEqual(query)) {
 				printf("Not found!  query=%s\n", query.toString().c_str());
 				ASSERT(false);
@@ -9038,7 +9038,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 }
 
 TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
-	const int N = 200;
+	int const N = 200;
 	IntIntPair lowerBound = { 0, 0 };
 	IntIntPair upperBound = { 1000, 1000 };
 
@@ -9641,8 +9641,8 @@ namespace {
 RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 	ASSERT(maxKeySize > 0);
 	RandomKeyGenerator keyGen;
-	const int maxTuples = 10;
-	const int tupleSetNum = deterministicRandom()->randomInt(0, maxTuples);
+	int const maxTuples = 10;
+	int const tupleSetNum = deterministicRandom()->randomInt(0, maxTuples);
 	for (int i = 0; i < tupleSetNum && maxKeySize > 0; i++) {
 		int subStrKeySize = deterministicRandom()->randomInt(1, std::min(maxKeySize, 100) + 1);
 		maxKeySize -= subStrKeySize;
@@ -9661,7 +9661,7 @@ RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 	return keyGen;
 }
 
-double getExternalTimeoutThreshold(const UnitTestParameters& params) {
+double getExternalTimeoutThreshold(UnitTestParameters const& params) {
 #if defined(USE_SANITIZER)
 	double ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(800);
 #else
@@ -10188,10 +10188,10 @@ template <int size>
 struct ExtentQueueEntry {
 	uint8_t entry[size];
 
-	bool operator<(const ExtentQueueEntry& rhs) const { return entry < rhs.entry; }
+	bool operator<(ExtentQueueEntry const& rhs) const { return entry < rhs.entry; }
 
 	std::string toString() const {
-		return format("{%s}", StringRef((const uint8_t*)entry, size).toHexString().c_str());
+		return format("{%s}", StringRef((uint8_t const*)entry, size).toHexString().c_str());
 	}
 };
 
@@ -10587,7 +10587,7 @@ struct KVSource {
 	// TODO there is probably a better way to do this
 	Prefix extraRangePrefix;
 
-	KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
+	KVSource(std::vector<PrefixSegment> const& desc, int numPrefixes = 0) : desc(desc) {
 		if (numPrefixes == 0) {
 			numPrefixes = 1;
 			for (auto& p : desc) {
@@ -10616,7 +10616,7 @@ struct KVSource {
 		for (auto& p : prefixes) {
 			prefixesSorted.push_back(&p);
 		}
-		std::sort(prefixesSorted.begin(), prefixesSorted.end(), [](const Prefix* a, const Prefix* b) {
+		std::sort(prefixesSorted.begin(), prefixesSorted.end(), [](Prefix const* a, Prefix const* b) {
 			return KeyRef((uint8_t*)a->begin(), a->size()) < KeyRef((uint8_t*)b->begin(), b->size());
 		});
 

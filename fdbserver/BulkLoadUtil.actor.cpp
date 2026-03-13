@@ -247,7 +247,7 @@ ACTOR Future<bool> doBytesSamplingOnDataFile(std::string dataFileFullPath, // in
 }
 
 // TODO(BulkLoad): slow task
-void clearFileFolder(const std::string& folderPath, const UID& logId, bool ignoreError) {
+void clearFileFolder(std::string const& folderPath, UID const& logId, bool ignoreError) {
 	try {
 		platform::eraseDirectoryRecursive(abspath(folderPath));
 	} catch (Error& e) {
@@ -265,7 +265,7 @@ void clearFileFolder(const std::string& folderPath, const UID& logId, bool ignor
 }
 
 // TODO(BulkLoad): slow task
-void resetFileFolder(const std::string& folderPath) {
+void resetFileFolder(std::string const& folderPath) {
 	clearFileFolder(abspath(folderPath));
 	ASSERT(platform::createDirectory(abspath(folderPath)));
 	return;
@@ -505,9 +505,9 @@ ACTOR Future<Void> downloadBulkLoadJobManifestFile(BulkLoadTransportMethod trans
 }
 
 // Update manifestEntryMap and expanding mapRange if the input line overlaps with the job range.
-KeyRange updateManifestEntryMap(const std::string& line,
-                                const KeyRange& jobRange,
-                                const KeyRange& mapRange,
+KeyRange updateManifestEntryMap(std::string const& line,
+                                KeyRange const& jobRange,
+                                KeyRange const& mapRange,
                                 std::shared_ptr<BulkLoadManifestFileMap> manifestEntryMap) {
 	BulkLoadJobFileManifestEntry manifestEntry(line);
 	KeyRange overlappingRange = jobRange & manifestEntry.getRange();

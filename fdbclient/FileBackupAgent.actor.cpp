@@ -233,7 +233,7 @@ std::string secondsToTimeFormat(int64_t seconds) {
 		return format("%lld second(s)", seconds);
 }
 
-const Key FileBackupAgent::keyLastRestorable = "last_restorable"_sr;
+Key const FileBackupAgent::keyLastRestorable = "last_restorable"_sr;
 
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
@@ -284,7 +284,7 @@ ACTOR Future<bool> anyPartitionedBackupRunning(Reference<ReadYourWritesTransacti
 	std::vector<KeyBackedTag> tags = wait(getAllBackupTags(tr));
 
 	state std::vector<Future<Optional<UidAndAbortedFlagT>>> futures;
-	for (const auto& tag : tags) {
+	for (auto const& tag : tags) {
 		futures.push_back(tag.get(tr));
 	}
 
@@ -858,15 +858,15 @@ void TwoBuffers::fillBufferIfAbsent(int index) {
 }
 
 bool endOfBlock(char* start, int offset) {
-	const unsigned char paddingChar = '\xff';
+	unsigned char const paddingChar = '\xff';
 	return (unsigned char)*(start + offset) == paddingChar;
 }
 
 class PartitionedLogIteratorSimple : public PartitionedLogIterator {
 public:
-	const int BATCH_READ_BLOCK_COUNT = 1;
-	const int BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
-	const int mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
+	int const BATCH_READ_BLOCK_COUNT = 1;
+	int const BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	int const mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
 	Reference<IBackupContainer> bc;
 	size_t bufferCapacity;
 	int tag;
@@ -1086,7 +1086,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorSim
 			// cannot check hasMoreData here because other buffer might have the last piece
 			wait(self->loadNextBlock());
 			Standalone<VectorRef<VersionedMutation>> batch = self->consumeData(firstVersion);
-			for (const VersionedMutation& vm : batch) {
+			for (VersionedMutation const& vm : batch) {
 				mutations.push_back_deep(mutations.arena(), vm);
 			}
 		} else {
@@ -1119,9 +1119,9 @@ private:
 public:
 	// read up to a fixed number of block count
 	// noted that each version has to be contained within 2 blocks
-	const int BATCH_READ_BLOCK_COUNT = 1;
-	const int BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
-	const int mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
+	int const BATCH_READ_BLOCK_COUNT = 1;
+	int const BLOCK_SIZE = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	int const mutationHeaderBytes = sizeof(int64_t) + sizeof(int32_t) + sizeof(int32_t);
 	Reference<IBackupContainer> bc;
 	int tag;
 	std::vector<RestoreConfig::RestoreFile> files;
@@ -1302,7 +1302,7 @@ ACTOR Future<Standalone<VectorRef<VersionedMutation>>> PartitionedLogIteratorTwo
 				break;
 			}
 			Standalone<VectorRef<VersionedMutation>> batch = wait(self->consumeData(firstVersion));
-			for (const VersionedMutation& vm : batch) {
+			for (VersionedMutation const& vm : batch) {
 				mutations.push_back_deep(mutations.arena(), vm);
 			}
 		} else {
@@ -1480,7 +1480,7 @@ private:
 void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* results) {
 	// Read begin key, if this fails then block was invalid.
 	uint32_t kLen = reader->consumeNetworkUInt32();
-	const uint8_t* k = reader->consume(kLen);
+	uint8_t const* k = reader->consume(kLen);
 	results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef()));
 	KeyRef prevKey = KeyRef(k, kLen);
 	// Read kv pairs and end key
@@ -1497,7 +1497,7 @@ void decodeKVPairs(StringRefReader* reader, Standalone<VectorRef<KeyValueRef>>* 
 
 		// Read a value, which must exist or the block is invalid
 		uint32_t vLen = reader->consumeNetworkUInt32();
-		const uint8_t* v = reader->consume(vLen);
+		uint8_t const* v = reader->consume(vLen);
 
 		results->push_back(results->arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
 
@@ -1517,7 +1517,7 @@ static Reference<IBackupContainer> getBackupContainerWithProxy(Reference<IBackup
 	return bc;
 }
 
-Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf) {
+Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(Standalone<StringRef> const& buf) {
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	StringRefReader reader(buf, restore_corrupted_data());
 
@@ -1527,7 +1527,7 @@ Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringR
 
 	// Read begin key, if this fails then block was invalid.
 	uint32_t beginKeyLen = reader.consumeNetworkUInt32();
-	const uint8_t* beginKey = reader.consume(beginKeyLen);
+	uint8_t const* beginKey = reader.consume(beginKeyLen);
 	results.push_back(results.arena(), KeyValueRef(KeyRef(beginKey, beginKeyLen), ValueRef()));
 
 	// Read kv pairs and end key
@@ -1539,7 +1539,7 @@ Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringR
 
 		// Read a key, which must exist or the block is invalid
 		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
+		uint8_t const* k = reader.consume(kLen);
 
 		// If eof reached or first value len byte is 0xFF then a valid block end was reached.
 		if (reader.eof() || *reader.rptr == 0xFF) {
@@ -1550,7 +1550,7 @@ Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringR
 
 		// Read a value, which must exist or the block is invalid
 		uint32_t vLen = reader.consumeNetworkUInt32();
-		const uint8_t* v = reader.consume(vLen);
+		uint8_t const* v = reader.consume(vLen);
 		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
 	}
 
@@ -1643,7 +1643,7 @@ private:
 
 // input: a string of [param1, param2], [param1, param2] ..., [param1, param2]
 // output: a vector of [param1, param2] after removing the length info
-Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf) {
+Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(Standalone<StringRef> const& buf) {
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
 	StringRefReader reader(buf, restore_corrupted_data());
 
@@ -1659,9 +1659,9 @@ Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<S
 
 		// Read key and value.  If anything throws then there is a problem.
 		uint32_t kLen = reader.consumeNetworkUInt32();
-		const uint8_t* k = reader.consume(kLen);
+		uint8_t const* k = reader.consume(kLen);
 		uint32_t vLen = reader.consumeNetworkUInt32();
-		const uint8_t* v = reader.consume(vLen);
+		uint8_t const* v = reader.consume(vLen);
 
 		results.push_back(results.arena(), KeyValueRef(KeyRef(k, kLen), ValueRef(v, vLen)));
 	}
@@ -1938,7 +1938,7 @@ ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction
 		ids = decodeBackupStartedValue(started.get());
 	}
 	auto it =
-	    std::find_if(ids.begin(), ids.end(), [=](const std::pair<UID, Version>& p) { return p.first == backupUid; });
+	    std::find_if(ids.begin(), ids.end(), [=](std::pair<UID, Version> const& p) { return p.first == backupUid; });
 	if (it != ids.end()) {
 		ids.erase(it);
 	}
@@ -2288,7 +2288,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		    wait(getBlockOfShards(tr, nextKey, endKey, CLIENT_KNOBS->BACKUP_SHARD_TASK_LIMIT));
 
 		std::vector<Future<Key>> addTaskVector;
-		for (const auto& splitKey : keys) {
+		for (auto const& splitKey : keys) {
 			if (nextKey != splitKey) {
 				addTaskVector.push_back(addTask(
 				    tr, taskBucket, task, task->getPriority(), nextKey, splitKey, TaskCompletionKey::joinWith(onDone)));
@@ -2551,7 +2551,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 			state bool lastValue = false;
 			state Key lastKey;
 			for (i = 0; i < dispatchBoundaries.size(); ++i) {
-				const std::pair<Key, bool>& boundary = dispatchBoundaries[i];
+				std::pair<Key, bool> const& boundary = dispatchBoundaries[i];
 
 				// Values must alternate
 				ASSERT(boundary.second == !lastValue);
@@ -3541,7 +3541,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 			auto i = (++ri).base();
 
 			while (1) {
-				const BackupConfig::RangeSlice& r = i->second;
+				BackupConfig::RangeSlice const& r = i->second;
 
 				// Add file to final file list
 				files.push_back(r.fileName);
@@ -3817,7 +3817,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 			if (completed) {
 				// Build beginEndKeys from backup ranges
 				std::vector<std::pair<Key, Key>> beginEndKeys;
-				for (const auto& range : backupRanges) {
+				for (auto const& range : backupRanges) {
 					beginEndKeys.emplace_back(range.begin, range.end);
 				}
 
@@ -4009,9 +4009,9 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				if (started.get().present()) {
 					ids = decodeBackupStartedValue(started.get().get());
 				}
-				const UID uid = config.getUid();
+				UID const uid = config.getUid();
 				auto it = std::find_if(
-				    ids.begin(), ids.end(), [uid](const std::pair<UID, Version>& p) { return p.first == uid; });
+				    ids.begin(), ids.end(), [uid](std::pair<UID, Version> const& p) { return p.first == uid; });
 				if (it == ids.end()) {
 					ids.emplace_back(uid, Params.beginVersion().get(task));
 				} else {
@@ -4821,7 +4821,7 @@ REGISTER_TASKFUNC(RestoreRangeTaskFunc);
 
 // Decodes a mutation log key, which contains (hash, commitVersion, chunkNumber) and
 // returns (commitVersion, chunkNumber)
-std::pair<Version, int32_t> decodeMutationLogKey(const StringRef& key) {
+std::pair<Version, int32_t> decodeMutationLogKey(StringRef const& key) {
 	ASSERT(key.size() == sizeof(uint8_t) + sizeof(Version) + sizeof(int32_t));
 
 	uint8_t hash;
@@ -4843,7 +4843,7 @@ std::pair<Version, int32_t> decodeMutationLogKey(const StringRef& key) {
 // where a mutation is encoded as:
 //   [type:uint32_t][keyLength:uint32_t][valueLength:uint32_t][param1][param2]
 // noted version needs to be included here(0x0FDB00A200090001)
-std::vector<MutationRef> decodeMutationLogValue(const StringRef& value) {
+std::vector<MutationRef> decodeMutationLogValue(StringRef const& value) {
 	StringRefReader reader(value, restore_corrupted_data());
 
 	Version protocolVersion = reader.consume<uint64_t>();
@@ -4870,15 +4870,15 @@ std::vector<MutationRef> decodeMutationLogValue(const StringRef& value) {
 		p1len = reader.consume<uint32_t>();
 		p2len = reader.consume<uint32_t>();
 
-		const uint8_t* key = reader.consume(p1len);
-		const uint8_t* val = reader.consume(p2len);
+		uint8_t const* key = reader.consume(p1len);
+		uint8_t const* val = reader.consume(p2len);
 
 		mutations.emplace_back((MutationRef::Type)type, StringRef(key, p1len), StringRef(val, p2len));
 	}
 	return mutations;
 }
 
-void AccumulatedMutations::addChunk(int chunkNumber, const KeyValueRef& kv) {
+void AccumulatedMutations::addChunk(int chunkNumber, KeyValueRef const& kv) {
 	// here it validates that partition(chunk) number has to be continuous
 	if (chunkNumber == lastChunkNumber + 1) {
 		lastChunkNumber = chunkNumber;
@@ -4909,7 +4909,7 @@ bool AccumulatedMutations::isComplete() const {
 // Returns true if a complete chunk contains any MutationRefs which intersect with any
 // range in ranges.
 // It is undefined behavior to run this if isComplete() does not return true.
-bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const {
+bool AccumulatedMutations::matchesAnyRange(RangeMapFilters const& filters) const {
 	// decode param2, so that each actual mutations are in mutations variable
 	std::vector<MutationRef> mutations = decodeMutationLogValue(serializedMutations);
 	for (auto& m : mutations) {
@@ -4921,7 +4921,7 @@ bool AccumulatedMutations::matchesAnyRange(const RangeMapFilters& filters) const
 	return false;
 }
 
-bool RangeMapFilters::match(const MutationRef& m) const {
+bool RangeMapFilters::match(MutationRef const& m) const {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		if (match(singleKeyRange(m.param1))) {
 			return true;
@@ -4936,13 +4936,13 @@ bool RangeMapFilters::match(const MutationRef& m) const {
 	return false;
 }
 
-bool RangeMapFilters::match(const KeyValueRef& kv) const {
+bool RangeMapFilters::match(KeyValueRef const& kv) const {
 	return match(singleKeyRange(kv.key));
 }
 
-bool RangeMapFilters::match(const KeyRangeRef& range) const {
+bool RangeMapFilters::match(KeyRangeRef const& range) const {
 	auto ranges = rangeMap.intersectingRanges(range);
-	for (const auto& r : ranges) {
+	for (auto const& r : ranges) {
 		if (r.cvalue() == 1) {
 			return true;
 		}
@@ -4952,7 +4952,7 @@ bool RangeMapFilters::match(const KeyRangeRef& range) const {
 
 // Returns a vector of filtered KV refs from data which are either part of incomplete mutation groups OR complete
 // and have data relevant to one of the KV ranges in ranges
-std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, const RangeMapFilters& filters) {
+std::vector<KeyValueRef> filterLogMutationKVPairs(VectorRef<KeyValueRef> data, RangeMapFilters const& filters) {
 	std::unordered_map<Version, AccumulatedMutations> mutationBlocksByVersion;
 
 	// group mutations by version
@@ -5198,7 +5198,7 @@ Standalone<StringRef> transformMutationToOldFormat(MutationRef m) {
 */
 Standalone<VectorRef<KeyValueRef>> generateOldFormatMutations(
     Version commitVersion,
-    const std::vector<Standalone<VectorRef<VersionedMutation>>>& newFormatMutations) {
+    std::vector<Standalone<VectorRef<VersionedMutation>>> const& newFormatMutations) {
 	Standalone<VectorRef<KeyValueRef>> results;
 	std::vector<Standalone<VectorRef<KeyValueRef>>> oldFormatMutations;
 	// mergeSort subversion here
@@ -5365,7 +5365,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		state int txBytes = 0;
 		state int txBytesLimit = CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
-		for (const auto& data : mutations) {
+		for (auto const& data : mutations) {
 			oldFormatMutations.append(oldFormatMutations.arena(), data.begin(), data.size());
 		}
 		state int totalMutation = oldFormatMutations.size();
@@ -6445,7 +6445,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			beginVersion = restorable.get().snapshot.beginVersion;
 
 			if (!inconsistentSnapshotOnly) {
-				for (const RangeFile& f : restorable.get().ranges) {
+				for (RangeFile const& f : restorable.get().ranges) {
 					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 					rangeFiles.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 					// In a restore with both snapshots and logs, the firstConsistentVersion is the highest version
@@ -6454,7 +6454,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				}
 			} else {
 				for (int i = 0; i < restorable.get().ranges.size(); ++i) {
-					const RangeFile& f = restorable.get().ranges[i];
+					RangeFile const& f = restorable.get().ranges[i];
 					files.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 					rangeFiles.push_back({ f.version, f.fileName, true, f.blockSize, f.fileSize });
 					// In inconsistentSnapshotOnly mode, if all range files have the same version, then it is the
@@ -6471,7 +6471,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			firstConsistentVersion = beginVersion;
 		}
 		if (!inconsistentSnapshotOnly) {
-			for (const LogFile& f : restorable.get().logs) {
+			for (LogFile const& f : restorable.get().logs) {
 				files.push_back(
 				    { f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion, f.tagId, f.totalTags });
 				logFiles.push_back(
@@ -8152,7 +8152,7 @@ public:
 	}
 };
 
-const int FileBackupAgent::dataFooterSize = 20;
+int const FileBackupAgent::dataFooterSize = 20;
 
 // Return if parallel restore has finished
 Future<Void> FileBackupAgent::parallelRestoreFinish(Database cx, UID randomUID, UnlockDB unlockDB) {

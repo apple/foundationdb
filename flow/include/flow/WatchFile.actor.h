@@ -36,8 +36,8 @@
 
 ACTOR static Future<Void> watchFileForChanges(std::string filename,
                                               AsyncTrigger* fileChanged,
-                                              const int* intervalSeconds,
-                                              const char* errorType) {
+                                              int const* intervalSeconds,
+                                              char const* errorType) {
 	if (filename == "") {
 		return Never();
 	}

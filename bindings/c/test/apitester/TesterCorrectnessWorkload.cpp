@@ -27,7 +27,7 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public ApiWorkload {
 public:
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
+	ApiCorrectnessWorkload(WorkloadConfig const& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType {
@@ -49,14 +49,14 @@ private:
 		}
 		execTransaction(
 		    [kvPairs](auto ctx) {
-			    for (const fdb::KeyValue& kv : *kvPairs) {
+			    for (fdb::KeyValue const& kv : *kvPairs) {
 				    ctx->tx().addReadConflictRange(kv.key, kv.key + fdb::Key(1, '\x00'));
 				    ctx->tx().set(kv.key, kv.value);
 			    }
 			    ctx->commit();
 		    },
 		    [this, kvPairs, cont, tenantId]() {
-			    for (const fdb::KeyValue& kv : *kvPairs) {
+			    for (fdb::KeyValue const& kv : *kvPairs) {
 				    stores[tenantId].set(kv.key, kv.value);
 			    }
 			    auto results = std::make_shared<std::vector<std::optional<fdb::Value>>>();
@@ -67,7 +67,7 @@ private:
 					        ctx->tx().setOption(FDB_TR_OPTION_USE_GRV_CACHE);
 				        }
 				        auto futures = std::make_shared<std::vector<fdb::Future>>();
-				        for (const auto& kv : *kvPairs) {
+				        for (auto const& kv : *kvPairs) {
 					        futures->push_back(ctx->tx().get(kv.key, false));
 				        }
 				        ctx->continueAfterAll(*futures, [ctx, futures, results]() {
@@ -110,7 +110,7 @@ private:
 		execTransaction(
 		    [keys, results](auto ctx) {
 			    auto futures = std::make_shared<std::vector<fdb::Future>>();
-			    for (const auto& key : *keys) {
+			    for (auto const& key : *keys) {
 				    futures->push_back(ctx->tx().get(key, false));
 			    }
 			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
@@ -159,7 +159,7 @@ private:
 		execTransaction(
 		    [keysWithSelectors, results](auto ctx) {
 			    auto futures = std::make_shared<std::vector<fdb::Future>>();
-			    for (const auto& keyWithSelector : *keysWithSelectors) {
+			    for (auto const& keyWithSelector : *keysWithSelectors) {
 				    auto key = keyWithSelector.first;
 				    auto selector = keyWithSelector.second;
 				    futures->push_back(ctx->tx().getKey(selector, false));
@@ -218,7 +218,7 @@ private:
 		ctx->continueAfter(f, [this, ctx, f, endKey, results]() {
 			auto out = copyKeyValueArray(f.get());
 			results->insert(results->end(), out.first.begin(), out.first.end());
-			const bool more = out.second;
+			bool const more = out.second;
 			if (more) {
 				// Fetch the remaining results.
 				getRangeLoop(ctx, fdb::key_select::firstGreaterThan(results->back().key), endKey, results);

@@ -168,7 +168,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			TraceEvent traceDiskUsage("DiskUsage");
 
 			bool gotStorageStats = false;
-			for (const auto& ss : healthMetrics.storageStats) {
+			for (auto const& ss : healthMetrics.storageStats) {
 				gotStorageStats = true;
 				auto storageStats = ss.second;
 				detailedWorstStorageQueue = std::max(detailedWorstStorageQueue, storageStats.storageQueue);
@@ -185,7 +185,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			TraceEvent traceTLogQueue("TLogQueue");
 			traceTLogQueue.setMaxEventLength(10000);
 			bool gotTLogQueue = false;
-			for (const auto& ss : healthMetrics.tLogQueue) {
+			for (auto const& ss : healthMetrics.tLogQueue) {
 				gotTLogQueue = true;
 				detailedWorstTLogQueue = std::max(detailedWorstTLogQueue, ss.second);
 				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);

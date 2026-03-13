@@ -162,8 +162,8 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 				                                         num.present() ? GetRangeLimits(num.get()) : GetRangeLimits(),
 				                                         Snapshot::False,
 				                                         reverse));
-				for (const auto& auditKeyValue : res) {
-					const AuditStorageState auditState = decodeAuditStorageState(auditKeyValue.value);
+				for (auto const& auditKeyValue : res) {
+					AuditStorageState const auditState = decodeAuditStorageState(auditKeyValue.value);
 					if (phase.present() && auditState.getPhase() != phase.get()) {
 						continue;
 					}
@@ -209,7 +209,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 
 				// Read and clear are not atomic
 				int numFinishAudit = 0;
-				for (const auto& auditState : auditStates) {
+				for (auto const& auditState : auditStates) {
 					if (auditState.id.first() > maxAuditIdToClear.first()) {
 						continue; // ignore any audit with a larger auditId than the input threshold
 					}
@@ -217,12 +217,12 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 						numFinishAudit++;
 					}
 				}
-				const int numFinishAuditToClean = numFinishAudit - numFinishAuditToKeep;
+				int const numFinishAuditToClean = numFinishAudit - numFinishAuditToKeep;
 				numFinishAuditCleaned = 0;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				for (const auto& auditState : auditStates) {
+				for (auto const& auditState : auditStates) {
 					if (auditState.id.first() > maxAuditIdToClear.first()) {
 						continue; // ignore any audit with a larger auditId than the input threshold
 					}
@@ -413,7 +413,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			if (!res_.present()) { // has been cancelled
 				throw audit_storage_cancelled();
 			} else {
-				const AuditStorageState currentState = decodeAuditStorageState(res_.get());
+				AuditStorageState const currentState = decodeAuditStorageState(res_.get());
 				ASSERT(currentState.id == auditState.id && currentState.getType() == auditState.getType());
 				if (currentState.getPhase() == AuditPhase::Failed) {
 					throw audit_storage_cancelled();
@@ -807,7 +807,7 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				    .detail("ResMore", result.more)
 				    .detail("ResSize", result.size());
 			}
-			for (const auto& auditKeyValue : result) {
+			for (auto const& auditKeyValue : result) {
 				auto auditState = decodeAuditStorageState(auditKeyValue.value);
 				TraceEvent(SevVerbose, "AuditUtilLoadMetadataEach", dataDistributorId)
 				    .detail("CurrentDDID", dataDistributorId)
@@ -823,21 +823,21 @@ ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
 				existingAuditStates[auditState.getType()].push_back(auditState);
 			}
 			// Cleanup Complete/Failed audit metadata for each type separately
-			for (const auto& [auditType, _] : existingAuditStates) {
+			for (auto const& [auditType, _] : existingAuditStates) {
 				int numFinishAudit = 0; // "finish" audits include Complete/Failed audits
-				for (const auto& auditState : existingAuditStates[auditType]) {
+				for (auto const& auditState : existingAuditStates[auditType]) {
 					if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed) {
 						numFinishAudit++;
 					}
 				}
-				const int numFinishAuditsToClear = numFinishAudit - persistFinishAuditCount;
+				int const numFinishAuditsToClear = numFinishAudit - persistFinishAuditCount;
 				int numFinishAuditsCleared = 0;
 				std::sort(existingAuditStates[auditType].begin(),
 				          existingAuditStates[auditType].end(),
 				          [](AuditStorageState a, AuditStorageState b) {
 					          return a.id < b.id; // Inplacement sort in ascending order
 				          });
-				for (const auto& auditState : existingAuditStates[auditType]) {
+				for (auto const& auditState : existingAuditStates[auditType]) {
 					if (auditState.getPhase() == AuditPhase::Failed) {
 						if (numFinishAuditsCleared < numFinishAuditsToClear) {
 							// Clear both audit metadata and corresponding progress metadata
@@ -910,7 +910,7 @@ bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges) {
 // This is not a part in consistency check of audit metadata
 // This is used for checking the validity of inputs to rangesSame()
 bool noEmptyRangeInRanges(std::vector<KeyRange> ranges) {
-	for (const auto& range : ranges) {
+	for (auto const& range : ranges) {
 		if (range.empty()) {
 			return false;
 		}
@@ -924,7 +924,7 @@ bool noEmptyRangeInRanges(std::vector<KeyRange> ranges) {
 std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges) {
 	std::sort(ranges.begin(), ranges.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	std::vector<KeyRange> res;
-	for (const auto& range : ranges) {
+	for (auto const& range : ranges) {
 		if (res.empty()) {
 			res.push_back(range);
 			continue;
@@ -1048,7 +1048,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 				ownRanges.push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
 			}
 		}
-		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
+		KeyRange const completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		TraceEvent(SevVerbose, "AuditUtilGetThisServerKeysFromServerKeysEnd", serverID)
 		    .detail("AuditServerID", serverID)
 		    .detail("Range", range)
@@ -1127,7 +1127,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 				serverOwnRanges[ssid].push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
 			}
 		}
-		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
+		KeyRange const completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		TraceEvent(SevInfo, "AuditUtilGetThisServerKeysFromKeyServersEnd", auditServerId)
 		    .detail("Range", range)
 		    .detail("CompleteRange", completeRange)

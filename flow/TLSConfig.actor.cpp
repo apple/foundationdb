@@ -119,7 +119,7 @@ void LoadedTLSConfig::print(FILE* fp) {
 	X509_STORE_CTX_free(store_ctx);
 }
 
-void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::context& context) {
+void ConfigureSSLContext(LoadedTLSConfig const& loaded, boost::asio::ssl::context& context) {
 	try {
 		context.set_options(boost::asio::ssl::context::default_workarounds);
 		auto verifyFailIfNoPeerCert = boost::asio::ssl::verify_fail_if_no_peer_cert;
@@ -131,18 +131,18 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 		context.set_password_callback([password = loaded.getPassword()](
 		                                  size_t, boost::asio::ssl::context::password_purpose) { return password; });
 
-		const std::string& CABytes = loaded.getCABytes();
+		std::string const& CABytes = loaded.getCABytes();
 		if (CABytes.size()) {
 			context.add_certificate_authority(boost::asio::buffer(CABytes.data(), CABytes.size()));
 		}
 
-		const std::string& keyBytes = loaded.getKeyBytes();
+		std::string const& keyBytes = loaded.getKeyBytes();
 		if (keyBytes.size()) {
 			context.use_private_key(boost::asio::buffer(keyBytes.data(), keyBytes.size()),
 			                        boost::asio::ssl::context::pem);
 		}
 
-		const std::string& certBytes = loaded.getCertificateBytes();
+		std::string const& certBytes = loaded.getCertificateBytes();
 		if (certBytes.size()) {
 			context.use_certificate_chain(boost::asio::buffer(certBytes.data(), certBytes.size()));
 		}
@@ -157,7 +157,7 @@ void ConfigureSSLContext(const LoadedTLSConfig& loaded, boost::asio::ssl::contex
 
 void ConfigureSSLStream(Reference<TLSPolicy> policy,
                         boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>& stream,
-                        const NetworkAddress& peerAddress,
+                        NetworkAddress const& peerAddress,
                         std::function<void(bool)> callback) {
 	try {
 		stream.set_verify_callback(
@@ -191,7 +191,7 @@ std::string TLSConfig::getCertificatePathSync() const {
 		return envCertPath;
 	}
 
-	const char* defaultCertFileName = "cert.pem";
+	char const* defaultCertFileName = "cert.pem";
 	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultCertFileName))) {
 		return joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 	}
@@ -209,7 +209,7 @@ std::string TLSConfig::getKeyPathSync() const {
 		return envKeyPath;
 	}
 
-	const char* defaultKeyFileName = "key.pem";
+	char const* defaultKeyFileName = "key.pem";
 	if (fileExists(joinPath(platform::getDefaultConfigPath(), defaultKeyFileName))) {
 		return joinPath(platform::getDefaultConfigPath(), defaultKeyFileName);
 	}
@@ -246,7 +246,7 @@ bool TLSConfig::getDisablePlainTextConnection() const {
 LoadedTLSConfig TLSConfig::loadSync() const {
 	LoadedTLSConfig loaded;
 
-	const std::string certPath = getCertificatePathSync();
+	std::string const certPath = getCertificatePathSync();
 	if (certPath.size()) {
 		try {
 			loaded.tlsCertBytes = readFileBytes(certPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
@@ -258,7 +258,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 		loaded.tlsCertBytes = tlsCertBytes;
 	}
 
-	const std::string keyPath = getKeyPathSync();
+	std::string const keyPath = getKeyPathSync();
 	if (keyPath.size()) {
 		try {
 			loaded.tlsKeyBytes = readFileBytes(keyPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
@@ -270,7 +270,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 		loaded.tlsKeyBytes = tlsKeyBytes;
 	}
 
-	const std::string CAPath = getCAPathSync();
+	std::string const CAPath = getCAPathSync();
 	if (CAPath.size()) {
 		try {
 			loaded.tlsCABytes = readFileBytes(CAPath, FLOW_KNOBS->CERT_FILE_MAX_SIZE);
@@ -290,7 +290,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 	return loaded;
 }
 
-TLSPolicy::TLSPolicy(const LoadedTLSConfig& loaded, std::function<void()> on_failure)
+TLSPolicy::TLSPolicy(LoadedTLSConfig const& loaded, std::function<void()> on_failure)
   : rules(), on_failure(std::move(on_failure)), is_client(loaded.getEndpointType() == TLSEndpointType::CLIENT) {
 	set_verify_peers(loaded.getVerifyPeers());
 }
@@ -309,7 +309,7 @@ ACTOR static Future<Void> readEntireFile(std::string filename, std::string* dest
 	return Void();
 }
 
-ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
+ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(TLSConfig const* self) {
 	state LoadedTLSConfig loaded;
 	state std::vector<Future<Void>> reads;
 
@@ -373,7 +373,7 @@ std::string TLSPolicy::ErrorString(boost::system::error_code e) {
 std::string TLSPolicy::toString() const {
 	std::stringstream ss;
 	ss << "TLSPolicy{ Rules=[";
-	for (const auto& r : rules) {
+	for (auto const& r : rules) {
 		ss << " " << r.toString() << ",";
 	}
 	ss << " ] }";
@@ -385,15 +385,15 @@ std::string TLSPolicy::Rule::toString() const {
 
 	ss << "Rule{ verify_cert=" << verify_cert << ", verify_time=" << verify_time;
 	ss << ", Subject=[";
-	for (const auto& s : subject_criteria) {
+	for (auto const& s : subject_criteria) {
 		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
 	}
 	ss << " ], Issuer=[";
-	for (const auto& s : issuer_criteria) {
+	for (auto const& s : issuer_criteria) {
 		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
 	}
 	ss << " ], Root=[";
-	for (const auto& s : root_criteria) {
+	for (auto const& s : root_criteria) {
 		ss << " { NID=" << s.first << ", Criteria=" << s.second.criteria << "},";
 	}
 	ss << " ] }";
@@ -522,7 +522,7 @@ static NID abbrevToNID(std::string const& sn) {
 }
 
 static X509Location locationForNID(NID nid) {
-	const char* name = OBJ_nid2ln(nid);
+	char const* name = OBJ_nid2ln(nid);
 	if (name == nullptr) {
 		throw std::runtime_error("locationForNID");
 	}
@@ -550,7 +550,7 @@ void TLSPolicy::set_verify_peers(std::vector<std::string> verify_peers) {
 				}
 			}
 			rules.emplace_back(verifyString.substr(start));
-		} catch (const std::runtime_error& e) {
+		} catch (std::runtime_error const& e) {
 			rules.clear();
 			std::string& verifyString = verify_peers[i];
 			TraceEvent(SevError, "FDBLibTLSVerifyPeersParseError").detail("Config", verifyString);
@@ -625,7 +625,7 @@ TLSPolicy::Rule::Rule(std::string input) {
 				throw std::runtime_error("parse_verify");
 
 			NID termNID = abbrevToNID(term);
-			const X509Location loc = locationForNID(termNID);
+			X509Location const loc = locationForNID(termNID);
 			auto criteriaToInsert = Criteria(unesc, mt, loc);
 			auto res = criteria->insert(std::make_pair(termNID, criteriaToInsert));
 			if (!res.second) {
@@ -658,7 +658,7 @@ inline void GENERAL_NAME_free_impl(struct stack_st_GENERAL_NAME* ptr) {
 	sk_GENERAL_NAME_pop_free(ptr, GENERAL_NAME_free);
 }
 
-bool match_criteria_entry(const std::string_view criteria, const ASN1_STRING* entry, const MatchType match_type) {
+bool match_criteria_entry(std::string_view const criteria, ASN1_STRING const* entry, MatchType const match_type) {
 	// Well, ScopeExit.h:ScopeExit should also work but unique_ptr is easier
 	std::unique_ptr<ASN1_STRING, decltype(&ASN1_STRING_free)> asn_criteria(ASN1_IA5STRING_new(), ASN1_STRING_free);
 	if (!asn_criteria) {
@@ -699,7 +699,7 @@ bool match_criteria_entry(const std::string_view criteria, const ASN1_STRING* en
 }
 
 class PeerVerifier {
-	const std::vector<TLSPolicy::Rule>& m_rules;
+	std::vector<TLSPolicy::Rule> const& m_rules;
 	X509_STORE_CTX* m_storeCtx;
 	bool m_verified;
 
@@ -710,23 +710,23 @@ class PeerVerifier {
 	std::string m_currentExtension;
 	std::vector<std::string> m_failureReasons;
 
-	bool matchNameCriteria(X509_NAME* name, const NID nid, std::string_view criteria, const MatchType matchType);
+	bool matchNameCriteria(X509_NAME* name, NID const nid, std::string_view criteria, MatchType const matchType);
 
-	bool matchExtensionCriteria(const X509* cert, const NID nid, std::string_view criteria, const MatchType matchType);
+	bool matchExtensionCriteria(X509 const* cert, NID const nid, std::string_view criteria, MatchType const matchType);
 
-	bool matchCriteria(const X509* cert, X509_NAME* name, const NID nid, const Criteria& criteria);
+	bool matchCriteria(X509 const* cert, X509_NAME* name, NID const nid, Criteria const& criteria);
 
 	// Verify a set of criteria
-	bool verifyCriterias(const X509* cert, X509_NAME* name, const TLSPolicy::Rule::CriteriaMap& criterias);
+	bool verifyCriterias(X509 const* cert, X509_NAME* name, TLSPolicy::Rule::CriteriaMap const& criterias);
 
 	// Verify a single rule
-	bool verifyRule(const TLSPolicy::Rule&);
+	bool verifyRule(TLSPolicy::Rule const&);
 
 	// Verify the TLSPolicy peer
 	bool verify();
 
 public:
-	PeerVerifier(const std::vector<TLSPolicy::Rule>& rules, X509_STORE_CTX* store_ctx)
+	PeerVerifier(std::vector<TLSPolicy::Rule> const& rules, X509_STORE_CTX* store_ctx)
 	  : m_rules(rules), m_storeCtx(store_ctx), m_successReason(), m_verifyState() {
 		ASSERT(m_storeCtx != nullptr);
 
@@ -738,11 +738,11 @@ public:
 
 	bool isOk() const noexcept { return m_verified; }
 	bool isErr() const noexcept { return !isOk(); }
-	const std::vector<std::string>& getFailureReasons() const noexcept { return m_failureReasons; }
-	const std::string_view getSuccessReason() const noexcept { return m_successReason; }
+	std::vector<std::string> const& getFailureReasons() const noexcept { return m_failureReasons; }
+	std::string_view const getSuccessReason() const noexcept { return m_successReason; }
 };
 
-std::string getX509Name(const X509_NAME* name) {
+std::string getX509Name(X509_NAME const* name) {
 	std::unique_ptr<BIO, decltype(&BIO_free)> out(BIO_new(BIO_s_mem()), BIO_free);
 	if (out == nullptr) {
 		throw internal_error_msg("Unable to allocate OpenSSL BIO");
@@ -751,7 +751,7 @@ std::string getX509Name(const X509_NAME* name) {
 	unsigned char* rawName = nullptr;
 	long length = BIO_get_mem_data(out.get(), &rawName);
 	ASSERT(length > 0);
-	std::string result((const char*)rawName, length);
+	std::string result((char const*)rawName, length);
 	return result;
 }
 
@@ -760,7 +760,7 @@ using GeneralNameType = int;
 
 using namespace std::literals::string_view_literals;
 
-const std::unordered_map<GeneralNameType, std::string_view> UNSUPPORTED_GENERAL_NAME_TYPES = {
+std::unordered_map<GeneralNameType, std::string_view> const UNSUPPORTED_GENERAL_NAME_TYPES = {
 	{ GEN_OTHERNAME, "GEN_OTHERNAME"sv },
 	{ GEN_X400, "GEN_X400"sv },
 	{ GEN_DIRNAME, "GEN_DIRNAME"sv },
@@ -768,10 +768,10 @@ const std::unordered_map<GeneralNameType, std::string_view> UNSUPPORTED_GENERAL_
 	{ GEN_RID, "GEN_RID"sv }
 };
 
-bool PeerVerifier::matchExtensionCriteria(const X509* cert,
-                                          const NID nid,
+bool PeerVerifier::matchExtensionCriteria(X509 const* cert,
+                                          NID const nid,
                                           std::string_view criteria,
-                                          const MatchType matchType) {
+                                          MatchType const matchType) {
 
 	// Only support NID_subject_alt_name and NID_issuer_alt_name
 	if (nid != NID_subject_alt_name && nid != NID_issuer_alt_name) {
@@ -787,14 +787,14 @@ bool PeerVerifier::matchExtensionCriteria(const X509* cert,
 	}
 	int numSans = sk_GENERAL_NAME_num(sans.get());
 
-	auto checkCriteriaEntry = [matchType, &criteria](const std::string_view prefix, const ASN1_STRING* entry) -> bool {
+	auto checkCriteriaEntry = [matchType, &criteria](std::string_view const prefix, ASN1_STRING const* entry) -> bool {
 		return criteria.starts_with(prefix) && match_criteria_entry(criteria.substr(prefix.size()), entry, matchType);
 	};
 
 	for (int i = 0; i < numSans; ++i) {
 		GENERAL_NAME* altName = sk_GENERAL_NAME_value(sans.get(), i);
 		// See openssl/include/openssl/x509v3.h.in for more details about GENERAL_NAME
-		const auto altNameType = altName->type;
+		auto const altNameType = altName->type;
 		if (UNSUPPORTED_GENERAL_NAME_TYPES.contains(altNameType)) {
 			m_verifyState.emplace_back(UNSUPPORTED_GENERAL_NAME_TYPES.at(altNameType));
 			return false;
@@ -827,9 +827,9 @@ bool PeerVerifier::matchExtensionCriteria(const X509* cert,
 }
 
 bool PeerVerifier::matchNameCriteria(X509_NAME* name,
-                                     const NID nid,
+                                     NID const nid,
                                      std::string_view criteria,
-                                     const MatchType matchType) {
+                                     MatchType const matchType) {
 	if (int index = X509_NAME_get_index_by_NID(name, nid, -1); index >= 0) {
 		if (X509_NAME_get_index_by_NID(name, nid, index) != -1) {
 			m_verifyState.emplace_back("MultipleNames"sv);
@@ -851,7 +851,7 @@ bool PeerVerifier::matchNameCriteria(X509_NAME* name,
 	return false;
 }
 
-bool PeerVerifier::matchCriteria(const X509* cert, X509_NAME* name, const NID nid, const Criteria& criteria) {
+bool PeerVerifier::matchCriteria(X509 const* cert, X509_NAME* name, NID const nid, Criteria const& criteria) {
 	bool result = false;
 
 	switch (criteria.location) {
@@ -880,8 +880,8 @@ bool PeerVerifier::matchCriteria(const X509* cert, X509_NAME* name, const NID ni
 	return result;
 }
 
-bool PeerVerifier::verifyCriterias(const X509* cert, X509_NAME* name, const TLSPolicy::Rule::CriteriaMap& criterias) {
-	for (const auto& [nid, criteria] : criterias) {
+bool PeerVerifier::verifyCriterias(X509 const* cert, X509_NAME* name, TLSPolicy::Rule::CriteriaMap const& criterias) {
+	for (auto const& [nid, criteria] : criterias) {
 		if (!matchCriteria(cert, name, nid, criteria)) {
 			return false;
 		}
@@ -889,13 +889,13 @@ bool PeerVerifier::verifyCriterias(const X509* cert, X509_NAME* name, const TLSP
 	return true;
 }
 
-bool PeerVerifier::verifyRule(const TLSPolicy::Rule& rule) {
+bool PeerVerifier::verifyRule(TLSPolicy::Rule const& rule) {
 	m_verifyState.emplace_back("Rule"sv);
 
 	{
 		m_verifyState.emplace_back("Cert");
 
-		const X509* cert = sk_X509_value(X509_STORE_CTX_get0_chain(m_storeCtx), 0);
+		X509 const* cert = sk_X509_value(X509_STORE_CTX_get0_chain(m_storeCtx), 0);
 		ASSERT(cert != nullptr);
 
 		m_verifyState.emplace_back("Subject"sv);
@@ -924,9 +924,9 @@ bool PeerVerifier::verifyRule(const TLSPolicy::Rule& rule) {
 	}
 
 	{
-		const auto chain = X509_STORE_CTX_get0_chain(m_storeCtx);
-		const auto numItems = sk_X509_num(chain);
-		const X509* rootCert = sk_X509_value(chain, numItems - 1);
+		auto const chain = X509_STORE_CTX_get0_chain(m_storeCtx);
+		auto const numItems = sk_X509_num(chain);
+		X509 const* rootCert = sk_X509_value(chain, numItems - 1);
 		ASSERT(rootCert != nullptr);
 
 		m_verifyState.emplace_back("RootCert.Subject");
@@ -952,12 +952,12 @@ bool PeerVerifier::verify() {
 		return true;
 	}
 
-	if (std::any_of(std::begin(m_rules), std::end(m_rules), [](const auto& rule) { return !rule.verify_cert; })) {
+	if (std::any_of(std::begin(m_rules), std::end(m_rules), [](auto const& rule) { return !rule.verify_cert; })) {
 		m_successReason = "At least one certificate verfications rule disabled"sv;
 		return true;
 	}
 
-	for (const auto& rule : m_rules) {
+	for (auto const& rule : m_rules) {
 		if (verifyRule(rule)) {
 			m_successReason = "Rule matched successfully"sv;
 			ASSERT(m_currentName.empty() && m_currentExtension.empty() && m_verifyState.empty());
@@ -968,7 +968,7 @@ bool PeerVerifier::verify() {
 			// Prevent realloc
 			failureReason.reserve(1024);
 
-			for (const auto& item : m_verifyState) {
+			for (auto const& item : m_verifyState) {
 				failureReason.append(item);
 				failureReason.push_back('.');
 			}
@@ -1000,7 +1000,7 @@ bool PeerVerifier::verify() {
 
 } // anonymous namespace
 
-bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx, const NetworkAddress& peerAddress) {
+bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx, NetworkAddress const& peerAddress) {
 	// Preverification
 	if (!preverified) {
 		TraceEvent(SevWarn, "TLSPolicyFailure")
@@ -1018,8 +1018,8 @@ bool TLSPolicy::verify_peer(bool preverified, X509_STORE_CTX* store_ctx, const N
 		ASSERT_EQ(verifier.getFailureReasons().size(), rules.size());
 
 		for (size_t i = 0; i < rules.size(); ++i) {
-			const auto& failureReason = verifier.getFailureReasons()[i];
-			const auto& rule = rules[i];
+			auto const& failureReason = verifier.getFailureReasons()[i];
+			auto const& rule = rules[i];
 			std::string eventName = fmt::format("TLSPolicyFailure{:02d}", i);
 
 			TraceEvent(SevWarn, eventName.c_str())

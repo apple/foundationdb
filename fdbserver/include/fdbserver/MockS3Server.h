@@ -53,11 +53,11 @@ private:
 };
 
 // Start a mock S3 server listening on the specified address (simulation mode)
-Future<Void> startMockS3Server(const NetworkAddress& listenAddress);
+Future<Void> startMockS3Server(NetworkAddress const& listenAddress);
 
 // Start a mock S3 server in real HTTP mode for ctests
 // persistenceDir: Optional directory for storing persistence files (default: "simfdb/mocks3")
-Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress, const std::string& persistenceDir = "");
+Future<Void> startMockS3ServerReal(NetworkAddress const& listenAddress, std::string const& persistenceDir = "");
 
 // Clear all MockS3 global storage - called at the start of each simulation test
 // to prevent data accumulation across multiple tests
@@ -71,7 +71,7 @@ Future<Void> registerMockS3Server(std::string ip, std::string port);
 // to disk for analysis and crash recovery
 // persistenceDir: Directory where data will be stored (e.g., "simfdb/mocks3")
 // Creates directory structure: <persistenceDir>/objects/<bucket>/ and <persistenceDir>/multipart/
-void enableMockS3Persistence(const std::string& persistenceDir);
+void enableMockS3Persistence(std::string const& persistenceDir);
 
 // Check if MockS3 persistence is currently enabled
 bool isMockS3PersistenceEnabled();

@@ -1,4 +1,3 @@
-Language:        Cpp
 # BasedOnStyle:  Mozilla
 AccessModifierOffset: -4
 AlignAfterOpenBracket: Align
@@ -49,6 +48,7 @@ PenaltyBreakString: 1000
 PenaltyExcessCharacter: 1000000
 PenaltyReturnTypeOnItsOwnLine: 200
 PointerAlignment: Left
+QualifierAlignment: Right
 ReflowComments:  true
 SortIncludes:    false
 SpaceAfterCStyleCast: false

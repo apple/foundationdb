@@ -108,7 +108,7 @@ struct Increment : TestWorkload {
 			throw;
 		}
 	}
-	bool incrementCheckData(const VectorRef<KeyValueRef>& data, Version v, Increment* self) {
+	bool incrementCheckData(VectorRef<KeyValueRef> const& data, Version v, Increment* self) {
 		CODE_PROBE(self->transactions.getValue(), "incrementCheckData transaction has value");
 		if (self->transactions.getValue() && data.empty()) {
 			TraceEvent(SevError, "TestFailure")

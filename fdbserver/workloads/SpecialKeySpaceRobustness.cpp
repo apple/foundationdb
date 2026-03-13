@@ -44,7 +44,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			co_await managementApiCorrectnessActor(cx, this);
 	}
 
-	bool getRangeResultInOrder(const RangeResult& result) {
+	bool getRangeResultInOrder(RangeResult const& result) {
 		for (int i = 0; i < result.size() - 1; ++i) {
 			if (result[i].key >= result[i + 1].key) {
 				TraceEvent(SevError, "TestFailure")
@@ -83,7 +83,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		{
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			for (const std::string& option : SpecialKeySpace::getManagementApiOptionsSet()) {
+			for (std::string const& option : SpecialKeySpace::getManagementApiOptionsSet()) {
 				tx->set(
 				    "options/"_sr.withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
 				        .withSuffix(option),
@@ -232,13 +232,13 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				// check correctness of classType of each process
 				std::vector<ProcessData> workers = co_await getWorkers(&tx->getTransaction());
 				if (workers.size()) {
-					for (const auto& worker : workers) {
+					for (auto const& worker : workers) {
 						Key addr =
 						    Key("process/class_type/" + formatIpPort(worker.address.ip, worker.address.port))
 						        .withPrefix(
 						            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 						bool found = false;
-						for (const auto& kv : result) {
+						for (auto const& kv : result) {
 							if (kv.key == addr) {
 								ASSERT(kv.value.toString() == worker.processClass.toString());
 								found = true;
@@ -308,13 +308,13 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				// check correctness of classType of each process
 				std::vector<ProcessData> workers = co_await getWorkers(&tx->getTransaction());
 				if (workers.size()) {
-					for (const auto& worker : workers) {
+					for (auto const& worker : workers) {
 						Key addr =
 						    Key("process/class_source/" + formatIpPort(worker.address.ip, worker.address.port))
 						        .withPrefix(
 						            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 						bool found = false;
-						for (const auto& kv : class_source_result) {
+						for (auto const& kv : class_source_result) {
 							if (kv.key == addr) {
 								ASSERT(kv.value.toString() == worker.processClass.sourceString());
 								// Default source string is command_line
@@ -352,7 +352,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 							LocalityData _locality(worker.locality);
 							std::vector<ProcessData> _workers = co_await getWorkers(&tx->getTransaction());
 							bool found = false;
-							for (const auto& w : _workers) {
+							for (auto const& w : _workers) {
 								auto w_addr = formatIpPort(w.address.ip, w.address.port);
 								if (w_addr == address) {
 									ASSERT(w.locality.describeProcessId() != _locality.describeProcessId());
@@ -549,7 +549,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					ASSERT(process_addresses.size() == cs.coords.size() + cs.hostnames.size());
 					// compare the coordinator process network addresses one by one
 					std::vector<NetworkAddress> coordinators = co_await cs.tryResolveHostnames();
-					for (const auto& network_address : coordinators) {
+					for (auto const& network_address : coordinators) {
 						ASSERT(std::find(process_addresses.begin(),
 						                 process_addresses.end(),
 						                 network_address.toString()) != process_addresses.end());

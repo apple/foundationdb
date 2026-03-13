@@ -40,9 +40,9 @@ _AssumeVersion::_AssumeVersion(ProtocolVersion version) : v(version) {
 	}
 }
 
-const void* BinaryReader::readBytes(int bytes) {
-	const char* b = begin;
-	const char* e = b + bytes;
+void const* BinaryReader::readBytes(int bytes) {
+	char const* b = begin;
+	char const* e = b + bytes;
 	if (e > end) {
 		uint64_t bytes_short = e - end;
 		ASSERT(!g_network->isSimulated());
@@ -92,7 +92,7 @@ void verifyData(StringRef value, int numObjects) {
 		std::vector<OldStruct> data;
 		reader >> data;
 		ASSERT_EQ(data.size(), numObjects);
-		for (const auto& object : data) {
+		for (auto const& object : data) {
 			ASSERT(object.isSet());
 		}
 	}
@@ -102,7 +102,7 @@ void verifyData(StringRef value, int numObjects) {
 		std::vector<OldStruct> data;
 		reader >> data;
 		ASSERT_EQ(data.size(), numObjects);
-		for (const auto& oldObject : data) {
+		for (auto const& oldObject : data) {
 			ASSERT(oldObject.isSet());
 		}
 	}

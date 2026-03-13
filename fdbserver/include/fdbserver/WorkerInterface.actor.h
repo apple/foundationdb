@@ -81,7 +81,7 @@ struct WorkerInterface {
 	Optional<NetworkAddress> grpcAddress() const { return clientInterface.grpcAddress; }
 
 	WorkerInterface() {}
-	WorkerInterface(const LocalityData& locality) : locality(locality) {}
+	WorkerInterface(LocalityData const& locality) : locality(locality) {}
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
@@ -136,10 +136,10 @@ struct WorkerDetails {
 	bool recoveredDiskFiles;
 
 	WorkerDetails() : degraded(false), recoveredDiskFiles(false) {}
-	WorkerDetails(const WorkerInterface& interf, ProcessClass processClass, bool degraded, bool recoveredDiskFiles)
+	WorkerDetails(WorkerInterface const& interf, ProcessClass processClass, bool degraded, bool recoveredDiskFiles)
 	  : interf(interf), processClass(processClass), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles) {}
 
-	bool operator<(const WorkerDetails& r) const { return interf.id() < r.interf.id(); }
+	bool operator<(WorkerDetails const& r) const { return interf.id() < r.interf.id(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -350,7 +350,7 @@ struct RecruitRemoteFromConfigurationRequest {
 	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
 	                                      Optional<Key> const& dcId,
 	                                      int logRouterCount,
-	                                      const std::vector<UID>& exclusionWorkerIds)
+	                                      std::vector<UID> const& exclusionWorkerIds)
 	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
 	    exclusionWorkerIds(exclusionWorkerIds) {}
 
@@ -496,7 +496,7 @@ struct TLogRejoinRequest {
 	ReplyPromise<TLogRejoinReply> reply;
 
 	TLogRejoinRequest() {}
-	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
+	explicit TLogRejoinRequest(TLogInterface const& interf) : myInterface(interf) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, myInterface, reply);
@@ -957,8 +957,8 @@ struct DebugEntryRef {
 	Version version;
 	MutationRef mutation;
 	DebugEntryRef() {}
-	DebugEntryRef(const char* c, Version v, MutationRef const& m)
-	  : time(now()), address(g_network->getLocalAddress()), context((const uint8_t*)c, strlen(c)), version(v),
+	DebugEntryRef(char const* c, Version v, MutationRef const& m)
+	  : time(now()), address(g_network->getLocalAddress()), context((uint8_t const*)c, strlen(c)), version(v),
 	    mutation(m) {}
 	DebugEntryRef(Arena& a, DebugEntryRef const& d)
 	  : time(d.time), address(d.address), context(d.context), version(d.version), mutation(a, d.mutation) {}
@@ -985,30 +985,30 @@ struct DiskStoreRequest {
 };
 
 struct Role {
-	static const Role WORKER;
-	static const Role STORAGE_SERVER;
-	static const Role TESTING_STORAGE_SERVER;
-	static const Role TRANSACTION_LOG;
-	static const Role SHARED_TRANSACTION_LOG;
-	static const Role COMMIT_PROXY;
-	static const Role GRV_PROXY;
-	static const Role MASTER;
-	static const Role RESOLVER;
-	static const Role CLUSTER_CONTROLLER;
-	static const Role TESTER;
-	static const Role LOG_ROUTER;
-	static const Role DATA_DISTRIBUTOR;
-	static const Role RATEKEEPER;
-	static const Role COORDINATOR;
-	static const Role BACKUP;
-	static const Role ENCRYPT_KEY_PROXY;
-	static const Role CONSISTENCYSCAN;
+	static Role const WORKER;
+	static Role const STORAGE_SERVER;
+	static Role const TESTING_STORAGE_SERVER;
+	static Role const TRANSACTION_LOG;
+	static Role const SHARED_TRANSACTION_LOG;
+	static Role const COMMIT_PROXY;
+	static Role const GRV_PROXY;
+	static Role const MASTER;
+	static Role const RESOLVER;
+	static Role const CLUSTER_CONTROLLER;
+	static Role const TESTER;
+	static Role const LOG_ROUTER;
+	static Role const DATA_DISTRIBUTOR;
+	static Role const RATEKEEPER;
+	static Role const COORDINATOR;
+	static Role const BACKUP;
+	static Role const ENCRYPT_KEY_PROXY;
+	static Role const CONSISTENCYSCAN;
 
 	std::string roleName;
 	std::string abbreviation;
 	bool includeInTraceRoles;
 
-	static const Role& get(ProcessClass::ClusterRole role) {
+	static Role const& get(ProcessClass::ClusterRole role) {
 		switch (role) {
 		case ProcessClass::Storage:
 			return STORAGE_SERVER;
@@ -1045,8 +1045,8 @@ struct Role {
 		}
 	}
 
-	bool operator==(const Role& r) const { return roleName == r.roleName; }
-	bool operator!=(const Role& r) const { return !(*this == r); }
+	bool operator==(Role const& r) const { return roleName == r.roleName; }
+	bool operator!=(Role const& r) const { return !(*this == r); }
 
 private:
 	Role(std::string roleName, std::string abbreviation, bool includeInTraceRoles = true)
@@ -1055,12 +1055,12 @@ private:
 	}
 };
 
-void startRole(const Role& role,
+void startRole(Role const& role,
                UID roleId,
                UID workerId,
-               const std::map<std::string, std::string>& details = std::map<std::string, std::string>(),
-               const std::string& origination = "Recruited");
-void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error e = Error());
+               std::map<std::string, std::string> const& details = std::map<std::string, std::string>(),
+               std::string const& origination = "Recruited");
+void endRole(Role const& role, UID id, std::string reason, bool ok = true, Error e = Error());
 
 ACTOR Future<Void> traceRole(Role role, UID roleId);
 
@@ -1164,11 +1164,11 @@ void registerThreadForProfiling();
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
 // satellite DC.
-bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+bool addressInDbAndPrimarySatelliteDc(NetworkAddress const& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's remote DC.
 bool addressInDbAndRemoteDc(
-    const NetworkAddress& address,
+    NetworkAddress const& address,
     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{});
 
@@ -1179,7 +1179,7 @@ typedef decltype(&tLog) TLogFn;
 extern bool isSimulatorProcessUnreliable();
 
 ACTOR template <class T>
-Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
+Future<T> ioTimeoutError(Future<T> what, double time, char const* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	state double orig = now();
@@ -1212,7 +1212,7 @@ ACTOR template <class T>
 Future<T> ioTimeoutErrorIfCleared(Future<T> what,
                                   double time,
                                   Reference<AsyncVar<bool>> condition,
-                                  const char* context = nullptr) {
+                                  char const* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
@@ -1244,7 +1244,7 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
                                    double errTime,
                                    Reference<AsyncVar<bool>> degraded,
                                    double degradedTime,
-                                   const char* context = nullptr) {
+                                   char const* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {

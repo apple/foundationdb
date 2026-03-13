@@ -34,8 +34,8 @@ struct RYWMutation {
 	RYWMutation(Optional<ValueRef> const& entry, MutationRef::Type type) : value(entry), type(type) {}
 	RYWMutation() : value(), type(MutationRef::NoOp) {}
 
-	bool operator==(const RYWMutation& r) const { return value == r.value && type == r.type; }
-	bool operator!=(const RYWMutation& r) const { return !(*this == r); }
+	bool operator==(RYWMutation const& r) const { return value == r.value && type == r.type; }
+	bool operator!=(RYWMutation const& r) const { return !(*this == r); }
 };
 
 class OperationStack {
@@ -56,14 +56,14 @@ public:
 	void push(RYWMutation entry);
 	bool isDependent() const;
 
-	const RYWMutation& top() const { return hasVector() ? optionalOperations.get().back() : singletonOperation; }
+	RYWMutation const& top() const { return hasVector() ? optionalOperations.get().back() : singletonOperation; }
 	RYWMutation& operator[](int n) { return (n == 0) ? singletonOperation : optionalOperations.get()[n - 1]; }
 
-	const RYWMutation& at(int n) const { return (n == 0) ? singletonOperation : optionalOperations.get()[n - 1]; }
+	RYWMutation const& at(int n) const { return (n == 0) ? singletonOperation : optionalOperations.get()[n - 1]; }
 
 	int size() const { return defaultConstructed ? 0 : hasVector() ? optionalOperations.get().size() + 1 : 1; }
 
-	bool operator==(const OperationStack& r) const;
+	bool operator==(OperationStack const& r) const;
 };
 
 struct WriteMapEntry {
@@ -103,19 +103,19 @@ inline int compare(ExtStringRef const& l, WriteMapEntry const& r) {
 	return l.compare(r.key);
 }
 
-inline bool operator<(const WriteMapEntry& lhs, const WriteMapEntry& rhs) {
+inline bool operator<(WriteMapEntry const& lhs, WriteMapEntry const& rhs) {
 	return lhs.key < rhs.key;
 }
-inline bool operator<(const WriteMapEntry& lhs, const StringRef& rhs) {
+inline bool operator<(WriteMapEntry const& lhs, StringRef const& rhs) {
 	return lhs.key < rhs;
 }
-inline bool operator<(const StringRef& lhs, const WriteMapEntry& rhs) {
+inline bool operator<(StringRef const& lhs, WriteMapEntry const& rhs) {
 	return lhs < rhs.key;
 }
-inline bool operator<(const WriteMapEntry& lhs, const ExtStringRef& rhs) {
+inline bool operator<(WriteMapEntry const& lhs, ExtStringRef const& rhs) {
 	return rhs.compare(lhs.key) > 0;
 }
-inline bool operator<(const ExtStringRef& lhs, const WriteMapEntry& rhs) {
+inline bool operator<(ExtStringRef const& lhs, WriteMapEntry const& rhs) {
 	return lhs.compare(rhs.key) < 0;
 }
 
@@ -183,7 +183,7 @@ public:
 
 		iterator& operator++();
 		iterator& operator--();
-		bool operator==(const iterator& r) const {
+		bool operator==(iterator const& r) const {
 			return offset == r.offset && beginLen == r.beginLen && finger[beginLen - 1] == r.finger[beginLen - 1];
 		}
 		void skip(KeyRef key);

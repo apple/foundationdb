@@ -515,7 +515,7 @@ struct P2PNetworkTest {
 
 				// Pick the number of requests for the session and send it to remote
 				numRequests = self->requests.get();
-				wait(writeMsg(self, conn, StringRef((const uint8_t*)&numRequests, sizeof(int))));
+				wait(writeMsg(self, conn, StringRef((uint8_t const*)&numRequests, sizeof(int))));
 			}
 
 			while (numRequests > 0) {

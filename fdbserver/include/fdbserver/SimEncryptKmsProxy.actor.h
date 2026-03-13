@@ -109,7 +109,7 @@ struct SimGetEncryptKeysByKeyIdsRequest {
 
 	SimGetEncryptKeysByKeyIdsRequest() {}
 	explicit SimGetEncryptKeysByKeyIdsRequest(
-	    const std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>& keyIds)
+	    std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> const& keyIds)
 	  : encryptKeyIds(keyIds) {}
 
 	template <class Ar>
@@ -137,7 +137,7 @@ struct SimGetEncryptKeysByDomainIdsRequest {
 	ReplyPromise<SimGetEncryptKeyByDomainIdReply> reply;
 
 	SimGetEncryptKeysByDomainIdsRequest() {}
-	explicit SimGetEncryptKeysByDomainIdsRequest(const std::vector<EncryptCipherDomainId>& ids)
+	explicit SimGetEncryptKeysByDomainIdsRequest(std::vector<EncryptCipherDomainId> const& ids)
 	  : encryptDomainIds(ids) {}
 
 	template <class Ar>

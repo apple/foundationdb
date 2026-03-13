@@ -64,7 +64,7 @@ void freeKeys(uint8_t** keys, int numKeys) {
 	free(keys);
 }
 
-int cmpfunc(const void* a, const void* b) {
+int cmpfunc(void const* a, void const* b) {
 	return (*(int*)a - *(int*)b);
 }
 
@@ -83,9 +83,9 @@ struct RunResult {
 	}
 
 struct Kpi {
-	const char* name;
+	char const* name;
 	int value;
-	const char* units;
+	char const* units;
 
 	struct Kpi* next;
 };
@@ -110,7 +110,7 @@ struct ResultSet* newResultSet() {
 	return rs;
 }
 
-void addKpi(struct ResultSet* rs, const char* name, int value, const char* units) {
+void addKpi(struct ResultSet* rs, char const* name, int value, char const* units) {
 	struct Kpi* k = malloc(sizeof(struct Kpi));
 	k->name = name;
 	k->value = value;
@@ -119,7 +119,7 @@ void addKpi(struct ResultSet* rs, const char* name, int value, const char* units
 	rs->kpis = k;
 }
 
-void addError(struct ResultSet* rs, const char* message) {
+void addError(struct ResultSet* rs, char const* message) {
 	struct Error* e = malloc(sizeof(struct Error));
 	e->message = (char*)malloc(strlen(message) + 1);
 	strcpy(e->message, message);
@@ -188,7 +188,7 @@ void freeResultSet(struct ResultSet* rs) {
 	free(rs);
 }
 
-fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+fdb_error_t getError(fdb_error_t err, char const* context, struct ResultSet* rs) {
 	if (err) {
 		char* msg = (char*)malloc(strlen(context) + 100);
 		sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
@@ -203,7 +203,7 @@ fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet* rs)
 	return err;
 }
 
-void checkError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+void checkError(fdb_error_t err, char const* context, struct ResultSet* rs) {
 	if (getError(err, context, rs)) {
 		if (rs != NULL) {
 			writeResultSet(rs);
@@ -213,7 +213,7 @@ void checkError(fdb_error_t err, const char* context, struct ResultSet* rs) {
 	}
 }
 
-fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+fdb_error_t logError(fdb_error_t err, char const* context, struct ResultSet* rs) {
 	char* msg = (char*)malloc(strlen(context) + 100);
 	sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
 	fprintf(stderr, "%s\n", msg);
@@ -225,7 +225,7 @@ fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet* rs)
 	return err;
 }
 
-fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet* rs) {
+fdb_error_t maybeLogError(fdb_error_t err, char const* context, struct ResultSet* rs) {
 	if (err && !fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err)) {
 		return logError(err, context, rs);
 	}

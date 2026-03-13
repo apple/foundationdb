@@ -33,24 +33,24 @@
 #define C_VERSION_MINOR 0
 #endif
 
-const char* kDate = __DATE__;
-const char* kTime = __TIME__;
+char const* kDate = __DATE__;
+char const* kTime = __TIME__;
 
 // FDB info.
-const std::string kGitHash = "@CURRENT_GIT_VERSION_WNL@";
-const std::string kFdbVersion = "@FDB_VERSION@";
+std::string const kGitHash = "@CURRENT_GIT_VERSION_WNL@";
+std::string const kFdbVersion = "@FDB_VERSION@";
 
 // System architecture.
-const std::string kArch = "@CMAKE_SYSTEM@";
+std::string const kArch = "@CMAKE_SYSTEM@";
 // ID of compiler used for build, ie "Clang", "GNU", etc...
-const std::string kCompiler = "@CMAKE_CXX_COMPILER_ID@";
+std::string const kCompiler = "@CMAKE_CXX_COMPILER_ID@";
 
 // Library versions.
-const std::string kBoostVersion = BOOST_LIB_VERSION;
+std::string const kBoostVersion = BOOST_LIB_VERSION;
 
 // Build info and flags.
-const std::string kCMakeVersion = "@CMAKE_VERSION@";
-const std::string kCCacheEnabled = "@USE_CCACHE@";
+std::string const kCMakeVersion = "@CMAKE_VERSION@";
+std::string const kCCacheEnabled = "@USE_CCACHE@";
 
 // GNU C library major and minor versions.
 constexpr int kCVersionMajor = C_VERSION_MAJOR;
@@ -61,7 +61,7 @@ constexpr int kCppStandard = __cplusplus;
 
 // Returns a JSON string with information about how the binary was built.
 std::string jsonBuildInformation() {
-	json_spirit::mValue json;	
+	json_spirit::mValue json;
 	JSONDoc doc(json);
 
 	doc.create("build_date") = kDate;

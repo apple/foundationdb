@@ -290,7 +290,7 @@ ACTOR Future<Void> dpServerLoop() {
 	}
 }
 
-static void usage(const char* argv0) {
+static void usage(char const* argv0) {
 	std::cerr << format("Usage: %s -p portNum | -s serverAddress\n", argv0);
 }
 

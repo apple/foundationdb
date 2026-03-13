@@ -45,9 +45,9 @@ public:
 
 	bool empty() const { return elements == 0; }
 
-	static JsonBuilderObject makeMessage(const char* name, const char* description);
+	static JsonBuilderObject makeMessage(char const* name, char const* description);
 
-	static int coerceAsciiNumberToJSON(const char* s, int len, char* dst);
+	static int coerceAsciiNumberToJSON(char const* s, int len, char* dst);
 
 protected:
 	EType type;
@@ -57,14 +57,14 @@ protected:
 	int bytes;
 
 	// 'raw' write methods
-	inline void write(const char* s, int len) {
+	inline void write(char const* s, int len) {
 		bytes += len;
 		jsonText.back().append(arena, s, len);
 	}
 
-	inline void write(const char* s) { write(s, strlen(s)); }
+	inline void write(char const* s) { write(s, strlen(s)); }
 
-	inline void write(const StringRef& s) { write((char*)s.begin(), s.size()); }
+	inline void write(StringRef const& s) { write((char*)s.begin(), s.size()); }
 
 	inline void write(char s) {
 		++bytes;
@@ -72,7 +72,7 @@ protected:
 	}
 
 	// writeValue() methods write JSON form of the value
-	void writeValue(const json_spirit::mValue& val) {
+	void writeValue(json_spirit::mValue const& val) {
 		switch (val.type()) {
 		case json_spirit::int_type:
 			return writeValue(val.get_int64());
@@ -88,12 +88,12 @@ protected:
 		};
 	}
 
-	void writeValue(const bool& val) { write(val ? "true" : "false"); }
+	void writeValue(bool const& val) { write(val ? "true" : "false"); }
 
 	template <typename T>
-	inline void writeFormat(const char* fmt, const T& val) {
+	inline void writeFormat(char const* fmt, T const& val) {
 		VString& dst = jsonText.back();
-		const int limit = 30;
+		int const limit = 30;
 		dst.reserve(arena, dst.size() + limit);
 		int len = snprintf(dst.end(), limit, fmt, val);
 		if (len > 0 && len < limit) {
@@ -103,13 +103,13 @@ protected:
 		}
 	}
 
-	void writeValue(const int64_t& val) { writeFormat("%lld", val); }
+	void writeValue(int64_t const& val) { writeFormat("%lld", val); }
 
-	void writeValue(const uint64_t& val) { writeFormat("%llu", val); }
+	void writeValue(uint64_t const& val) { writeFormat("%llu", val); }
 
-	void writeValue(const int& val) { writeFormat("%d", val); }
+	void writeValue(int const& val) { writeFormat("%d", val); }
 
-	void writeValue(const double& val) {
+	void writeValue(double const& val) {
 		if (std::isfinite(val)) {
 			writeFormat("%g", val);
 		} else if (std::isnan(val)) {
@@ -134,7 +134,7 @@ protected:
 		}
 	}
 
-	void writeValue(const char* val, int len) {
+	void writeValue(char const* val, int len) {
 		write('"');
 		int beginCopy = 0;
 		VString& dst = jsonText.back();
@@ -152,14 +152,14 @@ protected:
 		write('"');
 	}
 
-	inline void writeValue(const std::string& val) { writeValue(val.data(), val.size()); }
+	inline void writeValue(std::string const& val) { writeValue(val.data(), val.size()); }
 
-	inline void writeValue(const char* val) { writeValue(val, strlen(val)); }
+	inline void writeValue(char const* val) { writeValue(val, strlen(val)); }
 
-	inline void writeValue(const StringRef& s) { writeValue((const char*)s.begin(), s.size()); }
+	inline void writeValue(StringRef const& s) { writeValue((char const*)s.begin(), s.size()); }
 
 	// Write the finalized (closed) form of val
-	void writeValue(const JsonBuilder& val) {
+	void writeValue(JsonBuilder const& val) {
 		bytes += val.bytes;
 		jsonText.append(arena, val.jsonText.begin(), val.jsonText.size());
 		val.jsonText.push_back(arena, VString());
@@ -167,7 +167,7 @@ protected:
 		write(val.getEnd());
 	}
 
-	void writeCoercedAsciiNumber(const char* s, int len) {
+	void writeCoercedAsciiNumber(char const* s, int len) {
 		VString& val = jsonText.back();
 		val.reserve(arena, val.size() + len + 3);
 		int written = coerceAsciiNumberToJSON(s, len, val.end());
@@ -178,16 +178,16 @@ protected:
 		}
 	}
 
-	inline void writeCoercedAsciiNumber(const StringRef& s) {
-		writeCoercedAsciiNumber((const char*)s.begin(), s.size());
+	inline void writeCoercedAsciiNumber(StringRef const& s) {
+		writeCoercedAsciiNumber((char const*)s.begin(), s.size());
 	}
 
-	inline void writeCoercedAsciiNumber(const std::string& s) { writeCoercedAsciiNumber(s.data(), s.size()); }
+	inline void writeCoercedAsciiNumber(std::string const& s) { writeCoercedAsciiNumber(s.data(), s.size()); }
 
 	// Helper function to add contents of another JsonBuilder to this one.
 	// This is only used by the subclasses to combine like-typed (at compile time) objects,
 	// so it can be assumed that the other object has been initialized with an opening character.
-	void _addContents(const JsonBuilder& other) {
+	void _addContents(JsonBuilder const& other) {
 		if (other.empty()) {
 			return;
 		}
@@ -198,7 +198,7 @@ protected:
 
 		// Add everything but the first byte of the first string in arr
 		bytes += other.bytes - 1;
-		const VString& front = other.jsonText.front();
+		VString const& front = other.jsonText.front();
 		jsonText.push_back(arena, front.slice(1, front.size()));
 		jsonText.append(arena, other.jsonText.begin() + 1, other.jsonText.size() - 1);
 
@@ -211,7 +211,7 @@ protected:
 	}
 
 	// Get the text necessary to finish the JSON string
-	const char* getEnd() const {
+	char const* getEnd() const {
 		switch (type) {
 		case NULLVALUE:
 			return "null";
@@ -233,7 +233,7 @@ public:
 	}
 
 	template <typename VT>
-	inline JsonBuilderArray& push_back(const VT& val) {
+	inline JsonBuilderArray& push_back(VT const& val) {
 		if (elements++ > 0) {
 			write(',');
 		}
@@ -241,14 +241,14 @@ public:
 		return *this;
 	}
 
-	JsonBuilderArray& addContents(const json_spirit::mArray& arr) {
+	JsonBuilderArray& addContents(json_spirit::mArray const& arr) {
 		for (auto& v : arr) {
 			push_back(v);
 		}
 		return *this;
 	}
 
-	JsonBuilderArray& addContents(const JsonBuilderArray& arr) {
+	JsonBuilderArray& addContents(JsonBuilderArray const& arr) {
 		_addContents(arr);
 		return *this;
 	}
@@ -262,7 +262,7 @@ public:
 	}
 
 	template <typename KT, typename VT>
-	inline JsonBuilderObject& setKey(const KT& name, const VT& val) {
+	inline JsonBuilderObject& setKey(KT const& name, VT const& val) {
 		if (elements++ > 0) {
 			write(',');
 		}
@@ -274,7 +274,7 @@ public:
 	}
 
 	template <typename KT, typename VT>
-	inline JsonBuilderObject& setKeyRawNumber(const KT& name, const VT& val) {
+	inline JsonBuilderObject& setKeyRawNumber(KT const& name, VT const& val) {
 		if (elements++ > 0) {
 			write(',');
 		}
@@ -288,14 +288,14 @@ public:
 	template <typename T>
 	inline JsonBuilderObjectSetter<T> operator[](T&& name);
 
-	JsonBuilderObject& addContents(const json_spirit::mObject& obj) {
+	JsonBuilderObject& addContents(json_spirit::mObject const& obj) {
 		for (auto& kv : obj) {
 			setKey(kv.first, kv.second);
 		}
 		return *this;
 	}
 
-	JsonBuilderObject& addContents(const JsonBuilderObject& obj) {
+	JsonBuilderObject& addContents(JsonBuilderObject const& obj) {
 		_addContents(obj);
 		return *this;
 	}
@@ -309,7 +309,7 @@ public:
 
 	// Value is accepted as an rvalue if possible
 	template <class VT>
-	inline void operator=(const VT& value) {
+	inline void operator=(VT const& value) {
 		dest.setKey(name, value);
 	}
 

@@ -194,9 +194,9 @@ Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
 
 struct ErrorInfo {
 	Error error;
-	const Role& role;
+	Role const& role;
 	UID id;
-	ErrorInfo(Error e, const Role& role, UID id) : error(e), role(role), id(id) {}
+	ErrorInfo(Error e, Role const& role, UID id) : error(e), role(role), id(id) {}
 	template <class Ar>
 	void serialize(Ar&) {
 		ASSERT(false);
@@ -278,7 +278,7 @@ Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future
 	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
-Future<Void> deregisterGrpcService(const UID& id) {
+Future<Void> deregisterGrpcService(UID const& id) {
 #ifdef FLOW_GRPC_ENABLED
 	if (g_network->isSimulated()) {
 		return Void();
@@ -452,7 +452,7 @@ struct TLogOptions {
 		return options;
 	}
 
-	bool operator==(const TLogOptions& o) {
+	bool operator==(TLogOptions const& o) {
 		return version == o.version && (spillType == o.spillType || version >= TLogVersion::V5);
 	}
 
@@ -527,7 +527,7 @@ std::vector<DiskStore> getDiskStores(std::string folder,
 		files = platform::listFiles(folder, suffix);
 	}
 	if (check == FilesystemCheck::DIRECTORIES_ONLY || check == FilesystemCheck::FILES_AND_DIRECTORIES) {
-		for (const auto& directory : platform::listDirectories(folder)) {
+		for (auto const& directory : platform::listDirectories(folder)) {
 			if (StringRef(directory).endsWith(suffix)) {
 				files.push_back(directory);
 			}
@@ -733,10 +733,10 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary DC.
 bool addressInDbAndPrimaryDc(
-    const NetworkAddress& address,
+    NetworkAddress const& address,
     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{}) {
-	const auto& dbi = dbInfo->get();
+	auto const& dbi = dbInfo->get();
 
 	if (dbi.master.addresses().contains(address)) {
 		return true;
@@ -754,30 +754,30 @@ bool addressInDbAndPrimaryDc(
 		return true;
 	}
 
-	for (const auto& resolver : dbi.resolvers) {
+	for (auto const& resolver : dbi.resolvers) {
 		if (resolver.address() == address) {
 			return true;
 		}
 	}
 
-	for (const auto& grvProxy : dbi.client.grvProxies) {
+	for (auto const& grvProxy : dbi.client.grvProxies) {
 		if (grvProxy.addresses().contains(address)) {
 			return true;
 		}
 	}
 
-	for (const auto& commitProxy : dbi.client.commitProxies) {
+	for (auto const& commitProxy : dbi.client.commitProxies) {
 		if (commitProxy.addresses().contains(address)) {
 			return true;
 		}
 	}
 
-	auto localityIsInPrimaryDc = [&dbInfo](const LocalityData& locality) {
+	auto localityIsInPrimaryDc = [&dbInfo](LocalityData const& locality) {
 		return locality.dcId() == dbInfo->get().master.locality.dcId();
 	};
 
-	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-		for (const auto& tlog : logSet.tLogs) {
+	for (auto const& logSet : dbi.logSystemConfig.tLogs) {
+		for (auto const& tlog : logSet.tLogs) {
 			if (!tlog.present()) {
 				continue;
 			}
@@ -801,7 +801,7 @@ bool addressInDbAndPrimaryDc(
 }
 
 bool addressesInDbAndPrimaryDc(
-    const NetworkAddressList& addresses,
+    NetworkAddressList const& addresses,
     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{}) {
 	return addressInDbAndPrimaryDc(addresses.address, dbInfo, storageServers) ||
@@ -869,10 +869,10 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
 // satellite DC.
-bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	for (const auto& logSet : dbInfo->get().logSystemConfig.tLogs) {
+bool addressInDbAndPrimarySatelliteDc(NetworkAddress const& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	for (auto const& logSet : dbInfo->get().logSystemConfig.tLogs) {
 		if (logSet.isLocal && logSet.locality == tagLocalitySatellite) {
-			for (const auto& tlog : logSet.tLogs) {
+			for (auto const& tlog : logSet.tLogs) {
 				if (tlog.present() && tlog.interf().addresses().contains(address)) {
 					return true;
 				}
@@ -883,7 +883,7 @@ bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<A
 	return false;
 }
 
-bool addressesInDbAndPrimarySatelliteDc(const NetworkAddressList& addresses,
+bool addressesInDbAndPrimarySatelliteDc(NetworkAddressList const& addresses,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return addressInDbAndPrimarySatelliteDc(addresses.address, dbInfo) ||
 	       (addresses.secondaryAddress.present() &&
@@ -943,22 +943,22 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 
 } // namespace
 
-bool addressInDbAndRemoteDc(const NetworkAddress& address,
+bool addressInDbAndRemoteDc(NetworkAddress const& address,
                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                             Optional<std::vector<NetworkAddress>> storageServers) {
-	const auto& dbi = dbInfo->get();
+	auto const& dbi = dbInfo->get();
 
-	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+	for (auto const& logSet : dbi.logSystemConfig.tLogs) {
 		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
 			continue;
 		}
-		for (const auto& tlog : logSet.tLogs) {
+		for (auto const& tlog : logSet.tLogs) {
 			if (tlog.present() && tlog.interf().addresses().contains(address)) {
 				return true;
 			}
 		}
 
-		for (const auto& logRouter : logSet.logRouters) {
+		for (auto const& logRouter : logSet.logRouters) {
 			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
 				return true;
 			}
@@ -974,7 +974,7 @@ bool addressInDbAndRemoteDc(const NetworkAddress& address,
 }
 
 bool addressesInDbAndRemoteDc(
-    const NetworkAddressList& addresses,
+    NetworkAddressList const& addresses,
     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{}) {
 	return addressInDbAndRemoteDc(addresses.address, dbInfo, storageServers) ||
@@ -1036,12 +1036,12 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 } // namespace
 
-bool addressIsRemoteLogRouter(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	const auto& dbi = dbInfo->get();
+bool addressIsRemoteLogRouter(NetworkAddress const& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	auto const& dbi = dbInfo->get();
 
-	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+	for (auto const& logSet : dbi.logSystemConfig.tLogs) {
 		if (!logSet.isLocal) {
-			for (const auto& logRouter : logSet.logRouters) {
+			for (auto const& logRouter : logSet.logRouters) {
 				if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
 					return true;
 				}
@@ -1122,7 +1122,7 @@ bool shouldCheckPeer(Reference<Peer> peer) {
 }
 
 // Returns true if `address` is a degraded/disconnected peer in `lastReq` sent to CC.
-bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddress& address) {
+bool isDegradedPeer(UpdateWorkerHealthRequest const& lastReq, NetworkAddress const& address) {
 	if (std::find(lastReq.degradedPeers.begin(), lastReq.degradedPeers.end(), address) != lastReq.degradedPeers.end()) {
 		return true;
 	}
@@ -1141,13 +1141,13 @@ struct PrimaryAndRemoteAddresses {
 };
 
 // Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
-UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
-                                            const LocalityData& locality,
+UpdateWorkerHealthRequest doPeerHealthCheck(WorkerInterface const& interf,
+                                            LocalityData const& locality,
                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                            const UpdateWorkerHealthRequest& lastReq,
+                                            UpdateWorkerHealthRequest const& lastReq,
                                             Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck,
                                             Optional<PrimaryAndRemoteAddresses> storageServers) {
-	const auto& allPeers = FlowTransport::transport().getAllPeers();
+	auto const& allPeers = FlowTransport::transport().getAllPeers();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
 	bool checkRemoteLogRouterConnectivity = dbInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
@@ -1183,7 +1183,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		return req;
 	}
 
-	for (const auto& [address, peer] : allPeers) {
+	for (auto const& [address, peer] : allPeers) {
 		if (!shouldCheckPeer(peer)) {
 			continue;
 		}
@@ -1341,7 +1341,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// part of the transaction sub system.
 		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
 		// considered permanently closed peers.
-		for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+		for (auto const& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
 			if (allPeers.find(address) != allPeers.end()) {
 				// We have checked this peer in the above for loop.
 				continue;
@@ -1364,15 +1364,15 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 	if (g_network->isSimulated()) {
 		// Invariant check in simulation: for any peers that shouldn't be checked, we won't include it in the
 		// UpdateWorkerHealthRequest sent to CC.
-		for (const auto& [address, peer] : allPeers) {
+		for (auto const& [address, peer] : allPeers) {
 			if (!shouldCheckPeer(peer)) {
-				for (const auto& disconnectedPeer : req.disconnectedPeers) {
+				for (auto const& disconnectedPeer : req.disconnectedPeers) {
 					ASSERT(address != disconnectedPeer);
 				}
-				for (const auto& degradedPeer : req.degradedPeers) {
+				for (auto const& degradedPeer : req.degradedPeers) {
 					ASSERT(address != degradedPeer);
 				}
-				for (const auto& recoveredPeer : req.recoveredPeers) {
+				for (auto const& recoveredPeer : req.recoveredPeers) {
 					ASSERT(address != recoveredPeer);
 				}
 			}
@@ -1382,7 +1382,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 	return req;
 }
 
-static Optional<Standalone<StringRef>> getPrimaryDCId(const ServerDBInfo& dbInfo) {
+static Optional<Standalone<StringRef>> getPrimaryDCId(ServerDBInfo const& dbInfo) {
 	return dbInfo.master.locality.dcId();
 }
 
@@ -1402,11 +1402,11 @@ ACTOR Future<Optional<PrimaryAndRemoteAddresses>> getStorageServers(Database db,
 		std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
 		    wait(NativeAPI::getServerListAndProcessClasses(&tr));
 		PrimaryAndRemoteAddresses storageServers;
-		const auto primaryDCId = getPrimaryDCId(dbInfo->get());
+		auto const primaryDCId = getPrimaryDCId(dbInfo->get());
 		for (auto& [ssi, _] : results) {
-			const bool primarySS = ssi.locality.dcId().present() && primaryDCId.present() &&
+			bool const primarySS = ssi.locality.dcId().present() && primaryDCId.present() &&
 			                       ssi.locality.dcId().get() == primaryDCId.get();
-			const bool remoteSS = ssi.locality.dcId().present() && primaryDCId.present() &&
+			bool const remoteSS = ssi.locality.dcId().present() && primaryDCId.present() &&
 			                      ssi.locality.dcId().get() != primaryDCId.get();
 			if (SERVER_KNOBS->GRAY_FAILURE_ALLOW_PRIMARY_SS_TO_COMPLAIN && primarySS) {
 				storageServers.primary.push_back(ssi.address());
@@ -1443,9 +1443,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 	loop {
 		state Future<Void> nextHealthCheckDelay = Never();
-		const RecoveryState& recoveryState = dbInfo->get().recoveryState;
-		const bool primaryTxnSystemHealthCheckEnabled = enablePrimaryTxnSystemHealthCheck->get();
-		const bool ccInterfacePresent = ccInterface->get().present();
+		RecoveryState const& recoveryState = dbInfo->get().recoveryState;
+		bool const primaryTxnSystemHealthCheckEnabled = enablePrimaryTxnSystemHealthCheck->get();
+		bool const ccInterfacePresent = ccInterface->get().present();
 		TraceEvent(SevInfo, "WorkerHealthMonitor")
 		    .detail("DBInfoRecoveryState", recoveryState)
 		    .detail("PrimaryTxnSystemHealthCheckEnabled", primaryTxnSystemHealthCheckEnabled)
@@ -1463,11 +1463,11 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 				if (g_network->isSimulated()) {
 					// Do an invariant check only in simulation.
 					// Any recovered peer shouldn't appear as disconnected or degraded peer.
-					for (const auto& recoveredPeer : req.recoveredPeers) {
-						for (const auto& disconnectedPeer : req.disconnectedPeers) {
+					for (auto const& recoveredPeer : req.recoveredPeers) {
+						for (auto const& disconnectedPeer : req.disconnectedPeers) {
 							ASSERT(recoveredPeer != disconnectedPeer);
 						}
-						for (const auto& degradedPeer : req.degradedPeers) {
+						for (auto const& degradedPeer : req.degradedPeers) {
 							ASSERT(recoveredPeer != degradedPeer);
 						}
 					}
@@ -1505,7 +1505,7 @@ void registerThreadForProfiling() {
 	// Not sure if this is actually needed, but a call to backtrace was advised here:
 	// http://groups.google.com/group/google-perftools/browse_thread/thread/0dfd74532e038eb8/2686d9f24ac4365f?pli=1
 	profiledThreads.insert(std::this_thread::get_id());
-	const int num_levels = 100;
+	int const num_levels = 100;
 	void* pc[num_levels];
 	backtrace(pc, num_levels);
 #endif
@@ -1518,7 +1518,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 		switch (req.action) {
 		case ProfilerRequest::Action::ENABLE: {
-			const char* path = (const char*)req.outputFile.begin();
+			char const* path = (char const*)req.outputFile.begin();
 			ProfilerOptions* options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
 			options->filter_in_thread_arg = nullptr;
@@ -1567,7 +1567,7 @@ ACTOR Future<Void> runCpuProfiler(ProfilerRequest req) {
 	}
 }
 
-void runHeapProfiler(const char* msg) {
+void runHeapProfiler(char const* msg) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 	if (IsHeapProfilerRunning()) {
 		HeapProfilerDump(msg);
@@ -1600,7 +1600,7 @@ bool checkHighMemory(int64_t threshold, bool* error) {
 		return false;
 	}
 
-	const int buf_sz = 256;
+	int const buf_sz = 256;
 	char stat_buf[buf_sz];
 	ssize_t stat_nread = read(fd, stat_buf, buf_sz);
 	if (stat_nread < 0) {
@@ -1658,7 +1658,7 @@ struct TrackRunningStorage {
 	TrackRunningStorage(UID self,
 	                    KeyValueStoreType storeType,
 	                    LocalityData locality,
-	                    const std::string& filename,
+	                    std::string const& filename,
 	                    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
 	                    std::unordered_map<UID, StorageDiskCleaner>* storageCleaners)
 	  : self(self), storeType(storeType), locality(locality), filename(filename), runningStorages(runningStorages),
@@ -1795,11 +1795,11 @@ Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> r
 	return StringRef(result);
 }
 
-void startRole(const Role& role,
+void startRole(Role const& role,
                UID roleId,
                UID workerId,
-               const std::map<std::string, std::string>& details,
-               const std::string& origination) {
+               std::map<std::string, std::string> const& details,
+               std::string const& origination) {
 	if (role.includeInTraceRoles) {
 		addTraceRole(role.abbreviation);
 	}
@@ -1822,7 +1822,7 @@ void startRole(const Role& role,
 		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
 }
 
-void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
+void endRole(Role const& role, UID id, std::string reason, bool ok, Error e) {
 	{
 		TraceEvent ev("Role", id);
 		if (e.code() != invalid_error_code)
@@ -1936,13 +1936,13 @@ class SharedLogsKey {
 	KeyValueStoreType storeType;
 
 public:
-	SharedLogsKey(const TLogOptions& options, KeyValueStoreType kvst)
+	SharedLogsKey(TLogOptions const& options, KeyValueStoreType kvst)
 	  : logVersion(options.version), spillType(options.spillType), storeType(kvst) {
 		if (logVersion >= TLogVersion::V5)
 			spillType = TLogSpillType::UNSET;
 	}
 
-	bool operator<(const SharedLogsKey& other) const {
+	bool operator<(SharedLogsKey const& other) const {
 		return std::tie(logVersion, spillType, storeType) <
 		       std::tie(other.logVersion, other.spillType, other.storeType);
 	}
@@ -1979,7 +1979,7 @@ ACTOR Future<Void> chaosMetricsLogger() {
 	}
 }
 
-static const std::string clusterIdFilename = "clusterId";
+static std::string const clusterIdFilename = "clusterId";
 
 ACTOR Future<Void> createClusterIdFile(std::string folder, UID clusterId) {
 	state std::string clusterIdPath = joinPath(folder, clusterIdFilename);
@@ -2101,8 +2101,8 @@ void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	}
 }
 
-bool skipInitRspInSim(const UID workerInterfID, const bool allowDropInSim) {
-	const bool skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(/* 1% */ 0.01);
+bool skipInitRspInSim(UID const workerInterfID, bool const allowDropInSim) {
+	bool const skip = allowDropInSim && g_network->isSimulated() && BUGGIFY_WITH_PROB(/* 1% */ 0.01);
 	if (skip) {
 		TraceEvent("SkipInitRspInSimTrue").detail("WorkerInterfID", workerInterfID);
 	}
@@ -2383,7 +2383,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::TLog;
 				std::string logQueueBasename;
-				const std::string filename = basename(s.filename);
+				std::string const filename = basename(s.filename);
 				if (StringRef(filename).startsWith(fileLogDataPrefix)) {
 					logQueueBasename = fileLogQueuePrefix.toString();
 				} else {
@@ -2393,8 +2393,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
 				IKeyValueStore* kv = openKVStore(
 				    s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, false, dbInfo);
-				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
-				const int64_t diskQueueWarnSize =
+				DiskQueueVersion const dqv = s.tLogOptions.getDiskQueueVersion();
+				int64_t const diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
 				IDiskQueue* queue = openDiskQueue(joinPath(folder, logQueueBasename + s.storeID.toString() + "-"),
 				                                  tlogQueueExtension.toString(),
@@ -2742,13 +2742,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					// different role type for the shared actor
 					startRole(Role::SHARED_TRANSACTION_LOG, logId, interf.id(), details);
 
-					const StringRef prefix =
+					StringRef const prefix =
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					IKeyValueStore* data =
 					    openKVStore(req.storeType, filename, logId, memoryLimit, false, false, false, dbInfo);
-					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
+					DiskQueueVersion const dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
 					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
@@ -2794,7 +2794,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					e.detail("TssPairID", req.tssPairIDAndVersion.get().first);
 				}
 				int j = 0;
-				for (const auto& runningStorage : runningStorages) {
+				for (auto const& runningStorage : runningStorages) {
 					e.detail("RunningStorageIDOnSameWorker" + std::to_string(j), runningStorage.first);
 					e.detail("RunningStorageEngineOnSameWorker" + std::to_string(j), runningStorage.second);
 					j++;
@@ -2807,7 +2807,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				// was run it won't be able to do so.
 				if (std::all_of(runningStorages.begin(),
 				                runningStorages.end(),
-				                [&req](const auto& p) { return p.second != req.storeType; }) ||
+				                [&req](auto const& p) { return p.second != req.storeType; }) ||
 				    req.seedTag != invalidTag) {
 					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
@@ -3266,7 +3266,7 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 	}
 }
 
-static const std::string versionFileName = "sw-version";
+static std::string const versionFileName = "sw-version";
 
 ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, ProtocolVersion currentVersion) {
 	try {
@@ -3397,7 +3397,7 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 	return Void();
 }
 
-static const std::string swversionTestDirName = "sw-version-test";
+static std::string const swversionTestDirName = "sw-version-test";
 
 TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
 	if (!platform::createDirectory("sw-version-test")) {
@@ -3598,7 +3598,7 @@ KeyValueStoreType randomStoreType() {
 
 // Test the engine can clear in-flight commits
 TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
-	state const std::string testDir = "engine-basic-test";
+	state std::string const testDir = "engine-basic-test";
 	platform::eraseDirectoryRecursive(testDir);
 	platform::createDirectory(testDir);
 
@@ -3730,10 +3730,10 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 	state std::vector<LeaderElectionRegInterface> leaderElectionServers;
 
 	leaderElectionServers.reserve(coordinatorsSize);
-	for (const auto& h : cs.hostnames) {
+	for (auto const& h : cs.hostnames) {
 		leaderElectionServers.push_back(LeaderElectionRegInterface(h));
 	}
-	for (const auto& c : cs.coords) {
+	for (auto const& c : cs.coords) {
 		leaderElectionServers.push_back(LeaderElectionRegInterface(c));
 	}
 	deterministicRandom()->randomShuffle(leaderElectionServers);
@@ -3883,9 +3883,9 @@ ACTOR Future<Void> serveProcess() {
 				auto samples = sampleCollector->get(req.timeStart, req.timeEnd);
 
 				std::vector<SerializedSample> serializedSamples;
-				for (const auto& samplePtr : samples) {
+				for (auto const& samplePtr : samples) {
 					auto serialized = SerializedSample{ .time = samplePtr->time, .data = {} };
-					for (const auto& [waitState, pair] : samplePtr->data) {
+					for (auto const& [waitState, pair] : samplePtr->data) {
 						if (waitState >= req.waitStateStart && waitState <= req.waitStateEnd) {
 							serialized.data[waitState] = std::string(pair.first, pair.second);
 						}
@@ -4017,21 +4017,21 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	}
 }
 
-const Role Role::WORKER("Worker", "WK", false);
-const Role Role::STORAGE_SERVER("StorageServer", "SS");
-const Role Role::TESTING_STORAGE_SERVER("TestingStorageServer", "ST");
-const Role Role::TRANSACTION_LOG("TLog", "TL");
-const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
-const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
-const Role Role::GRV_PROXY("GrvProxyServer", "GP");
-const Role Role::MASTER("MasterServer", "MS");
-const Role Role::RESOLVER("Resolver", "RV");
-const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
-const Role Role::TESTER("Tester", "TS");
-const Role Role::LOG_ROUTER("LogRouter", "LR");
-const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
-const Role Role::RATEKEEPER("Ratekeeper", "RK");
-const Role Role::COORDINATOR("Coordinator", "CD");
-const Role Role::BACKUP("Backup", "BK");
-const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
-const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");
+Role const Role::WORKER("Worker", "WK", false);
+Role const Role::STORAGE_SERVER("StorageServer", "SS");
+Role const Role::TESTING_STORAGE_SERVER("TestingStorageServer", "ST");
+Role const Role::TRANSACTION_LOG("TLog", "TL");
+Role const Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
+Role const Role::COMMIT_PROXY("CommitProxyServer", "CP");
+Role const Role::GRV_PROXY("GrvProxyServer", "GP");
+Role const Role::MASTER("MasterServer", "MS");
+Role const Role::RESOLVER("Resolver", "RV");
+Role const Role::CLUSTER_CONTROLLER("ClusterController", "CC");
+Role const Role::TESTER("Tester", "TS");
+Role const Role::LOG_ROUTER("LogRouter", "LR");
+Role const Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
+Role const Role::RATEKEEPER("Ratekeeper", "RK");
+Role const Role::COORDINATOR("Coordinator", "CD");
+Role const Role::BACKUP("Backup", "BK");
+Role const Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
+Role const Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

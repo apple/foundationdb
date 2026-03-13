@@ -26,7 +26,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/genericactors.actor.h"
 
-void traceError(const char* filename, int line, Error const& e) {
+void traceError(char const* filename, int line, Error const& e) {
 	TraceEvent("DifferentClustersSameRVWorkload_Error").error(e).detail("File", filename).detail("Line", line);
 }
 
@@ -260,7 +260,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 	}
 
 	static Future<Optional<Value>> readAtVersion(Value const& keyToRead,
-	                                             const char* name,
+	                                             char const* name,
 	                                             Transaction* tr,
 	                                             Version version) {
 		Optional<Value> res;
