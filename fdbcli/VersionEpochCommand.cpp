@@ -20,7 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"

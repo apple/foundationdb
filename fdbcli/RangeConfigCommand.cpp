@@ -23,7 +23,7 @@
 #include <boost/lexical_cast/bad_lexical_cast.hpp>
 #include <list>
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 

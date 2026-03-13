@@ -1,5 +1,5 @@
 /*
- * fdbcli.actor.h
+ * fdbcli.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,14 +20,6 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated
-// version of this file.  In intellisense use the source version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
-#define FDBCLI_FDBCLI_ACTOR_G_H
-#include "fdbcli/fdbcli.actor.g.h"
-#elif !defined(FDBCLI_FDBCLI_ACTOR_H)
-#define FDBCLI_FDBCLI_ACTOR_H
-
 #include "fdbcli/FlowLineNoise.h"
 
 #include "fdbclient/CoordinationInterface.h"
@@ -35,8 +27,6 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -211,7 +201,7 @@ Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> co
 Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
 // blobrestore command
-ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
+Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command
 Future<bool> hotRangeCommandActor(Database localDb,
                                   Reference<IDatabase> db,
@@ -227,7 +217,7 @@ Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<String
 // profile command
 Future<bool> profileCommandActor(Database db, Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
 // quota command
-ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
 Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
@@ -251,7 +241,7 @@ Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> to
 // versionepoch command
 Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
 // targetversion command
-ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // idempotencyids command
 Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> const& tokens);
 
@@ -263,6 +253,3 @@ Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens)
 Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
 Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens);
 } // namespace fdb_cli
-
-#include "flow/unactorcompiler.h"
-#endif
