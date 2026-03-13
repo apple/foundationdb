@@ -4,6 +4,8 @@ Checks: >
   bugprone-sizeof-expression,
   bugprone-suspicious-string-compare,
   bugprone-use-after-move,
+  modernize-use-equals-default,
+  modernize-use-override,
   performance-for-range-copy,
   readability-container-contains,
   readability-const-return-type,

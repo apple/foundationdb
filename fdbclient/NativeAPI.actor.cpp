@@ -2855,7 +2855,7 @@ struct TSSDuplicateStreamData {
 	Promise<Void> tssComparisonDone;
 
 	// empty constructor for optional?
-	TSSDuplicateStreamData() {}
+	TSSDuplicateStreamData() = default;
 
 	TSSDuplicateStreamData(PromiseStream<StreamReply> stream) : stream(stream) {}
 
@@ -2867,7 +2867,7 @@ struct TSSDuplicateStreamData {
 		}
 	}
 
-	~TSSDuplicateStreamData() {}
+	~TSSDuplicateStreamData() = default;
 };
 
 // Error tracking here is weird, and latency doesn't really mean the same thing here as it does with normal tss

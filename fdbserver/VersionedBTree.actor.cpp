@@ -3734,7 +3734,7 @@ public:
 	Version getLastCommittedVersion() const override { return lastCommittedHeader.committedVersion; }
 
 private:
-	~DWALPager() {}
+	~DWALPager() = default;
 
 	// Try to expire snapshots up to but not including v, but do not expire any snapshots that are in use.
 	void expireSnapshots(Version v);
@@ -3901,7 +3901,7 @@ private:
 class DWALPagerSnapshot : public IPagerSnapshot, public ReferenceCounted<DWALPagerSnapshot> {
 public:
 	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version) : pager(pager), version(version), metaKey(meta) {}
-	~DWALPagerSnapshot() override {}
+	~DWALPagerSnapshot() override = default;
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                   unsigned int level,
@@ -6187,7 +6187,7 @@ private:
 	};
 
 	struct InternalPageModifier {
-		InternalPageModifier() {}
+		InternalPageModifier() = default;
 		InternalPageModifier(Reference<const ArenaPage> p,
 		                     bool alreadyCloned,
 		                     bool updating,
@@ -7870,7 +7870,7 @@ public:
 		}));
 	}
 
-	~KeyValueStoreRedwood() override {};
+	~KeyValueStoreRedwood() override = default;
 
 private:
 	std::string m_filename;
@@ -8266,7 +8266,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
 }
 
 struct IntIntPair {
-	IntIntPair() {}
+	IntIntPair() = default;
 	IntIntPair(int k, int v) : k(k), v(v) {}
 	IntIntPair(Arena& arena, const IntIntPair& toCopy) { *this = toCopy; }
 
@@ -10572,7 +10572,7 @@ struct PrefixSegment {
 // Utility class for generating kv pairs under a prefix pattern
 // It currently uses std::string in an abstraction breaking way.
 struct KVSource {
-	KVSource() {}
+	KVSource() = default;
 
 	typedef VectorRef<uint8_t> PrefixRef;
 	typedef Standalone<PrefixRef> Prefix;

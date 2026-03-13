@@ -978,7 +978,7 @@ ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b
 
 struct AddReply {
 	int sum;
-	AddReply() {}
+	AddReply() = default;
 	AddReply(int x) : sum(x) {}
 
 	template <class Ar>
@@ -991,7 +991,7 @@ struct AddRequest {
 	int a, b;
 	Promise<AddReply> reply; // Self-addressed envelope
 
-	AddRequest() {}
+	AddRequest() = default;
 	AddRequest(int a, int b) : a(a), b(b) {}
 
 	template <class Ar>

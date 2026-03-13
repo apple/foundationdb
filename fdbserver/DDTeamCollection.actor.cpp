@@ -4727,7 +4727,7 @@ struct ServerPriority {
 	UID id;
 	Reference<TCServerInfo> info;
 
-	ServerPriority() {}
+	ServerPriority() = default;
 	ServerPriority(int healthyShards, int unhealthyShards, int64_t loadBytes, UID id, Reference<TCServerInfo> info)
 	  : healthyShards(healthyShards), unhealthyShards(unhealthyShards), loadBytes(loadBytes), id(id), info(info) {}
 

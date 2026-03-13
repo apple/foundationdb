@@ -266,7 +266,7 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		swift::Job* _Nullable swiftJob = nullptr;
-		PromiseTask() {}
+		PromiseTask() = default;
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
@@ -364,7 +364,7 @@ class BindPromise {
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
@@ -817,7 +817,7 @@ private:
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
-	SSLHandshakerThread() {}
+	SSLHandshakerThread() = default;
 	void init() override {}
 
 	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
@@ -2266,7 +2266,7 @@ struct TestGVR {
 	Optional<std::pair<UID, UID>> debugID;
 	Promise<Optional<Standalone<StringRef>>> reply;
 
-	TestGVR() {}
+	TestGVR() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

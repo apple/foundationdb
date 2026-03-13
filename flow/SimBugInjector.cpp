@@ -63,7 +63,7 @@ unsigned ISimBug::numHits() const {
 	return ISimBugImpl::get(impl)->numHits;
 }
 
-IBugIdentifier::~IBugIdentifier() {}
+IBugIdentifier::~IBugIdentifier() = default;
 
 bool SimBugInjector::isEnabled() const {
 	return simBugInjector != nullptr && simBugInjector->isEnabled;

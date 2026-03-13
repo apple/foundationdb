@@ -608,9 +608,9 @@ public:
 	using MultipartUpload = MockS3GlobalStorage::MultipartUpload;
 
 	// Note: No TraceEvent here - constructor called before GlobalConfig is initialized
-	MockS3ServerImpl() {}
+	MockS3ServerImpl() = default;
 
-	~MockS3ServerImpl() {}
+	~MockS3ServerImpl() = default;
 
 	// S3 Operation Handlers
 	ACTOR static Future<Void> handleRequest(MockS3ServerImpl* self,

@@ -786,7 +786,7 @@ private:
 
 struct ConflictSet {
 	ConflictSet() : removalKey(makeString(0)), oldestVersion(0) {}
-	~ConflictSet() {}
+	~ConflictSet() = default;
 
 	SkipList versionHistory;
 	Key removalKey;
@@ -809,7 +809,7 @@ ConflictBatch::ConflictBatch(ConflictSet* cs,
   : cs(cs), transactionCount(0), conflictingKeyRangeMap(conflictingKeyRangeMap),
     resolveBatchReplyArena(resolveBatchReplyArena) {}
 
-ConflictBatch::~ConflictBatch() {}
+ConflictBatch::~ConflictBatch() = default;
 
 struct TransactionInfo {
 	VectorRef<std::pair<int, int>> readRanges;

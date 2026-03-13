@@ -64,7 +64,7 @@ unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
 bool g_traceProcessEvents = false;
 
-ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
+ITraceLogIssuesReporter::~ITraceLogIssuesReporter() = default;
 
 struct SuppressionMap {
 	struct SuppressionInfo {
@@ -277,7 +277,7 @@ public:
 		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
-			explicit Ping() {};
+			explicit Ping() = default;
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {

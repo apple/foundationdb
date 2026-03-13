@@ -393,7 +393,7 @@ struct P2PNetworkTest {
 		return s;
 	}
 
-	P2PNetworkTest() {}
+	P2PNetworkTest() = default;
 
 	P2PNetworkTest(std::string listenerAddresses,
 	               std::string remoteAddresses,
