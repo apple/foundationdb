@@ -1,5 +1,5 @@
 /*
- * ExcludeCommand.actor.cpp
+ * ExcludeCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,7 +29,6 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -40,7 +39,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
                                          bool failed,
                                          bool force) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		Error caughtErr;
@@ -93,7 +92,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 
 Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {
@@ -122,7 +121,7 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 // Get the list of excluded localities by reading the keys.
 Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {
@@ -149,7 +148,7 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 
 Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {
@@ -177,7 +176,7 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 // Get the list of failed localities by reading the keys.
 Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {
@@ -223,7 +222,7 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Reference<IDatabase> d
 	Reference<ITransaction> tr = db->createTransaction();
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	loop {
+	while (true) {
 		inProgressExclusion.clear();
 		Error err;
 		bool hasErr = false;
@@ -275,7 +274,7 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 	bool foundCoordinator = false;
 	std::vector<NetworkAddress> coordinatorList;
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {

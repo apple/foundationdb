@@ -1,5 +1,5 @@
 /*
- * DataDistributionCommand.actor.cpp
+ * DataDistributionCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,13 +29,12 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
 Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		bool hasErr = false;
@@ -69,7 +68,7 @@ Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 
 Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnoreOptionMask, bool setMaskedBit) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		Error err;

@@ -1,5 +1,5 @@
 /*
- * FlowLineNoise.actor.cpp
+ * FlowLineNoise.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -40,7 +40,6 @@
 #else
 #define HAVE_LINENOISE 0
 #endif
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LineNoiseReader final : IThreadPoolReceiver {
 	void init() override {}

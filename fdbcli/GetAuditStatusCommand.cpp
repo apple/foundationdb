@@ -1,5 +1,5 @@
 /*
- * GetAuditStatusCommand.actor.cpp
+ * GetAuditStatusCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,7 +28,6 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -38,7 +37,7 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 	int retryCount = 0;
 	int64_t finishCount = 0;
 	while (rangeToReadBegin < auditRange.end) {
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -81,7 +80,7 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 
 Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
 	Transaction tr(cx);
-	loop {
+	while (true) {
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		Error err;
@@ -113,7 +112,7 @@ Future<AuditPhase> getAuditProgressByServer(Database cx,
 	Key rangeToReadBegin = auditRange.begin;
 	int retryCount = 0;
 	while (rangeToReadBegin < auditRange.end) {
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {

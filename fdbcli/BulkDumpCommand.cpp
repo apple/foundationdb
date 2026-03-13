@@ -1,5 +1,5 @@
 /*
- * BulkDumpCommand.actor.cpp
+ * BulkDumpCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -43,7 +42,7 @@ static const std::string BULK_DUMP_HELP_MESSAGE =
 
 Future<bool> getOngoingBulkDumpJob(Database cx) {
 	Transaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);

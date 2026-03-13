@@ -1,5 +1,5 @@
 /*
- * VersionEpochCommand.actor.cpp
+ * VersionEpochCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,7 +28,6 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -41,7 +40,7 @@ struct VersionInfo {
 
 static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -62,7 +61,7 @@ static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> db) {
 }
 
 static Future<Optional<int64_t>> getVersionEpoch(Reference<ITransaction> tr) {
-	loop {
+	while (true) {
 		Error err;
 		try {
 			ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochSpecialKey);
@@ -102,7 +101,7 @@ Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std:
 			// Clearing the version epoch means versions will no longer attempt
 			// to advance at the same rate as the clock. The current version
 			// will remain unchanged.
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -131,7 +130,7 @@ Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std:
 				v = 0; // default version epoch
 			}
 
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);

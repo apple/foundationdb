@@ -1,5 +1,5 @@
 /*
- * SetClassCommand.actor.cpp
+ * SetClassCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,13 +29,12 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
 Future<Void> printProcessClass(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		bool hasErr = false;
@@ -80,7 +79,7 @@ Future<Void> printProcessClass(Reference<IDatabase> db) {
 
 Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, KeyRef class_type) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error caughtErr;
 		bool hasCaughtErr = false;

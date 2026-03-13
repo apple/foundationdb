@@ -1,5 +1,5 @@
 /*
- * fdbcli.actor.cpp
+ * fdbcli.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -73,7 +73,6 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
@@ -1125,7 +1124,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 	// when using external clients, it will throw cluster_version_changed for the first time establish the connection to
 	// the cluster. Thus, we catch it by doing a get version request to establish the connection
 	// The 3.0 timeout is a guard to avoid waiting forever when the cli cannot talk to any coordinators
-	loop {
+	while (true) {
 		Optional<Error> err;
 		try {
 			getTransaction(db, tr, options, intrans);
@@ -1164,7 +1163,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 
 	bool is_error = false;
 	Future<Void> warn;
-	loop {
+	while (true) {
 		if (warn.isValid())
 			warn.cancel();
 

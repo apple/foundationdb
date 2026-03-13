@@ -1,5 +1,5 @@
 /*
- * DebugCommands.actor.cpp
+ * DebugCommands.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -41,7 +40,7 @@ std::string toHex(StringRef v) {
 
 // Gets a version at which to read from the storage servers
 Future<Version> getVersion(Database cx) {
-	loop {
+	while (true) {
 		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		Error err;
@@ -320,7 +319,7 @@ Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dc
 Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dcid, bool checkAll) {
 	Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 	bool consistent = true;
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {

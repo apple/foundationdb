@@ -1,5 +1,5 @@
 /*
- * CoordinatorsCommand.actor.cpp
+ * CoordinatorsCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -31,13 +31,12 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
 Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			// Hold the reference to the standalone's memory
@@ -79,7 +78,7 @@ Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> 
 
 	bool automatic = tokens.size() == 2 && tokens[1] == "auto"_sr;
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error caughtErr;
 		bool hasCaughtErr = false;

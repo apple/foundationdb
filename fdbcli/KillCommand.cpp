@@ -1,5 +1,5 @@
 /*
- * KillCommand.actor.cpp
+ * KillCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,7 +30,6 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/CodeProbe.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 

@@ -1,5 +1,5 @@
 /*
- * AdvanceVersionCommand.actor.cpp
+ * AdvanceVersionCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,6 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -45,7 +44,7 @@ Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<Str
 			co_return false;
 		} else {
 			Reference<ITransaction> tr = db->createTransaction();
-			loop {
+			while (true) {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				Error err;
 				try {

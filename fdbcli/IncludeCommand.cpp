@@ -1,5 +1,5 @@
 /*
- * IncludeCommand.actor.cpp
+ * IncludeCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,6 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -39,7 +38,7 @@ Future<Void> includeLocalities(Reference<IDatabase> db,
                                bool includeAll) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {
@@ -69,7 +68,7 @@ Future<Void> includeLocalities(Reference<IDatabase> db,
 Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusion> servers, bool failed) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {

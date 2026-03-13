@@ -1,5 +1,5 @@
 /*
- * LocationMetadataCommand.actor.cpp
+ * LocationMetadataCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 Future<std::string> describeServers(Reference<ReadYourWritesTransaction> tr, std::vector<UID> ids) {
@@ -73,7 +72,7 @@ Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 		// RYW to optimize re-reading the same key ranges
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -126,7 +125,7 @@ Future<Void> printPhysicalShardCount(Database cx) {
 		// RYW to optimize re-reading the same key ranges
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -175,7 +174,7 @@ Future<Void> printServerShards(Database cx, UID serverId) {
 		// RYW to optimize re-reading the same key ranges
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -220,7 +219,7 @@ Future<Void> resolveRange(Database cx, KeyRange range) {
 		// RYW to optimize re-reading the same key ranges
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {

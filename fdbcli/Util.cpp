@@ -1,5 +1,5 @@
 /*
- * Util.actor.cpp
+ * Util.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "flow/Arena.h"
 
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -118,7 +117,7 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 
 Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -168,7 +167,7 @@ Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* worke
 Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
                                         std::map<std::string, StorageServerInterface>* interfaces) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		interfaces->clear();
 		Error err;
 		try {

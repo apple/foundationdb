@@ -1,5 +1,5 @@
 /*
- * MaintenanceCommand.actor.cpp
+ * MaintenanceCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -32,14 +32,13 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
 // print zoneId under maintenance, only one is possible at the same time
 Future<Void> printHealthyZone(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {
@@ -80,7 +79,7 @@ const KeyRef ignoreSSFailureSpecialKey = "\xff\xff/management/maintenance/Ignore
 Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning) {
 	Reference<ITransaction> tr = db->createTransaction();
 	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {
@@ -112,7 +111,7 @@ Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double se
 Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, bool clearSSFailureZoneString) {
 	Reference<ITransaction> tr = db->createTransaction();
 	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
-	loop {
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
 		try {

@@ -1,5 +1,5 @@
 /*
- * RangeConfigCommand.actor.cpp
+ * RangeConfigCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 

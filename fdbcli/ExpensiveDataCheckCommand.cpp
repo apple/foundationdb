@@ -1,5 +1,5 @@
 /*
- * ExpensiveDataCheckCommand.actor.cpp
+ * ExpensiveDataCheckCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,7 +29,6 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
