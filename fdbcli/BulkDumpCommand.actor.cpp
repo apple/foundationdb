@@ -70,7 +70,6 @@ Future<Void> getBulkDumpCompleteRanges(Database cx, KeyRange rangeToRead) {
 			fmt::println("timed out");
 		}
 	}
-	co_return;
 }
 
 Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {

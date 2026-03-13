@@ -155,7 +155,6 @@ Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
 	});
 
 	co_await result.getFuture();
-	co_return;
 }
 
 Future<Void> LineNoise::onKeyboardInterrupt() {

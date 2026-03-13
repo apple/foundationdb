@@ -77,7 +77,6 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 		}
 	}
 	fmt::println("Finished range count: {}", finishCount);
-	co_return;
 }
 
 Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
@@ -187,7 +186,6 @@ Future<Void> getAuditProgress(Database cx, AuditType auditType, UID auditId, Key
 	} else {
 		fmt::println("AuditType not implemented");
 	}
-	co_return;
 }
 
 Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {

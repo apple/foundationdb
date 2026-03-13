@@ -308,7 +308,6 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 	if (foundCoordinator)
 		printf("Type `help coordinators' for information on how to change the\n"
 		       "cluster's coordination servers before removing them.\n");
-	co_return;
 }
 
 } // namespace

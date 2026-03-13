@@ -63,7 +63,6 @@ Future<Void> printKeyServersEntry(Reference<ReadYourWritesTransaction> tr,
 	       srcId.toString().c_str(),
 	       srcDesc.c_str(),
 	       destDesc.c_str());
-	co_return;
 }
 
 Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
@@ -116,8 +115,6 @@ Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 	}
 
 	printf("Found %d %s shards\n", numShards, physicalShard ? "Physical" : "Non-physical");
-
-	co_return;
 }
 
 Future<Void> printPhysicalShardCount(Database cx) {
@@ -169,8 +166,6 @@ Future<Void> printPhysicalShardCount(Database cx) {
 	}
 
 	printf("Total number of shards: %d, number of physical shards: %d\n", numShards, numPhysicalShards);
-
-	co_return;
 }
 
 Future<Void> printServerShards(Database cx, UID serverId) {
@@ -216,8 +211,6 @@ Future<Void> printServerShards(Database cx, UID serverId) {
 			}
 		}
 	}
-
-	co_return;
 }
 
 Future<Void> resolveRange(Database cx, KeyRange range) {
@@ -259,8 +252,6 @@ Future<Void> resolveRange(Database cx, KeyRange range) {
 			}
 		}
 	}
-
-	co_return;
 }
 
 } // namespace

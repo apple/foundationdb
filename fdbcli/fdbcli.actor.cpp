@@ -652,7 +652,6 @@ int printStatusFromJSON(std::string const& jsonFileName) {
 Future<Void> timeWarning(double when, const char* msg) {
 	co_await delay(when);
 	fputs(msg, stderr);
-	co_return;
 }
 
 Future<Void> checkStatus(Future<Void> f,
@@ -679,7 +678,6 @@ Future<Void> checkStatus(Future<Void> f,
 	printf("\n");
 	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);
 	printf("\n");
-	co_return;
 }
 
 template <class T>
@@ -705,7 +703,6 @@ Future<Void> commitTransaction(Reference<ITransaction> tr) {
 		fmt::print("Committed ({})\n", ver);
 	else
 		fmt::print("Nothing to commit\n");
-	co_return;
 }
 
 Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
@@ -2031,7 +2028,6 @@ Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 Future<Void> timeExit(double duration) {
 	co_await delay(duration);
 	fprintf(stderr, "Specified timeout reached -- exiting...\n");
-	co_return;
 }
 
 const char* checkTlsConfigAgainstCoordAddrs(const ClusterConnectionString& ccs) {

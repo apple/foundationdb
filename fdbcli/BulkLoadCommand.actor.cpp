@@ -83,7 +83,6 @@ Future<Void> printPastBulkLoadJob(Database cx) {
 			fmt::println("Error message: {}", errorMessage.present() ? errorMessage.get() : "Not provided.");
 		}
 	}
-	co_return;
 }
 
 void printBulkLoadJobTotalTaskCount(Optional<uint64_t> count) {
@@ -151,7 +150,6 @@ Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 	fmt::println("Finished {} tasks", completeTaskCount);
 	fmt::println("Error {} tasks", errorTaskCount);
 	printBulkLoadJobTotalTaskCount(totalTaskCount);
-	co_return;
 }
 
 Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {

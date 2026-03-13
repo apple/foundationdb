@@ -114,7 +114,6 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 		tr->clear(workerInterfacesVerifyOptionSpecialKey);
 	}
 	addInterfacesFromKVs(kvs, address_interface);
-	co_return;
 }
 
 Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
