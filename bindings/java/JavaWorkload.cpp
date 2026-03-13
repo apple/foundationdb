@@ -324,7 +324,7 @@ struct JVM {
 		if (!env) {
 			throw JNIError{};
 		}
-		if (classPath.count(path) > 0) {
+		if (classPath.contains(path)) {
 			// already added
 			return;
 		}

@@ -43,7 +43,7 @@ void debug_advanceCommittedVersions(UID id, int64_t minVersion, int64_t maxVersi
 }
 
 void debug_advanceVersion(UID id, int64_t version, const char* suffix) {
-	if (!disabledMachines.count(id)) {
+	if (!disabledMachines.contains(id)) {
 		auto& entry = validationData[id.toString() + suffix];
 		if (version > entry)
 			entry = version;
@@ -69,9 +69,9 @@ bool debug_checkPartRestoredVersion(UID id,
                                     Severity sev = SevError) {
 	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
-	if (disabledMachines.count(id))
+	if (disabledMachines.contains(id))
 		return false;
-	if (!validationData.count(id.toString() + minormax)) {
+	if (!validationData.contains(id.toString() + minormax)) {
 		TraceEvent(SevWarn, (context + "UnknownVersion").c_str(), id).detail("RestoredVersion", version);
 		return false;
 	}
@@ -104,7 +104,7 @@ void debug_removeVersions(UID id) {
 bool debug_versionsExist(UID id) {
 	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
-	return validationData.count(id.toString() + "min") != 0 || validationData.count(id.toString() + "max") != 0;
+	return validationData.contains(id.toString() + "min") || validationData.contains(id.toString() + "max");
 }
 
 bool debug_checkMinRestoredVersion(UID id, int64_t version, std::string context, Severity sev) {
@@ -137,7 +137,7 @@ void debug_advanceVersionTimestamp(int64_t version, double t) {
 bool debug_checkVersionTime(int64_t version, double t, std::string context, Severity sev) {
 	if (!g_network->isSimulated() || !g_simulator->extraDatabases.empty())
 		return false;
-	if (!timedVersionsValidationData.count(version)) {
+	if (!timedVersionsValidationData.contains(version)) {
 		TraceEvent(SevWarn, (context + "UnknownTime").c_str())
 		    .detail("VersionChecking", version)
 		    .detail("TimeChecking", t);

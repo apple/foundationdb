@@ -236,7 +236,7 @@ public: // workload functions
 				Error err;
 				try {
 					RangeResult kvRange = co_await tr.getRange(begin, end, 1000);
-					if (!kvRange.more && kvRange.size() == 0) {
+					if (!kvRange.more && kvRange.empty()) {
 						TraceEvent("SnapTestNoMoreEntries").log();
 						break;
 					}

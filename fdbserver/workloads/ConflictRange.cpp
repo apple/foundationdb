@@ -170,7 +170,7 @@ struct ConflictRangeWorkload : TestWorkload {
 					                                        randomLimit,
 					                                        Snapshot::False,
 					                                        reverse);
-					if (res.size()) {
+					if (!res.empty()) {
 						originalResults = res;
 						break;
 					}

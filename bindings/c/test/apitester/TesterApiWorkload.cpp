@@ -171,7 +171,7 @@ fdb::KeyRange ApiWorkload::randomNonEmptyKeyRange() {
 }
 
 std::optional<int> ApiWorkload::randomTenant() {
-	if (tenants.size() > 0) {
+	if (!tenants.empty()) {
 		return Random::get().randomInt(0, tenants.size() - 1);
 	} else {
 		return {};
@@ -244,7 +244,7 @@ void ApiWorkload::populateTenantData(TTaskFct cont, std::optional<int> tenantId)
 }
 
 void ApiWorkload::createTenantsIfNecessary(TTaskFct cont) {
-	if (tenants.size() > 0) {
+	if (!tenants.empty()) {
 		ASSERT(false);
 	} else {
 		schedule(cont);
@@ -252,7 +252,7 @@ void ApiWorkload::createTenantsIfNecessary(TTaskFct cont) {
 }
 
 void ApiWorkload::populateData(TTaskFct cont) {
-	if (tenants.size() > 0) {
+	if (!tenants.empty()) {
 		populateTenantData(cont, std::make_optional(0));
 	} else {
 		populateTenantData(cont, {});
