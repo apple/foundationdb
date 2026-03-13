@@ -5133,7 +5133,7 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 }
 
 Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor) {
-	Reference<DataDistributor> dd =
+	auto dd =
 	    makeReference<DataDistributor>(Reference<AsyncVar<ServerDBInfo> const>(nullptr), context->ddId, context, "");
 	dd->txnProcessor = txnProcessor;
 	return dataDistributor_impl(context->interface, dd, IsMocked::True);

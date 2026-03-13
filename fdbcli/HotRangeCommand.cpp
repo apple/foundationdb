@@ -66,7 +66,7 @@ Future<bool> hotRangeCommandActor(Database localdb,
 		}
 		fmt::print("\n");
 	} else if (tokens.size() == 6) {
-		if (storage_interface->size() == 0) {
+		if (storage_interface->empty()) {
 			fprintf(stderr, "ERROR: no storage processes to query. You must run the `hotrange’ command first.\n");
 			co_return false;
 		}

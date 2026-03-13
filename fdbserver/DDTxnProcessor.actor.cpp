@@ -951,7 +951,7 @@ Future<Reference<InitialDataDistribution>> DDMockTxnProcessor::getInitialDataDis
     SkipDDModeCheck skipDDModeCheck) {
 
 	// FIXME: now we just ignore ddEnabledState and moveKeysLock, will fix it in the future
-	Reference<InitialDataDistribution> res = makeReference<InitialDataDistribution>();
+	auto res = makeReference<InitialDataDistribution>();
 	res->mode = 1;
 	res->allServers = getServerListAndProcessClasses().get().servers;
 	res->shards = getDDShardInfos();

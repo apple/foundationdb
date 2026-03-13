@@ -129,7 +129,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 					TraceEvent("IBackupCheckListContainersSuccess")
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
-					if (containers.size()) {
+					if (!containers.empty()) {
 						backupContainer =
 						    IBackupContainer::openContainer(containers.front(), {}, restoreEncryptionKeyFileName);
 					}

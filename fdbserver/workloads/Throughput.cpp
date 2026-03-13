@@ -363,7 +363,7 @@ struct ThroughputWorkload : TestWorkload {
 		std::vector<std::string> periodicMetrics =
 		    getOption(options, "measurePeriodicMetrics"_sr, std::vector<std::string>());
 		if (measurePeriod) {
-			ASSERT(periodicMetrics.size() != 0);
+			ASSERT(!periodicMetrics.empty());
 			multi->ms.push_back(Reference<IMeasurer>(new MeasurePeriodically(
 			    measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end()))));
 		}

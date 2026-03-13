@@ -1,5 +1,5 @@
 /*
- * PubSubMultiples.actor.cpp
+ * PubSubMultiples.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 #include "fdbserver/pubsub.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	static constexpr auto NAME = "PubSubMultiples";
@@ -64,7 +63,7 @@ struct PubSubMultiplesWorkload : TestWorkload {
 			inboxes.push_back(inboxIdx);
 		}
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				for (int idx = 0; idx < self->inboxesPerActor; idx++) {
@@ -92,12 +91,12 @@ struct PubSubMultiplesWorkload : TestWorkload {
 		TraceEvent("PSMNodesCreated").detail("ClientIdx", self->clientId);
 	}
 
-	/*ACTOR*/ Future<Void> createSubscriptions(PubSubMultiplesWorkload* self, int actor, Database cx) {
+	Future<Void> createSubscriptions(PubSubMultiplesWorkload* self, int actor, Database cx) {
 		// create the "multiples" subscriptions for each owned inbox
 		return Void();
 	}
 
-	/*ACTOR*/ Future<Void> messageSender(PubSubMultiplesWorkload* self, Database cx) {
+	Future<Void> messageSender(PubSubMultiplesWorkload* self, Database cx) {
 		// use a possion loop and post messages to feeds
 		return Void();
 	}

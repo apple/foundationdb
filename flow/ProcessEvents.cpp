@@ -86,7 +86,7 @@ struct ProcessEventsImpl {
 				// it's possible that the callback has been removed in
 				// which case attempting to call it will be undefined
 				// behavior.
-				if (toRemove.count(c.first) == 0) {
+				if (!toRemove.contains(c.first)) {
 					c.second->callback(name, data, e);
 				}
 			} catch (...) {

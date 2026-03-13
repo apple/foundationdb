@@ -86,9 +86,8 @@ void SimBugInjector::disable() {
 }
 
 void SimBugInjector::reset() {
-	if (simBugInjector) {
-		delete simBugInjector;
-	}
+
+	delete simBugInjector;
 }
 
 std::shared_ptr<ISimBug> SimBugInjector::getImpl(const IBugIdentifier& id, bool getDisabled /* = false */) const {

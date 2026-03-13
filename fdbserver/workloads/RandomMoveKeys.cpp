@@ -111,7 +111,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		std::set<StorageServerInterface> t;
 		std::set<Optional<Standalone<StringRef>>> machines;
 		std::set<Optional<Standalone<StringRef>>> dataHalls;
-		while (t.size() < teamSize && storageServers.size()) {
+		while (t.size() < teamSize && !storageServers.empty()) {
 			auto s = storageServers.back();
 			storageServers.pop_back();
 			if (!machines.contains(s.locality.zoneId()) &&

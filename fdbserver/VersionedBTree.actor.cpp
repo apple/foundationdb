@@ -9619,7 +9619,7 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 TEST_CASE(":/redwood/pager/ArenaPage") {
 	Arena x;
 	printf("Making p\n");
-	Reference<ArenaPage> p = makeReference<ArenaPage>(4096, 4096);
+	auto p = makeReference<ArenaPage>(4096, 4096);
 	printf("Made p=%p\n", p->data());
 	printf("Clearing p\n");
 	p.clear();
