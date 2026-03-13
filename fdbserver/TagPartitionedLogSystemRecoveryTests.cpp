@@ -24,7 +24,7 @@
 namespace {
 
 Reference<LogSet> makeSingleLogSet(const std::vector<TLogInterface>& tlogs, bool isLocal = true) {
-	Reference<LogSet> logSet = makeReference<LogSet>();
+	auto logSet = makeReference<LogSet>();
 	logSet->isLocal = isLocal;
 	for (const auto& tlog : tlogs) {
 		logSet->logServers.push_back(

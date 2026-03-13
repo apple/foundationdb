@@ -78,7 +78,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 
 	Future<Void> managementApiCorrectnessActor(Database cx, SpecialKeySpaceRobustnessWorkload* self) {
 		// Management api related tests that can run during failure injections
-		Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		auto tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test ordered option keys
 		{
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
