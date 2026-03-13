@@ -1,5 +1,5 @@
 /*
- * BackupProgress.actor.cpp
+ * BackupProgress.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 void BackupProgress::addBackupStatus(const WorkerBackupStatus& status) {
 	auto& it = progress[status.epoch];
@@ -147,7 +146,7 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging) {
 	Transaction tr(cx);
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -172,6 +171,7 @@ Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress>
 					    .detail("TotalTags", status.totalTags);
 				}
 			}
+			co_return;
 		} catch (Error& e) {
 			err = e;
 		}

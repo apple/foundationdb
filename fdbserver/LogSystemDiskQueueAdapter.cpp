@@ -1,5 +1,5 @@
 /*
- * LogSystemDiskQueueAdapter.actor.cpp
+ * LogSystemDiskQueueAdapter.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,6 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/Knobs.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 class LogSystemDiskQueueAdapterImpl {
 public:
@@ -42,7 +41,7 @@ public:
 			}
 
 			if (!self->cursor->hasMessage()) {
-				loop {
+				while (true) {
 					auto choice = co_await race(self->cursor->getMore(),
 					                            self->localityChanged,
 					                            delay(self->peekTypeSwitches == 0

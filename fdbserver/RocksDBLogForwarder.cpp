@@ -1,5 +1,5 @@
 /*
- * RocksDBLogForwarder.actor.cpp
+ * RocksDBLogForwarder.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,8 +24,6 @@
 #include "flow/network.h"
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
-
-#include "flow/actorcompiler.h" // This must be the last include file
 
 using InfoLogLevel = rocksdb::InfoLogLevel;
 
@@ -71,7 +69,7 @@ void logTraceEvent(const RocksDBLogRecord& record) {
 }
 
 Future<Void> rocksDBPeriodicallyLogger(RocksDBLogger* pRecords) {
-	loop {
+	while (true) {
 		co_await delay(0.1);
 		pRecords->consume();
 	}

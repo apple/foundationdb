@@ -1,5 +1,5 @@
 /*
- * ResolutionBalancer.actor.cpp
+ * ResolutionBalancer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,8 +24,6 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/flow.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 void ResolutionBalancer::setResolvers(const std::vector<ResolverInterface>& v) {
 	resolvers = v;
@@ -118,7 +116,7 @@ Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* se
 	CoalescedKeyRangeMap<int> key_resolver(
 	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
 	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
-	loop {
+	while (true) {
 		co_await delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics);
 		while (self->resolverChanges.get().size())
 			co_await self->resolverChanges.onChange();
@@ -144,7 +142,7 @@ Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* se
 				                 2;
 				Standalone<VectorRef<ResolverMoveRef>> movedRanges;
 
-				loop {
+				while (true) {
 					std::pair<KeyRangeRef, bool> range = findRange(key_resolver, movedRanges, src, dest);
 
 					ResolutionSplitRequest req;

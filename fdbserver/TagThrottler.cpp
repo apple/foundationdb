@@ -1,5 +1,5 @@
 /*
- * TagThrottler.h
+ * TagThrottler.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,6 @@
 
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/RkTagThrottleCollection.h"
-#include "flow/actorcompiler.h" // must be last include
 
 class TagThrottlerImpl {
 	Database db;
@@ -33,10 +32,10 @@ class TagThrottlerImpl {
 
 	static Future<Void> monitorThrottlingChanges(TagThrottlerImpl* self) {
 		bool committed = false;
-		loop {
+		while (true) {
 			ReadYourWritesTransaction tr(self->db);
 
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

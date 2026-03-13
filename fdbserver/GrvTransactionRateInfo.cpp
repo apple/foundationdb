@@ -1,5 +1,5 @@
 /*
- * GrvTransactionRateInfo.actor.cpp
+ * GrvTransactionRateInfo.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 
 #include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // must be last include
 
 GrvTransactionRateInfo::GrvTransactionRateInfo(double rateWindow, double maxEmptyQueueBudget, double rate)
   : rateWindow(rateWindow), maxEmptyQueueBudget(maxEmptyQueueBudget), rate(rate), smoothRate(rateWindow),
@@ -99,7 +98,7 @@ static bool isNear(double desired, int64_t actual) {
 }
 
 static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double desiredRate, int64_t* counter) {
-	loop {
+	while (true) {
 		double elapsed = (0.9 + 0.2 * deterministicRandom()->random01()) / desiredRate;
 		co_await delay(elapsed);
 		rateInfo->startReleaseWindow();
@@ -112,11 +111,10 @@ static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double desiredR
 // Rate limit set at 10, but client attempts 20 transactions per second.
 // Client should be throttled to only 10 transactions per second.
 TEST_CASE("/GrvTransactionRateInfo/Simple") {
-	state GrvTransactionRateInfo rateInfo(/*rateWindow=*/2.0, /*maxEmptyQueueBudget=*/100, /*rate=*/10);
-	state int64_t counter;
+	GrvTransactionRateInfo rateInfo(/*rateWindow=*/2.0, /*maxEmptyQueueBudget=*/100, /*rate=*/10);
+	int64_t counter = 0;
 	rateInfo.setRate(10.0);
-	wait(timeout(mockClient(&rateInfo, 20.0, &counter), 60.0, Void()));
+	co_await timeout(mockClient(&rateInfo, 20.0, &counter), 60.0, Void());
 	TraceEvent("GrvTransactionRateInfoTest").detail("Counter", counter);
 	ASSERT(isNear(60.0 * 10.0, counter));
-	return Void();
 }
