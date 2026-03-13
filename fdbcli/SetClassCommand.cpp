@@ -37,7 +37,6 @@ Future<Void> printProcessClass(Reference<IDatabase> db) {
 	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
-		bool hasErr = false;
 		try {
 			// Hold the reference to the memory
 			ThreadFuture<RangeResult> classTypeFuture =
@@ -69,11 +68,8 @@ Future<Void> printProcessClass(Reference<IDatabase> db) {
 			co_return;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 };
 
@@ -81,8 +77,7 @@ Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, Ke
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		Error caughtErr;
-		bool hasCaughtErr = false;
+		Error err;
 		try {
 			ThreadFuture<Optional<Value>> result =
 			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
@@ -95,19 +90,15 @@ Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, Ke
 			co_await safeThreadFutureToFuture(tr->commit());
 			co_return true;
 		} catch (Error& e) {
-			caughtErr = e;
-			hasCaughtErr = true;
+			err = e;
 		}
-		if (hasCaughtErr) {
-			Error err(caughtErr);
-			if (caughtErr.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-				// error message already has \n at the end
-				fprintf(stderr, "%s", errorMsgStr.c_str());
-				co_return false;
-			}
-			co_await safeThreadFutureToFuture(tr->onError(err));
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			// error message already has \n at the end
+			fprintf(stderr, "%s", errorMsgStr.c_str());
+			co_return false;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

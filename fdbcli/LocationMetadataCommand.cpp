@@ -74,7 +74,6 @@ Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -105,11 +104,8 @@ Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr->onError(err);
-			}
+			co_await tr->onError(err);
 		}
 	}
 
@@ -127,7 +123,6 @@ Future<Void> printPhysicalShardCount(Database cx) {
 
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -156,11 +151,8 @@ Future<Void> printPhysicalShardCount(Database cx) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr->onError(err);
-			}
+			co_await tr->onError(err);
 		}
 	}
 
@@ -176,7 +168,6 @@ Future<Void> printServerShards(Database cx, UID serverId) {
 
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -203,11 +194,8 @@ Future<Void> printServerShards(Database cx, UID serverId) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr->onError(err);
-			}
+			co_await tr->onError(err);
 		}
 	}
 }
@@ -221,7 +209,6 @@ Future<Void> resolveRange(Database cx, KeyRange range) {
 
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -244,11 +231,8 @@ Future<Void> resolveRange(Database cx, KeyRange range) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr->onError(err);
-			}
+			co_await tr->onError(err);
 		}
 	}
 }

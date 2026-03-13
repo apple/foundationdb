@@ -37,7 +37,6 @@ Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		Error err;
-		bool hasErr = false;
 		try {
 			tr->set(fdb_cli::ddModeSpecialKey, boost::lexical_cast<std::string>(mode));
 			if (mode) {
@@ -57,12 +56,9 @@ Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 			co_return;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			TraceEvent("SetDDModeRetrying").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		TraceEvent("SetDDModeRetrying").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -72,7 +68,6 @@ Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnor
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		Error err;
-		bool hasErr = false;
 		try {
 			ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
 			Optional<Value> v = co_await safeThreadFutureToFuture(resultFuture);
@@ -97,11 +92,8 @@ Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnor
 			co_return;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

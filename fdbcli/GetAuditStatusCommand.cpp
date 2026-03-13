@@ -39,7 +39,6 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 	while (rangeToReadBegin < auditRange.end) {
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
 				std::vector<AuditStorageState> auditStates =
@@ -60,19 +59,16 @@ Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID audit
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				if (retryCount > 30) {
-					fmt::println("Incomplete check");
-					co_return;
-				}
-				co_await delay(0.5);
-				retryCount++;
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
 			}
+			if (retryCount > 30) {
+				fmt::println("Incomplete check");
+				co_return;
+			}
+			co_await delay(0.5);
+			retryCount++;
 		}
 	}
 	fmt::println("Finished range count: {}", finishCount);
@@ -84,7 +80,6 @@ Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		Error err;
-		bool hasErr = false;
 		try {
 			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
@@ -95,11 +90,8 @@ Future<std::vector<StorageServerInterface>> getStorageServers(Database cx) {
 			co_return servers;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -114,7 +106,6 @@ Future<AuditPhase> getAuditProgressByServer(Database cx,
 	while (rangeToReadBegin < auditRange.end) {
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
 				std::vector<AuditStorageState> auditStates =
@@ -131,18 +122,15 @@ Future<AuditPhase> getAuditProgressByServer(Database cx,
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				if (retryCount > 30) {
-					co_return AuditPhase::Invalid;
-				}
-				co_await delay(0.5);
-				retryCount++;
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
 			}
+			if (retryCount > 30) {
+				co_return AuditPhase::Invalid;
+			}
+			co_await delay(0.5);
+			retryCount++;
 		}
 	}
 	co_return AuditPhase::Complete;

@@ -44,17 +44,13 @@ Future<Version> getVersion(Database cx) {
 		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		Error err;
-		bool hasErr = false;
 		try {
 			Version version = co_await tr.getReadVersion();
 			co_return version;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -321,7 +317,6 @@ Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dc
 	bool consistent = true;
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			fmt::println("Start checking for range: {}", printable(inputRange));
 			// Get SS interface for each shard of the inputRange
@@ -447,13 +442,10 @@ Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dc
 
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			fmt::print("Error: {}", err.what());
-			co_await onErrorTr.onError(err);
-			fmt::println(", retrying in 1s...");
-		}
+		fmt::print("Error: {}", err.what());
+		co_await onErrorTr.onError(err);
+		fmt::println(", retrying in 1s...");
 		co_await delay(1.0);
 	}
 	co_return consistent;

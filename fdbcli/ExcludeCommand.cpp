@@ -42,8 +42,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		Error caughtErr;
-		bool hasCaughtErr = false;
+		Error err;
 		try {
 			if (force && servers.size())
 				tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
@@ -65,28 +64,24 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 			co_await safeThreadFutureToFuture(tr->commit());
 			co_return true;
 		} catch (Error& e) {
-			caughtErr = e;
-			hasCaughtErr = true;
+			err = e;
 		}
-		if (hasCaughtErr) {
-			Error err(caughtErr);
-			if (caughtErr.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-				// last character is \n
-				auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
-				auto last_line = errorMsgStr.substr(pos + 1);
-				// customized the error message for fdbcli
-				fprintf(stderr,
-				        "%s\n%s\n",
-				        errorMsgStr.substr(0, pos).c_str(),
-				        last_line.find("free space") != std::string::npos
-				            ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
-				            : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
-				co_return false;
-			}
-			TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			// last character is \n
+			auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
+			auto last_line = errorMsgStr.substr(pos + 1);
+			// customized the error message for fdbcli
+			fprintf(stderr,
+			        "%s\n%s\n",
+			        errorMsgStr.substr(0, pos).c_str(),
+			        last_line.find("free space") != std::string::npos
+			            ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
+			            : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
+			co_return false;
 		}
+		TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -94,7 +89,6 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::excludedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
@@ -109,12 +103,9 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 			co_return exclusions;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			TraceEvent(SevWarn, "GetExcludedServersError").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		TraceEvent(SevWarn, "GetExcludedServersError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -123,7 +114,6 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::excludedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
@@ -138,11 +128,8 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 			co_return excludedLocalities;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -150,7 +137,6 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::failedServersSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
@@ -165,11 +151,8 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 			co_return exclusions;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -178,7 +161,6 @@ Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			ThreadFuture<RangeResult> resultFuture =
 			    tr->getRange(fdb_cli::failedLocalitySpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
@@ -193,12 +175,9 @@ Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 			co_return excludedLocalities;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		TraceEvent(SevWarn, "GetExcludedLocalitiesError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -276,7 +255,6 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			// Hold the reference to the standalone's memory
 			ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
@@ -286,12 +264,9 @@ Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<AddressExclu
 			break;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			TraceEvent(SevWarn, "CheckForCoordinatorsError").error(err);
-			co_await safeThreadFutureToFuture(tr->onError(err));
-		}
+		TraceEvent(SevWarn, "CheckForCoordinatorsError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 
 	for (const auto& c : coordinatorList) {
