@@ -1,5 +1,5 @@
 /*
- * MockDDTrackerShardEvaluator.actor.cpp
+ * MockDDTrackerShardEvaluator.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/workloads/MockDDTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 public:
@@ -67,20 +67,24 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
-	                                                FutureStream<RelocateShard> input) {
-		loop {
+	Future<Void> relocateShardReporter(FutureStream<RelocateShard> input) {
+		while (true) {
+			Error err;
 			try {
-				choose {
-					when(RelocateShard rs = waitNext(input)) {
-						++self->rsReasonCounts[rs.reason];
-					}
+				auto choice = co_await race(input);
+				if (choice.index() == 0) {
+					RelocateShard rs = std::get<0>(std::move(choice));
+
+					++rsReasonCounts[rs.reason];
+				} else {
+					UNREACHABLE();
 				}
 			} catch (Error& e) {
-				if (e.code() != error_code_wrong_shard_server)
-					throw e;
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+				err = e;
 			}
+			if (err.code() != error_code_wrong_shard_server)
+				throw err;
+			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY);
 		}
 	}
 
@@ -90,6 +94,7 @@ public:
 
 		// start mock servers
 		actors.add(waitForAll(sharedMgs->runAllMockServers()));
+		actors.add(relocateShardReporter(output.getFuture()));
 
 		// start tracker
 		Reference<InitialDataDistribution> initData =
@@ -119,8 +124,6 @@ public:
 		                                        getAverageShardBytes.getFuture(),
 		                                        triggerStorageQueueRebalance.getFuture(),
 		                                        triggerShardBulkLoading.getFuture()));
-
-		actors.add(relocateShardReporter(this, output.getFuture()));
 
 		return timeout(reportErrors(actors.getResult(), "MockDDTrackerShardEvaluatorWorkload"), testDuration, Void());
 	}

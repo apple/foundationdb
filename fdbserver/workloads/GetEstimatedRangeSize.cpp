@@ -24,7 +24,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 #include "flow/Error.h"
 #include "flow/Trace.h"
@@ -103,16 +103,15 @@ struct GetEstimatedRangeSizeWorkload : TestWorkload {
 				if (!sizeIsAsExpected(size) && totalDelay < 300.0) {
 					totalDelay += 5.0;
 					co_await delay(5.0);
+					continue;
 				} else {
 					co_return size;
 				}
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
-				co_await tr.onError(err);
-			}
+			TraceEvent(SevDebug, "GetSizeError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 	}
 };

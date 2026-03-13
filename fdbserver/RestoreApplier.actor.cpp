@@ -793,7 +793,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	return Void();
 }
 
-// Copy from WriteDuringRead.actor.cpp with small modifications
+// Copy from WriteDuringRead.cpp with small modifications
 // Not all AtomicOps are handled in this function: SetVersionstampedKey, SetVersionstampedValue, and CompareAndClear
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 	Arena arena;
