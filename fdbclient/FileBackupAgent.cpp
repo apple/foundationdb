@@ -90,6 +90,7 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 
 			co_await delay(pollInterval);
 			tr.reset();
+			continue;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -2418,6 +2419,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 				beginKey = keyAfter(shardBoundaries.get().back());
 				tr->reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -2513,11 +2515,13 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 					    dispatchBoundaries.end(), bounds.get().results.begin(), bounds.get().results.end());
 				}
 
-				if (!bounds.get().more)
+				if (!bounds.get().more) {
 					break;
+				}
 
 				beginKey = keyAfter(bounds.get().results.back().first);
 				tr->reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -2974,6 +2978,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 					    std::max(CLIENT_KNOBS->BACKUP_RANGE_MINWAIT,
 					             (double)(endVersion - currentVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 					tr->reset();
+					continue;
 				} catch (Error& e) {
 					err = e;
 				}
@@ -3526,11 +3531,13 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 					localmap.insert(p);
 				}
 
-				if (!rangeresults.more)
+				if (!rangeresults.more) {
 					break;
+				}
 
 				startKey = keyAfter(rangeresults.results.back().first);
 				tr->reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -6440,6 +6447,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 					CODE_PROBE(true, "Forcing restored cluster to higher version");
 					tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(restoreVersion + 1, Unversioned()));
 					co_await tr->commit();
+					tr->reset();
+					continue;
 				} else {
 					break;
 				}
@@ -6557,6 +6566,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				logStart = logIt;
 				tr->reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -6595,6 +6605,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				rangeStart = rangeIt;
 				tr->reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -6641,6 +6652,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				start = it;
 				tr->reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -7010,6 +7022,7 @@ public:
 				Future<Void> watchFuture = tr->watch(config.stateEnum().key);
 				co_await tr->commit();
 				co_await watchFuture;
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -7315,6 +7328,7 @@ public:
 					co_await (watchFuture || delay(1));
 				else
 					co_await watchFuture;
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -8055,6 +8069,7 @@ public:
 				} else {
 					ryw_tr->reset();
 					co_await delay(0.2);
+					continue;
 				}
 			} catch (Error& e) {
 				err = e;
