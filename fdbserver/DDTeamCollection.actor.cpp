@@ -6226,8 +6226,7 @@ public:
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                            Reference<IReplicationPolicy> policy,
 	                                                            int processCount) {
-		Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure =
-		    makeReference<ShardsAffectedByTeamFailure>();
+		auto shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 		return testTeamCollection(teamSize, policy, processCount, shardsAffectedByTeamFailure);
 	}
 
@@ -6974,8 +6973,7 @@ public:
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
-		Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure =
-		    makeReference<ShardsAffectedByTeamFailure>();
+		auto shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 		state std::unique_ptr<DDTeamCollection> collection =
 		    testTeamCollection(teamSize, policy, processSize, shardsAffectedByTeamFailure);
 
