@@ -76,7 +76,6 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
-		while (true) {
 		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
