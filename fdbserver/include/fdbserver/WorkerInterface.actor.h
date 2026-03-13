@@ -27,7 +27,6 @@
 
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -58,8 +57,6 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
-	RequestStream<struct InitializeEncryptKeyProxyRequest>
-	    encryptKeyProxy; // Deprecated. Retained in the serialized WorkerInterface layout for upgrade compatibility.
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -124,7 +121,6 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           encryptKeyProxy,
 		           updateServerDBInfo);
 	}
 };
@@ -395,8 +391,6 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	Optional<EncryptKeyProxyInterface>
-	    encryptKeyProxyInterf; // Deprecated. Retained in the serialized RegisterWorkerRequest layout.
 	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
@@ -414,15 +408,14 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
-	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
 	                      bool recoveredDiskFiles,
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
-	    recoveredDiskFiles(recoveredDiskFiles), clusterId(clusterId) {}
+	    consistencyScanInterf(csInterf), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles),
+	    clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -434,7 +427,6 @@ struct RegisterWorkerRequest {
 		           generation,
 		           distributorInterf,
 		           ratekeeperInterf,
-		           encryptKeyProxyInterf,
 		           consistencyScanInterf,
 		           issues,
 		           incompatiblePeers,
@@ -821,22 +813,6 @@ struct InitializeStorageRequest {
 	void serialize(Ar& ar) {
 		serializer(
 		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion, encryptMode);
-	}
-};
-
-struct InitializeEncryptKeyProxyRequest {
-	constexpr static FileIdentifier file_identifier = 4180191;
-	UID reqId;
-	UID interfaceId;
-	ReplyPromise<EncryptKeyProxyInterface> reply; // Deprecated. Retained for serialized protocol compatibility.
-	EncryptionAtRestModeDeprecated encryptMode;
-
-	InitializeEncryptKeyProxyRequest() {}
-	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, reply, encryptMode);
 	}
 };
 
