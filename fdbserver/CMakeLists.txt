@@ -56,6 +56,7 @@ add_subdirectory(coordinator)
 add_subdirectory(datadistributor)
 add_subdirectory(consistencyscan)
 add_subdirectory(grvproxy)
+add_subdirectory(logrouter)
 add_subdirectory(ratekeeper)
 add_subdirectory(resolver)
 add_subdirectory(sequencer)
@@ -91,6 +92,10 @@ add_fdbserver_link_test(fdbserver_datadistributorlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_grvproxylinktest
   fdbserver_grvproxy
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_logrouterlinktest
+  fdbserver_logrouter
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_ratekeeperlinktest
@@ -246,7 +251,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_backupworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_backupworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_logrouter fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
