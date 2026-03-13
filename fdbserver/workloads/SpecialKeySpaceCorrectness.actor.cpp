@@ -314,9 +314,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	Future<Void> testSpecialKeySpaceErrors(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
 		// TODO: explaining the purpose of and difference between `tx`, `defaultTx1`, and `defaultTx2`.
-		Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-		Reference<ReadYourWritesTransaction> defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
-		Reference<ReadYourWritesTransaction> defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
+		auto tx = makeReference<ReadYourWritesTransaction>(cx);
+		auto defaultTx1 = makeReference<ReadYourWritesTransaction>(cx);
+		auto defaultTx2 = makeReference<ReadYourWritesTransaction>(cx);
 		bool disableRyw = deterministicRandom()->coinflip();
 
 		// Formerly tenant check that conflict ranges stay the same after commit
@@ -608,8 +608,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		CODE_PROBE(!read, "test write conflict range special key implementation");
 		// Get a default special key range instance
 		Database cx = cx_->clone();
-		Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
-		Reference<ReadYourWritesTransaction> referenceTx = makeReference<ReadYourWritesTransaction>(cx);
+		auto tx = makeReference<ReadYourWritesTransaction>(cx);
+		auto referenceTx = makeReference<ReadYourWritesTransaction>(cx);
 		bool ryw = deterministicRandom()->coinflip();
 		tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 		if (!ryw) {
@@ -758,7 +758,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 	Future<Void> managementApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		// All management api related tests that cannot run with failure injections
 		Database cx = cx_->clone();
-		Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		auto tx = makeReference<ReadYourWritesTransaction>(cx);
 		// test change coordinators and cluster description
 		// we randomly pick one process(not coordinator) and add it, in this case, it should always succeed
 		{
@@ -1173,7 +1173,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 
 	Future<Void> metricsApiCorrectnessActor(Database cx_, SpecialKeySpaceCorrectnessWorkload* self) {
 		Database cx = cx_->clone();
-		Reference<ReadYourWritesTransaction> tx = makeReference<ReadYourWritesTransaction>(cx);
+		auto tx = makeReference<ReadYourWritesTransaction>(cx);
 		tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		{
 			Optional<Value> metrics = co_await tx->get("fault_tolerance_metrics_json"_sr.withPrefix(
