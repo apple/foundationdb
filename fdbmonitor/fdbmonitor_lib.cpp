@@ -278,9 +278,9 @@ uint64_t parseWithSuffix(const char* to_parse, const char* default_unit) {
 std::string joinPath(std::string const& directory, std::string const& filename) {
 	auto d = directory;
 	auto f = filename;
-	while (f.size() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
+	while (!f.empty() && (f[0] == '/' || f[0] == CANONICAL_PATH_SEPARATOR))
 		f = f.substr(1);
-	while (d.size() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
+	while (!d.empty() && (d.back() == '/' || d.back() == CANONICAL_PATH_SEPARATOR))
 		d = d.substr(0, d.size() - 1);
 	return d + CANONICAL_PATH_SEPARATOR + f;
 }
@@ -297,7 +297,7 @@ std::string cleanPath(std::string const& path) {
 		}
 		std::string part = path.substr(i, sep - i);
 		i = sep + 1;
-		if (part.size() == 0 || (part.size() == 1 && part[0] == '.'))
+		if (part.empty() || (part.size() == 1 && part[0] == '.'))
 			continue;
 		if (part == "..") {
 			if (!finalParts.empty() && finalParts.back() != "..") {
@@ -741,7 +741,7 @@ void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb
 		for (const auto& i : sections) {
 			if (auto dot = strrchr(i.pItem, '.')) {
 				ProcessID id = i.pItem;
-				if (!id_pid.count(id)) {
+				if (!id_pid.contains(id)) {
 					/* Found something we haven't yet started */
 					Command* cmd;
 

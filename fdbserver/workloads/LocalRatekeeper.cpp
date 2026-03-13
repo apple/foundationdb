@@ -32,7 +32,7 @@ Future<StorageServerInterface> getRandomStorage(Database cx) {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			RangeResult range = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			if (range.size() > 0) {
+			if (!range.empty()) {
 				auto idx = deterministicRandom()->randomInt(0, range.size());
 				co_return decodeServerListValue(range[idx].value);
 			} else {

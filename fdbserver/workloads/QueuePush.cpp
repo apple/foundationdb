@@ -116,7 +116,7 @@ struct QueuePushWorkload : TestWorkload {
 					if (self->forward) {
 						Key _lastKey = co_await tr.getKey(lastLessThan(self->endingKey), Snapshot::True);
 						lastKey = _lastKey;
-						if (lastKey == StringRef())
+						if (lastKey.empty())
 							lastKey = self->startingKey;
 					} else {
 						Key _lastKey = co_await tr.getKey(firstGreaterThan(self->startingKey), Snapshot::True);

@@ -91,7 +91,7 @@ void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTa
 		resultPairs.clear();
 		for (auto& used_idx : used_servers) {
 			auto entry = serverMap->add(tLogLocalities[used_idx.second], &used_idx);
-			if (!resultPairs.size()) {
+			if (resultPairs.empty()) {
 				resultPairs.push_back(used_idx);
 				alsoServers[0] = entry;
 			}
@@ -210,7 +210,7 @@ bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
 	bool result = logServerSet->selectReplicas(tLogPolicy, locations, resultEntries);
 	ASSERT(result);
 
-	return resultEntries.size() == 0;
+	return resultEntries.empty();
 }
 
 void LogSet::getPushLocations(VectorRef<Tag> tags,
@@ -250,7 +250,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 
 	uniquify(newLocations);
 
-	if (newLocations.size())
+	if (!newLocations.empty())
 		alsoServers.reserve(newLocations.size());
 
 	// Convert locations to the also servers
@@ -344,7 +344,7 @@ void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value
 
 float LogPushData::getEmptyMessageRatio() const {
 	auto count = std::count(messagesWritten.begin(), messagesWritten.end(), false);
-	ASSERT_WE_THINK(messagesWritten.size() > 0);
+	ASSERT_WE_THINK(!messagesWritten.empty());
 	return 1.0 * count / messagesWritten.size();
 }
 

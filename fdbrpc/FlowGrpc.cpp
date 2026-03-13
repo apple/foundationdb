@@ -93,7 +93,7 @@ Future<Void> GrpcServer::runInternal() {
 			co_await delay(CONFIG_STARTUP_DELAY_BETWEEN_RESTART);
 
 			// gRPC can't run a server without registered service.
-			if (registered_services_.size() > 0) {
+			if (!registered_services_.empty()) {
 				break;
 			} else {
 				next = on_services_changed_.onTrigger();

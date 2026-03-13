@@ -255,7 +255,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 				}
 
 				content.discardAll();
-				Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+				auto req = makeReference<HTTP::OutgoingRequest>();
 				UID requestID = deterministicRandom()->randomUniqueID();
 				req->data.content = &content;
 				req->data.contentLen = 0;

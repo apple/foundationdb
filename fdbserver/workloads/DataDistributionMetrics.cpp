@@ -77,7 +77,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	Future<Void> resultConsistencyCheckClient(Database cx, DataDistributionMetricsWorkload* self) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::TIMEOUT,
@@ -153,7 +153,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 		}
 		// TODO : find why this not work
 		// wait(quietDatabase(cx, self->dbInfo, "PopulateTPCC"));
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		int i{ 0 };
 		int retries = 0;
 		while (true) {

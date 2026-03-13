@@ -30,7 +30,7 @@ static std::string hierarchicalToPrometheus(const std::string input) {
 	std::string output;
 	for (char ch : input) {
 		if (ch == '/') {
-			if (output.size() > 0) {
+			if (!output.empty()) {
 				output += '_';
 			}
 		} else {
@@ -194,7 +194,7 @@ TEST_CASE("/flow/simplecounter/double") {
 	ASSERT(baz->get() == expectedSum);
 
 	std::vector<SimpleCounter<double>*> doubleCounters = SimpleCounter<double>::getCounters();
-	ASSERT(doubleCounters.size() >= 1);
+	ASSERT(!doubleCounters.empty());
 
 	// Give asserts here a chance to run.
 	simpleCounterReport();

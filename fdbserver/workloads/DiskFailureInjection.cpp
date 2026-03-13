@@ -1,5 +1,5 @@
 /*
- * DiskFailureInjection.actor.cpp
+ * DiskFailureInjection.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -77,14 +77,14 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	// 2. Starting the actor that injects failures on chosen storage servers
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			auto result = diskFailureInjectionClient<WorkerInterface>(cx, this);
+			auto result = diskFailureInjectionClient<WorkerInterface>(cx);
 			//  In verification mode, we want to wait until periodicEventBroadcast actor returns which indicates that
 			//  a non-zero chaosMetric was found.
 			if (verificationMode) {
-				return (periodicEventBroadcast(this) && delay(testDuration)) || result;
+				return (periodicEventBroadcast() && delay(testDuration)) || result;
 			} else {
 				// Else we honor the testDuration
-				return timeout(periodicEventBroadcast(this) && result, testDuration, Void());
+				return timeout(periodicEventBroadcast() && result, testDuration, Void());
 			}
 		} else
 			return Void();
@@ -109,11 +109,11 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	}
 
 	// Sets the disk delay request
-	ACTOR void injectDiskDelays(WorkerInterface worker,
-	                            double stallInterval,
-	                            double stallPeriod,
-	                            double throttlePeriod) {
-		state Future<Void> res;
+	Future<Void> injectDiskDelays(WorkerInterface worker,
+	                              double stallInterval,
+	                              double stallPeriod,
+	                              double throttlePeriod) {
+		Future<Void> res;
 		SetFailureInjection::DiskFailureCommand diskFailure;
 		diskFailure.stallInterval = stallInterval;
 		diskFailure.stallPeriod = stallPeriod;
@@ -121,36 +121,36 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		SetFailureInjection req;
 		req.diskFailure = diskFailure;
 		res = worker.clientInterface.setFailureInjection.getReply(req);
-		wait(ready(res));
+		co_await ready(res);
 		checkDiskFailureInjectionResult(res, worker);
 	}
 
 	// Sets the disk corruption request
-	ACTOR void injectBitFlips(WorkerInterface worker, double percentage) {
-		state Future<Void> res;
+	Future<Void> injectBitFlips(WorkerInterface worker, double percentage) {
+		Future<Void> res;
 		SetFailureInjection::FlipBitsCommand flipBits;
 		flipBits.percentBitFlips = percentage;
 		SetFailureInjection req;
 		req.flipBits = flipBits;
 		res = worker.clientInterface.setFailureInjection.getReply(req);
-		wait(ready(res));
+		co_await ready(res);
 		checkDiskFailureInjectionResult(res, worker);
 	}
 
 	// Choose random storage servers to inject disk failures.
 	// We currently only inject disk failure on storage servers. Can be expanded to include
 	// other worker types in future
-	ACTOR template <class W>
-	Future<Void> diskFailureInjectionClient(Database cx, DiskFailureInjectionWorkload* self) {
-		wait(::delay(self->startDelay));
-		state double lastTime = now();
-		state std::vector<W> machines;
-		state int throttledWorkers = 0;
-		state int corruptedWorkers = 0;
-		loop {
-			wait(poisson(&lastTime, 1));
+	template <class W>
+	Future<Void> diskFailureInjectionClient(Database cx) {
+		co_await ::delay(startDelay);
+		double lastTime = now();
+		std::vector<W> machines;
+		int throttledWorkers = 0;
+		int corruptedWorkers = 0;
+		while (true) {
+			co_await poisson(&lastTime, 1);
 			try {
-				std::pair<std::vector<W>, int> m = wait(getStorageWorkers(cx, self->dbInfo, false));
+				std::pair<std::vector<W>, int> m = co_await getStorageWorkers(cx, dbInfo, false);
 				if (m.second > 0) {
 					throw operation_failed();
 				}
@@ -164,74 +164,72 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 			auto machine = deterministicRandom()->randomChoice(machines);
 
 			// If we have already chosen this worker, then just continue
-			if (find(self->chosenWorkers.begin(), self->chosenWorkers.end(), machine.address()) !=
-			    self->chosenWorkers.end()) {
+			if (find(chosenWorkers.begin(), chosenWorkers.end(), machine.address()) != chosenWorkers.end()) {
 				continue;
 			}
 
 			// Keep track of chosen workers for verification purpose
-			self->chosenWorkers.emplace_back(machine.address());
-			if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
-				self->injectDiskDelays(machine, self->stallInterval, self->stallPeriod, self->throttlePeriod);
-			if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
+			chosenWorkers.emplace_back(machine.address());
+			if (throttleDisk && (throttledWorkers++ < workersToThrottle))
+				injectDiskDelays(machine, stallInterval, stallPeriod, throttlePeriod);
+			if (corruptFile && (corruptedWorkers++ < workersToCorrupt)) {
 				if (g_simulator == g_network)
 					g_simulator->corruptWorkerMap[machine.address()] = true;
-				self->injectBitFlips(machine, self->percentBitFlips);
+				injectBitFlips(machine, percentBitFlips);
 			}
 		}
 	}
 
 	// Resend the chaos event to previously chosen workers, in case some workers got restarted and lost their chaos
 	// config
-	ACTOR static Future<Void> reSendChaos(DiskFailureInjectionWorkload* self) {
-		state int throttledWorkers = 0;
-		state int corruptedWorkers = 0;
-		state std::map<NetworkAddress, WorkerInterface> workersMap;
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+	Future<Void> reSendChaos() {
+		int throttledWorkers = 0;
+		int corruptedWorkers = 0;
+		std::map<NetworkAddress, WorkerInterface> workersMap;
+		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 		for (auto worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
 		TraceEvent("ResendChaos")
-		    .detail("ChosenWorkersSize", self->chosenWorkers.size())
+		    .detail("ChosenWorkersSize", chosenWorkers.size())
 		    .detail("FoundWorkers", workersMap.size())
 		    .detail("ResendToNumber",
-		            std::count_if(self->chosenWorkers.begin(),
-		                          self->chosenWorkers.end(),
+		            std::count_if(chosenWorkers.begin(),
+		                          chosenWorkers.end(),
 		                          [&map = std::as_const(workersMap)](auto const& addr) { return map.contains(addr); }));
-		for (auto& workerAddress : self->chosenWorkers) {
+		for (auto& workerAddress : chosenWorkers) {
 			auto itr = workersMap.find(workerAddress);
 			if (itr != workersMap.end()) {
-				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle)) {
-					self->injectDiskDelays(itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
+				if (throttleDisk && (throttledWorkers++ < workersToThrottle)) {
+					injectDiskDelays(itr->second, stallInterval, stallPeriod, throttlePeriod);
 				}
-				if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
+				if (corruptFile && (corruptedWorkers++ < workersToCorrupt)) {
 					if (g_simulator == g_network)
 						g_simulator->corruptWorkerMap[workerAddress] = true;
-					self->injectBitFlips(itr->second, self->percentBitFlips);
+					injectBitFlips(itr->second, percentBitFlips);
 				}
 			}
 		}
-		return Void();
 	}
 
 	// Fetches chaosMetrics and verifies that chaos events are happening for enabled workers
-	ACTOR static Future<int> chaosGetStatus(DiskFailureInjectionWorkload* self) {
-		state int foundChaosMetrics = 0;
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+	Future<int> chaosGetStatus() {
+		int foundChaosMetrics = 0;
+		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 
 		Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture;
 		latestEventsFuture = latestEventOnWorkers(workers, "ChaosMetrics");
-		state Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = wait(latestEventsFuture);
+		Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = co_await latestEventsFuture;
 
-		state WorkerEvents cMetrics = workerEvents.present() ? workerEvents.get().first : WorkerEvents();
+		WorkerEvents cMetrics = workerEvents.present() ? workerEvents.get().first : WorkerEvents();
 
 		// Check if any of the chosen workers for chaos events have non-zero chaosMetrics
 		try {
-			for (auto& workerAddress : self->chosenWorkers) {
+			for (auto& workerAddress : chosenWorkers) {
 				auto chaosMetrics = cMetrics.find(workerAddress);
 				if (chaosMetrics != cMetrics.end()) {
 					// we expect diskDelays to be non-zero for chosenWorkers for throttleDisk event
-					if (self->throttleDisk) {
+					if (throttleDisk) {
 						int diskDelays = chaosMetrics->second.getInt("DiskDelays");
 						if (diskDelays > 0) {
 							foundChaosMetrics += diskDelays;
@@ -239,7 +237,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 					}
 
 					// we expect bitFlips to be non-zero for chosenWorkers for corruptFile event
-					if (self->corruptFile) {
+					if (corruptFile) {
 						int bitFlips = chaosMetrics->second.getInt("BitFlips");
 						if (bitFlips > 0) {
 							foundChaosMetrics += bitFlips;
@@ -255,26 +253,24 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 			}
 		}
 
-		return foundChaosMetrics;
+		co_return foundChaosMetrics;
 	}
 
 	// Periodically re-send the chaos event in case of a process restart
-	ACTOR static Future<Void> periodicEventBroadcast(DiskFailureInjectionWorkload* self) {
-		wait(::delay(self->startDelay));
-		state double start = now();
-		state double elapsed = 0.0;
+	Future<Void> periodicEventBroadcast() {
+		co_await ::delay(startDelay);
+		double start = now();
+		double elapsed = 0.0;
 
-		loop {
-			wait(delayUntil(start + elapsed));
-			wait(reSendChaos(self));
-			elapsed += self->periodicBroadcastInterval;
-			wait(delayUntil(start + elapsed));
-			int foundChaosMetrics = wait(chaosGetStatus(self));
+		while (true) {
+			co_await delayUntil(start + elapsed);
+			co_await reSendChaos();
+			elapsed += periodicBroadcastInterval;
+			co_await delayUntil(start + elapsed);
+			int foundChaosMetrics = co_await chaosGetStatus();
 			if (foundChaosMetrics > 0) {
-				TraceEvent("FoundChaos")
-				    .detail("ChaosMetricCount", foundChaosMetrics)
-				    .detail("ClientID", self->clientId);
-				return Void();
+				TraceEvent("FoundChaos").detail("ChaosMetricCount", foundChaosMetrics).detail("ClientID", clientId);
+				break;
 			}
 		}
 	}

@@ -1,5 +1,5 @@
 /*
- * Ping.actor.cpp
+ * Ping.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -103,7 +103,7 @@ struct PingWorkload : TestWorkload {
 		BinaryWriter wr(IncludeVersion());
 		wr << self->interf;
 		Standalone<StringRef> serializedInterface = wr.toValue();
-		loop {
+		while (true) {
 			Error err;
 			try {
 				Optional<Value> val = co_await tr.get(StringRef(format("Ping/Client/%d", self->clientId)));
@@ -124,7 +124,7 @@ struct PingWorkload : TestWorkload {
 
 	Future<std::vector<PingWorkloadInterface>> fetchInterfaces(PingWorkload* self, Database cx) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				std::vector<PingWorkloadInterface> result;
@@ -149,7 +149,7 @@ struct PingWorkload : TestWorkload {
 	Future<Void> pinger(PingWorkload* self, std::vector<RequestStream<LoadedPingRequest>> peers) {
 		double lastTime = now();
 
-		loop {
+		while (true) {
 			co_await poisson(&lastTime, self->actorCount / self->operationsPerSecond);
 			auto& peer = deterministicRandom()->randomChoice(peers);
 			NetworkAddress addr = peer.getEndpoint().getPrimaryAddress();
@@ -223,7 +223,7 @@ struct PingWorkload : TestWorkload {
 		}
 
 		// std::random_shuffle( peers.begin(), peers.end() );
-		loop {
+		while (true) {
 			co_await poisson(&lastTime, 1.0 / 6.0);
 			addActor.send(self->payloadPinger(self, cx, endpoints));
 		}
@@ -282,7 +282,7 @@ struct PingWorkload : TestWorkload {
 		// state PromiseStream<Future<Void>> addActor;
 		// state Future<Void> pongCollection = actorCollection( addActor.getFuture() );
 
-		loop {
+		while (true) {
 			LoadedPingRequest req = co_await self->interf.payloadPing.getFuture();
 			// double end = timer() + (deterministicRandom()->random01() / 200);
 			// while( timer() < end )

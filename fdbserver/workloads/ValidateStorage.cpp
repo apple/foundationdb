@@ -327,7 +327,7 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	Future<Version> populateData(ValidateStorage* self, Database cx, std::map<Key, Value>* kvs) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
 

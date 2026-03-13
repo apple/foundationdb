@@ -1,5 +1,5 @@
 /*
- * PerpetualWiggleStorageMigrationWorkload.actor.cpp
+ * PerpetualWiggleStorageMigrationWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,17 +30,15 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace {
-ACTOR Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
+Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
 	printf("Issuing configuration change: %s\n", config.c_str());
-	state ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), config, force));
+	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), config, force);
 	if (res != ConfigurationResult::SUCCESS) {
-		return false;
+		co_return false;
 	}
-	wait(delay(5.0)); // wait for read window
-	return true;
+	co_await delay(5.0); // wait for read window
+	co_return true;
 }
 
 constexpr bool hasRocksDB =
@@ -66,27 +64,27 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return _start(this, cx);
+			return startImpl(cx);
 		}
 		return Void();
 	};
 
 	Future<bool> check(Database const& cx) override { return true; };
 
-	ACTOR static Future<Void> _start(PerpetualWiggleStorageMigrationWorkload* self, Database cx) {
+	Future<Void> startImpl(Database cx) {
 		if (!hasRocksDB) {
 			// RocksDB, which is required by this test, is not supported
-			return Void();
+			co_return;
 		}
-		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
 		// The test should have enough storage servers to exclude.
 		ASSERT(storageServers.size() > 3);
 
 		// Pick a storage process to exclude and later include. This process should always use storage engine from
 		// `storage_engine` configuration.
-		state StorageServerInterface ssToExcludeInclude =
+		StorageServerInterface ssToExcludeInclude =
 		    storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
-		state ISimulator::ProcessInfo* p = g_simulator->getProcessByAddress(ssToExcludeInclude.address());
+		ISimulator::ProcessInfo* p = g_simulator->getProcessByAddress(ssToExcludeInclude.address());
 		while (!p->isReliable()) {
 			ssToExcludeInclude = storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
 			p = g_simulator->getProcessByAddress(ssToExcludeInclude.address());
@@ -97,8 +95,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		    .detail("Address", ssToExcludeInclude.address());
 
 		// Pick a storage process to migrate to storage engine specified in `perpetual_storage_wiggle_engine`.
-		state StorageServerInterface ssToWiggle =
-		    storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
+		StorageServerInterface ssToWiggle = storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
 		while (ssToExcludeInclude.locality.processId() == ssToWiggle.locality.processId()) {
 			ssToWiggle = storageServers[deterministicRandom()->randomInt(0, storageServers.size())];
 		}
@@ -109,47 +106,46 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		// Issue a configuration change to ONLY migrate `ssToWiggle` using perpetual wiggle.
 		std::string migrationLocality =
 		    LocalityData::keyProcessId.toString() + ":" + ssToWiggle.locality.processId()->toString();
-		bool change =
-		    wait(IssueConfigurationChange(cx,
-		                                  "perpetual_storage_wiggle_engine=ssd-rocksdb-v1 perpetual_storage_wiggle=1 "
-		                                  "storage_migration_type=gradual perpetual_storage_wiggle_locality=" +
-		                                      migrationLocality,
-		                                  true));
+		bool change = co_await IssueConfigurationChange(
+		    cx,
+		    "perpetual_storage_wiggle_engine=ssd-rocksdb-v1 perpetual_storage_wiggle=1 "
+		    "storage_migration_type=gradual perpetual_storage_wiggle_locality=" +
+		        migrationLocality,
+		    true);
 		TraceEvent("Test_ConfigChangeDone").detail("Success", change);
 		ASSERT(change);
 
-		wait(excludeIncludeServer(cx, ssToExcludeInclude));
+		co_await excludeIncludeServer(cx, ssToExcludeInclude);
 
-		wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-rocksdb-v1"));
+		co_await validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-rocksdb-v1");
 
 		// We probablistically validate that resetting perpetual_storage_wiggle_engine to none works as expected.
 		if (deterministicRandom()->coinflip()) {
 			TraceEvent("Test_ClearPerpetualStorageWiggleEngine").log();
-			bool change = wait(IssueConfigurationChange(cx, "perpetual_storage_wiggle_engine=none", true));
+			bool change = co_await IssueConfigurationChange(cx, "perpetual_storage_wiggle_engine=none", true);
 			TraceEvent("Test_ClearPerpetualStorageWiggleEngineDone").detail("Success", change);
 			ASSERT(change);
 
 			// Next, we run exclude and then include `ssToWiggle`. Because perpetual_storage_wiggle_engine is set to
 			// none, the engine for `ssToWiggle` should be `storage_engine`.
-			wait(excludeIncludeServer(cx, ssToWiggle));
-			wait(validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-2"));
+			co_await excludeIncludeServer(cx, ssToWiggle);
+			co_await validateDatabase(cx, ssToExcludeInclude, ssToWiggle, /*wiggleStorageType=*/"ssd-2");
 		}
-		return Void();
 	}
 
-	ACTOR static Future<Void> excludeIncludeServer(Database cx, StorageServerInterface ssToExcludeInclude) {
+	static Future<Void> excludeIncludeServer(Database cx, StorageServerInterface ssToExcludeInclude) {
 		// Now, let's exclude `ssToExcludeInclude` process and include it again. The new SS created on this process
 		// should always uses `storage_engine` config, which is `ssd-2`.
-		state std::vector<AddressExclusion> servers;
+		std::vector<AddressExclusion> servers;
 		servers.push_back(AddressExclusion(ssToExcludeInclude.address().ip, ssToExcludeInclude.address().port));
 
 		// Since we have enough storage servers and there won't be any failure, let's use exclude failed to make sure
 		// the exclude process can succeed.
-		wait(excludeServers(cx, servers, true));
+		co_await excludeServers(cx, servers, true);
 		TraceEvent("Test_DoneExcludeServer").log();
 
 		try {
-			std::set<NetworkAddress> inProgress = wait(checkForExcludingServers(cx, servers, true));
+			std::set<NetworkAddress> inProgress = co_await checkForExcludingServers(cx, servers, true);
 			ASSERT(inProgress.empty());
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
@@ -162,20 +158,18 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		TraceEvent("Test_CheckingExcludeServerDone").log();
 
 		// Include all the processes the cluster knows.
-		wait(includeServers(cx, std::vector<AddressExclusion>(1)));
+		co_await includeServers(cx, std::vector<AddressExclusion>(1));
 		TraceEvent("Test_IncludeServerDone").log();
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> validateDatabase(Database cx,
-	                                           StorageServerInterface ssToExcludeInclude,
-	                                           StorageServerInterface ssToWiggle,
-	                                           std::string wiggleStorageType) {
+	static Future<Void> validateDatabase(Database cx,
+	                                     StorageServerInterface ssToExcludeInclude,
+	                                     StorageServerInterface ssToWiggle,
+	                                     std::string wiggleStorageType) {
 		// Wait until `ssToExcludeInclude` to be recruited as storage server again.
-		state int missingTargetCount = 0;
-		loop {
-			std::vector<StorageServerInterface> allStorageServers = wait(getStorageServers(cx));
+		int missingTargetCount = 0;
+		while (true) {
+			std::vector<StorageServerInterface> allStorageServers = co_await getStorageServers(cx);
 			bool foundTarget = false;
 			for (auto& ss : allStorageServers) {
 				if (ss.address() == ssToExcludeInclude.address()) {
@@ -192,26 +186,26 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 				// the process class). So we don't wait indefinitely here.
 				break;
 			}
-			wait(delay(20));
+			co_await delay(20);
 		}
 
 		// Wait until wiggle process to migrate to new storage engine.
-		state int missingWiggleStorageCount = 0;
-		state std::vector<StorageServerInterface> allSSes;
-		state bool doneCheckingWiggleStorage = false;
-		state bool containWiggleStorage = false;
-		loop {
-			std::vector<StorageServerInterface> SSes = wait(getStorageServers(cx));
+		int missingWiggleStorageCount = 0;
+		std::vector<StorageServerInterface> allSSes;
+		bool doneCheckingWiggleStorage = false;
+		bool containWiggleStorage = false;
+		while (true) {
+			std::vector<StorageServerInterface> SSes = co_await getStorageServers(cx);
 			allSSes = SSes;
 
-			state int i = 0;
+			int i = 0;
 			containWiggleStorage = false;
 			doneCheckingWiggleStorage = false;
 			for (i = 0; i < allSSes.size(); ++i) {
-				state StorageServerInterface ssInterface = allSSes[i];
-				state ReplyPromise<KeyValueStoreType> typeReply;
+				StorageServerInterface ssInterface = allSSes[i];
+				ReplyPromise<KeyValueStoreType> typeReply;
 				ErrorOr<KeyValueStoreType> keyValueStoreType =
-				    wait(ssInterface.getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0));
+				    co_await ssInterface.getKeyValueStoreType.getReplyUnlessFailedFor(typeReply, 2, 0);
 				if (keyValueStoreType.present()) {
 					TraceEvent(SevDebug, "Test_KvStorageType")
 					    .detail("StorageServer", ssInterface.address())
@@ -245,7 +239,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 					break;
 				}
 			}
-			wait(delay(20));
+			co_await delay(20);
 		}
 
 		if (!doneCheckingWiggleStorage) {
@@ -254,7 +248,6 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 			// storage engine in the last check.
 			ASSERT(!containWiggleStorage);
 		}
-		return Void();
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override { return; }

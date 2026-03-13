@@ -327,7 +327,7 @@ struct RangeLocking : TestWorkload {
 				for (int i = 0; i < res.size(); i++) {
 					kvsFromDB[res[i].key] = res[i].value;
 				}
-				if (res.size() > 0) {
+				if (!res.empty()) {
 					beginKey = keyAfter(res.end()[-1].key);
 				} else {
 					break;

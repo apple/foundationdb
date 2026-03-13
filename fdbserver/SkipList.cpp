@@ -176,7 +176,7 @@ void sortPoints(std::vector<KeyInfo>& points) {
 
 	tasks.emplace_back(0, points.size(), 0);
 
-	while (tasks.size()) {
+	while (!tasks.empty()) {
 		SortTask st = tasks.back();
 		tasks.pop_back();
 
@@ -273,7 +273,7 @@ private:
 			n->nPointers = level + 1;
 
 			n->valueLength = value.size();
-			if (value.size() > 0) {
+			if (!value.empty()) {
 				memcpy(n->value(), value.begin(), value.size());
 			}
 			return n;
@@ -836,7 +836,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 	Arena& arena = transactionInfo.arena();
 	TransactionInfo* info = new (arena) TransactionInfo;
 	info->reportConflictingKeys = tr.report_conflicting_keys;
-	bool tooOld = tr.read_snapshot < newOldestVersion && tr.read_conflict_ranges.size();
+	bool tooOld = tr.read_snapshot < newOldestVersion && !tr.read_conflict_ranges.empty();
 	if (tooOld && ignoreTooOld()) {
 		bugs->hit();
 		tooOld = false;

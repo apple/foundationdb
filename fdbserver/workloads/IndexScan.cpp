@@ -123,7 +123,7 @@ struct IndexScanWorkload : KVWorkload {
 					RangeResult r = co_await tr.getRange(begin, end, limits);
 					chunks++;
 					rowsRead += r.size();
-					if (!r.size() || !r.more || (now() - startTime) > transactionDuration) {
+					if (r.empty() || !r.more || (now() - startTime) > transactionDuration) {
 						break;
 					}
 					begin = firstGreaterThan(r[r.size() - 1].key);

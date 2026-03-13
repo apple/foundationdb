@@ -1,5 +1,5 @@
 /*
- * TagPartitionedLogSystemRecoveryTests.actor.cpp
+ * TagPartitionedLogSystemRecoveryTests.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,12 +21,10 @@
 #include "fdbserver/tlog/TagPartitionedLogSystem.actor.h"
 #include "flow/UnitTest.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace {
 
 Reference<LogSet> makeSingleLogSet(const std::vector<TLogInterface>& tlogs, bool isLocal = true) {
-	Reference<LogSet> logSet = makeReference<LogSet>();
+	auto logSet = makeReference<LogSet>();
 	logSet->isLocal = isLocal;
 	for (const auto& tlog : tlogs) {
 		logSet->logServers.push_back(

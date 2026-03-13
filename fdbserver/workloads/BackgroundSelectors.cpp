@@ -170,7 +170,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 						}
 
 						restartProcess = false;
-						if (rangeResult.size() == 0) {
+						if (rangeResult.empty()) {
 							restartProcess = true;
 							break;
 						}

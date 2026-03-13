@@ -1,5 +1,5 @@
 /*
- * DataDistributionConfig.actor.cpp
+ * DataDistributionConfig.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,6 @@
 
 #include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 json_spirit::mValue DDConfiguration::toJSON(RangeConfigMapSnapshot const& config, bool includeDefaultRanges) {
 	json_spirit::mObject doc;

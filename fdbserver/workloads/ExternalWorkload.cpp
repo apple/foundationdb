@@ -1,5 +1,5 @@
 /*
- * ExternalWorkload.actor.cpp
+ * ExternalWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,8 +24,6 @@
 #include "foundationdb/CppWorkload.h"
 #include "fdbserver/core/workloads.actor.h"
 
-#include "flow/actorcompiler.h" // has to be last include
-
 extern void flushTraceFileVoid();
 
 namespace {
@@ -46,10 +44,10 @@ struct FDBPromiseImpl : FDBPromise {
 	}
 };
 
-ACTOR template <class F, class T>
-void keepAlive(F until, T db) {
+template <class F, class T>
+Future<Void> keepAlive(F until, T db) {
 	try {
-		wait(success(until));
+		co_await success(until);
 	} catch (...) {
 	}
 }
@@ -363,12 +361,11 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 	}
 
-	ACTOR Future<Void> assertTrue(StringRef stage, Future<bool> f) {
-		bool res = wait(f);
+	Future<Void> assertTrue(StringRef stage, Future<bool> f) {
+		bool res = co_await f;
 		if (!res) {
 			TraceEvent(SevError, "ExternalWorkloadFailure").detail("Stage", stage);
 		}
-		return Void();
 	}
 
 	Future<Void> setup(Database const& cx) override {
