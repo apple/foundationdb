@@ -109,11 +109,11 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	}
 
 	// Sets the disk delay request
-	ACTOR void injectDiskDelays(WorkerInterface worker,
-	                            double stallInterval,
-	                            double stallPeriod,
-	                            double throttlePeriod) {
-		state Future<Void> res;
+	Future<Void> injectDiskDelays(WorkerInterface worker,
+	                              double stallInterval,
+	                              double stallPeriod,
+	                              double throttlePeriod) {
+		Future<Void> res;
 		SetFailureInjection::DiskFailureCommand diskFailure;
 		diskFailure.stallInterval = stallInterval;
 		diskFailure.stallPeriod = stallPeriod;
@@ -121,36 +121,36 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		SetFailureInjection req;
 		req.diskFailure = diskFailure;
 		res = worker.clientInterface.setFailureInjection.getReply(req);
-		wait(ready(res));
+		co_await ready(res);
 		checkDiskFailureInjectionResult(res, worker);
 	}
 
 	// Sets the disk corruption request
-	ACTOR void injectBitFlips(WorkerInterface worker, double percentage) {
-		state Future<Void> res;
+	Future<Void> injectBitFlips(WorkerInterface worker, double percentage) {
+		Future<Void> res;
 		SetFailureInjection::FlipBitsCommand flipBits;
 		flipBits.percentBitFlips = percentage;
 		SetFailureInjection req;
 		req.flipBits = flipBits;
 		res = worker.clientInterface.setFailureInjection.getReply(req);
-		wait(ready(res));
+		co_await ready(res);
 		checkDiskFailureInjectionResult(res, worker);
 	}
 
 	// Choose random storage servers to inject disk failures.
 	// We currently only inject disk failure on storage servers. Can be expanded to include
 	// other worker types in future
-	ACTOR template <class W>
+	template <class W>
 	Future<Void> diskFailureInjectionClient(Database cx, DiskFailureInjectionWorkload* self) {
-		wait(::delay(self->startDelay));
-		state double lastTime = now();
-		state std::vector<W> machines;
-		state int throttledWorkers = 0;
-		state int corruptedWorkers = 0;
+		co_await ::delay(self->startDelay);
+		double lastTime = now();
+		std::vector<W> machines;
+		int throttledWorkers = 0;
+		int corruptedWorkers = 0;
 		loop {
-			wait(poisson(&lastTime, 1));
+			co_await poisson(&lastTime, 1);
 			try {
-				std::pair<std::vector<W>, int> m = wait(getStorageWorkers(cx, self->dbInfo, false));
+				std::pair<std::vector<W>, int> m = co_await getStorageWorkers(cx, self->dbInfo, false);
 				if (m.second > 0) {
 					throw operation_failed();
 				}
@@ -183,11 +183,11 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 
 	// Resend the chaos event to previously chosen workers, in case some workers got restarted and lost their chaos
 	// config
-	ACTOR static Future<Void> reSendChaos(DiskFailureInjectionWorkload* self) {
-		state int throttledWorkers = 0;
-		state int corruptedWorkers = 0;
-		state std::map<NetworkAddress, WorkerInterface> workersMap;
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+	static Future<Void> reSendChaos(DiskFailureInjectionWorkload* self) {
+		int throttledWorkers = 0;
+		int corruptedWorkers = 0;
+		std::map<NetworkAddress, WorkerInterface> workersMap;
+		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 		for (auto worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
@@ -211,19 +211,19 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 				}
 			}
 		}
-		return Void();
+		co_return;
 	}
 
 	// Fetches chaosMetrics and verifies that chaos events are happening for enabled workers
-	ACTOR static Future<int> chaosGetStatus(DiskFailureInjectionWorkload* self) {
-		state int foundChaosMetrics = 0;
-		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+	static Future<int> chaosGetStatus(DiskFailureInjectionWorkload* self) {
+		int foundChaosMetrics = 0;
+		std::vector<WorkerDetails> workers = co_await getWorkers(self->dbInfo);
 
 		Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventsFuture;
 		latestEventsFuture = latestEventOnWorkers(workers, "ChaosMetrics");
-		state Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = wait(latestEventsFuture);
+		Optional<std::pair<WorkerEvents, std::set<std::string>>> workerEvents = co_await latestEventsFuture;
 
-		state WorkerEvents cMetrics = workerEvents.present() ? workerEvents.get().first : WorkerEvents();
+		WorkerEvents cMetrics = workerEvents.present() ? workerEvents.get().first : WorkerEvents();
 
 		// Check if any of the chosen workers for chaos events have non-zero chaosMetrics
 		try {
@@ -255,26 +255,26 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 			}
 		}
 
-		return foundChaosMetrics;
+		co_return foundChaosMetrics;
 	}
 
 	// Periodically re-send the chaos event in case of a process restart
-	ACTOR static Future<Void> periodicEventBroadcast(DiskFailureInjectionWorkload* self) {
-		wait(::delay(self->startDelay));
-		state double start = now();
-		state double elapsed = 0.0;
+	static Future<Void> periodicEventBroadcast(DiskFailureInjectionWorkload* self) {
+		co_await ::delay(self->startDelay);
+		double start = now();
+		double elapsed = 0.0;
 
 		loop {
-			wait(delayUntil(start + elapsed));
-			wait(reSendChaos(self));
+			co_await delayUntil(start + elapsed);
+			co_await reSendChaos(self);
 			elapsed += self->periodicBroadcastInterval;
-			wait(delayUntil(start + elapsed));
-			int foundChaosMetrics = wait(chaosGetStatus(self));
+			co_await delayUntil(start + elapsed);
+			int foundChaosMetrics = co_await chaosGetStatus(self);
 			if (foundChaosMetrics > 0) {
 				TraceEvent("FoundChaos")
 				    .detail("ChaosMetricCount", foundChaosMetrics)
 				    .detail("ClientID", self->clientId);
-				return Void();
+				co_return;
 			}
 		}
 	}

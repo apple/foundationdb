@@ -46,10 +46,10 @@ struct FDBPromiseImpl : FDBPromise {
 	}
 };
 
-ACTOR template <class F, class T>
-void keepAlive(F until, T db) {
+template <class F, class T>
+Future<Void> keepAlive(F until, T db) {
 	try {
-		wait(success(until));
+		co_await success(until);
 	} catch (...) {
 	}
 }
@@ -363,12 +363,12 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 	}
 
-	ACTOR Future<Void> assertTrue(StringRef stage, Future<bool> f) {
-		bool res = wait(f);
+	Future<Void> assertTrue(StringRef stage, Future<bool> f) {
+		bool res = co_await f;
 		if (!res) {
 			TraceEvent(SevError, "ExternalWorkloadFailure").detail("Stage", stage);
 		}
-		return Void();
+		co_return;
 	}
 
 	Future<Void> setup(Database const& cx) override {

@@ -70,25 +70,25 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	ACTOR static Future<Void> _start(RandomCloggingWorkload* self) {
-		state Future<Void> done = delay(self->maxRunDuration);
+	static Future<Void> _start(RandomCloggingWorkload* self) {
+		Future<Void> done = delay(self->maxRunDuration);
 		loop {
-			wait(done ||
-			     timeout(reportErrors(self->swizzleClog ? self->swizzleClogClient(self) : self->clogClient(self),
-			                          "RandomCloggingError"),
-			             self->testDuration,
-			             Void()));
+			co_await (done ||
+			          timeout(reportErrors(self->swizzleClog ? self->swizzleClogClient(self) : self->clogClient(self),
+			                               "RandomCloggingError"),
+			                  self->testDuration,
+			                  Void()));
 			if (!done.isReady() && self->iterate) {
-				wait(delay(self->suspend));
+				co_await delay(self->suspend);
 				self->suspend *= self->backoff;
 			} else {
-				return Void();
+				co_return;
 			}
 		}
 	}
 
-	ACTOR void doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
-		wait(::delay(delay));
+	Future<Void> doClog(ISimulator::ProcessInfo* machine, double t, double delay = 0.0) {
+		co_await ::delay(delay);
 		g_simulator->clogInterface(machine->address.ip, t);
 	}
 
@@ -99,11 +99,11 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			g_simulator->clogPair(m1->address.ip, m2->address.ip, t);
 	}
 
-	ACTOR Future<Void> clogClient(RandomCloggingWorkload* self) {
-		state double lastTime = now();
-		state double workloadEnd = now() + self->testDuration;
+	Future<Void> clogClient(RandomCloggingWorkload* self) {
+		double lastTime = now();
+		double workloadEnd = now() + self->testDuration;
 		loop {
-			wait(poisson(&lastTime, self->scale / self->clogginess));
+			co_await poisson(&lastTime, self->scale / self->clogginess);
 			auto machine = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
 			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
@@ -115,11 +115,11 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 		}
 	}
 
-	ACTOR Future<Void> swizzleClogClient(RandomCloggingWorkload* self) {
-		state double lastTime = now();
-		state double workloadEnd = now() + self->testDuration;
+	Future<Void> swizzleClogClient(RandomCloggingWorkload* self) {
+		double lastTime = now();
+		double workloadEnd = now() + self->testDuration;
 		loop {
-			wait(poisson(&lastTime, self->scale / self->clogginess));
+			co_await poisson(&lastTime, self->scale / self->clogginess);
 			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 
