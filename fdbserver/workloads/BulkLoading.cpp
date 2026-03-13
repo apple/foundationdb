@@ -189,7 +189,10 @@ struct BulkLoading : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult res =
 				    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, Standalone(KeyRangeRef(beginKey, endKey)));
-				for (int i = 0; i < res.size() - 1; i++) {
+				if (res.empty()) {
+					break;
+				}
+				for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
 					if (!res[i].value.empty()) {
 						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
 						if (!bulkLoadTaskState.isValid()) {
@@ -247,9 +250,12 @@ struct BulkLoading : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult res = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
+				if (res.empty()) {
+					break;
+				}
 				int clearedCount = 0;
 				int nonEmptyCount = 0;
-				for (int i = 0; i < res.size() - 1; i++) {
+				for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
 					ASSERT(!self->initializeBulkLoadMetadata || !res[i].value.empty());
 					if (res[i].value.empty()) {
 						continue;

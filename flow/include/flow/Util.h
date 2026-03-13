@@ -24,8 +24,11 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <functional>
 #include <iosfwd>
+#include <string>
 
 // Read key/value pairs from stream. The stream is constituted by lines of text.
 // Each line contains a pair of key/value, separated by space/tab. e.g.
@@ -114,5 +117,102 @@ struct Hold {
 
 	void operator=(const Hold& other) = delete;
 };
+
+// Format byte count as human-readable string (e.g., "1.23 TB", "456.78 GB", "789.01 MB")
+// Uses binary units (1 KB = 1024 bytes)
+inline std::string formatBytesHumanReadable(int64_t bytes) {
+	char buf[64];
+	if (bytes >= 1099511627776LL) { // TB
+		std::snprintf(buf, sizeof(buf), "%.2f TB", bytes / 1099511627776.0);
+	} else if (bytes >= 1073741824LL) { // GB
+		std::snprintf(buf, sizeof(buf), "%.2f GB", bytes / 1073741824.0);
+	} else if (bytes >= 1048576LL) { // MB
+		std::snprintf(buf, sizeof(buf), "%.2f MB", bytes / 1048576.0);
+	} else if (bytes >= 1024LL) { // KB
+		std::snprintf(buf, sizeof(buf), "%.2f KB", bytes / 1024.0);
+	} else {
+		std::snprintf(buf, sizeof(buf), "%lld bytes", static_cast<long long>(bytes));
+	}
+	return std::string(buf);
+}
+
+// Format duration in seconds as human-readable string (e.g., "2 hours 30 minutes", "45 minutes", "30 seconds")
+inline std::string formatDurationHumanReadable(int seconds) {
+	char buf[64];
+	if (seconds >= 3600) {
+		int hours = seconds / 3600;
+		int mins = (seconds % 3600) / 60;
+		if (mins > 0) {
+			std::snprintf(buf, sizeof(buf), "%d hours %d minutes", hours, mins);
+		} else {
+			std::snprintf(buf, sizeof(buf), "%d hours", hours);
+		}
+	} else if (seconds >= 60) {
+		std::snprintf(buf, sizeof(buf), "%d minutes", seconds / 60);
+	} else {
+		std::snprintf(buf, sizeof(buf), "%d seconds", seconds);
+	}
+	return std::string(buf);
+}
+
+// Format byte progress as "completed (human) / total (human)"
+inline std::string formatBytesProgress(int64_t completedBytes, int64_t totalBytes) {
+	char buf[256];
+	std::snprintf(buf,
+	              sizeof(buf),
+	              "%lld (%s) / %lld (%s)",
+	              static_cast<long long>(completedBytes),
+	              formatBytesHumanReadable(completedBytes).c_str(),
+	              static_cast<long long>(totalBytes),
+	              formatBytesHumanReadable(totalBytes).c_str());
+	return std::string(buf);
+}
+
+// Overload to handle Optional totalBytes for bulk operations
+template <typename T>
+inline std::string formatBytesProgress(int64_t completedBytes, const T& totalBytes) {
+	if (totalBytes.present()) {
+		return formatBytesProgress(completedBytes, totalBytes.get());
+	} else {
+		char buf[128];
+		std::snprintf(buf,
+		              sizeof(buf),
+		              "%lld (%s)",
+		              static_cast<long long>(completedBytes),
+		              formatBytesHumanReadable(completedBytes).c_str());
+		return std::string(buf);
+	}
+}
+
+// Format throughput display line (returns empty string if throughput <= 0)
+inline std::string formatThroughputLine(double avgBytesPerSecond) {
+	if (avgBytesPerSecond <= 0) {
+		return "";
+	}
+	char buf[128];
+	std::snprintf(buf, sizeof(buf), " Throughput - %.1f MB/s", avgBytesPerSecond / 1048576.0);
+	return std::string(buf);
+}
+
+// Format ETA line (returns empty string if no ETA available)
+inline std::string formatETALine(double etaSeconds) {
+	if (etaSeconds <= 0) {
+		return "";
+	}
+	char buf[128];
+	std::snprintf(
+	    buf, sizeof(buf), " Estimated time remaining - %s", formatDurationHumanReadable((int)etaSeconds).c_str());
+	return std::string(buf);
+}
+
+// Format elapsed time line (returns empty string if elapsedSeconds <= 0)
+inline std::string formatElapsedTimeLine(double elapsedSeconds) {
+	if (elapsedSeconds <= 0) {
+		return "";
+	}
+	char buf[128];
+	std::snprintf(buf, sizeof(buf), " Elapsed time - %s", formatDurationHumanReadable((int)elapsedSeconds).c_str());
+	return std::string(buf);
+}
 
 #endif // _FLOW_UTIL_H_

@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Util.h"
 
 namespace fdb_cli {
 
@@ -190,12 +191,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
 			co_return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
-		if (!jobId.isValid()) {
-			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			co_return UID();
-		}
+		UID jobId = validateBulkJobId(tokens[2], BULK_LOAD_LOAD_USAGE.c_str());
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
 		// Bulk load can only inject data to normal key space, aka "" ~ \xff
@@ -219,14 +215,9 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
 			co_return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
-		if (!jobId.isValid()) {
-			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
-			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
-			co_return UID();
-		}
-		co_await cancelBulkLoadJob(cx, jobId);
-		fmt::println("Job {} has been cancelled. The job range lock has been cleared", jobId.toString());
+		UID cancelJobId = validateBulkJobId(tokens[2], BULK_LOAD_CANCEL_USAGE.c_str());
+		co_await cancelBulkLoadJob(cx, cancelJobId);
+		fmt::println("Job {} has been cancelled. The job range lock has been cleared", cancelJobId.toString());
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
@@ -234,14 +225,56 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
 			co_return UID();
 		}
-		Optional<BulkLoadJobState> job = co_await getRunningBulkLoadJob(cx);
-		if (!job.present()) {
+
+		// Get aggregated progress
+		Optional<BulkLoadProgress> progressOpt = co_await getBulkLoadProgress(cx);
+		if (!progressOpt.present()) {
 			fmt::println("No bulk loading job is running");
 			co_return UID();
 		}
-		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
-		fmt::println("Job information: {}", job.get().toString());
-		co_await printBulkLoadJobProgress(cx, job.get());
+
+		BulkLoadProgress progress = progressOpt.get();
+
+		fmt::println("BulkLoad job {} is in progress.", progress.jobId.toString());
+
+		std::string ownerSuffix = co_await getBulkOwnerSuffix(cx, progress.jobId, false);
+
+		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
+		fmt::println("");
+		fmt::println("Progress:");
+		fmt::println(" Tasks - {} submitted, {} triggered, {} running, {} complete, {} error",
+		             progress.submittedTasks,
+		             progress.triggeredTasks,
+		             progress.runningTasks,
+		             progress.completeTasks,
+		             progress.errorTasks);
+
+		int totalTasks = progress.submittedTasks + progress.triggeredTasks + progress.runningTasks +
+		                 progress.completeTasks + progress.errorTasks;
+		if (totalTasks > 0) {
+			fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+			             progress.completeTasks,
+			             totalTasks,
+			             100.0 * progress.completeTasks / totalTasks);
+		}
+
+		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+
+		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+
+		printTaskBreakdown(progress.submittedTasks,
+		                   progress.triggeredTasks,
+		                   progress.runningTasks,
+		                   progress.completeTasks,
+		                   progress.errorTasks);
+
+		printBulkAnalysis(progress.avgBytesPerSecond(),
+		                  progress.elapsedSeconds,
+		                  progress.completeTasks,
+		                  totalTasks,
+		                  progress.errorTasks,
+		                  progress.stalledTasks);
+
 		co_return UID();
 
 	} else if (tokencmp(tokens[1], "history")) {
