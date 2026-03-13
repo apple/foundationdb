@@ -40,16 +40,16 @@ std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
 }
 
 // KeyRangeMap guarantees that key ranges are contiguous with no gaps in shards.
-ACTOR Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMap<ShardTrackedData>* shards) {
+Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMap<ShardTrackedData>* shards) {
 	// TODO akanksha: Hardcoded for now.
-	state const int NUM_PARTITIONS = 100;
-	state std::vector<std::pair<KeyRange, int64_t>> userShards; // Pair of shard key range and shard size in bytes.
-	state int64_t totalBytes = 0;
+	const int NUM_PARTITIONS = 100;
+	std::vector<std::pair<KeyRange, int64_t>> userShards; // Pair of shard key range and shard size in bytes.
+	int64_t totalBytes = 0;
 
 	// Step 1: Collect shard sizes
 	loop {
-		state bool needWait = false;
-		state Future<Void> onChange;
+		bool needWait = false;
+		Future<Void> onChange;
 		userShards.clear();
 		totalBytes = 0;
 		for (auto it : shards->intersectingRanges(normalKeys)) {
@@ -69,15 +69,15 @@ ACTOR Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMa
 		if (!needWait) {
 			break;
 		}
-		wait(onChange);
+		co_await onChange;
 	}
 
 	// Step 2: Partition the shards
 	// Integer division is acceptable here as any rounding remainder is added to the last partition.
 	int64_t targetBytesPerPartition = totalBytes / NUM_PARTITIONS;
-	state std::vector<KeyRange> partitionKeyRanges;
-	state int64_t currentPartitionBytes = 0;
-	state Key partitionStart = normalKeys.begin;
+	std::vector<KeyRange> partitionKeyRanges;
+	int64_t currentPartitionBytes = 0;
+	Key partitionStart = normalKeys.begin;
 
 	for (int i = 0; i < userShards.size(); i++) {
 		currentPartitionBytes += userShards[i].second;
@@ -88,7 +88,7 @@ ACTOR Future<std::vector<KeyRange>> calculateBackupPartitionKeyRanges(KeyRangeMa
 			currentPartitionBytes = 0;
 		}
 	}
-	return partitionKeyRanges;
+	co_return partitionKeyRanges;
 }
 
 TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/NoUserShards") {
@@ -197,11 +197,11 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/ZeroSizeShards"
 	return Void();
 }
 
-ACTOR Future<Void> testAsyncMetricsUpdate() {
-	state ShardTrackedData defaultData;
+Future<Void> testAsyncMetricsUpdate() {
+	ShardTrackedData defaultData;
 	defaultData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
-	state KeyRangeMap<ShardTrackedData> shards(defaultData);
-	state Key splitKey = "split"_sr;
+	KeyRangeMap<ShardTrackedData> shards(defaultData);
+	Key splitKey = "split"_sr;
 	ShardTrackedData emptyData;
 	emptyData.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>();
 	shards.insert(KeyRangeRef(normalKeys.begin, splitKey), emptyData);
@@ -213,21 +213,21 @@ ACTOR Future<Void> testAsyncMetricsUpdate() {
 	dataWithMetrics.stats = makeReference<AsyncVar<Optional<ShardMetrics>>>(shardMetrics);
 	shards.insert(KeyRangeRef(splitKey, normalKeys.end), dataWithMetrics);
 
-	state Future<std::vector<KeyRange>> resultFuture = calculateBackupPartitionKeyRanges(&shards);
+	Future<std::vector<KeyRange>> resultFuture = calculateBackupPartitionKeyRanges(&shards);
 
-	wait(delay(0.1));
+	co_await delay(0.1);
 	ASSERT(!resultFuture.isReady());
 	StorageMetrics newMetrics;
 	newMetrics.bytes = 50000;
 	ShardMetrics newShardMetrics(newMetrics, 0.0, 1);
 	shards.rangeContaining(normalKeys.begin)->value().stats->set(newShardMetrics);
-	std::vector<KeyRange> partitions = wait(resultFuture);
+	std::vector<KeyRange> partitions = co_await resultFuture;
 	ASSERT(partitions.size() == 2);
 	ASSERT(partitions[0].begin == normalKeys.begin);
 	ASSERT(partitions[0].end == splitKey);
 	ASSERT(partitions[1].begin == splitKey);
 	ASSERT(partitions[1].end == normalKeys.end);
-	return Void();
+	co_return;
 }
 
 TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/WaitForAsyncMetrics") {

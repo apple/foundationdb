@@ -144,19 +144,20 @@ std::map<std::tuple<LogEpoch, Version, int>, std::map<Tag, Version>> BackupProgr
 }
 
 // Save each tag's savedVersion for all epochs into "bStatus".
-ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging) {
-	state Transaction tr(cx);
+Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging) {
+	Transaction tr(cx);
 
 	loop {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Future<Optional<Value>> fValue = tr.get(backupStartedKey);
-			state RangeResult results = wait(tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY));
+			Future<Optional<Value>> fValue = tr.get(backupStartedKey);
+			RangeResult results = co_await tr.getRange(backupProgressKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
-			Optional<Value> value = wait(fValue);
+			Optional<Value> value = co_await fValue;
 			bStatus->setBackupStartedValue(value);
 			for (auto& it : results) {
 				const UID workerID = decodeBackupProgressKey(it.key);
@@ -171,10 +172,12 @@ ACTOR Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupPro
 					    .detail("TotalTags", status.totalTags);
 				}
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+
+		co_await tr.onError(err);
 	}
 }
 

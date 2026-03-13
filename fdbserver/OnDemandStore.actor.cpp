@@ -21,10 +21,10 @@
 #include "fdbserver/OnDemandStore.h"
 #include "flow/actorcompiler.h" // must be last include
 
-ACTOR static Future<Void> onErr(Future<Future<Void>> e) {
-	Future<Void> f = wait(e);
-	wait(f);
-	return Void();
+static Future<Void> onErr(Future<Future<Void>> e) {
+	Future<Void> f = co_await e;
+	co_await f;
+	co_return;
 }
 
 void OnDemandStore::open() {

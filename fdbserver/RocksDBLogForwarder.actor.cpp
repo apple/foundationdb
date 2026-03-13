@@ -70,11 +70,10 @@ void logTraceEvent(const RocksDBLogRecord& record) {
 	}
 }
 
-ACTOR Future<Void> rocksDBPeriodicallyLogger(RocksDBLogger* pRecords) {
-	loop choose {
-		when(wait(delay(0.1))) {
-			pRecords->consume();
-		}
+Future<Void> rocksDBPeriodicallyLogger(RocksDBLogger* pRecords) {
+	loop {
+		co_await delay(0.1);
+		pRecords->consume();
 	}
 }
 

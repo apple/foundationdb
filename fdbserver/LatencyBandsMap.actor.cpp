@@ -24,9 +24,9 @@
 
 class LatencyBandsMapImpl {
 public:
-	ACTOR static Future<Void> expireOldTagsActor(LatencyBandsMap* self) {
+	static Future<Void> expireOldTagsActor(LatencyBandsMap* self) {
 		loop {
-			wait(delay(5.0));
+			co_await delay(5.0);
 			for (auto it = self->map.begin(); it != self->map.end();) {
 				const auto& [tag, expirableBands] = *it;
 				if (now() - expirableBands.lastUpdated > SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER) {

@@ -98,10 +98,10 @@ static bool isNear(double desired, int64_t actual) {
 	return std::abs(desired - actual) * 10 < desired;
 }
 
-ACTOR static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double desiredRate, int64_t* counter) {
+static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double desiredRate, int64_t* counter) {
 	loop {
-		state double elapsed = (0.9 + 0.2 * deterministicRandom()->random01()) / desiredRate;
-		wait(delay(elapsed));
+		double elapsed = (0.9 + 0.2 * deterministicRandom()->random01()) / desiredRate;
+		co_await delay(elapsed);
 		rateInfo->startReleaseWindow();
 		int started = rateInfo->canStart(0, 1) ? 1 : 0;
 		*counter += started;

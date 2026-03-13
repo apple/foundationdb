@@ -31,18 +31,19 @@ class TagThrottlerImpl {
 	bool autoThrottlingEnabled{ false };
 	Future<Void> expiredTagThrottleCleanup;
 
-	ACTOR static Future<Void> monitorThrottlingChanges(TagThrottlerImpl* self) {
-		state bool committed = false;
+	static Future<Void> monitorThrottlingChanges(TagThrottlerImpl* self) {
+		bool committed = false;
 		loop {
-			state ReadYourWritesTransaction tr(self->db);
+			ReadYourWritesTransaction tr(self->db);
 
 			loop {
+				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					state Future<RangeResult> throttledTagKeys = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
-					state Future<Optional<Value>> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
+					Future<RangeResult> throttledTagKeys = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
+					Future<Optional<Value>> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
 
 					if (!committed) {
 						BinaryWriter limitWriter(Unversioned());
@@ -50,7 +51,7 @@ class TagThrottlerImpl {
 						tr.set(tagThrottleLimitKey, limitWriter.toValue());
 					}
 
-					wait(success(throttledTagKeys) && success(autoThrottlingEnabled));
+					co_await (success(throttledTagKeys) && success(autoThrottlingEnabled));
 
 					if (autoThrottlingEnabled.get().present() && autoThrottlingEnabled.get().get() == "0"_sr) {
 						CODE_PROBE(true, "Auto-throttling disabled");
@@ -91,7 +92,7 @@ class TagThrottlerImpl {
 							tagValue.expirationTime = now() + tagValue.initialDuration;
 							BinaryWriter wr(IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 							wr << tagValue;
-							state Value value = wr.toValue();
+							Value value = wr.toValue();
 
 							tr.set(entry.key, value);
 						}
@@ -119,18 +120,20 @@ class TagThrottlerImpl {
 					self->throttledTags = std::move(updatedTagThrottles);
 					++self->throttledTagChangeId;
 
-					state Future<Void> watchFuture = tr.watch(tagThrottleSignalKey);
-					wait(tr.commit());
+					Future<Void> watchFuture = tr.watch(tagThrottleSignalKey);
+					co_await tr.commit();
 					committed = true;
 
-					wait(watchFuture);
+					co_await watchFuture;
 					TraceEvent("RatekeeperThrottleSignaled", self->id).log();
 					CODE_PROBE(true, "Tag throttle changes detected");
 					break;
 				} catch (Error& e) {
-					TraceEvent("RatekeeperMonitorThrottlingChangesError", self->id).error(e);
-					wait(tr.onError(e));
+					err = e;
 				}
+
+				TraceEvent("RatekeeperMonitorThrottlingChangesError", self->id).error(err);
+				co_await tr.onError(err);
 			}
 		}
 	}

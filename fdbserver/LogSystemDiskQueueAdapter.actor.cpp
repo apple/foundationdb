@@ -22,11 +22,12 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/Knobs.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 class LogSystemDiskQueueAdapterImpl {
 public:
-	ACTOR static Future<Standalone<StringRef>> readNext(LogSystemDiskQueueAdapter* self, int bytes) {
+	static Future<Standalone<StringRef>> readNext(LogSystemDiskQueueAdapter* self, int bytes) {
 		while (self->recoveryQueueDataSize < bytes) {
 			if (self->recoveryLoc == self->logSystem->getEnd()) {
 				// Recovery will be complete once the current recoveryQueue is consumed, so we no longer need
@@ -42,11 +43,42 @@ public:
 
 			if (!self->cursor->hasMessage()) {
 				loop {
-					choose {
-						when(wait(self->cursor->getMore())) {
-							break;
-						}
-						when(wait(self->localityChanged)) {
+					auto choice = co_await race(self->cursor->getMore(),
+					                            self->localityChanged,
+					                            delay(self->peekTypeSwitches == 0
+					                                      ? SERVER_KNOBS->DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME
+					                                      : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME));
+					if (choice.index() == 0) {
+						break;
+					}
+					if (choice.index() == 1) {
+						self->cursor = self->logSystem->peekTxs(
+						    UID(),
+						    self->recoveryLoc,
+						    self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid,
+						    self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion,
+						    self->totalRecoveredBytes == 0);
+						self->localityChanged = self->peekLocality->onChange();
+						continue;
+					}
+					if (choice.index() == 2) {
+						self->peekTypeSwitches++;
+						if (self->peekTypeSwitches % 3 == 1) {
+							self->cursor = self->logSystem->peekTxs(UID(),
+							                                        self->recoveryLoc,
+							                                        tagLocalityInvalid,
+							                                        invalidVersion,
+							                                        self->totalRecoveredBytes == 0);
+							self->localityChanged = Never();
+						} else if (self->peekTypeSwitches % 3 == 2) {
+							self->cursor = self->logSystem->peekTxs(
+							    UID(),
+							    self->recoveryLoc,
+							    self->peekLocality ? self->peekLocality->get().secondaryLocality : tagLocalityInvalid,
+							    self->peekLocality ? self->peekLocality->get().knownCommittedVersion : invalidVersion,
+							    self->totalRecoveredBytes == 0);
+							self->localityChanged = self->peekLocality->onChange();
+						} else {
 							self->cursor = self->logSystem->peekTxs(
 							    UID(),
 							    self->recoveryLoc,
@@ -55,39 +87,10 @@ public:
 							    self->totalRecoveredBytes == 0);
 							self->localityChanged = self->peekLocality->onChange();
 						}
-						when(wait(delay(self->peekTypeSwitches == 0
-						                    ? SERVER_KNOBS->DISK_QUEUE_ADAPTER_MIN_SWITCH_TIME
-						                    : SERVER_KNOBS->DISK_QUEUE_ADAPTER_MAX_SWITCH_TIME))) {
-							self->peekTypeSwitches++;
-							if (self->peekTypeSwitches % 3 == 1) {
-								self->cursor = self->logSystem->peekTxs(UID(),
-								                                        self->recoveryLoc,
-								                                        tagLocalityInvalid,
-								                                        invalidVersion,
-								                                        self->totalRecoveredBytes == 0);
-								self->localityChanged = Never();
-							} else if (self->peekTypeSwitches % 3 == 2) {
-								self->cursor = self->logSystem->peekTxs(
-								    UID(),
-								    self->recoveryLoc,
-								    self->peekLocality ? self->peekLocality->get().secondaryLocality
-								                       : tagLocalityInvalid,
-								    self->peekLocality ? self->peekLocality->get().knownCommittedVersion
-								                       : invalidVersion,
-								    self->totalRecoveredBytes == 0);
-								self->localityChanged = self->peekLocality->onChange();
-							} else {
-								self->cursor = self->logSystem->peekTxs(
-								    UID(),
-								    self->recoveryLoc,
-								    self->peekLocality ? self->peekLocality->get().primaryLocality : tagLocalityInvalid,
-								    self->peekLocality ? self->peekLocality->get().knownCommittedVersion
-								                       : invalidVersion,
-								    self->totalRecoveredBytes == 0);
-								self->localityChanged = self->peekLocality->onChange();
-							}
-						}
+						continue;
 					}
+
+					UNREACHABLE();
 				}
 				TraceEvent("PeekNextGetMore")
 				    .detail("Total", self->totalRecoveredBytes)
@@ -143,7 +146,7 @@ public:
 				}
 				if (!self->cursor->hasMessage()) {
 					self->recoveryLoc = self->cursor->version().version;
-					wait(yield());
+					co_await yield();
 					continue;
 				}
 			}
@@ -163,7 +166,7 @@ public:
 		}
 
 		if (self->recoveryQueueDataSize == 0)
-			return Standalone<StringRef>();
+			co_return Standalone<StringRef>();
 
 		ASSERT(self->recoveryQueue[0].size() == self->recoveryQueueDataSize);
 
@@ -175,7 +178,7 @@ public:
 		if (self->recoveryQueue[0].size() == 0) {
 			self->recoveryQueue.clear();
 		}
-		return result;
+		co_return result;
 	}
 };
 

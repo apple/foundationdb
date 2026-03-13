@@ -51,7 +51,7 @@ __attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
 
 	Future<Void> resolutionBalancing() { return resolutionBalancing_impl(this); }
 
-	ACTOR static Future<Void> resolutionBalancing_impl(ResolutionBalancer* self);
+	static Future<Void> resolutionBalancing_impl(ResolutionBalancer* self);
 
 	// Sets resolver interfaces. Trigger resolutionBalancing() actor if more
 	// than one resolvers are present.
