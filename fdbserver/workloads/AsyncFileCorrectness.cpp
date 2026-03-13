@@ -1,5 +1,5 @@
 /*
- * AsyncFileCorrectness.actor.cpp
+ * AsyncFileCorrectness.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // An enumeration representing the type of operation to be performed in a correctness test operation
 enum OperationType { READ, WRITE, SYNC, REOPEN, TRUNCATE };
@@ -103,7 +102,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _setup(AsyncFileCorrectnessWorkload* self) {
+	Future<Void> _setup(AsyncFileCorrectnessWorkload* self) {
 		// Create the memory version of the file, the file locks, and the valid mask
 		self->memoryFile = self->allocateBuffer(self->targetFileSize);
 		self->fileLock.resize(self->targetFileSize, 0);
@@ -111,9 +110,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		self->fileSize = 0;
 
 		// Create or open the file being used for testing
-		wait(self->openFile(self, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, self->fileSize, true));
-
-		return Void();
+		co_await self->openFile(self, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, self->fileSize, true);
 	}
 
 	// Updates the memory buffer, locks, and validity mask to a new file size
@@ -144,27 +141,25 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(AsyncFileCorrectnessWorkload* self) {
-		state StatisticsState statState;
+	Future<Void> _start(AsyncFileCorrectnessWorkload* self) {
+		StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		wait(timeout(self->runCorrectnessTest(self), self->testDuration, Void()));
+		co_await timeout(self->runCorrectnessTest(self), self->testDuration, Void());
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
 		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		// Try to let the IO operations finish so we can clean up after them
-		wait(timeout(waitForAll(self->operations), 10, Void()));
-
-		return Void();
+		co_await timeout(waitForAll(self->operations), 10, Void());
 	}
 
-	ACTOR Future<Void> runCorrectnessTest(AsyncFileCorrectnessWorkload* self) {
-		state std::vector<OperationInfo> postponedOperations;
-		state int validOperations = 0;
+	Future<Void> runCorrectnessTest(AsyncFileCorrectnessWorkload* self) {
+		std::vector<OperationInfo> postponedOperations;
+		int validOperations = 0;
 
-		loop {
-			wait(delay(0));
+		while (true) {
+			co_await delay(0);
 
 			// Fill the operations buffer with random operations
 			while (self->operations.size() < self->numSimultaneousOperations && postponedOperations.size() == 0) {
@@ -174,7 +169,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			}
 
 			// Get the first operation that finishes
-			OperationInfo info = wait(waitForFirst(self->operations));
+			OperationInfo info = co_await waitForFirst(self->operations);
 
 			// If it is a read, check that it matches what our memory representation has
 			if (info.operation == READ) {
@@ -198,7 +193,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 							       info.length);
 
 							self->success = false;
-							return Void();
+							co_return;
 						}
 						// Otherwise, skip the comparison and just update what we know
 						else if (!isValid) {
@@ -249,7 +244,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			while (validOperations == 0 && postponedOperations.size() > 0) {
 				self->operations.clear();
 				self->operations.push_back(self->processOperation(self, postponedOperations.front()));
-				OperationInfo info = wait(self->operations.front());
+				OperationInfo info = co_await self->operations.front();
 				postponedOperations.erase(postponedOperations.begin());
 				self->operations.clear();
 			}
@@ -358,15 +353,15 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	// Performs an operation on a file and the memory representation of that file
-	ACTOR Future<OperationInfo> processOperation(AsyncFileCorrectnessWorkload* self, OperationInfo info) {
+	Future<OperationInfo> processOperation(AsyncFileCorrectnessWorkload* self, OperationInfo info) {
 		if (info.operation == READ) {
 			info.data = self->allocateBuffer(info.length);
 
 			// Perform the read.  Don't allow it to be cancelled (because the underlying IO may not be cancellable) and
 			// don't allow objects that the read uses to be deleted
-			int numRead = wait(uncancellable(
+			int numRead = co_await uncancellable(
 			    holdWhile(self->fileHandle,
-			              holdWhile(info, self->fileHandle->file->read(info.data->buffer, info.length, info.offset)))));
+			              holdWhile(info, self->fileHandle->file->read(info.data->buffer, info.length, info.offset))));
 
 			if (numRead != std::min(info.length, self->fileSize - info.offset)) {
 				printf("Read reported incorrect number of bytes at %" PRIu64 " of length %" PRIu64 "\n",
@@ -382,19 +377,19 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 			// Perform the write.  Don't allow it to be cancelled (because the underlying IO may not be cancellable) and
 			// don't allow objects that the write uses to be deleted
-			wait(uncancellable(holdWhile(
-			    self->fileHandle,
-			    holdWhile(info, self->fileHandle->file->write(info.data->buffer, info.length, info.offset)))));
+			co_await uncancellable(
+			    holdWhile(self->fileHandle,
+			              holdWhile(info, self->fileHandle->file->write(info.data->buffer, info.length, info.offset))));
 
 			// If we wrote past the end of the file, update the size of the file
 			self->fileSize = std::max((int64_t)(info.offset + info.length), self->fileSize);
 		} else if (info.operation == SYNC) {
 			info.data = Reference<AsyncFileBuffer>(nullptr);
-			wait(self->fileHandle->file->sync());
+			co_await self->fileHandle->file->sync();
 		} else if (info.operation == REOPEN) {
 			// Will fail if the file does not exist
-			wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, 0, false));
-			int64_t fileSize = wait(self->fileHandle->file->size());
+			co_await self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, 0, false);
+			int64_t fileSize = co_await self->fileHandle->file->size();
 			int64_t fileSizeChange = fileSize - self->fileSize;
 			if (fileSizeChange >= _PAGE_SIZE) {
 				fmt::print("Reopened file increased in size by {0} bytes (at most {1} allowed)\n",
@@ -410,9 +405,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		} else if (info.operation == TRUNCATE) {
 			// Perform the truncate.  Don't allow it to be cancelled (because the underlying IO may not be cancellable)
 			// and don't allow file handle to be deleted
-			wait(uncancellable(holdWhile(self->fileHandle, self->fileHandle->file->truncate(info.offset))));
+			co_await uncancellable(holdWhile(self->fileHandle, self->fileHandle->file->truncate(info.offset)));
 
-			int64_t fileSize = wait(self->fileHandle->file->size());
+			int64_t fileSize = co_await self->fileHandle->file->size();
 			if (fileSize != info.offset) {
 				printf("Incorrect file size reported after truncate\n");
 				self->success = false;
@@ -422,7 +417,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		}
 
 		++self->numOperations;
-		return info;
+		co_return info;
 	}
 
 	Future<bool> check(Database const& cx) override { return success; }
