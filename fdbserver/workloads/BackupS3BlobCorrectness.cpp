@@ -371,8 +371,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 				Optional<BulkDumpOwnerInfo> ownerInfo = co_await getBulkDumpOwner(cx, progress.jobId);
 				if (ownerInfo.present() && ownerInfo.get().ownerUID == expectedBackupUID) {
-					TraceEvent("BS3BCW_ObservabilityVerified")
-					    .detail("BackupUID", expectedBackupUID);
+					TraceEvent("BS3BCW_ObservabilityVerified").detail("BackupUID", expectedBackupUID);
 					co_return;
 				}
 			}

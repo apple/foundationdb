@@ -3783,7 +3783,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 					} catch (Error& e) {
 						err = e;
 					}
-co_await checkTr.onError(err);
+					co_await checkTr.onError(err);
 				}
 
 				if (!jobAlreadyRunning) {
@@ -3839,6 +3839,16 @@ co_await checkTr.onError(err);
 				// Write the keyspace snapshot file to mark the backup as complete
 				// This is essential for the restore process to find the snapshot
 				if (completed) {
+					// Verify that BulkDump data was actually written before writing snapshot
+					bool datasetComplete =
+					    co_await verifyBulkDumpDatasetCompleteness(bc, bulkDumpJob.getJobId().toString());
+					if (!datasetComplete) {
+						TraceEvent(SevError, "BulkDumpTaskDatasetIncomplete")
+						    .detail("BackupUID", config.getUid())
+						    .detail("BulkDumpJobId", bulkDumpJob.getJobId());
+						throw backup_error();
+					}
+
 					// Build beginEndKeys from backup ranges
 					std::vector<std::pair<Key, Key>> beginEndKeys;
 					for (const auto& range : backupRanges) {
@@ -6288,7 +6298,7 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	} else
 		tags.push_back(makeRestoreTag(tagName.toString()));
 
-// If no tags found, return helpful message
+	// If no tags found, return helpful message
 	if (tags.empty()) {
 		co_return "No restores found.\n\n"
 		          "To start a restore:\n"
