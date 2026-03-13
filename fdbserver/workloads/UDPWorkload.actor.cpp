@@ -74,7 +74,7 @@ struct UDPWorkload : TestWorkload {
 		self->serverSocket = std::move(s);
 		self->serverSocket->bind(localAddress);
 		self->serverAddress = localAddress;
-		while (true) {
+		loop {
 			try {
 				Optional<Value> v = wait(tr.get(key));
 				if (v.present()) {
@@ -133,7 +133,7 @@ struct UDPWorkload : TestWorkload {
 		state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
 		state uint8_t* packet = mutateString(packetString);
 		state NetworkAddress peerAddress;
-		while (true) {
+		loop {
 			int sz = wait(self->serverSocket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peerAddress));
 			auto msg = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
 			if (msg.type() == Message::Type::PONG) {
@@ -150,7 +150,7 @@ struct UDPWorkload : TestWorkload {
 	ACTOR static Future<Void> serverSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
 		state Standalone<StringRef> packetString;
 		state NetworkAddress peer;
-		while (true) {
+		loop {
 			choose {
 				when(wait(delay(0.1))) {
 					peer = deterministicRandom()->randomChoice(*remotes);
@@ -173,7 +173,7 @@ struct UDPWorkload : TestWorkload {
 		state uint8_t* packet = mutateString(packetString);
 		state NetworkAddress peer;
 		state Future<Void> finished = Never();
-		while (true) {
+		loop {
 			choose {
 				when(int sz = wait(socket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peer))) {
 					auto res = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
@@ -197,7 +197,7 @@ struct UDPWorkload : TestWorkload {
 		state ActorCollection actors(false);
 		state NetworkAddress peer;
 
-		while (true) {
+		loop {
 			choose {
 				when(wait(delay(0.1))) {}
 				when(wait(actors.getResult())) {
@@ -221,7 +221,7 @@ struct UDPWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(UDPWorkload* self, Database cx) {
 		state ReadYourWritesTransaction tr(cx);
 		state std::vector<NetworkAddress> remotes;
-		while (true) {
+		loop {
 			try {
 				RangeResult range = wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
