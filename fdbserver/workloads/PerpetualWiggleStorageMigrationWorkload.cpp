@@ -64,14 +64,14 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0) {
-			return _start(this, cx);
+			return startImpl(cx);
 		}
 		return Void();
 	};
 
 	Future<bool> check(Database const& cx) override { return true; };
 
-	static Future<Void> _start(PerpetualWiggleStorageMigrationWorkload* self, Database cx) {
+	Future<Void> startImpl(Database cx) {
 		if (!hasRocksDB) {
 			// RocksDB, which is required by this test, is not supported
 			co_return;

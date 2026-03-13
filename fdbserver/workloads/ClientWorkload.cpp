@@ -34,58 +34,56 @@ class WorkloadProcessState {
 	Future<Void> processActor;
 	Promise<Void> init;
 
-	WorkloadProcessState(int clientId) : clientId(clientId) { processActor = processStart(this); }
+	WorkloadProcessState(int clientId) : clientId(clientId) { processActor = processStart(); }
 
 	~WorkloadProcessState() {
 		TraceEvent("ShutdownClientForWorkload", id).log();
 		g_simulator->destroyProcess(childProcess);
 	}
 
-	static Future<Void> initializationDone(WorkloadProcessState* self, ISimulator::ProcessInfo* parent) {
+	Future<Void> initializationDone(ISimulator::ProcessInfo* parent) {
 		co_await g_simulator->onProcess(parent, TaskPriority::DefaultYield);
-		self->init.send(Void());
+		init.send(Void());
 		co_await Future<Void>(Never());
 		ASSERT(false); // does not happen
 	}
 
-	static Future<Void> processStart(WorkloadProcessState* self) {
+	Future<Void> processStart() {
 		ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
 		std::vector<Future<Void>> futures;
 		if (parent->address.isV6()) {
-			self->childAddress =
-			    IPAddress::parse(fmt::format("2001:fdb1:fdb2:fdb3:fdb4:fdb5:fdb6:{:04x}", self->clientId + 2)).get();
+			childAddress =
+			    IPAddress::parse(fmt::format("2001:fdb1:fdb2:fdb3:fdb4:fdb5:fdb6:{:04x}", clientId + 2)).get();
 		} else {
-			self->childAddress = IPAddress::parse(fmt::format("192.168.0.{}", self->clientId + 2)).get();
+			childAddress = IPAddress::parse(fmt::format("192.168.0.{}", clientId + 2)).get();
 		}
-		self->processName = fmt::format("TestClient{}", self->clientId);
+		processName = fmt::format("TestClient{}", clientId);
 		Standalone<StringRef> newZoneId(deterministicRandom()->randomUniqueID().toString());
 		auto locality = LocalityData(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, parent->locality.dcId());
 		auto dataFolder = joinPath(popPath(parent->dataFolder), deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(dataFolder);
-		TraceEvent("StartingClientWorkloadProcess", self->id)
-		    .detail("Name", self->processName)
-		    .detail("Address", self->childAddress);
-		self->childProcess = g_simulator->newProcess(self->processName.c_str(),
-		                                             self->childAddress,
-		                                             1,
-		                                             parent->address.isTLS(),
-		                                             1,
-		                                             locality,
-		                                             ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
-		                                             dataFolder.c_str(),
-		                                             parent->coordinationFolder.c_str(),
-		                                             parent->protocolVersion,
-		                                             false);
-		self->childProcess->excludeFromRestarts = true;
-		co_await g_simulator->onProcess(self->childProcess, TaskPriority::DefaultYield);
+		TraceEvent("StartingClientWorkloadProcess", id).detail("Name", processName).detail("Address", childAddress);
+		childProcess = g_simulator->newProcess(processName.c_str(),
+		                                       childAddress,
+		                                       1,
+		                                       parent->address.isTLS(),
+		                                       1,
+		                                       locality,
+		                                       ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
+		                                       dataFolder.c_str(),
+		                                       parent->coordinationFolder.c_str(),
+		                                       parent->protocolVersion,
+		                                       false);
+		childProcess->excludeFromRestarts = true;
+		co_await g_simulator->onProcess(childProcess, TaskPriority::DefaultYield);
 		try {
 			FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 			Sim2FileSystem::newFileSystem();
 			auto addr = g_simulator->getCurrentProcess()->address;
 			futures.push_back(FlowTransport::transport().bind(addr, addr));
-			futures.push_back(success((self->childProcess->onShutdown())));
-			TraceEvent("ClientWorkloadProcessInitialized", self->id).log();
-			futures.push_back(initializationDone(self, parent));
+			futures.push_back(success(childProcess->onShutdown()));
+			TraceEvent("ClientWorkloadProcessInitialized", id).log();
+			futures.push_back(initializationDone(parent));
 			co_await waitForAny(futures);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -140,16 +138,14 @@ struct WorkloadProcess {
 		}
 	}
 
-	static Future<Void> openDatabase(WorkloadProcess* self,
-	                                 ClientWorkload::CreateWorkload childCreator,
-	                                 WorkloadContext wcx) {
+	Future<Void> openDatabase(ClientWorkload::CreateWorkload childCreator, WorkloadContext wcx) {
 		ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
 		Optional<Error> err;
 		wcx.dbInfo = Reference<AsyncVar<struct ServerDBInfo> const>();
-		co_await self->processState->initialized();
-		co_await g_simulator->onProcess(self->childProcess(), TaskPriority::DefaultYield);
+		co_await processState->initialized();
+		co_await g_simulator->onProcess(childProcess(), TaskPriority::DefaultYield);
 		try {
-			self->createDatabase(childCreator, wcx);
+			createDatabase(childCreator, wcx);
 		} catch (Error& e) {
 			ASSERT(e.code() != error_code_actor_cancelled);
 			err = e;
@@ -172,14 +168,14 @@ struct WorkloadProcess {
 		childWorkloadContext.ccr = wcx.ccr;
 		childWorkloadContext.options = wcx.options;
 		childWorkloadContext.sharedRandomNumber = wcx.sharedRandomNumber;
-		databaseOpened = openDatabase(this, childCreator, childWorkloadContext);
+		databaseOpened = openDatabase(childCreator, childWorkloadContext);
 	}
 
-	static Future<Void> destroy(WorkloadProcess* self) {
+	Future<Void> destroy() {
 		ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
-		co_await g_simulator->onProcess(self->childProcess(), TaskPriority::DefaultYield);
+		co_await g_simulator->onProcess(childProcess(), TaskPriority::DefaultYield);
 		TraceEvent("DeleteWorkloadProcess").backtrace();
-		delete self;
+		delete this;
 		co_await g_simulator->onProcess(parent, TaskPriority::DefaultYield);
 	}
 
@@ -193,16 +189,16 @@ struct WorkloadProcess {
 	}
 
 	template <class Ret, class Fun>
-	Future<Ret> runActor(WorkloadProcess* self, Fun f) {
+	Future<Ret> runActor(Fun f) {
 		Optional<Error> err;
 		using ResultHolder = std::conditional_t<std::is_same_v<Ret, Void>, bool, Ret>;
 		[[maybe_unused]] ResultHolder res{};
 		Future<Ret> fut;
 		ISimulator::ProcessInfo* parent = g_simulator->getCurrentProcess();
-		co_await self->databaseOpened;
-		co_await g_simulator->onProcess(self->childProcess(), TaskPriority::DefaultYield);
+		co_await databaseOpened;
+		co_await g_simulator->onProcess(childProcess(), TaskPriority::DefaultYield);
 		try {
-			fut = f(self->cx);
+			fut = f(cx);
 			if constexpr (std::is_same_v<Ret, Void>) {
 				co_await fut;
 			} else {
@@ -213,7 +209,7 @@ struct WorkloadProcess {
 			// cancel `fut` in any other process than the child process. So we're going to pass the future to an
 			// uncancellable actor (it has to be uncancellable because if we got cancelled here we can't wait on
 			// anything) which will then destroy the future on the child process.
-			cancelChild(self->childProcess(), fut);
+			cancelChild(childProcess(), fut);
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
 			}
@@ -236,7 +232,7 @@ ClientWorkload::ClientWorkload(CreateWorkload const& childCreator, WorkloadConte
 
 ClientWorkload::~ClientWorkload() {
 	TraceEvent(SevDebug, "DestroyClientWorkload").backtrace();
-	WorkloadProcess::destroy(impl);
+	impl->destroy();
 }
 
 std::string ClientWorkload::description() const {
@@ -248,17 +244,16 @@ Future<Void> ClientWorkload::initialized() {
 }
 
 Future<Void> ClientWorkload::setup(Database const& cx) {
-	return impl->runActor<Void>(impl, [this](Database const& db) { return impl->child->setup(db); });
+	return impl->runActor<Void>([this](Database const& db) { return impl->child->setup(db); });
 }
 Future<Void> ClientWorkload::start(Database const& cx) {
-	return impl->runActor<Void>(impl, [this](Database const& db) { return impl->child->start(db); });
+	return impl->runActor<Void>([this](Database const& db) { return impl->child->start(db); });
 }
 Future<bool> ClientWorkload::check(Database const& cx) {
-	return impl->runActor<bool>(impl, [this](Database const& db) { return impl->child->check(db); });
+	return impl->runActor<bool>([this](Database const& db) { return impl->child->check(db); });
 }
 Future<std::vector<PerfMetric>> ClientWorkload::getMetrics() {
-	return impl->runActor<std::vector<PerfMetric>>(impl,
-	                                               [this](Database const& db) { return impl->child->getMetrics(); });
+	return impl->runActor<std::vector<PerfMetric>>([this](Database const& db) { return impl->child->getMetrics(); });
 }
 void ClientWorkload::getMetrics(std::vector<PerfMetric>& m) {
 	ASSERT(false);

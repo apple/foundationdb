@@ -62,26 +62,25 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (g_network->isSimulated() && enabled) {
-			return _start(this);
+			return startImpl();
 		}
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> _start(RandomCloggingWorkload* self) {
-		Future<Void> done = delay(self->maxRunDuration);
+	Future<Void> startImpl() {
+		Future<Void> done = delay(maxRunDuration);
 		while (true) {
 			co_await (done ||
-			          timeout(reportErrors(self->swizzleClog ? self->swizzleClogClient(self) : self->clogClient(self),
-			                               "RandomCloggingError"),
-			                  self->testDuration,
+			          timeout(reportErrors(swizzleClog ? swizzleClogClient() : clogClient(), "RandomCloggingError"),
+			                  testDuration,
 			                  Void()));
-			if (done.isReady() || !self->iterate) {
+			if (done.isReady() || !iterate) {
 				break;
 			}
-			co_await delay(self->suspend);
-			self->suspend *= self->backoff;
+			co_await delay(suspend);
+			suspend *= backoff;
 		}
 	}
 
@@ -97,28 +96,28 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 			g_simulator->clogPair(m1->address.ip, m2->address.ip, t);
 	}
 
-	Future<Void> clogClient(RandomCloggingWorkload* self) {
+	Future<Void> clogClient() {
 		double lastTime = now();
-		double workloadEnd = now() + self->testDuration;
+		double workloadEnd = now() + testDuration;
 		while (true) {
-			co_await poisson(&lastTime, self->scale / self->clogginess);
+			co_await poisson(&lastTime, scale / clogginess);
 			auto machine = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
-			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
+			double t = scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
-			self->doClog(machine, t);
+			doClog(machine, t);
 
-			t = self->scale * 20.0 * exp(-10.0 * deterministicRandom()->random01());
+			t = scale * 20.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
-			self->clogRandomPair(t);
+			clogRandomPair(t);
 		}
 	}
 
-	Future<Void> swizzleClogClient(RandomCloggingWorkload* self) {
+	Future<Void> swizzleClogClient() {
 		double lastTime = now();
-		double workloadEnd = now() + self->testDuration;
+		double workloadEnd = now() + testDuration;
 		while (true) {
-			co_await poisson(&lastTime, self->scale / self->clogginess);
-			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
+			co_await poisson(&lastTime, scale / clogginess);
+			double t = scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 
 			// randomly choose half of the machines in the cluster to all clog up,
@@ -132,10 +131,10 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 					ends.push_back(deterministicRandom()->random01() * t / 2 + t / 2);
 				}
 			for (int i = 0; i < 10; i++)
-				self->clogRandomPair(t);
+				clogRandomPair(t);
 
 			for (int i = 0; i < swizzled.size(); i++)
-				self->doClog(swizzled[i], ends[i] - starts[i], starts[i]);
+				doClog(swizzled[i], ends[i] - starts[i], starts[i]);
 		}
 	}
 };
