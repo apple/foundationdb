@@ -1,5 +1,5 @@
 /*
- * FuzzApiCorrectness.actor.cpp
+ * FuzzApiCorrectness.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,7 +34,6 @@
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace ph = std::placeholders;
 
@@ -293,7 +292,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	// transaction
 	Future<Void> writeBarrier(Reference<IDatabase> db) {
 		Reference<ITransaction> tr = db->createTransaction();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -322,7 +321,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
 		                              (self->getKeyForIndex(-1, nodesPerTenant).size() + self->valueSizeRange.second));
 		try {
-			loop {
+			while (true) {
 				int tenantNum = self->minTenantNum;
 				for (; tenantNum < self->numTenants; ++tenantNum) {
 					int i = 0;
@@ -330,7 +329,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					for (; i < nodesPerTenant; i += keysPerBatch) {
 						ASSERT(tenantNum < 0);
 						Reference<ITransaction> tr = self->db->createTransaction();
-						loop {
+						while (true) {
 							if (now() - startTime > self->testDuration)
 								co_return;
 							Error err;
@@ -377,7 +376,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					}
 				}
 
-				loop {
+				while (true) {
 					try {
 						co_await (self->randomTransaction(self, cx) && delay(self->numOps * .001));
 					} catch (Error& e) {
@@ -407,7 +406,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		bool rawAccess = tenantNum == -1 && deterministicRandom()->coinflip();
 
-		loop {
+		while (true) {
 			bool cancelled = false;
 			if (readYourWritesDisabled)
 				tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
@@ -491,7 +490,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					throw err;
 				}
 			}
-		    }
+		}
 	}
 
 	template <typename Subclass, typename T>

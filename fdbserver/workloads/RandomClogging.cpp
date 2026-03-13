@@ -1,5 +1,5 @@
 /*
- * RandomClogging.actor.cpp
+ * RandomClogging.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,7 +24,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RandomCloggingWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomClogging";
@@ -72,7 +71,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 
 	static Future<Void> _start(RandomCloggingWorkload* self) {
 		Future<Void> done = delay(self->maxRunDuration);
-		loop {
+		while (true) {
 			co_await (done ||
 			          timeout(reportErrors(self->swizzleClog ? self->swizzleClogClient(self) : self->clogClient(self),
 			                               "RandomCloggingError"),
@@ -101,7 +100,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	Future<Void> clogClient(RandomCloggingWorkload* self) {
 		double lastTime = now();
 		double workloadEnd = now() + self->testDuration;
-		loop {
+		while (true) {
 			co_await poisson(&lastTime, self->scale / self->clogginess);
 			auto machine = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
 			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
@@ -117,7 +116,7 @@ struct RandomCloggingWorkload : FailureInjectionWorkload {
 	Future<Void> swizzleClogClient(RandomCloggingWorkload* self) {
 		double lastTime = now();
 		double workloadEnd = now() + self->testDuration;
-		loop {
+		while (true) {
 			co_await poisson(&lastTime, self->scale / self->clogginess);
 			double t = self->scale * 10.0 * exp(-10.0 * deterministicRandom()->random01());
 			t = std::max(0.0, std::min(t, workloadEnd - now()));

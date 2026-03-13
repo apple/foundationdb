@@ -1,5 +1,5 @@
 /*
- * ExternalWorkload.actor.cpp
+ * ExternalWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,8 +23,6 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "foundationdb/CppWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 extern void flushTraceFileVoid();
 

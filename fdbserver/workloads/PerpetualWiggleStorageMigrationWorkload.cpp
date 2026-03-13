@@ -1,5 +1,5 @@
 /*
- * PerpetualWiggleStorageMigrationWorkload.actor.cpp
+ * PerpetualWiggleStorageMigrationWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,8 +29,6 @@
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
@@ -170,7 +168,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 	                                     std::string wiggleStorageType) {
 		// Wait until `ssToExcludeInclude` to be recruited as storage server again.
 		int missingTargetCount = 0;
-		loop {
+		while (true) {
 			std::vector<StorageServerInterface> allStorageServers = co_await getStorageServers(cx);
 			bool foundTarget = false;
 			for (auto& ss : allStorageServers) {
@@ -196,7 +194,7 @@ struct PerpetualWiggleStorageMigrationWorkload : public TestWorkload {
 		std::vector<StorageServerInterface> allSSes;
 		bool doneCheckingWiggleStorage = false;
 		bool containWiggleStorage = false;
-		loop {
+		while (true) {
 			std::vector<StorageServerInterface> SSes = co_await getStorageServers(cx);
 			allSSes = SSes;
 

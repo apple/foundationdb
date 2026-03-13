@@ -102,7 +102,7 @@ AAAAAAAAAADwo2kloY1WAKDXp1f+BrgAAAAAAAAAAA==
 \ qDHU7CAAAAAAAADsIAAAAAAAAAD/+N1Ch/X3AEwORpyq68Y8AAAAAAAAADwAAAAAAAAAAEqD
 \ W3c/M9kAHCBUzBTlojsAAAAAAAAAOwAAAAAAAAAA+uRVDFla0gA5DXKp8yQbCgAAAAAAAAAK
 \ AAAAAAAAAADwo2kloY1WAKDXp1f+BrgAAAAAAAAAAA=="|bin/acac
-     1304263 /root/src/fdbserver/workloads/FuzzApiCorrectness.actor.cpp:loadAndRun  <ACTIVE>
+     1304263 /root/src/fdbserver/workloads/FuzzApiCorrectness.cpp:loadAndRun  <ACTIVE>
      1269030 /root/src/fdbserver/tester.actor.cpp:runWorkloadAsync
      1254091 /root/src/fdbserver/tester.actor.cpp:testerServerWorkload
         8760 /root/src/fdbserver/tester.actor.cpp:testerServerCore
@@ -126,4 +126,3 @@ The reason for not being able to generate the actor call backtrace inside the de
   * All binding tests fail
   * Random failure on the `fdbserver`
 * It is possible for AcAC to report the line number of the source code where the actor is created.
-

@@ -1,5 +1,5 @@
 /*
- * DiskFailureInjection.actor.cpp
+ * DiskFailureInjection.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,7 +25,6 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/Status.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "DiskFailureInjection";
@@ -147,7 +146,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		std::vector<W> machines;
 		int throttledWorkers = 0;
 		int corruptedWorkers = 0;
-		loop {
+		while (true) {
 			co_await poisson(&lastTime, 1);
 			try {
 				std::pair<std::vector<W>, int> m = co_await getStorageWorkers(cx, self->dbInfo, false);
@@ -263,7 +262,7 @@ struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
 		double start = now();
 		double elapsed = 0.0;
 
-		loop {
+		while (true) {
 			co_await delayUntil(start + elapsed);
 			co_await reSendChaos(self);
 			elapsed += self->periodicBroadcastInterval;

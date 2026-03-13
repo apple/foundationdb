@@ -1,5 +1,5 @@
 /*
- * AsyncFileCorrectness.actor.cpp
+ * AsyncFileCorrectness.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include "flow/IRandom.h"
 #include "flow/SystemMonitor.h"
 #include "fdbserver/workloads/AsyncFile.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // An enumeration representing the type of operation to be performed in a correctness test operation
 enum OperationType { READ, WRITE, SYNC, REOPEN, TRUNCATE };
@@ -159,7 +158,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		std::vector<OperationInfo> postponedOperations;
 		int validOperations = 0;
 
-		loop {
+		while (true) {
 			co_await delay(0);
 
 			// Fill the operations buffer with random operations

@@ -1,5 +1,5 @@
 /*
- * ClientWorkload.actor.cpp
+ * ClientWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,6 @@
 #include <type_traits>
 
 #include "flow/ApiVersion.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 class WorkloadProcessState {
 	IPAddress childAddress;
