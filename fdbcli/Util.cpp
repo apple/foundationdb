@@ -442,11 +442,8 @@ void printBulkAnalysis(double avgBytesPerSecond,
                        const std::vector<BulkLoadStalledTask>& stalledTasks) {
 	double efficiency = totalTasks > 0 ? 100.0 * completeTasks / totalTasks : 0.0;
 
-	auto healthMetrics = BulkHealthMetrics::analyze(avgBytesPerSecond / 1048576.0,
-	                                                efficiency,
-	                                                stalledTasks.size(),
-	                                                errorTasks,
-	                                                elapsedSeconds / 60.0);
+	auto healthMetrics = BulkHealthMetrics::analyze(
+	    avgBytesPerSecond / 1048576.0, efficiency, stalledTasks.size(), errorTasks, elapsedSeconds / 60.0);
 	printBulkHealthAnalysis(healthMetrics);
 
 	printStalledTasks(stalledTasks);

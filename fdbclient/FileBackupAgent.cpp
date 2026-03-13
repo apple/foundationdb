@@ -632,7 +632,7 @@ Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Ref
 	          success(restoreVersion) && success(progress) && success(restoreState) && success(useRangeFileRestore) &&
 	          success(bulkLoadComplete));
 
-	state std::string returnStr;
+	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
 	for (auto& range : ranges.get()) {
 		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
@@ -643,14 +643,13 @@ Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Ref
 	                    restoreVersion.get());
 
 	// Add enhanced status fields for BulkLoad integration
-	// useRangeFileRestore is Future<Optional<bool>>, after wait() we call .get() to get Optional<bool>
-	state bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
+	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
 	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
 	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
 
 	// Add phase status information
-	state ERestoreState currentState = restoreState.get();
-	state bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+	ERestoreState currentState = restoreState.get();
+	bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
 
 	if (currentState == ERestoreState::RUNNING) {
 		if (usingBulkLoad) {
@@ -7619,8 +7618,8 @@ public:
 					}
 
 					// Add snapshot mode information
-					state Optional<int> snapshotModeOpt = wait(config.snapshotMode().get(tr));
-					state int snapshotModeValue = snapshotModeOpt.present() ? snapshotModeOpt.get() : 0;
+					Optional<int> snapshotModeOpt = co_await config.snapshotMode().get(tr);
+					int snapshotModeValue = snapshotModeOpt.present() ? snapshotModeOpt.get() : 0;
 					std::string snapshotModeText;
 					switch (snapshotModeValue) {
 					case 0:
@@ -7639,12 +7638,12 @@ public:
 					doc.setKey("SnapshotMode", snapshotModeText);
 
 					// Check if backup is BulkLoad compatible
-					state Optional<std::string> bulkDumpJobIdOpt = wait(config.bulkDumpJobId().get(tr));
+					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
 					doc.setKey("BulkLoadCompatible", bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty());
 
 					// If using bulkdump mode, get bulkdump progress
 					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
-						Optional<BulkDumpProgress> bulkDumpProgressOpt = wait(getBulkDumpProgress(cx));
+						Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
 						if (bulkDumpProgressOpt.present()) {
 							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
 							JsonBuilderObject bdDoc;
@@ -7804,8 +7803,8 @@ public:
 					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
 
 					// If using bulkdump mode, show bulkdump progress
-					if (snapshotModeValueText == 1 || snapshotModeValueText == 2) {
-						Optional<BulkDumpProgress> bulkDumpProgressOpt = wait(getBulkDumpProgress(cx));
+					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
+						Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
 						if (bulkDumpProgressOpt.present()) {
 							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
 							statusText += "\nBulkDump progress:\n";

@@ -24,6 +24,7 @@
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/CoordinationInterface.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
