@@ -43,6 +43,11 @@ function(configure_fdbserver_target_includes target_name)
   )
 endfunction()
 
+function(add_fdbserver_link_test target_name)
+  add_flow_target(LINK_TEST NAME ${target_name} SRCS ../fdbclient/LinkTest.cpp)
+  target_link_libraries(${target_name} PRIVATE ${ARGN} rapidxml)
+endfunction()
+
 add_subdirectory(core)
 add_subdirectory(clustercontroller)
 add_subdirectory(backupworker)
@@ -56,6 +61,58 @@ add_subdirectory(resolver)
 add_subdirectory(sequencer)
 add_subdirectory(storageserver)
 add_subdirectory(tlog)
+
+add_fdbserver_link_test(fdbserver_corelinktest
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_backupworkerlinktest
+  fdbserver_backupworker
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
+  fdbserver_clustercontroller
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_commitproxylinktest
+  fdbserver_commitproxy
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_consistencyscanlinktest
+  fdbserver_consistencyscan
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_coordinatorlinktest
+  fdbserver_coordinator
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_datadistributorlinktest
+  fdbserver_datadistributor
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_grvproxylinktest
+  fdbserver_grvproxy
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_ratekeeperlinktest
+  fdbserver_ratekeeper
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_resolverlinktest
+  fdbserver_resolver
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_sequencerlinktest
+  fdbserver_sequencer
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_storageserverlinktest
+  fdbserver_storageserver
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_tloglinktest
+  fdbserver_tlog
+  fdbserver_core
+  fdbclient)
 
 if(WITH_ROCKSDB)
   find_package(LZ4 REQUIRED)
