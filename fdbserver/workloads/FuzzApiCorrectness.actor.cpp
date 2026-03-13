@@ -499,31 +499,53 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		typedef T value_type;
 
 		static Future<Void> runTest(unsigned int id, FuzzApiCorrectnessWorkload* wl, Reference<ITransaction> tr) {
-			Subclass self(id, wl, tr);
-
+			auto self = std::make_unique<Subclass>(id, wl, tr);
 			try {
-				Future<value_type> future = unsafeThreadFutureToFuture(self.createFuture(tr));
+				Future<value_type> future = unsafeThreadFutureToFuture(self->createFuture(tr));
+				return runTestAsync(tr, std::move(self), future);
+			} catch (Error& e) {
+				return handleCaughtException(tr, std::move(self), e);
+			}
+		}
 
+		static Future<Void> runTestAsync(Reference<ITransaction> tr,
+		                                 std::unique_ptr<Subclass> self,
+		                                 Future<value_type> future) {
+			Optional<Error> err;
+			try {
 				// Create may have added some other things to do before we can get the result.
-				for (auto i = self.pre_steps.begin(); i != self.pre_steps.end(); ++i) {
+				for (auto i = self->pre_steps.begin(); i != self->pre_steps.end(); ++i) {
 					co_await unsafeThreadFutureToFuture(*i);
 				}
 
 				co_await timeoutError(ready(future), 1000);
 
 				if (future.isError()) {
-					self.contract.handleException(future.getError(), tr);
+					err = future.getError();
 				} else {
 					ASSERT(future.isValid());
-					self.contract.handleNotThrown(tr);
+					self->contract.handleNotThrown(tr);
 					if constexpr (std::is_same_v<value_type, Void>) {
-						self.errorCheck(tr, Void());
+						self->errorCheck(tr, Void());
 					} else {
-						self.errorCheck(tr, future.get());
+						self->errorCheck(tr, future.get());
 					}
 				}
 			} catch (Error& e) {
-				self.contract.handleException(e, tr);
+				err = e;
+			}
+			if (err.present()) {
+				co_await handleCaughtException(tr, std::move(self), err.get());
+			}
+		}
+
+		static Future<Void> handleCaughtException(Reference<ITransaction> tr,
+		                                          std::unique_ptr<Subclass> self,
+		                                          Error err) {
+			self->contract.handleException(err, tr);
+			try {
+				co_await unsafeThreadFutureToFuture(tr.castTo<ThreadSafeTransaction>()->checkDeferredError());
+			} catch (Error&) {
 			}
 		}
 
