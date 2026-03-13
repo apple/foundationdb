@@ -38,7 +38,7 @@ bool IReplicationPolicy::validateFull(bool solved,
 	std::vector<LocalityEntry> totalSolution(solutionSet);
 
 	// Append the also servers, if any
-	if (alsoServers.size()) {
+	if (!alsoServers.empty()) {
 		totalSolution.reserve(totalSolution.size() + alsoServers.size());
 		totalSolution.insert(totalSolution.end(), alsoServers.begin(), alsoServers.end());
 	}
@@ -77,7 +77,7 @@ bool PolicyOne::selectReplicas(Reference<LocalitySet>& fromServers,
                                std::vector<LocalityEntry> const& alsoServers,
                                std::vector<LocalityEntry>& results) {
 	int totalUsed = 0;
-	if (alsoServers.size()) {
+	if (!alsoServers.empty()) {
 		totalUsed++;
 	} else if (fromServers->size()) {
 		auto randomEntry = fromServers->random();
@@ -89,7 +89,7 @@ bool PolicyOne::selectReplicas(Reference<LocalitySet>& fromServers,
 
 bool PolicyOne::validate(std::vector<LocalityEntry> const& solutionSet,
                          Reference<LocalitySet> const& fromServers) const {
-	return ((solutionSet.size() > 0) && (fromServers->size() > 0));
+	return ((!solutionSet.empty()) && (fromServers->size() > 0));
 }
 
 PolicyAcross::PolicyAcross(int count, std::string const& attribKey, Reference<IReplicationPolicy> const policy)
@@ -235,7 +235,7 @@ bool PolicyAcross::selectReplicas(Reference<LocalitySet>& fromServers,
 	}
 
 	// Process the remaining results, if present
-	if ((count < _count) && (_addedResults.size())) {
+	if ((count < _count) && (!_addedResults.empty())) {
 		// Sort the added results array
 		std::sort(_addedResults.begin(), _addedResults.end(), PolicyAcross::compareAddedResults);
 		if (g_replicationdebug > 0) {

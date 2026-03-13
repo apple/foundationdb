@@ -147,7 +147,7 @@ std::string StringRef::toHexString(int limit) const {
 			else
 				rv.append(format("%02x ", b));
 		}
-		if (rv.size() > 0)
+		if (!rv.empty())
 			rv.resize(rv.size() - 1);
 	}
 	bytesCopied()->increment(rv.length());
@@ -161,7 +161,7 @@ std::string StringRef::toFullHexStringPlain() const {
 		uint8_t b = (*this)[i];
 		s.append(format("%02x ", b));
 	}
-	if (s.size() > 0)
+	if (!s.empty())
 		s.resize(s.size() - 1);
 	bytesCopied()->increment(s.length());
 	return s;
@@ -525,7 +525,7 @@ void ArenaBlock::destroy() {
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
-	while (stack.size()) {
+	while (!stack.empty()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
 		allowAccess(b);
@@ -895,12 +895,12 @@ TEST_CASE("flow/StringRef/eat") {
 	str = "testcase"_sr;
 	first = str.eat("/"_sr);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	str = "testcase/"_sr;
 	first = str.eat("/"_sr);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	str = "test/case/extra"_sr;
 	first = str.eat("/"_sr);
@@ -918,7 +918,7 @@ TEST_CASE("flow/StringRef/eat") {
 	first = str.eat("/", &hasSep);
 	ASSERT(!hasSep);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	return Void();
 }

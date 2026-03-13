@@ -530,7 +530,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyStrings") {
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x.size() == 0);
+		ASSERT(x.empty());
 	}
 	return Void();
 }
@@ -543,7 +543,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyVectors") {
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x.size() == 0);
+		ASSERT(x.empty());
 	}
 	return Void();
 }
@@ -556,7 +556,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyVectorRefs") {
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x.size() == 0);
+		ASSERT(x.empty());
 	}
 	return Void();
 }
@@ -570,7 +570,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x.size() == 0);
+		ASSERT(x.empty());
 	}
 	return Void();
 }
@@ -584,7 +584,7 @@ TEST_CASE("/flow/FlatBuffers/EmptyUnorderedSet") {
 	rd.deserialize(xs);
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
-		ASSERT(x.size() == 0);
+		ASSERT(x.empty());
 	}
 	return Void();
 }

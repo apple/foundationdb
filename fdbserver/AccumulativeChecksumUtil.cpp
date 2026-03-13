@@ -181,7 +181,7 @@ Optional<AccumulativeChecksumState> AccumulativeChecksumValidator::processAccumu
 		existInTable = false;
 	}
 	// Calculate acs value by mutation buffer and compare it with acs value in acs mutation
-	if (mutationBuffer.size() == 0) {
+	if (mutationBuffer.empty()) {
 		TraceEvent(SevError, "AcsValidatorCorruptionDetected", ssid)
 		    .detail("Reason", "Mutation buffer is empty when processAccumulativeChecksum")
 		    .detail("AcsTag", tag)

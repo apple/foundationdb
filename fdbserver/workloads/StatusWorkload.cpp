@@ -44,7 +44,7 @@ struct StatusWorkload : TestWorkload {
 		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
 		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
 		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
-		if (statusSchemaStr.size()) {
+		if (!statusSchemaStr.empty()) {
 			json_spirit::mValue schema = readJSONStrictly(statusSchemaStr.toString());
 			parsedSchema = schema.get_obj();
 
@@ -86,11 +86,11 @@ struct StatusWorkload : TestWorkload {
 
 				schemaCoverage(spath, false);
 
-				if (skv.second.type() == json_spirit::array_type && skv.second.get_array().size()) {
+				if (skv.second.type() == json_spirit::array_type && !skv.second.get_array().empty()) {
 					if (skv.second.get_array()[0].type() != json_spirit::str_type)
 						schemaCoverageRequirements(skv.second.get_array()[0].get_obj(), spath + "[0]");
 				} else if (skv.second.type() == json_spirit::obj_type) {
-					if (skv.second.get_obj().count("$enum")) {
+					if (skv.second.get_obj().contains("$enum")) {
 						for (auto& enum_item : skv.second.get_obj().at("$enum").get_array())
 							schemaCoverage(spath + ".$enum." + enum_item.get_str(), false);
 					} else

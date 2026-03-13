@@ -23,7 +23,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/ApiVersion.h"
 
@@ -54,7 +54,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		extraPrefix = backupPrefix.withPrefix("\xfe\xff\xfe"_sr);
 		backupPrefix = backupPrefix.withPrefix("\xfe\xff\xff"_sr);
 
-		ASSERT(backupPrefix != StringRef());
+		ASSERT(!backupPrefix.empty());
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -197,7 +197,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				    co_await tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100);
 
 				// Error if the system keyspace for the backup tag is not empty
-				if (agentValues.size() > 0) {
+				if (!agentValues.empty()) {
 					displaySystemKeys++;
 					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n",
 					       agentValues.size(),
@@ -230,12 +230,12 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 				RangeResult versions = co_await tr->getRange(
 				    KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1);
-				if (!versions.size()) {
+				if (versions.empty()) {
 					RangeResult logValues = co_await tr->getRange(
 					    KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100);
 
 					// Error if the log/mutation keyspace for the backup tag is not empty
-					if (logValues.size() > 0) {
+					if (!logValues.empty()) {
 						displaySystemKeys++;
 						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n",
 						       logValues.size(),

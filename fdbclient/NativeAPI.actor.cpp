@@ -1544,8 +1544,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
                                                             bool generateNewSpan) const {
 
 	SpanContext newSpanContext = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanContext;
-	Reference<TransactionState> newState =
-	    makeReference<TransactionState>(cx, cx->taskID, newSpanContext, newTrLogInfo);
+	auto newState = makeReference<TransactionState>(cx, cx->taskID, newSpanContext, newTrLogInfo);
 
 	if (!cx->apiVersionAtLeast(16)) {
 		newState->options = options;

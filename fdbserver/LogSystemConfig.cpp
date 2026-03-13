@@ -271,7 +271,7 @@ bool LogSystemConfig::isEqualIds(LogSystemConfig const& r) const {
 }
 
 bool LogSystemConfig::isNextGenerationOf(LogSystemConfig const& r) const {
-	if (!oldTLogs.size()) {
+	if (oldTLogs.empty()) {
 		return false;
 	}
 

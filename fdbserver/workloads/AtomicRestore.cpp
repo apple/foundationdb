@@ -25,7 +25,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 // Workload to test atomicRestore().
 
@@ -69,10 +69,10 @@ struct AtomicRestoreWorkload : TestWorkload {
 		// 	}
 		// }
 		TraceEvent("AtomicRestoreWorkload").detail("AddPrefix", addPrefix).detail("RemovePrefix", removePrefix);
-		ASSERT(addPrefix.size() == 0 && removePrefix.size() == 0);
+		ASSERT(addPrefix.empty() && removePrefix.empty());
 		// Do not support removePrefix right now because we must ensure all backup keys have the removePrefix
 		// otherwise, test will fail because fast restore will simply add the removePrefix to every key in the end.
-		ASSERT(removePrefix.size() == 0);
+		ASSERT(removePrefix.empty());
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -87,7 +87,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	bool hasPrefix() const { return addPrefix != ""_sr || removePrefix != ""_sr; }
+	bool hasPrefix() const { return !addPrefix.empty() || !removePrefix.empty(); }
 
 	Future<Void> _start(Database cx) {
 		FileBackupAgent backupAgent;

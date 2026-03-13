@@ -100,7 +100,7 @@ public:
 	}
 
 	uint32_t randomPage() {
-		if (m.size() == 0) {
+		if (m.empty()) {
 			return 0;
 		}
 		auto it = m.begin();
@@ -144,7 +144,7 @@ public:
 	}
 
 	uint32_t leastRecentlyUsedPage() {
-		if (m.size() == 0) {
+		if (m.empty()) {
 			return 0;
 		}
 		return end->prev->page;

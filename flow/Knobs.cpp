@@ -409,7 +409,7 @@ static bool safe_stob(std::string const& str) {
 // invalid_option_value exception.
 ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const& value) const {
 	try {
-		if (double_knobs.count(knob)) {
+		if (double_knobs.contains(knob)) {
 			return safe_stod(value);
 		} else if (bool_knobs.count(knob)) {
 			return safe_stob(value);
@@ -427,7 +427,7 @@ ParsedKnobValue Knobs::parseKnobValue(std::string const& knob, std::string const
 }
 
 bool Knobs::setKnob(std::string const& knob, int value) {
-	if (!int_knobs.count(knob)) {
+	if (!int_knobs.contains(knob)) {
 		return false;
 	}
 	*int_knobs[knob].value = value;
@@ -436,7 +436,7 @@ bool Knobs::setKnob(std::string const& knob, int value) {
 }
 
 bool Knobs::setKnob(std::string const& knob, int64_t value) {
-	if (!int64_knobs.count(knob)) {
+	if (!int64_knobs.contains(knob)) {
 		return false;
 	}
 	*int64_knobs[knob].value = value;
@@ -445,7 +445,7 @@ bool Knobs::setKnob(std::string const& knob, int64_t value) {
 }
 
 bool Knobs::setKnob(std::string const& knob, bool value) {
-	if (!bool_knobs.count(knob)) {
+	if (!bool_knobs.contains(knob)) {
 		return false;
 	}
 	*bool_knobs[knob].value = value;
@@ -454,7 +454,7 @@ bool Knobs::setKnob(std::string const& knob, bool value) {
 }
 
 bool Knobs::setKnob(std::string const& knob, double value) {
-	if (!double_knobs.count(knob)) {
+	if (!double_knobs.contains(knob)) {
 		return false;
 	}
 	*double_knobs[knob].value = value;
@@ -463,7 +463,7 @@ bool Knobs::setKnob(std::string const& knob, double value) {
 }
 
 bool Knobs::setKnob(std::string const& knob, std::string const& value) {
-	if (!string_knobs.count(knob)) {
+	if (!string_knobs.contains(knob)) {
 		return false;
 	}
 	*string_knobs[knob].value = value;
@@ -472,19 +472,19 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 }
 
 ParsedKnobValue Knobs::getKnob(const std::string& name) const {
-	if (double_knobs.count(name) > 0) {
+	if (double_knobs.contains(name)) {
 		return ParsedKnobValue{ *double_knobs.at(name).value };
 	}
-	if (int64_knobs.count(name) > 0) {
+	if (int64_knobs.contains(name)) {
 		return ParsedKnobValue{ *int64_knobs.at(name).value };
 	}
-	if (int_knobs.count(name) > 0) {
+	if (int_knobs.contains(name)) {
 		return ParsedKnobValue{ *int_knobs.at(name).value };
 	}
-	if (string_knobs.count(name) > 0) {
+	if (string_knobs.contains(name)) {
 		return ParsedKnobValue{ *string_knobs.at(name).value };
 	}
-	if (bool_knobs.count(name) > 0) {
+	if (bool_knobs.contains(name)) {
 		return ParsedKnobValue{ *bool_knobs.at(name).value };
 	}
 
@@ -492,35 +492,35 @@ ParsedKnobValue Knobs::getKnob(const std::string& name) const {
 }
 
 void Knobs::initKnob(double& knob, double value, std::string const& name) {
-	if (!explicitlySetKnobs.count(toLower(name))) {
+	if (!explicitlySetKnobs.contains(toLower(name))) {
 		knob = value;
 		double_knobs[toLower(name)] = KnobValue<double>{ &knob };
 	}
 }
 
 void Knobs::initKnob(int64_t& knob, int64_t value, std::string const& name) {
-	if (!explicitlySetKnobs.count(toLower(name))) {
+	if (!explicitlySetKnobs.contains(toLower(name))) {
 		knob = value;
 		int64_knobs[toLower(name)] = KnobValue<int64_t>{ &knob };
 	}
 }
 
 void Knobs::initKnob(int& knob, int value, std::string const& name) {
-	if (!explicitlySetKnobs.count(toLower(name))) {
+	if (!explicitlySetKnobs.contains(toLower(name))) {
 		knob = value;
 		int_knobs[toLower(name)] = KnobValue<int>{ &knob };
 	}
 }
 
 void Knobs::initKnob(std::string& knob, const std::string& value, const std::string& name) {
-	if (!explicitlySetKnobs.count(toLower(name))) {
+	if (!explicitlySetKnobs.contains(toLower(name))) {
 		knob = value;
 		string_knobs[toLower(name)] = KnobValue<std::string>{ &knob };
 	}
 }
 
 void Knobs::initKnob(bool& knob, bool value, std::string const& name) {
-	if (!explicitlySetKnobs.count(toLower(name))) {
+	if (!explicitlySetKnobs.contains(toLower(name))) {
 		knob = value;
 		bool_knobs[toLower(name)] = KnobValue<bool>{ &knob };
 	}

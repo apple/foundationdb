@@ -28,7 +28,7 @@
 #include "fdbserver/Status.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct SnapTestWorkload : TestWorkload {
@@ -236,7 +236,7 @@ public: // workload functions
 				Error err;
 				try {
 					RangeResult kvRange = co_await tr.getRange(begin, end, 1000);
-					if (!kvRange.more && kvRange.size() == 0) {
+					if (!kvRange.more && kvRange.empty()) {
 						TraceEvent("SnapTestNoMoreEntries").log();
 						break;
 					}

@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 struct GetRangeStream : TestWorkload {
 	static constexpr auto NAME = "GetRangeStream";
@@ -86,9 +86,7 @@ struct GetRangeStream : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				co_await tx.onError(err);
-			}
+			co_await tx.onError(err);
 		}
 	}
 
@@ -112,7 +110,7 @@ struct GetRangeStream : TestWorkload {
 						}
 						bytesRead += k.size() + v.size();
 					}
-					if (range.size()) {
+					if (!range.empty()) {
 						next = keyAfter(range.back().key);
 					}
 				}
@@ -125,9 +123,7 @@ struct GetRangeStream : TestWorkload {
 			if (err.code() == error_code_end_of_stream) {
 				break;
 			}
-			if (err.isValid()) {
-				co_await tx.onError(err);
-			}
+			co_await tx.onError(err);
 		}
 	}
 };

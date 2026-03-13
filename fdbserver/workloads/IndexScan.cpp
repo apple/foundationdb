@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 
 struct IndexScanWorkload : KVWorkload {
@@ -123,7 +123,7 @@ struct IndexScanWorkload : KVWorkload {
 					RangeResult r = co_await tr.getRange(begin, end, limits);
 					chunks++;
 					rowsRead += r.size();
-					if (!r.size() || !r.more || (now() - startTime) > transactionDuration) {
+					if (r.empty() || !r.more || (now() - startTime) > transactionDuration) {
 						break;
 					}
 					begin = firstGreaterThan(r[r.size() - 1].key);
