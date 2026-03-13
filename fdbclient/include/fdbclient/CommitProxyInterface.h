@@ -126,7 +126,7 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 	UID clusterId;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy; // Deprecated. Retained in ClientDBInfo serialization.
 
 	ClusterType clusterType = ClusterType::STANDALONE;
 

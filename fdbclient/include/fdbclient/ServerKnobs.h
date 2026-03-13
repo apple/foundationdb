@@ -780,7 +780,6 @@ public:
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
 	double WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY;
 	double WAIT_FOR_BLOB_MANAGER_JOIN_DELAY;
-	double WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY;
 	double WORKER_FAILURE_TIME;
 	double CHECK_OUTSTANDING_INTERVAL;
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -805,7 +804,6 @@ public:
 	                                             // degraded server is considered healthy.
 	double CC_MIN_DEGRADATION_INTERVAL; // The minimum interval that a server is reported as degraded to be considered
 	                                    // as degraded by Cluster Controller.
-	double ENCRYPT_KEY_PROXY_FAILURE_TIME;
 	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
 	                                        // number of degraded peers is more than this value, we will not exclude
 	                                        // this server since it may because of server overload.

@@ -58,7 +58,8 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
-	RequestStream<struct InitializeEncryptKeyProxyRequest> encryptKeyProxy;
+	RequestStream<struct InitializeEncryptKeyProxyRequest>
+	    encryptKeyProxy; // Deprecated. Retained in the serialized WorkerInterface layout for upgrade compatibility.
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -394,7 +395,8 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
+	Optional<EncryptKeyProxyInterface>
+	    encryptKeyProxyInterf; // Deprecated. Retained in the serialized RegisterWorkerRequest layout.
 	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
@@ -826,7 +828,7 @@ struct InitializeEncryptKeyProxyRequest {
 	constexpr static FileIdentifier file_identifier = 4180191;
 	UID reqId;
 	UID interfaceId;
-	ReplyPromise<EncryptKeyProxyInterface> reply;
+	ReplyPromise<EncryptKeyProxyInterface> reply; // Deprecated. Retained for serialized protocol compatibility.
 	EncryptionAtRestModeDeprecated encryptMode;
 
 	InitializeEncryptKeyProxyRequest() {}
@@ -1096,10 +1098,6 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-
-ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
-                                         Reference<AsyncVar<ServerDBInfo>> db,
-                                         EncryptionAtRestModeDeprecated encryptMode);
 
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,

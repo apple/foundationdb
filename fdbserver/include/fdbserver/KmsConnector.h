@@ -30,7 +30,8 @@
 // keys. KmsConnector interface is an abstract interface enabling implementing specialized KMS connector
 // implementations.
 // FDB KMSConnector implementation should inherit from KmsConnector and implement pure virtual function,
-// EncryptKeyProxyServer instantiates desired implementation object based on SERVER_KNOB->KMS_CONNECTOR_TYPE knob.
+// and the remaining compatibility shims instantiate the desired implementation object based on
+// SERVER_KNOB->KMS_CONNECTOR_TYPE.
 
 class KmsConnector : public NonCopyable {
 public:
