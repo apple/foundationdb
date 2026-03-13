@@ -34,7 +34,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// Split RestoreConfigFR defined in FileBackupAgent.actor.cpp to declaration in Restore.actor.h and implementation in
+// Split RestoreConfigFR defined in FileBackupAgent.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
 
 KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
@@ -307,9 +307,9 @@ std::string RestoreConfigFR::toString() {
 	return ss.str();
 }
 
-// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
-// The implementation of parallelFileRestore is copied from FileBackupAgent.actor.cpp
-// parallelFileRestore is copied from FileBackupAgent.actor.cpp for the same reason as RestoreConfigFR is copied
+// parallelFileRestore is copied from FileBackupAgent.cpp for the same reason as RestoreConfigFR is copied
+// The implementation of parallelFileRestore is copied from FileBackupAgent.cpp
+// parallelFileRestore is copied from FileBackupAgent.cpp for the same reason as RestoreConfigFR is copied
 namespace parallelFileRestore {
 
 ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,

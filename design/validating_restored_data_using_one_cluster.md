@@ -75,7 +75,7 @@ Alternative Design Considerations
 
 ## Implementation Details
 
-* **Locking/Unlocking database:** Use the similar api's restore uses locking and unlocking database. [Lock](https://github.com/apple/foundationdb/blob/release-7.4/fdbclient/FileBackupAgent.actor.cpp#L6754) [Unlock](https://github.com/apple/foundationdb/blob/release-7.4/fdbclient/FileBackupAgent.actor.cpp#L4286). Don't allow the restore to unlockDB as we want lock the database until the comparison is done. Restore does lock-aware transactions to bypass this lock.
+* **Locking/Unlocking database:** Use the similar api's restore uses locking and unlocking database. [Lock](https://github.com/apple/foundationdb/blob/release-7.4/fdbclient/FileBackupAgent.cpp#L6754) [Unlock](https://github.com/apple/foundationdb/blob/release-7.4/fdbclient/FileBackupAgent.cpp#L4286). Don't allow the restore to unlockDB as we want lock the database until the comparison is done. Restore does lock-aware transactions to bypass this lock.
 * **Wait until (ReadVersion saved > MaxRestorableVersion) step** in Backup phase: There might be small gap before we save readVersion and lock the DB. Ensure to wait for at least backup_lag_seconds not to miss any mutations in the backup
 * **Restore destination check:** The restore empty destination check is bypassed when `addPrefix.size() > 0` (indicating a validation restore to a prefixed keyspace). For regular restores without a prefix, the check remains enforced to prevent accidental data loss. Note that all restores (validation or regular) will clear and overwrite any existing data at the destination range - this is standard restore behavior.
 * **Audit Storage:**
@@ -83,5 +83,4 @@ Alternative Design Considerations
     * Add new AuditType **ValidateRestore.**
     * New audit actor auditRestoreQ() in StorageServer similar to auditStorageShardReplicaQ()
         * Change the code to read the range appended with the prefix restored_data_prefix. Can compare, update metadata and error mechanism in the same way. [Range](https://github.com/apple/foundationdb/blob/release-7.4/fdbserver/storageserver.actor.cpp#L5671)
-
 

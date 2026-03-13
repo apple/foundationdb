@@ -1,5 +1,5 @@
 /*
- * FileBackupAgent.actor.cpp
+ * FileBackupAgent.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -64,8 +64,6 @@
 #include <unordered_map>
 #include <utility>
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 // Counters to verify BulkDump/BulkLoad were actually used (for test assertions)
 std::atomic<int> g_bulkDumpTaskCompleteCount(0);
 std::atomic<int> g_bulkLoadRestoreTaskCompleteCount(0);
@@ -76,7 +74,7 @@ Future<bool> monitorBulkDumpJobCompletion(Database cx, UID jobId, double timeout
 	double timeoutStart = now();
 	Transaction tr(cx);
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			Optional<BulkDumpState> currentJob = co_await getSubmittedBulkDumpJob(&tr);
@@ -109,7 +107,7 @@ Future<bool> monitorBulkLoadJobCompletion(Database cx,
                                           bool lockAware) {
 	double timeoutStart = now();
 
-	loop {
+	while (true) {
 		Optional<BulkLoadJobState> currentJob = co_await getRunningBulkLoadJob(cx, lockAware);
 		bool stillRunning = currentJob.present() && currentJob.get().getJobId() == jobId;
 
@@ -366,7 +364,7 @@ public:
 		int batchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
 		Optional<KeyRange> begin;
 		Arena arena;
-		loop {
+		while (true) {
 			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
 			    co_await self->restoreRangeSet().getRange(tr, begin, {}, batchSize);
 			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
@@ -2031,7 +2029,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		co_await task->extendMutex.take();
 		FlowLock::Releaser releaser(task->extendMutex, 1);
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2165,7 +2163,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		bool done = false;
 		int64_t nrKeys = 0;
 
-		loop {
+		while (true) {
 			RangeResultWithVersion values;
 			try {
 				RangeResultWithVersion _values = co_await results.getFuture();
@@ -2222,7 +2220,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 				int64_t snapshotRangeFileCount{ 0 };
 
 				Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-				loop {
+				while (true) {
 					Error err;
 					bool hasErr = false;
 					try {
@@ -2408,7 +2406,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		Key beginKey = allKeys.begin;
 
 		// Read all shard boundaries and add them to the map
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2450,7 +2448,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		Optional<int64_t> snapshotBatchSize;
 
 		tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2512,7 +2510,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		std::vector<std::pair<Key, bool>> dispatchBoundaries;
 		tr->reset();
 		beginKey = allKeys.begin;
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2743,7 +2741,7 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 
 			// Now add the selected ranges in a single transaction.
 			tr->reset();
-			loop {
+			while (true) {
 				Error err;
 				bool hasErr = false;
 				try {
@@ -2976,7 +2974,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		Reference<IBackupContainer> bc;
 
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		loop {
+		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// Wait for the read version to pass endVersion
@@ -3060,7 +3058,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 			Error caughtErr;
 			bool hasCaughtErr = false;
 			try {
-				loop {
+				while (true) {
 					RangeResultWithVersion r = co_await results.getFuture();
 					lock->release(r.first.expectedSize());
 
@@ -3533,7 +3531,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 		Key startKey;
 		int batchSize = BUGGIFY ? 1 : 1000000;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -3794,7 +3792,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// agent). If so, we'll monitor that job instead of submitting a new one. This prevents the "Conflict to
 				// a running BulkDump job" error that occurs when multiple backup agents try to run the same task.
 				Transaction checkTr(cx);
-				loop {
+				while (true) {
 					Error err;
 					bool hasErr = false;
 					try {
@@ -4004,7 +4002,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		BackupConfig config(task);
 		Future<Optional<bool>> partitionedLog;
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -4034,7 +4032,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		}
 
 		// Get start version after backup worker are enabled
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -4057,7 +4055,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 
 		// Set the "backupStartedKey" and wait for all backup worker started
 		tr->reset();
-		loop {
+		while (true) {
 			Future<Void> watchFuture;
 			{
 				Error err;
@@ -4661,7 +4659,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		Future<Key> addPrefix;
 		Future<Key> removePrefix;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -4754,7 +4752,7 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 			tr->reset();
-			loop {
+			while (true) {
 				Error err;
 				bool hasErr = false;
 				try {
@@ -5102,7 +5100,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -5143,7 +5141,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 		    BUGGIFY ? deterministicRandom()->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
 		tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -5477,7 +5475,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		// a _finish method
 		// this transaction does blind writes, so they are idempotent operations even if multiple instances of
 		// the same tasks are running these transactions.
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -5538,7 +5536,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		Reference<IBackupContainer> bc;
 		std::vector<KeyRange> ranges; // this is the actual KV, not version
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -5611,7 +5609,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		std::vector<Standalone<VectorRef<KeyValueRef>>> mutations;
 		int64_t totalBytes = 0;
 		Standalone<VectorRef<KeyValueRef>> oneVersionData;
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -6417,7 +6415,7 @@ Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key 
 Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			ERestoreState estate = co_await abortRestore(tr, tagName);
@@ -6436,7 +6434,7 @@ Future<ERestoreState> abortRestore(Database cx, Key tagName) {
 
 	// Commit a dummy transaction before returning success, to ensure the mutation applier has stopped submitting
 	// mutations
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -6476,7 +6474,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		bool logsOnly{ false };
 		bool inconsistentSnapshotOnly{ false };
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -6520,7 +6518,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		}
 
 		tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -6605,7 +6603,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		Params.firstVersion().set(task, beginVersion);
 
 		tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -6935,7 +6933,7 @@ public:
 		Optional<Value> restoreRequestDoneKeyValue;
 		TraceEvent("FastRestoreToolWaitForRestoreToFinish").detail("DBLock", randomUID);
 		// TODO: register watch first and then check if the key exist
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -7023,7 +7021,7 @@ public:
 		int restoreIndex = 0;
 		int numTries = 0;
 		// lock DB for restore
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -7051,7 +7049,7 @@ public:
 		// set up restore request
 		tr->reset();
 		numTries = 0;
-		loop {
+		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			{
@@ -7105,7 +7103,7 @@ public:
 		std::string backTrace;
 		KeyBackedTag tag = makeBackupTag(tagName);
 
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -7414,7 +7412,7 @@ public:
 	// This method will return the final status of the backup
 	static Future<ERestoreState> waitRestore(Database cx, Key tagName, Verbose verbose) {
 		ERestoreState status;
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			{
 				Error err;
@@ -7563,7 +7561,7 @@ public:
 	static Future<Void> changePause(FileBackupAgent* backupAgent, Database db, bool pause) {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(db));
 
-		loop {
+		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -7625,7 +7623,7 @@ public:
 	static Future<std::string> getStatusJSON(FileBackupAgent* backupAgent, Database cx, std::string tagName) {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -7786,7 +7784,7 @@ public:
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		std::string statusText;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8107,7 +8105,7 @@ public:
 		}
 
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8165,7 +8163,7 @@ public:
 		Reference<ReadYourWritesTransaction> ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8194,7 +8192,7 @@ public:
 		Transaction tr(cx);
 		Version commitVersion{ 0 };
 		UID randomUid = deterministicRandom()->randomUniqueID();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8216,7 +8214,7 @@ public:
 		}
 
 		ryw_tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8238,7 +8236,7 @@ public:
 		}
 
 		ryw_tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8262,7 +8260,7 @@ public:
 		TraceEvent("AS_BackupStopped").log();
 
 		ryw_tr->reset();
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -8340,7 +8338,7 @@ public:
 				                         randomUid));
 				Reference<ReadYourWritesTransaction> rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
-				loop {
+				while (true) {
 					Error err;
 					bool hasErr = false;
 					try {
@@ -8717,7 +8715,7 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 
 	// Sanity check data has been written to DB
 	ReadYourWritesTransaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -8754,7 +8752,7 @@ static Future<Void> transformDatabaseContents(Database cx,
 	    .detail("AddPrefix", addPrefix)
 	    .detail("RemovePrefix", removePrefix);
 	int i = 0;
-	loop { // Read all data from DB
+	while (true) { // Read all data from DB
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -8824,7 +8822,7 @@ static Future<Void> transformDatabaseContents(Database cx,
 
 	// Sanity check to ensure no data in the ranges
 	tr.reset();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -8844,7 +8842,7 @@ static Future<Void> transformDatabaseContents(Database cx,
 	}
 
 	// Write transformed KVs (i.e., kv backup took) back to DB
-	loop {
+	while (true) {
 		Error err;
 		try {
 			std::vector<Future<Void>> fwrites;
@@ -8865,7 +8863,7 @@ static Future<Void> transformDatabaseContents(Database cx,
 
 	// Sanity check
 	tr.reset();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
