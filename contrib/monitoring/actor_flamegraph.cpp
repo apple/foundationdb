@@ -113,11 +113,11 @@ public:
 					actor->stack.push_back(currentStack.top()->name);
 				}
 			} else if (op == OP_DESTROY) {
-				if (actors.count(id)) {
+				if (actors.contains(id)) {
 					actors.erase(id);
 				}
 			} else if (op == OP_ENTER) {
-				if (actors.count(id) == 0) {
+				if (!actors.contains(id)) {
 					actors[id] = std::make_shared<Actor>(results, id, name);
 				}
 				currentStack.push(actors[id]);

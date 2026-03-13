@@ -206,7 +206,7 @@ TEST_CASE("/KeyRangeUtil/KeyRangeComplement") {
 		Key b = "a"_sr;
 		Key e = "z"_sr;
 		std::vector<KeyRangeRef> result = range - KeyRangeRef(b, e);
-		ASSERT(result.size() == 0);
+		ASSERT(result.empty());
 	}
 
 	return Void();

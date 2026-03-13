@@ -137,7 +137,7 @@ TestSpec readTomlTestSpec(std::string fileName) {
 
 	// Then parse each test
 	const toml::array& tests = toml::find(conf, "test").as_array();
-	if (tests.size() == 0) {
+	if (tests.empty()) {
 		throw TesterError("Invalid test file. No [test] section found");
 	} else if (tests.size() > 1) {
 		throw TesterError("Invalid test file. More than one [test] section found");

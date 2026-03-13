@@ -89,7 +89,7 @@ private:
 		statusObj["CommitProxies"] = commitProxyArr;
 
 		// Update health status
-		if (clientInfo.grvProxies.size() == 0 || clientInfo.commitProxies.size() == 0) {
+		if (clientInfo.grvProxies.empty() || clientInfo.commitProxies.empty()) {
 			healthy = false;
 		}
 	}
