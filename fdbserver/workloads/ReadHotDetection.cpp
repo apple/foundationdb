@@ -21,7 +21,7 @@
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
@@ -130,9 +130,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				err = e;
 			}
 			// TraceEvent("RHDCheckPhaseReadGotError").error(e);
-			if (err.isValid()) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 

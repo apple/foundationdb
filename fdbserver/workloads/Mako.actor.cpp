@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/zipf.h"
 #include "crc32/crc32c.h"
@@ -176,7 +176,7 @@ struct MakoWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (doChecksumVerificationOnly)
 			return Void();
-		return _start(cx);
+		return _start(cx, this);
 	}
 
 	Future<bool> check(Database const& cx) override {
@@ -400,13 +400,13 @@ struct MakoWorkload : TestWorkload {
 		}
 	}
 
-	Future<Void> _start(Database cx) {
-		// TODO: Do I need to read data to warm the cache of the keySystem like ReadWrite.actor.cpp (line 465)?
-		if (runBenchmark) {
-			co_await _runBenchmark(cx, this);
+	Future<Void> _start(Database cx, MakoWorkload* self) {
+		// TODO: Do I need to read data to warm the cache of the keySystem like ReadWrite.cpp (line 465)?
+		if (self->runBenchmark) {
+			co_await self->_runBenchmark(cx, self);
 		}
-		if (!preserveData && clientId == 0) {
-			co_await cleanup(cx, this);
+		if (!self->preserveData && self->clientId == 0) {
+			co_await self->cleanup(cx, self);
 		}
 	}
 
@@ -627,15 +627,13 @@ struct MakoWorkload : TestWorkload {
 			} catch (Error& e) {
 				err = e;
 			}
-			if (err.isValid()) {
-				TraceEvent("FailedToExecOperations").error(err);
-				if (err.code() == error_code_operation_cancelled)
-					throw err;
-				else if (err.code() == error_code_not_committed)
-					++self->conflicts;
-				co_await tr.onError(err);
-				++self->retries;
-			}
+			TraceEvent("FailedToExecOperations").error(err);
+			if (err.code() == error_code_operation_cancelled)
+				throw err;
+			else if (err.code() == error_code_not_committed)
+				++self->conflicts;
+			co_await tr.onError(err);
+			++self->retries;
 			// reset all the operations' counters to 0
 			std::fill(perOpCount.begin(), perOpCount.end(), 0);
 			tr.reset();

@@ -1,5 +1,5 @@
 /*
- * WriteDuringRead.actor.cpp
+ * WriteDuringRead.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/Atomic.h"
 #include "flow/ApiVersion.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 struct WriteDuringReadWorkload : TestWorkload {
 	static constexpr auto NAME = "WriteDuringRead";
@@ -156,23 +156,23 @@ struct WriteDuringReadWorkload : TestWorkload {
 		return iter->first;
 	}
 
-	ACTOR Future<Void> getKeyAndCompare(ReadYourWritesTransaction* tr,
-	                                    KeySelector key,
-	                                    Snapshot snapshot,
-	                                    bool readYourWritesDisabled,
-	                                    bool snapshotRYWDisabled,
-	                                    WriteDuringReadWorkload* self,
-	                                    bool* doingCommit,
-	                                    int64_t* memLimit) {
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+	Future<Void> getKeyAndCompare(ReadYourWritesTransaction* tr,
+	                              KeySelector key,
+	                              Snapshot snapshot,
+	                              bool readYourWritesDisabled,
+	                              bool snapshotRYWDisabled,
+	                              WriteDuringReadWorkload* self,
+	                              bool* doingCommit,
+	                              int64_t* memLimit) {
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 		//TraceEvent("WDRGetKey", randomID);
 		try {
-			state Key memRes = self->memoryGetKey(readYourWritesDisabled || (snapshot && snapshotRYWDisabled)
-			                                          ? &self->lastCommittedDatabase
-			                                          : &self->memoryDatabase,
-			                                      key);
+			Key memRes = self->memoryGetKey(readYourWritesDisabled || (snapshot && snapshotRYWDisabled)
+			                                    ? &self->lastCommittedDatabase
+			                                    : &self->memoryDatabase,
+			                                key);
 			*memLimit -= memRes.expectedSize();
-			Key _res = wait(tr->getKey(key, snapshot));
+			Key _res = co_await tr->getKey(key, snapshot);
 			Key res = _res;
 			*memLimit += memRes.expectedSize();
 			if (self->useSystemKeys && res > self->getKeyForIndex(self->nodes))
@@ -187,14 +187,14 @@ struct WriteDuringReadWorkload : TestWorkload {
 				    .detail("DbResult", res);
 				self->success = false;
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			//TraceEvent("WDRGetKeyError", randomID).error(e,true);
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
-				return Void();
+				co_return;
 			} else if (e.code() == error_code_transaction_cancelled)
-				return Void();
+				co_return;
 			throw;
 		}
 	}
@@ -215,7 +215,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		Standalone<VectorRef<KeyValueRef>> results;
 		if (reverse) {
-			loop {
+			while (true) {
 				if (beginIter == endIter || limit.reachedBy(results))
 					break;
 
@@ -229,25 +229,25 @@ struct WriteDuringReadWorkload : TestWorkload {
 		return results;
 	}
 
-	ACTOR Future<Void> getRangeAndCompare(ReadYourWritesTransaction* tr,
-	                                      KeySelector begin,
-	                                      KeySelector end,
-	                                      GetRangeLimits limit,
-	                                      Snapshot snapshot,
-	                                      Reverse reverse,
-	                                      bool readYourWritesDisabled,
-	                                      bool snapshotRYWDisabled,
-	                                      WriteDuringReadWorkload* self,
-	                                      bool* doingCommit,
-	                                      int64_t* memLimit) {
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+	Future<Void> getRangeAndCompare(ReadYourWritesTransaction* tr,
+	                                KeySelector begin,
+	                                KeySelector end,
+	                                GetRangeLimits limit,
+	                                Snapshot snapshot,
+	                                Reverse reverse,
+	                                bool readYourWritesDisabled,
+	                                bool snapshotRYWDisabled,
+	                                WriteDuringReadWorkload* self,
+	                                bool* doingCommit,
+	                                int64_t* memLimit) {
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 		/*TraceEvent("WDRGetRange", randomID).detail("BeginKey", begin.getKey()).detail("BeginOffset", begin.offset).detail("BeginOrEqual", begin.orEqual)
 		    .detail("EndKey", end.getKey()).detail("EndOffset", end.offset).detail("EndOrEqual", end.orEqual)
 		    .detail("Limit", limit.rows).detail("Snapshot", snapshot).detail("Reverse",
 		   reverse).detail("ReadYourWritesDisabled", readYourWritesDisabled);*/
 
 		try {
-			state Standalone<VectorRef<KeyValueRef>> memRes = self->memoryGetRange(
+			Standalone<VectorRef<KeyValueRef>> memRes = self->memoryGetRange(
 			    readYourWritesDisabled || (snapshot && snapshotRYWDisabled) ? &self->lastCommittedDatabase
 			                                                                : &self->memoryDatabase,
 			    begin,
@@ -255,7 +255,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    limit,
 			    reverse);
 			*memLimit -= memRes.expectedSize();
-			RangeResult _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
+			RangeResult _res = co_await tr->getRange(begin, end, limit, snapshot, reverse);
 			RangeResult res = _res;
 			*memLimit += memRes.expectedSize();
 
@@ -301,7 +301,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 					    .detail("ReadYourWritesDisabled", readYourWritesDisabled);
 
 					self->success = false;
-					return Void();
+					co_return;
 				}
 
 				for (int i = 0; i < res.size(); i++) {
@@ -325,7 +325,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						    .detail("DbResultValueSize", res[i].value.size())
 						    .detail("ReadYourWritesDisabled", readYourWritesDisabled);
 						self->success = false;
-						return Void();
+						co_return;
 					}
 				}
 			} else {
@@ -349,7 +349,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 					    .detail("SystemKeyCount", systemKeyCount);
 
 					self->success = false;
-					return Void();
+					co_return;
 				}
 
 				for (int i = 0; i < res.size(); i++) {
@@ -374,18 +374,18 @@ struct WriteDuringReadWorkload : TestWorkload {
 						    .detail("ReadYourWritesDisabled", readYourWritesDisabled)
 						    .detail("More", res.more);
 						self->success = false;
-						return Void();
+						co_return;
 					}
 				}
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			//TraceEvent("WDRGetRangeError", randomID).error(e,true);
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
-				return Void();
+				co_return;
 			} else if (e.code() == error_code_transaction_cancelled)
-				return Void();
+				co_return;
 			throw;
 		}
 	}
@@ -398,23 +398,23 @@ struct WriteDuringReadWorkload : TestWorkload {
 			return iter->second;
 	}
 
-	ACTOR Future<Void> getAndCompare(ReadYourWritesTransaction* tr,
-	                                 Key key,
-	                                 Snapshot snapshot,
-	                                 bool readYourWritesDisabled,
-	                                 bool snapshotRYWDisabled,
-	                                 WriteDuringReadWorkload* self,
-	                                 bool* doingCommit,
-	                                 int64_t* memLimit) {
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+	Future<Void> getAndCompare(ReadYourWritesTransaction* tr,
+	                           Key key,
+	                           Snapshot snapshot,
+	                           bool readYourWritesDisabled,
+	                           bool snapshotRYWDisabled,
+	                           WriteDuringReadWorkload* self,
+	                           bool* doingCommit,
+	                           int64_t* memLimit) {
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 		//TraceEvent("WDRGet", randomID);
 		try {
-			state Optional<Value> memRes = self->memoryGet(readYourWritesDisabled || (snapshot && snapshotRYWDisabled)
-			                                                   ? &self->lastCommittedDatabase
-			                                                   : &self->memoryDatabase,
-			                                               key);
+			Optional<Value> memRes = self->memoryGet(readYourWritesDisabled || (snapshot && snapshotRYWDisabled)
+			                                             ? &self->lastCommittedDatabase
+			                                             : &self->memoryDatabase,
+			                                         key);
 			*memLimit -= memRes.expectedSize();
-			Optional<Value> res = wait(tr->get(key, snapshot));
+			Optional<Value> res = co_await tr->get(key, snapshot);
 			*memLimit += memRes.expectedSize();
 			if (res != memRes) {
 				TraceEvent(SevError, "WDRGetWrongResult", randomID)
@@ -425,84 +425,85 @@ struct WriteDuringReadWorkload : TestWorkload {
 				    .detail("RywDisable", readYourWritesDisabled);
 				self->success = false;
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			//TraceEvent("WDRGetError", randomID).error(e,true);
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
-				return Void();
+				co_return;
 			} else if (e.code() == error_code_transaction_cancelled)
-				return Void();
+				co_return;
 			throw;
 		}
 	}
 
-	ACTOR Future<Void> watchAndCompare(ReadYourWritesTransaction* tr,
-	                                   Key key,
-	                                   bool readYourWritesDisabled,
-	                                   WriteDuringReadWorkload* self,
-	                                   bool* doingCommit,
-	                                   int64_t* memLimit) {
-		state UID randomID = nondeterministicRandom()->randomUniqueID();
+	Future<Void> watchAndCompare(ReadYourWritesTransaction* tr,
+	                             Key key,
+	                             bool readYourWritesDisabled,
+	                             WriteDuringReadWorkload* self,
+	                             bool* doingCommit,
+	                             int64_t* memLimit) {
+		UID randomID = nondeterministicRandom()->randomUniqueID();
 		// SOMEDAY: test setting a low outstanding watch limit
 		if (readYourWritesDisabled) // Only tests RYW activated watches
-			return Void();
+			co_return;
 
 		//TraceEvent("WDRWatch", randomID).detail("Key", key);
 		try {
-			state int changeNum = self->changeCount[key];
-			state Optional<Value> memRes = self->memoryGet(&self->memoryDatabase, key);
+			int changeNum = self->changeCount[key];
+			Optional<Value> memRes = self->memoryGet(&self->memoryDatabase, key);
 			*memLimit -= memRes.expectedSize();
 
 			// This if block prevents formatting issues with clang-format
 			if (1) {
-				choose {
-					when(wait(tr->watch(key))) {
-						if (changeNum == self->changeCount[key]) {
-							TraceEvent(SevError, "WDRWatchWrongResult", randomID)
-							    .detail("Reason", "Triggered without changing")
-							    .detail("Key", key)
-							    .detail("Value", changeNum)
-							    .detail("DuringCommit", *doingCommit);
-						}
+				auto choice = co_await race(tr->watch(key), self->finished.onTrigger());
+				if (choice.index() == 0) {
+					if (changeNum == self->changeCount[key]) {
+						TraceEvent(SevError, "WDRWatchWrongResult", randomID)
+						    .detail("Reason", "Triggered without changing")
+						    .detail("Key", key)
+						    .detail("Value", changeNum)
+						    .detail("DuringCommit", *doingCommit);
 					}
-					when(wait(self->finished.onTrigger())) {
-						Optional<Value> memRes2 = self->memoryGet(&self->memoryDatabase, key);
-						if (memRes != memRes2) {
-							TraceEvent(SevError, "WDRWatchWrongResult", randomID)
-							    .detail("Reason", "Changed without triggering")
-							    .detail("Key", key)
-							    .detail("Value1", memRes)
-							    .detail("Value2", memRes2);
-						}
+				} else if (choice.index() == 1) {
+
+					Optional<Value> memRes2 = self->memoryGet(&self->memoryDatabase, key);
+					if (memRes != memRes2) {
+						TraceEvent(SevError, "WDRWatchWrongResult", randomID)
+						    .detail("Reason", "Changed without triggering")
+						    .detail("Key", key)
+						    .detail("Value1", memRes)
+						    .detail("Value2", memRes2);
 					}
+				} else {
+					UNREACHABLE();
 				}
 			}
 			*memLimit += memRes.expectedSize();
 
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			// check for transaction cancelled if the watch was not committed
 			//TraceEvent("WDRWatchError", randomID).error(e,true);
 			if (e.code() == error_code_used_during_commit) {
 				ASSERT(*doingCommit);
-				return Void();
+				co_return;
 			} else if (e.code() == error_code_transaction_cancelled)
-				return Void();
+				co_return;
 			throw;
 		}
 	}
 
-	ACTOR Future<Void> commitAndUpdateMemory(ReadYourWritesTransaction* tr,
-	                                         WriteDuringReadWorkload* self,
-	                                         bool* cancelled,
-	                                         bool readYourWritesDisabled,
-	                                         bool snapshotRYWDisabled,
-	                                         bool readAheadDisabled,
-	                                         bool useBatchPriority,
-	                                         bool* doingCommit,
-	                                         double* startTime,
-	                                         Key timebombStr) {
+	Future<Void> commitAndUpdateMemory(ReadYourWritesTransaction* tr,
+	                                   WriteDuringReadWorkload* self,
+	                                   bool* cancelled,
+	                                   bool readYourWritesDisabled,
+	                                   bool snapshotRYWDisabled,
+	                                   bool readAheadDisabled,
+	                                   bool useBatchPriority,
+	                                   bool* doingCommit,
+	                                   double* startTime,
+	                                   Key timebombStr) {
 		// state UID randomID = nondeterministicRandom()->randomUniqueID();
 		//TraceEvent("WDRCommit", randomID);
 		try {
@@ -548,10 +549,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 				}
 			}
 
-			state int64_t txnSize = tr->getApproximateSize();
-			state std::map<Key, Value> committedDB = self->memoryDatabase;
+			int64_t txnSize = tr->getApproximateSize();
+			std::map<Key, Value> committedDB = self->memoryDatabase;
 			*doingCommit = true;
-			wait(tr->commit());
+			co_await tr->commit();
 			*doingCommit = false;
 			self->finished.trigger();
 			self->dataWritten += txnSize;
@@ -579,7 +580,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			//TraceEvent("WDRCommitSuccess", randomID).detail("CommittedVersion", tr->getCommittedVersion());
 			self->lastCommittedDatabase = committedDB;
 
-			return Void();
+			co_return;
 		} catch (Error& e) {
 			//TraceEvent("WDRCommitCancelled", randomID).error(e,true);
 			if (e.code() == error_code_actor_cancelled || e.code() == error_code_transaction_cancelled ||
@@ -608,43 +609,46 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	// Prevent a write only transaction whose commit was previously cancelled from being reordered after this
 	// transaction
-	ACTOR Future<Void> writeBarrier(Database cx) {
-		state Transaction tr(cx);
-		loop {
+	Future<Void> writeBarrier(Database cx) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				// Write-only transactions have a self-conflict in the system keys
 				tr.addWriteConflictRange(allKeys);
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
-		state double startTime = now();
-		loop {
-			wait(self->writeBarrier(cx));
+	Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
+		double startTime = now();
+		while (true) {
+			co_await self->writeBarrier(cx);
 
-			state int i = 0;
-			state int keysPerBatch =
+			int i = 0;
+			int keysPerBatch =
 			    std::min<int64_t>(1000,
 			                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 6 /
 			                              (self->getKeyForIndex(self->nodes).size() + self->valueSizeRange.second));
 			self->memoryDatabase = std::map<Key, Value>();
 			for (; i < self->nodes; i += keysPerBatch) {
-				state Transaction tr(cx);
-				loop {
+				Transaction tr(cx);
+				while (true) {
+					Error err;
 					try {
 						if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
-							return Void();
+							co_return;
 						if (self->useSystemKeys)
 							tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-						state int64_t txnSize = 0;
+						int64_t txnSize = 0;
 						if (i == 0) {
 							tr.clear(normalKeys);
 						}
@@ -668,36 +672,37 @@ struct WriteDuringReadWorkload : TestWorkload {
 								}
 							}
 						}
-						wait(tr.commit());
+						co_await tr.commit();
 						self->dataWritten += txnSize;
 						//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr.getCommittedVersion());
 						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						err = e;
 					}
+					co_await tr.onError(err);
 				}
 			}
 			self->lastCommittedDatabase = self->memoryDatabase;
 			self->addedConflicts.insert(allKeys, false);
 			//TraceEvent("WDRInit");
 
-			loop {
-				wait(delay(now() - startTime > self->slowModeStart ||
-				                   (g_network->isSimulated() && g_simulator->speedUpSimulation)
-				               ? 1.0
-				               : 0.1));
+			while (true) {
+				co_await delay(now() - startTime > self->slowModeStart ||
+				                       (g_network->isSimulated() && g_simulator->speedUpSimulation)
+				                   ? 1.0
+				                   : 0.1);
 				try {
-					wait(self->randomTransaction(
+					co_await self->randomTransaction(
 					    (self->useExtraDB && deterministicRandom()->random01() < 0.5) ? self->extraDB : cx,
 					    self,
-					    startTime));
+					    startTime);
 				} catch (Error& e) {
 					if (e.code() != error_code_not_committed)
 						throw;
 					break;
 				}
 				if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
-					return Void();
+					co_return;
 			}
 		}
 	}
@@ -775,49 +780,49 @@ struct WriteDuringReadWorkload : TestWorkload {
 		return Value();
 	}
 
-	ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self, double testStartTime) {
-		state ReadYourWritesTransaction tr(cx);
-		state bool readYourWritesDisabled = deterministicRandom()->random01() < 0.5;
-		state bool readAheadDisabled = deterministicRandom()->random01() < 0.5;
-		state bool snapshotRYWDisabled = deterministicRandom()->random01() < 0.5;
-		state bool useBatchPriority = deterministicRandom()->random01() < 0.5;
-		state int64_t timebomb =
+	Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self, double testStartTime) {
+		ReadYourWritesTransaction tr(cx);
+		bool readYourWritesDisabled = deterministicRandom()->random01() < 0.5;
+		bool readAheadDisabled = deterministicRandom()->random01() < 0.5;
+		bool snapshotRYWDisabled = deterministicRandom()->random01() < 0.5;
+		bool useBatchPriority = deterministicRandom()->random01() < 0.5;
+		int64_t timebomb =
 		    (FLOW_KNOBS->MAX_BUGGIFIED_DELAY == 0.0 && deterministicRandom()->random01() < 0.01)
 		        ? deterministicRandom()->randomInt64(1, 6000)
 		        : 0; // timebomb check can fail incorrectly if simulation injects delay longer than the timebomb
-		state std::vector<Future<Void>> operations;
-		state ActorCollection commits(false);
-		state std::vector<Future<Void>> watches;
-		state int changeNum = 1;
-		state bool doingCommit = false;
-		state int waitLocation = 0;
-		state double startTime = now();
+		std::vector<Future<Void>> operations;
+		ActorCollection commits(false);
+		std::vector<Future<Void>> watches;
+		int changeNum = 1;
+		bool doingCommit = false;
+		int waitLocation = 0;
+		double startTime = now();
 
-		state bool disableGetKey = BUGGIFY;
-		state bool disableGetRange = BUGGIFY;
-		state bool disableGet = BUGGIFY;
-		state bool disableCommit = BUGGIFY;
-		state bool disableClearRange = BUGGIFY;
-		state bool disableClear = BUGGIFY;
-		state bool disableWatch = BUGGIFY;
-		state bool disableWriteConflictRange = BUGGIFY;
-		state bool disableDelay = BUGGIFY;
-		state bool disableReset = BUGGIFY;
-		state bool disableReadConflictRange = BUGGIFY;
-		state bool disableSet = BUGGIFY;
-		state bool disableAtomicOp = BUGGIFY;
+		bool disableGetKey = BUGGIFY;
+		bool disableGetRange = BUGGIFY;
+		bool disableGet = BUGGIFY;
+		bool disableCommit = BUGGIFY;
+		bool disableClearRange = BUGGIFY;
+		bool disableClear = BUGGIFY;
+		bool disableWatch = BUGGIFY;
+		bool disableWriteConflictRange = BUGGIFY;
+		bool disableDelay = BUGGIFY;
+		bool disableReset = BUGGIFY;
+		bool disableReadConflictRange = BUGGIFY;
+		bool disableSet = BUGGIFY;
+		bool disableAtomicOp = BUGGIFY;
 
-		state Key timebombStr = makeString(8);
+		Key timebombStr = makeString(8);
 		uint8_t* data = mutateString(timebombStr);
 		memcpy(data, &timebomb, 8);
 
-		loop {
+		while (true) {
 			if (now() - testStartTime > self->testDuration) {
-				return Void();
+				co_return;
 			}
 
-			state int64_t memLimit = 1e8;
-			state bool cancelled = false;
+			int64_t memLimit = 1e8;
+			bool cancelled = false;
 			if (readYourWritesDisabled)
 				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 			if (snapshotRYWDisabled)
@@ -831,244 +836,256 @@ struct WriteDuringReadWorkload : TestWorkload {
 			tr.setOption(FDBTransactionOptions::TIMEOUT, timebombStr);
 			tr.addWriteConflictRange(self->conflictRange);
 			self->addedConflicts.insert(self->conflictRange, true);
-			try {
-				state int numWaits = deterministicRandom()->randomInt(1, 5);
-				state int i = 0;
-				for (; i < numWaits && memLimit > 0; i++) {
-					//TraceEvent("WDROps").detail("Count", i).detail("Max", numWaits).detail("ReadYourWritesDisabled",readYourWritesDisabled);
-					state int numOps = deterministicRandom()->randomInt(1, self->numOps);
-					state int j = 0;
-					for (; j < numOps && memLimit > 0; j++) {
-						if (commits.getResult().isError())
-							throw commits.getResult().getError();
-						try {
-							state int operationType = deterministicRandom()->randomInt(0, 21);
-							if (operationType == 0 && !disableGetKey) {
-								operations.push_back(
-								    self->getKeyAndCompare(&tr,
-								                           self->getRandomKeySelector(),
-								                           Snapshot{ deterministicRandom()->coinflip() },
-								                           readYourWritesDisabled,
-								                           snapshotRYWDisabled,
-								                           self,
-								                           &doingCommit,
-								                           &memLimit));
-							} else if (operationType == 1 && !disableGetRange) {
-								operations.push_back(
-								    self->getRangeAndCompare(&tr,
-								                             self->getRandomKeySelector(),
-								                             self->getRandomKeySelector(),
-								                             self->getRandomLimits(),
-								                             Snapshot{ deterministicRandom()->coinflip() },
-								                             Reverse{ deterministicRandom()->coinflip() },
-								                             readYourWritesDisabled,
-								                             snapshotRYWDisabled,
-								                             self,
-								                             &doingCommit,
-								                             &memLimit));
-							} else if (operationType == 2 && !disableGet) {
-								operations.push_back(self->getAndCompare(&tr,
-								                                         self->getRandomKey(),
-								                                         Snapshot{ deterministicRandom()->coinflip() },
-								                                         readYourWritesDisabled,
-								                                         snapshotRYWDisabled,
-								                                         self,
-								                                         &doingCommit,
-								                                         &memLimit));
-							} else if (operationType == 3 && !disableCommit) {
-								if (!self->rarelyCommit || deterministicRandom()->random01() < 1.0 / self->numOps) {
-									Future<Void> commit = self->commitAndUpdateMemory(&tr,
-									                                                  self,
-									                                                  &cancelled,
-									                                                  readYourWritesDisabled,
-									                                                  snapshotRYWDisabled,
-									                                                  readAheadDisabled,
-									                                                  useBatchPriority,
-									                                                  &doingCommit,
-									                                                  &startTime,
-									                                                  timebombStr);
-									operations.push_back(commit);
-									commits.add(commit);
-								}
-							} else if (operationType == 4 && !disableClearRange) {
-								KeyRange range = self->getRandomRange(self->maxClearSize);
-								self->changeCount.insert(range, changeNum++);
-								bool noConflict = deterministicRandom()->random01() < 0.5;
-								//TraceEvent("WDRClearRange").detail("Begin", range).detail("NoConflict", noConflict);
-								if (noConflict)
-									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-								tr.clear(range);
-								if (!noConflict) {
-									KeyRangeRef conflict(
-									    range.begin.substr(
-									        0, std::min<int>(range.begin.size(), getMaxClearKeySize(range.begin) + 1)),
-									    range.end.substr(
-									        0, std::min<int>(range.end.size(), getMaxClearKeySize(range.end) + 1)));
-									self->addedConflicts.insert(conflict, true);
-								}
-								self->memoryDatabase.erase(self->memoryDatabase.lower_bound(range.begin),
-								                           self->memoryDatabase.lower_bound(range.end));
-							} else if (operationType == 5 && !disableClear) {
-								Key key = self->getRandomKey();
-								self->changeCount.insert(key, changeNum++);
-								bool noConflict = deterministicRandom()->random01() < 0.5;
-								//TraceEvent("WDRClear").detail("Key", key).detail("NoConflict", noConflict);
-								if (noConflict)
-									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-								tr.clear(key);
-								if (!noConflict && key.size() <= getMaxClearKeySize(key)) {
-									self->addedConflicts.insert(key, true);
-								}
-								self->memoryDatabase.erase(key);
-							} else if (operationType == 6 && !disableWatch) {
-								watches.push_back(self->watchAndCompare(
-								    &tr, self->getRandomKey(), readYourWritesDisabled, self, &doingCommit, &memLimit));
-							} else if (operationType == 7 && !disableWriteConflictRange) {
-								KeyRange range = self->getRandomRange(self->nodes);
-								//TraceEvent("WDRAddWriteConflict").detail("Range", range);
-								tr.addWriteConflictRange(range);
-								KeyRangeRef conflict(
-								    range.begin.substr(
-								        0, std::min<int>(range.begin.size(), getMaxKeySize(range.begin) + 1)),
-								    range.end.substr(0, std::min<int>(range.end.size(), getMaxKeySize(range.end) + 1)));
-								self->addedConflicts.insert(conflict, true);
-							} else if (operationType == 8 && !disableDelay) {
-								double maxTime = 6.0;
-								if (timebomb > 0)
-									maxTime = startTime + timebomb / 1000.0 - now();
-								operations.push_back(
-								    delay(deterministicRandom()->random01() * deterministicRandom()->random01() *
-								          deterministicRandom()->random01() * maxTime));
-							} else if (operationType == 9 && !disableReset) {
-								if (deterministicRandom()->random01() < 0.001) {
-									//TraceEvent("WDRReset");
-									tr.reset();
-									self->memoryDatabase = self->lastCommittedDatabase;
-									self->addedConflicts.insert(allKeys, false);
-									if (readYourWritesDisabled)
-										tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-									if (snapshotRYWDisabled)
-										tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
-									if (readAheadDisabled)
-										tr.setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
-									if (self->useSystemKeys)
-										tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-									tr.addWriteConflictRange(self->conflictRange);
-									self->addedConflicts.insert(self->conflictRange, true);
-									startTime = now();
-									tr.setOption(FDBTransactionOptions::TIMEOUT, timebombStr);
-								}
-							} else if (operationType == 10 && !disableReadConflictRange) {
-								KeyRange range = self->getRandomRange(self->maxClearSize);
-								tr.addReadConflictRange(range);
-							} else if (operationType == 11 && !disableAtomicOp) {
-								if (!self->useSystemKeys && deterministicRandom()->random01() < 0.01) {
-									Key versionStampKey = self->getRandomVersionStampKey();
-									Value value = self->getRandomValue();
-									KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(),
-									                                            versionStampKey,
-									                                            tr.getCachedReadVersion(),
-									                                            normalKeys.end);
-									self->changeCount.insert(range, changeNum++);
-									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", versionStampKey).detail("Range", range);
-									tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
-									tr.clear(range);
-									KeyRangeRef conflict(
-									    range.begin.substr(
-									        0, std::min<int>(range.begin.size(), getMaxClearKeySize(range.begin) + 1)),
-									    range.end.substr(
-									        0, std::min<int>(range.end.size(), getMaxClearKeySize(range.end) + 1)));
-									self->addedConflicts.insert(conflict, true);
-									self->memoryDatabase.erase(self->memoryDatabase.lower_bound(range.begin),
-									                           self->memoryDatabase.lower_bound(range.end));
-								} else {
-									Key key = self->getRandomKey();
-									Value value = self->getRandomValue();
-									MutationRef::Type opType;
-									switch (deterministicRandom()->randomInt(0, 8)) {
-									case 0:
-										opType = MutationRef::AddValue;
-										break;
-									case 1:
-										opType = MutationRef::And;
-										break;
-									case 2:
-										opType = MutationRef::Or;
-										break;
-									case 3:
-										opType = MutationRef::Xor;
-										break;
-									case 4:
-										opType = MutationRef::Max;
-										break;
-									case 5:
-										opType = MutationRef::Min;
-										break;
-									case 6:
-										opType = MutationRef::ByteMin;
-										break;
-									case 7:
-										opType = MutationRef::ByteMax;
-										break;
+			{
+				Error err;
+				try {
+					int numWaits = deterministicRandom()->randomInt(1, 5);
+					int i = 0;
+					for (; i < numWaits && memLimit > 0; i++) {
+						//TraceEvent("WDROps").detail("Count", i).detail("Max", numWaits).detail("ReadYourWritesDisabled",readYourWritesDisabled);
+						int numOps = deterministicRandom()->randomInt(1, self->numOps);
+						int j = 0;
+						for (; j < numOps && memLimit > 0; j++) {
+							if (commits.getResult().isError())
+								throw commits.getResult().getError();
+							try {
+								int operationType = deterministicRandom()->randomInt(0, 21);
+								if (operationType == 0 && !disableGetKey) {
+									operations.push_back(
+									    self->getKeyAndCompare(&tr,
+									                           self->getRandomKeySelector(),
+									                           Snapshot{ deterministicRandom()->coinflip() },
+									                           readYourWritesDisabled,
+									                           snapshotRYWDisabled,
+									                           self,
+									                           &doingCommit,
+									                           &memLimit));
+								} else if (operationType == 1 && !disableGetRange) {
+									operations.push_back(
+									    self->getRangeAndCompare(&tr,
+									                             self->getRandomKeySelector(),
+									                             self->getRandomKeySelector(),
+									                             self->getRandomLimits(),
+									                             Snapshot{ deterministicRandom()->coinflip() },
+									                             Reverse{ deterministicRandom()->coinflip() },
+									                             readYourWritesDisabled,
+									                             snapshotRYWDisabled,
+									                             self,
+									                             &doingCommit,
+									                             &memLimit));
+								} else if (operationType == 2 && !disableGet) {
+									operations.push_back(
+									    self->getAndCompare(&tr,
+									                        self->getRandomKey(),
+									                        Snapshot{ deterministicRandom()->coinflip() },
+									                        readYourWritesDisabled,
+									                        snapshotRYWDisabled,
+									                        self,
+									                        &doingCommit,
+									                        &memLimit));
+								} else if (operationType == 3 && !disableCommit) {
+									if (!self->rarelyCommit || deterministicRandom()->random01() < 1.0 / self->numOps) {
+										Future<Void> commit = self->commitAndUpdateMemory(&tr,
+										                                                  self,
+										                                                  &cancelled,
+										                                                  readYourWritesDisabled,
+										                                                  snapshotRYWDisabled,
+										                                                  readAheadDisabled,
+										                                                  useBatchPriority,
+										                                                  &doingCommit,
+										                                                  &startTime,
+										                                                  timebombStr);
+										operations.push_back(commit);
+										commits.add(commit);
 									}
-									self->changeCount.insert(key, changeNum++);
+								} else if (operationType == 4 && !disableClearRange) {
+									KeyRange range = self->getRandomRange(self->maxClearSize);
+									self->changeCount.insert(range, changeNum++);
 									bool noConflict = deterministicRandom()->random01() < 0.5;
-									//TraceEvent("WDRAtomicOp").detail("Key", key).detail("Value", value.size()).detail("NoConflict", noConflict);
+									//TraceEvent("WDRClearRange").detail("Begin", range).detail("NoConflict", noConflict);
 									if (noConflict)
 										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-									tr.atomicOp(key, value, opType);
-									//TraceEvent("WDRAtomicOpSuccess").detail("Key", key).detail("Value", value.size());
+									tr.clear(range);
+									if (!noConflict) {
+										KeyRangeRef conflict(
+										    range.begin.substr(
+										        0,
+										        std::min<int>(range.begin.size(), getMaxClearKeySize(range.begin) + 1)),
+										    range.end.substr(
+										        0, std::min<int>(range.end.size(), getMaxClearKeySize(range.end) + 1)));
+										self->addedConflicts.insert(conflict, true);
+									}
+									self->memoryDatabase.erase(self->memoryDatabase.lower_bound(range.begin),
+									                           self->memoryDatabase.lower_bound(range.end));
+								} else if (operationType == 5 && !disableClear) {
+									Key key = self->getRandomKey();
+									self->changeCount.insert(key, changeNum++);
+									bool noConflict = deterministicRandom()->random01() < 0.5;
+									//TraceEvent("WDRClear").detail("Key", key).detail("NoConflict", noConflict);
+									if (noConflict)
+										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+									tr.clear(key);
+									if (!noConflict && key.size() <= getMaxClearKeySize(key)) {
+										self->addedConflicts.insert(key, true);
+									}
+									self->memoryDatabase.erase(key);
+								} else if (operationType == 6 && !disableWatch) {
+									watches.push_back(self->watchAndCompare(&tr,
+									                                        self->getRandomKey(),
+									                                        readYourWritesDisabled,
+									                                        self,
+									                                        &doingCommit,
+									                                        &memLimit));
+								} else if (operationType == 7 && !disableWriteConflictRange) {
+									KeyRange range = self->getRandomRange(self->nodes);
+									//TraceEvent("WDRAddWriteConflict").detail("Range", range);
+									tr.addWriteConflictRange(range);
+									KeyRangeRef conflict(
+									    range.begin.substr(
+									        0, std::min<int>(range.begin.size(), getMaxKeySize(range.begin) + 1)),
+									    range.end.substr(
+									        0, std::min<int>(range.end.size(), getMaxKeySize(range.end) + 1)));
+									self->addedConflicts.insert(conflict, true);
+								} else if (operationType == 8 && !disableDelay) {
+									double maxTime = 6.0;
+									if (timebomb > 0)
+										maxTime = startTime + timebomb / 1000.0 - now();
+									operations.push_back(
+									    delay(deterministicRandom()->random01() * deterministicRandom()->random01() *
+									          deterministicRandom()->random01() * maxTime));
+								} else if (operationType == 9 && !disableReset) {
+									if (deterministicRandom()->random01() < 0.001) {
+										//TraceEvent("WDRReset");
+										tr.reset();
+										self->memoryDatabase = self->lastCommittedDatabase;
+										self->addedConflicts.insert(allKeys, false);
+										if (readYourWritesDisabled)
+											tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+										if (snapshotRYWDisabled)
+											tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
+										if (readAheadDisabled)
+											tr.setOption(FDBTransactionOptions::READ_AHEAD_DISABLE);
+										if (self->useSystemKeys)
+											tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+										tr.addWriteConflictRange(self->conflictRange);
+										self->addedConflicts.insert(self->conflictRange, true);
+										startTime = now();
+										tr.setOption(FDBTransactionOptions::TIMEOUT, timebombStr);
+									}
+								} else if (operationType == 10 && !disableReadConflictRange) {
+									KeyRange range = self->getRandomRange(self->maxClearSize);
+									tr.addReadConflictRange(range);
+								} else if (operationType == 11 && !disableAtomicOp) {
+									if (!self->useSystemKeys && deterministicRandom()->random01() < 0.01) {
+										Key versionStampKey = self->getRandomVersionStampKey();
+										Value value = self->getRandomValue();
+										KeyRangeRef range = getVersionstampKeyRange(versionStampKey.arena(),
+										                                            versionStampKey,
+										                                            tr.getCachedReadVersion(),
+										                                            normalKeys.end);
+										self->changeCount.insert(range, changeNum++);
+										//TraceEvent("WDRVersionStamp").detail("VersionStampKey", versionStampKey).detail("Range", range);
+										tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
+										tr.clear(range);
+										KeyRangeRef conflict(
+										    range.begin.substr(
+										        0,
+										        std::min<int>(range.begin.size(), getMaxClearKeySize(range.begin) + 1)),
+										    range.end.substr(
+										        0, std::min<int>(range.end.size(), getMaxClearKeySize(range.end) + 1)));
+										self->addedConflicts.insert(conflict, true);
+										self->memoryDatabase.erase(self->memoryDatabase.lower_bound(range.begin),
+										                           self->memoryDatabase.lower_bound(range.end));
+									} else {
+										Key key = self->getRandomKey();
+										Value value = self->getRandomValue();
+										MutationRef::Type opType;
+										switch (deterministicRandom()->randomInt(0, 8)) {
+										case 0:
+											opType = MutationRef::AddValue;
+											break;
+										case 1:
+											opType = MutationRef::And;
+											break;
+										case 2:
+											opType = MutationRef::Or;
+											break;
+										case 3:
+											opType = MutationRef::Xor;
+											break;
+										case 4:
+											opType = MutationRef::Max;
+											break;
+										case 5:
+											opType = MutationRef::Min;
+											break;
+										case 6:
+											opType = MutationRef::ByteMin;
+											break;
+										case 7:
+											opType = MutationRef::ByteMax;
+											break;
+										}
+										self->changeCount.insert(key, changeNum++);
+										bool noConflict = deterministicRandom()->random01() < 0.5;
+										//TraceEvent("WDRAtomicOp").detail("Key", key).detail("Value", value.size()).detail("NoConflict", noConflict);
+										if (noConflict)
+											tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+										tr.atomicOp(key, value, opType);
+										//TraceEvent("WDRAtomicOpSuccess").detail("Key", key).detail("Value", value.size());
+										if (!noConflict && key.size() <= getMaxWriteKeySize(key, self->useSystemKeys)) {
+											self->addedConflicts.insert(key, true);
+										}
+										Optional<Value> existing = self->memoryGet(&self->memoryDatabase, key);
+										self->memoryDatabase[key] =
+										    self->applyAtomicOp(existing.present() ? Optional<StringRef>(existing.get())
+										                                           : Optional<StringRef>(),
+										                        value,
+										                        opType);
+									}
+								} else if (operationType > 11 && !disableSet) {
+									Key key = self->getRandomKey();
+									Value value = self->getRandomValue();
+									self->changeCount.insert(key, changeNum++);
+									bool noConflict = deterministicRandom()->random01() < 0.5;
+									//TraceEvent("WDRSet").detail("Key", key).detail("Value", value.size()).detail("NoConflict", noConflict);
+									if (noConflict)
+										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
+									tr.set(key, value);
 									if (!noConflict && key.size() <= getMaxWriteKeySize(key, self->useSystemKeys)) {
 										self->addedConflicts.insert(key, true);
 									}
-									Optional<Value> existing = self->memoryGet(&self->memoryDatabase, key);
-									self->memoryDatabase[key] =
-									    self->applyAtomicOp(existing.present() ? Optional<StringRef>(existing.get())
-									                                           : Optional<StringRef>(),
-									                        value,
-									                        opType);
+									//TraceEvent("WDRSetSuccess").detail("Key", key).detail("Value", value.size());
+									self->memoryDatabase[key] = value;
 								}
-							} else if (operationType > 11 && !disableSet) {
-								Key key = self->getRandomKey();
-								Value value = self->getRandomValue();
-								self->changeCount.insert(key, changeNum++);
-								bool noConflict = deterministicRandom()->random01() < 0.5;
-								//TraceEvent("WDRSet").detail("Key", key).detail("Value", value.size()).detail("NoConflict", noConflict);
-								if (noConflict)
-									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
-								tr.set(key, value);
-								if (!noConflict && key.size() <= getMaxWriteKeySize(key, self->useSystemKeys)) {
-									self->addedConflicts.insert(key, true);
+							} catch (Error& e) {
+								if (e.code() == error_code_used_during_commit) {
+									ASSERT(doingCommit);
+								} else if (e.code() != error_code_transaction_cancelled) {
+									throw;
 								}
-								//TraceEvent("WDRSetSuccess").detail("Key", key).detail("Value", value.size());
-								self->memoryDatabase[key] = value;
-							}
-						} catch (Error& e) {
-							if (e.code() == error_code_used_during_commit) {
-								ASSERT(doingCommit);
-							} else if (e.code() != error_code_transaction_cancelled) {
-								throw;
 							}
 						}
-					}
 
-					if (waitLocation < operations.size()) {
-						int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
-						//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
-						wait(operations[waitOp]);
-						wait(delay(0.000001)); // to ensure errors have propagated from reads to commits
-						waitLocation = operations.size();
+						if (waitLocation < operations.size()) {
+							int waitOp = deterministicRandom()->randomInt(waitLocation, operations.size());
+							//TraceEvent("WDRWait").detail("Op", waitOp).detail("Operations", operations.size()).detail("WaitLocation", waitLocation);
+							co_await operations[waitOp];
+							co_await delay(0.000001); // to ensure errors have propagated from reads to commits
+							waitLocation = operations.size();
+						}
 					}
+					co_await waitForAll(operations);
+					ASSERT(timebomb == 0 || 1000 * (now() - startTime) <= timebomb + 1);
+					co_await tr.debug_onIdle();
+					co_await delay(0.000001); // to ensure triggered watches have a change to register
+					self->finished.trigger();
+					co_await waitForAll(watches); // only for errors, should have all returned
+					self->changeCount.insert(allKeys, 0);
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
-				wait(waitForAll(operations));
-				ASSERT(timebomb == 0 || 1000 * (now() - startTime) <= timebomb + 1);
-				wait(tr.debug_onIdle());
-				wait(delay(0.000001)); // to ensure triggered watches have a change to register
-				self->finished.trigger();
-				wait(waitForAll(watches)); // only for errors, should have all returned
-				self->changeCount.insert(allKeys, 0);
-				break;
-			} catch (Error& e) {
 				operations.clear();
 				commits.clear(false);
 				waitLocation = 0;
@@ -1076,23 +1093,23 @@ struct WriteDuringReadWorkload : TestWorkload {
 				self->changeCount.insert(allKeys, 0);
 				doingCommit = false;
 				//TraceEvent("WDRError").errorUnsuppressed(e);
-				if (e.code() == error_code_database_locked) {
+				if (err.code() == error_code_database_locked) {
 					self->memoryDatabase = self->lastCommittedDatabase;
 					self->addedConflicts.insert(allKeys, false);
-					return Void();
+					co_return;
 				}
-				if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
-				    e.code() == error_code_transaction_too_large || e.code() == error_code_key_too_large ||
-				    e.code() == error_code_value_too_large || e.code() == error_code_too_many_watches || cancelled)
+				if (err.code() == error_code_not_committed || err.code() == error_code_commit_unknown_result ||
+				    err.code() == error_code_transaction_too_large || err.code() == error_code_key_too_large ||
+				    err.code() == error_code_value_too_large || err.code() == error_code_too_many_watches || cancelled)
 					throw not_committed();
 				try {
-					wait(tr.onError(e));
-				} catch (Error& e) {
-					if (e.code() == error_code_transaction_timed_out) {
+					co_await tr.onError(err);
+				} catch (Error& err) {
+					if (err.code() == error_code_transaction_timed_out) {
 						ASSERT(timebomb != 0 && 1000 * (now() - startTime) >= timebomb - 1);
 						throw not_committed();
 					}
-					throw e;
+					throw err;
 				}
 				self->memoryDatabase = self->lastCommittedDatabase;
 				self->addedConflicts.insert(allKeys, false);
@@ -1100,7 +1117,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 		}
 		self->memoryDatabase = self->lastCommittedDatabase;
 		self->addedConflicts.insert(allKeys, false);
-		return Void();
 	}
 };
 

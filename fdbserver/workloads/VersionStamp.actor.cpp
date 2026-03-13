@@ -21,7 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ApiVersion.h"
@@ -431,9 +431,7 @@ struct VersionStampWorkload : TestWorkload {
 								} catch (Error& caughtErr) {
 									err = caughtErr;
 								}
-								if (err.isValid()) {
-									co_await cur_tr.onError(err);
-								}
+								co_await cur_tr.onError(err);
 							}
 						} else {
 							error = true;

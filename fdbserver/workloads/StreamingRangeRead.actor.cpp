@@ -22,7 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -37,7 +37,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
 	try {
-		loop {
+		while (true) {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, 1e6);
 			limits.minRows = 0;
 			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
@@ -62,7 +62,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 
 ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream<KeyValue> output) {
 	try {
-		loop {
+		while (true) {
 			RangeResult res = waitNext(input.getFuture());
 			for (auto& kv : res) {
 				output.send(kv);
@@ -106,7 +106,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 		state Transaction tr(cx);
 		state Key next;
 		state Future<Void> rateLimit = delay(0.01);
-		loop {
+		while (true) {
 			state PromiseStream<RangeResult> streamRaw;
 			state PromiseStream<RangeResult> compareRaw;
 			state PromiseStream<KeyValue> streamResults;
@@ -120,7 +120,7 @@ struct StreamingRangeReadWorkload : KVWorkload {
 				                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
 				                                              KeySelector(firstGreaterOrEqual(normalKeys.end)),
 				                                              GetRangeLimits());
-				loop {
+				while (true) {
 					state Optional<KeyValue> cmp;
 					state Optional<KeyValue> res;
 					try {

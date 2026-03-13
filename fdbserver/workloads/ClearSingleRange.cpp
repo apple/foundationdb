@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 struct ClearSingleRange : TestWorkload {
 	static constexpr auto NAME = "ClearSingleRange";
@@ -58,10 +58,8 @@ struct ClearSingleRange : TestWorkload {
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.isValid()) {
-			TraceEvent("ClearRangeError").error(err);
-			co_await tr.onError(err);
-		}
+		TraceEvent("ClearRangeError").error(err);
+		co_await tr.onError(err);
 	}
 };
 

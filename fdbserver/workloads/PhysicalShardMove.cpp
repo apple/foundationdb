@@ -33,8 +33,6 @@
 #include <cstdint>
 #include <limits>
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace {
 std::string printValue(const ErrorOr<Optional<Value>>& value) {
 	if (value.isError()) {
@@ -259,7 +257,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		TraceEvent(SevDebug, "DataMoveDeleteCheckpoints").detail("Checkpoints", describe(checkpointIds));
 
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				std::vector<Future<Optional<Value>>> checkpointEntries;
@@ -307,7 +305,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		TraceEvent("CheckpointRestore").detail("DMID1", dataMoveId.first()).detail("DMID2", dataMoveId.second());
 		Version version{ 0 };
 
-		loop {
+		while (true) {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -324,7 +322,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		// Fetch checkpoint meta data.
 		std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
-		loop {
+		while (true) {
 			records.clear();
 			try {
 				co_await store(records,
@@ -351,7 +349,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		ASSERT(platform::createDirectory(checkpointDir));
 		std::vector<Future<CheckpointMetaData>> checkpointFutures;
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		loop {
+		while (true) {
 			checkpointFutures.clear();
 			try {
 				if (asKeyValues) {
@@ -450,7 +448,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
-		loop {
+		while (true) {
 			debugID = deterministicRandom()->randomUniqueID();
 			Error err;
 			try {
@@ -478,7 +476,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	Future<Void> validateData(PhysicalShardMoveWorkLoad* self, Database cx, KeyRange range, std::map<Key, Value>* kvs) {
 		Transaction tr(cx);
 		UID debugID;
-		loop {
+		while (true) {
 			debugID = deterministicRandom()->randomUniqueID();
 			Error err;
 			try {
@@ -509,7 +507,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Version readVersion{ 0 };
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-		loop {
+		while (true) {
 			Error err;
 			try {
 				Version _readVersion = co_await tr.getReadVersion();
@@ -538,7 +536,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
-		loop {
+		while (true) {
 			debugID = deterministicRandom()->randomUniqueID();
 			Error err;
 			try {
@@ -570,15 +568,15 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	// Move keys to a random selected team consisting of a single SS, this requires DD is disabled to prevent shards
 	// being moved by DD automatically. Returns the address of the single SS of the new team.
-	ACTOR Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
-	                                         Database cx,
-	                                         UID dataMoveId,
-	                                         KeyRange keys,
-	                                         int teamSize,
-	                                         std::unordered_set<UID> includes,
-	                                         std::unordered_set<UID> excludes) {
+	Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
+	                                   Database cx,
+	                                   UID dataMoveId,
+	                                   KeyRange keys,
+	                                   int teamSize,
+	                                   std::unordered_set<UID> includes,
+	                                   std::unordered_set<UID> excludes) {
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
-		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+		std::vector<StorageServerInterface> interfs = co_await getStorageServers(cx);
 		ASSERT(interfs.size() > teamSize - includes.size());
 		while (includes.size() < teamSize) {
 			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
@@ -587,27 +585,28 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			}
 		}
 
-		state std::vector<UID> dests(includes.begin(), includes.end());
-		state UID owner = deterministicRandom()->randomUniqueID();
-		state DDEnabledState ddEnabledState;
+		std::vector<UID> dests(includes.begin(), includes.end());
+		UID owner = deterministicRandom()->randomUniqueID();
+		DDEnabledState ddEnabledState;
 
-		state Transaction tr(cx);
+		Transaction tr(cx);
 
-		loop {
+		while (true) {
+			Error err;
 			try {
 				TraceEvent("TestMoveShard").detail("Range", keys.toString());
-				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
+				MoveKeysLock moveKeysLock = co_await takeMoveKeysLock(cx, owner);
 
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
-				Version readVersion = wait(tr.getReadVersion());
+				RangeResult dataMoves = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				Version readVersion = co_await tr.getReadVersion();
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
-				state int i = 0;
+				int i = 0;
 				for (; i < dataMoves.size(); ++i) {
 					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
-					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
+					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);
 					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
 					if (dataMove.ranges.empty()) {
@@ -618,49 +617,50 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 						TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
 						continue;
 					}
-					wait(cleanUpDataMove(cx,
-					                     dataMoveId,
-					                     moveKeysLock,
-					                     &self->cleanUpDataMoveParallelismLock,
-					                     dataMove.ranges.front(),
-					                     &ddEnabledState));
+					co_await cleanUpDataMove(cx,
+					                         dataMoveId,
+					                         moveKeysLock,
+					                         &self->cleanUpDataMoveParallelismLock,
+					                         dataMove.ranges.front(),
+					                         &ddEnabledState);
 					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
 
 				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
-				wait(moveKeys(cx,
-				              MoveKeysParams(dataMoveId,
-				                             std::vector<KeyRange>{ keys },
-				                             dests,
-				                             dests,
-				                             moveKeysLock,
-				                             Promise<Void>(),
-				                             &self->startMoveKeysParallelismLock,
-				                             &self->finishMoveKeysParallelismLock,
-				                             false,
-				                             deterministicRandom()->randomUniqueID(), // for logging only
-				                             &ddEnabledState,
-				                             CancelConflictingDataMoves::False,
-				                             Optional<BulkLoadTaskState>())));
+				co_await moveKeys(cx,
+				                  MoveKeysParams(dataMoveId,
+				                                 std::vector<KeyRange>(1, keys),
+				                                 dests,
+				                                 dests,
+				                                 moveKeysLock,
+				                                 Promise<Void>(),
+				                                 &self->startMoveKeysParallelismLock,
+				                                 &self->finishMoveKeysParallelismLock,
+				                                 false,
+				                                 deterministicRandom()->randomUniqueID(), // for logging only
+				                                 &ddEnabledState,
+				                                 CancelConflictingDataMoves::False,
+				                                 Optional<BulkLoadTaskState>()));
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_movekeys_conflict) {
-					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
-					tr.reset();
-				} else {
-					wait(tr.onError(e));
-				}
+				err = e;
+			}
+			if (err.code() == error_code_movekeys_conflict) {
+				// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+				tr.reset();
+			} else {
+				co_await tr.onError(err);
 			}
 		}
 
 		TraceEvent("TestMoveShardComplete").detail("Range", keys.toString()).detail("NewTeam", describe(dests));
 
-		return dests;
+		co_return dests;
 	}
 
 	Future<std::vector<StorageServerShard>> getStorageServerShards(Database cx, UID ssId, KeyRange range) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				Optional<Value> serverListValue = co_await tr.get(serverListKeyFor(ssId));
