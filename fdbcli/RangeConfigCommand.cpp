@@ -27,7 +27,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 
-
 namespace fdb_cli {
 
 Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens) {

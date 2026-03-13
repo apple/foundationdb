@@ -26,7 +26,6 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 
-
 namespace {
 Future<std::string> describeServers(Reference<ReadYourWritesTransaction> tr, std::vector<UID> ids) {
 	std::vector<Future<Optional<Value>>> serverListEntries;

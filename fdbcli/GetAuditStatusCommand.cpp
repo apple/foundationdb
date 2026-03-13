@@ -28,7 +28,6 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 
-
 namespace fdb_cli {
 
 Future<Void> getAuditProgressByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange) {

@@ -73,7 +73,6 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 
-
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
