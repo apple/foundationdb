@@ -4,7 +4,6 @@
 #include "flow/UnitTest.h"
 #include <limits>
 #include <random>
-#include "flow/actorcompiler.h" // has to be last include
 void forceLinkDDSketchTests() {}
 
 TEST_CASE("/fdbrpc/ddsketch/accuracy") {
