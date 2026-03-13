@@ -773,7 +773,6 @@ Future<Void> TwoBuffers::ready(Reference<TwoBuffers> self) {
 	if (self->hasNext()) {
 		self->fillBufferIfAbsent(1 - self->cur);
 	}
-	co_return;
 }
 
 std::shared_ptr<char[]> TwoBuffers::peek() {
@@ -836,8 +835,6 @@ Future<Void> TwoBuffers::readNextBlock(Reference<TwoBuffers> self, int index) {
 	self->buffers[index]->index = self->currentFileIndex;
 	self->buffers[index]->size = bytesRead; // Set to actual bytes read
 	self->currentFilePosition += bytesRead;
-
-	co_return;
 }
 
 void TwoBuffers::fillBufferIfAbsent(int index) {
@@ -1019,7 +1016,6 @@ Future<Void> PartitionedLogIteratorSimple::loadNextBlock(Reference<PartitionedLo
 	self->bufferSize = bytesRead; // Set to actual bytes read
 	self->bufferOffset = 0; // Reset bufferOffset for the new data
 	self->fileOffset += bytesRead;
-	co_return;
 }
 
 Future<Version> PartitionedLogIteratorSimple::peekNextVersion() {
@@ -1703,8 +1699,6 @@ Future<Void> checkTaskVersion(Database cx, Reference<Task> task, StringRef name,
 
 		throw err;
 	}
-
-	co_return;
 }
 
 static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
@@ -1750,8 +1744,6 @@ static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
 	// Set old style state key to Aborted if it was Runnable
 	if (backupAgent->isRunnable(status))
 		tr->set(statusKey, StringRef(FileBackupAgent::getStateText(EBackupState::STATE_ABORTED)));
-
-	co_return;
 }
 
 struct AbortFiveZeroBackupTask : TaskFuncBase {
@@ -1833,8 +1825,6 @@ static Future<Void> abortFiveOneBackup(FileBackupAgent* backupAgent,
 	tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
 
 	config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
-
-	co_return;
 }
 
 struct AbortFiveOneBackupTask : TaskFuncBase {
@@ -1853,7 +1843,6 @@ struct AbortFiveOneBackupTask : TaskFuncBase {
 		co_await abortFiveOneBackup(&backupAgent, tr, tagName);
 
 		co_await taskBucket->finish(tr, task);
-		co_return;
 	}
 
 	StringRef getName() const override {
@@ -1939,7 +1928,6 @@ static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, 
 	} else {
 		tr->set(backupStartedKey, encodeBackupStartedValue(ids));
 	}
-	co_return;
 }
 
 // Backup and Restore taskFunc definitions will inherit from one of the following classes which
@@ -8751,8 +8739,6 @@ static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef>> kvs
 	}
 
 	TraceEvent(SevFRTestInfo, "TransformDatabaseContentsWriteKVDone").detail("Begin", begin).detail("End", end);
-
-	co_return;
 }
 
 // restoreRanges is the actual range that has applied removePrefix and addPrefix processed by restore system
@@ -8905,8 +8891,6 @@ static Future<Void> transformDatabaseContents(Database cx,
 	TraceEvent("FastRestoreWorkloadTransformDatabaseContentsFinish")
 	    .detail("AddPrefix", addPrefix)
 	    .detail("RemovePrefix", removePrefix);
-
-	co_return;
 }
 
 // addPrefix and removePrefix are the options used in the restore request:
@@ -8932,8 +8916,6 @@ Future<Void> transformRestoredDatabase(Database cx,
 		TraceEvent(SevError, "FastRestoreTransformRestoredDatabaseUnexpectedError").error(e);
 		throw;
 	}
-
-	co_return;
 }
 
 void simulateBlobFailure() {
