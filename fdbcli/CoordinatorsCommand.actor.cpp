@@ -81,104 +81,100 @@ Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> 
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error caughtErr;
-			bool hasCaughtErr = false;
-			try {
-				// update cluster description
-				if (new_cluster_description.size()) {
-					tr->set(fdb_cli::clusterDescriptionSpecialKey, new_cluster_description);
+		Error caughtErr;
+		bool hasCaughtErr = false;
+		try {
+			// update cluster description
+			if (new_cluster_description.size()) {
+				tr->set(fdb_cli::clusterDescriptionSpecialKey, new_cluster_description);
+			}
+			// if auto change, read the special key to retrieve the recommended config
+			if (automatic) {
+				// if previous read failed, retry, otherwise, use the same recommended config
+				if (!auto_coordinators_str.size()) {
+					// Hold the reference to the standalone's memory
+					ThreadFuture<Optional<Value>> auto_coordinatorsF = tr->get(fdb_cli::coordinatorsAutoSpecialKey);
+					Optional<Value> auto_coordinators = co_await safeThreadFutureToFuture(auto_coordinatorsF);
+					ASSERT(auto_coordinators.present());
+					auto_coordinators_str = auto_coordinators.get().toString();
 				}
-				// if auto change, read the special key to retrieve the recommended config
-				if (automatic) {
-					// if previous read failed, retry, otherwise, use the same recommended config
-					if (!auto_coordinators_str.size()) {
-						// Hold the reference to the standalone's memory
-						ThreadFuture<Optional<Value>> auto_coordinatorsF = tr->get(fdb_cli::coordinatorsAutoSpecialKey);
-						Optional<Value> auto_coordinators = co_await safeThreadFutureToFuture(auto_coordinatorsF);
-						ASSERT(auto_coordinators.present());
-						auto_coordinators_str = auto_coordinators.get().toString();
-					}
-					tr->set(fdb_cli::coordinatorsProcessSpecialKey, auto_coordinators_str);
-				} else if (tokens.size() > 1) {
-					std::set<NetworkAddress> new_coordinators_addresses;
-					std::set<Hostname> new_coordinators_hostnames;
-					std::vector<std::string> newCoordinatorslist;
-					std::vector<StringRef>::iterator t;
-					for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
-						try {
-							if (Hostname::isHostname(t->toString())) {
-								// We do not resolve hostnames here. We commit them as is.
-								const auto& hostname = Hostname::parse(t->toString());
-								if (new_coordinators_hostnames.count(hostname)) {
-									fprintf(stderr,
-									        "ERROR: passed redundant coordinators: `%s'\n",
-									        hostname.toString().c_str());
-									co_return true;
-								}
-								new_coordinators_hostnames.insert(hostname);
-								newCoordinatorslist.push_back(hostname.toString());
-							} else {
-								const auto& addr = NetworkAddress::parse(t->toString());
-								if (new_coordinators_addresses.count(addr)) {
-									fprintf(stderr,
-									        "ERROR: passed redundant coordinators: `%s'\n",
-									        addr.toString().c_str());
-									co_return true;
-								}
-								new_coordinators_addresses.insert(addr);
-								newCoordinatorslist.push_back(addr.toString());
-							}
-						} catch (Error& e) {
-							if (e.code() == error_code_connection_string_invalid) {
+				tr->set(fdb_cli::coordinatorsProcessSpecialKey, auto_coordinators_str);
+			} else if (tokens.size() > 1) {
+				std::set<NetworkAddress> new_coordinators_addresses;
+				std::set<Hostname> new_coordinators_hostnames;
+				std::vector<std::string> newCoordinatorslist;
+				std::vector<StringRef>::iterator t;
+				for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
+					try {
+						if (Hostname::isHostname(t->toString())) {
+							// We do not resolve hostnames here. We commit them as is.
+							const auto& hostname = Hostname::parse(t->toString());
+							if (new_coordinators_hostnames.count(hostname)) {
 								fprintf(stderr,
-								        "ERROR: '%s' is not a valid network endpoint address\n",
-								        t->toString().c_str());
+								        "ERROR: passed redundant coordinators: `%s'\n",
+								        hostname.toString().c_str());
 								co_return true;
 							}
-							throw;
+							new_coordinators_hostnames.insert(hostname);
+							newCoordinatorslist.push_back(hostname.toString());
+						} else {
+							const auto& addr = NetworkAddress::parse(t->toString());
+							if (new_coordinators_addresses.count(addr)) {
+								fprintf(
+								    stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
+								co_return true;
+							}
+							new_coordinators_addresses.insert(addr);
+							newCoordinatorslist.push_back(addr.toString());
 						}
-					}
-					std::string new_coordinators_str = boost::algorithm::join(newCoordinatorslist, ",");
-					tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_coordinators_str);
-				}
-				co_await safeThreadFutureToFuture(tr->commit());
-				// commit should always fail here
-				// If the commit succeeds, the coordinators change and the commit will fail with
-				// commit_unknown_result().
-				ASSERT(false);
-			} catch (Error& e) {
-				caughtErr = e;
-				hasCaughtErr = true;
-			}
-			if (hasCaughtErr) {
-				Error err(caughtErr);
-				if (caughtErr.code() == error_code_special_keys_api_failure) {
-					std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-					if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::NOT_ENOUGH_MACHINES) &&
-					    notEnoughMachineResults < 1) {
-						// we could get not_enough_machines if we happen to see the database while the cluster
-						// controller is updating the worker list, so make sure it happens twice before returning a
-						// failure
-						notEnoughMachineResults++;
-						co_await delay(1.0);
-						tr->reset();
-						continue;
-					} else if (errorMsgStr ==
-					           ManagementAPI::generateErrorMessage(CoordinatorsResult::SAME_NETWORK_ADDRESSES)) {
-						if (retries)
-							printf("Coordination state changed\n");
-						else
-							printf("No change (existing configuration satisfies request)\n");
-						co_return true;
-					} else {
-						fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
-						co_return false;
+					} catch (Error& e) {
+						if (e.code() == error_code_connection_string_invalid) {
+							fprintf(
+							    stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+							co_return true;
+						}
+						throw;
 					}
 				}
-				co_await safeThreadFutureToFuture(tr->onError(err));
-				++retries;
+				std::string new_coordinators_str = boost::algorithm::join(newCoordinatorslist, ",");
+				tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_coordinators_str);
 			}
+			co_await safeThreadFutureToFuture(tr->commit());
+			// commit should always fail here
+			// If the commit succeeds, the coordinators change and the commit will fail with
+			// commit_unknown_result().
+			ASSERT(false);
+		} catch (Error& e) {
+			caughtErr = e;
+			hasCaughtErr = true;
+		}
+		if (hasCaughtErr) {
+			Error err(caughtErr);
+			if (caughtErr.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+				if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::NOT_ENOUGH_MACHINES) &&
+				    notEnoughMachineResults < 1) {
+					// we could get not_enough_machines if we happen to see the database while the cluster
+					// controller is updating the worker list, so make sure it happens twice before returning a
+					// failure
+					notEnoughMachineResults++;
+					co_await delay(1.0);
+					tr->reset();
+					continue;
+				} else if (errorMsgStr ==
+				           ManagementAPI::generateErrorMessage(CoordinatorsResult::SAME_NETWORK_ADDRESSES)) {
+					if (retries)
+						printf("Coordination state changed\n");
+					else
+						printf("No change (existing configuration satisfies request)\n");
+					co_return true;
+				} else {
+					fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+					co_return false;
+				}
+			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
+			++retries;
 		}
 	}
 }

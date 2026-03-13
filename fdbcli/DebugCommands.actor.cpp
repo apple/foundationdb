@@ -44,19 +44,17 @@ Future<Version> getVersion(Database cx) {
 	loop {
 		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				Version version = co_await tr.getReadVersion();
-				co_return version;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+		Error err;
+		bool hasErr = false;
+		try {
+			Version version = co_await tr.getReadVersion();
+			co_return version;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -87,32 +85,30 @@ Future<bool> getKeyServers(
 		            GetKeyServerLocationsRequest({}, begin, end, limitKeyServers, false, latestVersion, Arena()), 2, 0);
 
 		bool keyServersInsertedForThisIteration = false;
-		{
-			auto choice = co_await race(keyServerLocationFuture, cx->onProxiesChanged());
-			if (choice.index() == 0) {
-				ErrorOr<GetKeyServerLocationsReply> shards = std::get<0>(std::move(choice));
-				// Get the list of shards if one was returned.
-				if (shards.present() && !keyServersInsertedForThisIteration) {
-					std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> shardResultList;
-					for (auto& result : shards.get().results) {
-						std::vector<StorageServerInterface> servers;
-						for (auto& server : result.second) {
-							// Filter out storage servers that are not in the given datacenter
-							Optional<Standalone<StringRef>> serverDcId = server.locality.dcId();
-							if (dcid.present() && serverDcId.present() && serverDcId.get() != dcid.get()) {
-								continue;
-							}
-							servers.push_back(server);
+		auto choice = co_await race(keyServerLocationFuture, cx->onProxiesChanged());
+		if (choice.index() == 0) {
+			ErrorOr<GetKeyServerLocationsReply> shards = std::get<0>(std::move(choice));
+			// Get the list of shards if one was returned.
+			if (shards.present() && !keyServersInsertedForThisIteration) {
+				std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> shardResultList;
+				for (auto& result : shards.get().results) {
+					std::vector<StorageServerInterface> servers;
+					for (auto& server : result.second) {
+						// Filter out storage servers that are not in the given datacenter
+						Optional<Standalone<StringRef>> serverDcId = server.locality.dcId();
+						if (dcid.present() && serverDcId.present() && serverDcId.get() != dcid.get()) {
+							continue;
 						}
-						shardResultList.push_back({ result.first, servers });
+						servers.push_back(server);
 					}
-					keyServers.insert(keyServers.end(), shardResultList.begin(), shardResultList.end());
-					keyServersInsertedForThisIteration = true;
-					begin = shards.get().results.back().first.end;
+					shardResultList.push_back({ result.first, servers });
 				}
-			} else if (choice.index() != 1) {
-				UNREACHABLE();
+				keyServers.insert(keyServers.end(), shardResultList.begin(), shardResultList.end());
+				keyServersInsertedForThisIteration = true;
+				begin = shards.get().results.back().first.end;
 			}
+		} else if (choice.index() != 1) {
+			UNREACHABLE();
 		}
 
 		if (!keyServersInsertedForThisIteration) // Retry the entire workflow

@@ -37,34 +37,32 @@ Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				tr->set(fdb_cli::ddModeSpecialKey, boost::lexical_cast<std::string>(mode));
-				if (mode) {
-					// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
-					// hold the returned standalone object's memory
-					ThreadFuture<RangeResult> resultFuture =
-					    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-					RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
-					ASSERT(res.size() <= 1);
-					if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
-						// only clear the key if it is currently being used to disable all SS failure data movement
-						tr->clear(fdb_cli::maintenanceSpecialKeyRange);
-					}
-					tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
+		Error err;
+		bool hasErr = false;
+		try {
+			tr->set(fdb_cli::ddModeSpecialKey, boost::lexical_cast<std::string>(mode));
+			if (mode) {
+				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
+				// hold the returned standalone object's memory
+				ThreadFuture<RangeResult> resultFuture =
+				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+				RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
+				ASSERT(res.size() <= 1);
+				if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
+					// only clear the key if it is currently being used to disable all SS failure data movement
+					tr->clear(fdb_cli::maintenanceSpecialKeyRange);
 				}
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
 			}
-			if (hasErr) {
-				TraceEvent("SetDDModeRetrying").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			TraceEvent("SetDDModeRetrying").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
@@ -74,38 +72,36 @@ Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnor
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
-				Optional<Value> v = co_await safeThreadFutureToFuture(resultFuture);
-				uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
-				if (v.present()) {
-					if (v.get().size() > 0) {
-						oldValue = BinaryReader::fromStringRef<uint8_t>(v.get(), Unversioned());
-					} else {
-						// In old version (<= 7.1), the value is an empty string, which means all DD rebalance functions
-						// are disabled
-						oldValue = DDIgnore::ALL;
-					}
-					// printf("oldValue: %d Mask: %d V:%d\n", oldValue, DDIgnoreOptionMask, v.get().size());
-				}
-				uint8_t newValue = setMaskedBit ? (oldValue | DDIgnoreOptionMask) : (oldValue & ~DDIgnoreOptionMask);
-				if (newValue > 0) {
-					tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, BinaryWriter::toValue(newValue, Unversioned()));
+		Error err;
+		bool hasErr = false;
+		try {
+			ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
+			Optional<Value> v = co_await safeThreadFutureToFuture(resultFuture);
+			uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
+			if (v.present()) {
+				if (v.get().size() > 0) {
+					oldValue = BinaryReader::fromStringRef<uint8_t>(v.get(), Unversioned());
 				} else {
-					tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
+					// In old version (<= 7.1), the value is an empty string, which means all DD rebalance functions
+					// are disabled
+					oldValue = DDIgnore::ALL;
 				}
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				// printf("oldValue: %d Mask: %d V:%d\n", oldValue, DDIgnoreOptionMask, v.get().size());
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
+			uint8_t newValue = setMaskedBit ? (oldValue | DDIgnoreOptionMask) : (oldValue & ~DDIgnoreOptionMask);
+			if (newValue > 0) {
+				tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, BinaryWriter::toValue(newValue, Unversioned()));
+			} else {
+				tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
 			}
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }

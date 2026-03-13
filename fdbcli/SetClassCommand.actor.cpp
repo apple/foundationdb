@@ -37,46 +37,43 @@ Future<Void> printProcessClass(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				// Hold the reference to the memory
-				ThreadFuture<RangeResult> classTypeFuture =
-				    tr->getRange(fdb_cli::processClassTypeSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				ThreadFuture<RangeResult> classSourceFuture =
-				    tr->getRange(fdb_cli::processClassSourceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				co_await (success(safeThreadFutureToFuture(classSourceFuture)) &&
-				          success(safeThreadFutureToFuture(classTypeFuture)));
-				RangeResult processTypeList = classTypeFuture.get();
-				RangeResult processSourceList = classSourceFuture.get();
-				ASSERT(processSourceList.size() == processTypeList.size());
-				if (!processTypeList.size())
-					printf("No processes are registered in the database.\n");
-				fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
-				for (int index = 0; index < processTypeList.size(); index++) {
-					std::string address = processTypeList[index]
-					                          .key.removePrefix(fdb_cli::processClassTypeSpecialKeyRange.begin)
-					                          .toString();
-					// check the addresses are the same in each list
-					std::string addressFromSourceList =
-					    processSourceList[index]
-					        .key.removePrefix(fdb_cli::processClassSourceSpecialKeyRange.begin)
-					        .toString();
-					ASSERT(address == addressFromSourceList);
-					printf("  %s: %s (%s)\n",
-					       address.c_str(),
-					       processTypeList[index].value.toString().c_str(),
-					       processSourceList[index].value.toString().c_str());
-				}
-				co_return;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+		Error err;
+		bool hasErr = false;
+		try {
+			// Hold the reference to the memory
+			ThreadFuture<RangeResult> classTypeFuture =
+			    tr->getRange(fdb_cli::processClassTypeSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			ThreadFuture<RangeResult> classSourceFuture =
+			    tr->getRange(fdb_cli::processClassSourceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
+			co_await (success(safeThreadFutureToFuture(classSourceFuture)) &&
+			          success(safeThreadFutureToFuture(classTypeFuture)));
+			RangeResult processTypeList = classTypeFuture.get();
+			RangeResult processSourceList = classSourceFuture.get();
+			ASSERT(processSourceList.size() == processTypeList.size());
+			if (!processTypeList.size())
+				printf("No processes are registered in the database.\n");
+			fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
+			for (int index = 0; index < processTypeList.size(); index++) {
+				std::string address =
+				    processTypeList[index].key.removePrefix(fdb_cli::processClassTypeSpecialKeyRange.begin).toString();
+				// check the addresses are the same in each list
+				std::string addressFromSourceList =
+				    processSourceList[index]
+				        .key.removePrefix(fdb_cli::processClassSourceSpecialKeyRange.begin)
+				        .toString();
+				ASSERT(address == addressFromSourceList);
+				printf("  %s: %s (%s)\n",
+				       address.c_str(),
+				       processTypeList[index].value.toString().c_str(),
+				       processSourceList[index].value.toString().c_str());
 			}
-			if (hasErr) {
-				co_await safeThreadFutureToFuture(tr->onError(err));
-			}
+			co_return;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 };
@@ -85,34 +82,32 @@ Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, Ke
 	Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-		{
-			Error caughtErr;
-			bool hasCaughtErr = false;
-			try {
-				ThreadFuture<Optional<Value>> result =
-				    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
-				Optional<Value> val = co_await safeThreadFutureToFuture(result);
-				if (!val.present()) {
-					printf("No matching addresses found\n");
-					co_return false;
-				}
-				tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return true;
-			} catch (Error& e) {
-				caughtErr = e;
-				hasCaughtErr = true;
+		Error caughtErr;
+		bool hasCaughtErr = false;
+		try {
+			ThreadFuture<Optional<Value>> result =
+			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
+			Optional<Value> val = co_await safeThreadFutureToFuture(result);
+			if (!val.present()) {
+				printf("No matching addresses found\n");
+				co_return false;
 			}
-			if (hasCaughtErr) {
-				Error err(caughtErr);
-				if (caughtErr.code() == error_code_special_keys_api_failure) {
-					std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-					// error message already has \n at the end
-					fprintf(stderr, "%s", errorMsgStr.c_str());
-					co_return false;
-				}
-				co_await safeThreadFutureToFuture(tr->onError(err));
+			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return true;
+		} catch (Error& e) {
+			caughtErr = e;
+			hasCaughtErr = true;
+		}
+		if (hasCaughtErr) {
+			Error err(caughtErr);
+			if (caughtErr.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+				// error message already has \n at the end
+				fprintf(stderr, "%s", errorMsgStr.c_str());
+				co_return false;
 			}
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }

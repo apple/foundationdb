@@ -105,45 +105,43 @@ Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 	size_t errorTaskCount = 0;
 	Optional<uint64_t> totalTaskCount = job.getTaskCount();
 	while (readBegin < readEnd) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				rangeResult.clear();
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd)));
-				for (int i = 0; i < rangeResult.size() - 1; ++i) {
-					if (rangeResult[i].value.empty()) {
-						continue;
-					}
-					BulkLoadTaskState bulkLoadTask = decodeBulkLoadTaskState(rangeResult[i].value);
-					if (bulkLoadTask.getJobId() != jobId) {
-						fmt::println("Submitted {} tasks", submitTaskCount);
-						fmt::println("Finished {} tasks", completeTaskCount);
-						fmt::println("Error {} tasks", errorTaskCount);
-						printBulkLoadJobTotalTaskCount(totalTaskCount);
-						if (bulkLoadTask.phase == BulkLoadPhase::Submitted &&
-						    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
-							fmt::println("Job {} has been cancelled or has completed", jobId.toString());
-						}
-						co_return;
-					}
-					if (bulkLoadTask.phase == BulkLoadPhase::Complete) {
-						completeTaskCount = completeTaskCount + bulkLoadTask.getManifests().size();
-					} else if (bulkLoadTask.phase == BulkLoadPhase::Error) {
-						errorTaskCount = errorTaskCount + bulkLoadTask.getManifests().size();
-					}
-					submitTaskCount = submitTaskCount + bulkLoadTask.getManifests().size();
+		Error err;
+		bool hasErr = false;
+		try {
+			rangeResult.clear();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd)));
+			for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				if (rangeResult[i].value.empty()) {
+					continue;
 				}
-				readBegin = rangeResult.back().key;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				BulkLoadTaskState bulkLoadTask = decodeBulkLoadTaskState(rangeResult[i].value);
+				if (bulkLoadTask.getJobId() != jobId) {
+					fmt::println("Submitted {} tasks", submitTaskCount);
+					fmt::println("Finished {} tasks", completeTaskCount);
+					fmt::println("Error {} tasks", errorTaskCount);
+					printBulkLoadJobTotalTaskCount(totalTaskCount);
+					if (bulkLoadTask.phase == BulkLoadPhase::Submitted &&
+					    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
+						fmt::println("Job {} has been cancelled or has completed", jobId.toString());
+					}
+					co_return;
+				}
+				if (bulkLoadTask.phase == BulkLoadPhase::Complete) {
+					completeTaskCount = completeTaskCount + bulkLoadTask.getManifests().size();
+				} else if (bulkLoadTask.phase == BulkLoadPhase::Error) {
+					errorTaskCount = errorTaskCount + bulkLoadTask.getManifests().size();
+				}
+				submitTaskCount = submitTaskCount + bulkLoadTask.getManifests().size();
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			readBegin = rangeResult.back().key;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 	fmt::println("Submitted {} tasks", submitTaskCount);

@@ -43,53 +43,50 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		{
-			Error caughtErr;
-			bool hasCaughtErr = false;
-			try {
-				if (force && servers.size())
-					tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
-					        ValueRef());
-				for (const auto& s : servers) {
-					Key addr = failed ? fdb_cli::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
-					                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
-					tr->set(addr, ValueRef());
-				}
-				if (force && localities.size())
-					tr->set(failed ? fdb_cli::failedLocalityForceOptionSpecialKey
-					               : fdb_cli::excludedLocalityForceOptionSpecialKey,
-					        ValueRef());
-				for (const auto& l : localities) {
-					Key addr = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
-					                  : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
-					tr->set(addr, ValueRef());
-				}
-				co_await safeThreadFutureToFuture(tr->commit());
-				co_return true;
-			} catch (Error& e) {
-				caughtErr = e;
-				hasCaughtErr = true;
+		Error caughtErr;
+		bool hasCaughtErr = false;
+		try {
+			if (force && servers.size())
+				tr->set(failed ? fdb_cli::failedForceOptionSpecialKey : fdb_cli::excludedForceOptionSpecialKey,
+				        ValueRef());
+			for (const auto& s : servers) {
+				Key addr = failed ? fdb_cli::failedServersSpecialKeyRange.begin.withSuffix(s.toString())
+				                  : fdb_cli::excludedServersSpecialKeyRange.begin.withSuffix(s.toString());
+				tr->set(addr, ValueRef());
 			}
-			if (hasCaughtErr) {
-				Error err(caughtErr);
-				if (caughtErr.code() == error_code_special_keys_api_failure) {
-					std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-					// last character is \n
-					auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
-					auto last_line = errorMsgStr.substr(pos + 1);
-					// customized the error message for fdbcli
-					fprintf(
-					    stderr,
-					    "%s\n%s\n",
-					    errorMsgStr.substr(0, pos).c_str(),
-					    last_line.find("free space") != std::string::npos
-					        ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
-					        : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
-					co_return false;
-				}
-				TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
-				co_await safeThreadFutureToFuture(tr->onError(err));
+			if (force && localities.size())
+				tr->set(failed ? fdb_cli::failedLocalityForceOptionSpecialKey
+				               : fdb_cli::excludedLocalityForceOptionSpecialKey,
+				        ValueRef());
+			for (const auto& l : localities) {
+				Key addr = failed ? fdb_cli::failedLocalitySpecialKeyRange.begin.withSuffix(l)
+				                  : fdb_cli::excludedLocalitySpecialKeyRange.begin.withSuffix(l);
+				tr->set(addr, ValueRef());
 			}
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return true;
+		} catch (Error& e) {
+			caughtErr = e;
+			hasCaughtErr = true;
+		}
+		if (hasCaughtErr) {
+			Error err(caughtErr);
+			if (caughtErr.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+				// last character is \n
+				auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
+				auto last_line = errorMsgStr.substr(pos + 1);
+				// customized the error message for fdbcli
+				fprintf(stderr,
+				        "%s\n%s\n",
+				        errorMsgStr.substr(0, pos).c_str(),
+				        last_line.find("free space") != std::string::npos
+				            ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
+				            : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
+				co_return false;
+			}
+			TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
+			co_await safeThreadFutureToFuture(tr->onError(err));
 		}
 	}
 }
