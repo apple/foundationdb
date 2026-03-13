@@ -24,7 +24,6 @@
 static Future<Void> onErr(Future<Future<Void>> e) {
 	Future<Void> f = co_await e;
 	co_await f;
-	co_return;
 }
 
 void OnDemandStore::open() {

@@ -227,7 +227,6 @@ Future<Void> testAsyncMetricsUpdate() {
 	ASSERT(partitions[0].end == splitKey);
 	ASSERT(partitions[1].begin == splitKey);
 	ASSERT(partitions[1].end == normalKeys.end);
-	co_return;
 }
 
 TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/WaitForAsyncMetrics") {

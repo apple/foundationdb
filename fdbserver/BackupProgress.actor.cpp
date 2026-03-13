@@ -172,7 +172,6 @@ Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress>
 					    .detail("TotalTags", status.totalTags);
 				}
 			}
-			co_return;
 		} catch (Error& e) {
 			err = e;
 		}
