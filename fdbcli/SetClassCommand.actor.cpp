@@ -49,8 +49,8 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 			RangeResult processSourceList = classSourceFuture.get();
 			ASSERT(processSourceList.size() == processTypeList.size());
 			if (!processTypeList.size())
-				printf("No processes are registered in the database.\n");
-			fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
+				fmt::println("No processes are registered in the database.");
+			fmt::println("There are currently {} processes in the database:", processTypeList.size());
 			for (int index = 0; index < processTypeList.size(); index++) {
 				std::string address =
 				    processTypeList[index].key.removePrefix(fdb_cli::processClassTypeSpecialKeyRange.begin).toString();
@@ -60,10 +60,10 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 				        .key.removePrefix(fdb_cli::processClassSourceSpecialKeyRange.begin)
 				        .toString();
 				ASSERT(address == addressFromSourceList);
-				printf("  %s: %s (%s)\n",
-				       address.c_str(),
-				       processTypeList[index].value.toString().c_str(),
-				       processSourceList[index].value.toString().c_str());
+				fmt::println("  {}: {} ({})",
+				             address,
+				             processTypeList[index].value.toString(),
+				             processSourceList[index].value.toString());
 			}
 			return Void();
 		} catch (Error& e) {
@@ -81,7 +81,7 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
 			Optional<Value> val = wait(safeThreadFutureToFuture(result));
 			if (!val.present()) {
-				printf("No matching addresses found\n");
+				fmt::println("No matching addresses found");
 				return false;
 			}
 			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
@@ -92,7 +92,7 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
 				// error message already has \n at the end
-				fprintf(stderr, "%s", errorMsgStr.c_str());
+				fmt::print(stderr, "{}", errorMsgStr);
 				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));

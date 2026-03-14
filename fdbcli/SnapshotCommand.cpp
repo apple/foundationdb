@@ -25,6 +25,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace fdb_cli {
 
 Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens) {
@@ -43,14 +44,14 @@ Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef
 		}
 		try {
 			co_await safeThreadFutureToFuture(db->createSnapshot(uid, snap_cmd));
-			printf("Snapshot command succeeded with UID %s\n", uid.toString().c_str());
+			fmt::println("Snapshot command succeeded with UID {}", uid.toString());
 		} catch (Error& e) {
-			fprintf(stderr,
-			        "Snapshot command failed %d (%s)."
-			        " Please cleanup any instance level snapshots created with UID %s.\n",
-			        e.code(),
-			        e.what(),
-			        uid.toString().c_str());
+			fmt::println(
+			    stderr,
+			    "Snapshot command failed {} ({}). Please cleanup any instance level snapshots created with UID {}.",
+			    e.code(),
+			    e.what(),
+			    uid.toString());
 			result = false;
 		}
 	}

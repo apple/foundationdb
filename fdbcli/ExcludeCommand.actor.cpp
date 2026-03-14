@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -71,12 +72,13 @@ ACTOR Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 				auto pos = errorMsgStr.find_last_of("\n", errorMsgStr.size() - 2);
 				auto last_line = errorMsgStr.substr(pos + 1);
 				// customized the error message for fdbcli
-				fprintf(stderr,
-				        "%s\n%s\n",
-				        errorMsgStr.substr(0, pos).c_str(),
-				        last_line.find("free space") != std::string::npos
-				            ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
-				            : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
+				fmt::print(
+				    stderr,
+				    "{}\n{}\n",
+				    errorMsgStr.substr(0, pos),
+				    last_line.find("free space") != std::string::npos
+				        ? "Type `exclude FORCE <ADDRESS...>' to exclude without checking free space."
+				        : "Type `exclude FORCE failed <ADDRESS...>' to exclude without performing safety checks.");
 				return false;
 			}
 			TraceEvent(SevWarn, "ExcludeServersAndLocalitiesError").error(err);
@@ -256,13 +258,13 @@ ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::set<Addres
 	for (const auto& c : coordinatorList) {
 		if (exclusions.find(AddressExclusion(c.ip, c.port)) != exclusions.end() ||
 		    exclusions.find(AddressExclusion(c.ip)) != exclusions.end()) {
-			fprintf(stderr, "WARNING: %s is a coordinator!\n", c.toString().c_str());
+			fmt::println(stderr, "WARNING: {} is a coordinator!", c.toString());
 			foundCoordinator = true;
 		}
 	}
 	if (foundCoordinator)
-		printf("Type `help coordinators' for information on how to change the\n"
-		       "cluster's coordination servers before removing them.\n");
+		fmt::print("Type `help coordinators' for information on how to change the\ncluster's coordination servers "
+		           "before removing them.\n");
 	return Void();
 }
 
@@ -293,44 +295,45 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 
 		if (!excludedAddresses.size() && !excludedLocalities.size() && !failedAddresses.size() &&
 		    !failedLocalities.size()) {
-			printf("There are currently no servers or localities excluded from the database.\n"
-			       "To learn how to exclude a server, type `help exclude'.\n");
+			fmt::print("There are currently no servers or localities excluded from the database.\nTo learn how to "
+			           "exclude a server, type `help exclude'.\n");
 			return true;
 		}
 
-		printf("There are currently %zu servers or localities being excluded from the database:\n",
-		       excludedAddresses.size() + excludedLocalities.size());
+		fmt::println("There are currently {} servers or localities being excluded from the database:",
+		             excludedAddresses.size() + excludedLocalities.size());
 		for (const auto& e : excludedAddresses)
-			printf("  %s\n", e.c_str());
+			fmt::println("  {}", e);
 		for (const auto& e : excludedLocalities)
-			printf("  %s\n", e.c_str());
+			fmt::println("  {}", e);
 
 		if (excludedAddresses.size() || excludedLocalities.size()) {
-			printf("To find out whether it is safe to remove one or more of these\n"
-			       "servers from the cluster, type `exclude <addresses>'.\n"
-			       "To return one of these servers to the cluster, type `include <addresses>'.\n");
+			fmt::print(
+			    "To find out whether it is safe to remove one or more of these\nservers from the cluster, type "
+			    "`exclude <addresses>'.\nTo return one of these servers to the cluster, type `include <addresses>'.\n");
 		}
 
-		printf("\n");
+		fmt::println("");
 
-		printf("There are currently %zu servers or localities marked as failed in the database:\n",
-		       failedAddresses.size() + failedLocalities.size());
+		fmt::println("There are currently {} servers or localities marked as failed in the database:",
+		             failedAddresses.size() + failedLocalities.size());
 		for (const auto& f : failedAddresses)
-			printf("  %s\n", f.c_str());
+			fmt::println("  {}", f);
 		for (const auto& f : failedLocalities)
-			printf("  %s\n", f.c_str());
+			fmt::println("  {}", f);
 
 		if (failedAddresses.size() || failedLocalities.size()) {
-			printf("To return one of these servers to the cluster, type `include failed <addresses>'.\n");
+			fmt::println("To return one of these servers to the cluster, type `include failed <addresses>'.");
 		}
 
-		printf("\n");
+		fmt::println("");
 
 		Reference<ITransaction> tr = db->createTransaction();
 		std::set<NetworkAddress> inProgressExclusion = wait(getInProgressExclusion(tr));
-		printf("There are currently %zu processes for which exclusion is in progress:\n", inProgressExclusion.size());
+		fmt::println("There are currently {} processes for which exclusion is in progress:",
+		             inProgressExclusion.size());
 		for (const auto& addr : inProgressExclusion) {
-			printf("%s\n", addr.toString().c_str());
+			fmt::println("{}", addr.toString());
 		}
 
 		return true;
@@ -375,11 +378,11 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 			} else {
 				auto a = AddressExclusion::parse(*t);
 				if (!a.isValid()) {
-					fprintf(stderr,
-					        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
-					        t->toString().c_str());
+					fmt::println(stderr,
+					             "ERROR: '{}' is neither a valid network endpoint address nor a locality",
+					             t->toString());
 					if (t->toString().find(":tls") != std::string::npos)
-						printf("        Do not include the `:tls' suffix when naming a process\n");
+						fmt::println("        Do not include the `:tls' suffix when naming a process");
 					return true;
 				}
 				exclusionSet.insert(a);
@@ -390,7 +393,7 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		// The validation if a locality or address has no match is done below and will result in a warning. If we abort
 		// here the provided locality and/or address will not be excluded.
 		if (exclusionAddresses.empty() && exclusionLocalities.empty()) {
-			fprintf(stderr, "ERROR: At least one valid network endpoint address or a locality must be provided\n");
+			fmt::println(stderr, "ERROR: At least one valid network endpoint address or a locality must be provided");
 			return false;
 		}
 
@@ -399,8 +402,8 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 			return false;
 
 		if (waitForAllExcluded) {
-			printf("Waiting for state to be removed from all excluded servers. This may take a while.\n");
-			printf("(Interrupting this wait with CTRL+C will not cancel the data movement.)\n");
+			fmt::println("Waiting for state to be removed from all excluded servers. This may take a while.");
+			fmt::println("(Interrupting this wait with CTRL+C will not cancel the data movement.)");
 		}
 
 		if (warn.isValid())
@@ -425,49 +428,48 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		for (const auto& exclusion : exclusionSet) {
 			if (absentExclusions.find(exclusion) != absentExclusions.end()) {
 				if (exclusion.port == 0) {
-					fprintf(stderr,
-					        "  %s(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded the "
-					        "correct machines before removing them from the cluster!\n",
-					        exclusion.ip.toString().c_str());
+					fmt::println(stderr,
+					             "  {}(Whole machine)  ---- WARNING: Missing from cluster!Be sure that you excluded "
+					             "the correct machines before removing them from the cluster!",
+					             exclusion.ip.toString());
 				} else {
-					fprintf(stderr,
-					        "  %s  ---- WARNING: Missing from cluster! Be sure that you excluded the correct processes "
-					        "before removing them from the cluster!\n",
-					        exclusion.toString().c_str());
+					fmt::println(stderr,
+					             "  {}  ---- WARNING: Missing from cluster! Be sure that you excluded the correct "
+					             "processes before removing them from the cluster!",
+					             exclusion.toString());
 				}
 			} else if (std::any_of(notExcludedServers.begin(), notExcludedServers.end(), [&](const NetworkAddress& a) {
 				           return addressExcluded({ exclusion }, a);
 			           })) {
 				if (exclusion.port == 0) {
-					fprintf(stderr,
-					        "  %s(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove this "
-					        "machine from the cluster\n",
-					        exclusion.ip.toString().c_str());
+					fmt::println(stderr,
+					             "  {}(Whole machine)  ---- WARNING: Exclusion in progress! It is not safe to remove "
+					             "this machine from the cluster",
+					             exclusion.ip.toString());
 				} else {
-					fprintf(stderr,
-					        "  %s  ---- WARNING: Exclusion in progress! It is not safe to remove this process from the "
-					        "cluster\n",
-					        exclusion.toString().c_str());
+					fmt::println(stderr,
+					             "  {}  ---- WARNING: Exclusion in progress! It is not safe to remove this process "
+					             "from the cluster",
+					             exclusion.toString());
 				}
 			} else {
 				if (exclusion.port == 0) {
-					printf("  %s(Whole machine)  ---- Successfully excluded. It is now safe to remove this machine "
-					       "from the cluster.\n",
-					       exclusion.ip.toString().c_str());
+					fmt::println("  {}(Whole machine)  ---- Successfully excluded. It is now safe to remove this "
+					             "machine from the cluster.",
+					             exclusion.ip.toString());
 				} else {
-					printf(
-					    "  %s  ---- Successfully excluded. It is now safe to remove this process from the cluster.\n",
-					    exclusion.toString().c_str());
+					fmt::println(
+					    "  {}  ---- Successfully excluded. It is now safe to remove this process from the cluster.",
+					    exclusion.toString());
 				}
 			}
 		}
 
 		for (const auto& locality : noMatchLocalities) {
-			fprintf(
-			    stderr,
-			    "  %s  ---- WARNING: Currently no servers found with this locality match! Be sure that you excluded "
-			    "the correct locality.\n",
-			    locality.c_str());
+			fmt::println(stderr,
+			             "  {}  ---- WARNING: Currently no servers found with this locality match! Be sure that you "
+			             "excluded the correct locality.",
+			             locality);
 		}
 
 		wait(checkForCoordinators(db, exclusionSet));

@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -50,21 +51,21 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {
-			printf("\nNo addresses can be checked.\n");
+			fmt::print("\nNo addresses can be checked.\n");
 		} else if (address_interface->size() == 1) {
-			printf("\nThe following address can be checked:\n");
+			fmt::print("\nThe following address can be checked:\n");
 		} else {
-			printf("\nThe following %zu addresses can be checked:\n", address_interface->size());
+			fmt::print("\nThe following {} addresses can be checked:\n", address_interface->size());
 		}
 		for (auto it : *address_interface) {
-			printf("%s\n", printable(it.first).c_str());
+			fmt::println("{}", printable(it.first));
 		}
-		printf("\n");
+		fmt::println("");
 	} else if (tokencmp(tokens[1], "all")) {
 		if (address_interface->size() == 0) {
-			fprintf(stderr,
-			        "ERROR: no processes to check. You must run the `expensive_data_check’ "
-			        "command before running `expensive_data_check all’.\n");
+			fmt::println(stderr,
+			             "ERROR: no processes to check. You must run the `expensive_data_checkâ command before "
+			             "running `expensive_data_check allâ.");
 		} else {
 			std::vector<std::string> addressesVec;
 			for (const auto& [address, _] : *address_interface) {
@@ -75,18 +76,18 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 			int64_t checkRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0)));
 			if (!checkRequestsSent) {
 				result = false;
-				fprintf(stderr,
-				        "ERROR: failed to send requests to check all processes, please run the `expensive_data_check’ "
-				        "command again to fetch latest addresses.\n");
+				fmt::println(stderr,
+				             "ERROR: failed to send requests to check all processes, please run the "
+				             "`expensive_data_checkâ command again to fetch latest addresses.");
 			} else {
-				printf("Attempted to kill and check %zu processes\n", address_interface->size());
+				fmt::println("Attempted to kill and check {} processes", address_interface->size());
 			}
 		}
 	} else {
 		state int i;
 		for (i = 1; i < tokens.size(); i++) {
 			if (!address_interface->count(tokens[i])) {
-				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+				fmt::println(stderr, "ERROR: process `{}' not recognized.", printable(tokens[i]));
 				result = false;
 				break;
 			}
@@ -101,12 +102,12 @@ ACTOR Future<bool> expensiveDataCheckCommandActor(
 			int64_t checkRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, true, 0)));
 			if (!checkRequestsSent) {
 				result = false;
-				fprintf(stderr,
-				        "ERROR: failed to send requests to check processes `%s', please run the `expensive_data_check’ "
-				        "command again to fetch latest addresses.\n",
-				        addressesStr.c_str());
+				fmt::println(stderr,
+				             "ERROR: failed to send requests to check processes `{}', please run the "
+				             "`expensive_data_checkâ command again to fetch latest addresses.",
+				             addressesStr);
 			} else {
-				printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
+				fmt::println("Attempted to kill and check {} processes", tokens.size() - 1);
 			}
 		}
 	}

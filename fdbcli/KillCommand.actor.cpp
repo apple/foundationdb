@@ -30,6 +30,7 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/CodeProbe.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -48,22 +49,22 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 	}
 	if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
 		if (address_interface->size() == 0) {
-			printf("\nNo addresses can be killed.\n");
+			fmt::print("\nNo addresses can be killed.\n");
 		} else if (address_interface->size() == 1) {
-			printf("\nThe following address can be killed:\n");
+			fmt::print("\nThe following address can be killed:\n");
 		} else {
-			printf("\nThe following %zu addresses can be killed:\n", address_interface->size());
+			fmt::print("\nThe following {} addresses can be killed:\n", address_interface->size());
 		}
 		for (auto it : *address_interface) {
-			printf("%s\n", printable(it.first).c_str());
+			fmt::println("{}", printable(it.first));
 		}
-		printf("\n");
+		fmt::println("");
 	} else if (tokencmp(tokens[1], "all")) {
 		if (address_interface->size() == 0) {
 			result = false;
-			fprintf(stderr,
-			        "ERROR: no processes to kill. You must run the `kill’ command before "
-			        "running `kill all’.\n");
+			fmt::println(
+			    stderr,
+			    "ERROR: no processes to kill. You must run the `killâ command before running `kill allâ.");
 		} else {
 			std::vector<std::string> addressesVec;
 			for (const auto& [address, _] : *address_interface) {
@@ -74,18 +75,18 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
 			if (!killRequestsSent) {
 				result = false;
-				fprintf(stderr,
-				        "ERROR: failed to send requests to all processes, please run the `kill’ command again to fetch "
-				        "latest addresses.\n");
+				fmt::println(stderr,
+				             "ERROR: failed to send requests to all processes, please run the `killâ command again "
+				             "to fetch latest addresses.");
 			} else {
-				printf("Attempted to kill %zu processes\n", address_interface->size());
+				fmt::println("Attempted to kill {} processes", address_interface->size());
 			}
 		}
 	} else {
 		state int i;
 		for (i = 1; i < tokens.size(); i++) {
 			if (!address_interface->count(tokens[i])) {
-				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+				fmt::println(stderr, "ERROR: process `{}' not recognized.", printable(tokens[i]));
 				result = false;
 				break;
 			}
@@ -100,14 +101,14 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
 			if (!killRequestsSent) {
 				result = false;
-				fprintf(stderr,
-				        "ERROR: failed to send requests to kill processes `%s', please run the `kill’ command again to "
-				        "fetch latest addresses.\n",
-				        addressesStr.c_str());
+				fmt::println(stderr,
+				             "ERROR: failed to send requests to kill processes `{}', please run the `killâ command "
+				             "again to fetch latest addresses.",
+				             addressesStr);
 			} else {
 				// delay in case the network queue is not flush before the client exits
 				wait(delay(3.0));
-				printf("Attempted to kill %zu processes\n", tokens.size() - 1);
+				fmt::println("Attempted to kill {} processes", tokens.size() - 1);
 			}
 		}
 	}

@@ -146,7 +146,7 @@ void printAtCol(const char* text, int col, FILE* stream = stdout) {
 		if (*iter == '\n' || *iter == '\0' || (iter - start == col)) {
 			if (!space)
 				space = iter;
-			fprintf(stream, "%.*s\n", (int)(space - start), start);
+			fmt::println(stream, "{:.{}}", start, (int)(space - start));
 			start = space;
 			if (*start == ' ' || *start == '\n')
 				start++;
@@ -167,9 +167,9 @@ public:
 		if (transactionItr != transactionOptions.legalOptions.end())
 			setTransactionOption(tr, transactionItr->second, enabled, arg, intrans);
 		else {
-			fprintf(stderr,
-			        "ERROR: invalid option '%s'. Try `help options' for a list of available options.\n",
-			        optionStr.toString().c_str());
+			fmt::println(stderr,
+			             "ERROR: invalid option '{}'. Try `help options' for a list of available options.",
+			             optionStr.toString());
 			throw invalid_option();
 		}
 	}
@@ -190,7 +190,7 @@ public:
 		found = found || transactionOptions.print();
 
 		if (!found)
-			printf("There are no options enabled\n");
+			fmt::println("There are no options enabled");
 	}
 
 	// Returns a vector of the names of all documented options
@@ -212,7 +212,7 @@ private:
 		if (enabled) {
 			auto optionInfo = FDBTransactionOptions::optionInfo.getMustExist(option);
 			if (arg.present() != optionInfo.hasParameter) {
-				fprintf(stderr, "ERROR: option %s a parameter\n", arg.present() ? "did not expect" : "expected");
+				fmt::println(stderr, "ERROR: option {} a parameter", arg.present() ? "did not expect" : "expected");
 				throw invalid_option_value();
 			}
 			if (arg.present() && optionInfo.paramType == FDBOptionInfo::ParamType::Int) {
@@ -221,13 +221,12 @@ private:
 					std::string value = arg.get().toString();
 					parsedInt = std::stoll(value, &nextIdx);
 					if (nextIdx != value.length()) {
-						fprintf(
-						    stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+						fmt::println(stderr, "ERROR: could not parse value `{}' as an integer", arg.get().toString());
 						throw invalid_option_value();
 					}
 					arg = StringRef(reinterpret_cast<uint8_t*>(&parsedInt), 8);
 				} catch (std::exception e) {
-					fprintf(stderr, "ERROR: could not parse value `%s' as an integer\n", arg.get().toString().c_str());
+					fmt::println(stderr, "ERROR: could not parse value `{}' as an integer", arg.get().toString());
 					throw invalid_option_value();
 				}
 			}
@@ -273,9 +272,9 @@ private:
 				auto optionItr = options.find(itr->second);
 				if (optionItr != options.end()) {
 					if (optionItr->second.present())
-						printf("%s: `%s'\n", itr->first.c_str(), formatStringRef(optionItr->second.get()).c_str());
+						fmt::println("{}: `{}'", itr->first, formatStringRef(optionItr->second.get()));
 					else
-						printf("%s\n", itr->first.c_str());
+						fmt::println("{}", itr->first);
 
 					found = true;
 				}
@@ -341,11 +340,11 @@ static std::string formatStringRef(StringRef item, bool fullEscaping = false) {
 		else if (fullEscaping && item[i] == '"')
 			ret += "\\\"";
 		else if (fullEscaping && item[i] == ' ')
-			ret += format("\\x%02x", item[i]);
+			ret += fmt::format("\\x{:02x}", item[i]);
 		else if (item[i] >= 32 && item[i] < 127)
 			ret += item[i];
 		else
-			ret += format("\\x%02x", item[i]);
+			ret += fmt::format("\\x{:02x}", item[i]);
 	}
 
 	return ret;
@@ -476,11 +475,10 @@ static void printProgramUsage(const char* name) {
 	       "usage: %s [OPTIONS]\n"
 	       "\n",
 	       name);
-	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is first the value of the\n"
-	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
-	       "                 then `%s'.\n",
-	       platform::getDefaultClusterFilePath().c_str());
+	fmt::print("  -C CONNFILE    The path of a file containing the connection string for the\n                 "
+	           "FoundationDB cluster. The default is first the value of the\n                 FDB_CLUSTER_FILE "
+	           "environment variable, then `./fdb.cluster',\n                 then `{}'.\n",
+	           platform::getDefaultClusterFilePath());
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --log-dir PATH Specifies the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
@@ -594,38 +592,38 @@ void initHelp() {
 
 void printVersion() {
 	printf("FoundationDB CLI " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getSourceVersion());
+	fmt::println("source version {}", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 }
 
 void printBuildInformation() {
-	printf("%s", jsonBuildInformation().c_str());
+	fmt::print("{}", jsonBuildInformation());
 }
 
 void printHelpOverview() {
-	printf("\nList of commands:\n\n");
+	fmt::print("\nList of commands:\n\n");
 	for (const auto& [command, help] : helpMap) {
 		if (help.short_desc.size())
-			printf(" %s:\n      %s\n", command.c_str(), help.short_desc.c_str());
+			fmt::print(" {}:\n      {}\n", command, help.short_desc);
 	}
-	printf("\nFor information on a specific command, type `help <command>'.");
-	printf("\nFor information on escaping keys and values, type `help escaping'.");
-	printf("\nFor information on available options, type `help options'.\n\n");
+	fmt::print("\nFor information on a specific command, type `help <command>'.");
+	fmt::print("\nFor information on escaping keys and values, type `help escaping'.");
+	fmt::print("\nFor information on available options, type `help options'.\n\n");
 }
 
 void printHelp(StringRef command) {
 	auto i = helpMap.find(command.toString());
 	if (i != helpMap.end() && i->second.short_desc.size()) {
-		printf("\n%s\n\n", i->second.usage.c_str());
+		fmt::print("\n{}\n\n", i->second.usage);
 		auto cstr = i->second.short_desc.c_str();
-		printf("%c%s.\n", toupper(cstr[0]), cstr + 1);
+		fmt::println("{:c}{}.", toupper(cstr[0]), cstr + 1);
 		if (!i->second.long_desc.empty()) {
-			printf("\n");
+			fmt::println("");
 			printAtCol(i->second.long_desc.c_str(), 80);
 		}
-		printf("\n");
+		fmt::println("");
 	} else
-		printf("I don't know anything about `%s'\n", formatStringRef(command).c_str());
+		fmt::println("I don't know anything about `{}'", formatStringRef(command));
 }
 
 int printStatusFromJSON(std::string const& jsonFileName) {
@@ -637,13 +635,13 @@ int printStatusFromJSON(std::string const& jsonFileName) {
 
 		return 0;
 	} catch (std::exception& e) {
-		printf("Exception printing status: %s\n", e.what());
+		fmt::println("Exception printing status: {}", e.what());
 		return 1;
 	} catch (Error& e) {
-		printf("Error printing status: %d %s\n", e.code(), e.what());
+		fmt::println("Error printing status: {} {}", e.code(), e.what());
 		return 2;
 	} catch (...) {
-		printf("Unknown exception printing status.\n");
+		fmt::println("Unknown exception printing status.");
 		return 3;
 	}
 }
@@ -669,16 +667,16 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
-			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
+			fmt::println(stderr, "ERROR: Failed to get status json from the cluster");
 			return Void();
 		}
 		json_spirit::mValue mv;
 		json_spirit::read_string(statusValue.get().toString(), mv);
 		s = StatusObject(mv.get_obj());
 	}
-	printf("\n");
+	fmt::println("");
 	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);
-	printf("\n");
+	fmt::println("");
 	return Void();
 }
 
@@ -700,9 +698,9 @@ ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
 	wait(makeInterruptable(safeThreadFutureToFuture(tr->commit())));
 	auto ver = tr->getCommittedVersion();
 	if (ver != invalidVersion)
-		fmt::print("Committed ({})\n", ver);
+		fmt::println("Committed ({})", ver);
 	else
-		fmt::print("Nothing to commit\n");
+		fmt::println("Nothing to commit");
 	return Void();
 }
 
@@ -717,14 +715,14 @@ ACTOR Future<bool> createSnapshot(Database db, std::vector<StringRef> tokens) {
 	}
 	try {
 		wait(makeInterruptable(mgmtSnapCreate(db, snapCmd, snapUID)));
-		printf("Snapshot command succeeded with UID %s\n", snapUID.toString().c_str());
+		fmt::println("Snapshot command succeeded with UID {}", snapUID.toString());
 	} catch (Error& e) {
-		fprintf(stderr,
-		        "Snapshot command failed %d (%s)."
-		        " Please cleanup any instance level snapshots created with UID %s.\n",
-		        e.code(),
-		        e.what(),
-		        snapUID.toString().c_str());
+		fmt::println(
+		    stderr,
+		    "Snapshot command failed {} ({}). Please cleanup any instance level snapshots created with UID {}.",
+		    e.code(),
+		    e.what(),
+		    snapUID.toString());
 		return true;
 	}
 	return false;
@@ -746,7 +744,7 @@ Reference<ITransaction> getTransaction(Reference<IDatabase> db,
 }
 
 std::string newCompletion(const char* base, const char* name) {
-	return format("%s%s ", base, name);
+	return fmt::format("{}{} ", base, name);
 }
 
 void compGenerator(const char* text, bool help, std::vector<std::string>& lc) {
@@ -867,7 +865,7 @@ void fdbcliCompCmd(std::string const& text, std::vector<std::string>& lc) {
 }
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
-	printf("%s\n", errMsg.c_str());
+	fmt::println("{}", errMsg);
 	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("Error", errMsg);
 }
 
@@ -920,7 +918,7 @@ struct CLIOptions {
 			}
 		}
 		if (exit_timeout && !exec.present()) {
-			fprintf(stderr, "ERROR: --timeout may only be specified with --exec\n");
+			fmt::println(stderr, "ERROR: --timeout may only be specified with --exec");
 			exit_code = FDB_EXIT_ERROR;
 			return;
 		}
@@ -947,14 +945,14 @@ struct CLIOptions {
 			char* endptr;
 			apiVersion = strtoul((char*)args.OptionArg(), &endptr, 10);
 			if (*endptr != '\0') {
-				fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
+				fmt::println(stderr, "ERROR: invalid client version {}", args.OptionArg());
 				return 1;
 			} else if (apiVersion < 700 || apiVersion > ApiVersion::LATEST_VERSION) {
 				// multi-version fdbcli only available after 7.0
-				fprintf(stderr,
-				        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
-				        args.OptionArg(),
-				        ApiVersion::LATEST_VERSION);
+				fmt::println(stderr,
+				             "ERROR: api version {} is not supported. (Min: 700, Max: {})",
+				             args.OptionArg(),
+				             ApiVersion::LATEST_VERSION);
 				return 1;
 			}
 			break;
@@ -977,7 +975,7 @@ struct CLIOptions {
 			char* endptr;
 			exit_timeout = strtoul((char*)args.OptionArg(), &endptr, 10);
 			if (*endptr != '\0') {
-				fprintf(stderr, "ERROR: invalid timeout %s\n", args.OptionArg());
+				fmt::println(stderr, "ERROR: invalid timeout {}", args.OptionArg());
 				return 1;
 			}
 			break;
@@ -1028,14 +1026,14 @@ struct CLIOptions {
 			return printStatusFromJSON(args.OptionArg());
 		case OPT_TRACE_FORMAT:
 			if (!validateTraceFormat(args.OptionArg())) {
-				fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+				fmt::println(stderr, "WARNING: Unrecognized trace format `{}'", args.OptionArg());
 			}
 			traceFormat = args.OptionArg();
 			break;
 		case OPT_KNOB: {
 			Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
 			if (!knobName.present()) {
-				fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
+				fmt::println(stderr, "ERROR: unable to parse knob option '{}'", args.OptionSyntax());
 				return FDB_EXIT_ERROR;
 			}
 			knobs.emplace_back(knobName.get(), args.OptionArg());
@@ -1093,12 +1091,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	try {
 		localDb = Database::createDatabase(ccf, opt.apiVersion, IsInternal::False);
 		if (!opt.exec.present()) {
-			printf("Using cluster file `%s'.\n", ccf->getLocation().c_str());
+			fmt::println("Using cluster file `{}'.", ccf->getLocation());
 		}
 		db = API->createDatabase(opt.clusterFile.c_str());
 	} catch (Error& e) {
-		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
-		printf("Unable to connect to cluster from `%s'\n", ccf->getLocation().c_str());
+		fmt::println(stderr, "ERROR: {} ({})", e.what(), e.code());
+		fmt::println("Unable to connect to cluster from `{}'", ccf->getLocation());
 		return 1;
 	}
 
@@ -1134,7 +1132,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			} else {
 				// unexpected errors
-				fprintf(stderr, "ERROR: unexpected error %d while initializing the multiversion database\n", e.code());
+				fmt::println(
+				    stderr, "ERROR: unexpected error {} while initializing the multiversion database", e.code());
 				tr->reset();
 				break;
 			}
@@ -1146,10 +1145,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 			Future<Void> checkStatusF = checkStatus(Void(), db, localDb);
 			wait(makeInterruptable(success(checkStatusF)));
 		} else {
-			printf("\n");
+			fmt::println("");
 		}
 
-		printf("Welcome to the fdbcli. For help, type `help'.\n");
+		fmt::println("Welcome to the fdbcli. For help, type `help'.");
 		validOptions = options->getValidOptions();
 	}
 
@@ -1166,7 +1165,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 		} else {
 			Optional<std::string> rawline = wait(linenoise.read("fdb> "));
 			if (!rawline.present()) {
-				printf("\n");
+				fmt::println("");
 				return 0;
 			}
 			line = rawline.get();
@@ -1209,7 +1208,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				state std::vector<StringRef> tokens = *iter;
 
 				if (is_error) {
-					printf("WARNING: the previous command failed, the remaining commands will not be executed.\n");
+					fmt::println("WARNING: the previous command failed, the remaining commands will not be executed.");
 					break;
 				}
 
@@ -1217,26 +1216,26 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 
 				if (tokencmp(tokens[0], "parse_error")) {
-					fprintf(stderr, "ERROR: Command failed to completely parse.\n");
+					fmt::println(stderr, "ERROR: Command failed to completely parse.");
 					if (tokens.size() > 1) {
-						fprintf(stderr, "ERROR: Not running partial or malformed command:");
+						fmt::print(stderr, "ERROR: Not running partial or malformed command:");
 						for (auto t = tokens.begin() + 1; t != tokens.end(); ++t)
-							printf(" %s", formatStringRef(*t, true).c_str());
-						printf("\n");
+							fmt::print(" {}", formatStringRef(*t, true));
+						fmt::println("");
 					}
 					is_error = true;
 					continue;
 				}
 
 				if (multi) {
-					printf(">>>");
+					fmt::print(">>>");
 					for (auto t = tokens.begin(); t != tokens.end(); ++t)
-						printf(" %s", formatStringRef(*t, true).c_str());
-					printf("\n");
+						fmt::print(" {}", formatStringRef(*t, true));
+					fmt::println("");
 				}
 
 				if (!helpMap.count(tokens[0].toString()) && !hiddenCommands.count(tokens[0].toString())) {
-					fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
+					fmt::println(stderr, "ERROR: Unknown command `{}'. Try `help'?", formatStringRef(tokens[0]));
 					is_error = true;
 					continue;
 				}
@@ -1250,36 +1249,43 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printHelpOverview();
 					} else if (tokens.size() == 2) {
 						if (tokencmp(tokens[1], "escaping"))
-							printf("\n"
-							       "When parsing commands, fdbcli considers a space to delimit individual tokens.\n"
-							       "To include a space in a single token, you may either enclose the token in\n"
-							       "quotation marks (\"hello world\"), prefix the space with a backslash\n"
-							       "(hello\\ world), or encode the space as a hex byte (hello\\x20world).\n"
-							       "\n"
-							       "To include a literal quotation mark in a token, precede it with a backslash\n"
-							       "(\\\"hello\\ world\\\").\n"
-							       "\n"
-							       "To express a binary value, encode each byte as either\n"
-							       "   a) a two-digit hex byte preceded by \\x\n"
-							       "   b) a four-digit hex byte in the range of 0x0000-0x00FF preceded by \\u\n"
-							       "(e.g. \\x20 or \\u0020 for a space character, or \\x0a\\x00\\x00\\x00 or\n"
-							       "\\u000a\\u0000\\u0000\\u0000 for a 32-bit, little-endian representation of\n"
-							       "the integer 10.  Any byte can use either syntax, so \\u000a\\x00\\x00\\x00\n"
-							       "is also a valid representation of a little-endian value of 10).\n"
-							       "\n"
-							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
-							       "and spaces encoded as two-digit hex bytes.\n\n");
+							fmt::
+							    print(
+							        "\nWhen parsing commands, fdbcli considers a space to delimit individual "
+							        "tokens.\nTo include a space in a single token, you may either enclose the token "
+							        "in\nquotation marks (\\" hello
+							            world\\"), prefix the space with a backslash\n(hello\\ world), or encode the "
+							                   "space as a hex byte (hello\\x20world).\n\nTo include a literal "
+							                   "quotation mark in a token, precede it with a "
+							                   "backslash\n(\\\\" hello\\ world\\\\").\n\nTo express a binary value, "
+							                                                       "encode each byte as either\n   a) "
+							                                                       "a two-digit hex byte preceded by "
+							                                                       "\\x\n   b) a four-digit hex byte "
+							                                                       "in the range of 0x0000-0x00FF "
+							                                                       "preceded by \\u\n(e.g. \\x20 or "
+							                                                       "\\u0020 for a space character, or "
+							                                                       "\\x0a\\x00\\x00\\x00 "
+							                                                       "or\n\\u000a\\u0000\\u0000\\u0000 "
+							                                                       "for a 32-bit, little-endian "
+							                                                       "representation of\nthe integer 10. "
+							                                                       " Any byte can use either syntax, "
+							                                                       "so \\u000a\\x00\\x00\\x00\nis also "
+							                                                       "a valid representation of a "
+							                                                       "little-endian value of 10).\n\nAll "
+							                                                       "keys and values are displayed by "
+							                                                       "the fdbcli with non-printable "
+							                                                       "characters\nand spaces encoded as "
+							                                                       "two-digit hex bytes.\n\n");
 						else if (tokencmp(tokens[1], "options")) {
-							printf("\n"
-							       "The following options are available to be set using the `option' command:\n"
-							       "\n");
+							fmt::print(
+							    "\nThe following options are available to be set using the `option' command:\n\n");
 							options->printHelpString();
 						} else if (tokencmp(tokens[1], "help"))
 							printHelpOverview();
 						else
 							printHelp(tokens[1]);
 					} else
-						printf("Usage: help [topic]\n");
+						fmt::println("Usage: help [topic]");
 					continue;
 				}
 
@@ -1398,11 +1404,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					} else {
 						state std::string passPhrase = deterministicRandom()->randomAlphaNumeric(10);
 						warn.cancel(); // don't warn while waiting on user input
-						printf("Unlocking the database is a potentially dangerous operation.\n");
-						printf("%s\n", passPhrase.c_str());
+						fmt::println("Unlocking the database is a potentially dangerous operation.");
+						fmt::println("{}", passPhrase);
 						fflush(stdout);
-						Optional<std::string> input =
-						    wait(linenoise.read(format("Repeat the above passphrase if you would like to proceed:")));
+						Optional<std::string> input = wait(
+						    linenoise.read(fmt::format("Repeat the above passphrase if you would like to proceed:")));
 						warn =
 						    checkStatus(timeWarning(5.0, "\nWARNING: Long delay (Ctrl-C to interrupt)\n"), db, localDb);
 						if (input.present() && input.get() == passPhrase) {
@@ -1411,7 +1417,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							if (!_result)
 								is_error = true;
 						} else {
-							fprintf(stderr, "ERROR: Incorrect passphrase entered.\n");
+							fmt::println(stderr, "ERROR: Incorrect passphrase entered.");
 							is_error = true;
 						}
 					}
@@ -1430,14 +1436,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (intrans) {
-						fprintf(stderr, "ERROR: Already in transaction\n");
+						fmt::println(stderr, "ERROR: Already in transaction");
 						is_error = true;
 					} else {
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
 						intrans = true;
 						getTransaction(db, tr, options, false);
-						printf("Transaction started\n");
+						fmt::println("Transaction started");
 					}
 					continue;
 				}
@@ -1447,7 +1453,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
-						fprintf(stderr, "ERROR: No active transaction\n");
+						fmt::println(stderr, "ERROR: No active transaction");
 						is_error = true;
 					} else {
 						warn =
@@ -1465,14 +1471,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
-						fprintf(stderr, "ERROR: No active transaction\n");
+						fmt::println(stderr, "ERROR: No active transaction");
 						is_error = true;
 					} else {
 						tr->reset();
 						activeOptions = FdbOptions(globalOptions);
 						options = &activeOptions;
 						options->apply(tr);
-						printf("Transaction reset\n");
+						fmt::println("Transaction reset");
 					}
 					continue;
 				}
@@ -1482,12 +1488,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else if (!intrans) {
-						fprintf(stderr, "ERROR: No active transaction\n");
+						fmt::println(stderr, "ERROR: No active transaction");
 						is_error = true;
 					} else {
 						intrans = false;
 						options = &globalOptions;
-						printf("Transaction rolled back\n");
+						fmt::println("Transaction rolled back");
 					}
 					continue;
 				}
@@ -1502,9 +1508,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
-							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
+							fmt::println("`{}' is `{}'", printable(tokens[1]), printable(v.get()));
 						else
-							printf("`%s': not found\n", printable(tokens[1]).c_str());
+							fmt::println("`{}': not found", printable(tokens[1]));
 					}
 					continue;
 				}
@@ -1539,7 +1545,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					} else {
 						Version v = wait(makeInterruptable(
 						    safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
-						fmt::print("{}\n", v);
+						fmt::println("{}", v);
 					}
 					continue;
 				}
@@ -1579,9 +1585,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!auditId.isValid()) {
 						is_error = true;
 					} else {
-						printf("%s audit: %s\n",
-						       tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
-						       auditId.toString().c_str());
+						fmt::println("{} audit: {}",
+						             tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
+						             auditId.toString());
 					}
 					continue;
 				}
@@ -1605,7 +1611,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				if (tokencmp(tokens[0], "bulkload")) {
 					UID taskId = wait(makeInterruptable(bulkLoadCommandActor(localDb, tokens)));
 					if (taskId.isValid()) {
-						printf("Received Job ID: %s\n", taskId.toString().c_str());
+						fmt::println("Received Job ID: {}", taskId.toString());
 					}
 					continue;
 				}
@@ -1613,7 +1619,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 				if (tokencmp(tokens[0], "bulkdump")) {
 					UID jobId = wait(makeInterruptable(bulkDumpCommandActor(localDb, tokens)));
 					if (jobId.isValid()) {
-						printf("Received Job ID: %s\n", jobId.toString().c_str());
+						fmt::println("Received Job ID: {}", jobId.toString());
 					}
 					continue;
 				}
@@ -1678,7 +1684,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							// limit at the (already absurd)
 							// nearly-a-billion
 							if (tokens[3].size() > 9) {
-								fprintf(stderr, "ERROR: bad limit\n");
+								fmt::println(stderr, "ERROR: bad limit");
 								is_error = true;
 								continue;
 							}
@@ -1694,7 +1700,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								place *= 10;
 							}
 							if (!valid) {
-								fprintf(stderr, "ERROR: bad limit\n");
+								fmt::println(stderr, "ERROR: bad limit");
 								is_error = true;
 								continue;
 							}
@@ -1719,15 +1725,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						state ThreadFuture<RangeResult> kvsF = tr->getRange(KeyRangeRef(tokens[1], endKey), limit);
 						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
 
-						printf("\nRange limited to %d keys\n", limit);
+						fmt::print("\nRange limited to {} keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {
 							if (tokencmp(tokens[0], "getrangekeys"))
-								printf("`%s'\n", printable((*iter).key).c_str());
+								fmt::println("`{}'", printable((*iter).key));
 							else
-								printf(
-								    "`%s' is `%s'\n", printable((*iter).key).c_str(), printable((*iter).value).c_str());
+								fmt::println("`{}' is `{}'", printable((*iter).key), printable((*iter).value));
 						}
-						printf("\n");
+						fmt::println("");
 					}
 					continue;
 				}
@@ -1751,7 +1756,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "set")) {
 					if (!writeMode) {
-						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						fmt::println(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.");
 						is_error = true;
 						continue;
 					}
@@ -1772,7 +1777,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "clear")) {
 					if (!writeMode) {
-						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						fmt::println(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.");
 						is_error = true;
 						continue;
 					}
@@ -1793,7 +1798,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "clearrange")) {
 					if (!writeMode) {
-						fprintf(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.\n");
+						fmt::println(stderr, "ERROR: writemode must be enabled to set or clear keys in the database.");
 						is_error = true;
 						continue;
 					}
@@ -1826,11 +1831,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					} else {
 						if (tokens.size() == 1) {
 							if (options->hasAnyOptionsEnabled()) {
-								printf("\nCurrently enabled options:\n\n");
+								fmt::print("\nCurrently enabled options:\n\n");
 								options->print();
-								printf("\n");
+								fmt::println("");
 							} else
-								fprintf(stderr, "There are no options enabled\n");
+								fmt::println(stderr, "There are no options enabled");
 
 							continue;
 						}
@@ -1839,23 +1844,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							isOn = true;
 						} else if (tokencmp(tokens[1], "off")) {
 							if (intrans) {
-								fprintf(
+								fmt::println(
 								    stderr,
-								    "ERROR: Cannot turn option off when using a transaction created with `begin'\n");
+								    "ERROR: Cannot turn option off when using a transaction created with `begin'");
 								is_error = true;
 								continue;
 							}
 							if (tokens.size() > 3) {
-								fprintf(stderr, "ERROR: Cannot specify option argument when turning option off\n");
+								fmt::println(stderr, "ERROR: Cannot specify option argument when turning option off");
 								is_error = true;
 								continue;
 							}
 
 							isOn = false;
 						} else {
-							fprintf(stderr,
-							        "ERROR: Invalid option state `%s': option must be turned `on' or `off'\n",
-							        formatStringRef(tokens[1]).c_str());
+							fmt::println(stderr,
+							             "ERROR: Invalid option state `{}': option must be turned `on' or `off'",
+							             formatStringRef(tokens[1]));
 							is_error = true;
 							continue;
 						}
@@ -1864,9 +1869,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 						try {
 							options->setOption(tr, tokens[2], isOn, arg, intrans);
-							printf("Option %s for %s\n",
-							       isOn ? "enabled" : "disabled",
-							       intrans ? "current transaction" : "all transactions");
+							fmt::println("Option {} for {}",
+							             isOn ? "enabled" : "disabled",
+							             intrans ? "current transaction" : "all transactions");
 						} catch (Error& e) {
 							// options->setOption() prints error message
 							TraceEvent(SevWarn, "CLISetOptionError").error(e).detail("Option", tokens[2]);
@@ -1908,7 +1913,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
+				fmt::println(stderr, "ERROR: Unknown command `{}'. Try `help'?", formatStringRef(tokens[0]));
 				is_error = true;
 			}
 
@@ -1917,11 +1922,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 			if (e.code() == error_code_operation_cancelled) {
 				throw;
 			} else if (e.code() != error_code_actor_cancelled) {
-				fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
+				fmt::println(stderr, "ERROR: {} ({})", e.what(), e.code());
 			}
 			is_error = true;
 			if (intrans) {
-				printf("Rolling back current transaction\n");
+				fmt::println("Rolling back current transaction");
 				intrans = false;
 				options = &globalOptions;
 				options->apply(tr);
@@ -2017,7 +2022,7 @@ ACTOR Future<int> runCli(CLIOptions opt, Reference<ClusterConnectionFile> ccf) {
 
 ACTOR Future<Void> timeExit(double duration) {
 	wait(delay(duration));
-	fprintf(stderr, "Specified timeout reached -- exiting...\n");
+	fmt::println(stderr, "Specified timeout reached -- exiting...");
 	return Void();
 }
 
@@ -2089,7 +2094,7 @@ int main(int argc, char** argv) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, opt.tlsCertPath);
 		} catch (Error& e) {
-			fprintf(stderr, "ERROR: cannot set TLS certificate path to `%s' (%s)\n", opt.tlsCertPath.c_str(), e.what());
+			fmt::println(stderr, "ERROR: cannot set TLS certificate path to `{}' ({})", opt.tlsCertPath, e.what());
 			return 1;
 		}
 	}
@@ -2098,7 +2103,7 @@ int main(int argc, char** argv) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);
 		} catch (Error& e) {
-			fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", opt.tlsCAPath.c_str(), e.what());
+			fmt::println(stderr, "ERROR: cannot set TLS CA path to `{}' ({})", opt.tlsCAPath, e.what());
 			return 1;
 		}
 	}
@@ -2109,7 +2114,7 @@ int main(int argc, char** argv) {
 
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
 		} catch (Error& e) {
-			fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", opt.tlsKeyPath.c_str(), e.what());
+			fmt::println(stderr, "ERROR: cannot set TLS key path to `{}' ({})", opt.tlsKeyPath, e.what());
 			return 1;
 		}
 	}
@@ -2117,8 +2122,7 @@ int main(int argc, char** argv) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, opt.tlsVerifyPeers);
 		} catch (Error& e) {
-			fprintf(
-			    stderr, "ERROR: cannot set TLS peer verification to `%s' (%s)\n", opt.tlsVerifyPeers.c_str(), e.what());
+			fmt::println(stderr, "ERROR: cannot set TLS peer verification to `{}' ({})", opt.tlsVerifyPeers, e.what());
 			return 1;
 		}
 	}
@@ -2127,7 +2131,7 @@ int main(int argc, char** argv) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_DISABLE_PLAINTEXT_CONNECTION);
 		} catch (Error& e) {
-			fprintf(stderr, "ERROR: cannot disable non-TLS connections (%s)\n", e.what());
+			fmt::println(stderr, "ERROR: cannot disable non-TLS connections ({})", e.what());
 			return 1;
 		}
 	}
@@ -2135,26 +2139,27 @@ int main(int argc, char** argv) {
 	try {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 	} catch (Error& e) {
-		fprintf(stderr, "ERROR: cannot disable logging client related information (%s)\n", e.what());
+		fmt::println(stderr, "ERROR: cannot disable logging client related information ({})", e.what());
 		return 1;
 	}
 
 	if (opt.debugTLS) {
 		// Backdoor into NativeAPI's tlsConfig, which is where the above network option settings ended up.
 		extern TLSConfig tlsConfig;
-		printf("TLS Configuration:\n");
-		printf("\tCertificate Path: %s\n", tlsConfig.getCertificatePathSync().c_str());
-		printf("\tKey Path: %s\n", tlsConfig.getKeyPathSync().c_str());
-		printf("\tCA Path: %s\n", tlsConfig.getCAPathSync().c_str());
-		printf("\tPlaintext Connection Disable: %s\n", tlsConfig.getDisablePlainTextConnection() ? "true" : "false");
+		fmt::println("TLS Configuration:");
+		fmt::println("\tCertificate Path: {}", tlsConfig.getCertificatePathSync());
+		fmt::println("\tKey Path: {}", tlsConfig.getKeyPathSync());
+		fmt::println("\tCA Path: {}", tlsConfig.getCAPathSync());
+		fmt::println("\tPlaintext Connection Disable: {}",
+		             tlsConfig.getDisablePlainTextConnection() ? "true" : "false");
 		try {
 			LoadedTLSConfig loaded = tlsConfig.loadSync();
-			printf("\tPassword: %s\n", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");
-			printf("\n");
+			fmt::println("\tPassword: {}", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");
+			fmt::println("");
 			loaded.print(stdout);
 		} catch (Error& e) {
-			fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
-			printf("Use --log and look at the trace logs for more detailed information on the failure.\n");
+			fmt::println(stderr, "ERROR: {} ({})", e.what(), e.code());
+			fmt::println("Use --log and look at the trace logs for more detailed information on the failure.");
 			return 1;
 		}
 		return 0;
@@ -2169,13 +2174,13 @@ int main(int argc, char** argv) {
 		if (e.code() == error_code_operation_cancelled) {
 			throw;
 		}
-		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+		fmt::println(stderr, "{}", ClusterConnectionFile::getErrorString(resolvedClusterFile, e));
 		return 1;
 	}
 
 	// Make sure that TLS configuration lines up with ":tls" prefix on coordinator addresses
 	if (auto errorMsg = checkTlsConfigAgainstCoordAddrs(ccf->getConnectionString())) {
-		fprintf(stderr, "ERROR: %s\n", errorMsg);
+		fmt::println(stderr, "ERROR: {}", errorMsg);
 		return 1;
 	}
 
@@ -2201,7 +2206,7 @@ int main(int argc, char** argv) {
 			return 1;
 		}
 	} catch (Error& e) {
-		fprintf(stderr, "ERROR: %s (%d)\n", e.what(), e.code());
+		fmt::println(stderr, "ERROR: {} ({})", e.what(), e.code());
 		return 1;
 	}
 }

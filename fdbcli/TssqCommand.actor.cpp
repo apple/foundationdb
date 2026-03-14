@@ -28,6 +28,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -43,9 +44,9 @@ ACTOR Future<Void> tssQuarantineList(Reference<IDatabase> db) {
 			RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
-			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");
+			fmt::println("Found {} quarantined TSS processes{}", result.size(), result.size() == 0 ? "." : ":");
 			for (auto& it : result) {
-				printf("  %s\n", decodeTssQuarantineKey(it.key).toString().c_str());
+				fmt::println("  {}", decodeTssQuarantineKey(it.key).toString());
 			}
 			return Void();
 		} catch (Error& e) {
@@ -68,12 +69,12 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			state ThreadFuture<Optional<Value>> serverListValueF = tr->get(serverListKeyFor(tssId));
 			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(serverListValueF));
 			if (!serverListValue.present()) {
-				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
+				fmt::println("No TSS {} found in cluster!", tssId.toString());
 				return false;
 			}
 			state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 			if (!ssi.isTss()) {
-				printf("Cannot quarantine Non-TSS storage ID %s!\n", tssId.toString().c_str());
+				fmt::println("Cannot quarantine Non-TSS storage ID {}!", tssId.toString());
 				return false;
 			}
 
@@ -81,10 +82,10 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			state ThreadFuture<Optional<Value>> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
 			Optional<Value> currentQuarantineValue = wait(safeThreadFutureToFuture(currentQuarantineValueF));
 			if (enable && currentQuarantineValue.present()) {
-				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
+				fmt::println("TSS {} already in quarantine, doing nothing.", tssId.toString());
 				return false;
 			} else if (!enable && !currentQuarantineValue.present()) {
-				printf("TSS %s is not in quarantine, cannot remove from quarantine!.\n", tssId.toString().c_str());
+				fmt::println("TSS {} is not in quarantine, cannot remove from quarantine!.", tssId.toString());
 				return false;
 			}
 
@@ -102,7 +103,7 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
-	printf("Successfully %s TSS %s\n", enable ? "quarantined" : "removed", tssId.toString().c_str());
+	fmt::println("Successfully {} TSS {}", enable ? "quarantined" : "removed", tssId.toString());
 	return true;
 }
 

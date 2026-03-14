@@ -25,6 +25,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
+#include "fmt/format.h"
 
 namespace fdb_cli {
 
@@ -33,11 +34,10 @@ Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransac
 	ConsistencyScanState::RoundStats statsCurrentRound;
 	co_await (store(statsLifetime, cs->lifetimeStats().getD(tr)) &&
 	          store(statsCurrentRound, cs->currentRoundStats().getD(tr)));
-	printf(
-	    "Current Round:\n%s\n",
-	    json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON()), json_spirit::pretty_print).c_str());
-	printf("Lifetime:\n%s\n",
-	       json_spirit::write_string(json_spirit::mValue(statsLifetime.toJSON()), json_spirit::pretty_print).c_str());
+	fmt::print("Current Round:\n{}\n",
+	           json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON()), json_spirit::pretty_print));
+	fmt::print("Lifetime:\n{}\n",
+	           json_spirit::write_string(json_spirit::mValue(statsLifetime.toJSON()), json_spirit::pretty_print));
 	co_return;
 }
 
@@ -57,9 +57,8 @@ Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> con
 			ConsistencyScanState::Config config = co_await ConsistencyScanState().config().getD(tr);
 
 			if (args.empty()) {
-				printf(
-				    "%s\n",
-				    json_spirit::write_string(json_spirit::mValue(config.toJSON()), json_spirit::pretty_print).c_str());
+				fmt::println(
+				    "{}", json_spirit::write_string(json_spirit::mValue(config.toJSON()), json_spirit::pretty_print));
 				break;
 			}
 

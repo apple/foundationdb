@@ -27,6 +27,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -121,11 +122,10 @@ ACTOR Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> token
 		} else {
 			auto a = AddressExclusion::parse(*t);
 			if (!a.isValid()) {
-				fprintf(stderr,
-				        "ERROR: '%s' is neither a valid network endpoint address nor a locality\n",
-				        t->toString().c_str());
+				fmt::println(
+				    stderr, "ERROR: '{}' is neither a valid network endpoint address nor a locality", t->toString());
 				if (t->toString().find(":tls") != std::string::npos)
-					printf("        Do not include the `:tls' suffix when naming a process\n");
+					fmt::println("        Do not include the `:tls' suffix when naming a process");
 				return false;
 			}
 			addresses.push_back(a);

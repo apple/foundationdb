@@ -27,6 +27,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -34,7 +35,7 @@ namespace fdb_cli {
 ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens) {
 	state std::function<bool(std::string)> fail = [&](std::string msg) {
 		if (!msg.empty()) {
-			fmt::print(stderr, "ERROR: {}\n", msg);
+			fmt::println(stderr, "ERROR: {}", msg);
 		}
 		printUsage(tokens[0]);
 		return false;
@@ -75,8 +76,8 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 		Reference<DDConfiguration::RangeConfigMapSnapshot> config =
 		    wait(DDConfiguration().userRangeConfig().getSnapshot(
 		        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
-		fmt::print(
-		    "{}\n",
+		fmt::println(
+		    "{}",
 		    json_spirit::write_string(DDConfiguration::toJSON(*config, includeDefault), json_spirit::pretty_print));
 
 	} else if (cmd == "update"_sr || cmd == "set"_sr) {
