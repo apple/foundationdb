@@ -733,7 +733,7 @@ ACTOR Future<Void> RocksDBColumnFamilyReader::doClose(RocksDBColumnFamilyReader*
 class RocksDBSstFileWriter : public IRocksDBSstFileWriter {
 public:
 	RocksDBSstFileWriter()
-	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false){};
+	  : writer(std::make_unique<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options())), hasData(false) {};
 
 	void open(const std::string localFile) override;
 
@@ -789,7 +789,7 @@ bool RocksDBSstFileWriter::finish() {
 
 class RocksDBSstFileReader : public IRocksDBSstFileReader {
 public:
-	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())){};
+	RocksDBSstFileReader() : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())) {};
 
 	RocksDBSstFileReader(const KeyRange& rangeBoundary, size_t rowLimit, size_t byteLimit)
 	  : sstReader(std::make_unique<rocksdb::SstFileReader>(rocksdb::Options())), rowLimit(rowLimit),
