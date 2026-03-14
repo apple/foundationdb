@@ -446,6 +446,22 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 	}
 }
 
+struct PartitionMapMessage {
+	PartitionMap partitionMap;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, partitionMap);
+	}
+
+	// For now there is no explicit type tag; we assume the first
+	// non-span, non-OTEL message at this position is the partition map.
+	static bool isNextIn(ArenaReader& r) {
+		// If later you add a type byte, decode and check it here.
+		return true;
+	}
+};
+
 // ============================================================================
 // Unit Tests
 // ============================================================================
@@ -654,9 +670,9 @@ TEST_CASE("/backup/rangePartitioned/pullPartitionMap/basic") {
 	// Prepare a single dummy log message at version 150.
 	state Version v = 150;
 	// Build a small partition map: this worker's tag has two ranges.
-	std::map<Tag, std::vector<PartitionInfo>> pm;
-	pm[req.routerTag].push_back(PartitionInfo(0, KeyRangeRef(""_sr, "m"_sr)));
-	pm[req.routerTag].push_back(PartitionInfo(1, KeyRangeRef("m"_sr, "\xff\xff"_sr)));
+	PartitionMap pm;
+	pm[req.routerTag].push_back(Partition(0, KeyRangeRef(""_sr, "m"_sr)));
+	pm[req.routerTag].push_back(Partition(1, KeyRangeRef("m"_sr, "\xff\xff"_sr)));
 
 	PartitionMapMessage pmMsg;
 	pmMsg.partitionMap = pm;
@@ -681,13 +697,15 @@ TEST_CASE("/backup/rangePartitioned/pullPartitionMap/basic") {
 
 	self->logSystem.set(Reference<ILogSystem>(new TestLogSystem(std::move(msgs))));
 
-	state std::map<Tag, std::vector<PartitionInfo>> outMap;
-	state Version got = wait(pullPartitionMapFromTLog(self, &outMap));
+	state PartitionMap outMap;
+	state Version partitionMapVersion = wait(pullPartitionMapFromTLog(self, &outMap));
 
-	ASSERT_EQ(got, v);
+	ASSERT_EQ(partitionMapVersion, v);
 	ASSERT_EQ(outMap.size(), 1);
 	ASSERT(outMap.find(req.routerTag) != outMap.end());
 	ASSERT_EQ(outMap[req.routerTag].size(), 2);
+
+	self->logFolderBaseVersion = partitionMapVersion + 1;
 
 	// Add a real backup container to test partition map upload with actual file writes
 	state std::string testURL = "file://simfdb/backups/test_" + deterministicRandom()->randomUniqueID().toString();
@@ -701,8 +719,87 @@ TEST_CASE("/backup/rangePartitioned/pullPartitionMap/basic") {
 	backupInfo.stopped = false;
 	self->backups[backupId] = backupInfo;
 
-	wait(uploadPartitionMap(self, got, outMap));
+	wait(uploadPartitionList(self, outMap));
 
 	printf("!!!!! Partition map upload completed successfully to %s\n", testURL.c_str());
+	return Void();
+}
+
+TEST_CASE("/backup/rangePartitioned/saveMutationsToFile/basic") {
+	wait(delay(0.0));
+
+	// --- Setup worker and DB info ---
+	state UID workerId = deterministicRandom()->randomUniqueID();
+	state InitializeBackupRequest req;
+	req.routerTag = Tag(1, 0);
+	req.totalTags = 1;
+	req.startVersion = 100;
+	req.endVersion = Optional<Version>();
+	req.recruitedEpoch = 1;
+	req.backupEpoch = 1;
+
+	state ServerDBInfo dbi;
+	state Reference<AsyncVar<ServerDBInfo> const> dbVar = makeReference<AsyncVar<ServerDBInfo> const>(dbi);
+
+	state BackupRangePartitionedData* self = new BackupRangePartitionedData(workerId, dbVar, req);
+
+	// Pretend we are ready to write at version 150.
+	self->logFolderBaseVersion = 200;
+	self->savedVersion = 149;
+	self->pulledVersion.set(150);
+
+	// --- Create a real backup container and fake ranges future ---
+	state std::string testURL =
+	    "file://simfdb/backups/saveMutations_" + deterministicRandom()->randomUniqueID().toString();
+	state Reference<IBackupContainer> container = IBackupContainer::openContainer(testURL, {}, {});
+	wait(container->create());
+
+	state UID backupId = deterministicRandom()->randomUniqueID();
+	BackupRangePartitionedData::PerBackupInfo info;
+	info.self = self;
+	info.startVersion = 100;
+	info.nextFileBeginVersion = invalidVersion;
+	info.stopped = false;
+
+	// Set container and ranges as already-resolved futures.
+	info.container = Future<Optional<Reference<IBackupContainer>>>(Optional<Reference<IBackupContainer>>(container));
+	info.ranges = Future<Optional<std::vector<KeyRange>>>(
+	    Optional<std::vector<KeyRange>>(std::vector<KeyRange>{ KeyRangeRef(""_sr, "\xff"_sr) }));
+
+	self->backups[backupId] = info;
+
+	// --- Partition map: single partition covering all keys, id = 0 ---
+	self->keyRangeToPartitionId.insert(KeyRangeRef(""_sr, "\xff"_sr), 7);
+	self->partitionToKeyRange[7] = KeyRangeRef(""_sr, "\xff"_sr);
+
+	// Compute keyRangeToBackupAssignment from backups + partition map.
+	wait(computeKeyRangeToBackupAssignment(self));
+
+	// At this point, keyRangeToBackupAssignment should map all keys
+	// to (backupId, partitionId=7) and isAllInfoReady() should be true.
+	ASSERT(self->isAllInfoReady());
+
+	// --- Prepare a single mutation message at version 150 ---
+	state Arena arena;
+	MutationRef m(MutationRef::Type::SetValue, "k"_sr, "v"_sr);
+	BinaryWriter wr(AssumeVersion(g_network->protocolVersion()));
+	wr << m;
+	Standalone<StringRef> payload = wr.toValue();
+
+	LogMessageVersion logVer(150);
+	VectorRef<Tag> tags;
+	tags.push_back(arena, req.routerTag);
+
+	RangePartitionedVersionedMessage msg(logVer, payload, tags, arena);
+	self->messages.push_back(msg);
+
+	state Version lastVersionInFile = 150;
+	state int numMsg = 1;
+
+	// --- Call saveMutationsToFile ---
+	wait(saveMutationsToFile(self, lastVersionInFile, numMsg));
+
+	printf("!!!!! saveMutationsToFile completed for %s\n", testURL.c_str());
+
 	return Void();
 }
