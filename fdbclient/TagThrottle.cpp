@@ -1,5 +1,5 @@
 /*
- * TagThrottle.actor.cpp
+ * TagThrottle.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,8 +23,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tuple.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 double const ClientTagThrottleLimits::NO_EXPIRATION = std::numeric_limits<double>::max();
 

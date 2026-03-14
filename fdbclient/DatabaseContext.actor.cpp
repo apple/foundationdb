@@ -63,7 +63,6 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/MutationList.h"
-#include "fdbclient/ParallelStream.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/StorageServerInterface.h"

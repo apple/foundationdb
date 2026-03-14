@@ -660,9 +660,9 @@ public:
 typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
 class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
-	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
-	                                                           Reference<ReadYourWritesTransaction> tr,
-	                                                           Snapshot snapshot);
+	static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap* tagsMap,
+	                                                     Reference<ReadYourWritesTransaction> tr,
+	                                                     Snapshot snapshot);
 
 public:
 	TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
@@ -1052,17 +1052,17 @@ struct StringRefReader {
 namespace fileBackup {
 Standalone<VectorRef<KeyValueRef>> decodeRangeFileBlock(const Standalone<StringRef>& buf);
 
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
-                                                                      int64_t offset,
-                                                                      int len,
-                                                                      Database cx);
+Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<IAsyncFile> file,
+                                                                int64_t offset,
+                                                                int len,
+                                                                Database cx);
 
 Standalone<VectorRef<KeyValueRef>> decodeMutationLogFileBlock(const Standalone<StringRef>& buf);
 
 // Reads a mutation log block from file and parses into batch mutation blocks for further parsing.
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
-                                                                            int64_t offset,
-                                                                            int len);
+Future<Standalone<VectorRef<KeyValueRef>>> decodeMutationLogFileBlock(Reference<IAsyncFile> file,
+                                                                      int64_t offset,
+                                                                      int len);
 
 // Return a block of contiguous padding bytes "\0xff" for backup files, growing if needed.
 Value makePadding(int size);
@@ -1072,10 +1072,10 @@ Value makePadding(int size);
 // For testing addPrefix feature in fast restore.
 // Transform db content in restoreRanges by removePrefix and then addPrefix.
 // Assume: DB is locked
-ACTOR Future<Void> transformRestoredDatabase(Database cx,
-                                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-                                             Key addPrefix,
-                                             Key removePrefix);
+Future<Void> transformRestoredDatabase(Database cx,
+                                       Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                       Key addPrefix,
+                                       Key removePrefix);
 
 void simulateBlobFailure();
 

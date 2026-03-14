@@ -1,5 +1,5 @@
 /*
- * RestoreWorkerInterface.actor.cpp
+ * RestoreWorkerInterface.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,8 +19,6 @@
  */
 
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-#include "flow/actorcompiler.h" // must be last include
-
 const KeyRef restoreLeaderKey = "\xff\x02/restoreLeader"_sr;
 const KeyRangeRef restoreWorkersKeys("\xff\x02/restoreWorkers/"_sr, "\xff\x02/restoreWorkers0"_sr);
 const KeyRef restoreStatusKey = "\xff\x02/restoreStatus/"_sr;
