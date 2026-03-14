@@ -1249,33 +1249,22 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printHelpOverview();
 					} else if (tokens.size() == 2) {
 						if (tokencmp(tokens[1], "escaping"))
-							fmt::
-							    print(
-							        "\nWhen parsing commands, fdbcli considers a space to delimit individual "
-							        "tokens.\nTo include a space in a single token, you may either enclose the token "
-							        "in\nquotation marks (\\" hello
-							            world\\"), prefix the space with a backslash\n(hello\\ world), or encode the "
-							                   "space as a hex byte (hello\\x20world).\n\nTo include a literal "
-							                   "quotation mark in a token, precede it with a "
-							                   "backslash\n(\\\\" hello\\ world\\\\").\n\nTo express a binary value, "
-							                                                       "encode each byte as either\n   a) "
-							                                                       "a two-digit hex byte preceded by "
-							                                                       "\\x\n   b) a four-digit hex byte "
-							                                                       "in the range of 0x0000-0x00FF "
-							                                                       "preceded by \\u\n(e.g. \\x20 or "
-							                                                       "\\u0020 for a space character, or "
-							                                                       "\\x0a\\x00\\x00\\x00 "
-							                                                       "or\n\\u000a\\u0000\\u0000\\u0000 "
-							                                                       "for a 32-bit, little-endian "
-							                                                       "representation of\nthe integer 10. "
-							                                                       " Any byte can use either syntax, "
-							                                                       "so \\u000a\\x00\\x00\\x00\nis also "
-							                                                       "a valid representation of a "
-							                                                       "little-endian value of 10).\n\nAll "
-							                                                       "keys and values are displayed by "
-							                                                       "the fdbcli with non-printable "
-							                                                       "characters\nand spaces encoded as "
-							                                                       "two-digit hex bytes.\n\n");
+							fmt::print(
+							    "\nWhen parsing commands, fdbcli considers a space to delimit individual tokens.\n"
+							    "To include a space in a single token, you may either enclose the token in\n"
+							    "quotation marks (\"hello world\"), prefix the space with a backslash\n"
+							    "(hello\\ world), or encode the space as a hex byte (hello\\x20world).\n\n"
+							    "To include a literal quotation mark in a token, precede it with a backslash\n"
+							    "(\\\"hello\\ world\\\").\n\n"
+							    "To express a binary value, encode each byte as either\n"
+							    "   a) a two-digit hex byte preceded by \\x\n"
+							    "   b) a four-digit hex byte in the range of 0x0000-0x00FF preceded by \\u\n"
+							    "(e.g. \\x20 or \\u0020 for a space character, or \\x0a\\x00\\x00\\x00 or\n"
+							    "\\u000a\\u0000\\u0000\\u0000 for a 32-bit, little-endian representation of\n"
+							    "the integer 10. Any byte can use either syntax, so \\u000a\\x00\\x00\\x00\n"
+							    "is also a valid representation of a little-endian value of 10).\n\n"
+							    "All keys and values are displayed by the fdbcli with non-printable characters\n"
+							    "and spaces encoded as two-digit hex bytes.\n\n");
 						else if (tokencmp(tokens[1], "options")) {
 							fmt::print(
 							    "\nThe following options are available to be set using the `option' command:\n\n");
