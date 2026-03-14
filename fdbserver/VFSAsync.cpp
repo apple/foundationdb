@@ -76,7 +76,7 @@ VFSAsyncFile::VFSAsyncFile(std::string const& filename, int flags)
 std::map<std::string, std::pair<uint32_t, int>> VFSAsyncFile::filename_lockCount_openCount;
 
 static int asyncClose(sqlite3_file* pFile) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 
 	TraceEvent(SevDebug, "VFSAsyncFileDestroy").detail("Filename", p->filename).backtrace();
 
@@ -89,7 +89,7 @@ static int asyncClose(sqlite3_file* pFile) {
 }
 
 static int asyncRead(sqlite3_file* pFile, void* zBuf, int iAmt, sqlite_int64 iOfst) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		++p->debug_reads;
 		int readBytes = waitForAndGet(p->file->read(zBuf, iAmt, iOfst));
@@ -109,7 +109,7 @@ static int asyncRead(sqlite3_file* pFile, void* zBuf, int iAmt, sqlite_int64 iOf
 
 #if 1
 static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlite_int64 iOfst) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		--p->debug_zcrefs;
 		p->file->releaseZeroCopy(data, iAmt, iOfst);
@@ -123,7 +123,7 @@ static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlit
 }
 
 static int asyncReadZeroCopy(sqlite3_file* pFile, void** data, int iAmt, sqlite_int64 iOfst, int* pDataWasCached) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		int readBytes = iAmt;
 		Future<Void> readFuture = p->file->readZeroCopy(data, &readBytes, iOfst);
@@ -149,7 +149,7 @@ static int asyncReadZeroCopy(sqlite3_file* pFile, void** data, int iAmt, sqlite_
 
 #else
 static int asyncReadZeroCopy(sqlite3_file* pFile, void** data, int iAmt, sqlite_int64 iOfst) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		*data = new char[iAmt];
 		int readBytes = waitForAndGet(p->file->read(*data, iAmt, iOfst));
@@ -175,7 +175,7 @@ static int asyncReleaseZeroCopy(sqlite3_file* pFile, void* data, int iAmt, sqlit
 #endif
 
 static int asyncWrite(sqlite3_file* pFile, const void* zBuf, int iAmt, sqlite_int64 iOfst) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		waitFor(p->file->write(zBuf, iAmt, iOfst));
 		return SQLITE_OK;
@@ -188,7 +188,7 @@ static int asyncWrite(sqlite3_file* pFile, const void* zBuf, int iAmt, sqlite_in
 }
 
 static int asyncTruncate(sqlite3_file* pFile, sqlite_int64 size) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 
 	// Adjust size to a multiple of chunkSize if set
 	if (p->chunkSize != 0) {
@@ -207,7 +207,7 @@ static int asyncTruncate(sqlite3_file* pFile, sqlite_int64 size) {
 }
 
 static int asyncSync(sqlite3_file* pFile, int flags) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		waitFor(p->file->sync());
 		return SQLITE_OK;
@@ -230,7 +230,7 @@ static int asyncSync(sqlite3_file* pFile, int flags) {
 ** Write the size of the file in bytes to *pSize.
 */
 static int VFSAsyncFileSize(sqlite3_file* pFile, sqlite_int64* pSize) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	try {
 		*pSize = waitForAndGet(p->file->size());
 		return SQLITE_OK;
@@ -255,7 +255,7 @@ static int asyncUnlock(sqlite3_file* pFile, int eLock) {
 	return SQLITE_OK;
 }
 static int asyncCheckReservedLock(sqlite3_file* pFile, int* pResOut) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	*pResOut = *p->pLockCount >= RESERVED_COUNT;
 	return SQLITE_OK;
 }
@@ -264,7 +264,7 @@ static int asyncCheckReservedLock(sqlite3_file* pFile, int* pResOut) {
 ** No xFileControl() verbs are implemented by this VFS.
 */
 static int VFSAsyncFileControl(sqlite3_file* pFile, int op, void* pArg) {
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile;
+	auto* p = (VFSAsyncFile*)pFile;
 	switch (op) {
 	case SQLITE_FCNTL_CHUNK_SIZE:
 		p->chunkSize = *(int*)pArg;
@@ -337,7 +337,7 @@ static int asyncShmMap(sqlite3_file* fd, /* Handle open on database file */
 ) {
 	MutexHolder hold(SharedMemoryInfo::mutex);
 
-	VFSAsyncFile* pDbFd = (VFSAsyncFile*)fd;
+	auto* pDbFd = (VFSAsyncFile*)fd;
 	SharedMemoryInfo* memInfo = pDbFd->sharedMemory;
 	if (!memInfo) {
 		std::string filename = pDbFd->filename;
@@ -388,7 +388,7 @@ static int asyncShmLock(sqlite3_file* fd, /* Database file holding the shared me
 
 	MutexHolder hold(SharedMemoryInfo::mutex);
 
-	VFSAsyncFile* pDbFd = (VFSAsyncFile*)fd;
+	auto* pDbFd = (VFSAsyncFile*)fd;
 	SharedMemoryInfo* memInfo = pDbFd->sharedMemory;
 
 	if (flags & SQLITE_SHM_UNLOCK) {
@@ -455,7 +455,7 @@ static int asyncShmUnmap(sqlite3_file* fd, /* The underlying database file */
 ) {
 	MutexHolder hold(SharedMemoryInfo::mutex);
 
-	VFSAsyncFile* pDbFd = (VFSAsyncFile*)fd;
+	auto* pDbFd = (VFSAsyncFile*)fd;
 	SharedMemoryInfo* memInfo = pDbFd->sharedMemory;
 	if (!memInfo)
 		return SQLITE_OK;
@@ -538,7 +538,7 @@ static int asyncOpen(sqlite3_vfs* pVfs, /* VFS */
 		                                        asyncReadZeroCopy,
 		                                        asyncReleaseZeroCopy };
 
-	VFSAsyncFile* p = (VFSAsyncFile*)pFile; /* Populate this structure */
+	auto* p = (VFSAsyncFile*)pFile; /* Populate this structure */
 
 	if (zName == 0)
 		return SQLITE_IOERR;

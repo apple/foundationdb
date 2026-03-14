@@ -197,7 +197,7 @@ struct PageChecksumCodec {
 	}
 
 	static void* codec(void* vpSelf, void* data, Pgno pageNumber, int op) {
-		PageChecksumCodec* self = (PageChecksumCodec*)vpSelf;
+		auto* self = (PageChecksumCodec*)vpSelf;
 
 		// Page write operations are 6 for DB page and 7 for journal page
 		bool write = (op == 6 || op == 7);
@@ -239,13 +239,13 @@ struct PageChecksumCodec {
 	}
 
 	static void sizeChange(void* vpSelf, int new_pageSize, int new_reserveSize) {
-		PageChecksumCodec* self = (PageChecksumCodec*)vpSelf;
+		auto* self = (PageChecksumCodec*)vpSelf;
 		self->pageSize = new_pageSize;
 		self->reserveSize = new_reserveSize;
 	}
 
 	static void free(void* vpSelf) {
-		PageChecksumCodec* self = (PageChecksumCodec*)vpSelf;
+		auto* self = (PageChecksumCodec*)vpSelf;
 		delete self;
 	}
 };
@@ -1692,7 +1692,7 @@ private:
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID) {};
+			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& rv) {
@@ -1720,7 +1720,7 @@ private:
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID) {};
+			  : key(key), maxLength(maxLength), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& rv) {

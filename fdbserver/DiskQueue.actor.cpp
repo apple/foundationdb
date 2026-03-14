@@ -28,8 +28,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-typedef bool (*compare_pages)(void*, void*);
-typedef int64_t loc_t;
+using compare_pages = bool (*)(void*, void*);
+using loc_t = int64_t;
 
 // 0 -> 0
 // 1 -> 4k
@@ -1575,7 +1575,7 @@ public:
 	                         DiskQueueVersion diskQueueVersion,
 	                         int64_t fileSizeWarningLimit)
 	  : queue(new DiskQueue(basename, fileExtension, dbgid, diskQueueVersion, fileSizeWarningLimit)), pushed(0),
-	    popped(0), committed(0) {};
+	    popped(0), committed(0){};
 
 	// IClosable
 	Future<Void> getError() const override { return queue->getError(); }

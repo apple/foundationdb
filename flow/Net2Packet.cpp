@@ -190,7 +190,7 @@ PacketBuffer* ReliablePacketList::compact(PacketBuffer* into, PacketBuffer* end)
 			if (len > into->bytes_unwritten()) {
 				// We have to split this ReliablePacket
 				len = into->bytes_unwritten();
-				ReliablePacket* e = new ReliablePacket;
+				auto* e = new ReliablePacket;
 				e->cont = c->cont;
 				e->buffer = c->buffer;
 				e->buffer->addref();

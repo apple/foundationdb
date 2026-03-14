@@ -630,7 +630,7 @@ void showArena(ArenaBlock* a, ArenaBlock* parent) {
 	if (!a->isTiny()) {
 		int o = a->nextBlockOffset;
 		while (o) {
-			ArenaBlockRef* r = (ArenaBlockRef*)((char*)a->getData() + o);
+			auto* r = (ArenaBlockRef*)((char*)a->getData() + o);
 
 			// If alignedBuffer is valid then print its pointer and size, else recurse
 			if (r->aligned4kBufferSize != 0) {

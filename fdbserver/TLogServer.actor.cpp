@@ -96,7 +96,7 @@ struct AlternativeTLogQueueEntryRef {
 	}
 };
 
-typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
+using TLogQueueEntry = Standalone<TLogQueueEntryRef>;
 struct LogData;
 struct TLogData;
 

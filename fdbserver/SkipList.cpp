@@ -834,7 +834,7 @@ void ConflictBatch::addTransaction(const CommitTransactionRef& tr, Version newOl
 	const int t = transactionCount++;
 
 	Arena& arena = transactionInfo.arena();
-	TransactionInfo* info = new (arena) TransactionInfo;
+	auto* info = new (arena) TransactionInfo;
 	info->reportConflictingKeys = tr.report_conflicting_keys;
 	bool tooOld = tr.read_snapshot < newOldestVersion && !tr.read_conflict_ranges.empty();
 	if (tooOld && ignoreTooOld()) {

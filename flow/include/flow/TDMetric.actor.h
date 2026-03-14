@@ -363,12 +363,12 @@ struct make_index_sequence_impl;
 
 template <size_t Start, size_t... Indices, size_t End>
 struct make_index_sequence_impl<Start, index_sequence<Indices...>, End> {
-	typedef typename make_index_sequence_impl<Start + 1, index_sequence<Indices..., Start>, End>::type type;
+	using type = typename make_index_sequence_impl<Start + 1, index_sequence<Indices..., Start>, End>::type;
 };
 
 template <size_t End, size_t... Indices>
 struct make_index_sequence_impl<End, index_sequence<Indices...>, End> {
-	typedef index_sequence<Indices...> type;
+	using type = index_sequence<Indices...>;
 };
 
 // The code that actually implements tuple_map
@@ -378,18 +378,20 @@ auto tuple_zip_invoke(F f, const Tuples&... ts) -> decltype(f(std::get<I>(ts)...
 }
 
 template <typename F, size_t... Is, typename... Tuples>
-auto tuple_map_impl(F f, index_sequence<Is...>, const Tuples&... ts)
-    -> decltype(std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...)) {
+auto tuple_map_impl(F f,
+                    index_sequence<Is...>,
+                    const Tuples&... ts) -> decltype(std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...)) {
 	return std::make_tuple(tuple_zip_invoke<Is>(f, ts...)...);
 }
 
 // tuple_map( f(a,b), (a1,a2,a3), (b1,b2,b3) ) = (f(a1,b1), f(a2,b2), f(a3,b3))
 template <typename F, typename Tuple, typename... Tuples>
-auto tuple_map(F f, const Tuple& t, const Tuples&... ts) -> decltype(tuple_map_impl(
-    f,
-    typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
-    t,
-    ts...)) {
+auto tuple_map(F f, const Tuple& t, const Tuples&... ts)
+    -> decltype(tuple_map_impl(
+        f,
+        typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(),
+        t,
+        ts...)) {
 	return tuple_map_impl(
 	    f, typename make_index_sequence_impl<0, index_sequence<>, std::tuple_size<Tuple>::value>::type(), t, ts...);
 }
@@ -398,7 +400,7 @@ template <class T>
 struct Descriptor {
 #ifndef NO_INTELLISENSE
 	using fields = std::tuple<>;
-	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
+	using field_indexes = make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type;
 
 	static StringRef typeName() { return ""_sr; }
 #endif

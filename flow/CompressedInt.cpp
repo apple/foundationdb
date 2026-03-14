@@ -22,7 +22,7 @@
 #include "flow/CompressedInt.h"
 
 void printBitsLittle(size_t const size, void const* const ptr) {
-	unsigned char* b = (unsigned char*)ptr;
+	auto* b = static_cast<unsigned char const*>(ptr);
 	unsigned char byte;
 	int i, j;
 
@@ -37,7 +37,7 @@ void printBitsLittle(size_t const size, void const* const ptr) {
 }
 
 void printBitsBig(size_t const size, void const* const ptr) {
-	unsigned char* b = (unsigned char*)ptr;
+	auto* b = static_cast<unsigned char const*>(ptr);
 	unsigned char byte;
 	int i, j;
 

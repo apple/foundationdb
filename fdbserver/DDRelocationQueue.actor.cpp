@@ -42,8 +42,8 @@
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
-typedef Reference<IDataDistributionTeam> ITeamRef;
-typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
+using ITeamRef = Reference<IDataDistributionTeam>;
+using SrcDestTeamPair = std::pair<ITeamRef, ITeamRef>;
 
 inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||
@@ -71,8 +71,8 @@ inline bool isDataMovementForValleyFiller(DataMovementReason reason) {
 	       reason == DataMovementReason::REBALANCE_READ_UNDERUTIL_TEAM;
 }
 
-typedef std::map<DataMovementReason, int> DmReasonPriorityMapping;
-typedef std::map<int, DataMovementReason> PriorityDmReasonMapping;
+using DmReasonPriorityMapping = std::map<DataMovementReason, int>;
+using PriorityDmReasonMapping = std::map<int, DataMovementReason>;
 std::pair<const DmReasonPriorityMapping*, const PriorityDmReasonMapping*> buildPriorityMappings() {
 	static DmReasonPriorityMapping reasonPriority{
 		{ DataMovementReason::INVALID, -1 },
@@ -130,7 +130,7 @@ DataMovementReason priorityToDataMovementReason(int priority) {
 RelocateData::RelocateData()
   : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::OTHER), startTime(-1),
     dataMoveId(anonymousShardId), workFactor(0), wantsNewServers(false), cancellable(false),
-    interval("QueuedRelocation") {};
+    interval("QueuedRelocation"){};
 
 RelocateData::RelocateData(RelocateShard const& rs)
   : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
@@ -216,7 +216,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 
 public:
 	ParallelTCInfo() = default;
-	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs) {};
+	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs){};
 
 	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
 

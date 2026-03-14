@@ -260,7 +260,7 @@ public:
 	void delref() override { ReferenceCounted<WorkPool>::delref(); }
 };
 
-typedef WorkPool<Coroutine, ThreadUnsafeSpinLock, true> CoroPool;
+using CoroPool = WorkPool<Coroutine, ThreadUnsafeSpinLock, true>;
 
 ACTOR void coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
 	try {

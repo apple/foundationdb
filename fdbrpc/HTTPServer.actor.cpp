@@ -281,7 +281,7 @@ struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<Hello
 	void delref() override { ReferenceCounted<HelloBadMD5RequestHandler>::delref(); }
 };
 
-typedef std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)> DoRequestFunction;
+using DoRequestFunction = std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)>;
 
 // handles retrying on timeout and reinitializing connection like other users of HTTP (S3BlobStore, RestClient)
 ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname,
