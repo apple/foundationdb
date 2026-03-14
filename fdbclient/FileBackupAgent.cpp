@@ -892,7 +892,6 @@ public:
 	// this might issue multiple consumeData() if the data of a version cross buffer boundary
 	Future<Standalone<VectorRef<VersionedMutation>>> getNext() override;
 	static Future<Standalone<VectorRef<VersionedMutation>>> getNext(Reference<PartitionedLogIteratorSimple> iterator);
-
 };
 
 PartitionedLogIteratorSimple::PartitionedLogIteratorSimple(Reference<IBackupContainer> _bc,
