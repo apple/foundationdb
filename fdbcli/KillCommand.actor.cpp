@@ -75,9 +75,10 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
 			if (!killRequestsSent) {
 				result = false;
-				fmt::println(stderr,
-				             "ERROR: failed to send requests to all processes, please run the `killâ command again "
-				             "to fetch latest addresses.");
+				fmt::println(
+				    stderr,
+				    "ERROR: failed to send requests to all processes, please run the `killâ command again "
+				    "to fetch latest addresses.");
 			} else {
 				fmt::println("Attempted to kill {} processes", address_interface->size());
 			}
@@ -101,10 +102,11 @@ ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
 			int64_t killRequestsSent = wait(safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, 0)));
 			if (!killRequestsSent) {
 				result = false;
-				fmt::println(stderr,
-				             "ERROR: failed to send requests to kill processes `{}', please run the `killâ command "
-				             "again to fetch latest addresses.",
-				             addressesStr);
+				fmt::println(
+				    stderr,
+				    "ERROR: failed to send requests to kill processes `{}', please run the `killâ command "
+				    "again to fetch latest addresses.",
+				    addressesStr);
 			} else {
 				// delay in case the network queue is not flush before the client exits
 				wait(delay(3.0));
