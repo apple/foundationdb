@@ -49,7 +49,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 	Value recordValue(int index) {
 		Version v = recordVersion(index);
-		return StringRef(fmt::format("{} ({:x})", static_cast<long long>(v), static_cast<long long>(v)));
+		return StringRef(fmt::format("{0} ({0:x})", static_cast<long long>(v)));
 	}
 
 	MutationLogReaderCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {

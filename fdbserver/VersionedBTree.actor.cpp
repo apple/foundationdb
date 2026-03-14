@@ -8301,13 +8301,8 @@ struct IntIntPair {
 		int size() const { return sizeof(Delta); }
 
 		std::string toString() const {
-			return fmt::format("DELTA{{prefixSource={} deleted={} dk={}(0x{:x}) dv={}(0x{:x})}}",
-			                   prefixSource,
-			                   deleted,
-			                   dk,
-			                   dk,
-			                   dv,
-			                   dv);
+			return fmt::format(
+			    "DELTA{{prefixSource={} deleted={} dk={2}(0x{2:x}) dv={3}(0x{3:x})}}", prefixSource, deleted, dk, dv);
 		}
 	};
 
@@ -8355,7 +8350,7 @@ struct IntIntPair {
 	int k;
 	int v;
 
-	std::string toString() const { return fmt::format("{{k={}(0x{:x}) v={}(0x{:x})}}", k, k, v, v); }
+	std::string toString() const { return fmt::format("{{k={0}(0x{0:x}) v={1}(0x{1:x})}}", k, v); }
 };
 
 int deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
