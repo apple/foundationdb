@@ -4879,8 +4879,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 					if (!mapFromServerKeys.contains(ssid)) {
 						std::string error = fmt::format("KeyServers and serverKeys mismatch: Some key in range({}, {}) "
 						                                "exists on Server({}) in KeyServers but not ServerKeys",
-						                                claimRange.toString(),
-						                                claimRange.toString(),
+						                                claimRange.begin.toString(),
+						                                claimRange.end.toString(),
 						                                ssid.toString());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
@@ -4918,8 +4918,8 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 					if (!mapFromKeyServers.contains(ssid)) {
 						std::string error = fmt::format("KeyServers and serverKeys mismatch: Some key of range({}, {}) "
 						                                "exists on Server({}) in ServerKeys but not KeyServers",
-						                                claimRange.toString(),
-						                                claimRange.toString(),
+						                                claimRange.begin.toString(),
+						                                claimRange.end.toString(),
 						                                ssid.toString());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
