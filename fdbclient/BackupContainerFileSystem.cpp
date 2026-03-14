@@ -1448,7 +1448,7 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangePartitionedL
                                                                                        int blockSize) {
 	return writeFile(
 	    BackupContainerFileSystemImpl::logVersionFolderStringForRangePartitioned(beginVersion, baseVersion) +
-	    format("log,%lld,%lld,%s,%d", beginVersion, endVersion, partitionId, blockSize));
+	    format("log,%lld,%lld,%d,%d", beginVersion, endVersion, partitionId, blockSize));
 }
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version snapshotBeginVersion,

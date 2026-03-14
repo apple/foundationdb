@@ -772,11 +772,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 				continue;
 			}
 
-			state Version beginVersion = it->second.nextFileBeginVersion;
 			state Version fileEndVersion = lastVersionInFile + 1;
 			if (it->second.nextFileBeginVersion == invalidVersion) {
 				it->second.nextFileBeginVersion = self->savedVersion + 1;
 			}
+			state Version beginVersion = it->second.nextFileBeginVersion;
 
 			RangePartitionedLogFileInfo lf;
 			lf.backupUid = it->first;
