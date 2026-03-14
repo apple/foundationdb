@@ -322,11 +322,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		                              (self->getKeyForIndex(-1, nodesPerTenant).size() + self->valueSizeRange.second));
 		try {
 			while (true) {
-				int tenantNum = self->minTenantNum;
-				for (; tenantNum < self->numTenants; ++tenantNum) {
-					int i = 0;
+				for (int tenantNum = self->minTenantNum; tenantNum < self->numTenants; ++tenantNum) {
 					co_await self->writeBarrier(self->db);
-					for (; i < nodesPerTenant; i += keysPerBatch) {
+					for (int i = 0; i < nodesPerTenant; i += keysPerBatch) {
 						ASSERT(tenantNum < 0);
 						Reference<ITransaction> tr = self->db->createTransaction();
 						while (true) {
@@ -430,14 +428,12 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			bool hasErr = false;
 			try {
 				int numWaits = deterministicRandom()->randomInt(1, 5);
-				int i = 0;
 
 				// Code path here will create a bunch of ops, wait for ONE of them to complete,
 				// then add more ops, wait for another one, and so on.
-				for (; i < numWaits; i++) {
+				for (int i = 0; i < numWaits; ++i) {
 					int numOps = deterministicRandom()->randomInt(1, self->numOps);
-					int j = 0;
-					for (; j < numOps; j++) {
+					for (int j = 0; j < numOps; ++j) {
 						int operationType = deterministicRandom()->randomInt(0, testCases.size());
 						printf("%d: Selected Operation %d\n", self->operationId + 1, operationType);
 						try {

@@ -184,8 +184,7 @@ struct RandomRangeLockWorkload : FailureInjectionWorkload {
 			co_await waitForAll(actors);
 
 			// Make sure all ranges locked by the workload client are unlocked
-			int j = 0;
-			for (; j < lockActorCount; j++) {
+			for (int j = 0; j < lockActorCount; ++j) {
 				std::vector<std::pair<KeyRange, RangeLockState>> res = co_await findExclusiveReadLockOnRange(
 				    cx, normalKeys, rangeLockOwnerNamePrefix + "-" + std::to_string(j));
 				ASSERT(res.empty());

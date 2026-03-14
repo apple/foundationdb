@@ -142,8 +142,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint.
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		std::vector<std::pair<KeyRange, CheckpointMetaData>>::iterator it = records.begin();
-		for (; it != records.end(); ++it) {
+		for (std::vector<std::pair<KeyRange, CheckpointMetaData>>::iterator it = records.begin(); it != records.end();
+		     ++it) {
 			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				Error err;
