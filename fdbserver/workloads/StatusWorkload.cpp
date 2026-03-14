@@ -25,6 +25,7 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fmt/format.h"
 
 struct StatusWorkload : TestWorkload {
 	static constexpr auto NAME = "Status";
@@ -120,7 +121,7 @@ struct StatusWorkload : TestWorkload {
 				result += ",";
 			}
 
-			result += format("%f", bands[i]);
+			result += fmt::format("{:f}", bands[i]);
 		}
 
 		return result + "]";
@@ -142,13 +143,13 @@ struct StatusWorkload : TestWorkload {
 					    "},"
 					    "\"read\":{" +
 					    generateBands() +
-					    format(", \"max_key_selector_offset\":%d, \"max_read_bytes\":%d},",
-					           deterministicRandom()->randomInt(0, 10000),
-					           deterministicRandom()->randomInt(0, 1000000)) +
+					    fmt::format(", \"max_key_selector_offset\":{}, \"max_read_bytes\":{}}},",
+					                deterministicRandom()->randomInt(0, 10000),
+					                deterministicRandom()->randomInt(0, 1000000)) +
 					    ""
 					    "\"commit\":{" +
 					    generateBands() +
-					    format(", \"max_commit_bytes\":%d", deterministicRandom()->randomInt(0, 1000000)) +
+					    fmt::format(", \"max_commit_bytes\":{}", deterministicRandom()->randomInt(0, 1000000)) +
 					    "}"
 					    "}";
 

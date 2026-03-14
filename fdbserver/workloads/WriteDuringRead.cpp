@@ -28,6 +28,7 @@
 #include "fdbclient/Atomic.h"
 #include "flow/ApiVersion.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 struct WriteDuringReadWorkload : TestWorkload {
 	static constexpr auto NAME = "WriteDuringRead";
@@ -714,7 +715,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		if (adjacentKeys) {
 			return Key(keyPrefix + (idx ? std::string(idx, '\x00') : ""));
 		} else {
-			return Key(keyPrefix + format("%010d", idx));
+			return Key(keyPrefix + fmt::format("{:010}", idx));
 		}
 	}
 

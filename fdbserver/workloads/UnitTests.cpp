@@ -20,6 +20,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/UnitTest.h"
+#include "fmt/format.h"
 
 void forceLinkIndexedSetTests();
 void forceLinkDequeTests();
@@ -168,7 +169,7 @@ struct UnitTestWorkload : TestWorkload {
 			return std::string_view(lhs->name) < std::string_view(rhs->name);
 		});
 
-		fprintf(stdout, "Found %zu tests\n", tests.size());
+		fmt::println(stdout, "Found {} tests", tests.size());
 
 		if (tests.size() == 0) {
 			TraceEvent(SevError, "NoMatchingUnitTests")
@@ -185,7 +186,7 @@ struct UnitTestWorkload : TestWorkload {
 		std::vector<UnitTest*>::iterator t;
 		for (t = tests.begin(); t != tests.end(); ++t) {
 			UnitTest* test = *t;
-			printf("Testing %s\n", test->name);
+			fmt::println("Testing {}", test->name);
 
 			TraceEvent(SevInfo, "RunningUnitTest")
 			    .detail("Name", test->name)

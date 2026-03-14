@@ -33,6 +33,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 struct ReadWriteCommonImpl {
 	// trace methods
@@ -178,7 +179,7 @@ Future<Void> ReadWriteCommon::tracePeriodically() {
 		bool recordBegin = shouldRecord(std::max(now() - periodicLoggingInterval, clientBegin));
 		bool recordEnd = shouldRecord(now());
 		if (recordBegin && recordEnd) {
-			std::string ts = format("T=%04.0fs:", elapsed);
+			std::string ts = fmt::format("T={:04.0f}s:", elapsed);
 			periodicMetrics.emplace_back(
 			    ts + "Operations/sec", (ops - last_ops) / periodicLoggingInterval, Averaged::False);
 
@@ -300,7 +301,7 @@ void ReadWriteCommon::getMetrics(std::vector<PerfMetric>& m) {
 
 	std::vector<std::pair<uint64_t, double>>::iterator ratesItr = ratesAtKeyCounts.begin();
 	for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
-		m.emplace_back(format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
+		m.emplace_back(fmt::format("{} keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 }
 
 Standalone<KeyValueRef> ReadWriteCommon::operator()(uint64_t n) {

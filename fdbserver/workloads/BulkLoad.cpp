@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct BulkLoadWorkload : TestWorkload {
 	static constexpr auto NAME = "BulkLoad";
@@ -86,11 +87,11 @@ struct BulkLoadWorkload : TestWorkload {
 				Error err;
 				try {
 					for (int i = 0; i < self->writesPerTransaction; i++) {
-						std::string key = format("%s/bulkload/%04x/%04x/%08x",
-						                         self->keyPrefix.toString().c_str(),
-						                         self->clientId,
-						                         actorId,
-						                         idx + i);
+						std::string key = fmt::format("{}/bulkload/{:04x}/{:04x}/{:08x}",
+						                              self->keyPrefix.toString(),
+						                              self->clientId,
+						                              actorId,
+						                              idx + i);
 						tr.set(key, self->value);
 						txnBytes += key.size() + self->value.size();
 					}

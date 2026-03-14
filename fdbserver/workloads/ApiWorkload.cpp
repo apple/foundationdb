@@ -38,8 +38,8 @@ Future<Void> clearKeyspace(ApiWorkload* self) {
 		Reference<TransactionWrapper> transaction = self->createTransaction();
 		Error err;
 		try {
-			KeyRange range(KeyRangeRef(StringRef(format("%010d", self->clientPrefixInt)),
-			                           StringRef(format("%010d", self->clientPrefixInt + 1))));
+			KeyRange range(KeyRangeRef(StringRef(fmt::format("{:010}", self->clientPrefixInt)),
+			                           StringRef(fmt::format("{:010}", self->clientPrefixInt + 1))));
 
 			transaction->clear(range);
 			co_await transaction->commit();
@@ -92,7 +92,7 @@ Future<Void> start(Database cx, ApiWorkload* self) {
 		co_await self->performTest(cx, data);
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
-			self->testFailure(format("Unhandled error %d: %s", e.code(), e.name()));
+			self->testFailure(fmt::format("Unhandled error {}: {}", e.code(), e.name()));
 	}
 }
 
@@ -105,7 +105,7 @@ Future<Void> ApiWorkload::start(Database const& cx) {
 
 // Convenience function for reporting a test failure to trace log and stdout
 void ApiWorkload::testFailure(std::string reason) {
-	printf("test failure on client %d: %s\n", clientPrefixInt, reason.c_str());
+	fmt::println("test failure on client {}: {}", clientPrefixInt, reason);
 	TraceEvent(SevError, "TestFailure")
 	    .detail("Reason", description() + " " + reason)
 	    .detail("Workload", "ApiCorrectness");
@@ -121,18 +121,18 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
                                  VectorRef<KeyValueRef> storeResults,
                                  Version readVersion) {
 	if (dbResults.size() != storeResults.size()) {
-		printf("%d. Size mismatch: %d - %d\n", clientPrefixInt, dbResults.size(), storeResults.size());
-		printf("DB Range:\n");
+		fmt::println("{}. Size mismatch: {} - {}", clientPrefixInt, dbResults.size(), storeResults.size());
+		fmt::println("DB Range:");
 		for (int j = 0; j < dbResults.size(); j++)
-			printf("%d: %s %d\n", j, dbResults[j].key.toString().c_str(), dbResults[j].value.size());
+			fmt::println("{}: {} {}", j, dbResults[j].key.toString(), dbResults[j].value.size());
 
-		printf("Memory Range:\n");
+		fmt::println("Memory Range:");
 		for (int j = 0; j < storeResults.size(); j++)
-			printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
+			fmt::println("{}: {} {}", j, storeResults[j].key.toString(), storeResults[j].value.size());
 
-		fmt::print("Read Version: {}\n", readVersion);
+		fmt::println("Read Version: {}", readVersion);
 
-		TraceEvent(SevError, format("%s_CompareSizeMismatch", description().c_str()).c_str())
+		TraceEvent(SevError, fmt::format("{}_CompareSizeMismatch", description()).c_str())
 		    .detail("ReadVer", readVersion)
 		    .detail("ResultSize", dbResults.size())
 		    .detail("StoreResultSize", storeResults.size());
@@ -142,18 +142,18 @@ bool ApiWorkload::compareResults(VectorRef<KeyValueRef> dbResults,
 
 	for (int i = 0; i < dbResults.size(); i++) {
 		if (dbResults[i].key != storeResults[i].key || dbResults[i].value != storeResults[i].value) {
-			printf("%s mismatch at %d\n", dbResults[i].key != storeResults[i].key ? "Key" : "Value", i);
-			printf("DB Range:\n");
+			fmt::println("{} mismatch at {}", dbResults[i].key != storeResults[i].key ? "Key" : "Value", i);
+			fmt::println("DB Range:");
 			for (int j = 0; j < dbResults.size(); j++)
-				printf("%d: %s %d\n", j, dbResults[j].key.toString().c_str(), dbResults[j].value.size());
+				fmt::println("{}: {} {}", j, dbResults[j].key.toString(), dbResults[j].value.size());
 
-			printf("Memory Range:\n");
+			fmt::println("Memory Range:");
 			for (int j = 0; j < storeResults.size(); j++)
-				printf("%d: %s %d\n", j, storeResults[j].key.toString().c_str(), storeResults[j].value.size());
+				fmt::println("{}: {} {}", j, storeResults[j].key.toString(), storeResults[j].value.size());
 
-			fmt::print("Read Version: {}\n", readVersion);
+			fmt::println("Read Version: {}", readVersion);
 
-			TraceEvent(SevError, format("%s_CompareValueMismatch", description().c_str()).c_str())
+			TraceEvent(SevError, fmt::format("{}_CompareValueMismatch", description()).c_str())
 			    .detail("ReadVer", readVersion)
 			    .detail("ResultSize", dbResults.size())
 			    .detail("DifferAt", i);
@@ -321,23 +321,23 @@ Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> 
 	self->transactionType = transactionType;
 
 	if (transactionType == NATIVE) {
-		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);
+		fmt::println("client {}: Running NativeAPI Transactions", self->clientPrefixInt);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
 		    new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(
 		        cx, self->extraDB, self->useExtraDB));
 	} else if (transactionType == READ_YOUR_WRITES) {
-		printf("client %d: Running ReadYourWrites Transactions\n", self->clientPrefixInt);
+		fmt::println("client {}: Running ReadYourWrites Transactions", self->clientPrefixInt);
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
 		    new TransactionFactory<FlowTransactionWrapper<ReadYourWritesTransaction>, const Database>(
 		        cx, self->extraDB, self->useExtraDB));
 	} else if (transactionType == THREAD_SAFE) {
-		printf("client %d: Running ThreadSafe Transactions\n", self->clientPrefixInt);
+		fmt::println("client {}: Running ThreadSafe Transactions", self->clientPrefixInt);
 		Reference<IDatabase> dbHandle =
 		    co_await unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx));
 		self->transactionFactory = Reference<TransactionFactoryInterface>(
 		    new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));
 	} else if (transactionType == MULTI_VERSION) {
-		printf("client %d: Running Multi-Version Transactions\n", self->clientPrefixInt);
+		fmt::println("client {}: Running Multi-Version Transactions", self->clientPrefixInt);
 		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
 		Reference<IDatabase> threadSafeHandle =
 		    co_await unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx));

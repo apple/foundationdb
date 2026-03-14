@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct SelectorCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "SelectorCorrectness";
@@ -62,7 +63,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> SelectorCorrectnessSetup(Database cx, SelectorCorrectnessWorkload* self) {
-		Value myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
+		Value myValue = StringRef(fmt::format("{:010}", deterministicRandom()->randomInt(0, 10000000)));
 		Transaction tr(cx);
 
 		if (!self->testReadYourWrites) {
@@ -70,7 +71,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				Error err;
 				try {
 					for (int i = 0; i < self->maxKeySpace; i += 2)
-						tr.set(StringRef(format("%010d", i)), myValue);
+						tr.set(StringRef(fmt::format("{:010}", i)), myValue);
 
 					co_await tr.commit();
 					break;
@@ -84,10 +85,10 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 				Error err;
 				try {
 					for (int i = 0; i < self->maxKeySpace; i += 4)
-						tr.set(StringRef(format("%010d", i)), myValue);
+						tr.set(StringRef(fmt::format("{:010}", i)), myValue);
 					for (int i = 2; i < self->maxKeySpace; i += 4)
 						if (deterministicRandom()->random01() > 0.5)
-							tr.set(StringRef(format("%010d", i)), myValue);
+							tr.set(StringRef(fmt::format("{:010}", i)), myValue);
 
 					co_await tr.commit();
 					break;
@@ -112,7 +113,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 		Standalone<StringRef> maxKey;
 		Reverse reverse = Reverse::False;
 
-		maxKey = Standalone<StringRef>(format("%010d", self->maxKeySpace + 1));
+		maxKey = Standalone<StringRef>(fmt::format("{:010}", self->maxKeySpace + 1));
 
 		while (true) {
 
@@ -120,12 +121,12 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 			ReadYourWritesTransaction trRYOW(cx);
 
 			if (self->testReadYourWrites) {
-				myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
+				myValue = StringRef(fmt::format("{:010}", deterministicRandom()->randomInt(0, 10000000)));
 				for (int i = 2; i < self->maxKeySpace; i += 4)
-					trRYOW.set(StringRef(format("%010d", i)), myValue);
+					trRYOW.set(StringRef(fmt::format("{:010}", i)), myValue);
 				for (int i = 0; i < self->maxKeySpace; i += 4)
 					if (deterministicRandom()->random01() > 0.5)
-						trRYOW.set(StringRef(format("%010d", i)), myValue);
+						trRYOW.set(StringRef(fmt::format("{:010}", i)), myValue);
 			}
 
 			Error err;
@@ -136,7 +137,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 					j = deterministicRandom()->randomInt(0, 2);
 					if (j < 1) {
 						int searchInt = deterministicRandom()->randomInt(0, self->maxKeySpace);
-						myKeyA = format("%010d", searchInt);
+						myKeyA = fmt::format("{:010}", searchInt);
 
 						if (self->testReadYourWrites) {
 							Optional<Value> getTest = co_await trRYOW.get(StringRef(myKeyA));
@@ -160,8 +161,8 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						int b = deterministicRandom()->randomInt(2, 2 * self->maxKeySpace);
 						int abmax = std::max(a, b);
 						int abmin = std::min(a, b) - 1;
-						myKeyA = format("%010d", abmin);
-						myKeyB = format("%010d", abmax);
+						myKeyA = fmt::format("{:010}", abmin);
+						myKeyB = fmt::format("{:010}", abmax);
 						onEqualA = deterministicRandom()->randomInt(0, 2) != 0;
 						onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
 						offsetA = 1; //-1*deterministicRandom()->randomInt( 0, self->maxOffset );

@@ -32,6 +32,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Split RestoreConfigFR defined in FileBackupAgent.cpp to declaration in Restore.actor.h and implementation in
@@ -233,8 +234,9 @@ ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreCon
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n",
-		                lastError.get().first.c_str(),
+		errstr =
+		    fmt::format("'{}' {}s ago.\n",
+		                lastError.get().first,
 		                (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 
 	TraceEvent("FileRestoreProgress")
@@ -250,18 +252,18 @@ ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreCon
 	    .detail("TaskInstance", THIS_ADDR)
 	    .backtrace();
 
-	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  ApplyVersionLag: %lld  LastError: %s",
-	              tag.get().c_str(),
-	              uid.toString().c_str(),
-	              status.get().toString().c_str(),
-	              fileBlocksFinished.get(),
-	              fileBlockCount.get(),
-	              fileBlocksDispatched.get() - fileBlocksFinished.get(),
-	              fileCount.get(),
-	              bytesWritten.get(),
-	              lag.get(),
-	              errstr.c_str());
+	return fmt::format("Tag: {}  UID: {}  State: {}  Blocks: {}/{}  BlocksInProgress: {}  Files: {}  BytesWritten: {}  "
+	                   "ApplyVersionLag: {}  LastError: {}",
+	                   tag.get(),
+	                   uid.toString(),
+	                   status.get().toString(),
+	                   fileBlocksFinished.get(),
+	                   fileBlockCount.get(),
+	                   fileBlocksDispatched.get() - fileBlocksFinished.get(),
+	                   fileCount.get(),
+	                   bytesWritten.get(),
+	                   lag.get(),
+	                   errstr);
 }
 Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransaction> tr) {
 	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);
@@ -286,14 +288,14 @@ ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreC
 	     success(progress));
 
 	std::string returnStr;
-	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
+	returnStr = fmt::format("{}  URL: {}", progress.get(), url.get().toString());
 	for (auto& range : ranges.get()) {
-		returnStr += format("  Range: '%s'-'%s'", printable(range.begin).c_str(), printable(range.end).c_str());
+		returnStr += fmt::format("  Range: '{}'-'{}'", printable(range.begin), printable(range.end));
 	}
-	returnStr += format("  AddPrefix: '%s'  RemovePrefix: '%s'  Version: %lld",
-	                    printable(addPrefix.get()).c_str(),
-	                    printable(removePrefix.get()).c_str(),
-	                    restoreVersion.get());
+	returnStr += fmt::format("  AddPrefix: '{}'  RemovePrefix: '{}'  Version: {}",
+	                         printable(addPrefix.get()),
+	                         printable(removePrefix.get()),
+	                         restoreVersion.get());
 	return returnStr;
 }
 Future<std::string> RestoreConfigFR::getFullStatus(Reference<ReadYourWritesTransaction> tr) {

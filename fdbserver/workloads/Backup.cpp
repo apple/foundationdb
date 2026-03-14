@@ -26,6 +26,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRandom.h"
+#include "fmt/format.h"
 
 // A workload which only performs backup operations. A separate workload is used to perform restore operations.
 struct BackupWorkload : TestWorkload {
@@ -217,7 +218,7 @@ struct BackupWorkload : TestWorkload {
 						if (!fdesc.isError()) {
 							BackupDescription desc = fdesc.get();
 							co_await desc.resolveVersionTimes(cx);
-							printf("BackupDescription:\n%s\n", desc.toString().c_str());
+							fmt::print("BackupDescription:\n{}\n", desc.toString());
 							restorable = desc.maxRestorableVersion.present();
 						}
 					}
@@ -238,9 +239,9 @@ struct BackupWorkload : TestWorkload {
 						    .detail("LastBackupUID", lastBackupUID)
 						    .detail("BackupTag", printable(tag))
 						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %s\n",
-						       printable(tag).c_str(),
-						       BackupAgentBase::getStateText(resultWait));
+						fmt::println("BackupCorrectnessMissingBackupContainer   tag: {}  status: {}",
+						             printable(tag),
+						             BackupAgentBase::getStateText(resultWait));
 					}
 					// Check that backup is restorable
 					else if (!restorable) {
@@ -249,7 +250,7 @@ struct BackupWorkload : TestWorkload {
 						    .detail("BackupTag", printable(tag))
 						    .detail("BackupFolder", lastBackupContainer->getURL())
 						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
+						fmt::println("BackupCorrectnessNotRestorable:  tag: {}", printable(tag));
 					}
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup

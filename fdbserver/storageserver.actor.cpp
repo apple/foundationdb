@@ -890,7 +890,7 @@ private:
 
 public:
 	struct PendingNewShard {
-		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(format("%016llx", shardId)), range(range) {}
+		PendingNewShard(uint64_t shardId, KeyRangeRef range) : shardId(fmt::format("{:016x}", shardId)), range(range) {}
 
 		std::string toString() const {
 			return fmt::format("PendingNewShard: [ShardID]: {} [Range]: {}",
@@ -1548,9 +1548,9 @@ public:
 					TraceEvent(SevVerbose, "StorageServerAddShardClear")
 					    .detail("NewShardRange", newShard->range())
 					    .detail("Range", it->value()->range())
-					    .detail("ShardID", format("%016llx", it->value()->getShardId()))
-					    .detail("NewShardID", format("%016llx", newShard->getDesiredShardId()))
-					    .detail("NewShardActualID", format("%016llx", newShard->getShardId()));
+					    .detail("ShardID", fmt::format("{:016x}", it->value()->getShardId()))
+					    .detail("NewShardID", fmt::format("{:016x}", newShard->getDesiredShardId()))
+					    .detail("NewShardActualID", fmt::format("{:016x}", newShard->getShardId()));
 				}
 			}
 		}
@@ -1875,8 +1875,8 @@ void validate(StorageServer* data, bool force = false) {
 			for (auto s = data->shards.ranges().begin(); s != data->shards.ranges().end(); ++s) {
 				TraceEvent(SevVerbose, "ValidateShard", data->thisServerID)
 				    .detail("Range", s->range())
-				    .detail("ShardID", format("%016llx", s->value()->getShardId()))
-				    .detail("DesiredShardID", format("%016llx", s->value()->getDesiredShardId()))
+				    .detail("ShardID", fmt::format("{:016x}", s->value()->getShardId()))
+				    .detail("DesiredShardID", fmt::format("{:016x}", s->value()->getDesiredShardId()))
 				    .detail("ShardRange", s->value()->range())
 				    .detail("ShardState", s->value()->debugDescribeState())
 				    .log();
@@ -4083,11 +4083,11 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 					if (anyMismatch.present()) { // mismatch detected
 						KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
 						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().second;
-						std::string error =
-						    format("KeyServers and serverKeys mismatch on Server(%s): ServerKey: %s; KeyServer: %s",
-						           data->thisServerID.toString().c_str(),
-						           mismatchedRangeByServerKey.toString().c_str(),
-						           mismatchedRangeByKeyServer.toString().c_str());
+						std::string error = fmt::format(
+						    "KeyServers and serverKeys mismatch on Server({}): ServerKey: {}; KeyServer: {}",
+						    data->thisServerID.toString(),
+						    mismatchedRangeByServerKey.toString(),
+						    mismatchedRangeByKeyServer.toString());
 						TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
 						    .setMaxFieldLength(-1)
 						    .setMaxEventLength(-1)
@@ -4108,11 +4108,11 @@ ACTOR Future<Void> auditStorageServerShardQ(StorageServer* data, AuditStorageReq
 				if (anyMismatch.present()) { // mismatch detected
 					KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
 					KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
-					std::string error =
-					    format("Storage server shard info mismatch on Server(%s): ServerKey: %s; ServerShardInfo: %s",
-					           data->thisServerID.toString().c_str(),
-					           mismatchedRangeByServerKey.toString().c_str(),
-					           mismatchedRangeByLocalView.toString().c_str());
+					std::string error = fmt::format(
+					    "Storage server shard info mismatch on Server({}): ServerKey: {}; ServerShardInfo: {}",
+					    data->thisServerID.toString(),
+					    mismatchedRangeByServerKey.toString(),
+					    mismatchedRangeByLocalView.toString());
 					TraceEvent(SevError, "SSAuditStorageSsShardError", data->thisServerID)
 					    .setMaxFieldLength(-1)
 					    .setMaxEventLength(-1)
@@ -4419,10 +4419,10 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		if (sourceKV.key == restoredKeyWithoutPrefix) {
 			// Keys match, compare values
 			if (sourceKV.value != restoredKV.value) {
-				std::string error = format("Value Mismatch for Key %s: source value: %s, restored value: %s",
-				                           Traceable<StringRef>::toString(sourceKV.key).c_str(),
-				                           Traceable<StringRef>::toString(sourceKV.value).c_str(),
-				                           Traceable<StringRef>::toString(restoredKV.value).c_str());
+				std::string error = fmt::format("Value Mismatch for Key {}: source value: {}, restored value: {}",
+				                                Traceable<StringRef>::toString(sourceKV.key),
+				                                Traceable<StringRef>::toString(sourceKV.value),
+				                                Traceable<StringRef>::toString(restoredKV.value));
 				TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
 				    .setMaxFieldLength(-1)
 				    .setMaxEventLength(-1)
@@ -4441,7 +4441,7 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		} else if (sourceKV.key < restoredKeyWithoutPrefix) {
 			// Source key missing from restored data
 			std::string error =
-			    format("Missing key in restored data: %s", Traceable<StringRef>::toString(sourceKV.key).c_str());
+			    fmt::format("Missing key in restored data: {}", Traceable<StringRef>::toString(sourceKV.key));
 			TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
 			    .setMaxFieldLength(-1)
 			    .setMaxEventLength(-1)
@@ -4455,7 +4455,7 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 		} else {
 			// Extra key in restored data (treat as validation error)
 			std::string error =
-			    format("Extra key in restored data: %s", Traceable<StringRef>::toString(restoredKV.key).c_str());
+			    fmt::format("Extra key in restored data: {}", Traceable<StringRef>::toString(restoredKV.key));
 			TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
 			    .setMaxFieldLength(-1)
 			    .setMaxEventLength(-1)
@@ -4476,8 +4476,8 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 	// We require !sourceReply.more because if there's more source data to fetch,
 	// we can't definitively say keys are missing until we've seen all source data.
 	if (errors.empty() && sourceIdx < sourceReply.data.size() && !sourceReply.more && !restoredReply.more) {
-		std::string error = format("Missing key(s) in restored data, next source key: %s",
-		                           Traceable<StringRef>::toString(sourceReply.data[sourceIdx].key).c_str());
+		std::string error = fmt::format("Missing key(s) in restored data, next source key: {}",
+		                                Traceable<StringRef>::toString(sourceReply.data[sourceIdx].key));
 		TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
 		    .setMaxFieldLength(-1)
 		    .setMaxEventLength(-1)
@@ -4492,8 +4492,8 @@ std::vector<std::string> compareSourceAndRestoredData(UID thisServerID,
 	// Check for any remaining restored keys that don't have matching source keys
 	if (errors.empty() && restoredIdx < restoredReply.data.size() && !restoredReply.more) {
 		// Extra keys found in restored data - treat as validation error
-		std::string error = format("Extra key(s) in restored data, first extra key: %s",
-		                           Traceable<StringRef>::toString(restoredReply.data[restoredIdx].key).c_str());
+		std::string error = fmt::format("Extra key(s) in restored data, first extra key: {}",
+		                                Traceable<StringRef>::toString(restoredReply.data[restoredIdx].key));
 		TraceEvent(SevError, "SSAuditRestoreError", thisServerID)
 		    .setMaxFieldLength(-1)
 		    .setMaxEventLength(-1)
@@ -4877,11 +4877,11 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 						}
 						// Check if mismatch
 						if (remoteKV.key != localKV.key) {
-							error = format("Key Mismatch: local server (%016llx): %s, remote server(%016llx) %s",
-							               data->thisServerID.first(),
-							               Traceable<StringRef>::toString(localKV.key).c_str(),
-							               remoteServer.uniqueID.first(),
-							               Traceable<StringRef>::toString(remoteKV.key).c_str());
+							error = fmt::format("Key Mismatch: local server ({:016x}): {}, remote server({:016x}) {}",
+							                    data->thisServerID.first(),
+							                    Traceable<StringRef>::toString(localKV.key),
+							                    remoteServer.uniqueID.first(),
+							                    Traceable<StringRef>::toString(remoteKV.key));
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 							    .setMaxFieldLength(-1)
 							    .setMaxEventLength(-1)
@@ -4893,13 +4893,13 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							errors.push_back(error);
 							break;
 						} else if (remoteKV.value != localKV.value) {
-							error = format(
-							    "Value Mismatch for Key %s: local server (%016llx): %s, remote server(%016llx) %s",
-							    Traceable<StringRef>::toString(localKV.key).c_str(),
+							error = fmt::format(
+							    "Value Mismatch for Key {}: local server ({:016x}): {}, remote server({:016x}) {}",
+							    Traceable<StringRef>::toString(localKV.key),
 							    data->thisServerID.first(),
-							    Traceable<StringRef>::toString(localKV.value).c_str(),
+							    Traceable<StringRef>::toString(localKV.value),
 							    remoteServer.uniqueID.first(),
-							    Traceable<StringRef>::toString(remoteKV.value).c_str());
+							    Traceable<StringRef>::toString(remoteKV.value));
 							TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 							    .setMaxFieldLength(-1)
 							    .setMaxEventLength(-1)
@@ -4939,10 +4939,10 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							           data->thisServerID);
 						}
 						std::string error =
-						    format("Missing key(s) form local server (%lld), next key: %s, remote server(%016llx) ",
-						           data->thisServerID.first(),
-						           Traceable<StringRef>::toString(remote.data[i].key).c_str(),
-						           remoteServer.uniqueID.first());
+						    fmt::format("Missing key(s) form local server ({}), next key: {}, remote server({:016x}) ",
+						                data->thisServerID.first(),
+						                Traceable<StringRef>::toString(remote.data[i].key),
+						                remoteServer.uniqueID.first());
 						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 						    .setMaxFieldLength(-1)
 						    .setMaxEventLength(-1)
@@ -4960,10 +4960,10 @@ ACTOR Future<Void> auditStorageShardReplicaQ(StorageServer* data, AuditStorageRe
 							           data->thisServerID);
 						}
 						std::string error =
-						    format("Missing key(s) form remote server (%lld), next local server(%016llx) key: %s",
-						           remoteServer.uniqueID.first(),
-						           data->thisServerID.first(),
-						           Traceable<StringRef>::toString(local.data[i].key).c_str());
+						    fmt::format("Missing key(s) form remote server ({}), next local server({:016x}) key: {}",
+						                remoteServer.uniqueID.first(),
+						                data->thisServerID.first(),
+						                Traceable<StringRef>::toString(local.data[i].key));
 						TraceEvent(SevError, "SSAuditStorageShardReplicaError", data->thisServerID)
 						    .setMaxFieldLength(-1)
 						    .setMaxEventLength(-1)
@@ -10250,8 +10250,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		unlimitedCommitBytes = UnlimitedCommitBytes::False;
 		ASSERT(data->durableVersion.get() == data->storageVersion());
 		if (g_network->isSimulated()) {
-			double endTime =
-			    g_simulator->checkDisabled(format("%s/updateStorage", data->thisServerID.toString().c_str()));
+			double endTime = g_simulator->checkDisabled(fmt::format("{}/updateStorage", data->thisServerID.toString()));
 			if (endTime > now()) {
 				wait(delay(endTime - now(), TaskPriority::UpdateStorage));
 			}
@@ -11613,7 +11612,8 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 	    self->thisServerID.toString() + "/StorageMetrics",
 	    [self = self](TraceEvent& te) {
 		    te.detail("StorageEngine", self->storage.getKeyValueStoreType().toString());
-		    te.detail("RocksDBVersion", format("%d.%d.%d", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
+		    te.detail("RocksDBVersion",
+		              fmt::format("{}.{}.{}", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH));
 		    te.detail("Tag", self->tag.toString());
 		    std::vector<int> rpr = self->readPriorityRanks;
 		    te.detail("ReadsTotalActive", self->ssLock->getRunnersCount());
@@ -11952,7 +11952,7 @@ ACTOR Future<Void> storageEngineConsistencyCheck(StorageServer* self) {
 				continue;
 			}
 			if (it.value()->assigned()) {
-				currentShards.insert(it.range(), format("%016llx", it.value()->getShardId()));
+				currentShards.insert(it.range(), fmt::format("{:016x}", it.value()->getShardId()));
 				teamShardCount[it.value()->getTeamId()]++;
 			}
 		}
@@ -12809,7 +12809,7 @@ Possibilities:
 void versionedMapTest() {
 	VersionedMap<int, int> vm;
 
-	printf("SS Ptree node is %zu bytes\n", sizeof(StorageServer::VersionedData::PTreeT));
+	fmt::println("SS Ptree node is {} bytes", sizeof(StorageServer::VersionedData::PTreeT));
 
 	const int NSIZE = sizeof(VersionedMap<int, int>::PTreeT);
 	const int ASIZE = NSIZE <= 64 ? 64 : nextFastAllocatedSize(NSIZE);
@@ -12834,7 +12834,7 @@ void versionedMapTest() {
 	for (auto i = vm.atLatest().begin(); i != vm.atLatest().end(); ++i)
 		++count;
 
-	printf("PTree node is %d bytes, allocated as %d bytes\n", NSIZE, ASIZE);
-	printf("%d distinct after %d insertions\n", count, 1000 * 1000);
-	printf("Memory used: %f MB\n", (after - before) / 1e6);
+	fmt::println("PTree node is {} bytes, allocated as {} bytes", NSIZE, ASIZE);
+	fmt::println("{} distinct after {} insertions", count, 1000 * 1000);
+	fmt::println("Memory used: {:f} MB", (after - before) / 1e6);
 }

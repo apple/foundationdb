@@ -791,8 +791,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				std::string fileName = event.getValue("Filename");
 				JsonBuilderObject msgObj = JsonString::makeMessage(
 				    "file_open_error",
-				    format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str())
-				        .c_str());
+				    fmt::format("Could not open file '{}' ({}).", fileName, event.getValue("Error")).c_str());
 				msgObj["file_name"] = fileName;
 
 				// Map the address of the worker to the error message object
@@ -1071,7 +1070,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (ssLag[address] >= 60) {
 				messages.push_back(JsonString::makeMessage(
 				    "storage_server_lagging",
-				    format("Storage server lagging by %lld seconds.", (int64_t)ssLag[address]).c_str()));
+				    fmt::format("Storage server lagging by {} seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
@@ -1365,19 +1364,19 @@ ACTOR static Future<Void> doProbe(Future<double> probe,
 				if (isAvailable != nullptr) {
 					*isAvailable = false;
 				}
-				incomplete_reasons->insert(format(
-				    "Unable to retrieve latency probe information (%s: %s).", description, result.getError().what()));
+				incomplete_reasons->insert(fmt::format(
+				    "Unable to retrieve latency probe information ({}: {}).", description, result.getError().what()));
 			} else {
-				(*probeObj)[format("%s_seconds", prefix).c_str()] = result.get();
+				(*probeObj)[fmt::format("{}_seconds", prefix).c_str()] = result.get();
 			}
 		}
 		when(wait(delay(timeoutSeconds))) {
 			if (isAvailable != nullptr) {
 				*isAvailable = false;
 			}
-			messages->push_back(
-			    JsonString::makeMessage(format("%s_probe_timeout", prefix).c_str(),
-			                            format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
+			messages->push_back(JsonString::makeMessage(
+			    fmt::format("{}_probe_timeout", prefix).c_str(),
+			    fmt::format("Unable to {} after {} seconds.", description, timeoutSeconds).c_str()));
 		}
 	}
 
@@ -1438,7 +1437,7 @@ ACTOR static Future<JsonBuilderObject> latencyProbeFetcher(Database cx,
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
+		incomplete_reasons->insert(fmt::format("Unable to retrieve latency probe information ({}).", e.what()));
 	}
 
 	return statusObj;
@@ -1470,7 +1469,7 @@ ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		incomplete_reasons->insert(format("Unable to retrieve version epoch information (%s).", e.what()));
+		incomplete_reasons->insert(fmt::format("Unable to retrieve version epoch information ({}).", e.what()));
 	}
 	return message;
 }
@@ -1499,8 +1498,8 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 				if (e.code() == error_code_timed_out) {
 					messages->push_back(
 					    JsonString::makeMessage("consistencycheck_suspendkey_fetch_timeout",
-					                            format("Timed out trying to fetch `%s` from the database.",
-					                                   printable(fdbShouldConsistencyCheckBeSuspended).c_str())
+					                            fmt::format("Timed out trying to fetch `{}` from the database.",
+					                                        printable(fdbShouldConsistencyCheckBeSuspended))
 					                                .c_str()));
 					break;
 				}
@@ -1511,7 +1510,7 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		incomplete_reasons->insert(format("Unable to retrieve consistency check settings (%s).", e.what()));
+		incomplete_reasons->insert(fmt::format("Unable to retrieve consistency check settings ({}).", e.what()));
 	}
 	return Void();
 }
@@ -1565,15 +1564,14 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 					if (loggingRanges.contains(LogRangeAndUID(range, logUid))) {
 						std::pair<Key, Key> rangePair = std::make_pair(range.begin, range.end);
 						if (existingRanges.contains(rangePair)) {
-							std::string rangeDescription = (range == getDefaultBackupSharedRange())
-							                                   ? "the default backup set"
-							                                   : format("`%s` - `%s`",
-							                                            printable(range.begin).c_str(),
-							                                            printable(range.end).c_str());
+							std::string rangeDescription =
+							    (range == getDefaultBackupSharedRange())
+							        ? "the default backup set"
+							        : fmt::format("`{}` - `{}`", printable(range.begin), printable(range.end));
 							messages->push_back(JsonString::makeMessage(
 							    "duplicate_mutation_streams",
-							    format("Backup and DR are not sharing the same stream of mutations for %s",
-							           rangeDescription.c_str())
+							    fmt::format("Backup and DR are not sharing the same stream of mutations for {}",
+							                rangeDescription)
 							        .c_str()));
 							break;
 						}
@@ -1584,11 +1582,10 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_timed_out) {
-					messages->push_back(
-					    JsonString::makeMessage("duplicate_mutation_fetch_timeout",
-					                            format("Timed out trying to fetch `%s` from the database.",
-					                                   printable(destUidLookupPrefix).c_str())
-					                                .c_str()));
+					messages->push_back(JsonString::makeMessage(
+					    "duplicate_mutation_fetch_timeout",
+					    fmt::format("Timed out trying to fetch `{}` from the database.", printable(destUidLookupPrefix))
+					        .c_str()));
 					break;
 				}
 				wait(tr.onError(e));
@@ -1598,7 +1595,7 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		incomplete_reasons->insert(format("Unable to retrieve log ranges (%s).", e.what()));
+		incomplete_reasons->insert(fmt::format("Unable to retrieve log ranges ({}).", e.what()));
 	}
 	return Void();
 }
@@ -2716,8 +2713,8 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
-		incomplete_reasons->insert(format("Unable to retrieve layer status (%s).", e.what()));
-		json.create("_error") = format("Unable to retrieve layer status (%s).", e.what());
+		incomplete_reasons->insert(fmt::format("Unable to retrieve layer status ({}).", e.what()));
+		json.create("_error") = fmt::format("Unable to retrieve layer status ({}).", e.what());
 		json.create("_valid") = false;
 	}
 
@@ -2756,7 +2753,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Database cx,
 				}
 				when(wait(getTimeout)) {
 					incomplete_reasons->insert(
-					    format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
+					    fmt::format("Unable to determine if database is locked after {} seconds.", timeoutSeconds));
 				}
 			}
 			break;
@@ -2767,7 +2764,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Database cx,
 				if (e.code() == error_code_actor_cancelled)
 					throw;
 
-				incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));
+				incomplete_reasons->insert(fmt::format("Unable to determine if database is locked ({}).", e.what()));
 				break;
 			}
 		}
@@ -3472,13 +3469,13 @@ bool checkAsciiNumber(const char* s) {
 	JsonBuilderObject number;
 	number.setKeyRawNumber("number", s);
 	std::string js = number.getJson();
-	printf("'%s' => %s\n", s, js.c_str());
+	fmt::println("'{}' => {}", s, js);
 
 	try {
 		// Make sure it parses as JSON
 		readJSONStrictly(js);
 	} catch (Error& e) {
-		printf("error: %s\n", e.what());
+		fmt::println("error: {}", e.what());
 		return false;
 	}
 
@@ -3487,14 +3484,14 @@ bool checkAsciiNumber(const char* s) {
 
 bool checkJson(const JsonBuilder& j, const char* expected) {
 	std::string js = j.getJson();
-	printf("json:     '%s'\n", js.c_str());
-	printf("expected: '%s'\n\n", expected);
+	fmt::println("json:     '{}'", js);
+	fmt::print("expected: '{}'\n\n", expected);
 
 	try {
 		// Make sure it parses as JSON
 		readJSONStrictly(js);
 	} catch (Error& e) {
-		printf("error: %s\n", e.what());
+		fmt::println("error: {}", e.what());
 		return false;
 	}
 
@@ -3660,7 +3657,7 @@ JsonBuilderObject randomDocument(const std::vector<std::string>& strings, int& l
 TEST_CASE("Lstatus/json/builderPerf") {
 	std::vector<std::string> strings;
 	int c = 1000000;
-	printf("Generating random strings\n");
+	fmt::println("Generating random strings");
 	while (--c)
 		strings.push_back(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 50)));
 
@@ -3668,7 +3665,7 @@ TEST_CASE("Lstatus/json/builderPerf") {
 	int level = 6;
 	int iterations = 200;
 
-	printf("Generating and serializing random document\n");
+	fmt::println("Generating and serializing random document");
 
 	int64_t bytes = 0;
 	double generated = 0;
@@ -3693,17 +3690,17 @@ TEST_CASE("Lstatus/json/builderPerf") {
 		std::string jsStr = json_spirit::write_string(mv);
 		double jsSerialize = timer() - start;
 
-		printf("JsonBuilder: %8lu bytes  %-7.5f gen   +  %-7.5f serialize =  %-7.5f\n",
-		       s.size(),
-		       generate,
-		       serialize,
-		       generate + serialize);
-		printf("json_spirit: %8lu bytes  %-7.5f parse +  %-7.5f serialize =  %-7.5f\n",
-		       jsStr.size(),
-		       jsParse,
-		       jsSerialize,
-		       jsParse + jsSerialize);
-		printf("\n");
+		fmt::println("JsonBuilder: {:8} bytes  {:<7.5f} gen   +  {:<7.5f} serialize =  {:<7.5f}",
+		             s.size(),
+		             generate,
+		             serialize,
+		             generate + serialize);
+		fmt::println("json_spirit: {:8} bytes  {:<7.5f} parse +  {:<7.5f} serialize =  {:<7.5f}",
+		             jsStr.size(),
+		             jsParse,
+		             jsSerialize,
+		             jsParse + jsSerialize);
+		fmt::println("");
 
 		generated += generate;
 		serialized += serialize;
@@ -3711,16 +3708,16 @@ TEST_CASE("Lstatus/json/builderPerf") {
 	}
 
 	double elapsed = generated + serialized;
-	fmt::print("RESULT: {0}"
-	           " bytes  {1} elements  {2} levels  {3} seconds ({4} gen, {5} serialize)  {6} MB/s  {7} items/s\n",
-	           bytes,
-	           iterations * elements,
-	           level,
-	           elapsed,
-	           generated,
-	           elapsed - generated,
-	           bytes / elapsed / 1e6,
-	           iterations * elements / elapsed);
+	fmt::println(
+	    "RESULT: {0} bytes  {1} elements  {2} levels  {3} seconds ({4} gen, {5} serialize)  {6} MB/s  {7} items/s",
+	    bytes,
+	    iterations * elements,
+	    level,
+	    elapsed,
+	    generated,
+	    elapsed - generated,
+	    bytes / elapsed / 1e6,
+	    iterations * elements / elapsed);
 
 	return Void();
 }
@@ -3792,15 +3789,15 @@ TEST_CASE("/status/json/merging") {
 	c.create("mixed_numeric_sum_6.$sum") = 4.5;
 	c.create("mixed_numeric_min_0.$min") = (double)0.0;
 
-	printf("a = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
-	printf("b = \n%s\n", json_spirit::write_string(json_spirit::mValue(objB), json_spirit::pretty_print).c_str());
-	printf("c = \n%s\n", json_spirit::write_string(json_spirit::mValue(objC), json_spirit::pretty_print).c_str());
+	fmt::print("a = \n{}\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print));
+	fmt::print("b = \n{}\n", json_spirit::write_string(json_spirit::mValue(objB), json_spirit::pretty_print));
+	fmt::print("c = \n{}\n", json_spirit::write_string(json_spirit::mValue(objC), json_spirit::pretty_print));
 
 	JSONDoc::expires_reference_version = 2;
 	a.absorb(b);
 	a.absorb(c);
 	a.cleanOps();
-	printf("result = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
+	fmt::print("result = \n{}\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print));
 	std::string result = json_spirit::write_string(json_spirit::mValue(objA));
 	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_"
 	                       "total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not "
@@ -3811,9 +3808,7 @@ TEST_CASE("/status/json/merging") {
 	                       "\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
 
 	if (result != expected) {
-		printf("ERROR:  Combined doc does not match expected.\nexpected:\n\n%s\nresult:\n%s\n",
-		       expected.c_str(),
-		       result.c_str());
+		fmt::print("ERROR:  Combined doc does not match expected.\nexpected:\n\n{}\nresult:\n{}\n", expected, result);
 		ASSERT(false);
 	}
 

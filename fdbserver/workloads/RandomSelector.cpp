@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct RandomSelectorWorkload : TestWorkload {
 	static constexpr auto NAME = "RandomSelector";
@@ -65,18 +66,18 @@ struct RandomSelectorWorkload : TestWorkload {
 	}
 
 	Future<Void> randomSelectorSetup(Database cx, RandomSelectorWorkload* self) {
-		Value myValue = StringRef(format("%d", deterministicRandom()->randomInt(0, 10000000)));
+		Value myValue = StringRef(fmt::format("{}", deterministicRandom()->randomInt(0, 10000000)));
 		Transaction tr(cx);
 		std::string clientID;
 
-		clientID = format("%08d", self->clientId);
+		clientID = fmt::format("{:08}", self->clientId);
 		while (true) {
 			Error err;
 			try {
 				for (int i = 0; i < self->maxOffset; i++) {
-					tr.set(StringRef(clientID + "a/" + format("%010d", i)), myValue);
-					tr.set(StringRef(clientID + "c/" + format("%010d", i)), myValue);
-					tr.set(StringRef(clientID + "e/" + format("%010d", i)), myValue);
+					tr.set(StringRef(clientID + "a/" + fmt::format("{:010}", i)), myValue);
+					tr.set(StringRef(clientID + "c/" + fmt::format("{:010}", i)), myValue);
+					tr.set(StringRef(clientID + "e/" + fmt::format("{:010}", i)), myValue);
 				}
 				co_await tr.commit();
 				break;
@@ -105,7 +106,7 @@ struct RandomSelectorWorkload : TestWorkload {
 		Reverse reverse = Reverse::False;
 		Error error;
 
-		clientID = format("%08d", self->clientId);
+		clientID = fmt::format("{:08}", self->clientId);
 
 		while (true) {
 			Transaction tr(cx);
@@ -118,8 +119,8 @@ struct RandomSelectorWorkload : TestWorkload {
 					for (i = 0;
 					     i < deterministicRandom()->randomInt(self->minInitialAmount, self->maxInitialAmount + 1);
 					     i++) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						tr.set(StringRef(clientID + "b/" + myKeyA), myValue);
 						tr.set(StringRef(clientID + "d/" + myKeyA), myValue);
 						//TraceEvent("RYOWInit").detail("Key",myKeyA).detail("Value",myValue);
@@ -142,8 +143,8 @@ struct RandomSelectorWorkload : TestWorkload {
 				     i++) {
 					j = deterministicRandom()->randomInt(0, 16);
 					if (j < 3) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 
 						//TraceEvent("RYOWset").detail("Key",myKeyA).detail("Value",myValue);
 						trRYOW.set(StringRef(clientID + "b/" + myKeyA), myValue);
@@ -161,7 +162,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							co_await tr.onError(err);
 						}
 					} else if (j < 4) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
 						//TraceEvent("RYOWclear").detail("Key",myKeyA);
 						trRYOW.clear(StringRef(clientID + "b/" + myKeyA));
 
@@ -181,8 +182,8 @@ struct RandomSelectorWorkload : TestWorkload {
 					} else if (j < 5) {
 						int a = deterministicRandom()->randomInt(1, self->maxKeySpace + 1);
 						int b = deterministicRandom()->randomInt(1, self->maxKeySpace + 1);
-						myKeyA = format("%010d", std::min(a, b) - 1);
-						myKeyB = format("%010d", std::max(a, b));
+						myKeyA = fmt::format("{:010}", std::min(a, b) - 1);
+						myKeyB = fmt::format("{:010}", std::max(a, b));
 
 						//TraceEvent("RYOWclearRange").detail("KeyA",myKeyA).detail("KeyB",myKeyB);
 						trRYOW.clear(
@@ -202,7 +203,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							co_await tr.onError(err);
 						}
 					} else if (j < 6) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
 
 						Optional<Value> getTest1;
 
@@ -238,9 +239,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 7) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWadd").detail("Key",myKeyA).detail("Value", "\\x01");
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AddValue);
 
@@ -266,9 +267,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 8) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWappendIfFits").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AppendIfFits);
 
@@ -295,9 +296,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 9) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWand").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::And);
 
@@ -323,9 +324,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 10) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWor").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Or);
 
@@ -351,9 +352,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 11) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWxor").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Xor);
 
@@ -379,9 +380,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 12) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWmax").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Max);
 
@@ -407,9 +408,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 13) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWmin").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Min);
 
@@ -435,9 +436,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 14) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWbytemin").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMin);
 
@@ -463,9 +464,9 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					} else if (j < 15) {
-						myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
-						myRandomIDKey = format("%010d", deterministicRandom()->randomInt(0, 1000000000));
-						myValue = format("%d", deterministicRandom()->randomInt(0, 10000000));
+						myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000000000));
+						myValue = fmt::format("{}", deterministicRandom()->randomInt(0, 10000000));
 						//TraceEvent("RYOWbytemax").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMax);
 
@@ -493,8 +494,8 @@ struct RandomSelectorWorkload : TestWorkload {
 					} else {
 						int a = deterministicRandom()->randomInt(1, self->maxKeySpace + 1);
 						int b = deterministicRandom()->randomInt(1, self->maxKeySpace + 1);
-						myKeyA = format("%010d", std::min(a, b) - 1);
-						myKeyB = format("%010d", std::max(a, b));
+						myKeyA = fmt::format("{:010}", std::min(a, b) - 1);
+						myKeyB = fmt::format("{:010}", std::max(a, b));
 						onEqualA = deterministicRandom()->randomInt(0, 2) != 0;
 						onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
 						offsetA = deterministicRandom()->randomInt(-1 * self->maxOffset / 2, self->maxOffset / 2);
@@ -560,13 +561,13 @@ struct RandomSelectorWorkload : TestWorkload {
 									std::string outStr1 = "";
 									for (int k = 0; k < getRangeTest1.size(); k++) {
 										outStr1 = outStr1 + printable(getRangeTest1[k].key) + " " +
-										          format("%d", getRangeTest1[k].value.size()) + " ";
+										          fmt::format("{}", getRangeTest1[k].value.size()) + " ";
 									}
 
 									std::string outStr2 = "";
 									for (int k = 0; k < getRangeTest2.size(); k++) {
 										outStr2 = outStr2 + printable(getRangeTest2[k].key) + " " +
-										          format("%d", getRangeTest2[k].value.size()) + " ";
+										          fmt::format("{}", getRangeTest2[k].value.size()) + " ";
 									}
 
 									TraceEvent("RanSelTestLog").detail("RYOW", outStr1).detail("Normal", outStr2);

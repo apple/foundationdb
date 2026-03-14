@@ -23,6 +23,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fmt/format.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
 // (sim2.actor.cpp)
@@ -96,7 +97,7 @@ struct ConflictRangeWorkload : TestWorkload {
 
 		// Set one key after the end of the tested range. If this key is included in the result, then
 		// we may have drifted into the system key-space and cannot evaluate the result.
-		Key sentinelKey = StringRef(format("%010d", self->maxKeySpace));
+		Key sentinelKey = StringRef(fmt::format("{:010}", self->maxKeySpace));
 
 		while (true) {
 			randomSets = !randomSets;
@@ -118,8 +119,8 @@ struct ConflictRangeWorkload : TestWorkload {
 						TraceEvent("ConflictRangeClear").detail("Begin", clearedBegin).detail("End", clearedEnd);
 					}
 
-					tr0.clear(
-					    KeyRangeRef(StringRef(format("%010d", 0)), StringRef(format("%010d", self->maxKeySpace))));
+					tr0.clear(KeyRangeRef(StringRef(fmt::format("{:010}", 0)),
+					                      StringRef(fmt::format("{:010}", self->maxKeySpace))));
 					for (int i = 0; i < self->maxKeySpace; i++) {
 						if (deterministicRandom()->random01() > 0.5) {
 							TraceEvent("ConflictRangeInit").detail("Key", i);
@@ -127,7 +128,7 @@ struct ConflictRangeWorkload : TestWorkload {
 								clearedSet.insert(i);
 							else {
 								insertedSet.insert(i);
-								tr0.set(StringRef(format("%010d", i)),
+								tr0.set(StringRef(fmt::format("{:010}", i)),
 								        deterministicRandom()->randomUniqueID().toString());
 							}
 						}
@@ -143,7 +144,7 @@ struct ConflictRangeWorkload : TestWorkload {
 				co_await tr0.onError(err);
 			}
 
-			firstElement = Key(StringRef(format("%010d", *(insertedSet.begin()))));
+			firstElement = Key(StringRef(fmt::format("{:010}", *(insertedSet.begin()))));
 
 			Transaction tr1(cx);
 			Transaction tr2(cx);
@@ -156,8 +157,8 @@ struct ConflictRangeWorkload : TestWorkload {
 				// Generate a random getRange operation and execute it, if it produces results, save them, otherwise
 				// retry.
 				while (true) {
-					myKeyA = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace));
-					myKeyB = format("%010d", deterministicRandom()->randomInt(0, self->maxKeySpace));
+					myKeyA = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace));
+					myKeyB = fmt::format("{:010}", deterministicRandom()->randomInt(0, self->maxKeySpace));
 					onEqualA = deterministicRandom()->randomInt(0, 2) != 0;
 					onEqualB = deterministicRandom()->randomInt(0, 2) != 0;
 					offsetA = deterministicRandom()->randomInt(-1 * self->maxOffset, self->maxOffset);
@@ -179,7 +180,7 @@ struct ConflictRangeWorkload : TestWorkload {
 
 				if (self->testReadYourWrites) {
 					for (auto iter = clearedSet.begin(); iter != clearedSet.end(); ++iter)
-						tr1.set(StringRef(format("%010d", (*iter))),
+						tr1.set(StringRef(fmt::format("{:010}", (*iter))),
 						        deterministicRandom()->randomUniqueID().toString());
 					co_await tr1.commit();
 					tr1 = Transaction(cx);
@@ -204,7 +205,7 @@ struct ConflictRangeWorkload : TestWorkload {
 							if (!insertedSet.contains(proposedKey)) {
 								TraceEvent("ConflictRangeSet").detail("Key", proposedKey);
 								insertedSet.insert(proposedKey);
-								tr2.set(StringRef(format("%010d", proposedKey)),
+								tr2.set(StringRef(fmt::format("{:010}", proposedKey)),
 								        deterministicRandom()->randomUniqueID().toString());
 								break;
 							}
@@ -215,7 +216,7 @@ struct ConflictRangeWorkload : TestWorkload {
 							if (insertedSet.contains(proposedKey)) {
 								TraceEvent("ConflictRangeClear").detail("Key", proposedKey);
 								insertedSet.erase(proposedKey);
-								tr2.clear(StringRef(format("%010d", proposedKey)));
+								tr2.clear(StringRef(fmt::format("{:010}", proposedKey)));
 								break;
 							}
 						}
@@ -228,8 +229,8 @@ struct ConflictRangeWorkload : TestWorkload {
 				try {
 					// Do the generated getRange in the other transaction and commit.
 					if (self->testReadYourWrites) {
-						trRYOW.clear(KeyRangeRef(StringRef(format("%010d", clearedBegin)),
-						                         StringRef(format("%010d", clearedEnd))));
+						trRYOW.clear(KeyRangeRef(StringRef(fmt::format("{:010}", clearedBegin)),
+						                         StringRef(fmt::format("{:010}", clearedEnd))));
 						RangeResult res = co_await trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 						                                           KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 						                                           randomLimit,
@@ -237,7 +238,7 @@ struct ConflictRangeWorkload : TestWorkload {
 						                                           reverse);
 						co_await trRYOW.commit();
 					} else {
-						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
+						tr3.clear(StringRef(fmt::format("{:010}", self->maxKeySpace + 1)));
 						RangeResult res = co_await tr3.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 						                                        KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 						                                        randomLimit,
@@ -255,8 +256,8 @@ struct ConflictRangeWorkload : TestWorkload {
 					// If the commit fails, do the getRange again and check that the results are different from the
 					// first execution.
 					if (self->testReadYourWrites) {
-						tr1.clear(KeyRangeRef(StringRef(format("%010d", clearedBegin)),
-						                      StringRef(format("%010d", clearedEnd))));
+						tr1.clear(KeyRangeRef(StringRef(fmt::format("{:010}", clearedBegin)),
+						                      StringRef(fmt::format("{:010}", clearedEnd))));
 						co_await tr1.commit();
 						tr1 = Transaction(cx);
 					}
@@ -294,7 +295,7 @@ struct ConflictRangeWorkload : TestWorkload {
 						}
 
 						if ((smallestResult == firstElement ||
-						     smallestResult == StringRef(format("%010d", *(insertedSet.begin())))) &&
+						     smallestResult == StringRef(fmt::format("{:010}", *(insertedSet.begin())))) &&
 						    offsetA < 0) {
 							// Results return the first element, and the begin offset is negative, so if a key
 							// selector does not fully resolve the offset, a change won't effect results
@@ -334,9 +335,10 @@ struct ConflictRangeWorkload : TestWorkload {
 						    .detail("Original", keyStr2);
 
 						tr4 = Transaction(cx);
-						RangeResult res = co_await tr4.getRange(
-						    KeyRangeRef(StringRef(format("%010d", 0)), StringRef(format("%010d", self->maxKeySpace))),
-						    200);
+						RangeResult res =
+						    co_await tr4.getRange(KeyRangeRef(StringRef(fmt::format("{:010}", 0)),
+						                                      StringRef(fmt::format("{:010}", self->maxKeySpace))),
+						                          200);
 						std::string allKeyEntries = "";
 						for (int i = 0; i < res.size(); i++) {
 							allKeyEntries += printable(res[i].key) + " ";

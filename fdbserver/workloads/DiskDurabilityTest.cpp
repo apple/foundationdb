@@ -95,7 +95,7 @@ struct DiskDurabilityTest : TestWorkload {
 				for (int i = 0; i < r.size(); i++) {
 					int bytesRead = co_await file->read(page, 4096, decodeKey(r[i].key) * 4096);
 					if (bytesRead != 4096 || decodePage(page) != decodeValue(r[i].value)) {
-						printf("ValidationError\n");
+						fmt::println("ValidationError");
 						TraceEvent(SevError, "ValidationError")
 						    .detail("At", decodeKey(r[i].key))
 						    .detail("Expected", decodeValue(r[i].value))
@@ -114,7 +114,7 @@ struct DiskDurabilityTest : TestWorkload {
 		if (failed)
 			throw operation_failed();
 
-		fmt::print("Verified {0}/{1} pages\n", verifyPages, size / 4096);
+		fmt::println("Verified {0}/{1} pages", verifyPages, size / 4096);
 		TraceEvent(SevInfo, "Verified").detail("Pages", verifyPages).detail("Of", size / 4096);
 
 		// Run

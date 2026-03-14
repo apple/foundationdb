@@ -23,6 +23,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fmt/format.h"
 
 // A workload which test the correctness of backup and restore process
 struct RunRestoreWorkerWorkload : TestWorkload {
@@ -40,15 +41,15 @@ struct RunRestoreWorkerWorkload : TestWorkload {
 		TraceEvent("RunParallelRestoreWorkerWorkload")
 		    .detail("Start", "RestoreToolDB")
 		    .detail("Workers", num_myWorkers);
-		printf("RunParallelRestoreWorkerWorkload, we will start %d restore workers\n", num_myWorkers);
+		fmt::println("RunParallelRestoreWorkerWorkload, we will start {} restore workers", num_myWorkers);
 		std::vector<Future<Void>> myWorkers;
 		myWorkers.reserve(num_myWorkers);
 		for (int i = 0; i < num_myWorkers; ++i) {
 			myWorkers.push_back(_restoreWorker(cx, LocalityData()));
 		}
-		printf("RunParallelRestoreWorkerWorkload, wait on reply from %ld restore workers\n", myWorkers.size());
+		fmt::println("RunParallelRestoreWorkerWorkload, wait on reply from {} restore workers", myWorkers.size());
 		worker = waitForAll(myWorkers);
-		printf("RunParallelRestoreWorkerWorkload, got all replies from restore workers\n");
+		fmt::println("RunParallelRestoreWorkerWorkload, got all replies from restore workers");
 		return Void();
 	}
 

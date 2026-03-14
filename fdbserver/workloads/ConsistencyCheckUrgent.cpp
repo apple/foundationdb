@@ -35,6 +35,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/network.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "fmt/format.h"
 
 // The ConsistencyCheckUrgent workload is designed to support the consistency check
 // urgent feature, a distributed version of the consistency check which emphasizes
@@ -466,16 +467,17 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 								TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
 								    .setMaxEventLength(-1)
 								    .setMaxFieldLength(-1)
-								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
-								    .detail(format("StorageServer%d", firstValidServer).c_str(),
+								    .detail(fmt::format("StorageServer{}", j).c_str(), storageServers[j].toString())
+								    .detail(fmt::format("StorageServer{}", firstValidServer).c_str(),
 								            storageServers[firstValidServer].toString())
 								    .detail("RangeBegin", req.begin.getKey())
 								    .detail("RangeEnd", req.end.getKey())
 								    .detail("VersionNumber", req.version)
-								    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-								    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-								    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
-								    .detail(format("Server%dUniqueKey", firstValidServer).c_str(), referenceUniqueKey)
+								    .detail(fmt::format("Server{}Uniques", j).c_str(), currentUniques)
+								    .detail(fmt::format("Server{}UniqueKey", j).c_str(), currentUniqueKey)
+								    .detail(fmt::format("Server{}Uniques", firstValidServer).c_str(), referenceUniques)
+								    .detail(fmt::format("Server{}UniqueKey", firstValidServer).c_str(),
+								            referenceUniqueKey)
 								    .detail("ValueMismatches", valueMismatches)
 								    .detail("ValueMismatchKey", valueMismatchKey)
 								    .detail("MatchingKVPairs", matchingKVPairs)

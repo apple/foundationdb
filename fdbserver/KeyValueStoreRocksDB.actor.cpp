@@ -70,6 +70,7 @@
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/RocksDBCommon.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef WITH_ROCKSDB
@@ -1153,8 +1154,8 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 			for (auto& [name, histogram] : histogramStats) {
 				rocksdb::HistogramData histogram_data;
 				statistics->histogramData(histogram, &histogram_data);
-				e.detail(format("%s%s", name, "P95"), histogram_data.percentile95);
-				e.detail(format("%s%s", name, "P99"), histogram_data.percentile99);
+				e.detail(fmt::format("{}{}", name, "P95"), histogram_data.percentile95);
+				e.detail(fmt::format("{}{}", name, "P99"), histogram_data.percentile99);
 			}
 		}
 
@@ -3000,8 +3001,8 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 
 	state int i = 0;
 	for (; i < 50000; ++i) {
-		state std::string key1 = format("\xffprefix/%d", i);
-		state std::string key2 = format("\xffprefix/%d", i + 1);
+		state std::string key1 = fmt::format("\xffprefix/{}", i);
+		state std::string key2 = fmt::format("\xffprefix/{}", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));

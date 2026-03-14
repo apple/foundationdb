@@ -25,6 +25,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/Smoother.h"
+#include "fmt/format.h"
 
 struct ITransactor : ReferenceCounted<ITransactor> {
 	struct Stats {
@@ -267,7 +268,7 @@ struct MeasurePeriodically : IMeasurer {
 	}
 	void nextPeriod(double t) {
 		// output stats
-		std::string prefix = format("T=%04.0fs:", t);
+		std::string prefix = fmt::format("T={:04.0f}s:", t);
 		std::vector<PerfMetric> m;
 		msp.getMetrics(m);
 		for (auto i = m.begin(); i != m.end(); ++i)

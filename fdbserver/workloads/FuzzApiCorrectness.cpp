@@ -34,6 +34,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Arena.h"
+#include "fmt/format.h"
 
 namespace ph = std::placeholders;
 
@@ -222,13 +223,13 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		    .detail("NewSeverity", SevInfo);
 	}
 
-	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
+	static TenantName getTenant(int num) { return TenantNameRef(fmt::format("tenant_{}", num)); }
 	Optional<TenantGroupName> getTenantGroup(int num) {
 		int groupNum = num % (numTenantGroups + 1);
 		if (groupNum == numTenantGroups - 1) {
 			return Optional<TenantGroupName>();
 		} else {
-			return TenantGroupNameRef(format("tenantgroup_%d", groupNum));
+			return TenantGroupNameRef(fmt::format("tenantgroup_{}", groupNum));
 		}
 	}
 	bool canUseTenant(Optional<TenantName> tenant) {
@@ -266,7 +267,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		if (adjacentKeys) {
 			return Key(keyPrefixes[tenantNum] + std::string(idx, '\x00'));
 		} else {
-			return Key(keyPrefixes[tenantNum] + format("%010d", idx));
+			return Key(keyPrefixes[tenantNum] + fmt::format("{:010}", idx));
 		}
 	}
 
@@ -439,7 +440,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					int j = 0;
 					for (; j < numOps; j++) {
 						int operationType = deterministicRandom()->randomInt(0, testCases.size());
-						printf("%d: Selected Operation %d\n", self->operationId + 1, operationType);
+						fmt::println("{}: Selected Operation {}", self->operationId + 1, operationType);
 						try {
 							operations.push_back(testCases[operationType](++self->operationId, self, tr));
 						} catch (Error& e) {
@@ -1292,7 +1293,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		TestWatch(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
 		  : BaseTest(id, workload, "TestWatch") {
 			key = makeKey();
-			printf("Watching: %d %s\n", key.size(), printable(key.substr(0, std::min(key.size(), 20))).c_str());
+			fmt::println("Watching: {} {}", key.size(), printable(key.substr(0, std::min(key.size(), 20))));
 			contract = {
 				std::make_pair(error_code_key_too_large,
 				               key.size() > getMaxWriteKeySize(key, true)    ? ExceptionContract::Always

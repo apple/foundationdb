@@ -22,6 +22,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 // A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
 struct CpuProfilerWorkload : TestWorkload {
@@ -77,8 +78,9 @@ struct CpuProfilerWorkload : TestWorkload {
 				req.duration = 0; // unused
 
 				// The profiler output name will be the ip.port.prof
-				req.outputFile = StringRef(self->profilingWorkers[i].address().ip.toString() + "." +
-				                           format("%d", self->profilingWorkers[i].address().port) + ".profile.bin");
+				req.outputFile =
+				    StringRef(self->profilingWorkers[i].address().ip.toString() + "." +
+				              fmt::format("{}", self->profilingWorkers[i].address().port) + ".profile.bin");
 
 				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}

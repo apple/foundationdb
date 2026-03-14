@@ -40,6 +40,7 @@
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type);
@@ -285,7 +286,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
 	    totalBytesToWrite(-1), applyingDataBytes(0), counters(this, nodeID, batchIndex) {
 		pollMetrics =
-		    counters.cc.traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
+		    counters.cc.traceCounters(fmt::format("FastRestoreApplierMetrics{}", batchIndex),
 		                              nodeID,
 		                              SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                              nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));

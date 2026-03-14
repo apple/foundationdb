@@ -29,10 +29,11 @@
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "fmt/format.h"
 
 namespace {
 Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
-	printf("Issuing configuration change: %s\n", config.c_str());
+	fmt::println("Issuing configuration change: {}", config);
 	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), config, force);
 	if (res != ConfigurationResult::SUCCESS) {
 		co_return false;

@@ -25,6 +25,7 @@
 #include "fdbclient/Tracing.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fmt/format.h"
 
 struct OTELSpanContextMessage {
 	// This message is pushed into the the transaction logs' memory to inform
@@ -43,9 +44,9 @@ struct OTELSpanContextMessage {
 	OTELSpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
-		return format("code: %d, span context: %s",
-		              MutationRef::Reserved_For_OTELSpanContextMessage,
-		              spanContext.toString().c_str());
+		return fmt::format("code: {}, span context: {}",
+		                   static_cast<unsigned int>(MutationRef::Reserved_For_OTELSpanContextMessage),
+		                   spanContext.toString());
 	}
 
 	template <class Ar>

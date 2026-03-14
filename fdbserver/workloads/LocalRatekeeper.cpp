@@ -21,6 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include <fdbserver/Knobs.h>
+#include "fmt/format.h"
 
 namespace {
 
@@ -132,7 +133,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	Future<Void> _start(Database cx) {
 		co_await delay(startAfter);
 		StorageServerInterface ssi = co_await getRandomStorage(cx);
-		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + blockWritesFor);
+		g_simulator->disableFor(fmt::format("{}/updateStorage", ssi.id().toString()), now() + blockWritesFor);
 		Future<Void> done = delay(blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
 		co_await delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6));

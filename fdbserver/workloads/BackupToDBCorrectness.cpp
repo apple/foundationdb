@@ -27,6 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "flow/ApiVersion.h"
+#include "fmt/format.h"
 
 // This workload tests backing up one cluster to another.
 
@@ -466,7 +467,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					    .detail("BackupTag", printable(tag))
 					    .detail("TaskCount", taskCount)
 					    .detail("WaitCycles", waitCycles);
-					printf("EndingNonZeroTasks: %ld\n", (long)taskCount);
+					fmt::println("EndingNonZeroTasks: {}", (long)taskCount);
 					co_await TaskBucket::debugPrintRange(cx, "\xff"_sr, StringRef());
 				}
 
@@ -477,11 +478,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					    .detail("BackupTag", printable(tag))
 					    .detail("TaskCount", taskCount)
 					    .detail("WaitCycles", waitCycles);
-					printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
-					       now(),
-					       randomID.toString().c_str(),
-					       waitCycles,
-					       (long long)taskCount);
+					fmt::println("{:.6f} {:<10} Wait #{:4} for {} tasks to end",
+					             now(),
+					             randomID.toString(),
+					             waitCycles,
+					             (long long)taskCount);
 
 					co_await delay(5.0);
 					tr = makeReference<ReadYourWritesTransaction>(cx);
@@ -494,9 +495,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				// Error if the system keyspace for the backup tag is not empty
 				if (agentValues.size() > 0) {
 					displaySystemKeys++;
-					printf("BackupCorrectnessLeftoverMutationKeys: (%d) %s\n",
-					       agentValues.size(),
-					       printable(backupAgentKey).c_str());
+					fmt::println("BackupCorrectnessLeftoverMutationKeys: ({}) {}",
+					             agentValues.size(),
+					             printable(backupAgentKey));
 					TraceEvent(SevError, "BackupCorrectnessLeftoverMutationKeys", randomID)
 					    .detail("BackupTag", printable(tag))
 					    .detail("LeftoverKeys", agentValues.size())
@@ -505,12 +506,12 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						TraceEvent("BARW_LeftoverKey", randomID)
 						    .detail("Key", printable(StringRef(s.key.toString())))
 						    .detail("Value", printable(StringRef(s.value.toString())));
-						printf("   Key: %-50s  Value: %s\n",
-						       printable(StringRef(s.key.toString())).c_str(),
-						       printable(StringRef(s.value.toString())).c_str());
+						fmt::println("   Key: {:<50}  Value: {}",
+						             printable(StringRef(s.key.toString())),
+						             printable(StringRef(s.value.toString())));
 					}
 				} else {
-					printf("No left over backup agent configuration keys\n");
+					fmt::println("No left over backup agent configuration keys");
 				}
 
 				Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
@@ -520,7 +521,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					    .detail("Key", backupLatestVersionsKey.printable())
 					    .detail("Value", BinaryReader::fromStringRef<Version>(latestVersion.get(), Unversioned()));
 				} else {
-					printf("No left over backup version key\n");
+					fmt::println("No left over backup version key");
 				}
 
 				RangeResult versions = co_await tr->getRange(
@@ -532,9 +533,9 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					// Error if the log/mutation keyspace for the backup tag is not empty
 					if (logValues.size() > 0) {
 						displaySystemKeys++;
-						printf("BackupCorrectnessLeftoverLogKeys: (%d) %s\n",
-						       logValues.size(),
-						       printable(backupLogValuesKey).c_str());
+						fmt::println("BackupCorrectnessLeftoverLogKeys: ({}) {}",
+						             logValues.size(),
+						             printable(backupLogValuesKey));
 						TraceEvent(SevError, "BackupCorrectnessLeftoverLogKeys", randomID)
 						    .detail("BackupTag", printable(tag))
 						    .detail("LeftoverKeys", logValues.size())
@@ -544,12 +545,12 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 							TraceEvent("BARW_LeftoverKey", randomID)
 							    .detail("Key", printable(StringRef(s.key.toString())))
 							    .detail("Value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n",
-							       printable(StringRef(s.key.toString())).c_str(),
-							       printable(StringRef(s.value.toString())).c_str());
+							fmt::println("   Key: {:<50}  Value: {}",
+							             printable(StringRef(s.key.toString())),
+							             printable(StringRef(s.value.toString())));
 						}
 					} else {
-						printf("No left over backup log keys\n");
+						fmt::println("No left over backup log keys");
 					}
 				}
 

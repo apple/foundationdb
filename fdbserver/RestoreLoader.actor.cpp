@@ -31,6 +31,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/StorageMetrics.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // SerializedMutationListMap: Buffered mutation lists from data blocks in log files
@@ -908,8 +909,8 @@ ACTOR Future<Void> sendMutationsToApplier(
 					if (e.isEnabled()) {
 						int i = 0;
 						for (auto& [key, uid] : *pRangeToApplier) {
-							e.detail(format("Range%d", i).c_str(), printable(key))
-							    .detail(format("UID%d", i).c_str(), uid.toString());
+							e.detail(fmt::format("Range{}", i).c_str(), printable(key))
+							    .detail(fmt::format("UID{}", i).c_str(), uid.toString());
 							i++;
 						}
 					}

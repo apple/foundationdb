@@ -23,6 +23,7 @@
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
+#include "fmt/format.h"
 
 Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
 	auto cx = cxUnsafe;
@@ -96,13 +97,13 @@ Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
 
 					if (verbose) {
 						if (verify.present()) {
-							fmt::print("'{}' is in '{}' to '{}' with config {}\n",
-							           query.printable(),
-							           verify->range.begin,
-							           verify->range.end,
-							           verify->value.toString());
+							fmt::println("'{}' is in '{}' to '{}' with config {}",
+							             query.printable(),
+							             verify->range.begin,
+							             verify->range.end,
+							             verify->value.toString());
 						} else {
-							fmt::print("'{}' is not in a range in the config\n", query.printable());
+							fmt::println("'{}' is not in a range in the config", query.printable());
 						}
 					}
 

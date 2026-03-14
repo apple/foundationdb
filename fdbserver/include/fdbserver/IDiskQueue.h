@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/BooleanParam.h"
+#include "fmt/format.h"
 
 FDB_BOOLEAN_PARAM(CheckHashes);
 
@@ -37,7 +38,7 @@ public:
 		location(int64_t lo) : hi(0), lo(lo) {}
 		location(int64_t hi, int64_t lo) : hi(hi), lo(lo) {}
 		operator std::string() const {
-			return format("%lld.%lld", hi, lo);
+			return fmt::format("{}.{}", hi, lo);
 		} // FIXME: Return a 'HumanReadableDescription' instead of std::string, make TraceEvent::detail accept that (for
 		  // safety)
 

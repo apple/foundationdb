@@ -40,6 +40,7 @@
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // must be last include
 
 // Each restore worker (a process) is assigned for a role.
@@ -60,7 +61,7 @@ struct RestoreWorkerData : NonCopyable, public ReferenceCounted<RestoreWorkerDat
 
 	~RestoreWorkerData() {
 		TraceEvent("RestoreWorkerDataDeleted").detail("WorkerID", workerID.toString());
-		printf("[Exit] Worker:%s RestoreWorkerData is deleted\n", workerID.toString().c_str());
+		fmt::println("[Exit] Worker:{} RestoreWorkerData is deleted", workerID.toString());
 	}
 
 	std::string describeNode() {

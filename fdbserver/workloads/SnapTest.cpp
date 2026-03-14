@@ -30,6 +30,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct SnapTestWorkload : TestWorkload {
 	static constexpr auto NAME = "SnapTest";
@@ -205,7 +206,7 @@ public: // workload functions
 			ini.LoadFile(restartInfoLocation.c_str());
 			std::string uidStr = snapUID.toString();
 			ini.SetValue("RESTORE", "RestoreSnapUID", uidStr.c_str());
-			ini.SetValue("RESTORE", "BackupFailed", format("%d", snapFailed).c_str());
+			ini.SetValue("RESTORE", "BackupFailed", fmt::format("{}", snapFailed).c_str());
 			ini.SaveFile(restartInfoLocation.c_str());
 			// write the snapUID to a file
 			auto const severity = snapFailed ? SevError : SevInfo;

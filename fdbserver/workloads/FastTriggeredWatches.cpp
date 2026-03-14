@@ -23,6 +23,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
 	static constexpr auto NAME = "FastTriggeredWatches";
@@ -37,7 +38,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries") {
 		testDuration = getOption(options, "testDuration"_sr, 600.0);
 		nodes = getOption(options, "nodes"_sr, 100);
-		defaultValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
+		defaultValue = StringRef(fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000)));
 		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
 
@@ -111,7 +112,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				Key setKey = keyForIndex(deterministicRandom()->randomInt(0, nodes));
 				Optional<Value> setValue;
 				if (deterministicRandom()->random01() > 0.5)
-					setValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 1000)));
+					setValue = StringRef(fmt::format("{:010}", deterministicRandom()->randomInt(0, 1000)));
 				// Set the value at setKey to something random
 				Future<Version> setFuture = setter(cx, setKey, setValue);
 				co_await delay(deterministicRandom()->random01());

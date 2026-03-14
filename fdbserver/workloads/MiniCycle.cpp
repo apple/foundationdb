@@ -30,6 +30,7 @@
 #include <cstring>
 
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 struct MiniCycleWorkload : TestWorkload {
 	static constexpr auto NAME = "MiniCycle";
@@ -106,7 +107,7 @@ struct MiniCycleWorkload : TestWorkload {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were check or cycle client errors.");
 		cycleClients.clear();
 
-		printf("Beginning full cycle check...");
+		fmt::print("Beginning full cycle check...");
 		bool ret = co_await self->_checkCycle(cx->clone(), self, ok);
 		co_return ret;
 	}
@@ -311,10 +312,10 @@ struct MiniCycleWorkload : TestWorkload {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
 			    .detail("File", __FILE__)
-			    .detail(
-			        "Details",
-			        format("%.2f",
-			               self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
+			    .detail("Details",
+			            fmt::format("{:.2f}",
+			                        self->transactions.getMetric().value() /
+			                            (self->transactionsPerSecond * self->testDuration)))
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);

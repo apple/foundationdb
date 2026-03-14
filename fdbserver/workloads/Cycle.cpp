@@ -30,6 +30,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
+#include "fmt/format.h"
 
 struct CycleWorkload : TestWorkload, Arena {
 	static constexpr auto NAME = "Cycle";
@@ -268,10 +269,10 @@ struct CycleWorkload : TestWorkload, Arena {
 			TraceEvent(SevWarnAlways, "TestFailure")
 			    .detail("Reason", "Rate below desired rate")
 			    .detail("File", __FILE__)
-			    .detail(
-			        "Details",
-			        format("%.2f",
-			               self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
+			    .detail("Details",
+			            fmt::format("{:.2f}",
+			                        self->transactions.getMetric().value() /
+			                            (self->transactionsPerSecond * self->testDuration)))
 			    .detail("TransactionsAchieved", self->transactions.getMetric().value())
 			    .detail("MinTransactionsExpected", self->testDuration * self->minExpectedTransactionsPerSecond)
 			    .detail("TransactionGoal", self->transactionsPerSecond * self->testDuration);

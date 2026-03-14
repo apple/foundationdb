@@ -48,6 +48,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/RocksDBCommon.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef WITH_ROCKSDB
@@ -2199,7 +2200,7 @@ struct RocksDBMetrics {
 		auto manifests = getManifestBytes(manifestDirectory);
 		int idx = 0;
 		for (const auto& [fileName, fileBytes] : manifests) {
-			e.detail(format("Manifest-%d", idx), format("%s-%lld", fileName.c_str(), fileBytes));
+			e.detail(fmt::format("Manifest-{}", idx), fmt::format("{}-{}", fileName, fileBytes));
 			manifestBytesTotal += fileBytes;
 			idx++;
 		}
@@ -4007,7 +4008,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	// write to shard 1
 	state RangeResult expectedRows;
 	for (int i = 0; i < 30; ++i) {
-		std::string key = format("%02d", i);
+		std::string key = fmt::format("{:02}", i);
 		std::string value = std::to_string(i);
 		kvStore->set({ key, value });
 		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
@@ -4015,7 +4016,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 
 	// write to shard 2
 	for (int i = 40; i < 70; ++i) {
-		std::string key = format("%02d", i);
+		std::string key = fmt::format("{:02}", i);
 		std::string value = std::to_string(i);
 		kvStore->set({ key, value });
 		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
@@ -4066,7 +4067,7 @@ TEST_CASE("noSim/ShardedRocksDB/RangeOps") {
 	kvStore->persistRangeMapping(KeyRangeRef("7"_sr, "9"_sr), true);
 
 	for (i = 70; i < 90; ++i) {
-		std::string key = format("%02d", i);
+		std::string key = fmt::format("{:02}", i);
 		std::string value = std::to_string(i);
 		kvStore->set({ key, value });
 		expectedRows.push_back_deep(expectedRows.arena(), { key, value });
@@ -4747,8 +4748,8 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 	state std::string key1;
 	state std::string key2;
 	for (; i < deleteCount; ++i) {
-		key1 = format("\xffprefix/%d", i);
-		key2 = format("\xffprefix/%d", i + 1);
+		key1 = fmt::format("\xffprefix/{}", i);
+		key2 = fmt::format("\xffprefix/{}", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
@@ -4773,8 +4774,8 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 	i = 0;
 
 	for (; i < deleteCount; ++i) {
-		key1 = format("\xffprefix/%d", i);
-		key2 = format("\xffprefix/%d", i + 1);
+		key1 = fmt::format("\xffprefix/{}", i);
+		key2 = fmt::format("\xffprefix/{}", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
@@ -4809,8 +4810,8 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 	state std::string key1;
 	state std::string key2;
 	for (; i < deleteCount; ++i) {
-		key1 = format("prefix/%d", i);
-		key2 = format("prefix/%d", i + 1);
+		key1 = fmt::format("prefix/{}", i);
+		key2 = fmt::format("prefix/{}", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
@@ -4834,8 +4835,8 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 	std::cout << "Restarted.\n";
 	i = 0;
 	for (; i < deleteCount; ++i) {
-		key1 = format("prefix/%d", i);
-		key2 = format("prefix/%d", i + 1);
+		key1 = fmt::format("prefix/{}", i);
+		key2 = fmt::format("prefix/{}", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
@@ -4857,20 +4858,20 @@ ACTOR Future<Void> testWrites(IKeyValueStore* kvStore, int writeCount) {
 
 	while (i < writeCount) {
 		state int endCount = deterministicRandom()->randomInt(i + 1, i + 1000);
-		state std::string beginKey = format("key-%6d", i);
-		state std::string endKey = format("key-%6d", endCount);
+		state std::string beginKey = fmt::format("key-{:6}", i);
+		state std::string endKey = fmt::format("key-{:6}", endCount);
 		wait(kvStore->addRange(KeyRangeRef(beginKey, endKey), deterministicRandom()->randomUniqueID().toString()));
 		kvStore->persistRangeMapping(KeyRangeRef(beginKey, endKey), true);
 		wait(kvStore->commit(false));
 
 		for (; i < endCount; ++i) {
-			std::string key = format("key-%6d", i);
-			std::string value = format("value-%d", i);
+			std::string key = fmt::format("key-{:6}", i);
+			std::string value = fmt::format("value-{}", i);
 			kvStore->set({ key, value });
 
 			// Add random clear ranges.
 			if (deterministicRandom()->random01() < 0.1) {
-				std::string clearKey = format("key-%d", deterministicRandom()->randomInt(0, i + 1));
+				std::string clearKey = fmt::format("key-{}", deterministicRandom()->randomInt(0, i + 1));
 				kvStore->clear({ key, key + "/" });
 			}
 
@@ -4888,7 +4889,7 @@ ACTOR Future<Void> testReadValue(IKeyValueStore* kvStore, int readCount) {
 	state std::string key;
 	state std::string value;
 	for (; i < readCount; ++i) {
-		key = format("key-%6d", deterministicRandom()->randomInt(0, readCount));
+		key = fmt::format("key-{:6}", deterministicRandom()->randomInt(0, readCount));
 		Optional<Value> val = wait(kvStore->readValue(key));
 	}
 	return Void();
@@ -4897,7 +4898,7 @@ ACTOR Future<Void> testReadValue(IKeyValueStore* kvStore, int readCount) {
 ACTOR Future<Void> testReadRange(IKeyValueStore* kvStore, int readCount) {
 	state int i = 0;
 	for (; i < readCount; ++i) {
-		std::string key = format("key-%6d", deterministicRandom()->randomInt(0, readCount));
+		std::string key = fmt::format("key-{:6}", deterministicRandom()->randomInt(0, readCount));
 		// Enable forward read and backward read.
 		int recordCount = deterministicRandom()->randomInt(-500, 500);
 		RangeResult result = wait(kvStore->readRange(KeyRangeRef(key, "key0"_sr), recordCount, 10000));

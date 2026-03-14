@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 // SOMEDAY: Make this actually run on multiple clients
 
@@ -154,7 +155,7 @@ struct InventoryTestWorkload : TestWorkload {
 		Optional<Value> val = co_await tr->get(key);
 		int count = !val.present() ? 0 : atoi(val.get().toString().c_str());
 		ASSERT(count >= 0 && count < 1000000);
-		tr->set(key, format("%d", count + 1));
+		tr->set(key, fmt::format("{}", count + 1));
 	}
 
 	Future<Void> inventoryTestClient(Database cx,

@@ -24,6 +24,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct DDMetricsExcludeWorkload : TestWorkload {
 	static constexpr auto NAME = "DDMetricsExclude";
@@ -43,7 +44,7 @@ struct DDMetricsExcludeWorkload : TestWorkload {
 	}
 
 	static Value getRandomValue() {
-		return Standalone<StringRef>(format("Value/%080d", deterministicRandom()->randomInt(0, 10e6)));
+		return Standalone<StringRef>(fmt::format("Value/{:080}", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
 	Future<double> getMovingDataAmount(Database cx) {

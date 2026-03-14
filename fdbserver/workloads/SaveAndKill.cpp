@@ -33,6 +33,7 @@
 
 #undef state
 #include "fdbclient/SimpleIni.h"
+#include "fmt/format.h"
 #define state
 #undef max
 #undef min
@@ -64,13 +65,13 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetUnicode();
 		ini.LoadFile(restartInfo.c_str());
 
-		ini.SetValue("RESTORE", "isRestoring", format("%d", isRestoring).c_str());
-		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator->processesPerMachine).c_str());
-		ini.SetValue("META", "listenersPerProcess", format("%d", g_simulator->listenersPerProcess).c_str());
-		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator->desiredCoordinators).c_str());
+		ini.SetValue("RESTORE", "isRestoring", fmt::format("{}", isRestoring).c_str());
+		ini.SetValue("META", "processesPerMachine", fmt::format("{}", g_simulator->processesPerMachine).c_str());
+		ini.SetValue("META", "listenersPerProcess", fmt::format("{}", g_simulator->listenersPerProcess).c_str());
+		ini.SetValue("META", "desiredCoordinators", fmt::format("{}", g_simulator->desiredCoordinators).c_str());
 		ini.SetValue("META", "connectionString", g_simulator->connectionString.c_str());
-		ini.SetValue("META", "testerCount", format("%d", g_simulator->testerCount).c_str());
-		ini.SetValue("META", "tssMode", format("%d", g_simulator->tssMode).c_str());
+		ini.SetValue("META", "testerCount", fmt::format("{}", g_simulator->testerCount).c_str());
+		ini.SetValue("META", "tssMode", fmt::format("{}", static_cast<int>(g_simulator->tssMode)).c_str());
 		ini.SetValue("META", "mockDNS", INetworkConnections::net()->convertMockDNSToString().c_str());
 		ini.SetBoolValue("META", "enableShardEncodeLocationMetadata", SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 		ini.SetBoolValue("META", "encryptHeaderAuthTokenEnabled", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
@@ -90,7 +91,7 @@ struct SaveAndKillWorkload : TestWorkload {
 				allProcessesMap[process->dataFolder] = process;
 			}
 		}
-		ini.SetValue("META", "processCount", format("%d", allProcessesMap.size() - 1).c_str());
+		ini.SetValue("META", "processCount", fmt::format("{}", allProcessesMap.size() - 1).c_str());
 		std::map<std::string, int> machines;
 
 		int j = 0;
@@ -100,7 +101,7 @@ struct SaveAndKillWorkload : TestWorkload {
 			if (!process->excludeFromRestarts) {
 				if (machines.find(machineId) == machines.end()) {
 					machines.insert(std::pair<std::string, int>(machineId, 1));
-					ini.SetValue("META", format("%d", j).c_str(), machineIdString);
+					ini.SetValue("META", fmt::format("{}", j).c_str(), machineIdString);
 					ini.SetValue(
 					    machineIdString,
 					    "dcUID",
@@ -110,25 +111,29 @@ struct SaveAndKillWorkload : TestWorkload {
 					             (process->locality.zoneId().present())
 					                 ? process->locality.zoneId().get().printable().c_str()
 					                 : "");
-					ini.SetValue(machineIdString, "mClass", format("%d", process->startingClass.classType()).c_str());
 					ini.SetValue(machineIdString,
-					             format("ipAddr%d", process->address.port - 1).c_str(),
+					             "mClass",
+					             fmt::format("{}", static_cast<int>(process->startingClass.classType())).c_str());
+					ini.SetValue(machineIdString,
+					             fmt::format("ipAddr{}", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
-					ini.SetValue(
-					    machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder.c_str());
 					ini.SetValue(machineIdString,
-					             format("c%d", process->address.port - 1).c_str(),
+					             fmt::format("{}", process->address.port - 1).c_str(),
+					             process->dataFolder.c_str());
+					ini.SetValue(machineIdString,
+					             fmt::format("c{}", process->address.port - 1).c_str(),
 					             process->coordinationFolder.c_str());
 					j++;
 				} else {
 					ini.SetValue(machineIdString,
-					             format("ipAddr%d", process->address.port - 1).c_str(),
+					             fmt::format("ipAddr{}", process->address.port - 1).c_str(),
 					             process->address.ip.toString().c_str());
 					int oldValue = machines.find(machineId)->second;
-					ini.SetValue(
-					    machineIdString, format("%d", process->address.port - 1).c_str(), process->dataFolder.c_str());
 					ini.SetValue(machineIdString,
-					             format("c%d", process->address.port - 1).c_str(),
+					             fmt::format("{}", process->address.port - 1).c_str(),
+					             process->dataFolder.c_str());
+					ini.SetValue(machineIdString,
+					             fmt::format("c{}", process->address.port - 1).c_str(),
 					             process->coordinationFolder.c_str());
 					machines.erase(machines.find(machineId));
 					machines.insert(std::pair<std::string, int>(machineId, oldValue + 1));
@@ -136,10 +141,10 @@ struct SaveAndKillWorkload : TestWorkload {
 			}
 		}
 		for (auto entry = machines.begin(); entry != machines.end(); entry++) {
-			ini.SetValue((*entry).first.c_str(), "processes", format("%d", (*entry).second).c_str());
+			ini.SetValue((*entry).first.c_str(), "processes", fmt::format("{}", (*entry).second).c_str());
 		}
 
-		ini.SetValue("META", "machineCount", format("%d", machines.size()).c_str());
+		ini.SetValue("META", "machineCount", fmt::format("{}", machines.size()).c_str());
 		ini.SaveFile(restartInfo.c_str());
 
 		for (auto process = allProcessesMap.begin(); process != allProcessesMap.end(); process++) {

@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/StorageServerInterface.h"
+#include "fmt/format.h"
 
 struct GetTeamRequest;
 namespace data_distribution {
@@ -86,8 +87,8 @@ struct IDataDistributionTeam {
 
 	std::string getDesc() const {
 		const auto& servers = getLastKnownServerInterfaces();
-		std::string s = format("TeamID %s; ", getTeamID().c_str());
-		s += format("Size %d; ", servers.size());
+		std::string s = fmt::format("TeamID {}; ", getTeamID());
+		s += fmt::format("Size {}; ", servers.size());
 		for (int i = 0; i < servers.size(); i++) {
 			if (i)
 				s += ", ";

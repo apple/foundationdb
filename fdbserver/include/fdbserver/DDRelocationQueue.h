@@ -24,6 +24,7 @@
 
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MovingWindow.h"
+#include "fmt/format.h"
 
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
@@ -152,7 +153,7 @@ public:
 		std::unordered_map<UID, ReasonItem> counter;
 
 		std::string toString(const Item& item) const {
-			return format("%d %d %d %d", item[0], item[1], item[2], item[3]);
+			return fmt::format("{} {} {} {}", item[0], item[1], item[2], item[3]);
 		}
 
 		void traceReasonItem(TraceEvent* event, const ReasonItem& item) const {

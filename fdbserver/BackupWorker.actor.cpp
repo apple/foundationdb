@@ -36,6 +36,7 @@
 
 #include "flow/IRandom.h"
 #include "fdbclient/Tracing.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
@@ -461,7 +462,7 @@ ACTOR static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 					TraceEvent e("BackupWorkerGotStartKey", self->myId);
 					int i = 1;
 					for (auto [uid, version] : uidVersions) {
-						e.detail(format("BackupID%d", i), uid).detail(format("Version%d", i), version);
+						e.detail(fmt::format("BackupID{}", i), uid).detail(fmt::format("Version{}", i), version);
 						i++;
 						if (shouldExit && version < self->endVersion.get()) {
 							shouldExit = false;
@@ -500,7 +501,7 @@ ACTOR static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
 					TraceEvent e("BackupWorkerGotStartKey", self->myId);
 					int i = 1;
 					for (auto [uid, version] : uidVersions) {
-						e.detail(format("BackupID%d", i), uid).detail(format("Version%d", i), version);
+						e.detail(fmt::format("BackupID{}", i), uid).detail(fmt::format("Version{}", i), version);
 						i++;
 					}
 				}

@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct ReadHotDetectionWorkload : TestWorkload {
 	static constexpr auto NAME = "ReadHotDetection";
@@ -42,7 +43,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 1000.0) / clientCount;
 		actorCount = getOption(options, "actorsPerClient"_sr, transactionsPerSecond / 5);
 		keyCount = getOption(options, "keyCount"_sr, 100);
-		readKey = StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, keyCount)));
+		readKey = StringRef(fmt::format("testkey{:08x}", deterministicRandom()->randomInt(0, keyCount)));
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -55,7 +56,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 			Error err;
 			try {
 				for (int i = 0; i < keyCount; i++) {
-					Standalone<StringRef> key = StringRef(format("testkey%08x", i));
+					Standalone<StringRef> key = StringRef(fmt::format("testkey{:08x}", i));
 					if (key == readKey) {
 						tr.set(key, largeValue);
 					} else {
@@ -145,9 +146,9 @@ struct ReadHotDetectionWorkload : TestWorkload {
 				Error err;
 				try {
 					Optional<Value> v = co_await tr.get(
-					    useReadKey
-					        ? self->readKey
-					        : StringRef(format("testkey%08x", deterministicRandom()->randomInt(0, self->keyCount))));
+					    useReadKey ? self->readKey
+					               : StringRef(fmt::format("testkey{:08x}",
+					                                       deterministicRandom()->randomInt(0, self->keyCount))));
 					break;
 				} catch (Error& e) {
 					err = e;

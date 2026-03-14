@@ -36,6 +36,7 @@
 #include <string>
 #include <vector>
 #include <libgen.h>
+#include "fmt/format.h"
 
 // Test s3client operations against s3.
 // Run this workload with ../build_output/bin/fdbserver -r simulation -f
@@ -191,7 +192,8 @@ private:
 		// This keeps test artifacts in the simulation directory like other workloads
 		// Use deterministic directory name instead of random UID to ensure deterministic behavior
 		std::string uniqueRunDir = joinPath(
-		    simfdbDir, format("s3_workload_run_%08x_%08x", clientId, deterministicRandom()->randomInt(0, 1000000)));
+		    simfdbDir,
+		    fmt::format("s3_workload_run_{:08x}_{:08x}", clientId, deterministicRandom()->randomInt(0, 1000000)));
 		try {
 			platform::createDirectory(uniqueRunDir);
 			TraceEvent(SevDebug, "S3ClientWorkloadCreatedRunDir").detail("Dir", uniqueRunDir);
@@ -213,7 +215,8 @@ private:
 		    ::basename(const_cast<char*>(credentials.c_str())); // Gets filename from the *new* path
 		// Use deterministic ID based on client ID and test context instead of random UID
 		// This ensures identical behavior across determinism check runs
-		std::string deterministicId = format("%08x_%08x", clientId, deterministicRandom()->randomInt(0, 1000000));
+		std::string deterministicId =
+		    fmt::format("{:08x}_{:08x}", clientId, deterministicRandom()->randomInt(0, 1000000));
 		std::string uniqueObjectKey = baseFilename + "_" + deterministicId;
 		std::string file_url = addFileToUrl(uniqueObjectKey, s3Url);
 		bool uploaded = false; // Track if upload started/succeeded

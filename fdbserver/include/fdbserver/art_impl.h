@@ -1,3 +1,4 @@
+#include "fmt/format.h"
 /*
  * art_impl.h
  *
@@ -124,7 +125,7 @@ art_leaf* art_tree::minimum(art_node* n) {
 	case ART_NODE4_KV:
 		return ART_FAT_NODE_LEAF(n);
 	default:
-		printf("%d\n", n->type);
+		fmt::println("{}", static_cast<int>(n->type));
 		UNSTOPPABLE_ASSERT(false);
 	}
 }

@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct FileSystemWorkload : TestWorkload {
 	static constexpr auto NAME = "FileSystem";
@@ -80,7 +81,7 @@ struct FileSystemWorkload : TestWorkload {
 		m.emplace_back("Median Write Latency (ms, averaged)", 1000 * writeLatencies.median(), Averaged::True);
 	}
 
-	Key keyForFileID(uint64_t id) { return StringRef(format("/files/id/%016llx", id)); }
+	Key keyForFileID(uint64_t id) { return StringRef(fmt::format("/files/id/{:016x}", id)); }
 
 	void initializeFile(Transaction* tr, FileSystemWorkload* self, uint64_t id) {
 		Key key = self->keyForFileID(id);
@@ -88,8 +89,8 @@ struct FileSystemWorkload : TestWorkload {
 		int pathLen = self->pathMinChars + deterministicRandom()->randomInt(0, self->pathCharRange);
 		std::string path = "";
 		for (int i = 0; i < pathLen; i += 4)
-			path +=
-			    format(format("%%0%dx", std::min(pathLen - i, 4)).c_str(), deterministicRandom()->randomInt(0, 0xFFFF));
+			path += format(fmt::format("%0{}x", std::min(pathLen - i, 4)).c_str(),
+			               deterministicRandom()->randomInt(0, 0xFFFF));
 		uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
 		int serverID = deterministicRandom()->randomInt(0, self->serverCount);
 		bool deleted = deterministicRandom()->random01() < self->deletedFilesRatio;
@@ -97,20 +98,21 @@ struct FileSystemWorkload : TestWorkload {
 
 		tr->set(key, path);
 		std::string keyStr(key.toString());
-		tr->set(keyStr + "/size", format("%d", deterministicRandom()->randomInt(0, std::numeric_limits<int>::max())));
-		tr->set(keyStr + "/server", format("%d", deterministicRandom()->randomInt(0, self->serverCount)));
+		tr->set(keyStr + "/size",
+		        fmt::format("{}", deterministicRandom()->randomInt(0, std::numeric_limits<int>::max())));
+		tr->set(keyStr + "/server", fmt::format("{}", deterministicRandom()->randomInt(0, self->serverCount)));
 		tr->set(keyStr + "/deleted", deleted ? "1"_sr : "0"_sr);
-		tr->set(keyStr + "/server", format("%d", serverID));
+		tr->set(keyStr + "/server", fmt::format("{}", serverID));
 		tr->set(keyStr + "/created", doubleToTestKey(time));
 		tr->set(keyStr + "/lastupdated", doubleToTestKey(time));
-		tr->set(keyStr + "/userid", format("%016llx", userID));
+		tr->set(keyStr + "/userid", fmt::format("{:016x}", userID));
 
 		if (deleted)
-			tr->set(format("/files/server/%08x/deleted/%016llx", serverID, id), doubleToTestKey(time));
-		tr->set(format("/files/user/%016llx/updated/%016llx/%016llx", userID, *(uint64_t*)&time, id), path);
-		tr->set(format("/files/user/%016llx/path/", userID) + path, format("%016llx", id));
+			tr->set(fmt::format("/files/server/{:08x}/deleted/{:016x}", serverID, id), doubleToTestKey(time));
+		tr->set(fmt::format("/files/user/{:016x}/updated/{:016x}/{:016x}", userID, *(uint64_t*)&time, id), path);
+		tr->set(fmt::format("/files/user/{:016x}/path/", userID) + path, fmt::format("{:016x}", id));
 		// This index was not specified in the original test: it removes duplicated paths
-		tr->set("/files/path/" + path, format("%016llx", id));
+		tr->set("/files/path/" + path, fmt::format("{:016x}", id));
 	}
 
 	Future<Void> setupRange(Database cx, FileSystemWorkload* self, int begin, int end) {
@@ -245,14 +247,14 @@ struct FileSystemWorkload : TestWorkload {
 						int serverID = testKeyToInt(serverStr.get());
 						if (deleted.get().toString() == "1") {
 							tr.set(keyStr + "/deleted", "0"_sr);
-							tr.clear(format("/files/server/%08x/deleted/%016llx", serverID, fileID));
+							tr.clear(fmt::format("/files/server/{:08x}/deleted/{:016x}", serverID, fileID));
 						} else {
 							tr.set(keyStr + "/deleted", "1"_sr);
-							tr.set(format("/files/server/%08x/deleted/%016llx", serverID, fileID),
+							tr.set(fmt::format("/files/server/{:08x}/deleted/{:016x}", serverID, fileID),
 							       doubleToTestKey(time));
 						}
 					} else {
-						tr.set(keyStr + "/size", format("%d", size));
+						tr.set(keyStr + "/size", fmt::format("{}", size));
 					}
 					tr.set(keyStr + "/lastupdated", doubleToTestKey(time));
 					co_await tr.commit();
@@ -271,7 +273,7 @@ struct FileSystemWorkload : TestWorkload {
 
 	Future<Optional<Version>> modificationQuery(FileSystemWorkload* self, Transaction* tr) {
 		uint64_t userID = deterministicRandom()->randomInt(0, self->userIDCount);
-		std::string base = format("/files/user/%016llx", userID);
+		std::string base = fmt::format("/files/user/{:016x}", userID);
 		if (self->loggingQueries)
 			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
 		Key keyEnd(base + "/updated0");
@@ -291,7 +293,7 @@ struct FileSystemWorkload : TestWorkload {
 
 	Future<Optional<Version>> deletionQuery(FileSystemWorkload* self, Transaction* tr) {
 		uint64_t serverID = deterministicRandom()->randomInt(0, self->serverCount);
-		std::string base = format("/files/server/%08x/deleted", serverID);
+		std::string base = fmt::format("/files/server/{:08x}/deleted", serverID);
 		if (self->loggingQueries)
 			TraceEvent("DeletionQuery").detail("ServerID", serverID).detail("PathBase", base);
 		Key keyBegin(base + "/");

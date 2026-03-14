@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/workloads/MockDDTest.h"
+#include "fmt/format.h"
 
 KeyRange MockDDTestWorkload::getRandomRange(double offset) const {
 	double len = deterministicRandom()->random01() * this->maxKeyspace;
@@ -84,7 +85,7 @@ void MockDDTestWorkload::populateFixedStrategy() {
 
 void MockDDTestWorkload::populateMgs() {
 	// Will the sampling structure become too large?
-	fmt::print("MGS Populating ...\n");
+	fmt::println("MGS Populating ...");
 	if (keySpaceStrategy == "linear") {
 		populateLinearStrategy();
 	} else if (keySpaceStrategy == "fixed") {
@@ -100,7 +101,7 @@ void MockDDTestWorkload::populateMgs() {
 	    .detail("Strategy", keySpaceStrategy)
 	    .detail("EstimatedDbSize", mockDbSize)
 	    .detail("MGSReportedTotalSize", totalSize);
-	fmt::print("MGS Populated.\n");
+	fmt::println("MGS Populated.");
 }
 
 Future<Void> MockDDTestWorkload::setup(Database const& cx) {

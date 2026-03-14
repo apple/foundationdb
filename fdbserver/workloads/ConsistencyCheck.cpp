@@ -41,6 +41,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 // #define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
@@ -399,7 +400,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					TraceEvent("ConsistencyCheck_Retry")
 					    .error(e); // FIXME: consistency check does not retry in this case
 				} else {
-					self->testFailure(format("Error %d - %s", e.code(), e.name()));
+					self->testFailure(fmt::format("Error {} - {}", e.code(), e.name()));
 				}
 			}
 		}
@@ -1102,10 +1103,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 		ev.detail(role + "Count", count).detail(role + "ExpectedCount", expectedCount);
 		if (count != expectedCount) {
-			fmt::print("ConsistencyCheck failure: incorrect number {0} of singleton {1} running (expected {2})\n",
-			           count,
-			           role,
-			           expectedCount);
+			fmt::println("ConsistencyCheck failure: incorrect number {0} of singleton {1} running (expected {2})",
+			             count,
+			             role,
+			             expectedCount);
 		}
 		return count == expectedCount;
 	}
@@ -1129,10 +1130,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		if (!success) {
 			// TODO REMOVE
-			fmt::print("ConsistencyCheck singletons: roles map:\n");
+			fmt::println("ConsistencyCheck singletons: roles map:");
 			for (int i = 0; i < allProcesses.size(); i++) {
-				fmt::print(
-				    "{0}: {1}\n", allProcesses[i]->address.toString(), g_simulator->getRoles(allProcesses[i]->address));
+				fmt::println(
+				    "{0}: {1}", allProcesses[i]->address.toString(), g_simulator->getRoles(allProcesses[i]->address));
 			}
 		}
 

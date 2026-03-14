@@ -34,6 +34,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConflictSet.h"
 #include "flow/UnitTest.h"
+#include "fmt/format.h"
 
 static std::vector<PerfDoubleCounter*> skc;
 
@@ -1114,7 +1115,7 @@ void miniConflictSetTest() {
 			mini.any(a, b); // Tests correctness internally
 		}
 	}
-	printf("miniConflictSetTest complete\n");
+	fmt::println("miniConflictSetTest complete");
 }
 
 void operatorLessThanTest() {
@@ -1153,7 +1154,7 @@ void operatorLessThanTest() {
 } // namespace
 
 void skipListTest() {
-	printf("Skip list test\n");
+	fmt::println("Skip list test");
 
 	miniConflictSetTest();
 
@@ -1182,9 +1183,9 @@ void skipListTest() {
 			testData[i][j] = KeyRangeRef(setK(testDataArena, key), setK(testDataArena, key2));
 		}
 	}
-	printf("Test data generated: %d batches, %d/batch\n", batches, data_per_batch);
+	fmt::println("Test data generated: {} batches, {}/batch", batches, data_per_batch);
 
-	printf("Running\n");
+	fmt::println("Running");
 
 	int readCount = 1, writeCount = 1;
 	int cranges = 0, tcount = 0;
@@ -1227,26 +1228,26 @@ void skipListTest() {
 		version++;
 	}
 	double elapsed = timer() - start;
-	printf("New conflict set: %0.3f sec\n", elapsed);
-	printf("                  %0.3f Mtransactions/sec\n", tcount / elapsed / 1e6);
-	printf("                  %0.3f Mkeys/sec\n", cranges * 2 / elapsed / 1e6);
+	fmt::println("New conflict set: {:.3f} sec", elapsed);
+	fmt::println("                  {:.3f} Mtransactions/sec", tcount / elapsed / 1e6);
+	fmt::println("                  {:.3f} Mkeys/sec", cranges * 2 / elapsed / 1e6);
 
 	elapsed = g_detectConflicts.getValue();
-	printf("Detect only:      %0.3f sec\n", elapsed);
-	printf("                  %0.3f Mtransactions/sec\n", tcount / elapsed / 1e6);
-	printf("                  %0.3f Mkeys/sec\n", cranges * 2 / elapsed / 1e6);
+	fmt::println("Detect only:      {:.3f} sec", elapsed);
+	fmt::println("                  {:.3f} Mtransactions/sec", tcount / elapsed / 1e6);
+	fmt::println("                  {:.3f} Mkeys/sec", cranges * 2 / elapsed / 1e6);
 
 	elapsed = g_checkRead.getValue() + g_merge.getValue();
-	printf("Skiplist only:    %0.3f sec\n", elapsed);
-	printf("                  %0.3f Mtransactions/sec\n", tcount / elapsed / 1e6);
-	printf("                  %0.3f Mkeys/sec\n", cranges * 2 / elapsed / 1e6);
+	fmt::println("Skiplist only:    {:.3f} sec", elapsed);
+	fmt::println("                  {:.3f} Mtransactions/sec", tcount / elapsed / 1e6);
+	fmt::println("                  {:.3f} Mkeys/sec", cranges * 2 / elapsed / 1e6);
 
-	printf("Performance counters:\n");
+	fmt::println("Performance counters:");
 	for (const auto& counter : skc) {
-		printf("%20s: %s\n", counter->getMetric().name().c_str(), counter->getMetric().formatted().c_str());
+		fmt::println("{:>20}: {}", counter->getMetric().name(), counter->getMetric().formatted());
 	}
 
-	printf("%d entries in version history\n", cs->versionHistory.count());
+	fmt::println("{} entries in version history", cs->versionHistory.count());
 }
 
 TEST_CASE("/fdbserver/skiplist/miniConflictSetCompatibility") {

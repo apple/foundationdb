@@ -82,9 +82,9 @@ ACTOR Future<Void> networkTestServer() {
 			when(wait(logging)) {
 				auto spd = sent / (now() - lastTime);
 				if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
-					fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
+					fmt::println(stderr, "{:f}\t{:.3f}\t{:.3f}", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
 				} else {
-					fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
+					fmt::println(stderr, "responses per second: {:f} ({:f} us)", spd, latency.mean() * 1e6);
 				}
 				latency.reset();
 				lastTime = now();
@@ -119,9 +119,9 @@ ACTOR Future<Void> networkTestStreamingServer() {
 				when(wait(logging)) {
 					auto spd = sent / (now() - lastTime);
 					if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
-						fprintf(stderr, "%f\t%.3f\t%.3f\n", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
+						fmt::println(stderr, "{:f}\t{:.3f}\t{:.3f}", spd, latency.mean() * 1e6, latency.stddev() * 1e6);
 					} else {
-						fprintf(stderr, "responses per second: %f (%f us)\n", spd, latency.mean() * 1e6);
+						fmt::println(stderr, "responses per second: {:f} ({:f} us)", spd, latency.mean() * 1e6);
 					}
 					latency.reset();
 					lastTime = now();
@@ -212,10 +212,10 @@ ACTOR Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
 		if (FLOW_KNOBS->NETWORK_TEST_SCRIPT_MODE) {
 			if (iteration == 2) {
 				// We don't report the first iteration because of warm-up effects.
-				printf("%f\t%.3f\t%.3f\n", spd, latency->mean() * 1e6, latency->stddev() * 1e6);
+				fmt::println("{:f}\t{:.3f}\t{:.3f}", spd, latency->mean() * 1e6, latency->stddev() * 1e6);
 			}
 		} else {
-			fprintf(stderr, "messages per second: %f (%6.3f us)\n", spd, latency->mean() * 1e6);
+			fmt::println(stderr, "messages per second: {:f} ({:6.3f} us)", spd, latency->mean() * 1e6);
 		}
 		latency->reset();
 		lastTime = now();
@@ -227,10 +227,10 @@ ACTOR Future<Void> logger(int* sent, int* completed, LatencyStats* latency) {
 }
 
 static void networkTestnanosleep() {
-	printf("nanosleep speed test\n");
+	fmt::println("nanosleep speed test");
 
 #ifdef __linux__
-	printf("\nnanosleep(10) latencies:");
+	fmt::print("\nnanosleep(10) latencies:");
 	for (int i = 0; i < 10; i++) {
 
 		double before = timer_monotonic();
@@ -240,10 +240,10 @@ static void networkTestnanosleep() {
 		nanosleep(&tv, nullptr);
 		double after = timer_monotonic();
 
-		printf(" %0.3lf", (after - before) * 1e6);
+		fmt::print(" {:.3f}", (after - before) * 1e6);
 	}
 
-	printf("\nnanosleep(10) latency after 5ms spin:");
+	fmt::print("\nnanosleep(10) latency after 5ms spin:");
 	for (int i = 0; i < 10; i++) {
 		double a = timer_monotonic() + 5e-3;
 		while (timer_monotonic() < a) {
@@ -255,10 +255,10 @@ static void networkTestnanosleep() {
 		tv.tv_nsec = 10;
 		nanosleep(&tv, nullptr);
 		double after = timer_monotonic();
-		printf(" %0.3lf", (after - before) * 1e6);
+		fmt::print(" {:.3f}", (after - before) * 1e6);
 	}
 
-	printf("\nnanosleep(20000) latency:");
+	fmt::print("\nnanosleep(20000) latency:");
 	for (int i = 0; i < 10; i++) {
 		double before = timer_monotonic();
 		timespec tv;
@@ -267,11 +267,11 @@ static void networkTestnanosleep() {
 		nanosleep(&tv, nullptr);
 		double after = timer_monotonic();
 
-		printf(" %0.3lf", (after - before) * 1e6);
+		fmt::print(" {:.3f}", (after - before) * 1e6);
 	}
-	printf("\n");
+	fmt::println("");
 
-	printf("nanosleep(20000) loop\n");
+	fmt::println("nanosleep(20000) loop");
 	while (true) {
 		timespec tv;
 		tv.tv_sec = 0;
@@ -334,7 +334,7 @@ struct RandomIntRange {
 
 	int get() const { return (max == 0) ? 0 : nondeterministicRandom()->randomInt(min, max + 1); }
 
-	std::string toString() const { return format("%d:%d", min, max); }
+	std::string toString() const { return fmt::format("{}:{}", min, max); }
 };
 
 struct P2PNetworkTest {
@@ -372,19 +372,19 @@ struct P2PNetworkTest {
 
 	std::string statsString() {
 		double elapsed = now() - startTime;
-		std::string s = format(
-		    "%.2f MB/s bytes in  %.2f MB/s bytes out  %.2f/s completed sessions in  %.2f/s completed sessions out  ",
-		    bytesReceived / elapsed / 1e6,
-		    bytesSent / elapsed / 1e6,
-		    sessionsIn / elapsed,
-		    sessionsOut / elapsed);
-		s += format("Total Errors %d  connect error=%d  accept error=%d  session error=%d  ",
-		            connectErrors + acceptErrors + sessionErrors,
-		            connectErrors,
-		            acceptErrors,
-		            sessionErrors);
-		s += format("Remaining time %.0f seconds",
-		            targetDuration > 0 ? std::max(0.0, targetDuration - (now() - globalStartTime)) : 0.0);
+		std::string s = fmt::format("{:.2f} MB/s bytes in  {:.2f} MB/s bytes out  {:.2f}/s completed sessions in  "
+		                            "{:.2f}/s completed sessions out  ",
+		                            bytesReceived / elapsed / 1e6,
+		                            bytesSent / elapsed / 1e6,
+		                            sessionsIn / elapsed,
+		                            sessionsOut / elapsed);
+		s += fmt::format("Total Errors {}  connect error={}  accept error={}  session error={}  ",
+		                 connectErrors + acceptErrors + sessionErrors,
+		                 connectErrors,
+		                 acceptErrors,
+		                 sessionErrors);
+		s += fmt::format("Remaining time {:.0f} seconds",
+		                 targetDuration > 0 ? std::max(0.0, targetDuration - (now() - globalStartTime)) : 0.0);
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -593,27 +593,27 @@ struct P2PNetworkTest {
 
 		self->startTime = now();
 
-		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
-		           self->listeners.size(),
-		           self->remotes.size(),
-		           self->connectionsOut);
+		fmt::println("{0} listeners, {1} remotes, {2} outgoing connections",
+		             self->listeners.size(),
+		             self->remotes.size(),
+		             self->connectionsOut);
 
 		for (auto n : self->remotes) {
-			printf("Remote: %s\n", n.toString().c_str());
+			fmt::println("Remote: {}", n.toString());
 		}
 
 		for (auto el : self->listeners) {
-			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
+			fmt::println("Listener: {}", el->getListenAddress().toString());
 		}
 
 		if (!self->listeners.empty()) {
 			state Reference<IConnection> conn1 = wait(self->listeners[0]->accept());
-			printf("Server: connected from %s\n", conn1->getPeerAddress().toString().c_str());
+			fmt::println("Server: connected from {}", conn1->getPeerAddress().toString());
 			try {
 				wait(conn1->acceptHandshake());
-				printf("Server: connected from %s, handshake done\n", conn1->getPeerAddress().toString().c_str());
+				fmt::println("Server: connected from {}, handshake done", conn1->getPeerAddress().toString());
 			} catch (Error& e) {
-				printf("Server: handshake error %s\n", e.what());
+				fmt::println("Server: handshake error {}", e.what());
 			}
 			threadSleep(11.0);
 			return Void();
@@ -621,9 +621,9 @@ struct P2PNetworkTest {
 
 		if (!self->remotes.empty()) {
 			state Reference<IConnection> conn2 = wait(INetworkConnections::net()->connect(self->remotes[0]));
-			printf("Client: connected to %s\n", self->remotes[0].toString().c_str());
+			fmt::println("Client: connected to {}", self->remotes[0].toString());
 			wait(conn2->connectHandshake());
-			printf("Client: connected to %s, handshake done\n", self->remotes[0].toString().c_str());
+			fmt::println("Client: connected to {}, handshake done", self->remotes[0].toString());
 		}
 
 		return Void();
@@ -635,30 +635,30 @@ struct P2PNetworkTest {
 		self->startTime = now();
 		self->globalStartTime = self->startTime;
 
-		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
-		           self->listeners.size(),
-		           self->remotes.size(),
-		           self->connectionsOut);
+		fmt::println("{0} listeners, {1} remotes, {2} outgoing connections",
+		             self->listeners.size(),
+		             self->remotes.size(),
+		             self->connectionsOut);
 
 		for (auto n : self->remotes) {
-			printf("Remote: %s\n", n.toString().c_str());
+			fmt::println("Remote: {}", n.toString());
 		}
 
 		for (auto el : self->listeners) {
-			printf("Listener: %s\n", el->getListenAddress().toString().c_str());
+			fmt::println("Listener: {}", el->getListenAddress().toString());
 			actors.add(incoming(self, el));
 		}
 
-		printf("Request size: %s\n", self->requestBytes.toString().c_str());
-		printf("Response size: %s\n", self->replyBytes.toString().c_str());
-		printf("Requests per outgoing session: %s\n", self->requests.toString().c_str());
-		printf("Delay before socket read: %s\n", self->waitReadMilliseconds.toString().c_str());
-		printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
-		printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
-		printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+		fmt::println("Request size: {}", self->requestBytes.toString());
+		fmt::println("Response size: {}", self->replyBytes.toString());
+		fmt::println("Requests per outgoing session: {}", self->requests.toString());
+		fmt::println("Delay before socket read: {}", self->waitReadMilliseconds.toString());
+		fmt::println("Delay before socket write: {}", self->waitWriteMilliseconds.toString());
+		fmt::println("Delay before session close: {}", self->idleMilliseconds.toString());
+		fmt::println("Send/Recv size {} bytes", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
 
 		if ((self->remotes.empty() || self->connectionsOut == 0) && self->listeners.empty()) {
-			printf("No listeners and no remotes or connectionsOut, so there is nothing to do!\n");
+			fmt::println("No listeners and no remotes or connectionsOut, so there is nothing to do!");
 			ASSERT((!self->remotes.empty() && (self->connectionsOut > 0)) || !self->listeners.empty());
 		}
 
@@ -670,7 +670,7 @@ struct P2PNetworkTest {
 
 		loop {
 			wait(delay(1.0, TaskPriority::Max));
-			printf("%s\n", self->statsString().c_str());
+			fmt::println("{}", self->statsString());
 			if (self->targetDuration > 0 && now() - self->globalStartTime > self->targetDuration) {
 				break;
 			}

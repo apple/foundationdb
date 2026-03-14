@@ -26,10 +26,11 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 template <>
 std::string describe(uint32_t const& item) {
-	return format("%d", item);
+	return fmt::format("{}", item);
 }
 
 struct RemoveServersSafelyWorkload : TestWorkload {

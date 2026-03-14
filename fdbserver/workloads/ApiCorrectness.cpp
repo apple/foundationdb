@@ -29,6 +29,7 @@
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include "fmt/format.h"
 
 // An enum of API operation types used in the random test
 enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE, UNINITIALIZED };
@@ -635,10 +636,10 @@ public:
 
 			// If there was a failure, print some debugging info about the failed key
 			if (!result) {
-				printf("Bad result for key selector %s: db=%s, mem=%s\n",
-				       selectors[i].toString().c_str(),
-				       printable(keys[i]).c_str(),
-				       printable(key).c_str());
+				fmt::println("Bad result for key selector {}: db={}, mem={}",
+				             selectors[i].toString(),
+				             printable(keys[i]),
+				             printable(key));
 				int dir = selectors[i].offset > 0 ? 1 : -1;
 				for (int j = 0; j <= abs(selectors[i].offset); j++) {
 					KeySelector sel = KeySelectorRef(selectors[i].getKey(), selectors[i].orEqual, j * dir);
@@ -661,10 +662,7 @@ public:
 
 					if (!(storeKey == self->store.startKey() && dbKey < StringRef(self->clientPrefix)) &&
 					    !(storeKey == self->store.endKey() && dbKey > StringRef(self->clientPrefix + "\xff")))
-						printf("Offset %d: db=%s, mem=%s\n",
-						       j * dir,
-						       printable(dbKey).c_str(),
-						       printable(storeKey).c_str());
+						fmt::println("Offset {}: db={}, mem={}", j * dir, printable(dbKey), printable(storeKey));
 				}
 
 				break;

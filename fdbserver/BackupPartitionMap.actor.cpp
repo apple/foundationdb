@@ -20,6 +20,7 @@
 
 #include "fdbserver/BackupPartitionMap.actor.h"
 #include "fdbserver/DDShardTracker.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
@@ -244,8 +245,8 @@ TEST_CASE("/BackupPartitionMap/calculateBackupPartitionKeyRanges/MultipleSmallSh
 	KeyRangeMap<ShardTrackedData> shards(defaultData);
 
 	for (int i = 0; i < 1000; i++) {
-		Key start = Key(format("shard%04d", i));
-		Key end = (i == 999) ? normalKeys.end : Key(format("shard%04d", i + 1));
+		Key start = Key(fmt::format("shard{:04}", i));
+		Key end = (i == 999) ? normalKeys.end : Key(fmt::format("shard{:04}", i + 1));
 
 		ShardTrackedData data;
 		StorageMetrics metrics;

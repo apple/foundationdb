@@ -24,6 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct DataDistributionMetricsWorkload : KVWorkload {
 	static constexpr auto NAME = "DataDistributionMetrics";
@@ -48,7 +49,7 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 	}
 
 	static Value getRandomValue() {
-		return Standalone<StringRef>(format("Value/%08d", deterministicRandom()->randomInt(0, 10e6)));
+		return Standalone<StringRef>(fmt::format("Value/{:08}", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
 	Key keyForIndex(int n) { return doubleToTestKey((double)n / nodeCount, keyPrefix); }

@@ -21,6 +21,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fmt/format.h"
 
 // NOTE: it might be simpler to test health metrics via something
 // other than simulation. Testing equivalent to what this workload does can
@@ -172,15 +173,15 @@ struct HealthMetricsApiWorkload : TestWorkload {
 				gotStorageStats = true;
 				auto storageStats = ss.second;
 				detailedWorstStorageQueue = std::max(detailedWorstStorageQueue, storageStats.storageQueue);
-				traceStorageQueue.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.storageQueue);
+				traceStorageQueue.detail(fmt::format("Storage-{}", ss.first.toString()), storageStats.storageQueue);
 				detailedWorstStorageDurabilityLag =
 				    std::max(detailedWorstStorageDurabilityLag, storageStats.storageDurabilityLag);
-				traceStorageDurabilityLag.detail(format("Storage-%s", ss.first.toString().c_str()),
+				traceStorageDurabilityLag.detail(fmt::format("Storage-{}", ss.first.toString()),
 				                                 storageStats.storageDurabilityLag);
 				detailedWorstCpuUsage = std::max(detailedWorstCpuUsage, storageStats.cpuUsage);
-				traceCpuUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.cpuUsage);
+				traceCpuUsage.detail(fmt::format("Storage-{}", ss.first.toString()), storageStats.cpuUsage);
 				detailedWorstDiskUsage = std::max(detailedWorstDiskUsage, storageStats.diskUsage);
-				traceDiskUsage.detail(format("Storage-%s", ss.first.toString().c_str()), storageStats.diskUsage);
+				traceDiskUsage.detail(fmt::format("Storage-{}", ss.first.toString()), storageStats.diskUsage);
 			}
 			TraceEvent traceTLogQueue("TLogQueue");
 			traceTLogQueue.setMaxEventLength(10000);
@@ -188,7 +189,7 @@ struct HealthMetricsApiWorkload : TestWorkload {
 			for (const auto& ss : healthMetrics.tLogQueue) {
 				gotTLogQueue = true;
 				detailedWorstTLogQueue = std::max(detailedWorstTLogQueue, ss.second);
-				traceTLogQueue.detail(format("TLog-%s", ss.first.toString().c_str()), ss.second);
+				traceTLogQueue.detail(fmt::format("TLog-{}", ss.first.toString()), ss.second);
 			}
 			if (!gotMetrics && gotStorageStats && gotTLogQueue) {
 				TraceEvent("HealthMetricsGotFullResult");

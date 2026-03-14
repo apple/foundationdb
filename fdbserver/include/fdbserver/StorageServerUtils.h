@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 #include "fdbclient/StorageCheckpoint.h"
+#include "fmt/format.h"
 
 enum class MoveInPhase : std::int8_t {
 	Pending = 0,
@@ -90,7 +91,7 @@ struct MoveInShardMetaData {
 	bool doBulkLoading() const { return this->conductBulkLoad; }
 
 	uint64_t destShardId() const { return this->dataMoveId.first(); }
-	std::string destShardIdString() const { return format("%016llx", this->dataMoveId.first()); }
+	std::string destShardIdString() const { return fmt::format("{:016x}", this->dataMoveId.first()); }
 
 	std::string toString() const {
 		return "MoveInShardMetaData: [Range]: " + describe(this->ranges) +

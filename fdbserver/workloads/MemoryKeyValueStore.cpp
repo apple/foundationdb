@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "fmt/format.h"
 
 // Get the value associated with a key
 Optional<Value> MemoryKeyValueStore::get(KeyRef key) const {
@@ -136,8 +137,8 @@ Key MemoryKeyValueStore::endKey() const {
 
 // Debugging function that prints all key-value pairs
 void MemoryKeyValueStore::printContents() const {
-	printf("Contents:\n");
+	fmt::println("Contents:");
 	std::map<Key, Value>::const_iterator mapItr;
 	for (mapItr = store.begin(); mapItr != store.end(); mapItr++)
-		printf("%s\n", mapItr->first.toString().c_str());
+		fmt::println("{}", mapItr->first.toString());
 }

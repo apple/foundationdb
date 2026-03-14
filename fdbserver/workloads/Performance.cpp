@@ -23,6 +23,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 // TODO: explain purpose of this workload. Obviously simulation is aimed at correctness,
 // not performance, so a workload literally named Performance has some explaining to do.
@@ -44,14 +45,11 @@ struct PerformanceWorkload : TestWorkload {
 		for (int i = 0; i < options.size(); i++) {
 			if (options[i].value.size()) {
 				savedOptions.push_back_deep(savedOptions.arena(), KeyValueRef(options[i].key, options[i].value));
-				printf("saved option (%d): '%s'='%s'\n",
-				       i,
-				       printable(options[i].key).c_str(),
-				       printable(options[i].value).c_str());
+				fmt::println("saved option ({}): '{}'='{}'", i, printable(options[i].key), printable(options[i].value));
 				options[i].value = ""_sr;
 			}
 		}
-		printf("saved %d options\n", savedOptions.size());
+		fmt::println("saved {} options", savedOptions.size());
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -83,13 +81,10 @@ struct PerformanceWorkload : TestWorkload {
 		Standalone<VectorRef<VectorRef<KeyValueRef>>> opts;
 		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, probeWorkload));
 		options.push_back_deep(options.arena(),
-		                       KeyValueRef("transactionsPerSecond"_sr, format("%f", transactionsPerSecond)));
+		                       KeyValueRef("transactionsPerSecond"_sr, fmt::format("{:f}", transactionsPerSecond)));
 		for (int i = 0; i < savedOptions.size(); i++) {
 			options.push_back_deep(options.arena(), savedOptions[i]);
-			printf("option [%d]: '%s'='%s'\n",
-			       i,
-			       printable(savedOptions[i].key).c_str(),
-			       printable(savedOptions[i].value).c_str());
+			fmt::println("option [{}]: '{}'='{}'", i, printable(savedOptions[i].key), printable(savedOptions[i].value));
 		}
 		opts.push_back_deep(opts.arena(), options);
 		return opts;
@@ -99,7 +94,7 @@ struct PerformanceWorkload : TestWorkload {
 		TraceEvent start("PerformaceSetupStarting");
 		for (int i = 0; i < options.size(); i++) {
 			for (int j = 0; j < options[i].size(); j++) {
-				start.detail(format("Option-%d-%d", i, j).c_str(),
+				start.detail(fmt::format("Option-{}-{}", i, j).c_str(),
 				             printable(options[i][j].key) + "=" + printable(options[i][j].value));
 			}
 		}
@@ -163,7 +158,7 @@ struct PerformanceWorkload : TestWorkload {
 			start.detail("RateTarget", tps);
 			for (int i = 0; i < options.size(); i++) {
 				for (int j = 0; j < options[i].size(); j++) {
-					start.detail(format("Option-%d-%d", i, j).c_str(),
+					start.detail(fmt::format("Option-{}-{}", i, j).c_str(),
 					             printable(options[i][j].key) + "=" + printable(options[i][j].value));
 				}
 			}

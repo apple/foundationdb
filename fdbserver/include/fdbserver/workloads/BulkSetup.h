@@ -33,6 +33,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
+#include "fmt/format.h"
 
 template <class T>
 struct sfinae_true : std::true_type {};
@@ -160,8 +161,8 @@ Future<uint64_t> setupRangeWorker(Database cx,
 				Error err;
 				setAuthToken(*workload, tr);
 				try {
-					std::string countKey = format("keycount|%d|%d", workload->clientId, actorId);
-					std::string bytesKey = format("bytesstored|%d|%d", workload->clientId, actorId);
+					std::string countKey = fmt::format("keycount|{}|{}", workload->clientId, actorId);
+					std::string bytesKey = fmt::format("bytesstored|{}|{}", workload->clientId, actorId);
 
 					tr.set(StringRef(countKey), StringRef((uint8_t*)&keysLoaded, sizeof(uint64_t)));
 					tr.set(StringRef(bytesKey), StringRef((uint8_t*)&bytesStored, sizeof(uint64_t)));

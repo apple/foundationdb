@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "fdbserver/workloads/ApiWorkload.h"
+#include "fmt/format.h"
 
 #define TRACE_TRANSACTION 0
 
@@ -152,7 +153,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		Key key;
 
 #if TRACE_TRANSACTION
-		printf("NEW_TRANSACTION\n");
+		fmt::println("NEW_TRANSACTION");
 #endif
 
 		for (auto op : sequence) {
@@ -161,14 +162,14 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 				store.set(op.beginKey, op.value);
 #if TRACE_TRANSACTION
 				if (op.beginKey == debugKey)
-					printf("SET: %s = %d\n", printable(op.beginKey).c_str(), op.value.size());
+					fmt::println("SET: {} = {}", printable(op.beginKey), op.value.size());
 #endif
 				break;
 			case Operation::GET:
 				pushKVPair(results, op.beginKey, store.get(op.beginKey));
 #if TRACE_TRANSACTION && 0
 				if (op.beginKey == debugKey)
-					printf("GET: %s\n", printable(op.beginKey).c_str());
+					fmt::println("GET: {}", printable(op.beginKey));
 #endif
 				break;
 			case Operation::GET_RANGE_SELECTOR:
@@ -182,12 +183,12 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 				results.push_back(store.getRange(KeyRangeRef(op.beginKey, op.endKey), op.limit, op.reverse));
 #if TRACE_TRANSACTION
 				if (op.beginKey <= debugKey && debugKey < op.endKey)
-					printf("%s: %s - %s (limit=%d, reverse=%d)\n",
-					       op.type == Operation::GET_RANGE ? "GET_RANGE" : "GET_RANGE_SELECTOR",
-					       printable(op.beginKey).c_str(),
-					       printable(op.endKey).c_str(),
-					       op.limit,
-					       op.reverse);
+					fmt::println("{}: {} - {} (limit={}, reverse={})",
+					             op.type == Operation::GET_RANGE ? "GET_RANGE" : "GET_RANGE_SELECTOR",
+					             printable(op.beginKey),
+					             printable(op.endKey),
+					             op.limit,
+					             op.reverse);
 #endif
 				break;
 			case Operation::GET_KEY:
@@ -195,21 +196,21 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 				pushKVPair(results, key, Value());
 #if TRACE_TRANSACTION
 				if (key == debugKey)
-					printf("GET_KEY: %s = %s\n", op.beginSelector.toString().c_str(), printable(key).c_str());
+					fmt::println("GET_KEY: {} = {}", op.beginSelector.toString(), printable(key));
 #endif
 				break;
 			case Operation::CLEAR:
 				store.clear(op.beginKey);
 #if TRACE_TRANSACTION
 				if (op.beginKey == debugKey)
-					printf("CLEAR: %s\n", printable(op.beginKey).c_str());
+					fmt::println("CLEAR: {}", printable(op.beginKey));
 #endif
 				break;
 			case Operation::CLEAR_RANGE:
 				store.clear(KeyRangeRef(op.beginKey, op.endKey));
 #if TRACE_TRANSACTION
 				if (op.beginKey <= debugKey && debugKey < op.endKey)
-					printf("CLEAR_RANGE: %s - %s\n", printable(op.beginKey).c_str(), printable(op.endKey).c_str());
+					fmt::println("CLEAR_RANGE: {} - {}", printable(op.beginKey), printable(op.endKey));
 #endif
 				break;
 			}
@@ -290,24 +291,24 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 			if (!ApiWorkload::compareResults(dbResults[currentResult], storeResults[currentResult], readVersion)) {
 				switch (op.type) {
 				case Operation::GET:
-					printf("Operation GET failed: key = %s\n", printable(op.beginKey).c_str());
+					fmt::println("Operation GET failed: key = {}", printable(op.beginKey));
 					break;
 				case Operation::GET_RANGE:
-					printf("Operation GET_RANGE failed: begin = %s, end = %s, limit = %d, reverse = %d\n",
-					       printable(op.beginKey).c_str(),
-					       printable(op.endKey).c_str(),
-					       op.limit,
-					       static_cast<bool>(op.reverse));
+					fmt::println("Operation GET_RANGE failed: begin = {}, end = {}, limit = {}, reverse = {}",
+					             printable(op.beginKey),
+					             printable(op.endKey),
+					             op.limit,
+					             static_cast<bool>(op.reverse));
 					break;
 				case Operation::GET_RANGE_SELECTOR:
-					printf("Operation GET_RANGE_SELECTOR failed: begin = %s, end = %s, limit = %d, reverse = %d\n",
-					       op.beginSelector.toString().c_str(),
-					       op.endSelector.toString().c_str(),
-					       op.limit,
-					       static_cast<bool>(op.reverse));
+					fmt::println("Operation GET_RANGE_SELECTOR failed: begin = {}, end = {}, limit = {}, reverse = {}",
+					             op.beginSelector.toString(),
+					             op.endSelector.toString(),
+					             op.limit,
+					             static_cast<bool>(op.reverse));
 					break;
 				case Operation::GET_KEY:
-					printf("Operation GET_KEY failed: selector = %s\n", op.beginSelector.toString().c_str());
+					fmt::println("Operation GET_KEY failed: selector = {}", op.beginSelector.toString());
 					break;
 				default:
 					break;

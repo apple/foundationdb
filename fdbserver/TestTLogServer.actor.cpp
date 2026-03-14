@@ -34,6 +34,7 @@
 #include "flow/IRandom.h"
 #include "flow/DebugTrace.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // must be last include
 
 namespace {
@@ -258,8 +259,8 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 	state Version next = pTLogTestContext->initVersion;
 
 	for (; i < pTLogTestContext->numCommits; i++) {
-		Standalone<StringRef> key = StringRef(format("key %d", i));
-		Standalone<StringRef> val = StringRef(format("value %d", i));
+		Standalone<StringRef> key = StringRef(fmt::format("key {}", i));
+		Standalone<StringRef> val = StringRef(fmt::format("value {}", i));
 		MutationRef m(MutationRef::Type::SetValue, key, val);
 
 		// build commit request
@@ -370,8 +371,8 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 		rd >> m;
 
 		// validate data
-		Standalone<StringRef> expectedKey = StringRef(format("key %d", i));
-		Standalone<StringRef> expectedVal = StringRef(format("value %d", i));
+		Standalone<StringRef> expectedKey = StringRef(fmt::format("key {}", i));
+		Standalone<StringRef> expectedVal = StringRef(fmt::format("value {}", i));
 		ASSERT_WE_THINK(m.param1 == expectedKey);
 		ASSERT_WE_THINK(m.param2 == expectedVal);
 

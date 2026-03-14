@@ -38,6 +38,7 @@
 #include "fdbserver/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
 #include "fdbserver/DDRelocationQueue.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
@@ -392,7 +393,7 @@ public:
 		std::string id;
 		for (int i = 0; i < teams.size(); i++) {
 			auto const& team = teams[i];
-			id += (i == teams.size() - 1) ? team->getTeamID() : format("%s, ", team->getTeamID().c_str());
+			id += (i == teams.size() - 1) ? team->getTeamID() : fmt::format("{}, ", team->getTeamID());
 		}
 		return id;
 	}
@@ -421,8 +422,9 @@ std::string Busyness::toString() {
 			j++;
 		if (i != 1)
 			result += ", ";
-		result += i + 1 == j ? format("%03d", i * 100) : format("%03d/%03d", i * 100, (j - 1) * 100);
-		result += format("=%1.02f (%d/%d)", (float)ledger[i] / WORK_FULL_UTILIZATION, ledger[i], WORK_FULL_UTILIZATION);
+		result += i + 1 == j ? fmt::format("{:03}", i * 100) : fmt::format("{:03}/{:03}", i * 100, (j - 1) * 100);
+		result += fmt::format(
+		    "={:1.02f} ({}/{})", (float)ledger[i] / WORK_FULL_UTILIZATION, ledger[i], WORK_FULL_UTILIZATION);
 		i = j;
 	}
 	return result;

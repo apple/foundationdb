@@ -26,6 +26,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/xxhash.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 typedef bool (*compare_pages)(void*, void*);
@@ -83,7 +84,7 @@ struct StringBuffer {
 			// SOMEDAY: Use a new arena and discard the old one after copying?
 			reserved = std::max(size, reserved * 2);
 			if (reserved > 1e9) {
-				printf("WOAH! Huge allocation\n");
+				fmt::println("WOAH! Huge allocation");
 				TraceEvent(SevError, "StringBufferHugeAllocation", id)
 				    .detail("Alignment", alignment)
 				    .detail("Reserved", reserved)
@@ -268,7 +269,7 @@ public:
 
 	std::string basename;
 	std::string fileExtension;
-	std::string filename(int i) const { return basename + format("%d.%s", i, fileExtension.c_str()); }
+	std::string filename(int i) const { return basename + fmt::format("{}.{}", i, fileExtension); }
 
 	UID dbgid;
 	int64_t dbg_file0BeginSeq;
@@ -969,7 +970,7 @@ public:
 			    .suppressFor(1.0)
 			    .detail("PushedPages", pushedPageCount())
 			    .detail("NextPageSeq", nextPageSeq)
-			    .detail("Details", format("%d pages", pushedPageCount()))
+			    .detail("Details", fmt::format("{} pages", pushedPageCount()))
 			    .detail("File0Name", rawQueue->files[0].dbgFilename);
 			if (g_network->isSimulated())
 				warnAlwaysForMemory = false;
@@ -1686,7 +1687,7 @@ TEST_CASE("performance/fdbserver/DiskQueue") {
 	}
 	while (loopCount < 4000) {
 		if (loopCount % 100 == 0) {
-			printf("loop count: %d\n", loopCount);
+			fmt::println("loop count: {}", loopCount);
 		}
 		if (++loopCount % 2 == 0) {
 			state IDiskQueue::location frontLocation = locations.front();

@@ -21,6 +21,7 @@
 // This file implements the functions defined in RestoreUtil.h
 
 #include "fdbserver/RestoreUtil.h"
+#include "fmt/format.h"
 
 const std::vector<std::string> RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
@@ -60,7 +61,7 @@ bool debugFRMutation(const char* context, Version version, MutationRef const& mu
 
 std::string getRoleStr(RestoreRole role) {
 	if ((int)role >= numRoles || (int)role < 0) {
-		printf("[ERROR] role:%d is out of scope\n", (int)role);
+		fmt::println("[ERROR] role:{} is out of scope", (int)role);
 		return "[Unset]";
 	}
 	return RestoreRoleStr[(int)role];

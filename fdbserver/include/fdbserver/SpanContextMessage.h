@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fmt/format.h"
 
 struct SpanContextMessage {
 	// This message is pushed into the the transaction logs' memory to inform
@@ -42,8 +43,9 @@ struct SpanContextMessage {
 	SpanContextMessage(SpanID const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
-		return format(
-		    "code: %d, span context: %s", MutationRef::Reserved_For_SpanContextMessage, spanContext.toString().c_str());
+		return fmt::format("code: {}, span context: {}",
+		                   static_cast<unsigned int>(MutationRef::Reserved_For_SpanContextMessage),
+		                   spanContext.toString());
 	}
 
 	template <class Ar>

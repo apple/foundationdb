@@ -32,6 +32,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IRandom.h"
+#include "fmt/format.h"
 
 static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",
 	                                           "perpetual_storage_wiggle=1",
@@ -60,7 +61,7 @@ std::string generateRegions() {
 	}
 
 	if (deterministicRandom()->random01() < 0.25) {
-		return format(" usable_regions=%d", deterministicRandom()->randomInt(1, 3));
+		return fmt::format(" usable_regions={}", deterministicRandom()->randomInt(1, 3));
 	}
 
 	int primaryPriority = 1;
@@ -204,8 +205,8 @@ std::string generateRegions() {
 			ASSERT(false); // Programmer forgot to adjust cases.
 		}
 
-		result += format(" log_routers=%d", deterministicRandom()->randomInt(1, 7));
-		result += format(" remote_logs=%d", deterministicRandom()->randomInt(1, 7));
+		result += fmt::format(" log_routers={}", deterministicRandom()->randomInt(1, 7));
+		result += fmt::format(" remote_logs={}", deterministicRandom()->randomInt(1, 7));
 	}
 
 	primaryObj["datacenters"] = primaryDcArr;
@@ -217,7 +218,7 @@ std::string generateRegions() {
 	if (deterministicRandom()->random01() < 0.8) {
 		regionArr.push_back(remoteObj);
 		if (deterministicRandom()->random01() < 0.25) {
-			result += format(" usable_regions=%d", deterministicRandom()->randomInt(1, 3));
+			result += fmt::format(" usable_regions={}", deterministicRandom()->randomInt(1, 3));
 		}
 	}
 
@@ -262,10 +263,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		return x;
 	}
 
-	inline Standalone<StringRef> getDatabaseName(int dbIndex) { return StringRef(format("DestroyDB%d", dbIndex)); }
+	inline Standalone<StringRef> getDatabaseName(int dbIndex) { return StringRef(fmt::format("DestroyDB{}", dbIndex)); }
 
 	static Future<ConfigurationResult> IssueConfigurationChange(Database cx, const std::string& config, bool force) {
-		printf("Issuing configuration change: %s\n", config.c_str());
+		fmt::println("Issuing configuration change: {}", config);
 		return ManagementAPI::changeConfig(cx.getReference(), config, force);
 	}
 
@@ -417,18 +418,18 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				config += generateRegions();
 
 				if (deterministicRandom()->random01() < 0.5)
-					config += " logs=" + format("%d", randomRoleNumber());
+					config += " logs=" + fmt::format("{}", randomRoleNumber());
 
 				if (deterministicRandom()->random01() < 0.2) {
-					config += " proxies=" + format("%d", deterministicRandom()->randomInt(2, 5));
+					config += " proxies=" + fmt::format("{}", deterministicRandom()->randomInt(2, 5));
 				} else {
 					if (deterministicRandom()->random01() < 0.5)
-						config += " commit_proxies=" + format("%d", randomRoleNumber());
+						config += " commit_proxies=" + fmt::format("{}", randomRoleNumber());
 					if (deterministicRandom()->random01() < 0.5)
-						config += " grv_proxies=" + format("%d", randomRoleNumber());
+						config += " grv_proxies=" + fmt::format("{}", randomRoleNumber());
 				}
 				if (deterministicRandom()->random01() < 0.5)
-					config += " resolvers=" + format("%d", randomRoleNumber());
+					config += " resolvers=" + fmt::format("{}", randomRoleNumber());
 
 				co_await IssueConfigurationChange(cx, config, false);
 

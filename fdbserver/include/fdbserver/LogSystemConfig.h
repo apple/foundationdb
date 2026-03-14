@@ -26,6 +26,7 @@
 #include "fdbserver/TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
+#include "fmt/format.h"
 
 template <class Interface>
 struct OptionalInterface {
@@ -149,7 +150,7 @@ struct OldTLogConf {
 	explicit OldTLogConf(const OldLogData&);
 
 	std::string toString() const {
-		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str());
+		return fmt::format("end: {} tags: {} {}", epochEnd, logRouterTags, describe(tLogs));
 	}
 
 	bool operator==(const OldTLogConf& rhs) const;

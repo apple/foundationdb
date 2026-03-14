@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fmt/format.h"
 
 template <class Ar, class VersionOptions>
 typename Ar::READER& applyVersionStartingHere(Ar& ar, VersionOptions vo) {
@@ -53,7 +54,9 @@ struct LogProtocolMessage {
 
 	LogProtocolMessage() {}
 
-	std::string toString() const { return format("code: %d", MutationRef::Reserved_For_LogProtocolMessage); }
+	std::string toString() const {
+		return fmt::format("code: {}", static_cast<unsigned int>(MutationRef::Reserved_For_LogProtocolMessage));
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

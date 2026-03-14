@@ -24,6 +24,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "flow/Trace.h"
+#include "fmt/format.h"
 
 namespace RocksDBCommon {
 
@@ -38,21 +39,21 @@ StringRef toStringRef(rocksdb::Slice s) {
 std::string getErrorReason(rocksdb::BackgroundErrorReason reason) {
 	switch (reason) {
 	case rocksdb::BackgroundErrorReason::kFlush:
-		return format("%d Flush", reason);
+		return fmt::format("{} Flush", static_cast<int>(reason));
 	case rocksdb::BackgroundErrorReason::kCompaction:
-		return format("%d Compaction", reason);
+		return fmt::format("{} Compaction", static_cast<int>(reason));
 	case rocksdb::BackgroundErrorReason::kWriteCallback:
-		return format("%d WriteCallback", reason);
+		return fmt::format("{} WriteCallback", static_cast<int>(reason));
 	case rocksdb::BackgroundErrorReason::kMemTable:
-		return format("%d MemTable", reason);
+		return fmt::format("{} MemTable", static_cast<int>(reason));
 	case rocksdb::BackgroundErrorReason::kManifestWrite:
-		return format("%d ManifestWrite", reason);
+		return fmt::format("{} ManifestWrite", static_cast<int>(reason));
 	case rocksdb::BackgroundErrorReason::kFlushNoWAL:
-		return format("%d FlushNoWAL", reason);
+		return fmt::format("{} FlushNoWAL", static_cast<int>(reason));
 	case rocksdb::BackgroundErrorReason::kManifestWriteNoWAL:
-		return format("%d ManifestWriteNoWAL", reason);
+		return fmt::format("{} ManifestWriteNoWAL", static_cast<int>(reason));
 	default:
-		return format("%d Unknown", reason);
+		return fmt::format("{} Unknown", static_cast<int>(reason));
 	}
 }
 

@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct DDBalanceWorkload : TestWorkload {
 	static constexpr auto NAME = "DDBalance";
@@ -83,7 +84,7 @@ struct DDBalanceWorkload : TestWorkload {
 	}
 
 	Key key(int bin, int n, int actorid, int clientid) {
-		return StringRef(format("%08x%08x%08x%08x", bin, n, actorid, clientid));
+		return StringRef(fmt::format("{:08x}{:08x}{:08x}{:08x}", bin, n, actorid, clientid));
 	}
 
 	Value value(int n) { return doubleToTestKey(n); }

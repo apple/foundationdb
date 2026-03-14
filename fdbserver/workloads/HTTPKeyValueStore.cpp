@@ -27,6 +27,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include <cstring>
 #include <limits>
+#include "fmt/format.h"
 
 /*
  * Implements a basic put/get key-value store over HTTP to test the http client and simulated server code.
@@ -51,7 +52,7 @@ struct SimHTTPKVStore : NonCopyable, ReferenceCounted<SimHTTPKVStore> {
 		ASSERT(clientId < maxClients);
 		if (seqNo < lastClientSeqnos[clientId]) {
 			if (DEBUG_HTTPKV) {
-				fmt::print("Client {0} SeqNo {1} < {2}\n", clientId, seqNo, lastClientSeqnos[clientId]);
+				fmt::println("Client {0} SeqNo {1} < {2}", clientId, seqNo, lastClientSeqnos[clientId]);
 			}
 			// out of order retransmit, ignore
 			return false;
@@ -69,7 +70,7 @@ void httpKVProcessPut(Reference<SimHTTPKVStore> kvStore,
 	kvStore->data[key] = req->data.content;
 
 	if (DEBUG_HTTPKV) {
-		fmt::print("KV:put {0} = {1}\n", key, req->data.content);
+		fmt::println("KV:put {0} = {1}", key, req->data.content);
 	}
 
 	response->code = 200;
@@ -86,7 +87,7 @@ void httpKVProcessGet(Reference<SimHTTPKVStore> kvStore,
 	ASSERT(it != kvStore->data.end());
 
 	if (DEBUG_HTTPKV) {
-		fmt::print("KV:get {0} = {1}\n", key, it->second);
+		fmt::println("KV:get {0} = {1}", key, it->second);
 	}
 
 	response->code = 200;
@@ -304,7 +305,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 				throw err;
 			}
 			if (DEBUG_HTTPKV) {
-				fmt::print("REQ: ERROR: {0}\n", err.name());
+				fmt::println("REQ: ERROR: {0}", err.name());
 			}
 			if (self->conn) {
 				self->conn->close();
@@ -327,13 +328,13 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		self->activePut = active;
 
 		if (DEBUG_HTTPKV) {
-			fmt::print("CL:put {0}:{1} = {2}\n", self->clientId, key, value);
+			fmt::println("CL:put {0}:{1} = {2}", self->clientId, key, value);
 		}
 
 		Reference<HTTP::IncomingResponse> response = co_await self->doKVRequest(self, key, value);
 
 		if (DEBUG_HTTPKV) {
-			fmt::print("CL:put {0}:{1} = {2} DONE\n", self->clientId, key, value);
+			fmt::println("CL:put {0}:{1} = {2} DONE", self->clientId, key, value);
 		}
 
 		// upon success, put in map
@@ -345,13 +346,13 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 	Future<Void> get(HTTPKeyValueStoreWorkload* self, std::string key, bool checkActive) {
 
 		if (DEBUG_HTTPKV) {
-			fmt::print("CL:get {0}:{1}\n", self->clientId, key);
+			fmt::println("CL:get {0}:{1}", self->clientId, key);
 		}
 
 		Reference<HTTP::IncomingResponse> response = co_await self->doKVRequest(self, key, {});
 
 		if (DEBUG_HTTPKV) {
-			fmt::print("CL:get {0}:{1} = {2} DONE\n", self->clientId, key, response->data.content);
+			fmt::println("CL:get {0}:{1} = {2} DONE", self->clientId, key, response->data.content);
 		}
 
 		if (!checkActive || !self->activePut.present()) {
@@ -372,12 +373,12 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		if (self->clientId == 0) {
 			TraceEvent("SimHTTPKeyValueStoreRegistering");
 			if (DEBUG_HTTPKV) {
-				fmt::print("Registering sim http kv server\n");
+				fmt::println("Registering sim http kv server");
 			}
 			co_await g_simulator->registerSimHTTPServer(
 			    self->hostname, self->service, makeReference<KeyValueRequestHandler>());
 			if (DEBUG_HTTPKV) {
-				fmt::print("Registered sim http kv server\n");
+				fmt::println("Registered sim http kv server");
 			}
 			TraceEvent("SimHTTPKeyValueStoreRegistered");
 		}

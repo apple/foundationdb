@@ -42,6 +42,7 @@
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {
@@ -487,10 +488,10 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	std::string metricsConnFile = getenv2("METRICS_CONNFILE");
 	std::string metricsPrefix = getenv2("METRICS_PREFIX");
 	if (metricsConnFile == "") {
-		fprintf(stdout, "Metrics cluster file must be specified in environment variable METRICS_CONNFILE\n");
+		fmt::println(stdout, "Metrics cluster file must be specified in environment variable METRICS_CONNFILE");
 		return Void();
 	}
-	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
+	fmt::println(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.");
 
 	state Database metricsDb = Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION);
 	TDMetricCollection::getTDMetrics()->address = "0.0.0.0:0"_sr;
@@ -501,16 +502,16 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	state int chunk = 4000;
 	state int total = 200000;
 
-	fprintf(stdout, "Writing trace event named Dummy with fields a, b, c, d, j, k, s, x, y, z.\n");
-	fprintf(stdout, "  There is a %f second pause every %d events\n", w, chunk);
-	fprintf(stdout, "  %d events will be logged.\n", total);
-	fprintf(stdout, "  a is always present.  It starts with = 0 and increments by 1 with each event.\n");
-	fprintf(stdout, "  b, if present, is always a*2.\n");
-	fprintf(stdout, "  c, if present, is always a*3.\n");
-	fprintf(stdout, "  b and c are never present in the same event.\n");
-	fprintf(stdout, "  x, y, and z, if present, are doubles and equal to 1.5 * a, b, and c, respectively\n");
-	fprintf(stdout, "  d is always present, is a string, and rotates through the values 'one', 'two', and ''.\n");
-	fprintf(stdout, "  Plotting j on the x axis and k on the y axis should look like x=sin(2t), y=sin(3t)\n");
+	fmt::println(stdout, "Writing trace event named Dummy with fields a, b, c, d, j, k, s, x, y, z.");
+	fmt::println(stdout, "  There is a {:f} second pause every {} events", w, chunk);
+	fmt::println(stdout, "  {} events will be logged.", total);
+	fmt::println(stdout, "  a is always present.  It starts with = 0 and increments by 1 with each event.");
+	fmt::println(stdout, "  b, if present, is always a*2.");
+	fmt::println(stdout, "  c, if present, is always a*3.");
+	fmt::println(stdout, "  b and c are never present in the same event.");
+	fmt::println(stdout, "  x, y, and z, if present, are doubles and equal to 1.5 * a, b, and c, respectively");
+	fmt::println(stdout, "  d is always present, is a string, and rotates through the values 'one', 'two', and ''.");
+	fmt::println(stdout, "  Plotting j on the x axis and k on the y axis should look like x=sin(2t), y=sin(3t)");
 
 	state Int64MetricHandle intMetric = Int64MetricHandle("DummyInt"_sr);
 	state BoolMetricHandle boolMetric = BoolMetricHandle("DummyBool"_sr);

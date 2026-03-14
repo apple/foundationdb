@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
 #include "flow/IRandom.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h"
 
 // Clear the chaos server registry (for testing/debugging only)
@@ -82,17 +83,12 @@ double getOperationMultiplier(S3Operation op) {
 
 // Generate S3-compatible error XML
 std::string generateS3ErrorXML(const std::string& code, const std::string& message, const std::string& resource) {
-	return format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-	              "<Error>\n"
-	              "  <Code>%s</Code>\n"
-	              "  <Message>%s</Message>\n"
-	              "  <Resource>%s</Resource>\n"
-	              "  <RequestId>%s</RequestId>\n"
-	              "</Error>",
-	              code.c_str(),
-	              message.c_str(),
-	              resource.c_str(),
-	              deterministicRandom()->randomUniqueID().toString().c_str());
+	return fmt::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error>\n  <Code>{}</Code>\n  "
+	                   "<Message>{}</Message>\n  <Resource>{}</Resource>\n  <RequestId>{}</RequestId>\n</Error>",
+	                   code,
+	                   message,
+	                   resource,
+	                   deterministicRandom()->randomUniqueID().toString());
 }
 
 // Phase 1: Inject delay if configured

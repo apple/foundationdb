@@ -31,6 +31,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 StringRef KeyValueStoreProcess::_name = "KeyValueStoreProcess"_sr;
@@ -194,7 +195,7 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 		                              "--process-name",
 		                              KeyValueStoreProcess::_name.toString(),
 		                              "--process-endpoint",
-		                              format("%s,%lu,%lu", address.c_str(), token.first(), token.second()) };
+		                              fmt::format("{},{},{}", address, token.first(), token.second()) };
 	// For remote IKV store, we need to make sure the shutdown signal is sent back until we can destroy it in the
 	// simulation
 	process = spawnProcess(path, args, -1.0, false, 0.01 /*not used*/, self);

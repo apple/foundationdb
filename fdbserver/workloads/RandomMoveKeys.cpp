@@ -29,6 +29,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
+#include "fmt/format.h"
 
 struct MoveKeysWorkload : FailureInjectionWorkload {
 	static constexpr auto NAME = "RandomMoveKeys";
@@ -142,8 +143,7 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 		FlowLock fl2(1);
 		std::string desc;
 		for (int s = 0; s < destinationTeam.size(); s++)
-			desc +=
-			    format("%s (%llx),", destinationTeam[s].address().toString().c_str(), destinationTeam[s].id().first());
+			desc += fmt::format("{} ({:x}),", destinationTeam[s].address().toString(), destinationTeam[s].id().first());
 		std::vector<UID> destinationTeamIDs;
 		destinationTeamIDs.reserve(destinationTeam.size());
 		for (int s = 0; s < destinationTeam.size(); s++)

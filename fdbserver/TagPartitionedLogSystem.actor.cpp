@@ -26,6 +26,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/WaitFailure.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
@@ -50,9 +51,9 @@ ACTOR Future<Version> minVersionWhenReady(Future<Void> f,
 				std::string message;
 				if (reply.isError()) {
 					// FIXME Use C++20 format when it is available
-					message = format("TLogPushRespondError%04d", index++);
+					message = fmt::format("TLogPushRespondError{:04}", index++);
 				} else {
-					message = format("TLogPushNoResponse%04d", index++);
+					message = fmt::format("TLogPushNoResponse{:04}", index++);
 				}
 				TraceEvent(g_network->isSimulated() ? SevInfo : SevWarnAlways, message.c_str())
 				    .detail("TLogID", tlogID);
@@ -197,7 +198,7 @@ void TagPartitionedLogSystem::delref() {
 std::string TagPartitionedLogSystem::describe() const {
 	std::string result;
 	for (int i = 0; i < tLogs.size(); i++) {
-		result += format("%d: ", i);
+		result += fmt::format("{}: ", i);
 		for (int j = 0; j < tLogs[i]->logServers.size(); j++) {
 			result +=
 			    tLogs[i]->logServers[j]->get().id().toString() + ((j == tLogs[i]->logServers.size() - 1) ? " " : ", ");

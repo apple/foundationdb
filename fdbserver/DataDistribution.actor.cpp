@@ -53,6 +53,7 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
@@ -4876,12 +4877,11 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				// 1. check mapFromKeyServers => mapFromServerKeys
 				for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
 					if (!mapFromServerKeys.contains(ssid)) {
-						std::string error =
-						    format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
-						           "on Server(%s) in KeyServers but not ServerKeys",
-						           claimRange.toString().c_str(),
-						           claimRange.toString().c_str(),
-						           ssid.toString().c_str());
+						std::string error = fmt::format("KeyServers and serverKeys mismatch: Some key in range({}, {}) "
+						                                "exists on Server({}) in KeyServers but not ServerKeys",
+						                                claimRange.toString(),
+						                                claimRange.toString(),
+						                                ssid.toString());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
 						    .setMaxFieldLength(-1)
@@ -4896,11 +4896,11 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 					if (anyMismatch.present()) { // mismatch detected
 						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
 						KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
-						std::string error =
-						    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
-						           ssid.toString().c_str(),
-						           mismatchedRangeByKeyServer.toString().c_str(),
-						           mismatchedRangeByServerKey.toString().c_str());
+						std::string error = fmt::format(
+						    "KeyServers and serverKeys mismatch on Server({}): KeyServer: {}; ServerKey: {}",
+						    ssid.toString(),
+						    mismatchedRangeByKeyServer.toString(),
+						    mismatchedRangeByServerKey.toString());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
 						    .setMaxFieldLength(-1)
@@ -4916,12 +4916,11 @@ ACTOR Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				// 2. check mapFromServerKeys => mapFromKeyServers
 				for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
 					if (!mapFromKeyServers.contains(ssid)) {
-						std::string error =
-						    format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
-						           "on Server(%s) in ServerKeys but not KeyServers",
-						           claimRange.toString().c_str(),
-						           claimRange.toString().c_str(),
-						           ssid.toString().c_str());
+						std::string error = fmt::format("KeyServers and serverKeys mismatch: Some key of range({}, {}) "
+						                                "exists on Server({}) in ServerKeys but not KeyServers",
+						                                claimRange.toString(),
+						                                claimRange.toString(),
+						                                ssid.toString());
 						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
 						    .setMaxFieldLength(-1)

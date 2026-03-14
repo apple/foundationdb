@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fmt/format.h"
 
 std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
@@ -213,7 +214,7 @@ void ShardsAffectedByTeamFailure::check() const {
 				if (!team_shards.contains(std::make_pair(*t, i->range()))) {
 					std::string teamDesc, shards;
 					for (int k = 0; k < t->servers.size(); k++)
-						teamDesc += format("%llx ", t->servers[k].first());
+						teamDesc += fmt::format("{:x} ", t->servers[k].first());
 					for (auto x = team_shards.lower_bound(std::make_pair(*t, KeyRangeRef()));
 					     x != team_shards.end() && x->first == *t;
 					     ++x)

@@ -25,6 +25,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/zipf.h"
 #include "crc32/crc32c.h"
+#include "fmt/format.h"
 
 enum {
 	OP_GETREADVERSION,
@@ -197,7 +198,7 @@ struct MakoWorkload : TestWorkload {
 			auto ratesItr = ratesAtKeyCounts.begin();
 			for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++) {
 				m.emplace_back(
-				    format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
+				    fmt::format("{} keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 			}
 		}
 		// benchmark
@@ -360,7 +361,7 @@ struct MakoWorkload : TestWorkload {
 			    .detail("Percentile95", self->opLatencies[OP_GETREADVERSION].percentile(.95))
 			    .detail("Count", self->opCounters[OP_GETREADVERSION].getValue());
 
-			std::string ts = format("T=%04.0fs: ", elapsed);
+			std::string ts = fmt::format("T={:04.0f}s: ", elapsed);
 			self->periodicMetrics.emplace_back(ts + "Transactions/sec",
 			                                   (self->xacts.getValue() - last_xacts) / self->periodicLoggingInterval,
 			                                   Averaged::False);
@@ -518,7 +519,8 @@ struct MakoWorkload : TestWorkload {
 							char* rkeyPtr = reinterpret_cast<char*>(mutateString(rkey));
 							randStr(rkeyPtr + self->KEYPREFIXLEN, self->keyBytes - self->KEYPREFIXLEN);
 							for (int range_i = 0; range_i < range; ++range_i) {
-								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
+								fmt::format("{:0{}}", range_i, static_cast<int>(rangeLen))
+								    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								if (self->latencyForLocalOperation) {
 									double opBegin = timer();
 									tr.set(rkey, self->randomValue());
@@ -578,7 +580,8 @@ struct MakoWorkload : TestWorkload {
 							std::string scr_end_key;
 							KeyRangeRef scr_key_range_ref;
 							for (int range_i = 0; range_i < range; ++range_i) {
-								format("%0.*d", rangeLen, range_i).copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
+								fmt::format("{:0{}}", range_i, static_cast<int>(rangeLen))
+								    .copy(rkeyPtr + self->keyBytes - rangeLen, rangeLen);
 								if (self->latencyForLocalOperation) {
 									double opBegin = timer();
 									tr.set(rkey, self->randomValue());

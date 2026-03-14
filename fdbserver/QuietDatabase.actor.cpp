@@ -38,6 +38,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
@@ -891,7 +892,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 
 	if (waitForCompletion) {
 		TraceEvent("ConsistencyScan_SimDisableWaiting").log();
-		printf("Waiting for consistency scan to complete...\n");
+		fmt::println("Waiting for consistency scan to complete...");
 		loop {
 			bool waitForCorruption = g_simulator->doInjectConsistencyScanCorruption.present() &&
 			                         g_simulator->doInjectConsistencyScanCorruption.get();
@@ -931,7 +932,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 				config.enabled = false;
 			} else {
 				TraceEvent("ConsistencyScan_SimDisableAlreadyDisabled").log();
-				printf("Consistency scan already complete.\n");
+				fmt::println("Consistency scan already complete.");
 				return Void();
 			}
 
@@ -952,7 +953,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 	                                        ISimulator::SimConsistencyScanState::DisabledEnd);
 	CODE_PROBE(true, "Consistency Scan disabled in simulation");
 	TraceEvent("ConsistencyScan_SimDisabled").log();
-	printf("Consistency scan complete.\n");
+	fmt::println("Consistency scan complete.");
 	return Void();
 }
 
@@ -997,13 +998,13 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.
 
-	printf("Set perpetual_storage_wiggle=0 ...\n");
+	fmt::println("Set perpetual_storage_wiggle=0 ...");
 	state Version version = wait(setPerpetualStorageWiggle(cx, false, LockAware::True));
-	printf("Set perpetual_storage_wiggle=0 Done.\n");
+	fmt::println("Set perpetual_storage_wiggle=0 Done.");
 
-	printf("Disabling backup worker ...\n");
+	fmt::println("Disabling backup worker ...");
 	wait(disableBackupWorker(cx));
-	printf("Disabled backup worker.\n");
+	fmt::println("Disabled backup worker.");
 
 	wait(disableConsistencyScanInSim(cx, false));
 

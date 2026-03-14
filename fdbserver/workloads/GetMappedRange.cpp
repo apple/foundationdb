@@ -29,6 +29,7 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 const Value EMPTY = Tuple().pack();
 ValueRef SOMETHING = "SOMETHING"_sr;
@@ -83,10 +84,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return Future<Void>();
 	}
 
-	static Key primaryKey(int i) { return Key(format("primary-key-of-record-%08d", i)); }
-	static Key indexKey(int i) { return Key(format("index-key-of-record-%08d", i)); }
-	static Value dataOfRecord(int i) { return Key(format("data-of-record-%08d", i)); }
-	static Value dataOfRecord(int i, int split) { return Key(format("data-of-record-%08d-split-%08d", i, split)); }
+	static Key primaryKey(int i) { return Key(fmt::format("primary-key-of-record-{:08}", i)); }
+	static Key indexKey(int i) { return Key(fmt::format("index-key-of-record-{:08}", i)); }
+	static Value dataOfRecord(int i) { return Key(fmt::format("data-of-record-{:08}", i)); }
+	static Value dataOfRecord(int i, int split) {
+		return Key(fmt::format("data-of-record-{:08}-split-{:08}", i, split));
+	}
 
 	static Key indexEntryKey(int i) { return Tuple::makeTuple(prefix, INDEX, indexKey(i), primaryKey(i)).pack(); }
 	static Key recordKey(int i) { return Tuple::makeTuple(prefix, RECORD, primaryKey(i)).pack(); }

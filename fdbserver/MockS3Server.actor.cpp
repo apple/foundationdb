@@ -42,6 +42,7 @@
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/prettywriter.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 /*
@@ -131,7 +132,7 @@ struct MockS3GlobalStorage {
 	void clearStorage() {
 		buckets.clear();
 		multipartUploads.clear();
-		TraceEvent("MockS3GlobalStorageCleared").detail("Address", format("%p", this));
+		TraceEvent("MockS3GlobalStorageCleared").detail("Address", fmt::format("{}", fmt::ptr(this)));
 	}
 
 	// Enable persistence to specified directory
@@ -830,15 +831,12 @@ public:
 		}
 
 		// Generate XML response
-		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-		                         "<InitiateMultipartUploadResult>\n"
-		                         "  <Bucket>%s</Bucket>\n"
-		                         "  <Key>%s</Key>\n"
-		                         "  <UploadId>%s</UploadId>\n"
-		                         "</InitiateMultipartUploadResult>",
-		                         bucket.c_str(),
-		                         object.c_str(),
-		                         uploadId.c_str());
+		std::string xml = fmt::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<InitiateMultipartUploadResult>\n  "
+		                              "<Bucket>{}</Bucket>\n  <Key>{}</Key>\n  <UploadId>{}</UploadId>\n"
+		                              "</InitiateMultipartUploadResult>",
+		                              bucket,
+		                              object,
+		                              uploadId);
 
 		self->sendXMLResponse(response, 200, xml);
 
@@ -950,15 +948,12 @@ public:
 		}
 
 		// Generate completion XML response
-		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-		                         "<CompleteMultipartUploadResult>\n"
-		                         "  <Bucket>%s</Bucket>\n"
-		                         "  <Key>%s</Key>\n"
-		                         "  <ETag>%s</ETag>\n"
-		                         "</CompleteMultipartUploadResult>",
-		                         bucket.c_str(),
-		                         object.c_str(),
-		                         getGlobalStorage().buckets[bucket][object].etag.c_str());
+		std::string xml = fmt::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<CompleteMultipartUploadResult>\n  "
+		                              "<Bucket>{}</Bucket>\n  <Key>{}</Key>\n  <ETag>{}</ETag>\n"
+		                              "</CompleteMultipartUploadResult>",
+		                              bucket,
+		                              object,
+		                              getGlobalStorage().buckets[bucket][object].etag);
 
 		self->sendXMLResponse(response, 200, xml);
 
@@ -1171,7 +1166,7 @@ public:
 			    content.substr(static_cast<size_t>(rangeStart), static_cast<size_t>(rangeEnd - rangeStart + 1));
 			response->code = 206; // Partial Content
 			response->data.headers["Content-Range"] =
-			    format("bytes %lld-%lld/%zu", rangeStart, rangeEnd, content.size());
+			    fmt::format("bytes {}-{}/{}", rangeStart, rangeEnd, content.size());
 			// For range requests, calculate MD5 of the partial content, not full content
 			contentMD5 = HTTP::computeMD5Sum(responseContent);
 		} else {
@@ -1455,13 +1450,10 @@ public:
 
 		TraceEvent("MockS3Error").detail("Code", code).detail("ErrorCode", errorCode).detail("Message", message);
 
-		std::string xml = format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-		                         "<Error>\n"
-		                         "  <Code>%s</Code>\n"
-		                         "  <Message>%s</Message>\n"
-		                         "</Error>",
-		                         errorCode.c_str(),
-		                         message.c_str());
+		std::string xml = fmt::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error>\n  "
+		                              "<Code>{}</Code>\n  <Message>{}</Message>\n</Error>",
+		                              errorCode,
+		                              message);
 
 		sendXMLResponse(response, code, xml);
 	}
@@ -2175,7 +2167,7 @@ ACTOR Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std:
 
 	TraceEvent("MockS3ServerRealStarted")
 	    .detail("ListenAddress", listenAddress.toString())
-	    .detail("ServerPtr", format("%p", server.getPtr()));
+	    .detail("ServerPtr", fmt::format("{}", fmt::ptr(server.getPtr())));
 
 	// Keep the server running indefinitely
 	wait(Never());

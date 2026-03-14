@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 /*
  * This workload is modelled off the Sideband workload, except it uses a single
@@ -90,7 +91,7 @@ struct SidebandSingleWorkload : TestWorkload {
 			Transaction tr(cx);
 			uint64_t key = deterministicRandom()->randomUniqueID().hash();
 
-			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
+			Standalone<StringRef> messageKey(fmt::format("Sideband/Message/{:x}", key));
 			// first set, this is the "old" value, always retry
 			while (true) {
 				Error err;
@@ -140,7 +141,7 @@ struct SidebandSingleWorkload : TestWorkload {
 		while (true) {
 			// Pair represents <Key, commitVersion>
 			std::pair<uint64_t, Version> message = co_await self->interf.getFuture();
-			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
+			Standalone<StringRef> messageKey(fmt::format("Sideband/Message/{:x}", message.first));
 			Transaction tr(cx);
 			while (true) {
 				Error err;

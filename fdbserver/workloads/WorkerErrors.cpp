@@ -25,6 +25,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fmt/format.h"
 
 struct WorkerErrorsWorkload : TestWorkload {
 	static constexpr auto NAME = "WorkerErrors";
@@ -56,7 +57,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 		std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
 		std::vector<TraceEventFields> errors = co_await latestEventOnWorkers(workers);
 		for (auto e : errors) {
-			printf("%s\n", e.toString().c_str());
+			fmt::println("{}", e.toString());
 		}
 	}
 

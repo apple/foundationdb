@@ -279,14 +279,14 @@ Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 		}
 		double elapsed = timer() - cst;
 		TraceEvent("KVStoreCount").detail("Count", count).detail("Took", elapsed);
-		fmt::print("Counted: {0} in {1:0.1f}s\n", count, elapsed);
+		fmt::println("Counted: {0} in {1:0.1f}s", count, elapsed);
 	}
 
 	if (workload->doSetup) {
 		wr << Version(0);
 		wr.serializeBytes(extraValue, extraBytes);
 
-		printf("Building %d nodes: ", workload->nodeCount);
+		fmt::print("Building {} nodes: ", workload->nodeCount);
 		double setupBegin = timer();
 		Future<Void> lastCommit = Void();
 		for (i = 0; i < workload->nodeCount; i++) {
@@ -294,7 +294,7 @@ Future<Void> testKVStoreMain(KVStoreTestWorkload* workload, KVTest* ptest) {
 			if (!((i + 1) % 10000) || i + 1 == workload->nodeCount) {
 				co_await lastCommit;
 				lastCommit = test.store->commit();
-				printf("ETA: %f seconds\n", (timer() - setupBegin) / i * (workload->nodeCount - i));
+				fmt::println("ETA: {:f} seconds", (timer() - setupBegin) / i * (workload->nodeCount - i));
 			}
 		}
 		co_await lastCommit;

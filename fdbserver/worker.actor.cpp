@@ -90,6 +90,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #endif
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #if CENABLED(0, NOT_IN_CLEAN)
@@ -2011,9 +2012,9 @@ ACTOR Future<Void> createClusterIdFile(std::string folder, UID clusterId) {
 				throw;
 			}
 			if (!e.isInjectedFault()) {
-				fprintf(stderr,
-				        "ERROR: error creating or opening cluster id file `%s'.\n",
-				        joinPath(folder, clusterIdFilename).c_str());
+				fmt::println(stderr,
+				             "ERROR: error creating or opening cluster id file `{}'.",
+				             joinPath(folder, clusterIdFilename));
 			}
 			TraceEvent(SevError, "OpenClusterIdError").error(e);
 			throw;
@@ -2442,7 +2443,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		std::map<std::string, std::string> details;
 		details["Locality"] = locality.toString();
 		details["DataFolder"] = folder;
-		details["StoresPresent"] = format("%d", stores.size());
+		details["StoresPresent"] = fmt::format("{}", stores.size());
 
 		startRole(Role::WORKER, interf.id(), interf.id(), details);
 		errorForwarders.add(traceRole(Role::WORKER, interf.id()));
@@ -3206,8 +3207,8 @@ static std::set<int> const& normalWorkerErrors() {
 ACTOR Future<Void> printTimeout() {
 	wait(delay(5));
 	if (!g_network->isSimulated()) {
-		fprintf(stderr, "Warning: FDBD has not joined the cluster after 5 seconds.\n");
-		fprintf(stderr, "  Check configuration and availability using the 'status' command with the fdbcli\n");
+		fmt::println(stderr, "Warning: FDBD has not joined the cluster after 5 seconds.");
+		fmt::println(stderr, "  Check configuration and availability using the 'status' command with the fdbcli");
 	}
 	return Void();
 }
@@ -3219,7 +3220,7 @@ ACTOR Future<Void> printOnFirstConnected(Reference<AsyncVar<Optional<ClusterInte
 			when(wait(ci->get().present() ? IFailureMonitor::failureMonitor().onStateEqual(
 			                                    ci->get().get().openDatabase.getEndpoint(), FailureStatus(false))
 			                              : Never())) {
-				printf("FDBD joined cluster.\n");
+				fmt::println("FDBD joined cluster.");
 				TraceEvent("FDBDConnected").log();
 				return Void();
 			}
@@ -3602,7 +3603,7 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 
 	KeyValueStoreType storeType = randomStoreType();
 	ASSERT(storeType.isValid());
-	fmt::print("Testing engine with store type {}\n", storeType.toString());
+	fmt::println("Testing engine with store type {}", storeType.toString());
 
 	UID uid = deterministicRandom()->randomUniqueID();
 	std::string filename = filenameFromId(storeType, testDir, "", uid);
@@ -3652,7 +3653,7 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();
-	fmt::print("Waiting for engine to close\n");
+	fmt::println("Waiting for engine to close");
 	wait(closed);
 
 	platform::eraseDirectoryRecursive(testDir);
@@ -3706,9 +3707,8 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 				throw;
 			}
 			if (!e.isInjectedFault()) {
-				fprintf(stderr,
-				        "ERROR: error creating or opening process id file `%s'.\n",
-				        joinPath(folder, "processId").c_str());
+				fmt::println(
+				    stderr, "ERROR: error creating or opening process id file `{}'.", joinPath(folder, "processId"));
 			}
 			TraceEvent(SevError, "OpenProcessIdError").error(e);
 			throw;

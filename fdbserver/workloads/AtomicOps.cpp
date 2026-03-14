@@ -23,6 +23,7 @@
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 // #define SevAtomicOpDebug SevInfo
 #define SevAtomicOpDebug SevVerbose
@@ -133,8 +134,8 @@ struct AtomicOpsWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	std::pair<Key, Key> logDebugKey(int group) {
-		Key logKey(format("log%08x%08x%08x", group, clientId, opNum));
-		Key debugKey(format("debug%08x%08x%08x", group, clientId, opNum));
+		Key logKey(fmt::format("log{:08x}{:08x}{:08x}", group, clientId, opNum));
+		Key debugKey(fmt::format("debug{:08x}{:08x}{:08x}", group, clientId, opNum));
 		opNum++;
 		return std::make_pair(logKey, debugKey);
 	}
@@ -171,7 +172,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				try {
 					for (int i = 0; i < self->nodeCount / 100; i++) {
 						uint64_t intValue = 0;
-						tr.set(StringRef(format("ops%08x%08x", g, i)),
+						tr.set(StringRef(fmt::format("ops{:08x}{:08x}", g, i)),
 						       StringRef((const uint8_t*)&intValue, sizeof(intValue)));
 					}
 					co_await tr.commit();
@@ -195,7 +196,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				Key val = StringRef((const uint8_t*)&intValue, sizeof(intValue));
 				std::pair<Key, Key> logDebugKey = self->logDebugKey(group);
 				int nodeIndex = deterministicRandom()->randomInt(0, self->nodeCount / 100);
-				Key opsKey(format("ops%08x%08x", group, nodeIndex));
+				Key opsKey(fmt::format("ops{:08x}{:08x}", group, nodeIndex));
 				Error err;
 				try {
 					tr.set(logDebugKey.first, val); // set log key
@@ -230,7 +231,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 		Error err;
 		try {
-			Key begin(format("log%08x", g));
+			Key begin(fmt::format("log{:08x}", g));
 			RangeResult log = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 			if (log.more) {
 				TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
@@ -257,7 +258,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 		Error err;
 		try {
-			Key begin(format("debug%08x", g));
+			Key begin(fmt::format("debug{:08x}", g));
 			RangeResult debuglog = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 			if (debuglog.more) {
 				TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
@@ -276,7 +277,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		ReadYourWritesTransaction tr(cx);
 		Error err;
 		try {
-			Key begin(format("ops%08x", g));
+			Key begin(fmt::format("ops{:08x}", g));
 			RangeResult ops = co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 			if (ops.more) {
 				TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
@@ -303,7 +304,8 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get mapping between opsKeys and debugKeys
 		ReadYourWritesTransaction tr1(cx);
 		std::map<Key, Key> records; // <ops, debugKey>
-		RangeResult debuglog = co_await tr1.getRange(prefixRange(format("debug%08x", g)), CLIENT_KNOBS->TOO_MANY);
+		RangeResult debuglog =
+		    co_await tr1.getRange(prefixRange(fmt::format("debug{:08x}", g)), CLIENT_KNOBS->TOO_MANY);
 		if (debuglog.more) {
 			TraceEvent(SevError, "DebugLogHitTxnLimits").detail("Result", debuglog.toString());
 			co_return;
@@ -315,7 +317,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get log key's value and assign it to the associated debugKey
 		ReadYourWritesTransaction tr2(cx);
 		std::map<Key, int64_t> logVal; // debugKey, log's value
-		RangeResult log = co_await tr2.getRange(prefixRange(format("log%08x", g)), CLIENT_KNOBS->TOO_MANY);
+		RangeResult log = co_await tr2.getRange(prefixRange(fmt::format("log{:08x}", g)), CLIENT_KNOBS->TOO_MANY);
 		if (log.more) {
 			TraceEvent(SevError, "LogHitTxnLimits").detail("Result", log.toString());
 			co_return;
@@ -329,7 +331,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Get opsKeys and validate if it has correct value
 		ReadYourWritesTransaction tr3(cx);
 		std::map<Key, int64_t> opsVal; // ops key, ops value
-		RangeResult ops = co_await tr3.getRange(prefixRange(format("ops%08x", g)), CLIENT_KNOBS->TOO_MANY);
+		RangeResult ops = co_await tr3.getRange(prefixRange(fmt::format("ops{:08x}", g)), CLIENT_KNOBS->TOO_MANY);
 		if (ops.more) {
 			TraceEvent(SevError, "OpsHitTxnLimits").detail("Result", ops.toString());
 			co_return;
@@ -372,7 +374,7 @@ struct AtomicOpsWorkload : TestWorkload {
 				try {
 					{
 						// Calculate the accumulated value in the log keyspace for the group g
-						Key begin(format("log%08x", g));
+						Key begin(fmt::format("log{:08x}", g));
 						RangeResult log_ =
 						    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 						log = log_;
@@ -387,7 +389,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 					{
 						// Calculate the accumulated value in the ops keyspace for the group g
-						Key begin(format("ops%08x", g));
+						Key begin(fmt::format("ops{:08x}", g));
 						RangeResult ops =
 						    co_await tr.getRange(KeyRangeRef(begin, strinc(begin)), CLIENT_KNOBS->TOO_MANY);
 						uint64_t zeroValue = 0;
@@ -404,7 +406,7 @@ struct AtomicOpsWorkload : TestWorkload {
 							ASSERT(logResult.present());
 							ASSERT(opsResult.present());
 							TraceEvent(SevError, "LogMismatch")
-							    .detail("Index", format("log%08x", g))
+							    .detail("Index", fmt::format("log{:08x}", g))
 							    .detail("LogResult", printable(logResult))
 							    .detail("OpsResult", printable(opsResult));
 						}

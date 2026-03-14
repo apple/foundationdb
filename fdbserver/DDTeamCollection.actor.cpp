@@ -30,6 +30,7 @@
 #include "flow/Trace.h"
 #include "flow/network.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -6271,11 +6272,11 @@ public:
 			int zone_id = process_id / 10;
 			int machine_id = process_id / 5;
 
-			printf("testMachineTeamCollection: process_id:%d zone_id:%d machine_id:%d ip_addr:%s\n",
-			       process_id,
-			       zone_id,
-			       machine_id,
-			       interface.address().toString().c_str());
+			fmt::println("testMachineTeamCollection: process_id:{} zone_id:{} machine_id:{} ip_addr:{}",
+			             process_id,
+			             zone_id,
+			             machine_id,
+			             interface.address().toString());
 			interface.locality.set("processid"_sr, Standalone<StringRef>(std::to_string(process_id)));
 			interface.locality.set("machineid"_sr, Standalone<StringRef>(std::to_string(machine_id)));
 			interface.locality.set("zoneid"_sr, Standalone<StringRef>(std::to_string(zone_id)));
@@ -6288,7 +6289,7 @@ public:
 		}
 
 		int totalServerIndex = collection->constructMachinesFromServers();
-		printf("testMachineTeamCollection: construct machines for %d servers\n", totalServerIndex);
+		fmt::println("testMachineTeamCollection: construct machines for {} servers", totalServerIndex);
 
 		return collection;
 	}
@@ -6325,7 +6326,7 @@ public:
 		state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
 
 		if (collection == nullptr) {
-			fprintf(stderr, "collection is null\n");
+			fmt::println(stderr, "collection is null");
 			return Void();
 		}
 
@@ -6951,10 +6952,10 @@ public:
 
 		wait(collection->getTeam(bestReq));
 		const auto [bestTeam, found1] = bestReq.reply.getFuture().get();
-		fmt::print("{} {} {}\n",
-		           SERVER_KNOBS->CPU_PIVOT_RATIO,
-		           collection->teamPivots.pivotCPU,
-		           collection->teamPivots.pivotAvailableSpaceRatio);
+		fmt::println("{} {} {}",
+		             SERVER_KNOBS->CPU_PIVOT_RATIO,
+		             collection->teamPivots.pivotCPU,
+		             collection->teamPivots.pivotAvailableSpaceRatio);
 		ASSERT(bestTeam.present());
 		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
 

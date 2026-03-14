@@ -28,6 +28,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fmt/format.h"
 
 // just compare the int part and smoothed duration is enough for the test.
 bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics const& b) {
@@ -46,7 +47,7 @@ bool storageWiggleStatsEqual(StorageWiggleMetrics const& a, StorageWiggleMetrics
 
 namespace {
 Future<bool> IssueConfigurationChange(Database cx, std::string config, bool force) {
-	printf("Issuing configuration change: %s\n", config.c_str());
+	fmt::println("Issuing configuration change: {}", config);
 	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), config, force);
 	if (res != ConfigurationResult::SUCCESS) {
 		co_return false;

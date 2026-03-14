@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct SidebandMessage {
 	constexpr static FileIdentifier file_identifier = 11862046;
@@ -96,13 +97,13 @@ struct SidebandWorkload : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				Optional<Value> val = co_await tr.get(StringRef(format("Sideband/Client/%d", self->clientId)));
+				Optional<Value> val = co_await tr.get(StringRef(fmt::format("Sideband/Client/{}", self->clientId)));
 				if (val.present()) {
 					if (val.get() != serializedInterface)
 						throw operation_failed();
 					break;
 				}
-				tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
+				tr.set(fmt::format("Sideband/Client/{}", self->clientId), serializedInterface);
 				co_await tr.commit();
 				break;
 			} catch (Error& e) {
@@ -118,8 +119,8 @@ struct SidebandWorkload : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				Optional<Value> val =
-				    co_await tr.get(StringRef(format("Sideband/Client/%d", (self->clientId + 1) % self->clientCount)));
+				Optional<Value> val = co_await tr.get(
+				    StringRef(fmt::format("Sideband/Client/{}", (self->clientId + 1) % self->clientCount)));
 				if (!val.present()) {
 					throw operation_failed();
 				}
@@ -145,7 +146,7 @@ struct SidebandWorkload : TestWorkload {
 			Transaction tr(cx);
 			uint64_t key = deterministicRandom()->randomUniqueID().hash();
 
-			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", key));
+			Standalone<StringRef> messageKey(fmt::format("Sideband/Message/{:x}", key));
 			while (true) {
 				Error err;
 				try {
@@ -172,7 +173,7 @@ struct SidebandWorkload : TestWorkload {
 	Future<Void> checker(SidebandWorkload* self, Database cx) {
 		while (true) {
 			SidebandMessage message = co_await self->interf.updates.getFuture();
-			Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
+			Standalone<StringRef> messageKey(fmt::format("Sideband/Message/{:x}", message.key));
 			Transaction tr(cx);
 			while (true) {
 				Error err;

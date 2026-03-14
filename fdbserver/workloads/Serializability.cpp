@@ -23,6 +23,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct SerializabilityWorkload : TestWorkload {
 	static constexpr auto NAME = "Serializability";
@@ -107,7 +108,7 @@ struct SerializabilityWorkload : TestWorkload {
 		if (adjacentKeys) {
 			return Key(idx ? keyPrefix + std::string(idx, '\x00') : "");
 		} else {
-			return Key(keyPrefix + format("%010d", idx));
+			return Key(keyPrefix + fmt::format("{:010}", idx));
 		}
 	}
 

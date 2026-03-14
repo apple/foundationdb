@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
+#include "fmt/format.h"
 
 struct GetRangeStream : TestWorkload {
 	static constexpr auto NAME = "GetRangeStream";
@@ -55,9 +56,9 @@ struct GetRangeStream : TestWorkload {
 			co_await delay(1);
 			double after = g_network->now();
 			if (after > before) {
-				printf("throughput: %g bytes/s, next: %s\n",
-				       (bytesRead.getValue() - last) / (after - before),
-				       printable(*next).c_str());
+				fmt::println("throughput: {:g} bytes/s, next: {}",
+				             (bytesRead.getValue() - last) / (after - before),
+				             printable(*next));
 			}
 		}
 	}
@@ -75,7 +76,7 @@ struct GetRangeStream : TestWorkload {
 				    GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 				for (const auto& [k, v] : range) {
 					if (printKVPairs) {
-						printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
+						fmt::println("{} -> {}", printable(k), printable(v));
 					}
 					bytesRead += k.size() + v.size();
 				}
@@ -106,7 +107,7 @@ struct GetRangeStream : TestWorkload {
 					Standalone<RangeResultRef> range = co_await results.getFuture();
 					for (const auto& [k, v] : range) {
 						if (printKVPairs) {
-							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());
+							fmt::println("{} -> {}", printable(k), printable(v));
 						}
 						bytesRead += k.size() + v.size();
 					}

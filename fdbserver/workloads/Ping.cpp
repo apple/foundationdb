@@ -24,6 +24,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fmt/format.h"
 
 struct PingWorkloadInterface {
 	RequestStream<LoadedPingRequest> payloadPing;
@@ -105,13 +106,13 @@ struct PingWorkload : TestWorkload {
 		while (true) {
 			Error err;
 			try {
-				Optional<Value> val = co_await tr.get(StringRef(format("Ping/Client/%d", self->clientId)));
+				Optional<Value> val = co_await tr.get(StringRef(fmt::format("Ping/Client/{}", self->clientId)));
 				if (val.present()) {
 					if (val.get() != serializedInterface)
 						throw operation_failed();
 					break;
 				}
-				tr.set(format("Ping/Client/%d", self->clientId), serializedInterface);
+				tr.set(fmt::format("Ping/Client/{}", self->clientId), serializedInterface);
 				co_await tr.commit();
 				break;
 			} catch (Error& e) {
@@ -128,7 +129,7 @@ struct PingWorkload : TestWorkload {
 			try {
 				std::vector<PingWorkloadInterface> result;
 				for (int i = 0; i < self->clientCount; i++) {
-					Optional<Value> val = co_await tr.get(StringRef(format("Ping/Client/%d", i)));
+					Optional<Value> val = co_await tr.get(StringRef(fmt::format("Ping/Client/{}", i)));
 					if (!val.present()) {
 						throw operation_failed();
 					}

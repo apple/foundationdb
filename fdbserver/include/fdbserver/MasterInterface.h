@@ -36,6 +36,7 @@
 
 #ifdef WITH_SWIFT
 #include "flow/swift_future_support.h"
+#include "fmt/format.h"
 #endif /* WITH_SWIFT */
 
 using DBRecoveryCount = uint64_t;
@@ -249,7 +250,7 @@ struct LifetimeToken {
 	bool isEqual(LifetimeToken const& toCompare) {
 		return ccID.compare(toCompare.ccID) == 0 && count == toCompare.count;
 	}
-	std::string toString() const { return ccID.shortString() + format("#%lld", count); }
+	std::string toString() const { return ccID.shortString() + fmt::format("#{}", count); }
 	void operator++() { ++count; }
 
 	template <class Ar>

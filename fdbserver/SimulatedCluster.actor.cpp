@@ -61,6 +61,7 @@
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IConnection.h"
 #include "fdbserver/MockGlobalState.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -110,7 +111,7 @@ std::string describe(bool const& val) {
 
 template <>
 std::string describe(int const& val) {
-	return format("%d", val);
+	return fmt::format("{}", val);
 }
 
 template <>
@@ -784,7 +785,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					futures.push_back(runDr(connRecord));
 				}
 				if (processRunHTTPServer(processMode)) {
-					fmt::print("Process {0} run http server\n", ip.toString());
+					fmt::println("Process {0} run http server", ip.toString());
 					futures.push_back(runSimHTTPServer());
 				}
 
@@ -821,7 +822,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				if (onShutdown.isReady() && onShutdown.isError())
 					throw onShutdown.getError();
 				if (e.code() != error_code_actor_cancelled)
-					printf("SimulatedFDBDTerminated: %s\n", e.what());
+					fmt::println("SimulatedFDBDTerminated: {}", e.what());
 				ASSERT(destructed ||
 				       g_simulator->getCurrentProcess() == process); // simulatedFDBD catch called on different process
 				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found ||
@@ -972,7 +973,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			if (restarting) {
 				myFolders.push_back(
 				    ini.GetValue(printable(localities.machineId()).c_str(),
-				                 format("%d", i * listenPerProcess).c_str(),
+				                 fmt::format("{}", i * listenPerProcess).c_str(),
 				                 joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()).c_str()));
 
 				if (i == 0) {
@@ -981,13 +982,13 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					if (!coordinationFolder.size())
 						coordinationFolder = ini.GetValue(
 						    printable(localities.machineId()).c_str(),
-						    format("c%d", i * listenPerProcess).c_str(),
+						    fmt::format("c{}", i * listenPerProcess).c_str(),
 						    joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()).c_str());
 					coordFolders.push_back(coordinationFolder);
 				} else {
 					coordFolders.push_back(
 					    ini.GetValue(printable(localities.machineId()).c_str(),
-					                 format("c%d", i * listenPerProcess).c_str(),
+					                 fmt::format("c{}", i * listenPerProcess).c_str(),
 					                 joinPath(baseFolder, deterministicRandom()->randomUniqueID().toString()).c_str()));
 				}
 			} else {
@@ -1329,7 +1330,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		for (int i = 0; i < machineCount; i++) {
 			Optional<Standalone<StringRef>> dcUID;
 			Optional<Standalone<StringRef>> zoneId;
-			std::string machineIdString = ini.GetValue("META", format("%d", i).c_str());
+			std::string machineIdString = ini.GetValue("META", fmt::format("{}", i).c_str());
 			Standalone<StringRef> machineId = StringRef(machineIdString);
 
 			std::string dcUIDini = ini.GetValue(machineIdString.c_str(), "dcUID");
@@ -1380,7 +1381,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			if (ip == nullptr) {
 				for (int i = 0; i < processes; i++) {
 					const char* val =
-					    ini.GetValue(machineIdString.c_str(), format("ipAddr%d", i * listenersPerProcess).c_str());
+					    ini.GetValue(machineIdString.c_str(), fmt::format("ipAddr{}", i * listenersPerProcess).c_str());
 					ipAddrs.push_back(parseIp(val));
 				}
 			} else {
@@ -1767,11 +1768,11 @@ void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
 			                  1)); // The anti quorum cannot be more than half of the replication factor, or the
 			                       // log system will continue to accept commits when a recovery is impossible
 			// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
-			set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
-			                  "replica_datacenters:=1 min_replica_datacenters:=1",
-			                  storage_servers,
-			                  replication_factor,
-			                  anti_quorum));
+			set_config(fmt::format("storage_replicas:={} log_replicas:={} log_anti_quorum:={} replica_datacenters:=1 "
+			                       "min_replica_datacenters:=1",
+			                       storage_servers,
+			                       replication_factor,
+			                       anti_quorum));
 			break;
 		}
 		case 1: {
@@ -1801,15 +1802,17 @@ void SimulationConfig::setReplicationType(const TestConfig& testConfig) {
 		}
 		if (deterministicRandom()->random01() < 0.5) {
 			int logSpill = deterministicRandom()->randomInt(TLogSpillType::VALUE, TLogSpillType::END);
-			set_config(format("log_spill:=%d", logSpill));
+			set_config(fmt::format("log_spill:={}", logSpill));
 			int logVersion =
 			    deterministicRandom()->randomInt(TLogVersion::MIN_RECRUITABLE, testConfig.maxTLogVersion + 1);
-			set_config(format("log_version:=%d", logVersion));
+			set_config(fmt::format("log_version:={}", logVersion));
 		} else {
-			if (deterministicRandom()->random01() < 0.7)
-				set_config(format("log_version:=%d", testConfig.maxTLogVersion));
-			if (deterministicRandom()->random01() < 0.5)
-				set_config(format("log_spill:=%d", TLogSpillType::DEFAULT));
+			if (deterministicRandom()->random01() < 0.7) {
+				set_config(fmt::format("log_version:={}", testConfig.maxTLogVersion));
+			}
+			if (deterministicRandom()->random01() < 0.5) {
+				set_config(fmt::format("log_spill:={}", static_cast<int>(TLogSpillType::DEFAULT)));
+			}
 		}
 	}
 }
@@ -2115,7 +2118,8 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 	    std::max(0, std::min(tssCount, db.usableRegions * ((machine_count / datacenters) - db.storageTeamSize) / 2));
 
 	if (!testConfig.config.present() && tssCount > 0) {
-		std::string confStr = format("tss_count:=%d tss_storage_engine:=%d", tssCount, db.storageServerStoreType);
+		std::string confStr =
+		    fmt::format("tss_count:={} tss_storage_engine:={}", tssCount, static_cast<int>(db.storageServerStoreType));
 		set_config(confStr);
 		double tssRandom = deterministicRandom()->random01();
 		if (tssRandom > 0.5 || !faultInjectionActivated) {
@@ -2129,7 +2133,7 @@ void SimulationConfig::setTss(const TestConfig& testConfig) {
 			// delay injection
 			g_simulator->tssMode = ISimulator::TSSMode::EnabledAddDelay;
 		}
-		printf("enabling tss for simulation in mode %d: %s\n", g_simulator->tssMode, confStr.c_str());
+		fmt::println("enabling tss for simulation in mode {}: {}", static_cast<int>(g_simulator->tssMode), confStr);
 	}
 }
 
@@ -2219,7 +2223,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// handle tss_storage_engine separately because the passthrough needs the enum ordinal, but it's serialized to json
 	// as the string name
 	if (simconfig.db.desiredTSSCount > 0) {
-		startingConfigString += format(" tss_storage_engine:=%d", simconfig.db.testingStorageServerStoreType);
+		startingConfigString +=
+		    fmt::format(" tss_storage_engine:={}", static_cast<int>(simconfig.db.testingStorageServerStoreType));
 	}
 
 	if (g_simulator->originalRegions != "") {
@@ -2422,11 +2427,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	} else if (testConfig.extraDatabaseMode != ISimulator::ExtraDatabaseMode::Disabled) {
 		for (int i = 0; i < extraDatabaseCount; ++i) {
 			g_simulator->extraDatabases.push_back(
-			    useHostname
-			        ? ClusterConnectionString(extraCoordinatorHostnames[i], StringRef(format("ExtraCluster%04d:0", i)))
-			              .toString()
-			        : ClusterConnectionString(extraCoordinatorAddresses[i], StringRef(format("ExtraCluster%04d:0", i)))
-			              .toString());
+			    useHostname ? ClusterConnectionString(extraCoordinatorHostnames[i],
+			                                          StringRef(fmt::format("ExtraCluster{:04}:0", i)))
+			                      .toString()
+			                : ClusterConnectionString(extraCoordinatorAddresses[i],
+			                                          StringRef(fmt::format("ExtraCluster{:04}:0", i)))
+			                      .toString());
 		}
 	}
 
@@ -2443,7 +2449,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		                                                          ProcessClass::StatelessClass };
 	for (int dc = 0; dc < dataCenters; dc++) {
 		// FIXME: test unset dcID
-		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
+		Optional<Standalone<StringRef>> dcUID = StringRef(fmt::format("{}", dc));
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters +
 		               (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
@@ -2453,19 +2459,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		int simHTTPMachines = 0;
 		if (testConfig.simHTTPServerEnabled) {
 			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
-			fmt::print("sim http machines = {0}\n", simHTTPMachines);
+			fmt::println("sim http machines = {0}", simHTTPMachines);
 		}
 		int extraStorageMachineCount = testConfig.extraStorageMachineCountPerDC;
 
 		int totalMachines = machines + simHTTPMachines + extraStorageMachineCount;
 
-		printf("Datacenter %d: %d/%d machines, %d/%d coordinators, %d other machines\n",
-		       dc,
-		       machines,
-		       machineCount,
-		       dcCoordinators,
-		       coordinatorCount,
-		       totalMachines - machines);
+		fmt::println("Datacenter {}: {}/{} machines, {}/{} coordinators, {} other machines",
+		             dc,
+		             machines,
+		             machineCount,
+		             dcCoordinators,
+		             coordinatorCount,
+		             totalMachines - machines);
 		ASSERT_LE(dcCoordinators, machines);
 
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);

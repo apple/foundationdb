@@ -24,6 +24,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
+#include "fmt/format.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
 // (sim2.actor.cpp)
@@ -89,8 +90,8 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 		// 8 bytes for Cid_* suffix of each client
 		int paddingLen = keyBytes - 8 - keyPrefix.size();
 		// left padding by zero, each client has different prefix
-		Key prefixWithClientId = StringRef(format("Cid_%04d", clientId)).withPrefix(keyPrefix);
-		return StringRef(format("%0*llx", paddingLen, *(uint64_t*)&p)).withPrefix(prefixWithClientId);
+		Key prefixWithClientId = StringRef(fmt::format("Cid_{:04}", clientId)).withPrefix(keyPrefix);
+		return StringRef(fmt::format("{:0{}x}", *(uint64_t*)&p, paddingLen)).withPrefix(prefixWithClientId);
 	}
 
 	void addRandomReadConflictRange(ReadYourWritesTransaction* tr, std::vector<KeyRange>* readConflictRanges) {

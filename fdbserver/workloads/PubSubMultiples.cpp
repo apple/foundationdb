@@ -22,6 +22,7 @@
 #include "fdbserver/pubsub.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	static constexpr auto NAME = "PubSubMultiples";
@@ -48,9 +49,9 @@ struct PubSubMultiplesWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override { m.push_back(messages.getMetric()); }
 
-	Key keyForFeed(int i) { return StringRef(format("/PSM/feeds/%d", i)); }
-	Key keyForInbox(int i) { return StringRef(format("/PSM/inbox/%d", i)); }
-	Value valueForUInt(uint64_t i) { return StringRef(format("%llx", i)); }
+	Key keyForFeed(int i) { return StringRef(fmt::format("/PSM/feeds/{}", i)); }
+	Key keyForInbox(int i) { return StringRef(fmt::format("/PSM/inbox/{}", i)); }
+	Value valueForUInt(uint64_t i) { return StringRef(fmt::format("{:x}", i)); }
 
 	Future<Void> createNodeSwath(PubSubMultiplesWorkload* self, int actor, Database cx) {
 		PubSub ps(cx);

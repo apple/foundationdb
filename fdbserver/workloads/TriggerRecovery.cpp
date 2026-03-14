@@ -24,6 +24,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
+#include "fmt/format.h"
 
 struct TriggerRecoveryLoopWorkload : TestWorkload {
 	static constexpr auto NAME = "TriggerRecoveryLoop";
@@ -87,7 +88,7 @@ struct TriggerRecoveryLoopWorkload : TestWorkload {
 			                        ? self->originalNumOfResolvers.get() + 1
 			                        : self->originalNumOfResolvers.get();
 		}
-		StringRef configStr(format("resolvers=%d", numResolversToSet));
+		StringRef configStr(fmt::format("resolvers={}", numResolversToSet));
 		while (true) {
 			Optional<ConfigureAutoResult> conf;
 			ConfigurationResult r = co_await ManagementAPI::changeConfig(cx.getReference(), { configStr }, conf, true);

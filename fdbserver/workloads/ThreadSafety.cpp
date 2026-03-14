@@ -25,6 +25,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct ThreadSafetyWorkload;
 
@@ -166,7 +167,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 				co_await threadInfo[i]->done.getFuture();
 			} catch (Error& e) {
 				success = false;
-				printf("Thread %d.%d failed: %s\n", clientId, i, e.name());
+				fmt::println("Thread {}.{} failed: {}", clientId, i, e.name());
 				TraceEvent(SevError, "ThreadSafety_ThreadFailed").error(e);
 			}
 
@@ -198,7 +199,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 	}
 
 	Key getRandomKey(DeterministicRandom& random) {
-		return StringRef(format("ThreadSafetyKey%010d", random.randomInt(0, numKeys)));
+		return StringRef(fmt::format("ThreadSafetyKey{:010}", random.randomInt(0, numKeys)));
 	}
 
 	void runTest(ThreadInfo* info) {

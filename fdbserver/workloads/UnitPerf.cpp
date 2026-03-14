@@ -21,6 +21,7 @@
 #include "fdbrpc/ActorFuzz.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 Future<Void> sleepyActor(double interval, int* counter) {
 	while (true) {
@@ -30,7 +31,7 @@ Future<Void> sleepyActor(double interval, int* counter) {
 }
 
 Future<Void> unitPerfTest() {
-	printf("\n");
+	fmt::println("");
 
 	int counter = 0;
 	std::vector<Future<Void>> sleepy;
@@ -41,9 +42,9 @@ Future<Void> unitPerfTest() {
 	co_await delay(10);
 	sleepy.clear();
 	TraceEvent("Completed").detail("Count", counter);
-	printf("Completed: %d\n", counter);
+	fmt::println("Completed: {}", counter);
 
-	printf("\n");
+	fmt::println("");
 }
 
 struct UnitPerfWorkload : TestWorkload {

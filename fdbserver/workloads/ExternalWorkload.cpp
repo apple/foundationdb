@@ -100,6 +100,7 @@ struct FDBLoggerImpl : FDBLogger {
 
 namespace capi {
 #include "foundationdb/CWorkload.h"
+#include "fmt/format.h"
 }
 namespace translator {
 template <typename T>
@@ -298,11 +299,11 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 
 	static std::string toLibName(const std::string& name) {
 #if defined(__unixish__) && !defined(__APPLE__)
-		return format("lib%s.so", name.c_str());
+		return fmt::format("lib{}.so", name);
 #elif defined(__APPLE__)
-		return format("lib%s.dylib", name.c_str());
+		return fmt::format("lib{}.dylib", name);
 #elif defined(_WIN32)
-		return format("lib%s.dll", name.c_str());
+		return fmt::format("lib{}.dll", name);
 #else
 #error Port me!
 #endif

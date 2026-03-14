@@ -94,7 +94,7 @@ std::string toString(LogicalPageID id) {
 	if (id == invalidLogicalPageID) {
 		return "LogicalPageID{invalid}";
 	}
-	return format("LogicalPageID{%u}", id);
+	return fmt::format("LogicalPageID{{{}}}", id);
 }
 
 std::string toString(Version v) {
@@ -187,7 +187,7 @@ std::string toString(const Optional<T>& o) {
 
 template <typename F, typename S>
 std::string toString(const std::pair<F, S>& o) {
-	return format("{%s, %s}", toString(o.first).c_str(), toString(o.second).c_str());
+	return fmt::format("{{{}, {}}}", toString(o.first), toString(o.second));
 }
 
 constexpr static int ioMinPriority = 0;
@@ -441,25 +441,25 @@ public:
 
 		std::string toString() const {
 			if (mode == WRITE) {
-				return format("{WriteCursor %s:%p pos=%s:%d rawEndOffset=%d}",
-				              queue->name.c_str(),
-				              this,
-				              ::toString(pageID).c_str(),
-				              offset,
-				              page ? header()->endOffset : -1);
+				return fmt::format("{{WriteCursor {}:{} pos={}:{} rawEndOffset={}}}",
+				                   queue->name,
+				                   fmt::ptr(this),
+				                   ::toString(pageID),
+				                   offset,
+				                   page ? header()->endOffset : -1);
 			}
 			if (mode == POP || mode == READONLY) {
-				return format("{ReadCursor %s:%p pos=%s:%d rawEndOffset=%d endPage=%s nextPage=%s}",
-				              queue->name.c_str(),
-				              this,
-				              ::toString(pageID).c_str(),
-				              offset,
-				              (page && header()) ? header()->endOffset : -1,
-				              ::toString(endPageID).c_str(),
-				              ::toString(nextPageID).c_str());
+				return fmt::format("{{ReadCursor {}:{} pos={}:{} rawEndOffset={} endPage={} nextPage={}}}",
+				                   queue->name,
+				                   fmt::ptr(this),
+				                   ::toString(pageID),
+				                   offset,
+				                   (page && header()) ? header()->endOffset : -1,
+				                   ::toString(endPageID),
+				                   ::toString(nextPageID));
 			}
 			ASSERT(mode == NONE);
-			return format("{NullCursor=%p}", this);
+			return fmt::format("{{NullCursor={}}}", fmt::ptr(this));
 		}
 
 		// Returns true if the mutex cannot be immediately taken.
@@ -1341,9 +1341,9 @@ public:
 	std::string name;
 
 	void toTraceEvent(TraceEvent& e, const char* prefix) const {
-		e.detail(format("%sRecords", prefix), numEntries);
-		e.detail(format("%sPages", prefix), numPages);
-		e.detail(format("%sRecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
+		e.detail(fmt::format("{}Records", prefix), numEntries);
+		e.detail(fmt::format("{}Pages", prefix), numPages);
+		e.detail(fmt::format("{}RecordsPerPage", prefix), numPages > 0 ? (double)numEntries / numPages : 0);
 	}
 };
 
@@ -1383,9 +1383,9 @@ struct RedwoodMetrics {
 				}
 
 				std::string name =
-				    format("%s%s", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
+				    fmt::format("{}{}", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
 				int count = getEventReason(p.first, p.second);
-				result += format("%-15s %8u %8u/s  ", name.c_str(), count, int(count / elapsed));
+				result += fmt::format("{:<15} {:8} {:8}/s  ", name, count, int(count / elapsed));
 
 				prevEvent = p.first;
 			}
@@ -1398,7 +1398,7 @@ struct RedwoodMetrics {
 			for (const auto& p : pairs) {
 				std::string name =
 				    format(level == 0 ? "" : "L%d", level) +
-				    format("%s%s", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
+				    fmt::format("{}{}", PagerEventsStrings[(int)p.first], PagerEventReasonsStrings[(int)p.second]);
 				int count = getEventReason(p.first, p.second);
 				t->detail(std::move(name), count);
 			}
@@ -1761,10 +1761,10 @@ public:
 			                       reservedSize,
 			                       movedOutCount);
 			for (auto& entry : evictionOrder) {
-				s += format("\n\tindex %s  size %d  evictable %d\n",
-				            ::toString(entry.index).c_str(),
-				            entry.size,
-				            entry.item.evictable());
+				s += fmt::format("\n\tindex {}  size {}  evictable {}\n",
+				                 ::toString(entry.index),
+				                 entry.size,
+				                 entry.item.evictable());
 			}
 			s += "}\n";
 			return s;
@@ -1981,11 +1981,11 @@ public:
 		bool operator<(const RemappedPage& rhs) const { return version < rhs.version; }
 
 		std::string toString() const {
-			return format("RemappedPage(%c: %s -> %s %s}",
-			              getType(),
-			              ::toString(originalPageID).c_str(),
-			              ::toString(newPageID).c_str(),
-			              ::toString(version).c_str());
+			return fmt::format("RemappedPage({:c}: {} -> {} {}}}",
+			                   static_cast<char>(getType()),
+			                   ::toString(originalPageID),
+			                   ::toString(newPageID),
+			                   ::toString(version));
 		}
 	};
 
@@ -1996,7 +1996,7 @@ public:
 		bool operator<(const ExtentUsedListEntry& rhs) const { return queueID < rhs.queueID; }
 
 		std::string toString() const {
-			return format("ExtentUsedListEntry{%s @%s}", ::toString(extentID).c_str(), ::toString(queueID).c_str());
+			return fmt::format("ExtentUsedListEntry{{{} @{}}}", ::toString(extentID), ::toString(queueID));
 		}
 	};
 
@@ -3999,9 +3999,9 @@ struct SplitStringRef {
 
 	int expectedSize() const { return size(); }
 
-	std::string toString() const { return format("%s%s", a.toString().c_str(), b.toString().c_str()); }
+	std::string toString() const { return fmt::format("{}{}", a.toString(), b.toString()); }
 
-	std::string toHexString() const { return format("%s%s", a.toHexString().c_str(), b.toHexString().c_str()); }
+	std::string toHexString() const { return fmt::format("{}{}", a.toHexString(), b.toHexString()); }
 
 	struct const_iterator {
 		const uint8_t* ptr;
@@ -4389,15 +4389,15 @@ struct RedwoodRecordRef {
 			int keySuffixLen = getKeySuffixLength();
 			int valueLen = getValueLength();
 
-			return format("lengthFormat: %d  totalDeltaSize: %d  flags: %s  prefixLen: %d  keySuffixLen: %d  "
-			              "valueLen %d  raw: %s",
-			              lengthFormat,
-			              size(),
-			              flagString.c_str(),
-			              prefixLen,
-			              keySuffixLen,
-			              valueLen,
-			              StringRef((const uint8_t*)this, size()).toHexString().c_str());
+			return fmt::format("lengthFormat: {}  totalDeltaSize: {}  flags: {}  prefixLen: {}  keySuffixLen: {}  "
+			                   "valueLen {}  raw: {}",
+			                   lengthFormat,
+			                   size(),
+			                   flagString,
+			                   prefixLen,
+			                   keySuffixLen,
+			                   valueLen,
+			                   StringRef((const uint8_t*)this, size()).toHexString());
 		}
 	};
 
@@ -4514,12 +4514,12 @@ struct RedwoodRecordRef {
 
 	std::string toString(bool leaf = true) const {
 		std::string r;
-		r += format("'%s' => ", key.printable().c_str());
+		r += fmt::format("'{}' => ", key.printable());
 		if (value.present()) {
 			if (leaf) {
-				r += format("'%s'", kvformat(value.get()).c_str());
+				r += fmt::format("'{}'", kvformat(value.get()));
 			} else {
-				r += format("[%s]", ::toString(getChildPage()).c_str());
+				r += fmt::format("[{}]", ::toString(getChildPage()));
 			}
 		} else {
 			r += "(absent)";
@@ -4624,7 +4624,7 @@ struct BoundaryRefAndPage {
 	std::vector<Reference<ArenaPage>> extPages;
 
 	std::string toString() const {
-		return format("[%s, %d pages]", lowerBound.toString().c_str(), extPages.size() + (firstPage ? 1 : 0));
+		return fmt::format("[{}, {} pages]", lowerBound.toString(), extPages.size() + (firstPage ? 1 : 0));
 	}
 };
 
@@ -4700,15 +4700,15 @@ public:
 		auto b = i->second.upper_bound(v);
 		--b;
 		if (b->second.lower != lowerBound || b->second.upper != upperBound) {
-			fprintf(stderr,
-			        "Boundary mismatch on %s %s\nUsing:\n\t'%s'\n\t'%s'\nWritten %s:\n\t'%s'\n\t'%s'\n",
-			        ::toString(id).c_str(),
-			        ::toString(v).c_str(),
-			        lowerBound.printable().c_str(),
-			        upperBound.printable().c_str(),
-			        ::toString(b->first).c_str(),
-			        b->second.lower.printable().c_str(),
-			        b->second.upper.printable().c_str());
+			fmt::print(stderr,
+			           "Boundary mismatch on {} {}\nUsing:\n\t'{}'\n\t'{}'\nWritten {}:\n\t'{}'\n\t'{}'\n",
+			           ::toString(id),
+			           ::toString(v),
+			           lowerBound.printable(),
+			           upperBound.printable(),
+			           ::toString(b->first),
+			           b->second.lower.printable(),
+			           b->second.upper.printable());
 			return false;
 		}
 
@@ -4842,11 +4842,11 @@ public:
 		EncryptionAtRestModeDeprecated encryptionModeDeprecated = EncryptionAtRestModeDeprecated::DISABLED;
 
 		std::string toString() {
-			return format("{formatVersion=%d  height=%d  root=%s  lazyDeleteQueue=%s}",
-			              (int)formatVersion,
-			              (int)height,
-			              ::toString(root).c_str(),
-			              lazyDeleteQueue.toString().c_str());
+			return fmt::format("{{formatVersion={}  height={}  root={}  lazyDeleteQueue={}}}",
+			                   (int)formatVersion,
+			                   (int)height,
+			                   ::toString(root),
+			                   lazyDeleteQueue.toString());
 		}
 
 		template <class Ar>
@@ -5208,7 +5208,7 @@ private:
 			return RedwoodRecordRef(userKey, value);
 		}
 
-		std::string toString() const { return format("op=%d val='%s'", op, printable(value).c_str()); }
+		std::string toString() const { return fmt::format("op={} val='{}'", static_cast<int>(op), printable(value)); }
 	};
 
 	struct RangeMutation {
@@ -5240,10 +5240,10 @@ private:
 		}
 
 		std::string toString() const {
-			return format("boundaryChanged=%d clearAfterBoundary=%d boundaryValue=%s",
-			              boundaryChanged,
-			              clearAfterBoundary,
-			              ::toString(boundaryValue).c_str());
+			return fmt::format("boundaryChanged={} clearAfterBoundary={} boundaryValue={}",
+			                   boundaryChanged,
+			                   clearAfterBoundary,
+			                   ::toString(boundaryValue));
 		}
 	};
 
@@ -5475,17 +5475,17 @@ private:
 		int endIndex() const { return startIndex + count; }
 
 		std::string toString() const {
-			return format("{start=%d count=%d used %d/%d bytes (%.2f%% slack) kvBytes=%d blocks=%d blockSize=%d "
-			              "large=%d}",
-			              startIndex,
-			              count,
-			              usedBytes(),
-			              pageSize,
-			              slackFraction() * 100,
-			              kvBytes,
-			              blockCount,
-			              blockSize,
-			              largeDeltaTree);
+			return fmt::format(
+			    "{{start={} count={} used {}/{} bytes ({:.2f}% slack) kvBytes={} blocks={} blockSize={} large={}}}",
+			    startIndex,
+			    count,
+			    usedBytes(),
+			    pageSize,
+			    slackFraction() * 100,
+			    kvBytes,
+			    blockCount,
+			    blockSize,
+			    largeDeltaTree);
 		}
 
 		// Move an item from a to b if a has 2 or more items and the item fits in b
@@ -6165,21 +6165,22 @@ private:
 
 		std::string toString() const {
 			std::string s;
-			s += format("SubtreeSlice: addr=%p skipLen=%d subtreeCleared=%d childrenChanged=%d inPlaceUpdate=%d\n",
-			            this,
-			            skipLen,
-			            childrenChanged && newLinks.empty(),
-			            childrenChanged,
-			            inPlaceUpdate);
-			s += format("SubtreeLower: %s\n", subtreeLowerBound.toString(false).c_str());
-			s += format(" DecodeLower: %s\n", decodeLowerBound.toString(false).c_str());
-			s += format(" DecodeUpper: %s\n", decodeUpperBound.toString(false).c_str());
-			s += format("SubtreeUpper: %s\n", subtreeUpperBound.toString(false).c_str());
-			s += format("expectedUpperBound: %s\n",
-			            expectedUpperBound.present() ? expectedUpperBound.get().toString(false).c_str() : "(null)");
-			s += format("newLinks:\n");
+			s += fmt::format("SubtreeSlice: addr={} skipLen={} subtreeCleared={} childrenChanged={} inPlaceUpdate={}\n",
+			                 fmt::ptr(this),
+			                 skipLen,
+			                 childrenChanged && newLinks.empty(),
+			                 childrenChanged,
+			                 inPlaceUpdate);
+			s += fmt::format("SubtreeLower: {}\n", subtreeLowerBound.toString(false));
+			s += fmt::format(" DecodeLower: {}\n", decodeLowerBound.toString(false));
+			s += fmt::format(" DecodeUpper: {}\n", decodeUpperBound.toString(false));
+			s += fmt::format("SubtreeUpper: {}\n", subtreeUpperBound.toString(false));
+			s +=
+			    fmt::format("expectedUpperBound: {}\n",
+			                expectedUpperBound.present() ? expectedUpperBound.get().toString(false).c_str() : "(null)");
+			s += fmt::format("newLinks:\n");
 			for (int i = 0; i < newLinks.size(); ++i) {
-				s += format("  %i: %s\n", i, newLinks[i].toString(false).c_str());
+				s += fmt::format("  {}: {}\n", i, newLinks[i].toString(false));
 			}
 			s.resize(s.size() - 1);
 			return s;
@@ -6369,10 +6370,10 @@ private:
 
 		state std::string context;
 		if (REDWOOD_DEBUG) {
-			context = format("CommitSubtree(root=%s+%d %s): ",
-			                 toString(rootID.front()).c_str(),
-			                 rootID.size() - 1,
-			                 ::toString(batch->writeVersion).c_str());
+			context = fmt::format("CommitSubtree(root={}+{} {}): ",
+			                      toString(rootID.front()),
+			                      rootID.size() - 1,
+			                      ::toString(batch->writeVersion));
 		}
 		debug_printf("%s rootID=%s\n", context.c_str(), toString(rootID).c_str());
 		debug_print(addPrefix(context, update->toString()));
@@ -6405,7 +6406,7 @@ private:
 
 		state BTreePage* btPage = (BTreePage*)page->mutateData();
 		if (height != btPage->height) {
-			fprintf(stderr, "height [%d] != btPage->height [%d]\n", height, btPage->height);
+			fmt::println(stderr, "height [{}] != btPage->height [{}]", height, btPage->height);
 			ASSERT(false);
 		}
 		ASSERT(height == btPage->height);
@@ -7249,28 +7250,29 @@ public:
 
 		// path entries at dumpHeight or below will have their entire pages printed
 		std::string toString(int dumpHeight = 0) const {
-			std::string r = format("{ptr=%p reason=%s %s ",
-			                       this,
-			                       PagerEventReasonsStrings[(int)reason],
-			                       ::toString(pager->getVersion()).c_str());
+			std::string r = fmt::format("{{ptr={} reason={} {} ",
+			                            fmt::ptr(this),
+			                            PagerEventReasonsStrings[(int)reason],
+			                            ::toString(pager->getVersion()));
 			for (int i = 0; i < path.size(); ++i) {
 				std::string id = "<debugOnly>";
 #if REDWOOD_DEBUG
 				id = ::toString(path[i].id);
 #endif
 				int height = path[i].btPage()->height;
-				r += format("\n\t[Level=%d ID=%s ptr=%p Cursor=%s]   ",
-				            height,
-				            id.c_str(),
-				            path[i].page->data(),
-				            path[i].cursor.valid() ? path[i].cursor.get().toString(path[i].btPage()->isLeaf()).c_str()
-				                                   : "<invalid>");
+				r += fmt::format("\n\t[Level={} ID={} ptr={} Cursor={}]   ",
+				                 height,
+				                 id,
+				                 fmt::ptr(path[i].page->data()),
+				                 path[i].cursor.valid()
+				                     ? path[i].cursor.get().toString(path[i].btPage()->isLeaf()).c_str()
+				                     : "<invalid>");
 				if (height <= dumpHeight) {
 					BTreePage::BinaryTree::Cursor c = path[i].cursor;
 					c.moveFirst();
 					int i = 0;
 					while (c.valid()) {
-						r += format("\n\t\%7d: %s", ++i, c.get().toString(height == 1).c_str());
+						r += fmt::format("\n\t\{:7}: {}", ++i, c.get().toString(height == 1));
 						c.moveNext();
 					}
 				}
@@ -8299,8 +8301,13 @@ struct IntIntPair {
 		int size() const { return sizeof(Delta); }
 
 		std::string toString() const {
-			return format(
-			    "DELTA{prefixSource=%d deleted=%d dk=%d(0x%x) dv=%d(0x%x)}", prefixSource, deleted, dk, dk, dv, dv);
+			return fmt::format("DELTA{{prefixSource={} deleted={} dk={}(0x{:x}) dv={}(0x{:x})}}",
+			                   prefixSource,
+			                   deleted,
+			                   dk,
+			                   dk,
+			                   dv,
+			                   dv);
 		}
 	};
 
@@ -8348,7 +8355,7 @@ struct IntIntPair {
 	int k;
 	int v;
 
-	std::string toString() const { return format("{k=%d(0x%x) v=%d(0x%x)}", k, k, v, v); }
+	std::string toString() const { return fmt::format("{{k={}(0x{:x}) v={}(0x{:x})}}", k, k, v, v); }
 };
 
 int deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
@@ -8361,15 +8368,15 @@ int deltaTest(RedwoodRecordRef rec, RedwoodRecordRef base) {
 	RedwoodRecordRef decoded = d.apply(base, mem);
 
 	if (decoded != rec || expectedSize != deltaSize || d.size() != deltaSize) {
-		printf("\n");
-		printf("Base:                %s\n", base.toString().c_str());
-		printf("Record:              %s\n", rec.toString().c_str());
-		printf("Decoded:             %s\n", decoded.toString().c_str());
-		printf("deltaSize():         %d\n", expectedSize);
-		printf("writeDelta():        %d\n", deltaSize);
-		printf("d.size():            %d\n", d.size());
-		printf("DeltaToString:       %s\n", d.toString().c_str());
-		printf("RedwoodRecordRef::Delta test failure!\n");
+		fmt::println("");
+		fmt::println("Base:                {}", base.toString());
+		fmt::println("Record:              {}", rec.toString());
+		fmt::println("Decoded:             {}", decoded.toString());
+		fmt::println("deltaSize():         {}", expectedSize);
+		fmt::println("writeDelta():        {}", deltaSize);
+		fmt::println("d.size():            {}", d.size());
+		fmt::println("DeltaToString:       {}", d.toString());
+		fmt::println("RedwoodRecordRef::Delta test failure!");
 		ASSERT(false);
 	}
 
@@ -8488,14 +8495,14 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 			for (auto& m : metrics) {
 				char c = m.first[0];
 				if (c != 0 && (!skipZeroes || m.second != 0)) {
-					e->detail(format("L%d%s", i, m.first + (c == '-' ? 1 : 0)), m.second);
+					e->detail(fmt::format("L{}{}", i, m.first + (c == '-' ? 1 : 0)), m.second);
 				}
 			}
 			metric.events.toTraceEvent(e, i);
 		}
 
 		if (s != nullptr) {
-			*s += format("\nLevel %d\n\t", i);
+			*s += fmt::format("\nLevel {}\n\t", i);
 
 			for (auto& m : metrics) {
 				const char* name = m.first;
@@ -8508,7 +8515,7 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 				if (*name == '\0') {
 					*s += "\n\t";
 				} else if (!skipZeroes || m.second != 0) {
-					*s += format("%-15s %8u %8u/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
+					*s += fmt::format("{:<15} {:8} {:8}/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
 				}
 			}
 			*s += metric.events.toString(i, elapsed);
@@ -8527,21 +8534,21 @@ void RedwoodMetrics::getIOLockFields(TraceEvent* e, std::string* s) {
 		e->detail("IOWaitingTotal", ioLock->getWaitersCount());
 
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			e->detail(format("IOActiveP%d", priority), ioLock->getRunnersCount(priority));
-			e->detail(format("IOWaitingP%d", priority), ioLock->getWaitersCount(priority));
+			e->detail(fmt::format("IOActiveP{}", priority), ioLock->getRunnersCount(priority));
+			e->detail(fmt::format("IOWaitingP{}", priority), ioLock->getWaitersCount(priority));
 		}
 	}
 
 	if (s != nullptr) {
 		*s += "\n";
-		*s += format("%-15s %-8u    ", "IOActiveTotal", ioLock->getRunnersCount());
+		*s += fmt::format("{:<15} {:<8}    ", "IOActiveTotal", ioLock->getRunnersCount());
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			*s += format("IOActiveP%-6d %-8u    ", priority, ioLock->getRunnersCount(priority));
+			*s += fmt::format("IOActiveP{:<6} {:<8}    ", priority, ioLock->getRunnersCount(priority));
 		}
 		*s += "\n";
-		*s += format("%-15s %-8u    ", "IOWaitingTotal", ioLock->getWaitersCount());
+		*s += fmt::format("{:<15} {:<8}    ", "IOWaitingTotal", ioLock->getWaitersCount());
 		for (int priority = 0; priority <= maxPriority; ++priority) {
-			*s += format("IOWaitingP%-5d %-8u    ", priority, ioLock->getWaitersCount(priority));
+			*s += fmt::format("IOWaitingP{:<5} {:<8}    ", priority, ioLock->getWaitersCount(priority));
 		}
 	}
 }
@@ -8552,7 +8559,7 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[2] == 6);
 	ASSERT(RedwoodRecordRef::Delta::LengthFormatSizes[3] == 8);
 
-	fmt::print("sizeof(RedwoodRecordRef) = {}\n", sizeof(RedwoodRecordRef));
+	fmt::println("sizeof(RedwoodRecordRef) = {}", sizeof(RedwoodRecordRef));
 
 	// Test pageID stuff.
 	{
@@ -8607,7 +8614,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		bytes += deltaTest(a, b);
 	}
 	double elapsed = timer() - start;
-	printf("DeltaTest() on random large records %f M/s  %f MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
+	fmt::println(
+	    "DeltaTest() on random large records {:f} M/s  {:f} MB/s", count / elapsed / 1e6, bytes / elapsed / 1e6);
 
 	keyBuffer.resize(30);
 	valueBuffer.resize(100);
@@ -8619,7 +8627,8 @@ TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
 		RedwoodRecordRef b = randomRedwoodRecordRef(keyBuffer, valueBuffer);
 		bytes += deltaTest(a, b);
 	}
-	printf("DeltaTest() on random small records %f M/s  %f MB/s\n", count / elapsed / 1e6, bytes / elapsed / 1e6);
+	fmt::println(
+	    "DeltaTest() on random small records {:f} M/s  {:f} MB/s", count / elapsed / 1e6, bytes / elapsed / 1e6);
 
 	RedwoodRecordRef rec1;
 	RedwoodRecordRef rec2;
@@ -8717,17 +8726,17 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
-	printf("Count=%d  Size=%d  InitialHeight=%d  largeTree=%d\n",
-	       (int)items.size(),
-	       (int)tree->size(),
-	       (int)tree->initialHeight,
-	       largeTree);
+	fmt::println("Count={}  Size={}  InitialHeight={}  largeTree={}",
+	             (int)items.size(),
+	             (int)tree->size(),
+	             (int)tree->initialHeight,
+	             largeTree);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
 
 	DeltaTree<RedwoodRecordRef>::Mirror r(tree, &prev, &next);
 
 	// Test delete/insert behavior for each item, making no net changes
-	printf("Testing seek/delete/insert for existing keys with random values\n");
+	fmt::println("Testing seek/delete/insert for existing keys with random values");
 	ASSERT(tree->numItems == items.size());
 	for (auto rec : items) {
 		// Insert existing should fail
@@ -8757,7 +8766,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Mirror rValuesOnly(tree, &prev, &next);
 	DeltaTree<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Cursor fwdValueOnly = rValuesOnly.getCursor();
 
-	printf("Verifying tree contents using forward, reverse, and value-only iterators\n");
+	fmt::println("Verifying tree contents using forward, reverse, and value-only iterators");
 	ASSERT(fwd.moveFirst());
 	ASSERT(fwdValueOnly.moveFirst());
 	ASSERT(rev.moveLast());
@@ -8765,27 +8774,25 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 	int i = 0;
 	while (1) {
 		if (fwd.get() != items[i]) {
-			printf("forward iterator i=%d\n  %s found\n  %s expected\n",
-			       i,
-			       fwd.get().toString().c_str(),
-			       items[i].toString().c_str());
-			printf("Delta: %s\n", fwd.node->raw->delta(largeTree).toString().c_str());
+			fmt::print(
+			    "forward iterator i={}\n  {} found\n  {} expected\n", i, fwd.get().toString(), items[i].toString());
+			fmt::println("Delta: {}", fwd.node->raw->delta(largeTree).toString());
 			ASSERT(false);
 		}
 		if (rev.get() != items[items.size() - 1 - i]) {
-			printf("reverse iterator i=%d\n  %s found\n  %s expected\n",
-			       i,
-			       rev.get().toString().c_str(),
-			       items[items.size() - 1 - i].toString().c_str());
-			printf("Delta: %s\n", rev.node->raw->delta(largeTree).toString().c_str());
+			fmt::print("reverse iterator i={}\n  {} found\n  {} expected\n",
+			           i,
+			           rev.get().toString(),
+			           items[items.size() - 1 - i].toString());
+			fmt::println("Delta: {}", rev.node->raw->delta(largeTree).toString());
 			ASSERT(false);
 		}
 		if (fwdValueOnly.get().value != items[i].value) {
-			printf("forward values-only iterator i=%d\n  %s found\n  %s expected\n",
-			       i,
-			       fwdValueOnly.get().toString().c_str(),
-			       items[i].toString().c_str());
-			printf("Delta: %s\n", fwdValueOnly.node->raw->delta(largeTree).toString().c_str());
+			fmt::print("forward values-only iterator i={}\n  {} found\n  {} expected\n",
+			           i,
+			           fwdValueOnly.get().toString(),
+			           items[i].toString());
+			fmt::println("Delta: {}", fwdValueOnly.node->raw->delta(largeTree).toString());
 			ASSERT(false);
 		}
 		++i;
@@ -8808,28 +8815,26 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 		DeltaTree<RedwoodRecordRef>::Mirror mirror(tree, &prev, &next);
 		DeltaTree<RedwoodRecordRef>::Cursor c = mirror.getCursor();
 
-		printf("Doing 20M random seeks using the same cursor from the same mirror.\n");
+		fmt::println("Doing 20M random seeks using the same cursor from the same mirror.");
 		double start = timer();
 
 		for (int i = 0; i < 20000000; ++i) {
 			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
 			if (!c.seekLessThanOrEqual(query)) {
-				printf("Not found!  query=%s\n", query.toString().c_str());
+				fmt::println("Not found!  query={}", query.toString());
 				ASSERT(false);
 			}
 			if (c.get() != query) {
-				printf("Found incorrect node!  query=%s  found=%s\n",
-				       query.toString().c_str(),
-				       c.get().toString().c_str());
+				fmt::println("Found incorrect node!  query={}  found={}", query.toString(), c.get().toString());
 				ASSERT(false);
 			}
 		}
 		double elapsed = timer() - start;
-		printf("Elapsed %f\n", elapsed);
+		fmt::println("Elapsed {:f}", elapsed);
 	}
 
 	{
-		printf("Doing 5M random seeks using 10k random cursors, each from a different mirror.\n");
+		fmt::println("Doing 5M random seeks using 10k random cursors, each from a different mirror.");
 		double start = timer();
 		std::vector<DeltaTree<RedwoodRecordRef>::Mirror*> mirrors;
 		std::vector<DeltaTree<RedwoodRecordRef>::Cursor> cursors;
@@ -8842,18 +8847,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
 			DeltaTree<RedwoodRecordRef>::Cursor& c = cursors[deterministicRandom()->randomInt(0, cursors.size())];
 			if (!c.seekLessThanOrEqual(query)) {
-				printf("Not found!  query=%s\n", query.toString().c_str());
+				fmt::println("Not found!  query={}", query.toString());
 				ASSERT(false);
 			}
 			if (c.get() != query) {
-				printf("Found incorrect node!  query=%s  found=%s\n",
-				       query.toString().c_str(),
-				       c.get().toString().c_str());
+				fmt::println("Found incorrect node!  query={}  found={}", query.toString(), c.get().toString());
 				ASSERT(false);
 			}
 		}
 		double elapsed = timer() - start;
-		printf("Elapsed %f\n", elapsed);
+		fmt::println("Elapsed {:f}", elapsed);
 	}
 
 	return Void();
@@ -8894,17 +8897,17 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
-	printf("Count=%d  Size=%d  InitialHeight=%d  largeTree=%d\n",
-	       (int)items.size(),
-	       (int)tree->size(),
-	       (int)tree->initialHeight,
-	       largeTree);
+	fmt::println("Count={}  Size={}  InitialHeight={}  largeTree={}",
+	             (int)items.size(),
+	             (int)tree->size(),
+	             (int)tree->initialHeight,
+	             largeTree);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
 
 	DeltaTree2<RedwoodRecordRef>::Cursor c(makeReference<DeltaTree2<RedwoodRecordRef>::DecodeCache>(prev, next), tree);
 
 	// Test delete/insert behavior for each item, making no net changes
-	printf("Testing seek/delete/insert for existing keys with random values\n");
+	fmt::println("Testing seek/delete/insert for existing keys with random values");
 	ASSERT(tree->numItems == items.size());
 	for (auto rec : items) {
 		// Insert existing should fail
@@ -8935,7 +8938,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	    makeReference<DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::DecodeCache>(prev, next),
 	    (DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>*)tree);
 
-	printf("Verifying tree contents using forward, reverse, and value-only iterators\n");
+	fmt::println("Verifying tree contents using forward, reverse, and value-only iterators");
 	ASSERT(fwd.moveFirst());
 	ASSERT(fwdValueOnly.moveFirst());
 	ASSERT(rev.moveLast());
@@ -8943,27 +8946,25 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	int i = 0;
 	while (1) {
 		if (fwd.get() != items[i]) {
-			printf("forward iterator i=%d\n  %s found\n  %s expected\n",
-			       i,
-			       fwd.get().toString().c_str(),
-			       items[i].toString().c_str());
-			printf("Cursor: %s\n", fwd.toString().c_str());
+			fmt::print(
+			    "forward iterator i={}\n  {} found\n  {} expected\n", i, fwd.get().toString(), items[i].toString());
+			fmt::println("Cursor: {}", fwd.toString());
 			ASSERT(false);
 		}
 		if (rev.get() != items[items.size() - 1 - i]) {
-			printf("reverse iterator i=%d\n  %s found\n  %s expected\n",
-			       i,
-			       rev.get().toString().c_str(),
-			       items[items.size() - 1 - i].toString().c_str());
-			printf("Cursor: %s\n", rev.toString().c_str());
+			fmt::print("reverse iterator i={}\n  {} found\n  {} expected\n",
+			           i,
+			           rev.get().toString(),
+			           items[items.size() - 1 - i].toString());
+			fmt::println("Cursor: {}", rev.toString());
 			ASSERT(false);
 		}
 		if (fwdValueOnly.get().value != items[i].value) {
-			printf("forward values-only iterator i=%d\n  %s found\n  %s expected\n",
-			       i,
-			       fwdValueOnly.get().toString().c_str(),
-			       items[i].toString().c_str());
-			printf("Cursor: %s\n", fwdValueOnly.toString().c_str());
+			fmt::print("forward values-only iterator i={}\n  {} found\n  {} expected\n",
+			           i,
+			           fwdValueOnly.get().toString(),
+			           items[i].toString());
+			fmt::println("Cursor: {}", fwdValueOnly.toString());
 			ASSERT(false);
 		}
 		++i;
@@ -8986,24 +8987,22 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 		DeltaTree2<RedwoodRecordRef>::Cursor c(makeReference<DeltaTree2<RedwoodRecordRef>::DecodeCache>(prev, next),
 		                                       tree);
 
-		printf("Doing 20M random seeks using the same cursor from the same mirror.\n");
+		fmt::println("Doing 20M random seeks using the same cursor from the same mirror.");
 		double start = timer();
 
 		for (int i = 0; i < 20000000; ++i) {
 			const RedwoodRecordRef& query = items[deterministicRandom()->randomInt(0, items.size())];
 			if (!c.seekLessThanOrEqual(query)) {
-				printf("Not found!  query=%s\n", query.toString().c_str());
+				fmt::println("Not found!  query={}", query.toString());
 				ASSERT(false);
 			}
 			if (c.get() != query) {
-				printf("Found incorrect node!  query=%s  found=%s\n",
-				       query.toString().c_str(),
-				       c.get().toString().c_str());
+				fmt::println("Found incorrect node!  query={}  found={}", query.toString(), c.get().toString());
 				ASSERT(false);
 			}
 		}
 		double elapsed = timer() - start;
-		printf("Elapsed %f\n", elapsed);
+		fmt::println("Elapsed {:f}", elapsed);
 	}
 
 	// {
@@ -9090,24 +9089,24 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	};
 
 	auto printTrees = [&] {
-		printf("DeltaTree: Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n",
-		       (int)tree->numItems,
-		       (int)tree->size(),
-		       (int)tree->initialHeight,
-		       (int)tree->maxHeight);
+		fmt::println("DeltaTree: Count={}  Size={}  InitialHeight={}  MaxHeight={}",
+		             (int)tree->numItems,
+		             (int)tree->size(),
+		             (int)tree->initialHeight,
+		             (int)tree->maxHeight);
 		debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
 
-		printf("DeltaTree2: Count=%d  Size=%d  InitialHeight=%d  MaxHeight=%d\n",
-		       (int)tree2->numItems,
-		       (int)tree2->size(),
-		       (int)tree2->initialHeight,
-		       (int)tree2->maxHeight);
+		fmt::println("DeltaTree2: Count={}  Size={}  InitialHeight={}  MaxHeight={}",
+		             (int)tree2->numItems,
+		             (int)tree2->size(),
+		             (int)tree2->initialHeight,
+		             (int)tree2->maxHeight);
 		debug_printf("Data(%p): %s\n", tree2, StringRef((uint8_t*)tree2, tree2->size()).toHexString().c_str());
 	};
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
 	auto scanAndVerify = [&]() {
-		printf("Verify DeltaTree contents.\n");
+		fmt::println("Verify DeltaTree contents.");
 
 		DeltaTree<IntIntPair>::Cursor fwd = r.getCursor();
 		DeltaTree<IntIntPair>::Cursor rev = r.getCursor();
@@ -9117,18 +9116,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		for (int i = 0; i < items.size(); ++i) {
 			if (fwd.get() != items[i]) {
 				printItems();
-				printf("forward iterator i=%d\n  %s found\n  %s expected\n",
-				       i,
-				       fwd.get().toString().c_str(),
-				       items[i].toString().c_str());
+				fmt::print(
+				    "forward iterator i={}\n  {} found\n  {} expected\n", i, fwd.get().toString(), items[i].toString());
 				ASSERT(false);
 			}
 			if (rev.get() != items[items.size() - 1 - i]) {
 				printItems();
-				printf("reverse iterator i=%d\n  %s found\n  %s expected\n",
-				       i,
-				       rev.get().toString().c_str(),
-				       items[items.size() - 1 - i].toString().c_str());
+				fmt::print("reverse iterator i={}\n  {} found\n  {} expected\n",
+				           i,
+				           rev.get().toString(),
+				           items[items.size() - 1 - i].toString());
 				ASSERT(false);
 			}
 
@@ -9149,7 +9146,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Iterate through items and tree forward and backward, verifying tree contents.
 	auto scanAndVerify2 = [&]() {
-		printf("Verify DeltaTree2 contents.\n");
+		fmt::println("Verify DeltaTree2 contents.");
 
 		DeltaTree2<IntIntPair>::Cursor fwd(cache, tree2);
 		DeltaTree2<IntIntPair>::Cursor rev(cache, tree2);
@@ -9160,18 +9157,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		for (int i = 0; i < items.size(); ++i) {
 			if (fwd.get() != items[i]) {
 				printItems();
-				printf("forward iterator i=%d\n  %s found\n  %s expected\n",
-				       i,
-				       fwd.get().toString().c_str(),
-				       items[i].toString().c_str());
+				fmt::print(
+				    "forward iterator i={}\n  {} found\n  {} expected\n", i, fwd.get().toString(), items[i].toString());
 				ASSERT(false);
 			}
 			if (rev.get() != items[items.size() - 1 - i]) {
 				printItems();
-				printf("reverse iterator i=%d\n  %s found\n  %s expected\n",
-				       i,
-				       rev.get().toString().c_str(),
-				       items[items.size() - 1 - i].toString().c_str());
+				fmt::print("reverse iterator i={}\n  {} found\n  {} expected\n",
+				           i,
+				           rev.get().toString(),
+				           items[items.size() - 1 - i].toString());
 				ASSERT(false);
 			}
 
@@ -9242,7 +9237,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	scanAndVerify2();
 
 	// For each randomly selected new item to be deleted, delete it from the DeltaTree2 and from uniqueItems
-	printf("Deleting some items\n");
+	fmt::println("Deleting some items");
 	for (auto p : toDelete) {
 		uniqueItems.erase(p);
 
@@ -9263,7 +9258,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	scanAndVerify();
 	scanAndVerify2();
 
-	printf("Verifying insert/erase behavior for existing items\n");
+	fmt::println("Verifying insert/erase behavior for existing items");
 	// Test delete/insert behavior for each item, making no net changes
 	for (auto p : items) {
 		// Insert existing should fail
@@ -9294,7 +9289,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	scanAndVerify();
 	scanAndVerify2();
 
-	printf("Verifying seek behaviors\n");
+	fmt::println("Verifying seek behaviors");
 	DeltaTree<IntIntPair>::Cursor s = r.getCursor();
 	DeltaTree2<IntIntPair>::Cursor s2(cache, tree2);
 
@@ -9306,20 +9301,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		ASSERT(s.seekLessThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
-			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekLessThanOrEqual({}) found {} expected {}", q.toString(), s.get().toString(), p.toString());
 			ASSERT(false);
 		}
 
 		ASSERT(s2.seekLessThanOrEqual(q));
 		if (s2.get() != p) {
 			printItems();
-			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s2.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekLessThanOrEqual({}) found {} expected {}", q.toString(), s2.get().toString(), p.toString());
 			ASSERT(false);
 		}
 	}
@@ -9332,20 +9323,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		ASSERT(s.seekGreaterThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
-			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekGreaterThanOrEqual({}) found {} expected {}", q.toString(), s.get().toString(), p.toString());
 			ASSERT(false);
 		}
 
 		ASSERT(s2.seekGreaterThanOrEqual(q));
 		if (s2.get() != p) {
 			printItems();
-			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s2.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekGreaterThanOrEqual({}) found {} expected {}", q.toString(), s2.get().toString(), p.toString());
 			ASSERT(false);
 		}
 	}
@@ -9360,20 +9347,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		ASSERT(s.seekLessThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
-			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekLessThanOrEqual({}) found {} expected {}", q.toString(), s.get().toString(), p.toString());
 			ASSERT(false);
 		}
 
 		ASSERT(s2.seekLessThanOrEqual(q));
 		if (s2.get() != p) {
 			printItems();
-			printf("seekLessThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s2.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekLessThanOrEqual({}) found {} expected {}", q.toString(), s2.get().toString(), p.toString());
 			ASSERT(false);
 		}
 	}
@@ -9388,20 +9371,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		ASSERT(s.seekGreaterThanOrEqual(q));
 		if (s.get() != p) {
 			printItems();
-			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekGreaterThanOrEqual({}) found {} expected {}", q.toString(), s.get().toString(), p.toString());
 			ASSERT(false);
 		}
 
 		ASSERT(s2.seekGreaterThanOrEqual(q));
 		if (s2.get() != p) {
 			printItems();
-			printf("seekGreaterThanOrEqual(%s) found %s expected %s\n",
-			       q.toString().c_str(),
-			       s2.get().toString().c_str(),
-			       p.toString().c_str());
+			fmt::println(
+			    "seekGreaterThanOrEqual({}) found {} expected {}", q.toString(), s2.get().toString(), p.toString());
 			ASSERT(false);
 		}
 	}
@@ -9415,11 +9394,9 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			ASSERT(s.seekLessThanOrEqual(q, 0, &s));
 			if (s.get() != p) {
 				printItems();
-				printf("i=%d  j=%d\n", i, j);
-				printf("seekLessThanOrEqual(%s) found %s expected %s\n",
-				       q.toString().c_str(),
-				       s.get().toString().c_str(),
-				       p.toString().c_str());
+				fmt::println("i={}  j={}", i, j);
+				fmt::println(
+				    "seekLessThanOrEqual({}) found {} expected {}", q.toString(), s.get().toString(), p.toString());
 				ASSERT(false);
 			}
 		}
@@ -9436,7 +9413,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			ASSERT(s.seekLessThanOrEqual(q, 0, &s));
 			if (s.get() != p) {
 				printItems();
-				printf("i=%d  j=%d\n", i, j);
+				fmt::println("i={}  j={}", i, j);
 				ASSERT(false);
 			}
 		}
@@ -9475,15 +9452,15 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		fmt::print("Seek/skip test, count={0} jumpMax={1}, items={2}, oldSeek={3} useHint={4}:  Elapsed {5} seconds "
-		           "{6:.2f} M/s\n",
-		           count,
-		           jumpMax,
-		           items.size(),
-		           old,
-		           useHint,
-		           elapsed,
-		           double(count) / elapsed / 1e6);
+		fmt::println("Seek/skip test, count={0} jumpMax={1}, items={2}, oldSeek={3} useHint={4}:  Elapsed {5} seconds "
+		             "{6:.2f} M/s",
+		             count,
+		             jumpMax,
+		             items.size(),
+		             old,
+		             useHint,
+		             elapsed,
+		             double(count) / elapsed / 1e6);
 	};
 
 	auto skipSeekPerformance2 = [&](int jumpMax, bool old, bool useHint, int count) {
@@ -9519,16 +9496,15 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 			pos = newPos;
 		}
 		double elapsed = timer() - start;
-		fmt::print("DeltaTree2 Seek/skip test, count={0} jumpMax={1}, items={2}, oldSeek={3} useHint={4}:  Elapsed {5} "
-		           "seconds  "
-		           "{6:.2f} M/s\n",
-		           count,
-		           jumpMax,
-		           items.size(),
-		           old,
-		           useHint,
-		           elapsed,
-		           double(count) / elapsed / 1e6);
+		fmt::println("DeltaTree2 Seek/skip test, count={0} jumpMax={1}, items={2}, oldSeek={3} useHint={4}:  Elapsed "
+		             "{5} seconds  {6:.2f} M/s",
+		             count,
+		             jumpMax,
+		             items.size(),
+		             old,
+		             useHint,
+		             elapsed,
+		             double(count) / elapsed / 1e6);
 	};
 
 	// Compare seeking to nearby elements with and without hints, using the old and new SeekLessThanOrEqual methods.
@@ -9553,16 +9529,16 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 		// Verify the result is less than or equal, and if seek fails then p must be lower than lowest (first) item
 		if (!s.seekLessThanOrEqual(p)) {
 			if (p >= items.front()) {
-				printf("Seek failed!  query=%s  front=%s\n", p.toString().c_str(), items.front().toString().c_str());
+				fmt::println("Seek failed!  query={}  front={}", p.toString(), items.front().toString());
 				ASSERT(false);
 			}
 		} else if (s.get() > p) {
-			printf("Found incorrect node!  query=%s  found=%s\n", p.toString().c_str(), s.get().toString().c_str());
+			fmt::println("Found incorrect node!  query={}  found={}", p.toString(), s.get().toString());
 			ASSERT(false);
 		}
 	}
 	double elapsed = timer() - start;
-	printf("Random seek test: Elapsed %f\n", elapsed);
+	fmt::println("Random seek test: Elapsed {:f}", elapsed);
 
 	return Void();
 }
@@ -9591,14 +9567,14 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 	// This test uses pregenerated short random keys
 	int count = 10e6;
 
-	printf("Generating %d strings...\n", count);
+	fmt::println("Generating {} strings...", count);
 	Arena arena;
 	std::vector<KeyRef> strings;
 	while (strings.size() < count) {
 		strings.push_back(randomString(arena, 5));
 	}
 
-	fmt::print("Inserting {} elements and then finding each string...\n", count);
+	fmt::println("Inserting {} elements and then finding each string...", count);
 	double start = timer();
 	VersionedBTree::MutationBuffer m;
 	for (int i = 0; i < count; ++i) {
@@ -9610,7 +9586,7 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 	}
 
 	double elapsed = timer() - start;
-	printf("count=%d elapsed=%f\n", count, elapsed);
+	fmt::println("count={} elapsed={:f}", count, elapsed);
 
 	return Void();
 }
@@ -9618,21 +9594,21 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 // This test is only useful with Arena debug statements which show when aligned buffers are allocated and freed.
 TEST_CASE(":/redwood/pager/ArenaPage") {
 	Arena x;
-	printf("Making p\n");
+	fmt::println("Making p");
 	auto p = makeReference<ArenaPage>(4096, 4096);
-	printf("Made p=%p\n", p->data());
-	printf("Clearing p\n");
+	fmt::println("Made p={}", fmt::ptr(p->data()));
+	fmt::println("Clearing p");
 	p.clear();
-	printf("Making p\n");
+	fmt::println("Making p");
 	p = makeReference<ArenaPage>(4096, 4096);
-	printf("Made p=%p\n", p->data());
-	printf("Making x depend on p\n");
+	fmt::println("Made p={}", fmt::ptr(p->data()));
+	fmt::println("Making x depend on p");
 	x.dependsOn(p->getArena());
-	printf("Clearing p\n");
+	fmt::println("Clearing p");
 	p.clear();
-	printf("Clearing x\n");
+	fmt::println("Clearing x");
 	x = Arena();
-	printf("Pointer should be freed\n");
+	fmt::println("Pointer should be freed");
 	return Void();
 }
 
@@ -9757,38 +9733,38 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	state EncodingType encodingType = EncodingType::XXHash64;
 
-	printf("\n");
-	printf("file: %s\n", file.c_str());
+	fmt::println("");
+	fmt::println("file: {}", file);
 	printf("maxPageOps: %" PRId64 "\n", maxPageOps);
-	printf("maxVerificationMapEntries: %d\n", maxVerificationMapEntries);
+	fmt::println("maxVerificationMapEntries: {}", maxVerificationMapEntries);
 	printf("maxRecordsRead: %" PRId64 "\n", maxRecordsRead);
-	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
-	printf("serialTest: %d\n", serialTest);
-	printf("shortTest: %d\n", shortTest);
-	printf("encodingType: %d\n", encodingType);
-	printf("pageSize: %d\n", pageSize);
-	printf("extentSize: %d\n", extentSize);
-	printf("keyGenerator: %s\n", keyGen.toString().c_str());
-	printf("valueGenerator: %s\n", valGen.toString().c_str());
-	printf("maxCommitSize: %d\n", maxCommitSize);
-	printf("setExistingKeyProbability: %f\n", setExistingKeyProbability);
-	printf("clearProbability: %f\n", clearProbability);
-	printf("clearExistingBoundaryProbability: %f\n", clearExistingBoundaryProbability);
-	printf("clearKnownNodeBoundaryProbability: %f\n", clearKnownNodeBoundaryProbability);
-	printf("clearSingleKeyProbability: %f\n", clearSingleKeyProbability);
-	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
-	printf("coldStartProbability: %f\n", coldStartProbability);
-	printf("maxColdStarts: %d\n", maxColdStarts);
-	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
-	printf("pageCacheBytes: %s\n", pageCacheBytes == 0 ? "default" : format("%" PRId64, pageCacheBytes).c_str());
+	fmt::println("pagerMemoryOnly: {}", pagerMemoryOnly);
+	fmt::println("serialTest: {}", serialTest);
+	fmt::println("shortTest: {}", shortTest);
+	fmt::println("encodingType: {}", static_cast<int>(encodingType));
+	fmt::println("pageSize: {}", pageSize);
+	fmt::println("extentSize: {}", extentSize);
+	fmt::println("keyGenerator: {}", keyGen.toString());
+	fmt::println("valueGenerator: {}", valGen.toString());
+	fmt::println("maxCommitSize: {}", maxCommitSize);
+	fmt::println("setExistingKeyProbability: {:f}", setExistingKeyProbability);
+	fmt::println("clearProbability: {:f}", clearProbability);
+	fmt::println("clearExistingBoundaryProbability: {:f}", clearExistingBoundaryProbability);
+	fmt::println("clearKnownNodeBoundaryProbability: {:f}", clearKnownNodeBoundaryProbability);
+	fmt::println("clearSingleKeyProbability: {:f}", clearSingleKeyProbability);
+	fmt::println("clearPostSetProbability: {:f}", clearPostSetProbability);
+	fmt::println("coldStartProbability: {:f}", coldStartProbability);
+	fmt::println("maxColdStarts: {}", maxColdStarts);
+	fmt::println("advanceOldVersionProbability: {:f}", advanceOldVersionProbability);
+	fmt::println("pageCacheBytes: {}", pageCacheBytes == 0 ? "default" : format("%" PRId64, pageCacheBytes));
 	printf("versionIncrement: %" PRId64 "\n", versionIncrement);
 	printf("remapCleanupWindowBytes: %" PRId64 "\n", remapCleanupWindowBytes);
-	printf("\n");
+	fmt::println("");
 
-	printf("Deleting existing test data...\n");
+	fmt::println("Deleting existing test data...");
 	deleteFile(file);
 
-	printf("Initializing...\n");
+	fmt::println("Initializing...");
 	pager = new DWALPager(
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 
@@ -9969,10 +9945,10 @@ TEST_CASE("Lredwood/correctness/btree") {
 			printf("Commit complete.  Next commit %d bytes, %" PRId64 " bytes committed so far.",
 			       mutationBytesThisCommit,
 			       mutationBytes.get() - mutationBytesThisCommit);
-			printf("  Stats:  Insert %.2f MB/s  ClearedKeys %.2f MB/s  Total %.2f\n",
-			       (keyBytesInserted.rate() + valueBytesInserted.rate()) / 1e6,
-			       keyBytesCleared.rate() / 1e6,
-			       mutationBytes.rate() / 1e6);
+			fmt::println("  Stats:  Insert {:.2f} MB/s  ClearedKeys {:.2f} MB/s  Total {:.2f}",
+			             (keyBytesInserted.rate() + valueBytesInserted.rate()) / 1e6,
+			             keyBytesCleared.rate() / 1e6,
+			             mutationBytes.rate() / 1e6);
 
 			// Sometimes advance the oldest version to close the gap between the oldest and latest versions by a
 			// random amount.
@@ -9986,19 +9962,19 @@ TEST_CASE("Lredwood/correctness/btree") {
 			commit = map(btree->commit(version), [&, v = version](Void) {
 				// Update pager ops before clearing metrics
 				totalPageOps += g_redwoodMetrics.pageOps();
-				fmt::print("Committed {0} PageOps {1}/{2} ({3:.2f}%)  VerificationMapEntries {4}/{5} ({6:.2f}%)  "
-				           "RecordsRead {7}/{8} ({9:.2f}%)\n",
-				           toString(v).c_str(),
-				           totalPageOps,
-				           maxPageOps,
-				           totalPageOps * 100.0 / maxPageOps,
-				           written.size(),
-				           maxVerificationMapEntries,
-				           written.size() * 100.0 / maxVerificationMapEntries,
-				           totalRecordsRead,
-				           maxRecordsRead,
-				           totalRecordsRead * 100.0 / maxRecordsRead);
-				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
+				fmt::println("Committed {0} PageOps {1}/{2} ({3:.2f}%)  VerificationMapEntries {4}/{5} ({6:.2f}%)  "
+				             "RecordsRead {7}/{8} ({9:.2f}%)",
+				             toString(v),
+				             totalPageOps,
+				             maxPageOps,
+				             totalPageOps * 100.0 / maxPageOps,
+				             written.size(),
+				             maxVerificationMapEntries,
+				             written.size() * 100.0 / maxVerificationMapEntries,
+				             totalRecordsRead,
+				             maxRecordsRead,
+				             totalRecordsRead * 100.0 / maxRecordsRead);
+				fmt::print("Committed:\n{}\n", g_redwoodMetrics.toString(true));
 
 				// Notify the background verifier that version is committed and therefore readable
 				committedVersions.send(v);
@@ -10022,7 +9998,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 			// Recover from disk at random
 			if (!pagerMemoryOnly && deterministicRandom()->random01() < coldStartProbability) {
 				++coldStarts;
-				printf("Recovering from disk after next commit.\n");
+				fmt::println("Recovering from disk after next commit.");
 
 				// Wait for outstanding commit
 				debug_printf("Waiting for outstanding commit\n");
@@ -10038,7 +10014,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				btree->close();
 				wait(closedFuture);
 
-				printf("Reopening btree from disk.\n");
+				fmt::println("Reopening btree from disk.");
 				IPager2* pager = new DWALPager(
 				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
 
@@ -10136,7 +10112,7 @@ ACTOR Future<Void> randomSeeks(VersionedBTree* btree,
 		++c;
 	}
 	double elapsed = timer() - readStart;
-	printf("Random seek speed %d/s\n", int(count / elapsed));
+	fmt::println("Random seek speed {}/s", int(count / elapsed));
 	return Void();
 }
 
@@ -10173,8 +10149,8 @@ ACTOR Future<Void> randomScans(VersionedBTree* btree,
 		}
 	}
 	double elapsed = timer() - readStart;
-	fmt::print(
-	    "Completed {0} scans: width={1} totalbytesRead={2} prefetchBytes={3} scansRate={4} scans/s  {5:.2f} MB/s\n",
+	fmt::println(
+	    "Completed {0} scans: width={1} totalbytesRead={2} prefetchBytes={3} scansRate={4} scans/s  {5:.2f} MB/s",
 	    count,
 	    width,
 	    totalScanBytes,
@@ -10190,9 +10166,7 @@ struct ExtentQueueEntry {
 
 	bool operator<(const ExtentQueueEntry& rhs) const { return entry < rhs.entry; }
 
-	std::string toString() const {
-		return format("{%s}", StringRef((const uint8_t*)entry, size).toHexString().c_str());
-	}
+	std::string toString() const { return fmt::format("{{{}}}", StringRef((const uint8_t*)entry, size).toHexString()); }
 };
 
 typedef FIFOQueue<ExtentQueueEntry<16>> ExtentQueueT;
@@ -10206,11 +10180,11 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state std::string fileName = reload ? "unittest.redwood-v1" : getenv("TESTFILE");
 
 	if (reload) {
-		printf("Deleting old test data\n");
+		fmt::println("Deleting old test data");
 		deleteFile(fileName);
 	}
 
-	printf("Filename: %s\n", fileName.c_str());
+	fmt::println("Filename: {}", fileName);
 	state int pageSize = params.getInt("pageSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE);
 	state int extentSize = params.getInt("extentSize").orDefault(SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE);
 	state int64_t cacheSizeBytes = params.getInt("cacheSizeBytes").orDefault(FLOW_KNOBS->PAGE_CACHE_4K);
@@ -10223,8 +10197,8 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	state int currentCommitSize = 0;
 	state int64_t cumulativeCommitSize = 0;
 
-	printf("pageSize: %d\n", pageSize);
-	printf("extentSize: %d\n", extentSize);
+	fmt::println("pageSize: {}", pageSize);
+	fmt::println("extentSize: {}", extentSize);
 	printf("cacheSizeBytes: %" PRId64 "\n", cacheSizeBytes);
 	printf("remapCleanupWindowBytes: %" PRId64 "\n", remapCleanupWindowBytes);
 
@@ -10245,10 +10219,10 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		for (v = 1; v <= numEntries; ++v) {
 			// Sometimes do a commit
 			if (currentCommitSize >= targetCommitSize) {
-				fmt::print("currentCommitSize: {0}, cumulativeCommitSize: {1}, pageCacheCount: {2}\n",
-				           currentCommitSize,
-				           cumulativeCommitSize,
-				           pager->getPageCacheCount());
+				fmt::println("currentCommitSize: {0}, cumulativeCommitSize: {1}, pageCacheCount: {2}",
+				             currentCommitSize,
+				             cumulativeCommitSize,
+				             pager->getPageCacheCount());
 				wait(m_extentQueue.flush());
 				wait(pager->commit(pager->getLastCommittedVersion() + 1,
 				                   ObjectWriter::toValue(m_extentQueue.getState(), Unversioned())));
@@ -10268,10 +10242,10 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 			}
 		}
 		cumulativeCommitSize += currentCommitSize;
-		fmt::print(
-		    "Final cumulativeCommitSize: {0}, pageCacheCount: {1}\n", cumulativeCommitSize, pager->getPageCacheCount());
+		fmt::println(
+		    "Final cumulativeCommitSize: {0}, pageCacheCount: {1}", cumulativeCommitSize, pager->getPageCacheCount());
 		wait(m_extentQueue.flush());
-		printf("Commit ExtentQueue getState(): %s\n", m_extentQueue.getState().toString().c_str());
+		fmt::println("Commit ExtentQueue getState(): {}", m_extentQueue.getState().toString());
 		wait(pager->commit(pager->getLastCommittedVersion() + 1,
 		                   ObjectWriter::toValue(m_extentQueue.getState(), Unversioned())));
 
@@ -10280,16 +10254,16 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 		wait(onClosed);
 	}
 
-	printf("Reopening pager file from disk.\n");
+	fmt::println("Reopening pager file from disk.");
 	pager = new DWALPager(
 	    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false);
 	wait(success(pager->init()));
 
-	printf("Starting ExtentQueue FastPath Recovery from Disk.\n");
+	fmt::println("Starting ExtentQueue FastPath Recovery from Disk.");
 
 	// reopen the pager from disk
 	extentQueueState = ObjectReader::fromStringRef<ExtentQueueT::QueueState>(pager->getCommitRecord(), Unversioned());
-	printf("Recovered ExtentQueue getState(): %s\n", extentQueueState.toString().c_str());
+	fmt::println("Recovered ExtentQueue getState(): {}", extentQueueState.toString());
 	m_extentQueue.recover(pager, extentQueueState, "ExtentQueueRecovered");
 
 	state double intervalStart = timer();
@@ -10325,27 +10299,27 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 	}
 
 	state double elapsed = timer() - start;
-	printf("Completed fastpath extent queue recovery: elapsed=%f entriesRead=%d recoveryRate=%f MB/s\n",
-	       elapsed,
-	       entriesRead,
-	       cumulativeCommitSize / elapsed / 1e6);
+	fmt::println("Completed fastpath extent queue recovery: elapsed={:f} entriesRead={} recoveryRate={:f} MB/s",
+	             elapsed,
+	             entriesRead,
+	             cumulativeCommitSize / elapsed / 1e6);
 
-	fmt::print("pageCacheCount: {0} extentCacheCount: {1}\n", pager->getPageCacheCount(), pager->getExtentCacheCount());
+	fmt::println("pageCacheCount: {0} extentCacheCount: {1}", pager->getPageCacheCount(), pager->getExtentCacheCount());
 
 	pager->extentCacheClear();
 	m_extentQueue.resetHeadReader();
 
-	printf("Starting ExtentQueue SlowPath Recovery from Disk.\n");
+	fmt::println("Starting ExtentQueue SlowPath Recovery from Disk.");
 	intervalStart = timer();
 	start = intervalStart;
 	// peekAll the queue using regular slow path
 	Standalone<VectorRef<ExtentQueueEntry<16>>> entries = wait(m_extentQueue.peekAll());
 
 	elapsed = timer() - start;
-	printf("Completed slowpath extent queue recovery: elapsed=%f entriesRead=%d recoveryRate=%f MB/s\n",
-	       elapsed,
-	       entries.size(),
-	       cumulativeCommitSize / elapsed / 1e6);
+	fmt::println("Completed slowpath extent queue recovery: elapsed={:f} entriesRead={} recoveryRate={:f} MB/s",
+	             elapsed,
+	             entries.size(),
+	             cumulativeCommitSize / elapsed / 1e6);
 
 	return Void();
 }
@@ -10384,32 +10358,32 @@ TEST_CASE(":/redwood/performance/set") {
 	state bool traceMetrics = params.getInt("traceMetrics").orDefault(0);
 	state bool destructiveSanityCheck = params.getInt("destructiveSanityCheck").orDefault(0);
 
-	printf("file: %s\n", file.c_str());
-	printf("openExisting: %d\n", openExisting);
-	printf("insertRecords: %d\n", insertRecords);
-	printf("destructiveSanityCheck: %d\n", destructiveSanityCheck);
-	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
-	printf("pageSize: %d\n", pageSize);
-	printf("extentSize: %d\n", extentSize);
+	fmt::println("file: {}", file);
+	fmt::println("openExisting: {}", openExisting);
+	fmt::println("insertRecords: {}", insertRecords);
+	fmt::println("destructiveSanityCheck: {}", destructiveSanityCheck);
+	fmt::println("pagerMemoryOnly: {}", pagerMemoryOnly);
+	fmt::println("pageSize: {}", pageSize);
+	fmt::println("extentSize: {}", extentSize);
 	printf("pageCacheBytes: %" PRId64 "\n", pageCacheBytes);
-	printf("trailingIntegerIndexRange: %d\n", nodeCount);
-	printf("maxChangesPerCommit: %d\n", maxRecordsPerCommit);
-	printf("minKeyPrefixBytes: %d\n", minKeyPrefixBytes);
-	printf("maxKeyPrefixBytes: %d\n", maxKeyPrefixBytes);
-	printf("minConsecutiveRun: %d\n", minConsecutiveRun);
-	printf("maxConsecutiveRun: %d\n", maxConsecutiveRun);
-	printf("minValueSize: %d\n", minValueSize);
-	printf("maxValueSize: %d\n", maxValueSize);
-	printf("maxCommitSize: %d\n", maxKVBytesPerCommit);
+	fmt::println("trailingIntegerIndexRange: {}", nodeCount);
+	fmt::println("maxChangesPerCommit: {}", maxRecordsPerCommit);
+	fmt::println("minKeyPrefixBytes: {}", minKeyPrefixBytes);
+	fmt::println("maxKeyPrefixBytes: {}", maxKeyPrefixBytes);
+	fmt::println("minConsecutiveRun: {}", minConsecutiveRun);
+	fmt::println("maxConsecutiveRun: {}", maxConsecutiveRun);
+	fmt::println("minValueSize: {}", minValueSize);
+	fmt::println("maxValueSize: {}", maxValueSize);
+	fmt::println("maxCommitSize: {}", maxKVBytesPerCommit);
 	printf("kvBytesTarget: %" PRId64 "\n", kvBytesTarget);
-	printf("KeyLexicon '%c' to '%c'\n", firstKeyChar, lastKeyChar);
+	fmt::println("KeyLexicon '{:c}' to '{:c}'", firstKeyChar, lastKeyChar);
 	printf("remapCleanupWindowBytes: %" PRId64 "\n", remapCleanupWindowBytes);
-	printf("concurrentScans: %d\n", concurrentScans);
-	printf("concurrentSeeks: %d\n", concurrentSeeks);
-	printf("seeks: %d\n", seeks);
-	printf("scans: %d\n", scans);
-	printf("scanWidth: %d\n", scanWidth);
-	printf("scanPrefetchBytes: %d\n", scanPrefetchBytes);
+	fmt::println("concurrentScans: {}", concurrentScans);
+	fmt::println("concurrentSeeks: {}", concurrentSeeks);
+	fmt::println("seeks: {}", seeks);
+	fmt::println("scans: {}", scans);
+	fmt::println("scanWidth: {}", scanWidth);
+	fmt::println("scanPrefetchBytes: {}", scanPrefetchBytes);
 
 	// If using stdout for metrics, prevent trace event metrics logger from starting
 	if (!traceMetrics) {
@@ -10418,7 +10392,7 @@ TEST_CASE(":/redwood/performance/set") {
 	}
 
 	if (!openExisting) {
-		printf("Deleting old test data\n");
+		fmt::println("Deleting old test data");
 		deleteFile(file);
 	}
 
@@ -10426,7 +10400,7 @@ TEST_CASE(":/redwood/performance/set") {
 	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindowBytes, concurrentExtentReads, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, file, UID(), {});
 	wait(btree->init());
-	printf("Initialized.  StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
+	fmt::println("Initialized.  StorageBytes={}", btree->getStorageBytes().toString());
 
 	state int64_t kvBytesThisCommit = 0;
 	state int64_t kvBytesTotal = 0;
@@ -10434,7 +10408,7 @@ TEST_CASE(":/redwood/performance/set") {
 	state Future<Void> commit = Void();
 	state std::string value(maxValueSize, 'v');
 
-	printf("Starting.\n");
+	fmt::println("Starting.");
 	state double intervalStart = timer();
 	state double start = intervalStart;
 	state int sinceYield = 0;
@@ -10481,9 +10455,9 @@ TEST_CASE(":/redwood/performance/set") {
 				btree->toTraceEvent(e);
 				e.log();
 
-				printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n",
-				       kvBytesTotal / 1e6,
-				       kvBytesTotal / (timer() - start) / 1e6);
+				fmt::println("Cumulative {:.2f} MB keyValue bytes written at {:.2f} MB/s",
+				             kvBytesTotal / 1e6,
+				             kvBytesTotal / (timer() - start) / 1e6);
 
 				// Avoid capturing via this to freeze counter values
 				int recs = recordsThisCommit;
@@ -10495,14 +10469,14 @@ TEST_CASE(":/redwood/performance/set") {
 
 				commit = map(btree->commit(++version), [=](Void result) {
 					if (!traceMetrics) {
-						printf("%s\n", g_redwoodMetrics.toString(true).c_str());
+						fmt::println("{}", g_redwoodMetrics.toString(true));
 					}
 					double elapsed = timer() - *pIntervalStart;
-					printf("Committed %d keyValueBytes in %d records in %f seconds, %.2f MB/s\n",
-					       kvb,
-					       recs,
-					       elapsed,
-					       kvb / elapsed / 1e6);
+					fmt::println("Committed {} keyValueBytes in {} records in {:f} seconds, {:.2f} MB/s",
+					             kvb,
+					             recs,
+					             elapsed,
+					             kvb / elapsed / 1e6);
 					*pIntervalStart = timer();
 					return Void();
 				});
@@ -10514,22 +10488,21 @@ TEST_CASE(":/redwood/performance/set") {
 		}
 
 		wait(commit);
-		printf("Cumulative %.2f MB keyValue bytes written at %.2f MB/s\n",
-		       kvBytesTotal / 1e6,
-		       kvBytesTotal / (timer() - start) / 1e6);
-		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
+		fmt::println("Cumulative {:.2f} MB keyValue bytes written at {:.2f} MB/s",
+		             kvBytesTotal / 1e6,
+		             kvBytesTotal / (timer() - start) / 1e6);
+		fmt::println("StorageBytes={}", btree->getStorageBytes().toString());
 	}
 
 	state Future<Void> stats =
-	    traceMetrics ? Void()
-	                 : recurring([&]() { printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str()); }, 1.0);
+	    traceMetrics ? Void() : recurring([&]() { fmt::print("Stats:\n{}\n", g_redwoodMetrics.toString(true)); }, 1.0);
 
 	if (scans > 0) {
-		printf("Parallel scans, concurrency=%d, scans=%d, scanWidth=%d, scanPreftchBytes=%d ...\n",
-		       concurrentScans,
-		       scans,
-		       scanWidth,
-		       scanPrefetchBytes);
+		fmt::println("Parallel scans, concurrency={}, scans={}, scanWidth={}, scanPreftchBytes={} ...",
+		             concurrentScans,
+		             scans,
+		             scanWidth,
+		             scanPrefetchBytes);
 		for (int x = 0; x < concurrentScans; ++x) {
 			actors.add(
 			    randomScans(btree, scans / concurrentScans, scanWidth, scanPrefetchBytes, firstKeyChar, lastKeyChar));
@@ -10538,7 +10511,7 @@ TEST_CASE(":/redwood/performance/set") {
 	}
 
 	if (seeks > 0) {
-		printf("Parallel seeks, concurrency=%d, seeks=%d ...\n", concurrentSeeks, seeks);
+		fmt::println("Parallel seeks, concurrency={}, seeks={} ...", concurrentSeeks, seeks);
 		for (int x = 0; x < concurrentSeeks; ++x) {
 			actors.add(
 			    randomSeeks(btree, Optional<Version>(), true, seeks / concurrentSeeks, firstKeyChar, lastKeyChar, 4));
@@ -10566,7 +10539,7 @@ struct PrefixSegment {
 	int length;
 	int cardinality;
 
-	std::string toString() const { return format("{%d bytes, %d choices}", length, cardinality); }
+	std::string toString() const { return fmt::format("{{{} bytes, {} choices}}", length, cardinality); }
 };
 
 // Utility class for generating kv pairs under a prefix pattern
@@ -10686,7 +10659,7 @@ struct KVSource {
 	int numPrefixes() const { return prefixes.size(); };
 
 	std::string toString() const {
-		return format("{prefixLen=%d prefixes=%d format=%s}", prefixLen, numPrefixes(), ::toString(desc).c_str());
+		return fmt::format("{{prefixLen={} prefixes={} format={}}}", prefixLen, numPrefixes(), ::toString(desc));
 	}
 };
 
@@ -10721,15 +10694,15 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	state int recordsPerPrefix = recordCountTarget / source.numPrefixes();
 
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
-	fmt::print("commitTarget: {}\n", commitTarget);
-	fmt::print("prefixSource: {}\n", source.toString());
-	fmt::print("usePrefixesInOrder: {}\n", usePrefixesInOrder);
-	fmt::print("suffixSize: {}\n", suffixSize);
-	fmt::print("valueSize: {}\n", valueSize);
-	fmt::print("recordSize: {}\n", recordSize);
-	fmt::print("recordsPerPrefix: {}\n", recordsPerPrefix);
-	fmt::print("recordCountTarget: {}\n", recordCountTarget);
-	fmt::print("kvBytesTarget: {}\n", kvBytesTarget);
+	fmt::println("commitTarget: {}", commitTarget);
+	fmt::println("prefixSource: {}", source.toString());
+	fmt::println("usePrefixesInOrder: {}", usePrefixesInOrder);
+	fmt::println("suffixSize: {}", suffixSize);
+	fmt::println("valueSize: {}", valueSize);
+	fmt::println("recordSize: {}", recordSize);
+	fmt::println("recordsPerPrefix: {}", recordsPerPrefix);
+	fmt::println("recordCountTarget: {}", recordCountTarget);
+	fmt::println("kvBytesTarget: {}", kvBytesTarget);
 
 	state int64_t kvBytes = 0;
 	state int64_t kvBytesTotal = 0;
@@ -10744,12 +10717,13 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 
 	state std::function<void()> stats = [&]() {
 		double elapsed = timer() - start;
-		printf("Cumulative stats: %.2f seconds  %.2f MB keyValue bytes  %d records  %.2f MB/s  %.2f rec/s\r",
-		       elapsed,
-		       kvBytesTotal / 1e6,
-		       records,
-		       kvBytesTotal / elapsed / 1e6,
-		       records / elapsed);
+		fmt::print(
+		    "Cumulative stats: {:.2f} seconds  {:.2f} MB keyValue bytes  {} records  {:.2f} MB/s  {:.2f} rec/s\r",
+		    elapsed,
+		    kvBytesTotal / 1e6,
+		    records,
+		    kvBytesTotal / elapsed / 1e6,
+		    records / elapsed);
 		fflush(stdout);
 	};
 
@@ -10784,20 +10758,19 @@ ACTOR Future<Void> prefixClusteredInsert(IKeyValueStore* kvs,
 	// since the last commit are persisted. For the purposes of how this is used currently, I don't think it matters
 	// though
 	stats();
-	printf("\n");
+	fmt::println("");
 
 	intervalStart = timer();
 	StorageBytes sb = wait(getStableStorageBytes(kvs));
-	printf("storageBytes: %s (stable after %.2f seconds)\n", toString(sb).c_str(), timer() - intervalStart);
+	fmt::println("storageBytes: {} (stable after {:.2f} seconds)", toString(sb), timer() - intervalStart);
 
 	if (clearAfter) {
-		printf("Clearing all keys\n");
+		fmt::println("Clearing all keys");
 		intervalStart = timer();
 		kvs->clear(KeyRangeRef(""_sr, "\xff"_sr));
 		state StorageBytes sbClear = wait(getStableStorageBytes(kvs));
-		printf("Cleared all keys in %.2f seconds, final storageByte: %s\n",
-		       timer() - intervalStart,
-		       toString(sbClear).c_str());
+		fmt::println(
+		    "Cleared all keys in {:.2f} seconds, final storageByte: {}", timer() - intervalStart, toString(sbClear));
 	}
 
 	return Void();
@@ -10811,11 +10784,11 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 	state int64_t kvBytesTarget = (int64_t)recordCountTarget * recordSize;
 
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
-	fmt::print("commitTarget: {}\n", commitTarget);
-	fmt::print("valueSize: {}\n", valueSize);
-	fmt::print("recordSize: {}\n", recordSize);
-	fmt::print("recordCountTarget: {}\n", recordCountTarget);
-	fmt::print("kvBytesTarget: {}\n", kvBytesTarget);
+	fmt::println("commitTarget: {}", commitTarget);
+	fmt::println("valueSize: {}", valueSize);
+	fmt::println("recordSize: {}", recordSize);
+	fmt::println("recordCountTarget: {}", recordCountTarget);
+	fmt::println("kvBytesTarget: {}", kvBytesTarget);
 
 	state int64_t kvBytes = 0;
 	state int64_t kvBytesTotal = 0;
@@ -10830,12 +10803,13 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 
 	state std::function<void()> stats = [&]() {
 		double elapsed = timer() - start;
-		printf("Cumulative stats: %.2f seconds  %.2f MB keyValue bytes  %d records  %.2f MB/s  %.2f rec/s\r",
-		       elapsed,
-		       kvBytesTotal / 1e6,
-		       records,
-		       kvBytesTotal / elapsed / 1e6,
-		       records / elapsed);
+		fmt::print(
+		    "Cumulative stats: {:.2f} seconds  {:.2f} MB keyValue bytes  {} records  {:.2f} MB/s  {:.2f} rec/s\r",
+		    elapsed,
+		    kvBytesTotal / 1e6,
+		    records,
+		    kvBytesTotal / elapsed / 1e6,
+		    records / elapsed);
 		fflush(stdout);
 	};
 
@@ -10865,7 +10839,7 @@ ACTOR Future<Void> sequentialInsert(IKeyValueStore* kvs, int prefixLen, int valu
 
 	wait(commit);
 	stats();
-	printf("\n");
+	fmt::println("");
 
 	return Void();
 }
@@ -10891,7 +10865,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(prefixClusteredInsert(redwood, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(redwood));
-	printf("\n");
+	fmt::println("");
 
 	deleteFile("test.sqlite");
 	deleteFile("test.sqlite-wal");
@@ -10899,7 +10873,7 @@ ACTOR Future<Void> doPrefixInsertComparison(int suffixSize,
 	state IKeyValueStore* sqlite = openKVStore(KeyValueStoreType::SSD_BTREE_V2, "test.sqlite", UID(), 0);
 	wait(prefixClusteredInsert(sqlite, suffixSize, valueSize, source, recordCountTarget, usePrefixesInOrder, true));
 	wait(closeKVS(sqlite));
-	printf("\n");
+	fmt::println("");
 
 	return Void();
 }
@@ -10935,7 +10909,7 @@ TEST_CASE(":/redwood/performance/sequentialInsert") {
 	state IKeyValueStore* redwood = openKVStore(KeyValueStoreType::SSD_REDWOOD_V1, "test.redwood-v1", UID(), 0);
 	wait(sequentialInsert(redwood, prefixLen, valueSize, recordCountTarget));
 	wait(closeKVS(redwood));
-	printf("\n");
+	fmt::println("");
 
 	return Void();
 }
@@ -10951,11 +10925,11 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
                                     int byteLimit,
                                     Optional<ReadOptions> options = Optional<ReadOptions>()) {
 	fmt::print("\nstoreType: {}\n", static_cast<int>(kvs->getType()));
-	fmt::print("prefixSource: {}\n", source.toString());
-	fmt::print("suffixSize: {}\n", suffixSize);
-	fmt::print("recordCountTarget: {}\n", recordCountTarget);
-	fmt::print("singlePrefix: {}\n", singlePrefix);
-	fmt::print("rowLimit: {}\n", rowLimit);
+	fmt::println("prefixSource: {}", source.toString());
+	fmt::println("suffixSize: {}", suffixSize);
+	fmt::println("recordCountTarget: {}", recordCountTarget);
+	fmt::println("singlePrefix: {}", singlePrefix);
+	fmt::println("rowLimit: {}", rowLimit);
 
 	state int64_t recordSize = source.prefixLen + suffixSize + valueSize;
 	state int64_t bytesRead = 0;
@@ -10966,15 +10940,15 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 	state double start = timer();
 	state std::function<void()> stats = [&]() {
 		double elapsed = timer() - start;
-		fmt::print("Cumulative stats: {0:.2f} seconds  {1} queries {2:.2f} MB {3} records  {4:.2f} qps {5:.2f} MB/s  "
-		           "{6:.2f} rec/s\r\n",
-		           elapsed,
-		           queries,
-		           bytesRead / 1e6,
-		           recordsRead,
-		           queries / elapsed,
-		           bytesRead / elapsed / 1e6,
-		           recordsRead / elapsed);
+		fmt::println("Cumulative stats: {0:.2f} seconds  {1} queries {2:.2f} MB {3} records  {4:.2f} qps {5:.2f} MB/s  "
+		             "{6:.2f} rec/s\r",
+		             elapsed,
+		             queries,
+		             bytesRead / 1e6,
+		             recordsRead,
+		             queries / elapsed,
+		             bytesRead / elapsed / 1e6,
+		             recordsRead / elapsed);
 		fflush(stdout);
 	};
 
@@ -10996,7 +10970,7 @@ ACTOR Future<Void> randomRangeScans(IKeyValueStore* kvs,
 	}
 
 	stats();
-	printf("\n");
+	fmt::println("");
 
 	return Void();
 }
@@ -11027,7 +11001,7 @@ TEST_CASE(":/redwood/performance/randomRangeScans") {
 	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 10000, maxByteLimit));
 	wait(randomRangeScans(redwood, suffixSize, source, valueSize, queryRecordTarget, false, 1000000, maxByteLimit));
 	wait(closeKVS(redwood));
-	printf("\n");
+	fmt::println("");
 	return Void();
 }
 

@@ -33,6 +33,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
@@ -797,7 +798,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder, Reference<ICluster
 			state std::vector<Future<Reference<IAsyncFile>>> fs;
 			fs.reserve(2);
 			for (int i = 0; i < 2; ++i) {
-				std::string file = joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i));
+				std::string file = joinPath(dataFolder, fmt::format("{}{}.fdq", fileCoordinatorPrefix, i));
 				fs.push_back(
 				    IAsyncFileSystem::filesystem()->open(file,
 				                                         IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |

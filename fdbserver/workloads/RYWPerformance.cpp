@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct RYWPerformanceWorkload : TestWorkload {
 	static constexpr auto NAME = "RYWPerformance";
@@ -175,7 +176,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 					co_await tr.get(keyForIndex(nodes / 2));
 				}
 
-				fprintf(stderr, "%f", nodes / (timer() - startTime));
+				fmt::print(stderr, "{:f}", nodes / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -200,7 +201,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 					co_await tr.get(keyForIndex(i));
 				}
 
-				fprintf(stderr, "%f", nodes / (timer() - startTime));
+				fmt::print(stderr, "{:f}", nodes / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -225,7 +226,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 					co_await tr.getRange(KeyRangeRef(keyForIndex(0), keyForIndex(nodes)), nodes);
 				}
 
-				fprintf(stderr, "%f", ranges / (timer() - startTime));
+				fmt::print(stderr, "{:f}", ranges / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -253,7 +254,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 					tr.set(keyForIndex(nodes / 2), keyForIndex(i));
 				}
 
-				fprintf(stderr, "%f", nodes / (timer() - startTime));
+				fmt::print(stderr, "{:f}", nodes / (timer() - startTime));
 
 				co_return;
 			} catch (Error& e) {
@@ -265,37 +266,37 @@ struct RYWPerformanceWorkload : TestWorkload {
 
 	Future<Void> _start(Database cx) {
 		int i{ 0 };
-		fprintf(stderr, "test_get_single, ");
+		fmt::print(stderr, "test_get_single, ");
 		for (i = 0; i < 14; i++) {
 			co_await test_get_single(cx, i);
 			if (i == 13)
-				fprintf(stderr, "\n");
+				fmt::println(stderr, "");
 			else
-				fprintf(stderr, ", ");
+				fmt::print(stderr, ", ");
 		}
-		fprintf(stderr, "test_get_many_sequential, ");
+		fmt::print(stderr, "test_get_many_sequential, ");
 		for (i = 0; i < 14; i++) {
 			co_await test_get_many_sequential(cx, i);
 			if (i == 13)
-				fprintf(stderr, "\n");
+				fmt::println(stderr, "");
 			else
-				fprintf(stderr, ", ");
+				fmt::print(stderr, ", ");
 		}
-		fprintf(stderr, "test_get_range_basic, ");
+		fmt::print(stderr, "test_get_range_basic, ");
 		for (i = 4; i < 14; i++) {
 			co_await test_get_range_basic(cx, i);
 			if (i == 13)
-				fprintf(stderr, "\n");
+				fmt::println(stderr, "");
 			else
-				fprintf(stderr, ", ");
+				fmt::print(stderr, ", ");
 		}
-		fprintf(stderr, "test_interleaved_sets_gets, ");
+		fmt::print(stderr, "test_interleaved_sets_gets, ");
 		for (i = 0; i < 14; i++) {
 			co_await test_interleaved_sets_gets(cx, i);
 			if (i == 13)
-				fprintf(stderr, "\n");
+				fmt::println(stderr, "");
 			else
-				fprintf(stderr, ", ");
+				fmt::print(stderr, ", ");
 		}
 	}
 

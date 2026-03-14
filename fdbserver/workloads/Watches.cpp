@@ -25,6 +25,7 @@
 #include "flow/Coroutines.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct WatchesWorkload : TestWorkload {
 	static constexpr auto NAME = "Watches";
@@ -110,7 +111,7 @@ struct WatchesWorkload : TestWorkload {
 		while (extraLoc < extraNodes) {
 			co_await cx.run([&](Transaction* tr) -> Future<Void> {
 				for (int i = 0; i < 1000 && extraLoc + i < extraNodes; i++) {
-					Key extraKey = KeyRef(watchKey.toString() + format("%d", extraLoc + i));
+					Key extraKey = KeyRef(watchKey.toString() + fmt::format("{}", extraLoc + i));
 					Value extraValue = ValueRef(std::string(100, '.'));
 					tr->set(extraKey, extraValue);
 					// TraceEvent("WatcherInitialSetupExtra").detail("Key", extraKey).detail("Value", extraValue);

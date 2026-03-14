@@ -84,7 +84,7 @@ struct PageChecksumCodec {
 		bool operator==(const SumType& rhs) const { return part1 == rhs.part1 && part2 == rhs.part2; }
 		uint32_t part1;
 		uint32_t part2;
-		std::string toString() { return format("0x%08x%08x", part1, part2); }
+		std::string toString() { return fmt::format("0x{:08x}{:08x}", part1, part2); }
 	};
 
 	// Calculates and then either stores or verifies a checksum.
@@ -458,23 +458,23 @@ void hexdump(FILE* fout, StringRef val) {
 	const unsigned char* buf = val.begin();
 	int i, j;
 	for (i = 0; i < buflen; i += 32) {
-		fprintf(fout, "%06x: ", i);
+		fmt::print(fout, "{:06x}: ", i);
 		for (j = 0; j < 32; j++) {
 			if (j == 16)
-				fprintf(fout, "  ");
+				fmt::print(fout, "  ");
 			if (i + j < buflen)
-				fprintf(fout, "%02x ", buf[i + j]);
+				fmt::print(fout, "{:02x} ", buf[i + j]);
 			else
-				fprintf(fout, "   ");
+				fmt::print(fout, "   ");
 		}
-		fprintf(fout, " ");
+		fmt::print(fout, " ");
 		for (j = 0; j < 32; j++) {
 			if (j == 16)
-				fprintf(fout, "  ");
+				fmt::print(fout, "  ");
 			if (i + j < buflen)
-				fprintf(fout, "%c", isprint(buf[i + j]) ? buf[i + j] : '.');
+				fmt::print(fout, "{:c}", isprint(buf[i + j]) ? buf[i + j] : '.');
 		}
-		fprintf(fout, "\n");
+		fmt::println(fout, "");
 	}
 }
 
@@ -2220,7 +2220,7 @@ void KeyValueStoreSQLite::startReadThreads() {
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskRead);
 	for (int i = 0; i < nReadThreads; i++) {
-		std::string threadName = format("fdb-sqlite-r-%d", i);
+		std::string threadName = fmt::format("fdb-sqlite-r-{}", i);
 		if (threadName.size() > 15) {
 			threadName = "fdb-sqlite-r";
 		}
@@ -2305,7 +2305,7 @@ void GenerateIOLogChecksumFile(std::string filename) {
 	uint8_t buf[4096];
 	unsigned int c = 0;
 	while (fread(buf, 1, 4096, f) > 0)
-		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
+		fmt::println(fout, "{} {}", c++, hashlittle(buf, 4096, 0xab12fd93));
 	fclose(f);
 	fclose(fout);
 }
@@ -2370,11 +2370,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 	if (debugS != nullptr)
 		debug = true;
 
-	fprintf(stderr,
-	        "Dump start: %s, end: %s, debug: %s\n",
-	        printable(k).c_str(),
-	        printable(endk).c_str(),
-	        debug ? "true" : "false");
+	fmt::println(stderr, "Dump start: {}, end: {}, debug: {}", printable(k), printable(endk), debug ? "true" : "false");
 
 	while (true) {
 		RangeResult kv = wait(store->readRange(KeyRangeRef(k, endk), 1000));
@@ -2393,8 +2389,8 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 			fwrite(data, sizeof(uint8_t), size, stdout);
 
 			if (debug) {
-				fprintf(stderr, "key: %s\n", printable(one.key).c_str());
-				fprintf(stderr, "val: %s\n", printable(one.value).c_str());
+				fmt::println(stderr, "key: {}", printable(one.key));
+				fmt::println(stderr, "val: {}", printable(one.value));
 			}
 		}
 
@@ -2404,7 +2400,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 		k = keyAfter(kv[kv.size() - 1].key);
 	}
 	fflush(stdout);
-	fmt::print(stderr, "Counted: {}\n", count);
+	fmt::println(stderr, "Counted: {}", count);
 
 	if (store->getError().isError())
 		wait(store->getError());

@@ -19,16 +19,17 @@
  */
 
 #include "fdbserver/LogSystemConfig.h"
+#include "fmt/format.h"
 
 std::string TLogSet::toString() const {
-	return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %s locality: %d",
-	              tLogWriteAntiQuorum,
-	              tLogReplicationFactor,
-	              isLocal,
-	              logRouters.size(),
-	              describe(tLogs).c_str(),
-	              describe(backupWorkers).c_str(),
-	              locality);
+	return fmt::format("anti: {} replication: {} local: {} routers: {} tLogs: {} backupWorkers: {} locality: {}",
+	                   tLogWriteAntiQuorum,
+	                   tLogReplicationFactor,
+	                   isLocal,
+	                   logRouters.size(),
+	                   describe(tLogs),
+	                   describe(backupWorkers),
+	                   locality);
 }
 
 bool TLogSet::operator==(const TLogSet& rhs) const {
@@ -104,11 +105,11 @@ bool OldTLogConf::isEqualIds(OldTLogConf const& r) const {
 }
 
 std::string LogSystemConfig::toString() const {
-	return format("type: %d oldGenerations: %d tags: %d %s",
-	              logSystemType,
-	              oldTLogs.size(),
-	              logRouterTags,
-	              describe(tLogs).c_str());
+	return fmt::format("type: {} oldGenerations: {} tags: {} {}",
+	                   static_cast<int>(logSystemType),
+	                   oldTLogs.size(),
+	                   logRouterTags,
+	                   describe(tLogs));
 }
 
 Optional<Key> LogSystemConfig::getRemoteDcId() const {

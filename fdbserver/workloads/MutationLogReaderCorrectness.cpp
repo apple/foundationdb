@@ -49,7 +49,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 	Value recordValue(int index) {
 		Version v = recordVersion(index);
-		return StringRef(format("%lld (%llx)", static_cast<long long>(v), static_cast<long long>(v)));
+		return StringRef(fmt::format("{} ({:x})", static_cast<long long>(v), static_cast<long long>(v)));
 	}
 
 	MutationLogReaderCorrectnessWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -78,9 +78,9 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 		Transaction tr(cx);
 		int iStart = 0;
 		int batchSize = 1000;
-		fmt::print("Records: {}\n", self->records);
-		fmt::print("BeginVersion: {}\n", self->beginVersion);
-		fmt::print("EndVersion: {}\n", self->endVersion);
+		fmt::println("Records: {}", self->records);
+		fmt::println("BeginVersion: {}", self->beginVersion);
+		fmt::println("EndVersion: {}", self->endVersion);
 
 		while (iStart < self->records) {
 			while (true) {
@@ -126,12 +126,12 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 					if (self->debug) {
 						if (!keyMatch) {
-							printf("key:            %s\n", rec.key.printable().c_str());
-							printf("expected key:   %s\n", expectedKey.printable().c_str());
+							fmt::println("key:            {}", rec.key.printable());
+							fmt::println("expected key:   {}", expectedKey.printable());
 						}
 						if (!valueMatch) {
-							printf("value:          %s\n", rec.value.printable().c_str());
-							printf("expected value: %s\n", expectedValue.printable().c_str());
+							fmt::println("value:          {}", rec.value.printable());
+							fmt::println("expected value: {}", expectedValue.printable());
 						}
 					}
 
@@ -146,8 +146,8 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 			}
 		}
 
-		printf("records expected: %d\n", self->records);
-		printf("records found:    %d\n", nextExpectedRecord);
+		fmt::println("records expected: {}", self->records);
+		fmt::println("records found:    {}", nextExpectedRecord);
 
 		ASSERT_EQ(nextExpectedRecord, self->records);
 	}

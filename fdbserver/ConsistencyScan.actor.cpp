@@ -44,6 +44,7 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define DEBUG_SCAN_PROGRESS false
@@ -280,7 +281,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 			state GetKeyValuesReply current = rangeResult.get();
 			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream", myId)
 			    .detail("DataSize", current.data.size())
-			    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id());
+			    .detail(fmt::format("StorageServer{}", j).c_str(), (*storageServerInterfaces)[j].id());
 			*totalReadAmount += current.data.expectedSize();
 			// If we haven't encountered a valid storage server yet, then mark this as the baseline
 			// to compare against
@@ -295,42 +296,40 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 					// Be especially verbose if in simulation
 					if (g_network->isSimulated()) {
 						int invalidIndex = -1;
-						fmt::print("MISMATCH AT VERSION {0}\n", req.version);
-						printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-						       "",
-						       j,
-						       (*storageServerInterfaces)[j].address().toString().c_str(),
-						       printable(req.begin.getKey()).c_str(),
-						       printable(req.end.getKey()).c_str());
+						fmt::println("MISMATCH AT VERSION {0}", req.version);
+						fmt::print("\n{}SERVER {} ({}); shard = {} - {}:\n",
+						           "",
+						           j,
+						           (*storageServerInterfaces)[j].address().toString(),
+						           printable(req.begin.getKey()),
+						           printable(req.end.getKey()));
 						for (int k = 0; k < current.data.size(); k++) {
-							printf("%d. %s => %s\n",
-							       k,
-							       printable(current.data[k].key).c_str(),
-							       printable(current.data[k].value).c_str());
+							fmt::println(
+							    "{}. {} => {}", k, printable(current.data[k].key), printable(current.data[k].value));
 							if (invalidIndex < 0 &&
 							    (k >= reference.data.size() || current.data[k].key != reference.data[k].key ||
 							     current.data[k].value != reference.data[k].value))
 								invalidIndex = k;
 						}
 
-						printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
-						       "",
-						       firstValidServer->get(),
-						       (*storageServerInterfaces)[firstValidServer->get()].address().toString().c_str(),
-						       printable(req.begin.getKey()).c_str(),
-						       printable(req.end.getKey()).c_str());
+						fmt::print("\n{}SERVER {} ({}); shard = {} - {}:\n",
+						           "",
+						           firstValidServer->get(),
+						           (*storageServerInterfaces)[firstValidServer->get()].address().toString(),
+						           printable(req.begin.getKey()),
+						           printable(req.end.getKey()));
 						for (int k = 0; k < reference.data.size(); k++) {
-							printf("%d. %s => %s\n",
-							       k,
-							       printable(reference.data[k].key).c_str(),
-							       printable(reference.data[k].value).c_str());
+							fmt::println("{}. {} => {}",
+							             k,
+							             printable(reference.data[k].key),
+							             printable(reference.data[k].value));
 							if (invalidIndex < 0 &&
 							    (k >= current.data.size() || reference.data[k].key != current.data[k].key ||
 							     reference.data[k].value != current.data[k].value))
 								invalidIndex = k;
 						}
 
-						printf("\nMISMATCH AT %d\n\n", invalidIndex);
+						fmt::print("\nMISMATCH AT {}\n\n", invalidIndex);
 					}
 
 					// Data for trace event
@@ -461,21 +460,21 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 					TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
 					           "ConsistencyCheck_DataInconsistent",
 					           myId)
-					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
-					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
+					    .detail(fmt::format("StorageServer{}", j).c_str(), (*storageServerInterfaces)[j].id())
+					    .detail(fmt::format("StorageServer{}", firstValidServer->get()).c_str(),
 					            (*storageServerInterfaces)[firstValidServer->get()].id())
 					    .detail("ShardBegin", req.begin.getKey())
 					    .detail("ShardEnd", req.end.getKey())
 					    .detail("VersionNumber", req.version)
-					    .detail(format("Server%dUniques", j).c_str(), currentUniques)
-					    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
-					    .detail(format("Server%dUniques", firstValidServer->get()).c_str(), referenceUniques)
-					    .detail(format("Server%dUniqueKey", firstValidServer->get()).c_str(), referenceUniqueKey)
+					    .detail(fmt::format("Server{}Uniques", j).c_str(), currentUniques)
+					    .detail(fmt::format("Server{}UniqueKey", j).c_str(), currentUniqueKey)
+					    .detail(fmt::format("Server{}Uniques", firstValidServer->get()).c_str(), referenceUniques)
+					    .detail(fmt::format("Server{}UniqueKey", firstValidServer->get()).c_str(), referenceUniqueKey)
 					    .detail("ValueMismatches", valueMismatches)
 					    .detail("ValueMismatchKey", valueMismatchKey)
 					    .detail("MatchingKVPairs", matchingKVPairs)
-					    .detail(format("Server%dHasMore", j).c_str(), current.more)
-					    .detail(format("Server%dHasMore", firstValidServer->get()).c_str(), reference.more)
+					    .detail(fmt::format("Server{}HasMore", j).c_str(), current.more)
+					    .detail(fmt::format("Server{}HasMore", firstValidServer->get()).c_str(), reference.more)
 					    .detail("IsTSS", isTss)
 					    .detail("IsInjected", expectInjected);
 
@@ -2005,7 +2004,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				    .detail("NumSampledKeys", sampledKeys)
 				    .detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
-				testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
+				testFailure(fmt::format("Shard size is more than {:f} std dev from estimate", failErrorNumStdDev),
 				            performQuiescentChecks,
 				            success,
 				            failureIsError);
@@ -2048,8 +2047,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				    .detail("ShardEnd", printable(range.end))
 				    .detail("ShardCount", ranges.size())
 				    .detail("SampledKeys", sampledKeys);
-				testFailure(format("Shard size in quiescent database is too %s",
-				                   (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
+				testFailure(fmt::format("Shard size in quiescent database is too {}",
+				                        (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
 				            performQuiescentChecks,
 				            success,
 				            failureIsError);

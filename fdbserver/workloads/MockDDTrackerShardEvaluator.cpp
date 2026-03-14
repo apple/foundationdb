@@ -20,6 +20,7 @@
 
 #include "fdbserver/workloads/MockDDTest.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 public:
@@ -132,10 +133,10 @@ public:
 		if (!enabled)
 			return true;
 
-		fmt::print("Check phase shards count: {}\n", shards.size());
+		fmt::println("Check phase shards count: {}", shards.size());
 		ASSERT_GE(shards.size(), checkMinShardCount);
 		for (auto& [r, c] : rsReasonCounts) {
-			fmt::print("{}: {}\n", r.toString(), c);
+			fmt::println("{}: {}", r.toString(), c);
 		}
 		ASSERT_GE(rsReasonCounts[RelocateReason::SIZE_SPLIT], checkMinSizeSplit);
 		ASSERT_GE(rsReasonCounts[RelocateReason::WRITE_SPLIT], checkMinWriteSplit);

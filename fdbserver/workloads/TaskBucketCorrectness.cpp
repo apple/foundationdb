@@ -24,6 +24,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct SayHelloTaskFunc : TaskFuncBase {
 	static StringRef name;
@@ -88,7 +89,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 				                                    SayHelloTaskFunc::version,
 				                                    StringRef(),
 				                                    deterministicRandom()->randomInt(0, 2));
-				new_task->params["name"_sr] = StringRef(format("task_%d", currTaskNumber + 1));
+				new_task->params["name"_sr] = StringRef(fmt::format("task_{}", currTaskNumber + 1));
 				new_task->params["chained"_sr] = task->params["chained"_sr];
 				new_task->params["subtaskCount"_sr] = task->params["subtaskCount"_sr];
 				Reference<TaskFuture> taskDone = futureBucket->future(tr);
@@ -139,7 +140,7 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 		for (int i = 0; i < subtaskCount; ++i) {
 			auto new_task = makeReference<Task>(
 			    SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
-			new_task->params["name"_sr] = StringRef(format("task_%d", i));
+			new_task->params["name"_sr] = StringRef(fmt::format("task_{}", i));
 			new_task->params["chained"_sr] = task->params["chained"_sr];
 			new_task->params["subtaskCount"_sr] = task->params["subtaskCount"_sr];
 			Reference<TaskFuture> taskDone = futureBucket->future(tr);
@@ -225,7 +226,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		                                deterministicRandom()->randomInt(0, 2));
 
 		task->params["chained"_sr] = chained ? "true"_sr : "false"_sr;
-		task->params["subtaskCount"_sr] = StringRef(format("%d", subtaskCount));
+		task->params["subtaskCount"_sr] = StringRef(fmt::format("{}", subtaskCount));
 		taskBucket->addTask(tr, task);
 		auto taskDone = makeReference<Task>(
 		    SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), deterministicRandom()->randomInt(0, 2));
@@ -266,7 +267,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 									break;
 								else {
 									co_await TaskBucket::debugPrintRange(
-									    cx, taskSubspace.key(), StringRef(format("client_%d", clientId)));
+									    cx, taskSubspace.key(), StringRef(fmt::format("client_{}", clientId)));
 									TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
 								}
 							} else {
@@ -307,7 +308,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	Future<bool> checkSayHello(Reference<ReadYourWritesTransaction> tr, int subTaskCount) {
 		std::set<std::string> data = { "Hello, Everyone!", "Said hello to everyone!" };
 		for (int i = 0; i < subTaskCount; i++) {
-			data.insert(format("task_%d", i));
+			data.insert(fmt::format("task_{}", i));
 		}
 
 		RangeResult values =
@@ -338,7 +339,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 WorkloadFactory<TaskBucketCorrectnessWorkload> TaskBucketCorrectnessWorkloadFactory;
 
 void print_subspace_key(const Subspace& subspace, int id) {
-	printf("%d==========%s===%d\n", id, printable(StringRef(subspace.key())).c_str(), subspace.key().size());
+	fmt::println("{}=========={}==={}", id, printable(StringRef(subspace.key())), subspace.key().size());
 }
 
 TEST_CASE("/fdbclient/TaskBucket/Subspace") {
@@ -370,10 +371,10 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 	ASSERT(subspace_test5.key() == "abc\x01user\x00\x15\x7b"_sr);
 
 	// Subspace pack
-	printf("%d==========%s===%d\n", 6, printable(subspace_test5.pack(t)).c_str(), subspace_test5.pack(t).size());
+	fmt::println("{}=========={}==={}", 6, printable(subspace_test5.pack(t)), subspace_test5.pack(t).size());
 	ASSERT(subspace_test5.pack(t) == "abc\x01user\x00\x15\x7b\x01user\x00\x15\x7b"_sr);
 
-	printf("%d==========%s===%d\n", 7, printable(subspace_test5.pack(t1)).c_str(), subspace_test5.pack(t1).size());
+	fmt::println("{}=========={}==={}", 7, printable(subspace_test5.pack(t1)), subspace_test5.pack(t1).size());
 	ASSERT(subspace_test5.pack(t1) == "abc\x01user\x00\x15\x7b\x15\x01"_sr);
 
 	// Subspace getItem
@@ -390,39 +391,31 @@ TEST_CASE("/fdbclient/TaskBucket/Subspace") {
 
 	// pack
 	Tuple t3 = Tuple::makeTuple(""_sr);
-	printf("%d==========%s===%d\n", 10, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
+	fmt::println("{}=========={}==={}", 10, printable(subspace_test5.pack(t3)), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.pack(StringRef()));
 	ASSERT(subspace_test5.pack(t3) == "abc\x01user\x00\x15\x7b\x01\x00"_sr);
 
-	printf("%d==========%s===%d\n",
-	       11,
-	       printable(subspace_test5.range(t3).begin).c_str(),
-	       subspace_test5.range(t3).begin.size());
+	fmt::println(
+	    "{}=========={}==={}", 11, printable(subspace_test5.range(t3).begin), subspace_test5.range(t3).begin.size());
 	ASSERT(subspace_test5.range(t3).begin == subspace_test5.get(StringRef()).range().begin);
-	printf("%d==========%s===%d\n",
-	       12,
-	       printable(subspace_test5.range(t3).end).c_str(),
-	       subspace_test5.range(t3).end.size());
+	fmt::println(
+	    "{}=========={}==={}", 12, printable(subspace_test5.range(t3).end), subspace_test5.range(t3).end.size());
 	ASSERT(subspace_test5.range(t3).end == subspace_test5.get(StringRef()).range().end);
 
 	StringRef def = "def"_sr;
 	StringRef ghi = "ghi"_sr;
 	t3.append(def);
 	t3.append(ghi);
-	printf("%d==========%s===%d\n", 13, printable(subspace_test5.pack(t3)).c_str(), subspace_test5.pack(t3).size());
+	fmt::println("{}=========={}==={}", 13, printable(subspace_test5.pack(t3)), subspace_test5.pack(t3).size());
 	ASSERT(subspace_test5.pack(t3) == subspace_test5.get(StringRef()).get(def).pack(ghi));
 	ASSERT(subspace_test5.pack(t3) == "abc\x01user\x00\x15\x7b\x01\x00\x01"
 	                                  "def\x00\x01ghi\x00"_sr);
 
-	printf("%d==========%s===%d\n",
-	       14,
-	       printable(subspace_test5.range(t3).begin).c_str(),
-	       subspace_test5.range(t3).begin.size());
+	fmt::println(
+	    "{}=========={}==={}", 14, printable(subspace_test5.range(t3).begin), subspace_test5.range(t3).begin.size());
 	ASSERT(subspace_test5.range(t3).begin == subspace_test5.get(StringRef()).get(def).get(ghi).range().begin);
-	printf("%d==========%s===%d\n",
-	       15,
-	       printable(subspace_test5.range(t3).end).c_str(),
-	       subspace_test5.range(t3).end.size());
+	fmt::println(
+	    "{}=========={}==={}", 15, printable(subspace_test5.range(t3).end), subspace_test5.range(t3).end.size());
 	ASSERT(subspace_test5.range(t3).end == subspace_test5.get(StringRef()).get(def).get(ghi).range().end);
 
 	return Void();

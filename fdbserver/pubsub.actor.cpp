@@ -21,10 +21,11 @@
 #include <cinttypes>
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/pubsub.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 Value uInt64ToValue(uint64_t v) {
-	return StringRef(format("%016llx", v));
+	return StringRef(fmt::format("{:016x}", v));
 }
 uint64_t valueToUInt64(const StringRef& v) {
 	uint64_t x = 0;
@@ -33,70 +34,70 @@ uint64_t valueToUInt64(const StringRef& v) {
 }
 
 Key keyForInbox(uint64_t inbox) {
-	return StringRef(format("i/%016llx", inbox));
+	return StringRef(fmt::format("i/{:016x}", inbox));
 }
 Key keyForInboxSubscription(uint64_t inbox, uint64_t feed) {
-	return StringRef(format("i/%016llx/subs/%016llx", inbox, feed));
+	return StringRef(fmt::format("i/{:016x}/subs/{:016x}", inbox, feed));
 }
 Key keyForInboxSubscriptionCount(uint64_t inbox) {
-	return StringRef(format("i/%016llx/subsCnt", inbox));
+	return StringRef(fmt::format("i/{:016x}/subsCnt", inbox));
 }
 Key keyForInboxStalePrefix(uint64_t inbox) {
-	return StringRef(format("i/%016llx/stale/", inbox));
+	return StringRef(fmt::format("i/{:016x}/stale/", inbox));
 }
 Key keyForInboxStaleFeed(uint64_t inbox, uint64_t feed) {
-	return StringRef(format("i/%016llx/stale/%016llx", inbox, feed));
+	return StringRef(fmt::format("i/{:016x}/stale/{:016x}", inbox, feed));
 }
 Key keyForInboxCacheByIDPrefix(uint64_t inbox) {
-	return StringRef(format("i/%016llx/cid/", inbox));
+	return StringRef(fmt::format("i/{:016x}/cid/", inbox));
 }
 Key keyForInboxCacheByID(uint64_t inbox, uint64_t messageId) {
-	return StringRef(format("i/%016llx/cid/%016llx", inbox, messageId));
+	return StringRef(fmt::format("i/{:016x}/cid/{:016x}", inbox, messageId));
 }
 Key keyForInboxCacheByFeedPrefix(uint64_t inbox) {
-	return StringRef(format("i/%016llx/cf/", inbox));
+	return StringRef(fmt::format("i/{:016x}/cf/", inbox));
 }
 Key keyForInboxCacheByFeed(uint64_t inbox, uint64_t feed) {
-	return StringRef(format("i/%016llx/cf/%016llx", inbox, feed));
+	return StringRef(fmt::format("i/{:016x}/cf/{:016x}", inbox, feed));
 }
 
 Key keyForFeed(uint64_t feed) {
-	return StringRef(format("f/%016llx", feed));
+	return StringRef(fmt::format("f/{:016x}", feed));
 }
 Key keyForFeedSubscriber(uint64_t feed, uint64_t inbox) {
-	return StringRef(format("f/%016llx/subs/%016llx", feed, inbox));
+	return StringRef(fmt::format("f/{:016x}/subs/{:016x}", feed, inbox));
 }
 Key keyForFeedSubscriberCount(uint64_t feed) {
-	return StringRef(format("f/%016llx/subscCnt", feed));
+	return StringRef(fmt::format("f/{:016x}/subscCnt", feed));
 }
 Key keyForFeedMessage(uint64_t feed, uint64_t message) {
-	return StringRef(format("f/%016llx/m/%016llx", feed, message));
+	return StringRef(fmt::format("f/{:016x}/m/{:016x}", feed, message));
 }
 Key keyForFeedMessagePrefix(uint64_t feed) {
-	return StringRef(format("f/%016llx/m/", feed));
+	return StringRef(fmt::format("f/{:016x}/m/", feed));
 }
 Key keyForFeedMessageCount(uint64_t feed) {
-	return StringRef(format("f/%016llx/messCount", feed));
+	return StringRef(fmt::format("f/{:016x}/messCount", feed));
 }
 // the following should go at some point: change over to range query of count 1 from feed message list
 Key keyForFeedLatestMessage(uint64_t feed) {
-	return StringRef(format("f/%016llx/latestMessID", feed));
+	return StringRef(fmt::format("f/{:016x}/latestMessID", feed));
 }
 Key keyForFeedWatcherPrefix(uint64_t feed) {
-	return StringRef(format("f/%016llx/watchers/", feed));
+	return StringRef(fmt::format("f/{:016x}/watchers/", feed));
 }
 Key keyForFeedWatcher(uint64_t feed, uint64_t inbox) {
-	return StringRef(format("f/%016llx/watchers/%016llx", feed, inbox));
+	return StringRef(fmt::format("f/{:016x}/watchers/{:016x}", feed, inbox));
 }
 
 Standalone<StringRef> messagePrefix("m/"_sr);
 
 Key keyForMessage(uint64_t message) {
-	return StringRef(format("m/%016llx", message));
+	return StringRef(fmt::format("m/{:016x}", message));
 }
 
 Key keyForDisptchEntry(uint64_t message) {
-	return StringRef(format("d/%016llx", message));
+	return StringRef(fmt::format("d/{:016x}", message));
 }
 
 PubSub::PubSub(Database _cx) : cx(_cx) {}

@@ -30,6 +30,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IAsyncFile.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class RandomByteGenerator {
@@ -132,7 +133,7 @@ struct AsyncFileWorkload : TestWorkload {
 				state Future<Void> lastWrite = Void();
 				for (i = oldSize & ~(chunkSize - 1); i < newSize; i += chunkSize) {
 					if (i >> 30 != (i + (chunkSize)) >> 30) // each GB
-						printf("Building test file: %d GB\n", int((i + (chunkSize)) >> 30));
+						fmt::println("Building test file: {} GB", int((i + (chunkSize)) >> 30));
 					if (self->fillRandom)
 						rbg.writeRandomBytesToBuffer(data->buffer, chunkSize);
 					auto w = lastWrite;

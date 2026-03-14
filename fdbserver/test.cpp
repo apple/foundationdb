@@ -58,6 +58,7 @@
 
 #include "flow/Trace.h"
 #include "flow/CoroUtils.h"
+#include "fmt/format.h"
 
 WorkloadContext::WorkloadContext() {}
 
@@ -77,7 +78,7 @@ void emplaceIndex(uint8_t* data, int offset, int64_t index) {
 }
 
 Key doubleToTestKey(double p) {
-	return StringRef(format("%016llx", *(uint64_t*)&p));
+	return StringRef(fmt::format("{:016x}", *(uint64_t*)&p));
 }
 
 double testKeyToDouble(const KeyRef& p) {
@@ -523,17 +524,15 @@ Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 		evt.detail("TestName", testName);
 		if (!workload) {
 			evt.detail("Reason", "Null workload");
-			fprintf(stderr,
-			        "ERROR: Workload could not be created, perhaps testName (%s) is not a valid workload\n",
-			        printable(testName).c_str());
+			fmt::println(stderr,
+			             "ERROR: Workload could not be created, perhaps testName ({}) is not a valid workload",
+			             printable(testName));
 		} else {
 			evt.detail("Reason", "Not all options consumed");
-			fprintf(stderr, "ERROR: Workload had invalid options. The following were unrecognized:\n");
+			fmt::println(stderr, "ERROR: Workload had invalid options. The following were unrecognized:");
 			for (int i = 0; i < unconsumedOptions.size(); i++)
-				fprintf(stderr,
-				        " '%s' = '%s'\n",
-				        unconsumedOptions[i].key.toString().c_str(),
-				        unconsumedOptions[i].value.toString().c_str());
+				fmt::println(
+				    stderr, " '{}' = '{}'", unconsumedOptions[i].key.toString(), unconsumedOptions[i].value.toString());
 		}
 		throw test_specification_invalid();
 	}
@@ -547,7 +546,7 @@ Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
 	std::vector<Future<Reference<TestWorkload>>> ifaces;
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
-		fprintf(stderr, "ERROR: No options were provided for workload.\n");
+		fmt::println(stderr, "ERROR: No options were provided for workload.");
 		throw test_specification_invalid();
 	}
 
@@ -597,35 +596,35 @@ void printSimulatedTopology() {
 		}
 		return lhs->address < rhs->address;
 	});
-	printf("Simulated Cluster Topology:\n");
-	printf("===========================\n");
+	fmt::println("Simulated Cluster Topology:");
+	fmt::println("===========================");
 	Optional<Standalone<StringRef>> dcId, dataHallId, zoneId, machineId;
 	for (auto p : processes) {
 		std::string indent = "";
 		if (dcId != p->locality.dcId()) {
 			dcId = p->locality.dcId();
-			printf("%sdcId: %s\n", indent.c_str(), p->locality.describeDcId().c_str());
+			fmt::println("{}dcId: {}", indent, p->locality.describeDcId());
 		}
 		indent += "  ";
 		if (dataHallId != p->locality.dataHallId()) {
 			dataHallId = p->locality.dataHallId();
-			printf("%sdataHallId: %s\n", indent.c_str(), p->locality.describeDataHall().c_str());
+			fmt::println("{}dataHallId: {}", indent, p->locality.describeDataHall());
 		}
 		indent += "  ";
 		if (zoneId != p->locality.zoneId()) {
 			zoneId = p->locality.zoneId();
-			printf("%szoneId: %s\n", indent.c_str(), p->locality.describeZone().c_str());
+			fmt::println("{}zoneId: {}", indent, p->locality.describeZone());
 		}
 		indent += "  ";
 		if (machineId != p->locality.machineId()) {
 			machineId = p->locality.machineId();
-			printf("%smachineId: %s\n", indent.c_str(), p->locality.describeMachineId().c_str());
+			fmt::println("{}machineId: {}", indent, p->locality.describeMachineId());
 		}
 		indent += "  ";
-		printf("%sAddress: %s\n", indent.c_str(), p->address.toString().c_str());
+		fmt::println("{}Address: {}", indent, p->address.toString());
 		indent += "  ";
-		printf("%sClass: %s\n", indent.c_str(), p->startingClass.toString().c_str());
-		printf("%sName: %s\n", indent.c_str(), p->name.c_str());
+		fmt::println("{}Class: {}", indent, p->startingClass.toString());
+		fmt::println("{}Name: {}", indent, p->name);
 	}
 }
 
@@ -823,7 +822,7 @@ Future<Void> runWorkloadAsync(Database cx,
 
 		if (action == 1) {
 			// setup
-			printf("Test received trigger for setup...\n");
+			fmt::println("Test received trigger for setup...");
 			TraceEvent("TestSetupBeginning", workIface.id()).detail("Workload", workload->description());
 			if (!setupResult.present()) {
 				try {
@@ -859,7 +858,7 @@ Future<Void> runWorkloadAsync(Database cx,
 				TraceEvent("TestComplete", workIface.id())
 				    .detail("Workload", workload->description())
 				    .detail("OK", !startResult.get().isError());
-				printf("%s complete\n", workload->description().c_str());
+				fmt::println("{} complete", workload->description());
 			}
 			sendResult(startReq, startResult);
 		} else if (action == 3) {
@@ -909,9 +908,9 @@ Future<Void> testerServerWorkload(WorkloadRequest work,
 	try {
 		std::map<std::string, std::string> details;
 		details["WorkloadTitle"] = printable(work.title);
-		details["ClientId"] = format("%d", work.clientId);
-		details["ClientCount"] = format("%d", work.clientCount);
-		details["WorkloadTimeout"] = format("%d", work.timeout);
+		details["ClientId"] = fmt::format("{}", work.clientId);
+		details["ClientCount"] = fmt::format("{}", work.clientCount);
+		details["WorkloadTimeout"] = fmt::format("{}", work.timeout);
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
@@ -924,7 +923,7 @@ Future<Void> testerServerWorkload(WorkloadRequest work,
 		Reference<TestWorkload> workload = co_await getWorkloadIface(work, ccr, dbInfo);
 		if (!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
-			fprintf(stderr, "ERROR: The workload could not be created.\n");
+			fmt::println(stderr, "ERROR: The workload could not be created.");
 			throw test_specification_invalid();
 		}
 		Future<Void> test = runWorkloadAsync(cx, workIface, workload, work.databasePingDelay) ||
@@ -1166,19 +1165,19 @@ std::vector<PerfMetric> aggregateMetrics(std::vector<std::vector<PerfMetric>> me
 		std::vector<PerfMetric> workloadMetrics = metrics[i];
 		TraceEvent("MetricsReturned").detail("Count", workloadMetrics.size());
 		for (int m = 0; m < workloadMetrics.size(); m++) {
-			printf("Metric (%d, %d): %s, %f, %s\n",
-			       i,
-			       m,
-			       workloadMetrics[m].name().c_str(),
-			       workloadMetrics[m].value(),
-			       workloadMetrics[m].formatted().c_str());
+			fmt::println("Metric ({}, {}): {}, {:f}, {}",
+			             i,
+			             m,
+			             workloadMetrics[m].name(),
+			             workloadMetrics[m].value(),
+			             workloadMetrics[m].formatted());
 			metricMap[workloadMetrics[m].name()].push_back(workloadMetrics[m]);
 		}
 	}
 	TraceEvent("Metric")
 	    .detail("Name", "Reporting Clients")
 	    .detail("Value", (double)metrics.size())
-	    .detail("Formatted", format("%d", metrics.size()).c_str());
+	    .detail("Formatted", fmt::format("{}", metrics.size()).c_str());
 
 	std::vector<PerfMetric> result;
 	std::map<std::string, std::vector<PerfMetric>>::iterator it;
@@ -1229,10 +1228,10 @@ Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanSta
 	csState->enabled = false;
 
 	if (csState->enableAfter || csState->waitForComplete) {
-		printf("Enabling consistency scan after test ...\n");
+		fmt::println("Enabling consistency scan after test ...");
 		TraceEvent("TestProgress").log("checkConsistencyScanAfterTest: calling enableConsistencyScanInSim()");
 		co_await enableConsistencyScanInSim(cx);
-		printf("Enabled consistency scan after test.\n");
+		fmt::println("Enabled consistency scan after test.");
 		TraceEvent("TestProgress").log("checkConsistencyScanAfterTest: enableConsistencyScanInSim() returned.");
 	}
 
@@ -1287,7 +1286,7 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 
 	if (specCopy.phases & TestWorkload::SETUP) {
 		std::vector<Future<ErrorOr<Void>>> setups;
-		printf("setting up test (%s)...\n", printable(specCopy.title).c_str());
+		fmt::println("setting up test ({})...", printable(specCopy.title));
 		TraceEvent("TestSetupStart").detail("WorkloadTitle", specCopy.title);
 		setups.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
@@ -1300,14 +1299,14 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 
 	if (specCopy.phases & TestWorkload::EXECUTION) {
 		TraceEvent("TestStarting").detail("WorkloadTitle", specCopy.title);
-		printf("running test (%s)...\n", printable(specCopy.title).c_str());
+		fmt::println("running test ({})...", printable(specCopy.title));
 		std::vector<Future<ErrorOr<Void>>> starts;
 		starts.reserve(workloads.size());
 		for (int i = 0; i < workloads.size(); i++)
 			starts.push_back(workloads[i].start.template getReplyUnlessFailedFor<Void>(waitForFailureTime, 0));
 		co_await waitForAll(starts);
 		throwIfError(starts, "StartFailedForWorkload" + printable(specCopy.title));
-		printf("%s complete\n", printable(specCopy.title).c_str());
+		fmt::println("{} complete", printable(specCopy.title));
 		TraceEvent("TestComplete").detail("WorkloadTitle", specCopy.title);
 		TraceEvent("TestProgress").log("runWorkload: workload [%s] start finished", name.c_str());
 	}
@@ -1320,7 +1319,7 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 		std::vector<Future<ErrorOr<CheckReply>>> checks;
 		TraceEvent("TestCheckingResults").detail("WorkloadTitle", specCopy.title);
 
-		printf("checking test (%s)...\n", name.c_str());
+		fmt::println("checking test ({})...", name);
 		TraceEvent("TestProgress").log("runWorkload: calling check interface for test [%s]", name.c_str());
 
 		checks.reserve(workloads.size());
@@ -1343,7 +1342,7 @@ Future<DistributedTestResults> runWorkload(Database const& cx,
 
 	if (specCopy.phases & TestWorkload::METRICS) {
 		std::vector<Future<ErrorOr<std::vector<PerfMetric>>>> metricTasks;
-		printf("fetching metrics (%s)...\n", printable(specCopy.title).c_str());
+		fmt::println("fetching metrics ({})...", printable(specCopy.title));
 		TraceEvent("TestFetchingMetrics").detail("WorkloadTitle", specCopy.title);
 		TraceEvent("TestProgress").log("runWorkload: calling metrics interface for test [%s]", name.c_str());
 		metricTasks.reserve(workloads.size());
@@ -1510,8 +1509,8 @@ Future<Void> checkConsistency(Database cx,
 	options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
 	options.push_back_deep(options.arena(), KeyValueRef("performQuiescentChecks"_sr, performQuiescent));
 	options.push_back_deep(options.arena(), KeyValueRef("performTSSCheck"_sr, performTSSCheck));
-	options.push_back_deep(options.arena(),
-	                       KeyValueRef("maxDDRunTime"_sr, ValueRef(options.arena(), format("%f", maxDDRunTime))));
+	options.push_back_deep(
+	    options.arena(), KeyValueRef("maxDDRunTime"_sr, ValueRef(options.arena(), fmt::format("{:f}", maxDDRunTime))));
 	options.push_back_deep(options.arena(), KeyValueRef("distributed"_sr, "false"_sr));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
@@ -2116,7 +2115,7 @@ Future<bool> runTest(Database cx,
 			fTestResults = timeoutError(fTestResults, spec.timeout);
 		}
 		DistributedTestResults _testResults = co_await fTestResults;
-		printf("Test complete\n");
+		fmt::println("Test complete");
 		TraceEvent("TestProgress").log("runTest: test [%s] complete", name.c_str());
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
@@ -2131,7 +2130,7 @@ Future<bool> runTest(Database cx,
 			    .error(e)
 			    .detail("Reason", "Test timed out")
 			    .detail("Timeout", spec.timeout);
-			fprintf(stderr, "ERROR: Test [%s] timed out after %d seconds.\n", name.c_str(), spec.timeout);
+			fmt::println(stderr, "ERROR: Test [{}] timed out after {} seconds.", name, spec.timeout);
 			testResults.failures = testers.size();
 			testResults.successes = 0;
 		} else {
@@ -2147,7 +2146,7 @@ Future<bool> runTest(Database cx,
 	bool ok = testResults.ok();
 
 	if (spec.useDB) {
-		printf("%d test clients passed; %d test clients failed\n", testResults.successes, testResults.failures);
+		fmt::println("{} test clients passed; {} test clients failed", testResults.successes, testResults.failures);
 		TraceEvent("TestProgress")
 		    .log("runTest: [%d] test clients passed; [%d] test clients failed",
 		         testResults.successes,
@@ -2168,17 +2167,17 @@ Future<bool> runTest(Database cx,
 		// Disable consistency scan before checkConsistency because otherwise it will prevent quiet database from
 		// quiescing
 		co_await checkConsistencyScanAfterTest(cx, consistencyScanState);
-		printf("Consistency scan done\n");
+		fmt::println("Consistency scan done");
 		TraceEvent("TestProgress").log("runTest: checkConsistencyScanAfterTest returned");
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
 			bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 			try {
-				printf("Running urgent consistency check...\n");
+				fmt::println("Running urgent consistency check...");
 				TraceEvent("TestProgress").log("Running urgent consistency check");
 				co_await timeoutError(checkConsistencyUrgentSim(cx, testers), 20000.0);
-				printf("Urgent consistency check done\nRunning consistency check...\n");
+				fmt::print("Urgent consistency check done\nRunning consistency check...\n");
 				TraceEvent("TestProgress").log("Urgent consistency check done; now invoking checkConsistency()");
 				co_await timeoutError(checkConsistency(cx,
 				                                       testers,
@@ -2189,7 +2188,7 @@ Future<bool> runTest(Database cx,
 				                                       spec.databasePingDelay,
 				                                       dbInfo),
 				                      20000.0);
-				printf("Consistency check done\n");
+				fmt::println("Consistency check done");
 				TraceEvent("TestProgress").log("checkConsistency() returned");
 			} catch (Error& e) {
 				TraceEvent("TestProgress").log("Exception in checkConsistencyUrgentSim or checkConsistency");
@@ -2240,7 +2239,7 @@ Future<bool> runTest(Database cx,
 		failCount++;
 	}
 
-	printf("%d test clients passed; %d test clients failed\n", testResults.successes, testResults.failures);
+	fmt::println("{} test clients passed; {} test clients failed", testResults.successes, testResults.failures);
 	TraceEvent("TestProgress")
 	    .log(
 	        "runTest: [%d] test clients passed; [%d] test clients failed", testResults.successes, testResults.failures);
@@ -2863,8 +2862,8 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 	disableConnectionFailures("Tester");
 
 	// Change the configuration (and/or create the database) if necessary
-	printf("startingConfiguration:%s start\n", startingConfiguration.toString().c_str());
-	fmt::print("useDB: {}\n", useDB);
+	fmt::println("startingConfiguration:{} start", startingConfiguration.toString());
+	fmt::println("useDB: {}", useDB);
 
 	TraceEvent("TestProgress")
 	    .log("runTests7: startingConfiguration: [%s]; useDB: [%s]",
@@ -2984,23 +2983,23 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		}
 
 		if (perpetualWiggleEnabled) { // restore the enabled perpetual storage wiggle setting
-			printf("Set perpetual_storage_wiggle=1 ...\n");
+			fmt::println("Set perpetual_storage_wiggle=1 ...");
 			Version cVer = co_await setPerpetualStorageWiggle(cx, true, LockAware::True);
 			(void)cVer;
-			printf("Set perpetual_storage_wiggle=1 Done.\n");
+			fmt::println("Set perpetual_storage_wiggle=1 Done.");
 		}
 
 		if (backupWorkerEnabled) {
-			printf("Enabling backup worker ...\n");
+			fmt::println("Enabling backup worker ...");
 			co_await enableBackupWorker(cx);
-			printf("Enabled backup worker.\n");
+			fmt::println("Enabled backup worker.");
 		}
 
 		// TODO: Move this to a BehaviorInjection workload once that concept exists.
 		if (consistencyScanState.enabled && !consistencyScanState.enableAfter) {
-			printf("Enabling consistency scan ...\n");
+			fmt::println("Enabling consistency scan ...");
 			co_await enableConsistencyScanInSim(cx);
-			printf("Enabled consistency scan.\n");
+			fmt::println("Enabled consistency scan.");
 		}
 	}
 
@@ -3034,16 +3033,16 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 	int idx = 0;
 	std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup;
 	for (; idx < tests.size(); idx++) {
-		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
+		fmt::println("Run test:{} start", tests[idx].title.toString());
 		TraceEvent("TestProgress").log("runTests7: starting test [%s]", tests[idx].title.toString().c_str());
 		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
 		co_await success(runTest(cx, testers, tests[idx], dbInfo, &consistencyScanState));
 		knobProtectiveGroup.reset(nullptr);
-		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
+		fmt::println("Run test:{} Done.", tests[idx].title.toString());
 		TraceEvent("TestProgress").log("runTests7: done running test [%s]", tests[idx].title.toString().c_str());
 	}
 
-	printf("\n%d tests passed; %d tests failed.\n", passCount, failCount);
+	fmt::print("\n{} tests passed; {} tests failed.\n", passCount, failCount);
 	TraceEvent("TestProgress").log("runTests7: [%d] tests passed; [%d] tests failed.", passCount, failCount);
 
 	bool ranConsistencyScan = false;
@@ -3051,7 +3050,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		if (waitForQuiescenceEnd) {
 			TraceEvent("TestProgress")
 			    .log("runTests7: useDB && waitForQuiescenceEnd ==> invoking checkConsistencyScanAfterTest()");
-			printf("Waiting for DD to end...\n");
+			fmt::println("Waiting for DD to end...");
 			TraceEvent("QuietDatabaseEndStart");
 			try {
 				TraceEvent("QuietDatabaseEndWait");
@@ -3075,7 +3074,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		TraceEvent("TestProgress").log("runTests7: didn't run consistency scan");
 	}
 
-	printf("\n");
+	fmt::println("");
 
 	co_return;
 }
@@ -3224,7 +3223,7 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsaf
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
 		spec.waitForQuiescenceEnd = false;
-		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
+		std::string rateLimitMax = fmt::format("{}", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
 		options.push_back_deep(options.arena(), KeyValueRef("testName"_sr, "ConsistencyCheck"_sr));
 		options.push_back_deep(options.arena(), KeyValueRef("performQuiescentChecks"_sr, "false"_sr));
 		options.push_back_deep(options.arena(), KeyValueRef("distributed"_sr, "false"_sr));
@@ -3257,7 +3256,7 @@ Future<Void> runTests(Reference<IClusterConnectionRecord> const& connRecordUnsaf
 			TraceEvent(SevError, "TestHarnessFail")
 			    .detail("Reason", "file open failed")
 			    .detail("File", fileName.c_str());
-			fprintf(stderr, "ERROR: Could not open file `%s'\n", fileName.c_str());
+			fmt::println(stderr, "ERROR: Could not open file `{}'", fileName);
 			co_return;
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester

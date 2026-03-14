@@ -29,6 +29,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "flow/IRandom.h"
+#include "fmt/format.h"
 
 // TODO: explain the purpose of this workload and how it different from the
 // 20+ (literally) other backup/restore workloads.
@@ -207,9 +208,9 @@ struct RestoreWorkload : TestWorkload {
 				restoreRanges = modifiedRestoreRanges;
 
 				Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
-				printf("BackupCorrectness, backupAgent.restore is called for restoreIndex:%d tag:%s\n",
-				       restoreIndex,
-				       restoreTag.toString().c_str());
+				fmt::println("BackupCorrectness, backupAgent.restore is called for restoreIndex:{} tag:{}",
+				             restoreIndex,
+				             restoreTag.toString());
 				TraceEvent("RW_RestoreRanges", randomID)
 				    .detail("RestoreIndex", restoreIndex)
 				    .detail("RestoreTag", printable(restoreTag))
@@ -264,11 +265,11 @@ struct RestoreWorkload : TestWorkload {
 						    .detail("BackupTag", printable(backupTag))
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
-						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
-						       now(),
-						       randomID.toString().c_str(),
-						       waitCycles,
-						       (long long)taskCount);
+						fmt::println("{:.6f} {:<10} Wait #{:4} for {} tasks to end",
+						             now(),
+						             randomID.toString(),
+						             waitCycles,
+						             (long long)taskCount);
 
 						co_await delay(5.0);
 
@@ -282,9 +283,9 @@ struct RestoreWorkload : TestWorkload {
 					// Error if the system keyspace for the backup tag is not empty
 					if (!agentValues.empty()) {
 						displaySystemKeys++;
-						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
-						       agentValues.size(),
-						       printable(backupAgentKey).c_str());
+						fmt::println("BackupCorrectnessLeftOverMutationKeys: ({}) {}",
+						             agentValues.size(),
+						             printable(backupAgentKey));
 						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
 						    .detail("BackupTag", printable(backupTag))
 						    .detail("LeftOverKeys", agentValues.size())
@@ -293,12 +294,12 @@ struct RestoreWorkload : TestWorkload {
 							TraceEvent("RW_LeftOverKey", randomID)
 							    .detail("Key", printable(StringRef(s.key.toString())))
 							    .detail("Value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n",
-							       printable(StringRef(s.key.toString())).c_str(),
-							       printable(StringRef(s.value.toString())).c_str());
+							fmt::println("   Key: {:<50}  Value: {}",
+							             printable(StringRef(s.key.toString())),
+							             printable(StringRef(s.value.toString())));
 						}
 					} else {
-						printf("No left over backup agent configuration keys\n");
+						fmt::println("No left over backup agent configuration keys");
 					}
 
 					Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
@@ -308,7 +309,7 @@ struct RestoreWorkload : TestWorkload {
 						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
 						    .detail("DestUidValue", destUidValue.printable());
 					} else {
-						printf("No left over backup version key\n");
+						fmt::println("No left over backup version key");
 					}
 
 					RangeResult versions = co_await tr->getRange(
@@ -320,15 +321,15 @@ struct RestoreWorkload : TestWorkload {
 						// Error if the log/mutation keyspace for the backup tag  is not empty
 						if (!logValues.empty()) {
 							displaySystemKeys++;
-							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
-							       logValues.size(),
-							       printable(backupLogValuesKey).c_str());
+							fmt::println("BackupCorrectnessLeftOverLogKeys: ({}) {}",
+							             logValues.size(),
+							             printable(backupLogValuesKey));
 							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
 							    .detail("BackupTag", printable(backupTag))
 							    .detail("LeftOverKeys", logValues.size())
 							    .detail("KeySpace", printable(backupLogValuesKey));
 						} else {
-							printf("No left over backup log keys\n");
+							fmt::println("No left over backup log keys");
 						}
 					}
 

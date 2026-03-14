@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
 #include <string.h>
+#include "fmt/format.h"
 
 #define DELTATREE_DEBUG 0
 
@@ -982,11 +983,11 @@ struct DeltaTree2 {
 		};
 
 		std::string toString(DeltaTree2* tree) const {
-			return format("Node{offset=%d leftChild=%d rightChild=%d delta=%s}",
-			              tree->nodeOffset(this),
-			              getLeftChildOffset(tree->largeNodes),
-			              getRightChildOffset(tree->largeNodes),
-			              delta(tree->largeNodes).toString().c_str());
+			return fmt::format("Node{{offset={} leftChild={} rightChild={} delta={}}}",
+			                   tree->nodeOffset(this),
+			                   getLeftChildOffset(tree->largeNodes),
+			                   getRightChildOffset(tree->largeNodes),
+			                   delta(tree->largeNodes).toString());
 		}
 
 #define getMember(m) (large ? largeOffsets.m : smallOffsets.m)
@@ -1044,13 +1045,13 @@ public:
 		Node* node(DeltaTree2* tree) const { return tree->nodeAt(nodeOffset); }
 
 		std::string toString() const {
-			return format("DecodedNode{nodeOffset=%d leftChildIndex=%d rightChildIndex=%d leftParentIndex=%d "
-			              "rightParentIndex=%d}",
-			              (int)nodeOffset,
-			              (int)leftChildIndex,
-			              (int)rightChildIndex,
-			              (int)leftParentIndex,
-			              (int)rightParentIndex);
+			return fmt::format("DecodedNode{{nodeOffset={} leftChildIndex={} rightChildIndex={} leftParentIndex={} "
+			                   "rightParentIndex={}}}",
+			                   (int)nodeOffset,
+			                   (int)leftChildIndex,
+			                   (int)rightChildIndex,
+			                   (int)leftParentIndex,
+			                   (int)rightParentIndex);
 		}
 	};
 #pragma pack(pop)
@@ -1123,15 +1124,15 @@ public:
 		}
 
 		std::string toString() const {
-			std::string s = format("DecodeCache{%p\n", this);
-			s += format("upperBound %s\n", upperBound.toString().c_str());
-			s += format("lowerBound %s\n", lowerBound.toString().c_str());
-			s += format("arenaSize %d\n", arena.getSize());
-			s += format("decodedNodes %d {\n", decodedNodes.size());
+			std::string s = fmt::format("DecodeCache{{{}\n", fmt::ptr(this));
+			s += fmt::format("upperBound {}\n", upperBound.toString());
+			s += fmt::format("lowerBound {}\n", lowerBound.toString());
+			s += fmt::format("arenaSize {}\n", arena.getSize());
+			s += fmt::format("decodedNodes {} {{\n", decodedNodes.size());
 			for (auto const& n : decodedNodes) {
-				s += format("  %s\n", n.toString().c_str());
+				s += fmt::format("  {}\n", n.toString());
 			}
-			s += format("}}\n");
+			s += fmt::format("}}}}\n");
 			return s;
 		}
 	};
@@ -1187,14 +1188,14 @@ public:
 
 		std::string toString() const {
 			if (nodeIndex == -1) {
-				return format("Cursor{nodeIndex=-1}");
+				return fmt::format("Cursor{{nodeIndex=-1}}");
 			}
-			return format("Cursor{item=%s indexItem=%s nodeIndex=%d decodedNode=%s node=%s ",
-			              item.present() ? item.get().toString().c_str() : "<absent>",
-			              get(cache->get(nodeIndex)).toString().c_str(),
-			              nodeIndex,
-			              cache->get(nodeIndex).toString().c_str(),
-			              node()->toString(tree).c_str());
+			return fmt::format("Cursor{{item={} indexItem={} nodeIndex={} decodedNode={} node={} ",
+			                   item.present() ? item.get().toString().c_str() : "<absent>",
+			                   get(cache->get(nodeIndex)).toString(),
+			                   nodeIndex,
+			                   cache->get(nodeIndex).toString(),
+			                   node()->toString(tree));
 		}
 
 		bool valid() const { return nodeIndex != -1; }

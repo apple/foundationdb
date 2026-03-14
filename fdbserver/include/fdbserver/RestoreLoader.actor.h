@@ -40,6 +40,7 @@
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbclient/BackupContainer.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 class LoaderVersionBatchState : RoleVersionBatchState {
@@ -94,7 +95,7 @@ struct LoaderBatchData : public ReferenceCounted<LoaderBatchData> {
 	explicit LoaderBatchData(UID nodeID, int batchIndex)
 	  : vbState(LoaderVersionBatchState::NOT_INIT), loadFileReqs(0), counters(this, nodeID, batchIndex) {
 		pollMetrics =
-		    counters.cc.traceCounters(format("FastRestoreLoaderMetrics%d", batchIndex),
+		    counters.cc.traceCounters(fmt::format("FastRestoreLoaderMetrics{}", batchIndex),
 		                              nodeID,
 		                              SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
 		                              nodeID.toString() + "/RestoreLoaderMetrics/" + std::to_string(batchIndex));

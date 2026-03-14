@@ -24,6 +24,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 const int keyBytes = 16;
 
@@ -77,7 +78,7 @@ struct QueuePushWorkload : TestWorkload {
 		m.emplace_back("Bytes written/sec", (writes * (keyBytes + valueBytes)) / duration, Averaged::False);
 	}
 
-	static Key keyForIndex(int base, int offset) { return StringRef(format("%08x%08x", base, offset)); }
+	static Key keyForIndex(int base, int offset) { return StringRef(fmt::format("{:08x}{:08x}", base, offset)); }
 
 	static std::pair<int, int> valuesForKey(KeyRef value) {
 		int base, offset;

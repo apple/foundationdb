@@ -20,6 +20,7 @@
 
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload {
@@ -33,7 +34,7 @@ struct CommitBugWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return timeout(bug1(cx, this) && bug2(cx, this), 60, Void()); }
 
 	Future<Void> bug1(Database cx, CommitBugWorkload* self) {
-		Key key = StringRef(format("B1Key%d", self->clientId));
+		Key key = StringRef(fmt::format("B1Key{}", self->clientId));
 		Value val1 = "Value1"_sr;
 		Value val2 = "Value2"_sr;
 
@@ -104,7 +105,7 @@ struct CommitBugWorkload : TestWorkload {
 	}
 
 	Future<Void> bug2(Database cx, CommitBugWorkload* self) {
-		Key key = StringRef(format("B2Key%d", self->clientId));
+		Key key = StringRef(fmt::format("B2Key{}", self->clientId));
 
 		for (int i = 0; i < 1000; ++i) {
 			Transaction tr(cx);
@@ -124,7 +125,7 @@ struct CommitBugWorkload : TestWorkload {
 					}
 
 					TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
-					tr.set(key, StringRef(format("%d", i + 1)));
+					tr.set(key, StringRef(fmt::format("{}", i + 1)));
 					co_await tr.commit();
 					TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
 					break;
@@ -139,7 +140,7 @@ struct CommitBugWorkload : TestWorkload {
 							Error caughtErr;
 							try {
 								TraceEvent("CommitBug2SetKey").detail("Num", i + 1);
-								tr.set(key, StringRef(format("%d", i + 1)));
+								tr.set(key, StringRef(fmt::format("{}", i + 1)));
 								TraceEvent("CommitBug2SetCompleted").detail("Num", i + 1);
 								co_await tr.commit();
 								break;

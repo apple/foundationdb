@@ -46,22 +46,22 @@ struct SlowTaskWorkload : TestWorkload {
 		int64_t startProfilesOverflowed = getNumProfilesOverflowed();
 		int64_t startProfilesCaptured = getNumProfilesCaptured();
 		int64_t exc = 0;
-		fprintf(stderr, "Slow task starting\n");
+		fmt::println(stderr, "Slow task starting");
 		for (int i = 0; i < 10; i++) {
-			fprintf(stderr, "  %d\n", i);
+			fmt::println(stderr, "  {}", i);
 			double end = timer() + 1;
 			while (timer() < end) {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fmt::print(stderr,
-		           "Slow task complete: {0} exceptions; {1} calls to dl_iterate_phdr, {2}"
-		           " profiles disabled, {3} profiles overflowed, {4} profiles captured\n",
-		           exc,
-		           dl_iterate_phdr_calls - phc,
-		           getNumProfilesDisabled() - startProfilesDisabled,
-		           getNumProfilesOverflowed() - startProfilesOverflowed,
-		           getNumProfilesCaptured() - startProfilesCaptured);
+		fmt::println(stderr,
+		             "Slow task complete: {0} exceptions; {1} calls to dl_iterate_phdr, {2} profiles disabled, {3} "
+		             "profiles overflowed, {4} profiles captured",
+		             exc,
+		             dl_iterate_phdr_calls - phc,
+		             getNumProfilesDisabled() - startProfilesDisabled,
+		             getNumProfilesOverflowed() - startProfilesOverflowed,
+		             getNumProfilesCaptured() - startProfilesCaptured);
 	}
 
 	static void do_slow_exception_thing(int64_t* exc_count) {

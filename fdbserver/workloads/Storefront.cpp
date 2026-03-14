@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
+#include "fmt/format.h"
 
 // Storefront workload will maintain 2 tables: one for orders and one for items
 // Items table will have an entry for each item and the current total of "unfilled" orders
@@ -93,9 +94,9 @@ struct StorefrontWorkload : TestWorkload {
 	}
 
 	Key keyForIndex(int n) { return itemKey(n); }
-	Key itemKey(int item) { return StringRef(format("/items/%016d", item)); }
-	Key orderKey(orderID order) { return StringRef(format("/orders/%016llx", order)); }
-	Value itemValue(int count) { return StringRef(format("%d", count)); }
+	Key itemKey(int item) { return StringRef(fmt::format("/items/{:016}", item)); }
+	Key orderKey(orderID order) { return StringRef(fmt::format("/orders/{:016x}", order)); }
+	Value itemValue(int count) { return StringRef(fmt::format("{}", count)); }
 
 	Standalone<KeyValueRef> operator()(int n) { return KeyValueRef(itemKey(n), itemValue(0)); }
 

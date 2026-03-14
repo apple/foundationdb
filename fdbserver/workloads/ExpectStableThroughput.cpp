@@ -4,6 +4,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 // This workload is meant to be run with the ThroughputQuotaWorklaod.
 // The ThroughputQuotaWorkload sets a total quota, and then this workload runs
@@ -41,7 +42,7 @@ class ExpectStableThroughputWorkload : public TestWorkload {
 		}
 	}
 
-	Key getKey(int index) { return Key(format("%06d", index)).withPrefix(keyPrefix); }
+	Key getKey(int index) { return Key(fmt::format("{:06}", index)).withPrefix(keyPrefix); }
 
 	Future<Void> runTransaction(Database cx) {
 		Transaction tr(cx);

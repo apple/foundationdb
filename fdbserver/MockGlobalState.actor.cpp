@@ -22,6 +22,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/FDBTypes.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h"
 
 class MockGlobalStateImpl {
@@ -592,10 +593,10 @@ std::shared_ptr<MockGlobalState>& MockGlobalState::g_mockState() {
 }
 
 void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf) {
-	fmt::print("MGS Cluster Layout: {} dc, {} machines, {} processes per machine.\n",
-	           conf.datacenters,
-	           conf.machine_count,
-	           conf.processes_per_machine);
+	fmt::println("MGS Cluster Layout: {} dc, {} machines, {} processes per machine.",
+	             conf.datacenters,
+	             conf.machine_count,
+	             conf.processes_per_machine);
 
 	int mod = conf.machine_count % conf.datacenters;
 	for (int i = 0; i < conf.datacenters; ++i) {
@@ -619,7 +620,7 @@ void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf)
 					seedProcesses.emplace_back(processes.back());
 					fmt::print("(seed) ");
 				}
-				fmt::print("Mock Process: {}\n", processes.back()->locality.toString());
+				fmt::println("Mock Process: {}", processes.back()->locality.toString());
 			}
 		}
 	}
@@ -645,7 +646,7 @@ void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& 
 		allServers[id] = makeReference<MockStorageServer>(ssi, defaultDiskSpace);
 		allServers[id]->serverKeys.insert(allKeys, { MockShardStatus::COMPLETED, 0 });
 	}
-	fmt::print("\n");
+	fmt::println("");
 	shardMapping->assignRangeToTeams(allKeys, { Team(serverIds, true) });
 }
 

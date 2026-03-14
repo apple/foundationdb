@@ -33,6 +33,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -637,7 +638,7 @@ ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterReco
 				TraceEvent e("GotBackupStartKey", self->dbgid);
 				int i = 1;
 				for (auto [uid, version] : uidVersions) {
-					e.detail(format("BackupID%d", i), uid).detail(format("Version%d", i), version);
+					e.detail(fmt::format("BackupID{}", i), uid).detail(fmt::format("Version{}", i), version);
 					i++;
 					minVersion = minVersion.present() ? std::min(version, minVersion.get()) : version;
 				}

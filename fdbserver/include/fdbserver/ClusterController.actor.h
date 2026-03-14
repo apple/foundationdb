@@ -39,6 +39,7 @@
 #include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WorkerInfo : NonCopyable {
@@ -1614,7 +1615,10 @@ public:
 			       degraded == r.degraded;
 		}
 
-		std::string toString() const { return format("%d %d %d %d %d", worstFit, worstUsed, count, degraded, bestFit); }
+		std::string toString() const {
+			return fmt::format(
+			    "{} {} {} {} {}", static_cast<int>(worstFit), worstUsed, count, degraded, static_cast<int>(bestFit));
+		}
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,

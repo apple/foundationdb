@@ -27,6 +27,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "fmt/format.h"
 
 // an enumeration of apis being tested
 enum TransactionType { NATIVE, READ_YOUR_WRITES, THREAD_SAFE, MULTI_VERSION };
@@ -270,7 +271,7 @@ struct ApiWorkload : TestWorkload {
 	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1)
 	  : TestWorkload(wcx), maxClients(maxClients), success(true), transactionFactory(nullptr) {
 		clientPrefixInt = getOption(options, "clientId"_sr, clientId);
-		clientPrefix = format("%010d", clientPrefixInt);
+		clientPrefix = fmt::format("{:010}", clientPrefixInt);
 
 		numKeys = getOption(options, "numKeys"_sr, 5000);
 		onlyLowerCase = getOption(options, "onlyLowerCase"_sr, false);

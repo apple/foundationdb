@@ -24,6 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct TokenBucket {
 	static constexpr const double addTokensInterval = 0.1;
@@ -92,7 +93,7 @@ struct ThrottlingWorkload : KVWorkload {
 	}
 
 	static Value getRandomValue() {
-		return Standalone<StringRef>(format("Value/%d", deterministicRandom()->randomInt(0, 10e6)));
+		return Standalone<StringRef>(fmt::format("Value/{}", deterministicRandom()->randomInt(0, 10e6)));
 	}
 
 	Future<Void> clientActor(Database cx) {

@@ -28,6 +28,7 @@
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
+#include "fmt/format.h"
 
 #define TEST_ABORT_FASTRESTORE 0
 
@@ -276,7 +277,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						if (!fdesc.isError()) {
 							BackupDescription desc = fdesc.get();
 							co_await desc.resolveVersionTimes(cx);
-							printf("BackupDescription:\n%s\n", desc.toString().c_str());
+							fmt::print("BackupDescription:\n{}\n", desc.toString());
 							restorable = desc.maxRestorableVersion.present();
 						}
 					}
@@ -297,9 +298,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						    .detail("LastBackupUID", lastBackupUID)
 						    .detail("BackupTag", printable(tag))
 						    .detail("WaitStatus", resultWait);
-						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %s\n",
-						       printable(tag).c_str(),
-						       BackupAgentBase::getStateText(resultWait));
+						fmt::println("BackupCorrectnessMissingBackupContainer   tag: {}  status: {}",
+						             printable(tag),
+						             BackupAgentBase::getStateText(resultWait));
 					}
 					// Check that backup is restorable
 					else if (!restorable) {
@@ -308,7 +309,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						    .detail("BackupTag", printable(tag))
 						    .detail("BackupFolder", lastBackupContainer->getURL())
 						    .detail("WaitStatus", BackupAgentBase::getStateText(resultWait));
-						printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
+						fmt::println("BackupCorrectnessNotRestorable:  tag: {}", printable(tag));
 					}
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup
@@ -517,7 +518,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 
 			if (lastBackupContainer && performRestore) {
 				if (deterministicRandom()->random01() < 0.5) {
-					printf("TODO: Check if restore can succeed if dirty restore is performed first\n");
+					fmt::println("TODO: Check if restore can succeed if dirty restore is performed first");
 					// TODO: To support restore even after we attempt dirty restore. Not implemented in the 1st version
 					// fast restore
 					// wait(attemptDirtyRestore(this, cx, &backupAgent, StringRef(lastBackupContainer->getURL()),
@@ -688,11 +689,11 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						    .detail("BackupTag", printable(backupTag))
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
-						printf("%.6f %-10s Wait #%4d for %lld tasks to end\n",
-						       now(),
-						       randomID.toString().c_str(),
-						       waitCycles,
-						       (long long)taskCount);
+						fmt::println("{:.6f} {:<10} Wait #{:4} for {} tasks to end",
+						             now(),
+						             randomID.toString(),
+						             waitCycles,
+						             (long long)taskCount);
 
 						co_await delay(5.0);
 						co_await tr->commit();
@@ -711,7 +712,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						    .detail("BackupTag", printable(backupTag))
 						    .detail("TaskCount", taskCount)
 						    .detail("WaitCycles", waitCycles);
-						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long)taskCount);
+						fmt::println("BackupCorrectnessLeftOverLogTasks: {}", (long)taskCount);
 					}
 
 					RangeResult agentValues =
@@ -720,9 +721,9 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// Error if the system keyspace for the backup tag is not empty
 					if (agentValues.size() > 0) {
 						displaySystemKeys++;
-						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n",
-						       agentValues.size(),
-						       printable(backupAgentKey).c_str());
+						fmt::println("BackupCorrectnessLeftOverMutationKeys: ({}) {}",
+						             agentValues.size(),
+						             printable(backupAgentKey));
 						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID)
 						    .detail("BackupTag", printable(backupTag))
 						    .detail("LeftOverKeys", agentValues.size())
@@ -731,12 +732,12 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 							TraceEvent("BARW_LeftOverKey", randomID)
 							    .detail("Key", printable(StringRef(s.key.toString())))
 							    .detail("Value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n",
-							       printable(StringRef(s.key.toString())).c_str(),
-							       printable(StringRef(s.value.toString())).c_str());
+							fmt::println("   Key: {:<50}  Value: {}",
+							             printable(StringRef(s.key.toString())),
+							             printable(StringRef(s.value.toString())));
 						}
 					} else {
-						printf("No left over backup agent configuration keys\n");
+						fmt::println("No left over backup agent configuration keys");
 					}
 
 					Optional<Value> latestVersion = co_await tr->get(backupLatestVersionsKey);
@@ -746,7 +747,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						    .detail("BackupLatestVersionsKey", backupLatestVersionsKey.printable())
 						    .detail("DestUidValue", destUidValue.printable());
 					} else {
-						printf("No left over backup version key\n");
+						fmt::println("No left over backup version key");
 					}
 
 					RangeResult versions = co_await tr->getRange(
@@ -758,15 +759,15 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 						// Error if the log/mutation keyspace for the backup tag  is not empty
 						if (logValues.size() > 0) {
 							displaySystemKeys++;
-							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n",
-							       logValues.size(),
-							       printable(backupLogValuesKey).c_str());
+							fmt::println("BackupCorrectnessLeftOverLogKeys: ({}) {}",
+							             logValues.size(),
+							             printable(backupLogValuesKey));
 							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID)
 							    .detail("BackupTag", printable(backupTag))
 							    .detail("LeftOverKeys", logValues.size())
 							    .detail("KeySpace", printable(backupLogValuesKey));
 						} else {
-							printf("No left over backup log keys\n");
+							fmt::println("No left over backup log keys");
 						}
 					}
 

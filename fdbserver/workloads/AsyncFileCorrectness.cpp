@@ -84,9 +84,8 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 		if (maxOperationSize * numSimultaneousOperations > targetFileSize * 0.25) {
 			targetFileSize *= (int)ceil((maxOperationSize * numSimultaneousOperations * 4.0) / targetFileSize);
-			fmt::print(
-			    "Target file size is insufficient to support {0} simultaneous operations of size {1}; changing to "
-			    "{2}\n",
+			fmt::println(
+			    "Target file size is insufficient to support {0} simultaneous operations of size {1}; changing to {2}",
 			    numSimultaneousOperations,
 			    maxOperationSize,
 			    targetFileSize);
@@ -392,12 +391,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 			int64_t fileSize = co_await self->fileHandle->file->size();
 			int64_t fileSizeChange = fileSize - self->fileSize;
 			if (fileSizeChange >= _PAGE_SIZE) {
-				fmt::print("Reopened file increased in size by {0} bytes (at most {1} allowed)\n",
-				           fileSizeChange,
-				           _PAGE_SIZE - 1);
+				fmt::println("Reopened file increased in size by {0} bytes (at most {1} allowed)",
+				             fileSizeChange,
+				             _PAGE_SIZE - 1);
 				self->success = false;
 			} else if (fileSizeChange < 0) {
-				fmt::print("Reopened file decreased in size by {} bytes\n", -fileSizeChange);
+				fmt::println("Reopened file decreased in size by {} bytes", -fileSizeChange);
 				self->success = false;
 			}
 
@@ -409,7 +408,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 			int64_t fileSize = co_await self->fileHandle->file->size();
 			if (fileSize != info.offset) {
-				printf("Incorrect file size reported after truncate\n");
+				fmt::println("Incorrect file size reported after truncate");
 				self->success = false;
 			}
 

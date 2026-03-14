@@ -370,7 +370,7 @@ UID getSharedMemoryMachineId() {
 				if (++numTries == 10)
 					criticalError(FDB_EXIT_ERROR,
 					              "SharedMemoryError",
-					              format("Could not open shared memory - %s", ex.what()).c_str());
+					              fmt::format("Could not open shared memory - {}", ex.what()).c_str());
 			}
 		}
 	}
@@ -380,7 +380,7 @@ UID getSharedMemoryMachineId() {
 ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator->getCurrentProcess()) {
 	wait(trigger);
 	if (enableFailures) {
-		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
+		fmt::println("Killing machine: {} at {:f}", m->address.toString(), now());
 		g_simulator->killProcess(m, ISimulator::KillType::KillInstantly);
 	}
 }
@@ -468,14 +468,14 @@ void testSerializationSpeed() {
 		deallocate += timer() - tstart;
 	}
 	double elapsed = (timer() - testBegin);
-	printf("Test speed: %0.1f MB/sec (%0.0f/sec)\n", bytes / 1e6 / elapsed, 1000000 / elapsed);
-	printf("  Build: %0.1f MB/sec\n", bytes / 1e6 / build);
-	printf("  Serialize: %0.1f MB/sec\n", bytes / 1e6 / serialize);
-	printf("  Copy: %0.1f MB/sec\n", bytes / 1e6 / copy);
-	printf("  Deserialize: %0.1f MB/sec\n", bytes / 1e6 / deserialize);
-	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
-	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
-	printf("\n");
+	fmt::println("Test speed: {:.1f} MB/sec ({:.0f}/sec)", bytes / 1e6 / elapsed, 1000000 / elapsed);
+	fmt::println("  Build: {:.1f} MB/sec", bytes / 1e6 / build);
+	fmt::println("  Serialize: {:.1f} MB/sec", bytes / 1e6 / serialize);
+	fmt::println("  Copy: {:.1f} MB/sec", bytes / 1e6 / copy);
+	fmt::println("  Deserialize: {:.1f} MB/sec", bytes / 1e6 / deserialize);
+	fmt::println("  Deallocate: {:.1f} MB/sec", bytes / 1e6 / deallocate);
+	fmt::println("  Bytes: {:.1f} MB", bytes / 1e6);
+	fmt::println("");
 }
 
 std::string toHTML(const StringRef& binaryString) {
@@ -496,7 +496,7 @@ std::string toHTML(const StringRef& binaryString) {
 		else if (c > 32 && c < 127)
 			s += c;
 		else
-			s += format("<span class=\"binary\">[%02x]</span>", c);
+			s += fmt::format("<span class=\"binary\">[{:02x}]</span>", c);
 	}
 
 	return s;
@@ -510,7 +510,7 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 			try {
 				state KeySelectorRef iter = firstGreaterOrEqual(range.begin);
 				state Arena arena;
-				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
+				fmt::println(output, "<html><head><style type=\"text/css\">.binary {{color:red}}</style></head><body>");
 				Version ver = wait(tr.getReadVersion());
 				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
@@ -518,13 +518,13 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
 					for (int r = 0; r < results.size(); r++) {
 						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
-						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
+						fmt::println(output, "<p>{} <b>:=</b> {}</p>", key, value);
 					}
 					if (results.size() < 1000)
 						break;
 					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
 				}
-				fprintf(output, "</body></html>");
+				fmt::print(output, "</body></html>");
 				fclose(output);
 				TraceEvent("DatabaseDumped").detail("Filename", outputFilename);
 				return Void();
@@ -577,28 +577,28 @@ void* parentWatcher(void* arg) {
 #endif
 
 static void printBuildInformation() {
-	printf("%s", jsonBuildInformation().c_str());
+	fmt::print("{}", jsonBuildInformation());
 }
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("source version %s\n", getSourceVersion());
+	fmt::println("source version {}", getSourceVersion());
 	printf("protocol %" PRIx64 "\n", currentProtocolVersion().version());
 #ifdef WITH_ROCKSDB
 	if (FDB_ROCKSDB_GIT_HASH[0] != '\0') {
-		printf("rocksdb %d.%d.%d (commit %s)\n",
-		       FDB_ROCKSDB_MAJOR,
-		       FDB_ROCKSDB_MINOR,
-		       FDB_ROCKSDB_PATCH,
-		       FDB_ROCKSDB_GIT_HASH);
+		fmt::println("rocksdb {}.{}.{} (commit {})",
+		             FDB_ROCKSDB_MAJOR,
+		             FDB_ROCKSDB_MINOR,
+		             FDB_ROCKSDB_PATCH,
+		             FDB_ROCKSDB_GIT_HASH);
 	} else {
-		printf("rocksdb %d.%d.%d\n", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH);
+		fmt::println("rocksdb {}.{}.{}", FDB_ROCKSDB_MAJOR, FDB_ROCKSDB_MINOR, FDB_ROCKSDB_PATCH);
 	}
 #endif
 }
 
 static void printHelpTeaser(const char* name) {
-	fprintf(stderr, "Try `%s --help' for more information.\n", name);
+	fmt::println(stderr, "Try `{} --help' for more information.", name);
 }
 
 static void printOptionUsage(std::string option, std::string description) {
@@ -613,7 +613,7 @@ static void printOptionUsage(std::string option, std::string description) {
 
 	std::stringstream sstream(description);
 	if (sstream.eof()) {
-		printf("%s", result.c_str());
+		fmt::print("{}", result);
 		return;
 	}
 
@@ -636,12 +636,12 @@ static void printOptionUsage(std::string option, std::string description) {
 	}
 	result += currLine + '\n';
 
-	printf("%s", result.c_str());
+	fmt::print("{}", result);
 }
 
 static void printUsage(const char* name, bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
-	printf("Usage: %s -p ADDRESS [OPTIONS]\n\n", name);
+	fmt::print("Usage: {} -p ADDRESS [OPTIONS]\n\n", name);
 	printOptionUsage("-p ADDRESS, --public-address ADDRESS",
 	                 " Public address, specified as `IP_ADDRESS:PORT' or `auto:PORT'.");
 	printOptionUsage("-l ADDRESS, --listen-address ADDRESS",
@@ -725,11 +725,11 @@ static void printUsage(const char* name, bool devhelp) {
 	                 "  collector -- None or FluentD (FluentD requires collector_endpoint to be set)\n"
 	                 "  collector_endpoint -- IP:PORT of the fluentd server\n"
 	                 "  collector_protocol -- UDP or TCP (default is UDP)");
-	printf("%s", TLS_HELP);
+	fmt::print("{}", TLS_HELP);
 	printOptionUsage("-v, --version", "Print version information and exit.");
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
-		printf("  --build-flags  Print build information and exit.\n");
+		fmt::println("  --build-flags  Print build information and exit.");
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
@@ -798,32 +798,26 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--use-future-protocol-version [true,false]",
 		                 " Run the process with a simulated future protocol version."
 		                 " This option can be used testing purposes only!");
-		printf("\n"
-		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
-		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
-		       "(little endianness). This role takes 3 environment variables as parameters:\n"
-		       " - FDB_DUMP_STARTKEY: start key for the dump, default is empty\n"
-		       " - FDB_DUMP_ENDKEY: end key for the dump, default is \"\\xff\\xff\"\n"
-		       " - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
+		fmt::print("\nThe 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n{{key "
+		           "length}}{{key binary}}{{value length}}{{value binary}}, length is 4 bytes int\n(little "
+		           "endianness). This role takes 3 environment variables as parameters:\n - FDB_DUMP_STARTKEY: start "
+		           "key for the dump, default is empty\n - FDB_DUMP_ENDKEY: end key for the dump, default is "
+		           "\"\\xff\\xff\"\n - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
 
-		printf(
-		    "\n"
-		    "The 'changedescription' role replaces the old cluster key in all coordinators' data file to the specified "
-		    "new cluster key,\n"
-		    "which is passed in by '--new-cluster-key'. In particular, cluster key means '[description]:[id]'.\n"
-		    "'--datadir' is supposed to point to the top level directory of FDB's data, where subdirectories are for "
-		    "each process's data.\n"
-		    "The given cluster file passed in by '-C, --cluster-file' is considered to contain the old cluster key.\n"
-		    "It is used before restoring a snapshotted cluster to let the cluster have a different cluster key.\n"
-		    "Please make sure run it on every host in the cluster with the same '--new-cluster-key'.\n");
+		fmt::print("\nThe 'changedescription' role replaces the old cluster key in all coordinators' data file to the "
+		           "specified new cluster key,\nwhich is passed in by '--new-cluster-key'. In particular, cluster key "
+		           "means '[description]:[id]'.\n'--datadir' is supposed to point to the top level directory of FDB's "
+		           "data, where subdirectories are for each process's data.\nThe given cluster file passed in by '-C, "
+		           "--cluster-file' is considered to contain the old cluster key.\nIt is used before restoring a "
+		           "snapshotted cluster to let the cluster have a different cluster key.\nPlease make sure run it on "
+		           "every host in the cluster with the same '--new-cluster-key'.\n");
 
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
 
-	printf("\n"
-	       "SIZE parameters may use one of the multiplicative suffixes B=1, KB=10^3,\n"
-	       "KiB=2^10, MB=10^6, MiB=2^20, GB=10^9, GiB=2^30, TB=10^12, or TiB=2^40.\n");
+	fmt::print("\nSIZE parameters may use one of the multiplicative suffixes B=1, KB=10^3,\nKiB=2^10, MB=10^6, "
+	           "MiB=2^20, GB=10^9, GiB=2^30, TB=10^12, or TiB=2^40.\n");
 }
 
 extern bool g_crashOnError;
@@ -908,7 +902,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 				ifs.close();
 				return false;
 			} else {
-				fprintf(stderr, "ERROR: Unknown buggify override state `%s'\n", value.c_str());
+				fmt::println(stderr, "ERROR: Unknown buggify override state `{}'", value);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
@@ -949,7 +943,7 @@ Optional<bool> checkFaultInjectionOverride(const char* testFile) {
 				ifs.close();
 				return false;
 			} else {
-				fprintf(stderr, "ERROR: Unknown fault injection override state `%s'\n", value.c_str());
+				fmt::println(stderr, "ERROR: Unknown fault injection override state `{}'", value);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
@@ -966,14 +960,15 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
-		fprintf(stderr,
-		        "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.\n");
+		fmt::println(
+		    stderr,
+		    "ERROR: Listen addresses (if provided) should be equal to the number of public addresses in order.");
 		flushAndExit(FDB_EXIT_ERROR);
 	}
 	listenAddressStrs.resize(publicAddressStrs.size(), "public");
 
 	if (publicAddressStrs.size() > 2) {
-		fprintf(stderr, "ERROR: maximum 2 public/listen addresses are allowed\n");
+		fmt::println(stderr, "ERROR: maximum 2 public/listen addresses are allowed");
 		flushAndExit(FDB_EXIT_ERROR);
 	}
 
@@ -994,19 +989,19 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 				const IPAddress publicIP = connectionRecord.getConnectionString().determineLocalSourceIP();
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
-				fprintf(stderr,
-				        "ERROR: could not determine public address automatically from `%s': %s\n",
-				        publicAddressStr.c_str(),
-				        e.what());
+				fmt::println(stderr,
+				             "ERROR: could not determine public address automatically from `{}': {}",
+				             publicAddressStr,
+				             e.what());
 				throw;
 			}
 		} else {
 			try {
 				currentPublicAddress = NetworkAddress::parse(publicAddressStr);
 			} catch (Error&) {
-				fprintf(stderr,
-				        "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n",
-				        publicAddressStr.c_str());
+				fmt::println(stderr,
+				             "ERROR: Could not parse network address `{}' (specify as IP_ADDRESS:PORT)",
+				             publicAddressStr);
 				throw;
 			}
 		}
@@ -1018,7 +1013,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 		}
 
 		if (!currentPublicAddress.isValid()) {
-			fprintf(stderr, "ERROR: %s is not a valid IP address\n", currentPublicAddress.toString().c_str());
+			fmt::println(stderr, "ERROR: {} is not a valid IP address", currentPublicAddress.toString());
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1030,17 +1025,18 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			try {
 				currentListenAddress = NetworkAddress::parse(listenAddressStr);
 			} catch (Error&) {
-				fprintf(stderr,
-				        "ERROR: Could not parse network address `%s' (specify as IP_ADDRESS:PORT)\n",
-				        listenAddressStr.c_str());
+				fmt::println(stderr,
+				             "ERROR: Could not parse network address `{}' (specify as IP_ADDRESS:PORT)",
+				             listenAddressStr);
 				throw;
 			}
 
 			if (currentListenAddress.isTLS() != currentPublicAddress.isTLS()) {
-				fprintf(stderr,
-				        "ERROR: TLS state of listen address: %s is not equal to the TLS state of public address: %s.\n",
-				        listenAddressStr.c_str(),
-				        publicAddressStr.c_str());
+				fmt::println(
+				    stderr,
+				    "ERROR: TLS state of listen address: {} is not equal to the TLS state of public address: {}.",
+				    listenAddressStr,
+				    publicAddressStr);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
@@ -1071,16 +1067,15 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 			});
 		}
 		if (!matchCoordinatorsTls) {
-			fprintf(stderr,
-			        "ERROR: TLS state of public address %s does not match in coordinator list.\n",
-			        publicAddressStr.c_str());
+			fmt::println(
+			    stderr, "ERROR: TLS state of public address {} does not match in coordinator list.", publicAddressStr);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 	}
 
 	if (publicNetworkAddresses.secondaryAddress.present() &&
 	    publicNetworkAddresses.address.isTLS() == publicNetworkAddresses.secondaryAddress.get().isTLS()) {
-		fprintf(stderr, "ERROR: only one public address of each TLS state is allowed.\n");
+		fmt::println(stderr, "ERROR: only one public address of each TLS state is allowed.");
 		flushAndExit(FDB_EXIT_ERROR);
 	}
 
@@ -1227,7 +1222,7 @@ struct CLIOptions {
 
 		if (role == ServerRole::ConsistencyCheck || role == ServerRole::ConsistencyCheckUrgent) {
 			if (!publicAddressStrs.empty()) {
-				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
+				fmt::println(stderr, "ERROR: Public address cannot be specified for consistency check processes");
 				printHelpTeaser(name);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
@@ -1243,10 +1238,8 @@ private:
 		for (const std::string& knob : getEnvironmentKnobOptions()) {
 			auto pos = knob.find_first_of("=");
 			if (pos == std::string::npos) {
-				fprintf(stderr,
-				        "Error: malformed environment knob option: %s%s\n",
-				        ENVIRONMENT_KNOB_OPTION_PREFIX,
-				        knob.c_str());
+				fmt::println(
+				    stderr, "Error: malformed environment knob option: {}{}", ENVIRONMENT_KNOB_OPTION_PREFIX, knob);
 				TraceEvent(SevWarnAlways, "MalformedEnvironmentVariableKnob")
 				    .detail("Key", ENVIRONMENT_KNOB_OPTION_PREFIX + knob);
 			} else {
@@ -1259,7 +1252,7 @@ private:
 
 	void parseArgsInternal(int argc, char* argv[]) {
 		auto warnDeprecatedOption = [](const char* optionText) {
-			fprintf(stderr, "WARNING: option `%s' is deprecated and ignored\n", optionText);
+			fmt::println(stderr, "WARNING: option `{}' is deprecated and ignored", optionText);
 			TraceEvent(SevWarnAlways, "DeprecatedCommandLineOption").detail("Option", optionText);
 		};
 
@@ -1278,27 +1271,27 @@ private:
 
 		while (args.Next()) {
 			if (args.LastError() == SO_ARG_INVALID_DATA) {
-				fprintf(stderr, "ERROR: invalid argument to option `%s'\n", args.OptionText());
+				fmt::println(stderr, "ERROR: invalid argument to option `{}'", args.OptionText());
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			if (args.LastError() == SO_ARG_INVALID) {
-				fprintf(stderr, "ERROR: argument given for option `%s'\n", args.OptionText());
+				fmt::println(stderr, "ERROR: argument given for option `{}'", args.OptionText());
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			if (args.LastError() == SO_ARG_MISSING) {
-				fprintf(stderr, "ERROR: missing argument for option `%s'\n", args.OptionText());
+				fmt::println(stderr, "ERROR: missing argument for option `{}'", args.OptionText());
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			if (args.LastError() == SO_OPT_INVALID) {
-				fprintf(stderr, "ERROR: unknown option: `%s'\n", args.OptionText());
+				fmt::println(stderr, "ERROR: unknown option: `{}'", args.OptionText());
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			if (args.LastError() != SO_SUCCESS) {
-				fprintf(stderr, "ERROR: error parsing options\n");
+				fmt::println(stderr, "ERROR: error parsing options");
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
@@ -1323,7 +1316,7 @@ private:
 			case OPT_KNOB: {
 				Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
 				if (!knobName.present()) {
-					fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
+					fmt::println(stderr, "ERROR: unable to parse knob option '{}'", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				knobs.emplace_back(knobName.get(), args.OptionArg());
@@ -1332,7 +1325,7 @@ private:
 			case OPT_PROFILER: {
 				Optional<std::string> profilerArg = extractPrefixedArgument("--profiler", args.OptionSyntax());
 				if (!profilerArg.present()) {
-					fprintf(stderr, "ERROR: unable to parse profiler option '%s'\n", args.OptionSyntax());
+					fmt::println(stderr, "ERROR: unable to parse profiler option '{}'", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				profilerConfig.emplace(profilerArg.get(), args.OptionArg());
@@ -1341,7 +1334,7 @@ private:
 			case OPT_UNITTESTPARAM: {
 				Optional<std::string> testArg = extractPrefixedArgument("--test", args.OptionSyntax());
 				if (!testArg.present()) {
-					fprintf(stderr, "ERROR: unable to parse unit test option '%s'\n", args.OptionSyntax());
+					fmt::println(stderr, "ERROR: unable to parse unit test option '{}'", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				testParams.set(testArg.get(), args.OptionArg());
@@ -1350,7 +1343,7 @@ private:
 			case OPT_LOCALITY: {
 				Optional<std::string> localityKey = extractPrefixedArgument("--locality", args.OptionSyntax());
 				if (!localityKey.present()) {
-					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
+					fmt::println(stderr, "ERROR: unable to parse locality key '{}'", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				Standalone<StringRef> key = StringRef(localityKey.get());
@@ -1361,7 +1354,7 @@ private:
 			case OPT_IP_TRUSTED_MASK: {
 				Optional<std::string> subnetKey = extractPrefixedArgument("--trusted-subnet", args.OptionSyntax());
 				if (!subnetKey.present()) {
-					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
+					fmt::println(stderr, "ERROR: unable to parse locality key '{}'", args.OptionSyntax());
 					flushAndExit(FDB_EXIT_ERROR);
 				}
 				allowList.addTrustedSubnet(args.OptionArg());
@@ -1427,7 +1420,7 @@ private:
 				else if (!strcmp(sRole, "mocks3server"))
 					role = ServerRole::MockS3Server;
 				else {
-					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
+					fmt::println(stderr, "ERROR: Unknown role `{}'", sRole);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1470,7 +1463,7 @@ private:
 				char* end;
 				rsssize = strtoull(a, &end, 10);
 				if (*end) {
-					fprintf(stderr, "ERROR: Unrecognized memory size `%s'\n", a);
+					fmt::println(stderr, "ERROR: Unrecognized memory size `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1491,7 +1484,7 @@ private:
 					useNet2 = true;
 					useThreadPool = true;
 				} else {
-					fprintf(stderr, "ERROR: Unknown network implementation `%s'\n", a);
+					fmt::println(stderr, "ERROR: Unknown network implementation `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1504,7 +1497,7 @@ private:
 				else if (!strcmp(a, "now"))
 					g_trace_clock.store(TRACE_CLOCK_NOW);
 				else {
-					fprintf(stderr, "ERROR: Unknown clock source `%s'\n", a);
+					fmt::println(stderr, "ERROR: Unknown clock source `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1513,7 +1506,7 @@ private:
 			case OPT_NUMTESTERS: {
 				const char* a = args.OptionArg();
 				if (!sscanf(a, "%d", &minTesterCount)) {
-					fprintf(stderr, "ERROR: Could not parse numtesters `%s'\n", a);
+					fmt::println(stderr, "ERROR: Could not parse numtesters `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1523,7 +1516,7 @@ private:
 				const char* a = args.OptionArg();
 				ti = parse_with_suffix(a);
 				if (!ti.present()) {
-					fprintf(stderr, "ERROR: Could not parse logsize `%s'\n", a);
+					fmt::println(stderr, "ERROR: Could not parse logsize `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1535,7 +1528,7 @@ private:
 				const char* a = args.OptionArg();
 				ti = parse_with_suffix(a);
 				if (!ti.present()) {
-					fprintf(stderr, "ERROR: Could not parse maxlogssize `%s'\n", a);
+					fmt::println(stderr, "ERROR: Could not parse maxlogssize `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1548,7 +1541,7 @@ private:
 				char* end;
 				maxLogs = strtoull(a, &end, 10);
 				if (*end) {
-					fprintf(stderr, "ERROR: Unrecognized maximum number of logs `%s'\n", a);
+					fmt::println(stderr, "ERROR: Unrecognized maximum number of logs `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1562,7 +1555,8 @@ private:
 				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
 				if (!pHandle) {
 					TraceEvent("ParentProcessOpenError").GetLastError();
-					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+					fmt::print(
+					    stderr, "Could not open parent process at pid {} (error {})", parent_pid, GetLastError());
 					throw platform_error();
 				}
 				startThread(&parentWatcher, pHandle, 0, "fdb-parentwatch");
@@ -1598,7 +1592,7 @@ private:
 				} else if (tracer == "network_lossy") {
 					openTracer(TracerType::NETWORK_LOSSY);
 				} else {
-					fprintf(stderr, "ERROR: Unknown or unsupported tracer: `%s'", args.OptionArg());
+					fmt::print(stderr, "ERROR: Unknown or unsupported tracer: `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1617,7 +1611,7 @@ private:
 				char* end;
 				randomSeed = (uint32_t)strtoul(args.OptionArg(), &end, 0);
 				if (*end) {
-					fprintf(stderr, "ERROR: Could not parse random seed `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Could not parse random seed `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1627,7 +1621,7 @@ private:
 				char* end;
 				reseedTime = strtod(args.OptionArg(), &end);
 				if (*end || reseedTime < 0) {
-					fprintf(stderr, "ERROR: Could not parse reseed time `%s' (must be >= 0)\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Could not parse reseed time `{}' (must be >= 0)", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1645,7 +1639,7 @@ private:
 				sRole = args.OptionArg();
 				processClass = ProcessClass(sRole, ProcessClass::CommandLineSource);
 				if (processClass == ProcessClass::InvalidClass) {
-					fprintf(stderr, "ERROR: Unknown machine class `%s'\n", sRole);
+					fmt::println(stderr, "ERROR: Unknown machine class `{}'", sRole);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1656,7 +1650,7 @@ private:
 			case OPT_MEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MiB");
 				if (!ti.present()) {
-					fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Could not parse memory limit from `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1665,7 +1659,7 @@ private:
 			case OPT_VMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MiB");
 				if (!ti.present()) {
-					fprintf(stderr, "ERROR: Could not parse virtual memory limit from `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Could not parse virtual memory limit from `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1674,7 +1668,7 @@ private:
 			case OPT_STORAGEMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MB");
 				if (!ti.present()) {
-					fprintf(stderr, "ERROR: Could not parse storage memory limit from `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Could not parse storage memory limit from `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1683,7 +1677,7 @@ private:
 			case OPT_CACHEMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MiB");
 				if (!ti.present()) {
-					fprintf(stderr, "ERROR: Could not parse cache memory limit from `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Could not parse cache memory limit from `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1691,8 +1685,8 @@ private:
 				// parameter
 				knobs.emplace_back(
 				    "page_cache_4k",
-				    format("%lld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
-				                                             // next smaller multiple of 4K.
+				    fmt::format("{}", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to
+				                                                // the next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
@@ -1700,7 +1694,7 @@ private:
 				else if (!strcmp(args.OptionArg(), "off"))
 					buggifyEnabled = false;
 				else {
-					fprintf(stderr, "ERROR: Unknown buggify state `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Unknown buggify state `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1711,7 +1705,7 @@ private:
 				else if (!strcmp(args.OptionArg(), "off"))
 					faultInjectionEnabled = false;
 				else {
-					fprintf(stderr, "ERROR: Unknown fault injection state `%s'\n", args.OptionArg());
+					fmt::println(stderr, "ERROR: Unknown fault injection state `{}'", args.OptionArg());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1737,7 +1731,7 @@ private:
 			case OPT_IO_TRUST_SECONDS: {
 				const char* a = args.OptionArg();
 				if (!sscanf(a, "%lf", &fileIoTimeout)) {
-					fprintf(stderr, "ERROR: Could not parse io_trust_seconds `%s'\n", a);
+					fmt::println(stderr, "ERROR: Could not parse io_trust_seconds `{}'", a);
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1748,7 +1742,7 @@ private:
 				break;
 			case OPT_TRACE_FORMAT:
 				if (!selectTraceFormatter(args.OptionArg())) {
-					fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+					fmt::println(stderr, "WARNING: Unrecognized trace format `{}'", args.OptionArg());
 				}
 				break;
 			case OPT_WHITELIST_BINPATH:
@@ -1764,7 +1758,7 @@ private:
 			case OPT_PROXY:
 				proxy = args.OptionArg();
 				if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
-					fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+					fmt::println(stderr, "ERROR: proxy format should be either IP:port or host:port");
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1887,7 +1881,7 @@ private:
 		if (proxyENV != nullptr && !proxy.present()) {
 			proxy = proxyENV;
 			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
-				fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
+				fmt::println(stderr, "ERROR: proxy format should be either IP:port or host:port");
 				printHelpTeaser(argv[0]);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
@@ -1899,22 +1893,23 @@ private:
 		try {
 			ProfilerConfig::instance().reset(profilerConfig);
 		} catch (ConfigError& e) {
-			printf("Error setting up profiler: %s", e.description.c_str());
+			fmt::print("Error setting up profiler: {}", e.description);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if (seedConnString.length() && seedConnFile.length()) {
-			fprintf(
-			    stderr, "%s\n", "--seed-cluster-file and --seed-connection-string may not both be specified at once.");
+			fmt::println(
+			    stderr, "{}", "--seed-cluster-file and --seed-connection-string may not both be specified at once.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		bool seedSpecified = seedConnFile.length() || seedConnString.length();
 
 		if (seedSpecified && !connFile.length()) {
-			fprintf(stderr,
-			        "%s\n",
-			        "If -seed-cluster-file or --seed-connection-string is specified, -C must be specified as well.");
+			fmt::println(
+			    stderr,
+			    "{}",
+			    "If -seed-cluster-file or --seed-connection-string is specified, -C must be specified as well.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1922,7 +1917,7 @@ private:
 			metricsConnFile = "";
 
 		if (metricsConnFile != "" && metricsPrefix == "") {
-			fprintf(stderr, "If a metrics cluster file is specified, a metrics prefix is required.\n");
+			fmt::println(stderr, "If a metrics cluster file is specified, a metrics prefix is required.");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -1942,9 +1937,9 @@ private:
 					try {
 						connectionString = readFileBytes(seedConnFile, MAX_CLUSTER_FILE_BYTES);
 					} catch (Error& e) {
-						fprintf(stderr,
-						        "%s\n",
-						        ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e).c_str());
+						fmt::println(stderr,
+						             "{}",
+						             ClusterConnectionFile::getErrorString(std::make_pair(seedConnFile, false), e));
 						throw;
 					}
 				}
@@ -1952,7 +1947,7 @@ private:
 				try {
 					ccs = ClusterConnectionString(connectionString);
 				} catch (Error& e) {
-					fprintf(stderr, "%s\n", ClusterConnectionString::getErrorString(connectionString, e).c_str());
+					fmt::println(stderr, "{}", ClusterConnectionString::getErrorString(connectionString, e));
 					throw;
 				}
 				connectionFile = makeReference<ClusterConnectionFile>(connFile, ccs);
@@ -1962,7 +1957,7 @@ private:
 					resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(connFile);
 					connectionFile = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 				} catch (Error& e) {
-					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+					fmt::println(stderr, "{}", ClusterConnectionFile::getErrorString(resolvedClusterFile, e));
 					throw;
 				}
 			}
@@ -1981,13 +1976,13 @@ private:
 		}
 
 		if (role == ServerRole::SearchMutations && !targetKey) {
-			fprintf(stderr, "ERROR: please specify a target key\n");
+			fmt::println(stderr, "ERROR: please specify a target key");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if (role == ServerRole::NetworkTestClient && !testServersStr.size()) {
-			fprintf(stderr, "ERROR: please specify --testservers\n");
+			fmt::println(stderr, "ERROR: please specify --testservers");
 			printHelpTeaser(argv[0]);
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -1995,10 +1990,10 @@ private:
 		if (role == ServerRole::ChangeClusterKey) {
 			bool error = false;
 			if (!newClusterKey.size()) {
-				fprintf(stderr, "ERROR: please specify --new-cluster-key\n");
+				fmt::println(stderr, "ERROR: please specify --new-cluster-key");
 				error = true;
 			} else if (connectionFile->getConnectionString().clusterKey() == newClusterKey) {
-				fprintf(stderr, "ERROR: the new cluster key is the same as the old one\n");
+				fmt::println(stderr, "ERROR: the new cluster key is the same as the old one");
 				error = true;
 			}
 			if (error) {
@@ -2047,16 +2042,15 @@ bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestartin
 		for (const auto& file : files) {
 			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
-				fprintf(stderr,
-				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
-				        dataFolder.c_str());
+				fmt::println(
+				    stderr, "ERROR: Data folder `{}' is non-empty; please use clean, fdb-only folder", dataFolder);
 				return false;
 			}
 		}
 	} else if (isRestarting && files.empty()) {
 		TraceEvent(SevWarnAlways, "FileNotFound").detail("DataFolder", dataFolder);
-		printf("ERROR: Data folder `%s' is empty, but restarting option selected. Run Phase 1 test first\n",
-		       dataFolder.c_str());
+		fmt::println("ERROR: Data folder `{}' is empty, but restarting option selected. Run Phase 1 test first",
+		             dataFolder);
 		return false;
 	}
 
@@ -2087,12 +2081,12 @@ int main(int argc, char* argv[]) {
 		const auto role = opts.role;
 
 		if (role == ServerRole::Simulation) {
-			printf("Random seed is %u...\n", opts.randomSeed);
+			fmt::println("Random seed is {}...", opts.randomSeed);
 			bindDeterministicRandomToOpenssl();
 		}
 
 		if (opts.zoneId.present())
-			printf("ZoneId set to %s, dcId to %s\n", printable(opts.zoneId).c_str(), printable(opts.dcId).c_str());
+			fmt::println("ZoneId set to {}, dcId to {}", printable(opts.zoneId), printable(opts.dcId));
 
 		if (opts.buggifyEnabled) {
 			enableGeneralBuggify();
@@ -2120,9 +2114,9 @@ int main(int argc, char* argv[]) {
 
 		if (!SERVER_KNOBS->ALLOW_DANGEROUS_KNOBS) {
 			if (SERVER_KNOBS->REMOTE_KV_STORE) {
-				fprintf(stderr,
-				        "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
-				        "proceed anyways\n");
+				fmt::println(stderr,
+				             "ERROR : explicitly setting REMOTE_KV_STORE is dangerous! set ALLOW_DANGEROUS_KNOBS to "
+				             "proceed anyways");
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 		}
@@ -2131,12 +2125,12 @@ int main(int argc, char* argv[]) {
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
 		if (opts.memLimit > 0 && opts.virtualMemLimit > 0 && opts.memLimit > opts.virtualMemLimit) {
-			fprintf(stderr, "ERROR : --memory-vsize has to be no less than --memory");
+			fmt::print(stderr, "ERROR : --memory-vsize has to be no less than --memory");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
 		if (opts.memLimit > 0 && opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
-			fprintf(stderr, "ERROR: --memory has to be larger than --cache-memory\n");
+			fmt::println(stderr, "ERROR: --memory has to be larger than --cache-memory");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
@@ -2208,7 +2202,7 @@ int main(int argc, char* argv[]) {
 			     role == ServerRole::FlowProcess || role == ServerRole::MockS3Server);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
-					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
+					fmt::println(stderr, "ERROR: The -p or --public-address option is required");
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -2252,11 +2246,11 @@ int main(int argc, char* argv[]) {
 							errorF.get();
 					} catch (Error& e) {
 						TraceEvent("BindError").error(e);
-						fprintf(stderr,
-						        "Error initializing networking with public address %s and listen address %s (%s)\n",
-						        publicAddress.toString().c_str(),
-						        listenAddress.toString().c_str(),
-						        e.what());
+						fmt::println(stderr,
+						             "Error initializing networking with public address {} and listen address {} ({})",
+						             publicAddress.toString(),
+						             listenAddress.toString(),
+						             e.what());
 						printHelpTeaser(argv[0]);
 						flushAndExit(FDB_EXIT_ERROR);
 					}
@@ -2355,10 +2349,10 @@ int main(int argc, char* argv[]) {
 					    .detail("DataFolder", dataFolder)
 					    .detail("SuspiciousFile", dir);
 
-					fprintf(stderr,
-					        "ERROR: Data folder `%s' had non fdb file `%s'; please use clean, fdb-only folder\n",
-					        dataFolder.c_str(),
-					        dir.c_str());
+					fmt::println(stderr,
+					             "ERROR: Data folder `{}' had non fdb file `{}'; please use clean, fdb-only folder",
+					             dataFolder,
+					             dir);
 
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -2491,18 +2485,18 @@ int main(int argc, char* argv[]) {
 
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus
 			if (opts.processClass == ProcessClass::FastRestoreClass) {
-				printf("Run as fast restore worker\n");
+				fmt::println("Run as fast restore worker");
 				ASSERT(opts.connectionFile);
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+					dataFolder = fmt::format("fdb/{}/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 				actors.push_back(restoreWorker(opts.connectionFile, opts.localities, dataFolder));
 				f = stopAfter(waitForAll(actors));
-				printf("Fast restore worker started\n");
+				fmt::println("Fast restore worker started");
 				g_network->run();
-				printf("g_network->run() done\n");
+				fmt::println("g_network->run() done");
 			} else { // Call fdbd roles in conventional way
 				ASSERT(opts.connectionFile);
 
@@ -2510,7 +2504,7 @@ int main(int argc, char* argv[]) {
 
 				auto dataFolder = opts.dataFolder;
 				if (!dataFolder.size())
-					dataFolder = format("fdb/%d/", opts.publicAddresses.address.port); // SOMEDAY: Better default
+					dataFolder = fmt::format("fdb/{}/", opts.publicAddresses.address.port); // SOMEDAY: Better default
 
 				std::vector<Future<Void>> actors(listenErrors.begin(), listenErrors.end());
 
@@ -2614,7 +2608,7 @@ int main(int argc, char* argv[]) {
 				GenerateIOLogChecksumFile(opts.kvFile);
 				result = Void();
 			} catch (Error& e) {
-				fprintf(stderr, "Fatal Error: %s\n", e.what());
+				fmt::println(stderr, "Fatal Error: {}", e.what());
 			}
 
 			f = result;
@@ -2657,7 +2651,7 @@ int main(int argc, char* argv[]) {
 			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
 		} else if (role == ServerRole::MockS3Server) {
-			printf("Starting MockS3Server on %s\n", opts.publicAddresses.address.toString().c_str());
+			fmt::println("Starting MockS3Server on {}", opts.publicAddresses.address.toString());
 			f = stopAfter(startMockS3ServerReal(opts.publicAddresses.address, opts.mocks3PersistenceDir));
 			g_network->run();
 		}
@@ -2674,8 +2668,8 @@ int main(int argc, char* argv[]) {
 		    .detail("RandomUnseed", unseed);
 
 		if (role == ServerRole::Simulation) {
-			printf("Unseed: %d\n", unseed);
-			printf("Elapsed: %f simsec, %f real seconds\n", now() - startNow, timer() - start);
+			fmt::println("Unseed: {}", unseed);
+			fmt::println("Elapsed: {:f} simsec, {:f} real seconds", now() - startNow, timer() - start);
 		}
 
 		// IFailureMonitor::failureMonitor().address_info.clear();
@@ -2713,7 +2707,7 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {
-				printf("%lu SevError events logged\n", sevErrorEventsLogged);
+				fmt::println("{} SevError events logged", sevErrorEventsLogged);
 				rc = FDB_EXIT_ERROR;
 			}
 		}
@@ -2758,12 +2752,12 @@ int main(int argc, char* argv[]) {
 			for (int i = 0; i < typeNames.size(); i++) {
 				const char* n = typeNames[i].second;
 				auto& f = allocInstr[n];
-				printf("%+d\t%+d\t%d\t%d\t%s\n",
-				       f.allocCount,
-				       -f.deallocCount,
-				       f.allocCount - f.deallocCount,
-				       f.maxAllocated,
-				       typeNames[i].first.c_str());
+				fmt::println("{:+}\t{:+}\t{}\t{}\t{}",
+				             f.allocCount,
+				             -f.deallocCount,
+				             f.allocCount - f.deallocCount,
+				             f.maxAllocated,
+				             typeNames[i].first);
 			}
 
 			// We're about to exit and clean up data structures, this will wreak havoc on allocation recording
@@ -2773,18 +2767,18 @@ int main(int argc, char* argv[]) {
 		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(rc);
 	} catch (Error& e) {
-		fprintf(stderr, "Error: %s\n", e.what());
+		fmt::println(stderr, "Error: {}", e.what());
 		TraceEvent(SevError, "MainError").error(e);
 		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (boost::system::system_error& e) {
 		ASSERT_WE_THINK(false); // boost errors shouldn't leak
-		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
+		fmt::print(stderr, "boost::system::system_error: {} ({})", e.what(), e.code().value());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
-		fprintf(stderr, "std::exception: %s\n", e.what());
+		fmt::println(stderr, "std::exception: {}", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);

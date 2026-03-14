@@ -20,6 +20,7 @@
 
 #include "fdbserver/AccumulativeChecksumUtil.h"
 #include "fdbserver/Knobs.h"
+#include "fmt/format.h"
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                                      MutationRef& mutation,
@@ -316,7 +317,7 @@ uint64_t AccumulativeChecksumValidator::getAndClearTotalAddedMutations() {
 }
 
 TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
-	printf("testing MutationRef encoding/decoding\n");
+	fmt::println("testing MutationRef encoding/decoding");
 	MutationRef m(MutationRef::SetValue, "TestKey"_sr, "TestValue"_sr);
 	m.setAccumulativeChecksumIndex(512);
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withMutationChecksum()));
@@ -331,7 +332,7 @@ TEST_CASE("noSim/AccumulativeChecksum/MutationRef") {
 
 	rd >> de;
 
-	printf("Deserialized mutation: %s\n", de.toString().c_str());
+	fmt::println("Deserialized mutation: {}", de.toString());
 
 	if (de.type != m.type || de.param1 != m.param1 || de.param2 != m.param2) {
 		TraceEvent(SevError, "MutationMismatch")

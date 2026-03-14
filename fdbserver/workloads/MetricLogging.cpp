@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fmt/format.h"
 
 struct MetricLoggingWorkload : TestWorkload {
 	static constexpr auto NAME = "MetricLogging";
@@ -43,9 +44,9 @@ struct MetricLoggingWorkload : TestWorkload {
 
 		for (int i = 0; i < metricCount; i++) {
 			if (testBool) {
-				boolMetrics.push_back(BoolMetricHandle("TestBool"_sr, format("%d", i)));
+				boolMetrics.push_back(BoolMetricHandle("TestBool"_sr, fmt::format("{}", i)));
 			} else {
-				int64Metrics.push_back(Int64MetricHandle("TestInt"_sr, format("%d", i)));
+				int64Metrics.push_back(Int64MetricHandle("TestInt"_sr, fmt::format("{}", i)));
 			}
 		}
 	}
