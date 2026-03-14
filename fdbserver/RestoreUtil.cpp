@@ -22,8 +22,6 @@
 
 #include "fdbserver/RestoreUtil.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 const std::vector<std::string> RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
 int numRoles = RestoreRoleStr.size();
 

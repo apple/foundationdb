@@ -631,7 +631,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			incorrectTime = Optional<double>();
 		}
 
-		Optional<EncryptKeyProxyInterface> fakeEpkInterf;
 		RegisterWorkerRequest request(interf,
 		                              initialClass,
 		                              processClass,
@@ -639,7 +638,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
-		                              fakeEpkInterf,
 		                              csInterf->get(),
 		                              degraded->get(),
 		                              recoveredDiskFiles.isSet(),

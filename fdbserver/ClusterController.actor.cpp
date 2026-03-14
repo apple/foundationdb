@@ -2557,17 +2557,6 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
-	state EncryptionAtRestModeDeprecated encryptMode = wait(self->encryptionAtRestModeDeprecated.getFuture());
-	if (!encryptMode.isEncryptionEnabled()) {
-		TraceEvent("EKPNotConfigured");
-		return Void();
-	} else {
-		TraceEvent(SevError, "WeBoguslyThinkEKPIsConfigured");
-		return Void();
-	}
-}
-
 ACTOR Future<Void> stopConsistencyScan(Database db) {
 	state ConsistencyScanState cs = ConsistencyScanState();
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
@@ -2827,8 +2816,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state uint64_t step = 0;
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
-	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	self.addActor.send(monitorEncryptKeyProxy(&self));
 	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators)); // Start the master database
 	self.addActor.send(self.updateWorkerList.init(self.db.db));
 	self.addActor.send(statusServer(interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));

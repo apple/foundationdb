@@ -1,5 +1,5 @@
 /*
- * MetricClient.actor.cpp
+ * MetricClient.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,8 +34,6 @@
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
-#include "flow/actorcompiler.h"
-
 UDPMetricClient::UDPMetricClient()
   : socket_fd(-1), model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
     buf{ MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(1024), .data_size = 0, .buffer_size = 1024 } },

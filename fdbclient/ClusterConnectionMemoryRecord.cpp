@@ -1,5 +1,5 @@
 /*
- * ClusterConnectionMemoryRecord.actor.cpp
+ * ClusterConnectionMemoryRecord.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,6 @@
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/MonitorLeader.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // Sets the connections string held by this object.
 Future<Void> ClusterConnectionMemoryRecord::setAndPersistConnectionString(ClusterConnectionString const& conn) {
