@@ -45,8 +45,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <boost/asio.hpp>
 #include <fmt/format.h>
 #include <fmt/printf.h>
@@ -541,7 +539,7 @@ void runAsyncWorkload(Arguments const& args,
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
 		// launch [async_xacts] concurrent transactions
-		for (auto state : states)
+		for (const auto& state : states)
 			state->postNextTick();
 		while (stopcount.load() != args.async_xacts)
 			usleep(1000);
@@ -573,7 +571,7 @@ void runAsyncWorkload(Arguments const& args,
 		}
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
-		for (auto state : states)
+		for (const auto& state : states)
 			state->postNextTick();
 		logr.debug("Launched {} concurrent transactions", states.size());
 		while (stopcount.load() != args.async_xacts)

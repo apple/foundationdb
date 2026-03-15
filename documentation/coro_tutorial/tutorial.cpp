@@ -439,7 +439,7 @@ Future<Void> fdbClientStream() {
 			                                        GetRangeLimits());
 			loop {
 				Standalone<RangeResultRef> range = co_await results.getFuture();
-				if (range.size()) {
+				if (!range.empty()) {
 					bytes += range.expectedSize();
 					next = keyAfter(range.back().key);
 				}

@@ -254,7 +254,7 @@ void traceMissedProbes(Optional<ExecutionContext> context) {
 	CodeProbes::instance().traceMissedProbes(context);
 }
 
-ICodeProbe::~ICodeProbe() {}
+ICodeProbe::~ICodeProbe() = default;
 
 bool ICodeProbe::operator==(const ICodeProbe& other) const {
 	return filename() == other.filename() && line() == other.line();

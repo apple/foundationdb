@@ -129,7 +129,7 @@ bool findBestPolicySetSimple(int targetUniqueValueCount,
 	desired = std::max(desired, targetUniqueValueCount);
 	auto it = randomizedEntries.begin();
 	while (bestSet.size() < desired) {
-		if (it->size()) {
+		if (!it->empty()) {
 			bestSet.push_back(mutableEntries[it->back()]);
 			it->pop_back();
 		}
@@ -238,7 +238,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,
 				break;
 		}
 	} else if (policy->name() == "Across") {
-		PolicyAcross* pa = (PolicyAcross*)policy.getPtr();
+		auto* pa = (PolicyAcross*)policy.getPtr();
 		std::set<std::string> attributeKeys;
 		pa->attributeKeys(&attributeKeys);
 		if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
@@ -376,7 +376,7 @@ bool validateAllCombinations(std::vector<LocalityData>& offendingCombo,
 	} else {
 		bool bIsValidGroup;
 		Reference<LocalitySet> localSet = Reference<LocalitySet>(new LocalityGroup());
-		LocalityGroup* localGroup = (LocalityGroup*)localSet.getPtr();
+		auto* localGroup = (LocalityGroup*)localSet.getPtr();
 		localGroup->deep_copy(localitySet);
 
 		std::vector<LocalityEntry> localityGroupEntries = localGroup->getEntries();
@@ -405,7 +405,7 @@ bool validateAllCombinations(std::vector<LocalityData>& offendingCombo,
 			bool result = localSet->selectReplicas(policy, localityGroupEntries, resultEntries);
 			ASSERT(result);
 
-			bIsValidGroup = resultEntries.size() == 0;
+			bIsValidGroup = resultEntries.empty();
 
 			if (((bCheckIfValid) && (!bIsValidGroup)) || ((!bCheckIfValid) && (bIsValidGroup))) {
 				offendingCombo.reserve(nCombinationSize);
@@ -460,7 +460,7 @@ Reference<LocalitySet> createTestLocalityMap(std::vector<repTestType>& indexes,
                                              int independentItems,
                                              int independentTotal) {
 	Reference<LocalitySet> buildServer(new LocalityMap<repTestType>());
-	LocalityMap<repTestType>* serverMap = (LocalityMap<repTestType>*)buildServer.getPtr();
+	auto* serverMap = (LocalityMap<repTestType>*)buildServer.getPtr();
 	int serverValue;
 	std::string dcText, szText, rackText, slotText, independentName, independentText;
 
@@ -552,7 +552,7 @@ bool testPolicy(Reference<LocalitySet> servers,
                 Reference<IReplicationPolicy> const& policy,
                 std::vector<LocalityEntry> const& including,
                 bool validate) {
-	LocalityMap<repTestType>* serverMap = (LocalityMap<repTestType>*)servers.getPtr();
+	auto* serverMap = (LocalityMap<repTestType>*)servers.getPtr();
 	std::string outputText, includeText;
 	std::vector<LocalityEntry> entryResults;
 	std::vector<repTestType*> results;
@@ -592,14 +592,14 @@ bool testPolicy(Reference<LocalitySet> servers,
 	valid = (validate) ? policy->validateFull(solved, entryResults, including, servers) : true;
 
 	if (g_replicationdebug > 0) {
-		if (including.size()) {
+		if (!including.empty()) {
 			includeText = " with ";
 			for (auto& entry : including) {
 				includeText += " " + servers->getEntryInfo(entry);
 			}
 		}
 
-		if (results.size()) {
+		if (!results.empty()) {
 			outputText = policy->info() + includeText + " -> ";
 			int count = 0;
 			for (auto& entry : entryResults) {
@@ -835,7 +835,7 @@ std::vector<Reference<IReplicationPolicy>> const& getStaticPolicies() {
 	return staticPolicies;
 }
 
-Reference<IReplicationPolicy> const randomAcrossPolicy(LocalitySet const& serverSet) {
+Reference<IReplicationPolicy> randomAcrossPolicy(LocalitySet const& serverSet) {
 	int usedKeyTotal, keysUsed, keyIndex, valueTotal, maxValueTotal, maxKeyTotal, skips, lastKeyIndex;
 	std::vector<std::string> keyArray(serverSet.getGroupKeyMap()->_lookuparray);
 	std::set<std::string> valueSet;
@@ -1002,7 +1002,7 @@ int testReplication() {
 			alsoSize = maxAlsoSize;
 		}
 
-		if ((!alsoSize) && (alsoServers.size() > 0)) {
+		if ((!alsoSize) && (!alsoServers.empty())) {
 			alsoServers.clear();
 		} else {
 			alsoServers = testServers->getEntries();

@@ -715,9 +715,10 @@ public:
 		state std::vector<Reference<TCServerInfo>> servers;
 		state std::vector<UID> serverIds;
 		state Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
-		state LocalityMap<UID>* tempMap = (LocalityMap<UID>*)tempSet.getPtr();
+		state LocalityMap<UID>* tempMap = nullptr;
 		state std::vector<Reference<TCTeamInfo>> largeOrBadTeams = self->badTeams;
 		largeOrBadTeams.insert(largeOrBadTeams.end(), self->largeTeams.begin(), self->largeTeams.end());
+		tempMap = static_cast<LocalityMap<UID>*>(tempSet.getPtr());
 
 		for (; idx < largeOrBadTeams.size(); idx++) {
 			servers.clear();
@@ -4377,7 +4378,7 @@ Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
 
 void DDTeamCollection::resetLocalitySet() {
 	storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
-	LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
+	auto* storageServerMap = static_cast<LocalityMap<UID>*>(storageServerSet.getPtr());
 
 	for (auto& it : server_info) {
 		it.second->localityEntry =
@@ -4727,7 +4728,7 @@ struct ServerPriority {
 	UID id;
 	Reference<TCServerInfo> info;
 
-	ServerPriority() {}
+	ServerPriority() = default;
 	ServerPriority(int healthyShards, int unhealthyShards, int64_t loadBytes, UID id, Reference<TCServerInfo> info)
 	  : healthyShards(healthyShards), unhealthyShards(unhealthyShards), loadBytes(loadBytes), id(id), info(info) {}
 
@@ -4816,7 +4817,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		return Reference<TCTeamInfo>();
 	} else if (candidateTeam.size() > teamSize) {
 		Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
-		LocalityMap<UID>* tempMap = (LocalityMap<UID>*)tempSet.getPtr();
+		auto* tempMap = static_cast<LocalityMap<UID>*>(tempSet.getPtr());
 		tempSet->clear();
 		for (auto& it : candidateTeam) {
 			tempMap->add(it->getLastKnownInterface().locality, &it->getId());
@@ -6226,8 +6227,7 @@ public:
 	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
 	                                                            Reference<IReplicationPolicy> policy,
 	                                                            int processCount) {
-		Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure =
-		    makeReference<ShardsAffectedByTeamFailure>();
+		auto shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 		return testTeamCollection(teamSize, policy, processCount, shardsAffectedByTeamFailure);
 	}
 
@@ -6974,8 +6974,7 @@ public:
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 5;
 		state int teamSize = 3;
-		Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure =
-		    makeReference<ShardsAffectedByTeamFailure>();
+		auto shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 		state std::unique_ptr<DDTeamCollection> collection =
 		    testTeamCollection(teamSize, policy, processSize, shardsAffectedByTeamFailure);
 

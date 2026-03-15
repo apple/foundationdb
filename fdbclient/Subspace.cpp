@@ -38,7 +38,7 @@ Subspace::Subspace(StringRef const& rawPrefix) {
 	this->rawPrefix.append(this->rawPrefix.arena(), rawPrefix.begin(), rawPrefix.size());
 }
 
-Subspace::~Subspace() {}
+Subspace::~Subspace() = default;
 
 Key Subspace::key() const {
 	return Key(StringRef(rawPrefix.begin(), rawPrefix.size()), rawPrefix.arena());

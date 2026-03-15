@@ -46,7 +46,7 @@
 #define S3_CHECKSUM_TAG_NAME "xxhash64"
 #define S3_CHECKSUM_FILE_SUFFIX ".checksum"
 
-typedef XXH64_state_t XXHashState;
+using XXHashState = XXH64_state_t;
 
 using ::format; // Use FoundationDB's format, not std::format
 

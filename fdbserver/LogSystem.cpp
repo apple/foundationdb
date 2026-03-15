@@ -75,7 +75,7 @@ void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTa
 	}
 
 	Reference<LocalitySet> serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int, int>>());
-	LocalityMap<std::pair<int, int>>* serverMap = (LocalityMap<std::pair<int, int>>*)serverSet.getPtr();
+	auto* serverMap = (LocalityMap<std::pair<int, int>>*)serverSet.getPtr();
 	std::vector<std::pair<int, int>> resultPairs;
 	for (int loc = 0; loc < satelliteTagLocations.size(); loc++) {
 		int team = loc;
@@ -91,7 +91,7 @@ void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTa
 		resultPairs.clear();
 		for (auto& used_idx : used_servers) {
 			auto entry = serverMap->add(tLogLocalities[used_idx.second], &used_idx);
-			if (!resultPairs.size()) {
+			if (resultPairs.empty()) {
 				resultPairs.push_back(used_idx);
 				alsoServers[0] = entry;
 			}
@@ -210,7 +210,7 @@ bool LogSet::satisfiesPolicy(const std::vector<LocalityEntry>& locations) {
 	bool result = logServerSet->selectReplicas(tLogPolicy, locations, resultEntries);
 	ASSERT(result);
 
-	return resultEntries.size() == 0;
+	return resultEntries.empty();
 }
 
 void LogSet::getPushLocations(VectorRef<Tag> tags,
@@ -250,7 +250,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 
 	uniquify(newLocations);
 
-	if (newLocations.size())
+	if (!newLocations.empty())
 		alsoServers.reserve(newLocations.size());
 
 	// Convert locations to the also servers
@@ -269,7 +269,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 	ASSERT(result);
 
 	// Add the new servers to the location array
-	LocalityMap<int>* logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
+	auto* logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
 	for (auto entry : resultEntries) {
 		locations.push_back(locationOffset + *logServerMap->getObject(entry));
 	}
@@ -344,7 +344,7 @@ void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value
 
 float LogPushData::getEmptyMessageRatio() const {
 	auto count = std::count(messagesWritten.begin(), messagesWritten.end(), false);
-	ASSERT_WE_THINK(messagesWritten.size() > 0);
+	ASSERT_WE_THINK(!messagesWritten.empty());
 	return 1.0 * count / messagesWritten.size();
 }
 

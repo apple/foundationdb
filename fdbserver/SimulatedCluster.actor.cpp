@@ -1348,8 +1348,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 				zoneId = Standalone<StringRef>(zoneIdStr);
 			}
 
-			ProcessClass::ClassType cType =
-			    (ProcessClass::ClassType)(atoi(ini.GetValue(machineIdString.c_str(), "mClass")));
+			auto cType = static_cast<ProcessClass::ClassType>(atoi(ini.GetValue(machineIdString.c_str(), "mClass")));
 			// using specialized class types can lead to nondeterministic recruitment
 			if (cType == ProcessClass::MasterClass || cType == ProcessClass::ResolutionClass) {
 				cType = ProcessClass::StatelessClass;

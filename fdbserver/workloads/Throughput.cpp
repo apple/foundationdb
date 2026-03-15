@@ -46,7 +46,7 @@ struct ITransactor : ReferenceCounted<ITransactor> {
 	};
 
 	virtual Future<Void> doTransaction(Database const&, Stats* stats) = 0;
-	virtual ~ITransactor() {}
+	virtual ~ITransactor() = default;
 };
 
 struct RWTransactor : ITransactor {
@@ -195,7 +195,7 @@ struct IMeasurer : ReferenceCounted<IMeasurer> {
 		return *this;
 	} // allow copy operator for non-reference counted instances of subclasses
 
-	virtual ~IMeasurer() {}
+	virtual ~IMeasurer() = default;
 };
 
 struct MeasureSinglePeriod : IMeasurer {
@@ -363,7 +363,7 @@ struct ThroughputWorkload : TestWorkload {
 		std::vector<std::string> periodicMetrics =
 		    getOption(options, "measurePeriodicMetrics"_sr, std::vector<std::string>());
 		if (measurePeriod) {
-			ASSERT(periodicMetrics.size() != 0);
+			ASSERT(!periodicMetrics.empty());
 			multi->ms.push_back(Reference<IMeasurer>(new MeasurePeriodically(
 			    measurePeriod, std::set<std::string>(periodicMetrics.begin(), periodicMetrics.end()))));
 		}

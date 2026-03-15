@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 struct Increment : TestWorkload {
 	static constexpr auto NAME = "Increment";
@@ -110,7 +110,7 @@ struct Increment : TestWorkload {
 	}
 	bool incrementCheckData(const VectorRef<KeyValueRef>& data, Version v, Increment* self) {
 		CODE_PROBE(self->transactions.getValue(), "incrementCheckData transaction has value");
-		if (self->transactions.getValue() && data.size() == 0) {
+		if (self->transactions.getValue() && data.empty()) {
 			TraceEvent(SevError, "TestFailure")
 			    .detail("Reason", "No successful increments")
 			    .detail("Before", nodeCount)

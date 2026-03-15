@@ -83,7 +83,7 @@ void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef cons
 
 void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 	try {
-		StatusObject statusObj = BinaryReader::fromStringRef<StatusObject>(v, IncludeVersion());
+		auto statusObj = BinaryReader::fromStringRef<StatusObject>(v, IncludeVersion());
 		regions->clear();
 		if (statusObj["regions"].type() != json_spirit::array_type) {
 			return;
@@ -208,7 +208,7 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 }
 
 int32_t DatabaseConfiguration::maxZoneFailuresTolerated(int fullyReplicatedRegions, bool forAvailability) const {
-	int worstSatelliteTLogReplicationFactor = regions.size() ? std::numeric_limits<int>::max() : 0;
+	int worstSatelliteTLogReplicationFactor = !regions.empty() ? std::numeric_limits<int>::max() : 0;
 	int regionsWithNonNegativePriority = 0;
 	for (auto& r : regions) {
 		if (r.priority >= 0) {
@@ -269,8 +269,8 @@ bool DatabaseConfiguration::isValid() const {
 	      LOG_TEST(remoteTLogReplicationFactor >= 0) && LOG_TEST(repopulateRegionAntiQuorum >= 0) &&
 	      LOG_TEST(repopulateRegionAntiQuorum <= 1) && LOG_TEST(usableRegions >= 1) && LOG_TEST(usableRegions <= 2) &&
 	      LOG_TEST(regions.size() <= 2) && LOG_TEST((usableRegions == 1 || regions.size() == 2)) &&
-	      LOG_TEST((regions.size() == 0 || regions[0].priority >= 0)) &&
-	      LOG_TEST((regions.size() == 0 || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1")) &&
+	      LOG_TEST((regions.empty() || regions[0].priority >= 0)) &&
+	      LOG_TEST((regions.empty() || tLogPolicy->info() != "dcid^2 x zoneid^2 x 1")) &&
 	      // We cannot specify regions with three_datacenter replication
 	      LOG_TEST((perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1)) &&
 	      LOG_TEST(isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality)) &&
@@ -281,9 +281,9 @@ bool DatabaseConfiguration::isValid() const {
 	std::set<Key> dcIds;
 	dcIds.insert(Key());
 	for (auto& r : regions) {
-		if (!(!dcIds.count(r.dcId) && r.satelliteTLogReplicationFactor >= 0 && r.satelliteTLogWriteAntiQuorum >= 0 &&
+		if (!(!dcIds.contains(r.dcId) && r.satelliteTLogReplicationFactor >= 0 && r.satelliteTLogWriteAntiQuorum >= 0 &&
 		      r.satelliteTLogUsableDcs >= 1 &&
-		      (r.satelliteTLogReplicationFactor == 0 || (r.satelliteTLogPolicy && r.satellites.size())) &&
+		      (r.satelliteTLogReplicationFactor == 0 || (r.satelliteTLogPolicy && !r.satellites.empty())) &&
 		      (r.satelliteTLogUsableDcsFallback == 0 ||
 		       (r.satelliteTLogReplicationFactor > 0 && r.satelliteTLogReplicationFactorFallback > 0)))) {
 			return false;
@@ -293,7 +293,7 @@ bool DatabaseConfiguration::isValid() const {
 		satelliteDcIds.insert(Key());
 		satelliteDcIds.insert(r.dcId);
 		for (auto& s : r.satellites) {
-			if (satelliteDcIds.count(s.dcId)) {
+			if (satelliteDcIds.contains(s.dcId)) {
 				return false;
 			}
 			satelliteDcIds.insert(s.dcId);
@@ -376,7 +376,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 	result["usable_regions"] = usableRegions;
 
-	if (regions.size()) {
+	if (!regions.empty()) {
 		result["regions"] = getRegionJSON();
 	}
 
@@ -542,7 +542,7 @@ StatusArray DatabaseConfiguration::getRegionJSON() const {
 			regionObj["satellite_logs"] = r.satelliteDesiredTLogCount;
 		}
 
-		if (r.satellites.size()) {
+		if (!r.satellites.empty()) {
 			for (auto& s : r.satellites) {
 				StatusObject satObj;
 				satObj["id"] = s.dcId.toString();

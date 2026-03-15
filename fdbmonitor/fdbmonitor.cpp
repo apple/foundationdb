@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
 
 	/* open and lock our lockfile for mutual exclusion */
 	std::string lockfileDir = parentDirectory(lockfile, true);
-	if (lockfileDir.size() == 0) {
+	if (lockfileDir.empty()) {
 		log_msg(SevError, "Unable to determine parent directory of lockfile %s\n", lockfile.c_str());
 		exit(1);
 	}
@@ -367,7 +367,7 @@ int main(int argc, char** argv) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
 			// If process has a resident memory limit and is currently running
-			if (i.second->memory_rss > 0 && id_pid.count(i.first) > 0) {
+			if (i.second->memory_rss > 0 && id_pid.contains(i.first)) {
 				need_rss_check = true;
 			}
 		}
@@ -453,7 +453,7 @@ int main(int argc, char** argv) {
 				}
 				break;
 			case EVFILT_READ:
-				Command* cmd = (Command*)ev.udata;
+				auto* cmd = (Command*)ev.udata;
 				for (int i = 0; i < 2; i++) {
 					if (ev.ident == cmd->pipes[i][0]) {
 						read_child_output(cmd, i, watched_fds);
@@ -470,7 +470,7 @@ int main(int argc, char** argv) {
 			last_rss_check = timer();
 			std::vector<ProcessID> oom_ids;
 			for (auto& i : id_command) {
-				if (id_pid.count(i.first) == 0) {
+				if (!id_pid.contains(i.first)) {
 					// process is not running
 					continue;
 				}
@@ -494,7 +494,7 @@ int main(int argc, char** argv) {
 			for (auto& id : oom_ids) {
 				kill_process(id, false /*wait*/, false /*cleanup*/);
 			}
-			if (oom_ids.size() > 0) {
+			if (!oom_ids.empty()) {
 				child_exited = true;
 			}
 		}
@@ -570,11 +570,12 @@ int main(int argc, char** argv) {
 					log_err("read", errno, "Error reading inotify message");
 
 				while (i < len) {
-					struct inotify_event* event = (struct inotify_event*)&buf[i];
+					auto* event = (struct inotify_event*)&buf[i];
 
 					auto search = additional_watch_wds.find(event->wd);
 					if (event->wd != conffile_wd) {
-						if (search != additional_watch_wds.end() && event->len && search->second.count(event->name)) {
+						if (search != additional_watch_wds.end() && event->len &&
+						    search->second.contains(event->name)) {
 							log_msg(SevInfo,
 							        "Changes detected on watched symlink `%s': (%d, %#010x)\n",
 							        event->name,

@@ -2959,7 +2959,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 
 struct AbortableTest {
 	static FutureInfo createThreadFuture(FutureInfo f) {
-		ThreadSingleAssignmentVar<Void>* abort = new ThreadSingleAssignmentVar<Void>();
+		auto* abort = new ThreadSingleAssignmentVar<Void>();
 		abort->addref(); // this leaks if abort is never set
 
 		auto newFuture =
@@ -3030,7 +3030,7 @@ struct DLTest {
 			// Functions needed for DLSingleAssignmentVar
 			api->futureSetCallback = [](FdbCApi::FDBFuture* f, FdbCApi::FDBCallback callback, void* callbackParameter) {
 				try {
-					CAPICallback* cb = new CAPICallback(callback, f, callbackParameter);
+					auto* cb = new CAPICallback(callback, f, callbackParameter);
 					int ignore;
 					((ThreadSingleAssignmentVarBase*)f)->callOrSetAsCallback(cb, ignore, 0);
 					return FdbCApi::fdb_error_t(error_code_success);

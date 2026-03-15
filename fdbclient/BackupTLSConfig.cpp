@@ -34,13 +34,13 @@ void BackupTLSConfig::setupBlobCredentials() {
 		StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
 		do {
 			StringRef file = t.eat(":");
-			if (file.size() != 0)
+			if (!file.empty())
 				blobCredentials.push_back(file.toString());
-		} while (t.size() != 0);
+		} while (!t.empty());
 	}
 
 	// Update the global blob credential files list
-	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+	auto* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
 	if (pFiles != nullptr) {
 		for (auto& f : blobCredentials) {
 			pFiles->push_back(f);
@@ -49,7 +49,7 @@ void BackupTLSConfig::setupBlobCredentials() {
 }
 
 bool BackupTLSConfig::setupTLS() {
-	if (tlsCertPath.size()) {
+	if (!tlsCertPath.empty()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, tlsCertPath);
 		} catch (Error& e) {
@@ -58,7 +58,7 @@ bool BackupTLSConfig::setupTLS() {
 		}
 	}
 
-	if (tlsCAPath.size()) {
+	if (!tlsCAPath.empty()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, tlsCAPath);
 		} catch (Error& e) {
@@ -66,9 +66,9 @@ bool BackupTLSConfig::setupTLS() {
 			return false;
 		}
 	}
-	if (tlsKeyPath.size()) {
+	if (!tlsKeyPath.empty()) {
 		try {
-			if (tlsPassword.size())
+			if (!tlsPassword.empty())
 				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, tlsPassword);
 
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, tlsKeyPath);
@@ -77,7 +77,7 @@ bool BackupTLSConfig::setupTLS() {
 			return false;
 		}
 	}
-	if (tlsVerifyPeers.size()) {
+	if (!tlsVerifyPeers.empty()) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_VERIFY_PEERS, tlsVerifyPeers);
 		} catch (Error& e) {

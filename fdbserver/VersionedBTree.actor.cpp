@@ -1629,7 +1629,7 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
 	struct Entry;
-	typedef std::unordered_map<IndexType, Entry> CacheT;
+	using CacheT = std::unordered_map<IndexType, Entry>;
 
 	struct Entry : public boost::intrusive::list_base_hook<> {
 		Entry() : hits(0), size(0) {}
@@ -1641,7 +1641,7 @@ class ObjectCache : NonCopyable {
 		CacheT* pCache;
 	};
 
-	typedef boost::intrusive::list<Entry> EvictionOrderT;
+	using EvictionOrderT = boost::intrusive::list<Entry>;
 
 public:
 	// Object evictor, manages the eviction order for one or more ObjectCaches
@@ -1907,9 +1907,9 @@ class DWALPagerSnapshot;
 // back to their original location once the original version is no longer needed.
 class DWALPager final : public IPager2 {
 public:
-	typedef FIFOQueue<LogicalPageID> LogicalPageQueueT;
-	typedef std::map<Version, LogicalPageID> VersionToPageMapT;
-	typedef std::unordered_map<LogicalPageID, VersionToPageMapT> PageToVersionedMapT;
+	using LogicalPageQueueT = FIFOQueue<LogicalPageID>;
+	using VersionToPageMapT = std::map<Version, LogicalPageID>;
+	using PageToVersionedMapT = std::unordered_map<LogicalPageID, VersionToPageMapT>;
 	struct PageCacheEntry {
 		Future<Reference<ArenaPage>> readFuture;
 		Future<Void> writeFuture;
@@ -1936,7 +1936,7 @@ public:
 			return Void();
 		}
 	};
-	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
+	using PageCacheT = ObjectCache<LogicalPageID, PageCacheEntry>;
 
 	int64_t* getPageCachePenaltySource() override { return &pageCache.evictor().reservedSize; }
 
@@ -2002,9 +2002,9 @@ public:
 
 #pragma pack(pop)
 
-	typedef FIFOQueue<DelayedFreePage> DelayedFreePageQueueT;
-	typedef FIFOQueue<RemappedPage> RemapQueueT;
-	typedef FIFOQueue<ExtentUsedListEntry> ExtentUsedListQueueT;
+	using DelayedFreePageQueueT = FIFOQueue<DelayedFreePage>;
+	using RemapQueueT = FIFOQueue<RemappedPage>;
+	using ExtentUsedListQueueT = FIFOQueue<ExtentUsedListEntry>;
 
 	// If the file already exists, pageSize might be different than desiredPageSize
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
@@ -3734,7 +3734,7 @@ public:
 	Version getLastCommittedVersion() const override { return lastCommittedHeader.committedVersion; }
 
 private:
-	~DWALPager() {}
+	~DWALPager() = default;
 
 	// Try to expire snapshots up to but not including v, but do not expire any snapshots that are in use.
 	void expireSnapshots(Version v);
@@ -3901,7 +3901,7 @@ private:
 class DWALPagerSnapshot : public IPagerSnapshot, public ReferenceCounted<DWALPagerSnapshot> {
 public:
 	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version) : pager(pager), version(version), metaKey(meta) {}
-	~DWALPagerSnapshot() override {}
+	~DWALPagerSnapshot() override = default;
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
 	                                                   unsigned int level,
@@ -4059,8 +4059,8 @@ struct SplitStringRef {
 };
 
 // A BTree node link is a list of LogicalPageID's whose contents should be concatenated together.
-typedef VectorRef<LogicalPageID> BTreeNodeLinkRef;
-typedef Standalone<BTreeNodeLinkRef> BTreeNodeLink;
+using BTreeNodeLinkRef = VectorRef<LogicalPageID>;
+using BTreeNodeLink = Standalone<BTreeNodeLinkRef>;
 
 constexpr LogicalPageID maxPageID = (LogicalPageID)-1;
 
@@ -4069,7 +4069,7 @@ std::string toString(BTreeNodeLinkRef id) {
 }
 
 struct RedwoodRecordRef {
-	typedef uint8_t byte;
+	using byte = uint8_t;
 
 	RedwoodRecordRef(KeyRef key = KeyRef(), Optional<ValueRef> value = {}) : key(key), value(value) {}
 
@@ -4079,7 +4079,7 @@ struct RedwoodRecordRef {
 		}
 	}
 
-	typedef KeyRef Partial;
+	using Partial = KeyRef;
 
 	void updateCache(Optional<Partial>& cache, Arena& arena) const { cache = KeyRef(arena, key); }
 
@@ -4529,8 +4529,8 @@ struct RedwoodRecordRef {
 };
 
 struct BTreePage {
-	typedef DeltaTree2<RedwoodRecordRef> BinaryTree;
-	typedef DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly> ValueTree;
+	using BinaryTree = DeltaTree2<RedwoodRecordRef>;
+	using ValueTree = DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>;
 
 #pragma pack(push, 1)
 	struct {
@@ -4639,7 +4639,7 @@ class DecodeBoundaryVerifier {
 		bool empty() const { return lower.empty() && upper.empty(); }
 	};
 
-	typedef std::map<Version, DecodeBoundaries> BoundariesByVersion;
+	using BoundariesByVersion = std::map<Version, DecodeBoundaries>;
 	std::unordered_map<LogicalPageID, BoundariesByVersion> boundariesByPageID;
 	int boundarySampleSize = 1000;
 	int boundaryPopulation = 0;
@@ -4794,7 +4794,7 @@ public:
 		std::string toString() const { return format("{%s @%" PRId64 "}", ::toString(pageID).c_str(), version); }
 	};
 
-	typedef FIFOQueue<LazyClearQueueEntry> LazyClearQueueT;
+	using LazyClearQueueT = FIFOQueue<LazyClearQueueEntry>;
 
 	struct ParentInfo {
 		ParentInfo() {
@@ -4822,7 +4822,7 @@ public:
 		int count;
 	};
 
-	typedef std::unordered_map<LogicalPageID, ParentInfo> ParentInfoMapT;
+	using ParentInfoMapT = std::unordered_map<LogicalPageID, ParentInfo>;
 
 	struct BTreeCommitHeader {
 		constexpr static FileIdentifier file_identifier = 10847329;
@@ -5260,13 +5260,13 @@ public:
 		}
 
 	private:
-		typedef std::map<KeyRef, RangeMutation> MutationsT;
+		using MutationsT = std::map<KeyRef, RangeMutation>;
 		Arena arena;
 		MutationsT mutations;
 
 	public:
 		struct iterator : public MutationsT::iterator {
-			typedef MutationsT::iterator Base;
+			using Base = MutationsT::iterator;
 			iterator() = default;
 			iterator(const MutationsT::iterator& i) : Base(i) {}
 
@@ -5276,7 +5276,7 @@ public:
 		};
 
 		struct const_iterator : public MutationsT::const_iterator {
-			typedef MutationsT::const_iterator Base;
+			using Base = MutationsT::const_iterator;
 			const_iterator() = default;
 			const_iterator(const MutationsT::const_iterator& i) : Base(i) {}
 			const_iterator(const MutationsT::iterator& i) : Base(i) {}
@@ -5333,9 +5333,9 @@ public:
 #define USE_ART_MUTATION_BUFFER 1
 
 #ifdef USE_ART_MUTATION_BUFFER
-	typedef struct MutationBufferART MutationBuffer;
+	using MutationBuffer = MutationBufferART;
 #else
-	typedef struct MutationBufferStdMap MutationBuffer;
+	using MutationBuffer = MutationBufferStdMap;
 #endif
 
 private:
@@ -5989,7 +5989,7 @@ private:
 
 		if (REDWOOD_DEBUG) {
 			const BTreePage* btPage = (const BTreePage*)page->mutateData();
-			BTreePage::BinaryTree::DecodeCache* cache = page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>();
+			auto* cache = page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>();
 
 			debug_printf_always(
 			    "updateBTreePage(%s, %s) start, page:\n%s\n",
@@ -6187,7 +6187,7 @@ private:
 	};
 
 	struct InternalPageModifier {
-		InternalPageModifier() {}
+		InternalPageModifier() = default;
 		InternalPageModifier(Reference<const ArenaPage> p,
 		                     bool alreadyCloned,
 		                     bool updating,
@@ -7548,7 +7548,7 @@ public:
 		if (!snapshot->extra.valid()) {
 			KeyRef m = snapshot->getMetaKey();
 			if (!m.empty()) {
-				BTreeCommitHeader h = ObjectReader::fromStringRef<VersionedBTree::BTreeCommitHeader>(m, Unversioned());
+				auto h = ObjectReader::fromStringRef<VersionedBTree::BTreeCommitHeader>(m, Unversioned());
 				root = h.root;
 				// Copy the BTreeNodeLink but keep the same arena and BTreeNodeLinkRef
 				snapshot->extra = new BTreeNodeLink(h.root, h.root.arena());
@@ -7870,7 +7870,7 @@ public:
 		}));
 	}
 
-	~KeyValueStoreRedwood() override {};
+	~KeyValueStoreRedwood() override = default;
 
 private:
 	std::string m_filename;
@@ -8266,11 +8266,11 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
 }
 
 struct IntIntPair {
-	IntIntPair() {}
+	IntIntPair() = default;
 	IntIntPair(int k, int v) : k(k), v(v) {}
 	IntIntPair(Arena& arena, const IntIntPair& toCopy) { *this = toCopy; }
 
-	typedef IntIntPair Partial;
+	using Partial = IntIntPair;
 
 	void updateCache(Optional<Partial> cache, Arena& arena) const {}
 	struct Delta {
@@ -8713,7 +8713,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef") {
 
 	int bufferSize = N * 100;
 	bool largeTree = bufferSize > DeltaTree<RedwoodRecordRef>::SmallSizeLimit;
-	DeltaTree<RedwoodRecordRef>* tree = (DeltaTree<RedwoodRecordRef>*)new uint8_t[bufferSize];
+	auto* tree = (DeltaTree<RedwoodRecordRef>*)new uint8_t[bufferSize];
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
@@ -8890,7 +8890,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 
 	int bufferSize = N * 100;
 	bool largeTree = bufferSize > DeltaTree2<RedwoodRecordRef>::SmallSizeLimit;
-	DeltaTree2<RedwoodRecordRef>* tree = (DeltaTree2<RedwoodRecordRef>*)new uint8_t[bufferSize];
+	auto* tree = (DeltaTree2<RedwoodRecordRef>*)new uint8_t[bufferSize];
 
 	tree->build(bufferSize, &items[0], &items[items.size()], &prev, &next);
 
@@ -9072,12 +9072,12 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	std::vector<IntIntPair> items(uniqueItems.begin(), uniqueItems.end());
 	int bufferSize = N * 2 * 30;
 
-	DeltaTree<IntIntPair>* tree = (DeltaTree<IntIntPair>*)new uint8_t[bufferSize];
+	auto* tree = (DeltaTree<IntIntPair>*)new uint8_t[bufferSize];
 	int builtSize = tree->build(bufferSize, &items[0], &items[items.size()], &lowerBound, &upperBound);
 	ASSERT(builtSize <= bufferSize);
 	DeltaTree<IntIntPair>::Mirror r(tree, &lowerBound, &upperBound);
 
-	DeltaTree2<IntIntPair>* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
+	auto* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
 	int builtSize2 = tree2->build(bufferSize, &items[0], &items[0] + items.size(), &lowerBound, &upperBound);
 	ASSERT(builtSize2 <= bufferSize);
 	auto cache = makeReference<DeltaTree2<IntIntPair>::DecodeCache>(lowerBound, upperBound);
@@ -9619,7 +9619,7 @@ TEST_CASE(":/redwood/performance/mutationBuffer") {
 TEST_CASE(":/redwood/pager/ArenaPage") {
 	Arena x;
 	printf("Making p\n");
-	Reference<ArenaPage> p = makeReference<ArenaPage>(4096, 4096);
+	auto p = makeReference<ArenaPage>(4096, 4096);
 	printf("Made p=%p\n", p->data());
 	printf("Clearing p\n");
 	p.clear();
@@ -10195,7 +10195,7 @@ struct ExtentQueueEntry {
 	}
 };
 
-typedef FIFOQueue<ExtentQueueEntry<16>> ExtentQueueT;
+using ExtentQueueT = FIFOQueue<ExtentQueueEntry<16>>;
 TEST_CASE(":/redwood/performance/extentQueue") {
 	state ExtentQueueT m_extentQueue;
 	state ExtentQueueT::QueueState extentQueueState;
@@ -10572,10 +10572,10 @@ struct PrefixSegment {
 // Utility class for generating kv pairs under a prefix pattern
 // It currently uses std::string in an abstraction breaking way.
 struct KVSource {
-	KVSource() {}
+	KVSource() = default;
 
-	typedef VectorRef<uint8_t> PrefixRef;
-	typedef Standalone<PrefixRef> Prefix;
+	using PrefixRef = VectorRef<uint8_t>;
+	using Prefix = Standalone<PrefixRef>;
 
 	std::vector<PrefixSegment> desc;
 	std::vector<std::vector<std::string>> segments;

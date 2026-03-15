@@ -279,7 +279,7 @@ private:
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener() {}
+	RocksDBErrorListener() = default;
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		if (!bg_error)
 			return;
@@ -307,7 +307,7 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
-	~RocksDBErrorListener() {
+	~RocksDBErrorListener() override {
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
@@ -383,7 +383,7 @@ public:
 	CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
 	  : threshold(numRangeDeletionsAllowed), numFilesMarkedForCompaction(0) {}
 
-	~CompactOnRangeDeletionCollectorFactory() {}
+	~CompactOnRangeDeletionCollectorFactory() override = default;
 
 	rocksdb::TablePropertiesCollector* CreateTablePropertiesCollector(
 	    rocksdb::TablePropertiesCollectorFactory::Context context) override {
@@ -820,7 +820,7 @@ struct ReadIterator {
 // Stores iterators for all shards for future reuse. One iterator is stored per shard.
 class IteratorPool {
 public:
-	IteratorPool() {}
+	IteratorPool() = default;
 
 	std::shared_ptr<ReadIterator> getIterator(const std::string& id) {
 		std::unique_lock<std::mutex> lock(mu);
@@ -2346,7 +2346,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		explicit CompactionWorker(UID logId) : logId(logId) {}
 
 		void init() override {}
-		~CompactionWorker() override {}
+		~CompactionWorker() override = default;
 
 		struct CompactShardsAction : TypedAction<CompactionWorker, CompactShardsAction> {
 			std::vector<std::shared_ptr<PhysicalShard>> shards;
@@ -2427,7 +2427,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(iteratorPool);
 		}
 
-		~Writer() override {}
+		~Writer() override = default;
 
 		void init() override {}
 

@@ -72,13 +72,13 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			if (req->has_cluster_description() && req->cluster_description().size()) {
+			if (req->has_cluster_description() && !req->cluster_description().empty()) {
 				tr->set(special_keys::clusterDescriptionSpecialKey, req->cluster_description());
 			}
 
 			if (req->automatic_coordinators()) {
 				ASSERT(req->new_coordinator_addresses_size() == 0);
-				if (!auto_coordinators_str.size()) {
+				if (auto_coordinators_str.empty()) {
 					ThreadFuture<Optional<Value>> auto_coordinatorsF =
 					    tr->get(special_keys::coordinatorsAutoSpecialKey);
 					Optional<Value> auto_coordinators = co_await safeThreadFutureToFuture(auto_coordinatorsF);
@@ -95,7 +95,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 					try {
 						if (Hostname::isHostname(new_coord)) {
 							const auto& hostname = Hostname::parse(new_coord);
-							if (new_coordinators_hostnames.count(hostname)) {
+							if (new_coordinators_hostnames.contains(hostname)) {
 								co_return grpc::Status(
 								    grpc::StatusCode::INVALID_ARGUMENT,
 								    fmt::format("passed redundant coordinators: {}", hostname.toString()));
@@ -104,7 +104,7 @@ Future<grpc::Status> changeCoordinators(Reference<IDatabase> db,
 							newCoordinatorsList.push_back(hostname.toString());
 						} else {
 							const auto& addr = NetworkAddress::parse(new_coord);
-							if (new_coordinators_addresses.count(addr)) {
+							if (new_coordinators_addresses.contains(addr)) {
 								co_return grpc::Status(
 								    grpc::StatusCode::INVALID_ARGUMENT,
 								    fmt::format("passed redundant coordinators: {}", addr.toString()));
@@ -362,8 +362,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 void addInterfacesFromKVs(RangeResult& kvs,
                           std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	for (const auto& kv : kvs) {
-		ClientWorkerInterface workerInterf =
-		    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+		auto workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 		ClientLeaderRegInterface leaderInterf(workerInterf.address());
 		StringRef ip_port = (kv.key.endsWith(":tls"_sr) ? kv.key.removeSuffix(":tls"_sr) : kv.key)
 		                        .removePrefix("\xff\xff/worker_interfaces/"_sr);
@@ -404,7 +403,7 @@ Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillReply* rep) {
 	// TODO: Handle duration_seconds
 	// TODO: What if asked to kill itself?
-	if (req->all() && req->addresses().size() > 0) {
+	if (req->all() && !req->addresses().empty()) {
 		co_return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "ERROR: both fields `all` and `addresses` set");
 	}
 
@@ -412,7 +411,7 @@ Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillR
 	std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 	co_await getWorkerInterfaces(tr, &address_interface, true);
 
-	if (address_interface.size() == 0) {
+	if (address_interface.empty()) {
 		// TODO: Return more elaborate result.
 		co_return grpc::Status::OK;
 	}
@@ -422,9 +421,9 @@ Future<grpc::Status> kill(Reference<IDatabase> db, const KillRequest* req, KillR
 		for (const auto& [address, _] : address_interface) {
 			addressesVec.push_back(address.toString());
 		}
-	} else if (req->addresses().size() > 0) {
+	} else if (!req->addresses().empty()) {
 		for (const auto& addr : req->addresses()) {
-			if (!address_interface.count(StringRef(addr))) {
+			if (!address_interface.contains(StringRef(addr))) {
 				co_return grpc::Status(grpc::StatusCode::UNKNOWN, fmt::format("process `{}' not recognized", addr));
 			}
 			addressesVec.push_back(addr);

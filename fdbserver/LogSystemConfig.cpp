@@ -227,7 +227,7 @@ std::pair<int8_t, int8_t> LogSystemConfig::getLocalityForDcId(Optional<Key> dcId
 }
 
 std::vector<std::pair<UID, NetworkAddress>> LogSystemConfig::allSharedLogs() const {
-	typedef std::pair<UID, NetworkAddress> IdAddrPair;
+	using IdAddrPair = std::pair<UID, NetworkAddress>;
 	std::vector<IdAddrPair> results;
 	for (auto& tLogSet : tLogs) {
 		for (auto& tLog : tLogSet.tLogs) {
@@ -271,7 +271,7 @@ bool LogSystemConfig::isEqualIds(LogSystemConfig const& r) const {
 }
 
 bool LogSystemConfig::isNextGenerationOf(LogSystemConfig const& r) const {
-	if (!oldTLogs.size()) {
+	if (oldTLogs.empty()) {
 		return false;
 	}
 

@@ -863,7 +863,7 @@ struct YAMRandom {
 		} else if (op == 1) {
 			onchanges.push_back(trigger([this]() { this->randomOp(); }, yam.onChange(k)));
 		} else if (op == 2) {
-			if (onchanges.size()) {
+			if (!onchanges.empty()) {
 				int i = deterministicRandom()->randomInt(0, onchanges.size());
 				onchanges[i] = onchanges.back();
 				onchanges.pop_back();

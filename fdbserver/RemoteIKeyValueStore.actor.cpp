@@ -232,7 +232,7 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                   int64_t memoryLimit,
                                   bool checkChecksums,
                                   bool checkIntegrity) {
-	RemoteIKeyValueStore* self = new RemoteIKeyValueStore();
+	auto* self = new RemoteIKeyValueStore();
 	self->initialized = initializeRemoteKVStore(
 	    self, OpenKVStoreRequest(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity));
 	return self;

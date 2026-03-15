@@ -405,8 +405,8 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	    .detail("FutureClearRanges", fClearRanges.size());
 	for (auto& rangeMutation : batchData->stagingKeyRanges) {
 		ASSERT(rangeMutation.mutation.param1 <= rangeMutation.mutation.param2);
-		std::map<Key, StagingKey>::iterator lb = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param1);
-		std::map<Key, StagingKey>::iterator ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
+		auto lb = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param1);
+		auto ub = batchData->stagingKeys.lower_bound(rangeMutation.mutation.param2);
 		while (lb != ub) {
 			if (lb->first >= rangeMutation.mutation.param2) {
 				TraceEvent(SevError, "FastRestoreApplerPhasePrecomputeMutationsResultIncorrectUpperBound")
@@ -435,7 +435,7 @@ ACTOR static Future<Void> precomputeMutationsResult(Reference<ApplierBatchData> 
 	// Get keys in stagingKeys which does not have a baseline key by reading database cx, and precompute the key's value
 	std::vector<Future<Void>> fGetAndComputeKeys;
 	std::map<Key, std::map<Key, StagingKey>::iterator> incompleteStagingKeys;
-	std::map<Key, StagingKey>::iterator stagingKeyIter = batchData->stagingKeys.begin();
+	auto stagingKeyIter = batchData->stagingKeys.begin();
 	int numKeysInBatch = 0;
 	int numGetTxns = 0;
 	{
@@ -534,7 +534,7 @@ ACTOR static Future<Void> applyStagingKeysBatch(std::map<Key, StagingKey>::itera
 			txnSizeUsed = 0;
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			std::map<Key, StagingKey>::iterator iter = begin;
+			auto iter = begin;
 			while (iter != end) {
 				if (iter->second.type == MutationRef::SetValue) {
 					tr->set(iter->second.key, iter->second.val);
@@ -600,8 +600,8 @@ ACTOR static Future<Void> applyStagingKeys(Reference<ApplierBatchData> batchData
                                            UID applierID,
                                            int64_t batchIndex,
                                            Database cx) {
-	std::map<Key, StagingKey>::iterator begin = batchData->stagingKeys.begin();
-	std::map<Key, StagingKey>::iterator cur = begin;
+	auto begin = batchData->stagingKeys.begin();
+	auto cur = begin;
 	state int txnBatches = 0;
 	double txnSize = 0;
 	std::vector<Future<Void>> fBatches;
@@ -793,7 +793,7 @@ ACTOR static Future<Void> handleApplyToDBRequest(RestoreVersionBatchRequest req,
 	return Void();
 }
 
-// Copy from WriteDuringRead.actor.cpp with small modifications
+// Copy from WriteDuringRead.cpp with small modifications
 // Not all AtomicOps are handled in this function: SetVersionstampedKey, SetVersionstampedValue, and CompareAndClear
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 	Arena arena;

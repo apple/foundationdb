@@ -20,7 +20,7 @@
 
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TagThrottle.actor.h"

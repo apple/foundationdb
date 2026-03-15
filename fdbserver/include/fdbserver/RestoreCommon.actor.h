@@ -39,18 +39,18 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-// RestoreConfig copied from FileBackupAgent.actor.cpp
+// RestoreConfig copied from FileBackupAgent.cpp
 // We copy RestoreConfig instead of using (and potentially changing) it in place
 // to avoid conflict with the existing code.
 // We also made minor changes to allow RestoreConfig to be ReferenceCounted
-// TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.actor.cpp
+// TODO: Merge this RestoreConfig with the original RestoreConfig in FileBackupAgent.cpp
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
 struct RestoreFileFR;
 
-// We copy RestoreConfig copied from FileBackupAgent.actor.cpp instead of using (and potentially changing) it in place
-// to avoid conflict with the existing code Split RestoreConfig defined in FileBackupAgent.actor.cpp to declaration in
+// We copy RestoreConfig copied from FileBackupAgent.cpp instead of using (and potentially changing) it in place
+// to avoid conflict with the existing code Split RestoreConfig defined in FileBackupAgent.cpp to declaration in
 // Restore.actor.h and implementation in RestoreCommon.actor.cpp, so that we can use in both the existing restore and
 // the new fast restore subsystems. We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
 // non-functional changes in RestoreConfig

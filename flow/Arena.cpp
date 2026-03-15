@@ -107,7 +107,7 @@ void makeUndefined(void*, size_t) {}
 #endif
 } // namespace
 
-Arena::Arena() : impl(nullptr) {}
+Arena::Arena() = default;
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
@@ -147,7 +147,7 @@ std::string StringRef::toHexString(int limit) const {
 			else
 				rv.append(format("%02x ", b));
 		}
-		if (rv.size() > 0)
+		if (!rv.empty())
 			rv.resize(rv.size() - 1);
 	}
 	bytesCopied()->increment(rv.length());
@@ -161,7 +161,7 @@ std::string StringRef::toFullHexStringPlain() const {
 		uint8_t b = (*this)[i];
 		s.append(format("%02x ", b));
 	}
-	if (s.size() > 0)
+	if (!s.empty())
 		s.resize(s.size() - 1);
 	bytesCopied()->increment(s.length());
 	return s;
@@ -271,7 +271,7 @@ size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 		static SimpleCounter<int64_t>* count =
 		    SimpleCounter<int64_t>::makeCounter("/flow/arena/totalSizeBlocksExamined");
 		count->increment(1);
-		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		auto* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 		if (r->aligned4kBufferSize != 0) {
 			totalSizeEstimate += r->aligned4kBufferSize;
@@ -314,7 +314,7 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 
 	int o = nextBlockOffset;
 	while (o) {
-		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		auto* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 
 		// If next is valid recursively count its blocks
@@ -341,7 +341,7 @@ int ArenaBlock::addUsed(int bytes) {
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	auto* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
 	makeDefined(r, sizeof(ArenaBlockRef));
 	r->aligned4kBufferSize = 0;
 	r->next = next;
@@ -353,7 +353,7 @@ void ArenaBlock::makeReference(ArenaBlock* next) {
 }
 
 void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	auto* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
 	makeDefined(r, sizeof(ArenaBlockRef));
 	r->aligned4kBufferSize = size;
 	r->aligned4kBuffer = allocateFast4kAligned(size);
@@ -525,7 +525,7 @@ void ArenaBlock::destroy() {
 	Arena stackArena;
 	VectorRef<ArenaBlock*> stack(&tinyStack, 1);
 
-	while (stack.size()) {
+	while (!stack.empty()) {
 		ArenaBlock* b = stack.end()[-1];
 		stack.pop_back();
 		allowAccess(b);
@@ -533,7 +533,7 @@ void ArenaBlock::destroy() {
 		if (!b->isTiny()) {
 			int o = b->nextBlockOffset;
 			while (o) {
-				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
+				auto* br = (ArenaBlockRef*)((char*)b->getData() + o);
 				makeDefined(br, sizeof(ArenaBlockRef));
 
 				// If aligned4kBuffer is valid, free it
@@ -895,12 +895,12 @@ TEST_CASE("flow/StringRef/eat") {
 	str = "testcase"_sr;
 	first = str.eat("/"_sr);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	str = "testcase/"_sr;
 	first = str.eat("/"_sr);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	str = "test/case/extra"_sr;
 	first = str.eat("/"_sr);
@@ -918,7 +918,7 @@ TEST_CASE("flow/StringRef/eat") {
 	first = str.eat("/", &hasSep);
 	ASSERT(!hasSep);
 	ASSERT(first == "testcase"_sr);
-	ASSERT(str == ""_sr);
+	ASSERT(str.empty());
 
 	return Void();
 }

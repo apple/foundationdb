@@ -64,7 +64,7 @@ unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
 bool g_traceProcessEvents = false;
 
-ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
+ITraceLogIssuesReporter::~ITraceLogIssuesReporter() = default;
 
 struct SuppressionMap {
 	struct SuppressionInfo {
@@ -146,7 +146,7 @@ private:
 
 		void refreshRolesString() {
 			rolesString = "";
-			for (auto itr : roles) {
+			for (const auto& itr : roles) {
 				if (!rolesString.empty()) {
 					rolesString += ",";
 				}
@@ -277,7 +277,7 @@ public:
 		struct Ping final : TypedAction<WriterThread, Ping> {
 			ThreadReturnPromise<Void> ack;
 
-			explicit Ping() {};
+			explicit Ping() = default;
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Ping& ping) {
@@ -375,7 +375,7 @@ public:
 		fields.addField("LogGroup", logGroup);
 
 		RoleInfo const& r = mutateRoleInfo();
-		if (r.rolesString.size() > 0) {
+		if (!r.rolesString.empty()) {
 			fields.addField("Roles", r.rolesString);
 		}
 
@@ -469,7 +469,7 @@ public:
 
 		MutexHolder hold(mutex);
 		bool roll = false;
-		if (!eventBuffer.size())
+		if (eventBuffer.empty())
 			return Void(); // SOMEDAY: maybe we still roll the tracefile here?
 
 		if (rollsize && bufferLength + loggedLength > rollsize) // SOMEDAY: more conditions to roll
@@ -1205,7 +1205,7 @@ BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* v
 BaseTraceEvent& BaseTraceEvent::trackLatest(const std::string& trackingKey) {
 	ASSERT(!logged);
 	this->trackingKey = trackingKey;
-	ASSERT(this->trackingKey.size() != 0 && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
+	ASSERT(!this->trackingKey.empty() && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
 	return *this;
 }
 

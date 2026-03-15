@@ -187,12 +187,12 @@ struct ClientMetricWorkload : TestWorkload {
 			co_await self->writeRandomKeys(cx, numKeys);
 			// get the latest latency metric and parse its version stamp
 			RangeResult r = co_await self->latencyRangeQuery(cx, keysLimit, true);
-			if (r.size() == 0) {
+			if (r.empty()) {
 				// latency metrics might not be present due to transaction batching, retry a few times
 				++retry;
 				continue;
 			}
-			ASSERT(r.size() > 0);
+			ASSERT(!r.empty());
 			// [0] is the latest version, as we have reverse = true
 			KeyRef latest = r[0].key;
 			uint64_t vs = getVersionStamp(latest);

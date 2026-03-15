@@ -349,7 +349,7 @@ void openTracer(TracerType type) {
 	}
 }
 
-ITracer::~ITracer() {}
+ITracer::~ITracer() = default;
 
 Span& Span::operator=(Span&& o) {
 	if (begin > 0.0 && context.isSampled()) {

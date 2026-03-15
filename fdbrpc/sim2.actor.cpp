@@ -629,7 +629,7 @@ class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
 	static void init() {}
 
-	virtual StringRef getClassName() override { return "SimpleFile"_sr; }
+	StringRef getClassName() override { return "SimpleFile"_sr; }
 
 	static bool should_poll() { return false; }
 
@@ -1059,7 +1059,7 @@ public:
 		                     // as infinite
 			return Never();
 
-		PromiseTask* t = new PromiseTask(machine);
+		auto* t = new PromiseTask(machine);
 		if (seconds <= TIME_EPS) {
 			taskQueue.addReady(taskID, t);
 		} else {
@@ -1262,7 +1262,7 @@ public:
 
 	// Starts a new thread, making sure to set any thread local state
 	THREAD_FUNC simStartThread(void* arg) {
-		SimThreadArgs* simArgs = (SimThreadArgs*)arg;
+		auto* simArgs = static_cast<SimThreadArgs*>(arg);
 		ISimulator::currentProcess = simArgs->currentProcess;
 		simArgs->func(simArgs->arg);
 
@@ -1271,7 +1271,7 @@ public:
 	}
 
 	THREAD_HANDLE startThread(THREAD_FUNC_RETURN (*func)(void*), void* arg, int stackSize, const char* name) override {
-		SimThreadArgs* simArgs = new SimThreadArgs(func, arg);
+		auto* simArgs = new SimThreadArgs(func, arg);
 		return ::startThread(simStartThread, simArgs, stackSize, name);
 	}
 
@@ -1452,8 +1452,7 @@ public:
 		}
 
 		// FIXME: why would a ProcessInfo be called `m`?
-		ProcessInfo* m =
-		    new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
+		auto* m = new ProcessInfo(name, locality, startingClass, addresses, this, dataFolder, coordinationFolder);
 		for (int processPort = port; processPort < port + listenPerProcess; ++processPort) {
 			NetworkAddress address(ip, processPort, true, sslEnabled && processPort == port);
 			m->listenerMap[address] = Reference<IListener>(new Sim2Listener(m, address));
@@ -2582,7 +2581,7 @@ public:
 		ASSERT(getCurrentProcess());
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 
-		PromiseTask* p = new PromiseTask(getCurrentProcess(), std::move(signal));
+		auto* p = new PromiseTask(getCurrentProcess(), std::move(signal));
 		taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p);
 	}
 	bool isOnMainThread() const override { return ISimulator::isMainThread; }

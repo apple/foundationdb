@@ -253,7 +253,7 @@ namespace actorcompiler
 
             writer.WriteLine(memberIndentStr + "template<> struct Descriptor<struct {0}> {{", descr.name);
             writer.WriteLine(memberIndentStr + "\tstatic StringRef typeName() {{ return \"{0}\"_sr; }}", descr.name);
-            writer.WriteLine(memberIndentStr + "\ttypedef {0} type;", descr.name);
+            writer.WriteLine(memberIndentStr + "\tusing type = {0};", descr.name);
             lines += 3;
 
             foreach (var dec in descr.body)
@@ -262,13 +262,13 @@ namespace actorcompiler
                 writer.WriteLine(memberIndentStr + "\t\tstatic StringRef name() {{ return \"{0}\"_sr; }}", dec.name);
                 writer.WriteLine(memberIndentStr + "\t\tstatic StringRef typeName() {{ return \"{0}\"_sr; }}", dec.type);
                 writer.WriteLine(memberIndentStr + "\t\tstatic StringRef comment() {{ return \"{0}\"_sr; }}", dec.comment);
-                writer.WriteLine(memberIndentStr + "\t\ttypedef {0} type;", dec.type);
+                writer.WriteLine(memberIndentStr + "\t\tusing type = {0};", dec.type);
                 writer.WriteLine(memberIndentStr + "\t\tstatic inline type get({0}& from);", descr.name);
                 writer.WriteLine(memberIndentStr + "\t};");
                 lines += 7;
             }
 
-            writer.Write(memberIndentStr + "\ttypedef std::tuple<");
+            writer.Write(memberIndentStr + "\tusing fields = std::tuple<");
             bool FirstDesc = true;
             foreach (var dec in descr.body)
             {
@@ -277,8 +277,8 @@ namespace actorcompiler
                 writer.Write("{0}Descriptor", dec.name);
                 FirstDesc = false;
             }
-            writer.Write("> fields;\n");
-            writer.WriteLine(memberIndentStr + "\ttypedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;");
+            writer.Write(">;\n");
+            writer.WriteLine(memberIndentStr + "\tusing field_indexes = make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type;");
             writer.WriteLine(memberIndentStr + "};");
             if(descr.superClassList != null)
                 writer.WriteLine(memberIndentStr + "struct {0} : {1} {{", descr.name, descr.superClassList);

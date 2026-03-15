@@ -38,7 +38,7 @@ bool LatencyBandConfig::RequestConfig::isEqual(RequestConfig const& r) const {
 void LatencyBandConfig::RequestConfig::fromJson(JSONDoc json) {
 	json_spirit::mArray bandsArray;
 	if (json.get("bands", bandsArray)) {
-		for (auto b : bandsArray) {
+		for (const auto& b : bandsArray) {
 			bands.insert(b.get_real());
 		}
 	}
@@ -72,13 +72,13 @@ void LatencyBandConfig::CommitConfig::fromJson(JSONDoc json) {
 }
 
 bool LatencyBandConfig::CommitConfig::isEqual(RequestConfig const& r) const {
-	CommitConfig const& other = static_cast<CommitConfig const&>(r);
+	auto const& other = static_cast<CommitConfig const&>(r);
 	return RequestConfig::isEqual(r) && maxCommitBytes == other.maxCommitBytes;
 }
 
 Optional<LatencyBandConfig> LatencyBandConfig::parse(ValueRef configurationString) {
 	Optional<LatencyBandConfig> config;
-	if (configurationString.size() == 0) {
+	if (configurationString.empty()) {
 		return config;
 	}
 

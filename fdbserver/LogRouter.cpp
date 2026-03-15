@@ -246,7 +246,7 @@ struct LogRouterData {
 };
 
 void LogRouterData::commitMessages(Version version, const std::vector<TagsAndMessage>& taggedMessages) {
-	if (!taggedMessages.size()) {
+	if (taggedMessages.empty()) {
 		return;
 	}
 
@@ -579,7 +579,7 @@ Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
 			}
 			auto seqBegin = trackerData.sequence_version.begin();
 			// The peek cursor and this comparison need to agree about the maximum number of in-flight requests.
-			while (trackerData.sequence_version.size() &&
+			while (!trackerData.sequence_version.empty() &&
 			       seqBegin->first <= sequence - SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS) {
 				if (seqBegin->second.canBeSet()) {
 					seqBegin->second.sendError(operation_obsolete());
@@ -588,7 +588,7 @@ Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
 				seqBegin = trackerData.sequence_version.begin();
 			}
 
-			if (trackerData.sequence_version.size() && sequence < seqBegin->first) {
+			if (!trackerData.sequence_version.empty() && sequence < seqBegin->first) {
 				throw operation_obsolete();
 			}
 
@@ -706,7 +706,7 @@ Future<Void> LogRouterData::logRouterPeekMessages(PromiseType replyPromise,
 		auto& trackerData = peekTracker[peekId];
 		trackerData.lastUpdate = now();
 		auto& sequenceData = trackerData.sequence_version[sequence + 1];
-		if (trackerData.sequence_version.size() && sequence + 1 < trackerData.sequence_version.begin()->first) {
+		if (!trackerData.sequence_version.empty() && sequence + 1 < trackerData.sequence_version.begin()->first) {
 			replyPromise.sendError(operation_obsolete());
 			if (!sequenceData.isSet())
 				sequenceData.sendError(operation_obsolete());
@@ -782,7 +782,7 @@ Future<Void> LogRouterData::cleanupPeekTrackers() {
 		while (it != peekTracker.end()) {
 			double timeUntilExpiration = it->second.lastUpdate + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME - now();
 			if (timeUntilExpiration < 1.0e-6) {
-				for (auto seq : it->second.sequence_version) {
+				for (const auto& seq : it->second.sequence_version) {
 					if (!seq.second.isSet()) {
 						seq.second.sendError(timed_out());
 					}
@@ -811,7 +811,7 @@ Future<Void> logRouterPop(LogRouterData* self, TLogPopRequest req) {
 
 	Version minPopped = std::numeric_limits<Version>::max();
 	Version minKnownCommittedVersion = std::numeric_limits<Version>::max();
-	for (auto it : self->tag_data) {
+	for (const auto& it : self->tag_data) {
 		if (it) {
 			minPopped = std::min(it->popped, minPopped);
 			minKnownCommittedVersion = std::min(it->durableKnownCommittedVersion, minKnownCommittedVersion);

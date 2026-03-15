@@ -157,7 +157,7 @@ Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
 }
 
 Future<Void> LineNoise::onKeyboardInterrupt() {
-	boost::asio::io_service* ios = (boost::asio::io_service*)g_network->global(INetwork::enASIOService);
+	auto* ios = (boost::asio::io_service*)g_network->global(INetwork::enASIOService);
 	if (!ios)
 		return Never();
 	return waitKeyboardInterrupt(ios);

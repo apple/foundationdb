@@ -389,7 +389,7 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 
 	ConnectionLogWriter(const std::string baseDir) : baseDir(baseDir) {}
 
-	virtual ~ConnectionLogWriter() {
+	~ConnectionLogWriter() override {
 		if (file.is_open())
 			file.close();
 	}
@@ -400,12 +400,12 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 		AppendAction(std::string localAddr, std::deque<TransportData::ConnectionHistoryEntry>&& entries)
 		  : localAddr(localAddr), entries(std::move(entries)) {}
 
-		double getTimeEstimate() const { return 2; }
+		double getTimeEstimate() const override { return 2; }
 	};
 
 	std::string newFileName() const { return baseDir + "fdb-connection-log-" + time_str() + ".csv"; }
 
-	void init() { fileName = newFileName(); }
+	void init() override { fileName = newFileName(); }
 
 	std::string time_str() const { return std::to_string(now()); }
 
