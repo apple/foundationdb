@@ -22,7 +22,7 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H)
 #define FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H
-#include "fdbserver/RemoteIKeyValueStore.actor.g.h"
+#include "fdbserver/core/RemoteIKeyValueStore.actor.g.h"
 #elif !defined(FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_H)
 #define FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_H
 
@@ -135,7 +135,7 @@ struct OpenKVStoreRequest {
 	bool checkIntegrity;
 	ReplyPromise<struct IKVSInterface> reply;
 
-	OpenKVStoreRequest() {};
+	OpenKVStoreRequest(){};
 
 	OpenKVStoreRequest(KeyValueStoreType storeType,
 	                   std::string filename,

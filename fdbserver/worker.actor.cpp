@@ -59,7 +59,7 @@
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
+#include "fdbserver/core/RemoteIKeyValueStore.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"

@@ -50,6 +50,14 @@ function(add_fdbserver_link_test target_name)
   target_link_libraries(${target_name} PRIVATE ${ARGN} rapidxml)
 endfunction()
 
+if(WITH_ROCKSDB)
+  find_package(LZ4 REQUIRED)
+  include(CompileRocksDB)
+  if(WITH_LIBURING)
+    find_package(uring REQUIRED)
+  endif()
+endif()
+
 add_subdirectory(core)
 add_subdirectory(restoreworker)
 add_subdirectory(clustercontroller)
@@ -125,14 +133,6 @@ add_fdbserver_link_test(fdbserver_tloglinktest
   fdbserver_tlog
   fdbserver_core
   fdbclient)
-
-if(WITH_ROCKSDB)
-  find_package(LZ4 REQUIRED)
-  include(CompileRocksDB)
-  if(WITH_LIBURING)
-    find_package(uring REQUIRED)
-  endif()
-endif()
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 

@@ -47,7 +47,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
+#include "fdbserver/core/RemoteIKeyValueStore.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
