@@ -82,7 +82,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/OTELSpanContextMessage.h"
-#include "fdbserver/ratekeeper/Ratekeeper.h"
+#include "fdbserver/ratekeeper/include/fdbserver/ratekeeper/Ratekeeper.h"
 #include "fdbserver/ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"

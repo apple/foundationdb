@@ -22,7 +22,7 @@
 
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/ratekeeper/Ratekeeper.h"
+#include "fdbserver/ratekeeper/include/fdbserver/ratekeeper/Ratekeeper.h"
 
 class ServerThroughputTracker {
 	enum class OpType {
