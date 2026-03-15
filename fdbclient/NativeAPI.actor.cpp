@@ -6680,8 +6680,7 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	// map worker network address to its interface
 	state std::map<Key, ClientWorkerInterface> workerInterfaces;
 	for (const auto& it : kvs) {
-		ClientWorkerInterface workerInterf =
-		    BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
+		auto workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(it.value, IncludeVersion());
 		Key primaryAddress = it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key;
 		workerInterfaces[primaryAddress] = workerInterf;
 		// Also add mapping from a worker's second address(if present) to its interface
@@ -6750,7 +6749,7 @@ void sharedStateDelRef(DatabaseSharedState* ssPtr) {
 
 Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
-	DatabaseSharedState* newState = new DatabaseSharedState();
+	auto* newState = new DatabaseSharedState();
 	// Increment refcount by 1 on creation to account for the one held in MultiVersionApi map
 	// Therefore, on initialization, refCount should be 2 (after also going to setSharedState)
 	newState->refCount++;

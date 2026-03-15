@@ -49,7 +49,7 @@ struct SignalClosure {
 		// async signal safe!
 		// This is intended to work as a SIGPROF handler for past and future versions of the flow profiler (when
 		// multiple are running in a process!) So don't change what it does without really good reason
-		SignalClosure* closure = (SignalClosure*)(si->si_value.sival_ptr);
+		auto* closure = static_cast<SignalClosure*>(si->si_value.sival_ptr);
 		closure->func(s, si, ucontext, closure->userdata);
 	}
 };

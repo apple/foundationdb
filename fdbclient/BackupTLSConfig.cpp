@@ -40,7 +40,7 @@ void BackupTLSConfig::setupBlobCredentials() {
 	}
 
 	// Update the global blob credential files list
-	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+	auto* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
 	if (pFiles != nullptr) {
 		for (auto& f : blobCredentials) {
 			pFiles->push_back(f);

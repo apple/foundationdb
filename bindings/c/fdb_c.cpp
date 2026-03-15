@@ -222,7 +222,7 @@ private:
 extern "C" DLLEXPORT fdb_error_t fdb_future_set_callback(FDBFuture* f,
                                                          void (*callbackf)(FDBFuture*, void*),
                                                          void* userdata) {
-	CAPICallback* cb = new CAPICallback(callbackf, f, userdata);
+	auto* cb = new CAPICallback(callbackf, f, userdata);
 	int ignore;
 	CATCH_AND_RETURN(TSAVB(f)->callOrSetAsCallback(cb, ignore, 0););
 }

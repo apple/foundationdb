@@ -47,10 +47,10 @@ namespace ph = std::placeholders;
 // Maybe we should put it out of its misery i.e. delete it.  TBD.
 
 // Putting back some tenant crap so that this test works
-typedef StringRef TenantNameRef;
-typedef Standalone<TenantNameRef> TenantName;
-typedef StringRef TenantGroupNameRef;
-typedef Standalone<TenantGroupNameRef> TenantGroupName;
+using TenantNameRef = StringRef;
+using TenantName = Standalone<TenantNameRef>;
+using TenantGroupNameRef = StringRef;
+using TenantGroupName = Standalone<TenantGroupNameRef>;
 
 // This allows us to dictate which exceptions we SHOULD get.
 // We can use this to suppress expected exceptions, and take action
@@ -491,7 +491,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	template <typename Subclass, typename T>
 	struct BaseTest {
-		typedef T value_type;
+		using value_type = T;
 
 		static Future<Void> runTest(unsigned int id, FuzzApiCorrectnessWorkload* wl, Reference<ITransaction> tr) {
 			auto self = std::make_unique<Subclass>(id, wl, tr);
@@ -697,7 +697,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	template <typename Subclass>
 	struct BaseTestCallback : BaseTest<Subclass, Void> {
-		typedef typename BaseTest<Subclass, Void>::value_type value_type;
+		using value_type = typename BaseTest<Subclass, Void>::value_type;
 
 		BaseTestCallback(unsigned int id, FuzzApiCorrectnessWorkload* wl, const char* func)
 		  : BaseTest<Subclass, Void>(id, wl, func) {}
@@ -717,7 +717,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestSetVersion : public BaseTest<TestSetVersion, Version> {
-		typedef BaseTest<TestSetVersion, Version> base_type;
+		using base_type = BaseTest<TestSetVersion, Version>;
 		Version v;
 
 		TestSetVersion(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -749,7 +749,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGet : public BaseTest<TestGet, Optional<Value>> {
-		typedef BaseTest<TestGet, Optional<Value>> base_type;
+		using base_type = BaseTest<TestGet, Optional<Value>>;
 		Key key;
 
 		TestGet(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -787,7 +787,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetKey : public BaseTest<TestGetKey, Key> {
-		typedef BaseTest<TestGetKey, Key> base_type;
+		using base_type = BaseTest<TestGetKey, Key>;
 		KeySelector keysel;
 
 		TestGetKey(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -812,7 +812,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetRange0 : public BaseTest<TestGetRange0, RangeResult> {
-		typedef BaseTest<TestGetRange0, RangeResult> base_type;
+		using base_type = BaseTest<TestGetRange0, RangeResult>;
 		KeySelector keysel1, keysel2;
 		int limit;
 
@@ -863,7 +863,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetRange1 : public BaseTest<TestGetRange1, RangeResult> {
-		typedef BaseTest<TestGetRange1, RangeResult> base_type;
+		using base_type = BaseTest<TestGetRange1, RangeResult>;
 		KeySelector keysel1, keysel2;
 		GetRangeLimits limits;
 
@@ -909,7 +909,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetRange2 : public BaseTest<TestGetRange2, RangeResult> {
-		typedef BaseTest<TestGetRange2, RangeResult> base_type;
+		using base_type = BaseTest<TestGetRange2, RangeResult>;
 		Key key1, key2;
 		int limit;
 
@@ -970,7 +970,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetRange3 : public BaseTest<TestGetRange3, RangeResult> {
-		typedef BaseTest<TestGetRange3, RangeResult> base_type;
+		using base_type = BaseTest<TestGetRange3, RangeResult>;
 		Key key1, key2;
 		GetRangeLimits limits;
 
@@ -1025,7 +1025,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestGetAddressesForKey : public BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>> {
-		typedef BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>> base_type;
+		using base_type = BaseTest<TestGetAddressesForKey, Standalone<VectorRef<const char*>>>;
 		Key key;
 
 		TestGetAddressesForKey(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1047,7 +1047,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestAddReadConflictRange : public BaseTestCallback<TestAddReadConflictRange> {
-		typedef BaseTest<TestAddReadConflictRange, Void> base_type;
+		using base_type = BaseTest<TestAddReadConflictRange, Void>;
 		Key key1, key2;
 
 		TestAddReadConflictRange(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1069,7 +1069,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestAtomicOp : public BaseTestCallback<TestAtomicOp> {
-		typedef BaseTest<TestAtomicOp, Void> base_type;
+		using base_type = BaseTest<TestAtomicOp, Void>;
 		Key key;
 		Value value;
 		uint8_t op;
@@ -1141,7 +1141,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestSet : public BaseTestCallback<TestSet> {
-		typedef BaseTest<TestSet, Void> base_type;
+		using base_type = BaseTest<TestSet, Void>;
 		Key key;
 		Value value;
 
@@ -1178,7 +1178,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestClear0 : public BaseTestCallback<TestClear0> {
-		typedef BaseTest<TestClear0, Void> base_type;
+		using base_type = BaseTest<TestClear0, Void>;
 		Key key1, key2;
 
 		TestClear0(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1216,7 +1216,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestClear1 : public BaseTestCallback<TestClear1> {
-		typedef BaseTest<TestClear1, Void> base_type;
+		using base_type = BaseTest<TestClear1, Void>;
 		Key key1, key2;
 
 		TestClear1(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1254,7 +1254,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestClear2 : public BaseTestCallback<TestClear2> {
-		typedef BaseTest<TestClear2, Void> base_type;
+		using base_type = BaseTest<TestClear2, Void>;
 		Key key;
 
 		TestClear2(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1282,7 +1282,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestWatch : public BaseTest<TestWatch, Void> {
-		typedef BaseTest<TestWatch, Void> base_type;
+		using base_type = BaseTest<TestWatch, Void>;
 		Key key;
 
 		TestWatch(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1312,7 +1312,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestAddWriteConflictRange : public BaseTestCallback<TestAddWriteConflictRange> {
-		typedef BaseTest<TestAddWriteConflictRange, Void> base_type;
+		using base_type = BaseTest<TestAddWriteConflictRange, Void>;
 		Key key1, key2;
 
 		TestAddWriteConflictRange(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)
@@ -1334,7 +1334,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestSetOption : public BaseTestCallback<TestSetOption> {
-		typedef BaseTest<TestSetOption, Void> base_type;
+		using base_type = BaseTest<TestSetOption, Void>;
 		int op;
 		Optional<Standalone<StringRef>> val;
 
@@ -1420,7 +1420,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	};
 
 	struct TestOnError : public BaseTestCallback<TestOnError> {
-		typedef BaseTest<TestOnError, Void> base_type;
+		using base_type = BaseTest<TestOnError, Void>;
 		int errorcode;
 
 		TestOnError(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)

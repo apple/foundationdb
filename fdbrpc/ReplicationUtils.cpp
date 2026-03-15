@@ -238,7 +238,7 @@ bool findBestPolicySet(std::vector<LocalityEntry>& bestResults,
 				break;
 		}
 	} else if (policy->name() == "Across") {
-		PolicyAcross* pa = (PolicyAcross*)policy.getPtr();
+		auto* pa = (PolicyAcross*)policy.getPtr();
 		std::set<std::string> attributeKeys;
 		pa->attributeKeys(&attributeKeys);
 		if (pa->embeddedPolicyName() == "One" && attributeKeys.size() == 1 &&
@@ -376,7 +376,7 @@ bool validateAllCombinations(std::vector<LocalityData>& offendingCombo,
 	} else {
 		bool bIsValidGroup;
 		Reference<LocalitySet> localSet = Reference<LocalitySet>(new LocalityGroup());
-		LocalityGroup* localGroup = (LocalityGroup*)localSet.getPtr();
+		auto* localGroup = (LocalityGroup*)localSet.getPtr();
 		localGroup->deep_copy(localitySet);
 
 		std::vector<LocalityEntry> localityGroupEntries = localGroup->getEntries();
@@ -460,7 +460,7 @@ Reference<LocalitySet> createTestLocalityMap(std::vector<repTestType>& indexes,
                                              int independentItems,
                                              int independentTotal) {
 	Reference<LocalitySet> buildServer(new LocalityMap<repTestType>());
-	LocalityMap<repTestType>* serverMap = (LocalityMap<repTestType>*)buildServer.getPtr();
+	auto* serverMap = (LocalityMap<repTestType>*)buildServer.getPtr();
 	int serverValue;
 	std::string dcText, szText, rackText, slotText, independentName, independentText;
 
@@ -552,7 +552,7 @@ bool testPolicy(Reference<LocalitySet> servers,
                 Reference<IReplicationPolicy> const& policy,
                 std::vector<LocalityEntry> const& including,
                 bool validate) {
-	LocalityMap<repTestType>* serverMap = (LocalityMap<repTestType>*)servers.getPtr();
+	auto* serverMap = (LocalityMap<repTestType>*)servers.getPtr();
 	std::string outputText, includeText;
 	std::vector<LocalityEntry> entryResults;
 	std::vector<repTestType*> results;

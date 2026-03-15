@@ -2487,8 +2487,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 		loop choose {
 			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
-				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(
-				    req.serializedDbInfo, AssumeVersion(g_network->protocolVersion()));
+				auto localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo,
+				                                                           AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
 
 				if (localInfo.infoGeneration < dbInfo->get().infoGeneration &&

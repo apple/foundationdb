@@ -113,7 +113,7 @@ struct MetricsConfig {
 
 	Subspace space;
 
-	typedef KeyBackedMap<int64_t, MetricsRule> RuleMapT;
+	using RuleMapT = KeyBackedMap<int64_t, MetricsRule>;
 	RuleMapT ruleMap;
 	RuleMapT::RangeResultType rules;
 

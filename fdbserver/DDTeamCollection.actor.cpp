@@ -715,9 +715,10 @@ public:
 		state std::vector<Reference<TCServerInfo>> servers;
 		state std::vector<UID> serverIds;
 		state Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
-		state LocalityMap<UID>* tempMap = (LocalityMap<UID>*)tempSet.getPtr();
+		state LocalityMap<UID>* tempMap = nullptr;
 		state std::vector<Reference<TCTeamInfo>> largeOrBadTeams = self->badTeams;
 		largeOrBadTeams.insert(largeOrBadTeams.end(), self->largeTeams.begin(), self->largeTeams.end());
+		tempMap = static_cast<LocalityMap<UID>*>(tempSet.getPtr());
 
 		for (; idx < largeOrBadTeams.size(); idx++) {
 			servers.clear();
@@ -4377,7 +4378,7 @@ Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
 
 void DDTeamCollection::resetLocalitySet() {
 	storageServerSet = Reference<LocalitySet>(new LocalityMap<UID>());
-	LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
+	auto* storageServerMap = static_cast<LocalityMap<UID>*>(storageServerSet.getPtr());
 
 	for (auto& it : server_info) {
 		it.second->localityEntry =
@@ -4816,7 +4817,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		return Reference<TCTeamInfo>();
 	} else if (candidateTeam.size() > teamSize) {
 		Reference<LocalitySet> tempSet = Reference<LocalitySet>(new LocalityMap<UID>());
-		LocalityMap<UID>* tempMap = (LocalityMap<UID>*)tempSet.getPtr();
+		auto* tempMap = static_cast<LocalityMap<UID>*>(tempSet.getPtr());
 		tempSet->clear();
 		for (auto& it : candidateTeam) {
 			tempMap->add(it->getLastKnownInterface().locality, &it->getId());
