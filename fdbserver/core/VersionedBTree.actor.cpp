@@ -28,7 +28,7 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/VersionedBTreeDebug.h"
+#include "fdbserver/core/VersionedBTreeDebug.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -7561,7 +7561,7 @@ public:
 	}
 };
 
-#include "fdbserver/art_impl.h"
+#include "fdbserver/core/art_impl.h"
 
 RedwoodRecordRef VersionedBTree::dbBegin(""_sr);
 RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);

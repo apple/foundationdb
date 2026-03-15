@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/VersionedBTreeDebug.h"
+#include "fdbserver/core/VersionedBTreeDebug.h"
 
 // Whether to enable debug log
 static bool g_debugEnabled = true;
