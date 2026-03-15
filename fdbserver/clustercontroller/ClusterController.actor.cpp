@@ -51,7 +51,7 @@
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/clustercontroller/SingletonRoles.h"
-#include "fdbserver/core/Status.actor.h"
+#include "fdbserver/clustercontroller/Status.actor.h"
 #include "fdbserver/core/LatencyBandConfig.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbserver/core/RecoveryState.h"

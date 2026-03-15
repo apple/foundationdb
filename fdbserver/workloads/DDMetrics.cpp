@@ -20,7 +20,6 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/core/Status.actor.h"
 #include "fdbserver/QuietDatabase.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/workloads.actor.h"

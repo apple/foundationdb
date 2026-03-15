@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/ServerKnobs.h"
-#include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/TCInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

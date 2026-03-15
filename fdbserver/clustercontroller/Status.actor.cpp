@@ -24,23 +24,24 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/core/Status.actor.h"
+#include "fdbserver/clustercontroller/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/core/WorkerEvents.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
 #include "fdbserver/clustercontroller/ClusterRecovery.actor.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/QuietDatabase.actor.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -129,43 +130,6 @@ ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterf
 	}
 }
 
-ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
-    std::vector<WorkerDetails> workers,
-    std::string eventName) {
-	try {
-		state std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
-		for (int c = 0; c < workers.size(); c++) {
-			EventLogRequest req =
-			    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
-			eventTraces.push_back(errorOr(timeoutError(workers[c].interf.eventLogRequest.getReply(req), 2.0)));
-		}
-
-		wait(waitForAll(eventTraces));
-
-		std::set<std::string> failed;
-		WorkerEvents results;
-
-		for (int i = 0; i < eventTraces.size(); i++) {
-			const ErrorOr<TraceEventFields>& v = eventTraces[i].get();
-			if (v.isError()) {
-				failed.insert(workers[i].interf.address().toString());
-				results[workers[i].interf.address()] = TraceEventFields();
-			} else {
-				results[workers[i].interf.address()] = v.get();
-			}
-		}
-
-		std::pair<WorkerEvents, std::set<std::string>> val;
-		val.first = results;
-		val.second = failed;
-
-		return val;
-	} catch (Error& e) {
-		ASSERT(e.code() ==
-		       error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
-		throw;
-	}
-}
 static Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestErrorOnWorkers(
     std::vector<WorkerDetails> workers) {
 	return latestEventOnWorkers(workers, "");

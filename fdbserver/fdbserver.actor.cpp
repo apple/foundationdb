@@ -68,7 +68,6 @@
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
-#include "fdbserver/core/Status.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"

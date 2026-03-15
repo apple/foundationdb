@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_STATUS_ACTOR_G_H)
-#define FDBSERVER_CORE_STATUS_ACTOR_G_H
-#include "fdbserver/core/Status.actor.g.h"
-#elif !defined(FDBSERVER_CORE_STATUS_ACTOR_H)
-#define FDBSERVER_CORE_STATUS_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_G_H)
+#define FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_G_H
+#include "fdbserver/clustercontroller/Status.actor.g.h"
+#elif !defined(FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_H)
+#define FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_H
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
@@ -55,11 +55,6 @@ Future<StatusReply> clusterGetStatus(
         excludedDegradedServers);
 
 StatusReply clusterGetFaultToleranceStatus(const std::string& statusString);
-
-struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
-ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
-    std::vector<WorkerDetails> workers,
-    std::string eventName);
 
 #include "flow/unactorcompiler.h"
 #endif

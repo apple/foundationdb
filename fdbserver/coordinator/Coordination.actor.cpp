@@ -24,7 +24,6 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/OnDemandStore.h"
-#include "fdbserver/core/Status.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/ProtocolVersion.h"

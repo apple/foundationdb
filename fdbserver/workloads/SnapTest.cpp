@@ -25,7 +25,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/core/Status.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
