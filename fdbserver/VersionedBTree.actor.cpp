@@ -8301,8 +8301,13 @@ struct IntIntPair {
 		int size() const { return sizeof(Delta); }
 
 		std::string toString() const {
-			return fmt::format(
-			    "DELTA{{prefixSource={} deleted={} dk={2}(0x{2:x}) dv={3}(0x{3:x})}}", prefixSource, deleted, dk, dv);
+			return fmt::format("DELTA{{prefixSource={} deleted={} dk={}(0x{:x}) dv={}(0x{:x})}}",
+			                   prefixSource,
+			                   deleted,
+			                   dk,
+			                   dk,
+			                   dv,
+			                   dv);
 		}
 	};
 
