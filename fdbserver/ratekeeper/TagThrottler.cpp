@@ -20,8 +20,8 @@
  */
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/ratekeeper/include/fdbserver/ratekeeper/RkTagThrottleCollection.h"
-#include "fdbserver/ratekeeper/include/fdbserver/ratekeeper/TagThrottler.h"
+#include "fdbserver/ratekeeper/RkTagThrottleCollection.h"
+#include "fdbserver/ratekeeper/TagThrottler.h"
 #include "flow/CoroUtils.h"
 
 class TagThrottlerImpl {
