@@ -2,7 +2,7 @@ include(AddFdbTest)
 fdb_find_sources(FDBCLI_SRCS)
 
 add_flow_target(EXECUTABLE NAME fdbcli SRCS ${FDBCLI_SRCS})
-target_include_directories(fdbcli PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(fdbcli PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(fdbcli PRIVATE fdbctl fdbclient SimpleOpt)
 
 if (USE_UBSAN)

@@ -1,5 +1,5 @@
 /*
- * DataDistributionCommand.actor.cpp
+ * DataDistributionCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
@@ -29,22 +29,22 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
-ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
 			tr->set(fdb_cli::ddModeSpecialKey, boost::lexical_cast<std::string>(mode));
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
 				// hold the returned standalone object's memory
-				state ThreadFuture<RangeResult> resultFuture =
+				ThreadFuture<RangeResult> resultFuture =
 				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-				RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
+				RangeResult res = co_await safeThreadFutureToFuture(resultFuture);
 				ASSERT(res.size() <= 1);
 				if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 					// only clear the key if it is currently being used to disable all SS failure data movement
@@ -52,30 +52,32 @@ ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 				}
 				tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
 		} catch (Error& e) {
-			TraceEvent("SetDDModeRetrying").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		TraceEvent("SetDDModeRetrying").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnoreOptionMask, bool setMaskedBit) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnoreOptionMask, bool setMaskedBit) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		Error err;
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
-			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
+			ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
+			Optional<Value> v = co_await safeThreadFutureToFuture(resultFuture);
 			uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
 			if (v.present()) {
 				if (v.get().size() > 0) {
 					oldValue = BinaryReader::fromStringRef<uint8_t>(v.get(), Unversioned());
 				} else {
-					// In old version (<= 7.1), the value is an empty string, which means all DD rebalance functions are
-					// disabled
+					// In old version (<= 7.1), the value is an empty string, which means all DD rebalance functions
+					// are disabled
 					oldValue = DDIgnore::ALL;
 				}
 				// printf("oldValue: %d Mask: %d V:%d\n", oldValue, DDIgnoreOptionMask, v.get().size());
@@ -86,11 +88,12 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t D
 			} else {
 				tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -113,30 +116,30 @@ const KeyRef ddIgnoreRebalanceSpecialKey = "\xff\xff/management/data_distributio
 constexpr auto usage =
     "Usage: datadistribution <on|off|disable <ssfailure|rebalance|rebalance_disk|rebalance_read>|enable "
     "<ssfailure|rebalance|rebalance_disk|rebalance_read>>\n";
-ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	state bool result = true;
+Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	bool result = true;
 	if (tokens.size() != 2 && tokens.size() != 3) {
 		printf(usage);
 		result = false;
 	} else {
 		if (tokencmp(tokens[1], "on")) {
-			wait(success(setDDMode(db, 1)));
+			co_await success(setDDMode(db, 1));
 			printf("Data distribution is turned on.\n");
 		} else if (tokencmp(tokens[1], "off")) {
-			wait(success(setDDMode(db, 0)));
+			co_await success(setDDMode(db, 0));
 			printf("Data distribution is turned off.\n");
 		} else if (tokencmp(tokens[1], "disable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
-				wait(success((setHealthyZone(db, "IgnoreSSFailures"_sr, 0))));
+				co_await success((setHealthyZone(db, "IgnoreSSFailures"_sr, 0)));
 				printf("Data distribution is disabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
-				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
+				co_await setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ);
 				printf("Data distribution is disabled for rebalance.\n");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
-				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK));
+				co_await setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK);
 				printf("Data distribution is disabled for rebalance_disk.\n");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
-				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_READ));
+				co_await setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_READ);
 				printf("Data distribution is disabled for rebalance_read.\n");
 			} else {
 				printf(usage);
@@ -144,16 +147,16 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 			}
 		} else if (tokencmp(tokens[1], "enable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
-				wait(success((clearHealthyZone(db, false, true))));
+				co_await success((clearHealthyZone(db, false, true)));
 				printf("Data distribution is enabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
-				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
+				co_await setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ);
 				printf("Data distribution is enabled for rebalance.\n");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
-				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK));
+				co_await setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK);
 				printf("Data distribution is enabled for rebalance_disk.\n");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
-				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_READ));
+				co_await setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_READ);
 				printf("Data distribution is enabled for rebalance_read.\n");
 			} else {
 				printf(usage);
@@ -164,7 +167,7 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 			result = false;
 		}
 	}
-	return result;
+	co_return result;
 }
 
 // hidden commands, no help text for now

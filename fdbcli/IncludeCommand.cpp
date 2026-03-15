@@ -1,5 +1,5 @@
 /*
- * IncludeCommand.actor.cpp
+ * IncludeCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
@@ -27,22 +27,21 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
 // Remove the given localities from the exclusion list.
 // include localities by clearing the keys.
-ACTOR Future<Void> includeLocalities(Reference<IDatabase> db,
-                                     std::vector<std::string> localities,
-                                     bool failed,
-                                     bool includeAll) {
-	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> includeLocalities(Reference<IDatabase> db,
+                               std::vector<std::string> localities,
+                               bool failed,
+                               bool includeAll) {
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
-
 			if (includeAll) {
 				if (failed) {
 					tr->clear(fdb_cli::failedLocalitySpecialKeyRange);
@@ -56,20 +55,22 @@ ACTOR Future<Void> includeLocalities(Reference<IDatabase> db,
 					tr->clear(locality);
 				}
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
 		} catch (Error& e) {
-			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusion> servers, bool failed) {
-	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressExclusion> servers, bool failed) {
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
 			for (auto& s : servers) {
 				// include all, just clear the whole key range
@@ -95,21 +96,22 @@ ACTOR Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressEx
 						tr->clear(KeyRangeRef(addr.withSuffix(":"_sr), addr.withSuffix(";"_sr)));
 				}
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
 		} catch (Error& e) {
-			TraceEvent("IncludeServersError").errorUnsuppressed(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		TraceEvent("IncludeServersError").errorUnsuppressed(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
 // Includes the servers that could be IP addresses or localities back to the cluster.
-ACTOR Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	state std::vector<AddressExclusion> addresses;
-	state std::vector<std::string> localities;
-	state bool failed = false;
-	state bool all = false;
+Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	std::vector<AddressExclusion> addresses;
+	std::vector<std::string> localities;
+	bool failed = false;
+	bool all = false;
 	for (auto t = tokens.begin() + 1; t != tokens.end(); ++t) {
 		if (*t == "all"_sr) {
 			all = true;
@@ -126,7 +128,7 @@ ACTOR Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> token
 				        t->toString().c_str());
 				if (t->toString().find(":tls") != std::string::npos)
 					printf("        Do not include the `:tls' suffix when naming a process\n");
-				return false;
+				co_return false;
 			}
 			addresses.push_back(a);
 		}
@@ -134,31 +136,31 @@ ACTOR Future<bool> include(Reference<IDatabase> db, std::vector<StringRef> token
 	if (all) {
 		std::vector<AddressExclusion> includeAll;
 		includeAll.push_back(AddressExclusion());
-		wait(includeServers(db, includeAll, failed));
-		wait(includeLocalities(db, localities, failed, all));
+		co_await includeServers(db, includeAll, failed);
+		co_await includeLocalities(db, localities, failed, all);
 	} else {
 		if (!addresses.empty()) {
-			wait(includeServers(db, addresses, failed));
+			co_await includeServers(db, addresses, failed);
 		}
 		if (!localities.empty()) {
 			// include the servers that belong to given localities.
-			wait(includeLocalities(db, localities, failed, all));
+			co_await includeLocalities(db, localities, failed, all);
 		}
 	}
-	return true;
+	co_return true;
 };
 
 } // namespace
 
 namespace fdb_cli {
 
-ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else {
-		bool result = wait(include(db, tokens));
-		return result;
+		bool result = co_await include(db, tokens);
+		co_return result;
 	}
 }
 

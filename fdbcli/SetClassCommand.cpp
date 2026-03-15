@@ -1,5 +1,5 @@
 /*
- * SetClassCommand.actor.cpp
+ * SetClassCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 
 #include "fmt/format.h"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
@@ -29,22 +29,22 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
-ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> printProcessClass(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
 			// Hold the reference to the memory
-			state ThreadFuture<RangeResult> classTypeFuture =
+			ThreadFuture<RangeResult> classTypeFuture =
 			    tr->getRange(fdb_cli::processClassTypeSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state ThreadFuture<RangeResult> classSourceFuture =
+			ThreadFuture<RangeResult> classSourceFuture =
 			    tr->getRange(fdb_cli::processClassSourceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			wait(success(safeThreadFutureToFuture(classSourceFuture)) &&
-			     success(safeThreadFutureToFuture(classTypeFuture)));
+			co_await (success(safeThreadFutureToFuture(classSourceFuture)) &&
+			          success(safeThreadFutureToFuture(classTypeFuture)));
 			RangeResult processTypeList = classTypeFuture.get();
 			RangeResult processSourceList = classSourceFuture.get();
 			ASSERT(processSourceList.size() == processTypeList.size());
@@ -65,38 +65,40 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 				       processTypeList[index].value.toString().c_str(),
 				       processSourceList[index].value.toString().c_str());
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 };
 
-ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, KeyRef class_type) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_address, KeyRef class_type) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error err;
 		try {
-			state ThreadFuture<Optional<Value>> result =
+			ThreadFuture<Optional<Value>> result =
 			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
-			Optional<Value> val = wait(safeThreadFutureToFuture(result));
+			Optional<Value> val = co_await safeThreadFutureToFuture(result);
 			if (!val.present()) {
 				printf("No matching addresses found\n");
-				return false;
+				co_return false;
 			}
 			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return true;
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
-				// error message already has \n at the end
-				fprintf(stderr, "%s", errorMsgStr.c_str());
-				return false;
-			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
+			err = e;
 		}
+		if (err.code() == error_code_special_keys_api_failure) {
+			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
+			// error message already has \n at the end
+			fprintf(stderr, "%s", errorMsgStr.c_str());
+			co_return false;
+		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -110,17 +112,17 @@ const KeyRangeRef processClassSourceSpecialKeyRange =
 const KeyRangeRef processClassTypeSpecialKeyRange =
     KeyRangeRef("\xff\xff/configuration/process/class_type/"_sr, "\xff\xff/configuration/process/class_type0"_sr);
 
-ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 3 && tokens.size() != 1) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else if (tokens.size() == 1) {
-		wait(printProcessClass(db));
+		co_await printProcessClass(db);
 	} else {
-		bool successful = wait(setProcessClass(db, tokens[1], tokens[2]));
-		return successful;
+		bool successful = co_await setProcessClass(db, tokens[1], tokens[2]);
+		co_return successful;
 	}
-	return true;
+	co_return true;
 }
 
 CommandFactory setClassFactory(

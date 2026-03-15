@@ -1,5 +1,5 @@
 /*
- * BulkDumpCommand.actor.cpp
+ * BulkDumpCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,13 +20,12 @@
 
 #include <cstddef>
 #include <fmt/core.h>
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -41,45 +40,46 @@ static const std::string BULK_DUMP_HELP_MESSAGE =
     std::string(BULK_DUMP_MODE_USAGE) + std::string(BULK_DUMP_DUMP_USAGE) + std::string(BULK_DUMP_STATUS_USAGE) +
     std::string(BULK_DUMP_CANCEL_USAGE);
 
-ACTOR Future<bool> getOngoingBulkDumpJob(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<bool> getOngoingBulkDumpJob(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
-			Optional<BulkDumpState> job = wait(getSubmittedBulkDumpJob(&tr));
+			Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
 			if (job.present()) {
 				fmt::println("Running bulk dumping job: {}", job.get().getJobId().toString());
-				return true;
+				co_return true;
 			} else {
 				fmt::println("No bulk dumping job is running");
-				return false;
+				co_return false;
 			}
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> getBulkDumpCompleteRanges(Database cx, KeyRange rangeToRead) {
+Future<Void> getBulkDumpCompleteRanges(Database cx, KeyRange rangeToRead) {
 	try {
-		size_t finishCount = wait(getBulkDumpCompleteTaskCount(cx, rangeToRead));
+		size_t finishCount = co_await getBulkDumpCompleteTaskCount(cx, rangeToRead);
 		fmt::println("Finished {} tasks", finishCount);
 	} catch (Error& e) {
 		if (e.code() == error_code_timed_out) {
 			fmt::println("timed out");
 		}
 	}
-	return Void();
 }
 
-ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
-	state BulkDumpState bulkDumpJob;
+Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
+	BulkDumpState bulkDumpJob;
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() != 2 && tokens.size() != 3) {
 			fmt::println("{}", BULK_DUMP_MODE_USAGE);
-			return UID();
+			co_return UID();
 		}
 		if (tokens.size() == 2) {
-			int mode = wait(getBulkDumpMode(cx));
+			int mode = co_await getBulkDumpMode(cx);
 			if (mode == 0) {
 				fmt::println("Bulkdump mode is disabled");
 			} else if (mode == 1) {
@@ -87,32 +87,32 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			} else {
 				fmt::println("Invalid bulkload mode value {}", mode);
 			}
-			return UID();
+			co_return UID();
 		}
 		ASSERT(tokens.size() == 3);
 		if (tokencmp(tokens[2], "on")) {
-			int old = wait(setBulkDumpMode(cx, 1));
+			int old = co_await setBulkDumpMode(cx, 1);
 			TraceEvent("SetBulkDumpModeCommand").detail("OldValue", old).detail("NewValue", 1);
-			return UID();
+			co_return UID();
 		} else if (tokencmp(tokens[2], "off")) {
-			int old = wait(setBulkDumpMode(cx, 0));
+			int old = co_await setBulkDumpMode(cx, 0);
 			TraceEvent("SetBulkDumpModeCommand").detail("OldValue", old).detail("NewValue", 0);
-			return UID();
+			co_return UID();
 		} else {
 			fmt::println("ERROR: Invalid bulkdump mode value {}", tokens[2].toString());
 			fmt::println("{}", BULK_DUMP_MODE_USAGE);
-			return UID();
+			co_return UID();
 		}
 
 	} else if (tokencmp(tokens[1], "dump")) {
-		int mode = wait(getBulkDumpMode(cx));
+		int mode = co_await getBulkDumpMode(cx);
 		if (mode == 0) {
 			fmt::println("ERROR: Bulkdump mode must be enabled to dump data");
-			return UID();
+			co_return UID();
 		}
 		if (tokens.size() != 5) {
 			fmt::println("{}", BULK_DUMP_DUMP_USAGE);
-			return UID();
+			co_return UID();
 		}
 		Key rangeBegin = tokens[2];
 		Key rangeEnd = tokens[3];
@@ -121,7 +121,7 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println(
 			    "ERROR: Invalid range: {} to {}, normal key space only", rangeBegin.toString(), rangeEnd.toString());
 			fmt::println("{}", BULK_DUMP_DUMP_USAGE);
-			return UID();
+			co_return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
 		std::string jobRoot = tokens[4].toString();
@@ -130,35 +130,35 @@ ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> token
 		                                BulkLoadType::SST,
 		                                jobRoot.find("blobstore://") == 0 ? BulkLoadTransportMethod::BLOBSTORE
 		                                                                  : BulkLoadTransportMethod::CP);
-		wait(submitBulkDumpJob(cx, bulkDumpJob));
-		return bulkDumpJob.getJobId();
+		co_await submitBulkDumpJob(cx, bulkDumpJob);
+		co_return bulkDumpJob.getJobId();
 	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
 			fmt::println("{}", BULK_DUMP_CANCEL_USAGE);
-			return UID();
+			co_return UID();
 		}
-		state UID jobId = UID::fromString(tokens[2].toString());
-		wait(cancelBulkDumpJob(cx, jobId));
+		UID jobId = UID::fromString(tokens[2].toString());
+		co_await cancelBulkDumpJob(cx, jobId);
 		fmt::println("Job {} has been cancelled. No new tasks will be spawned.", jobId.toString());
-		return UID();
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
 		if (tokens.size() != 2) {
 			fmt::println("{}", BULK_DUMP_STATUS_USAGE);
-			return UID();
+			co_return UID();
 		}
-		bool anyJob = wait(getOngoingBulkDumpJob(cx));
+		bool anyJob = co_await getOngoingBulkDumpJob(cx);
 		if (!anyJob) {
-			return UID();
+			co_return UID();
 		}
 		KeyRange range = Standalone(KeyRangeRef(normalKeys.begin, normalKeys.end));
-		wait(getBulkDumpCompleteRanges(cx, range));
-		return UID();
+		co_await getBulkDumpCompleteRanges(cx, range);
+		co_return UID();
 
 	} else {
 		printUsage(tokens[0]);
 		printLongDesc(tokens[0]);
-		return UID();
+		co_return UID();
 	}
 }
 

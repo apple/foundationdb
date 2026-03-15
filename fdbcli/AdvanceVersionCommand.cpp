@@ -1,5 +1,5 @@
 /*
- * AdvanceVersionCommand.actor.cpp
+ * AdvanceVersionCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,45 +20,47 @@
 
 #include "boost/lexical_cast.hpp"
 #include "fmt/format.h"
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/IClientApi.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
 const KeyRef advanceVersionSpecialKey = "\xff\xff/management/min_required_commit_version"_sr;
 
-ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 2) {
 		printUsage(tokens[0]);
-		return false;
+		co_return false;
 	} else {
-		state Version v;
+		Version v;
 		int n = 0;
 		if (sscanf(tokens[1].toString().c_str(), "%" PRId64 "%n", &v, &n) != 1 || n != tokens[1].size()) {
 			printUsage(tokens[0]);
-			return false;
+			co_return false;
 		} else {
-			state Reference<ITransaction> tr = db->createTransaction();
-			loop {
+			Reference<ITransaction> tr = db->createTransaction();
+			while (true) {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				Error err;
 				try {
-					Version rv = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+					Version rv = co_await safeThreadFutureToFuture(tr->getReadVersion());
 					if (rv <= v) {
 						tr->set(advanceVersionSpecialKey, boost::lexical_cast<std::string>(v));
-						wait(safeThreadFutureToFuture(tr->commit()));
+						co_await safeThreadFutureToFuture(tr->commit());
+						continue;
 					} else {
 						fmt::print("Current read version is {}\n", rv);
-						return true;
+						co_return true;
 					}
 				} catch (Error& e) {
-					wait(safeThreadFutureToFuture(tr->onError(e)));
+					err = e;
 				}
+				co_await safeThreadFutureToFuture(tr->onError(err));
 			}
 		}
 	}
