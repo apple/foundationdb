@@ -20,7 +20,7 @@
 
 #include "fdbserver/LogSystem.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "flow/DebugTrace.h"

@@ -25,7 +25,7 @@
 
 #include <limits.h>
 #include "flow/Deque.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 // MovingWindow::addSample() will sum up all the samples, and getAverage() method will return the average
 // sampling rate in the past <timeWindow>, where every sample weights evenly.

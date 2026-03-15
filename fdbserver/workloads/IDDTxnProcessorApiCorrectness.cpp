@@ -25,7 +25,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 
 std::string describe(const DDShardInfo& a) {

@@ -25,9 +25,9 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "flow/DeterministicRandom.h"
 
 struct MoveKeysWorkload : FailureInjectionWorkload {

@@ -22,11 +22,11 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/MasterInterface.h"
+#include "fdbserver/core/MasterInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 
 struct TargetedKillWorkload : TestWorkload {
 	static constexpr auto NAME = "TargetedKill";

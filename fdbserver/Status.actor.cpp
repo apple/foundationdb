@@ -38,9 +38,9 @@
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/QuietDatabase.actor.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

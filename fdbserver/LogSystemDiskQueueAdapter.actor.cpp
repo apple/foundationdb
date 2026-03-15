@@ -21,7 +21,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 class LogSystemDiskQueueAdapterImpl {

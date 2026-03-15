@@ -29,7 +29,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"

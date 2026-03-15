@@ -34,16 +34,16 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/RatekeeperInterface.h"
+#include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define DEBUG_SCAN_PROGRESS false

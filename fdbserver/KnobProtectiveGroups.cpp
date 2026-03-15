@@ -25,7 +25,7 @@
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ServerKnobCollection.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 void KnobKeyValuePairs::set(const std::string& name, const ParsedKnobValue value) {
 	ASSERT(!knobs.contains(name));

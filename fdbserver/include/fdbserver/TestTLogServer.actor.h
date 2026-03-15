@@ -29,8 +29,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/ResolverInterface.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
+#include "fdbserver/core/TLogInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/flow.h"
 

@@ -37,7 +37,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/RestoreUtil.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

@@ -40,7 +40,7 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/ClusterInterface.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"

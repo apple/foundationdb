@@ -33,7 +33,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/NetworkAddress.h"

@@ -23,7 +23,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/Status.actor.h"
 
 struct DiskFailureInjectionWorkload : FailureInjectionWorkload {

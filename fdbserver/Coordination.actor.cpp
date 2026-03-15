@@ -22,7 +22,7 @@
 
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/OnDemandStore.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/Status.actor.h"

@@ -23,7 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbserver/RecoveryState.h"
+#include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"

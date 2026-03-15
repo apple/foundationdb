@@ -28,7 +28,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
