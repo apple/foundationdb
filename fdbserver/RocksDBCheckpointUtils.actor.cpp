@@ -312,7 +312,7 @@ public:
 	public:
 		DummyRocksDBCheckpointIterator(const UID& logId) : logId(logId) {}
 
-		~DummyRocksDBCheckpointIterator() {}
+		~DummyRocksDBCheckpointIterator() override = default;
 
 		Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) override { throw end_of_stream(); }
 
@@ -367,7 +367,7 @@ private:
 		};
 
 		explicit Reader(DB& db, CF& cf, std::vector<rocksdb::ColumnFamilyHandle*>& handles, const UID& logId);
-		~Reader() override {}
+		~Reader() override = default;
 
 		void init() override {}
 
@@ -798,7 +798,7 @@ public:
 		endSlice = toSlice(rangeBoundary.end);
 	};
 
-	~RocksDBSstFileReader() {}
+	~RocksDBSstFileReader() override = default;
 
 	void open(const std::string localFile) override;
 
@@ -896,7 +896,7 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
 public:
 	RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
-	~RocksDBCheckpointByteSampleReader() {}
+	~RocksDBCheckpointByteSampleReader() override = default;
 
 	KeyValue next() override;
 

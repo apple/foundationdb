@@ -629,7 +629,7 @@ class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
 	static void init() {}
 
-	virtual StringRef getClassName() override { return "SimpleFile"_sr; }
+	StringRef getClassName() override { return "SimpleFile"_sr; }
 
 	static bool should_poll() { return false; }
 

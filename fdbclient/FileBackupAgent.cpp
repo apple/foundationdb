@@ -877,7 +877,7 @@ public:
 	                             std::vector<RestoreConfig::RestoreFile> _files,
 	                             std::vector<Version> _endVersions);
 
-	bool hasNext();
+	bool hasNext() override;
 	Future<Void> loadNextBlock();
 	static Future<Void> loadNextBlock(Reference<PartitionedLogIteratorSimple> self);
 	void removeBlockHeader();
@@ -885,12 +885,12 @@ public:
 	Standalone<VectorRef<VersionedMutation>> consumeData(Version firstVersion);
 
 	// find the next version without advanding the iterator
-	Future<Version> peekNextVersion();
+	Future<Version> peekNextVersion() override;
 	static Future<Version> peekNextVersion(Reference<PartitionedLogIteratorSimple> iterator);
 
 	// get all the mutations of next version and advance the iterator
 	// this might issue multiple consumeData() if the data of a version cross buffer boundary
-	Future<Standalone<VectorRef<VersionedMutation>>> getNext();
+	Future<Standalone<VectorRef<VersionedMutation>>> getNext() override;
 	static Future<Standalone<VectorRef<VersionedMutation>>> getNext(Reference<PartitionedLogIteratorSimple> iterator);
 };
 
@@ -1126,15 +1126,15 @@ public:
 	                                 std::vector<Version> _endVersions);
 
 	// whether there are more contents for this tag in all files specified
-	bool hasNext();
+	bool hasNext() override;
 
 	// find the next version without advanding the iterator
-	Future<Version> peekNextVersion();
+	Future<Version> peekNextVersion() override;
 	static Future<Version> peekNextVersion(Reference<PartitionedLogIteratorTwoBuffers> iterator);
 
 	// get all the mutations of next version and advance the iterator
 	// this might issue multiple consumeData() if the data of a version cross buffer boundary
-	Future<Standalone<VectorRef<VersionedMutation>>> getNext();
+	Future<Standalone<VectorRef<VersionedMutation>>> getNext() override;
 	static Future<Standalone<VectorRef<VersionedMutation>>> getNext(
 	    Reference<PartitionedLogIteratorTwoBuffers> iterator);
 };
@@ -1339,7 +1339,7 @@ public:
 
 	virtual Future<Void> finish() = 0;
 
-	virtual ~IRangeFileWriter() {}
+	virtual ~IRangeFileWriter() = default;
 };
 
 // File Format handlers.

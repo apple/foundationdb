@@ -39,7 +39,7 @@ struct FileSystemWorkload : TestWorkload {
 	public:
 		virtual Future<Optional<Version>> run(FileSystemWorkload* self, Transaction* tr) = 0;
 		virtual const char* name() = 0;
-		virtual ~FileSystemOp() {}
+		virtual ~FileSystemOp() = default;
 	};
 
 	FileSystemWorkload(WorkloadContext const& wcx)

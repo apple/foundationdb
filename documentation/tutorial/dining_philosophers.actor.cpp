@@ -103,7 +103,7 @@ struct GetForkRequest {
 	ReplyPromise<ForkState> reply;
 
 	GetForkRequest(ForkState fork_state) : forkState(fork_state) {}
-	GetForkRequest() {}
+	GetForkRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -117,7 +117,7 @@ struct ReleaseForkRequest {
 	ReplyPromise<ForkState> reply;
 
 	ReleaseForkRequest(ForkState fork_state) : forkState(fork_state) {}
-	ReleaseForkRequest() {}
+	ReleaseForkRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
