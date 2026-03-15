@@ -27,7 +27,6 @@
 
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/RatekeeperInterface.h"
@@ -58,7 +57,6 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
-	RequestStream<struct InitializeEncryptKeyProxyRequest> encryptKeyProxy;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -123,7 +121,6 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
-		           encryptKeyProxy,
 		           updateServerDBInfo);
 	}
 };
@@ -394,7 +391,6 @@ struct RegisterWorkerRequest {
 	Generation generation;
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
 	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
@@ -412,15 +408,14 @@ struct RegisterWorkerRequest {
 	                      Generation generation,
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
-	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
 	                      bool recoveredDiskFiles,
 	                      Optional<UID> clusterId)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf),
-	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
-	    recoveredDiskFiles(recoveredDiskFiles), clusterId(clusterId) {}
+	    consistencyScanInterf(csInterf), degraded(degraded), recoveredDiskFiles(recoveredDiskFiles),
+	    clusterId(clusterId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -432,7 +427,6 @@ struct RegisterWorkerRequest {
 		           generation,
 		           distributorInterf,
 		           ratekeeperInterf,
-		           encryptKeyProxyInterf,
 		           consistencyScanInterf,
 		           issues,
 		           incompatiblePeers,
@@ -822,22 +816,6 @@ struct InitializeStorageRequest {
 	}
 };
 
-struct InitializeEncryptKeyProxyRequest {
-	constexpr static FileIdentifier file_identifier = 4180191;
-	UID reqId;
-	UID interfaceId;
-	ReplyPromise<EncryptKeyProxyInterface> reply;
-	EncryptionAtRestModeDeprecated encryptMode;
-
-	InitializeEncryptKeyProxyRequest() {}
-	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, reply, encryptMode);
-	}
-};
-
 struct TraceBatchDumpRequest {
 	constexpr static FileIdentifier file_identifier = 8184121;
 	ReplyPromise<Void> reply;
@@ -1096,10 +1074,6 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
 class IKeyValueStore;
 class ServerCoordinators;
 class IDiskQueue;
-
-ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
-                                         Reference<AsyncVar<ServerDBInfo>> db,
-                                         EncryptionAtRestModeDeprecated encryptMode);
 
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
