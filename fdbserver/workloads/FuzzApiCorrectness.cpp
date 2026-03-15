@@ -322,6 +322,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		                              (self->getKeyForIndex(-1, nodesPerTenant).size() + self->valueSizeRange.second));
 		try {
 			while (true) {
+				// TODO: Remove tenant-related logic
 				for (int tenantNum = self->minTenantNum; tenantNum < self->numTenants; ++tenantNum) {
 					co_await self->writeBarrier(self->db);
 					for (int i = 0; i < nodesPerTenant; i += keysPerBatch) {
