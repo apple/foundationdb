@@ -423,11 +423,9 @@ public:
 		}
 
 		// Since cursors can have async operations pending which modify their state they can't be copied cleanly
-		Cursor(const Cursor& other)
+		Cursor(const Cursor& other) = delete;
 
-		    ~Cursor() {
-			cancel();
-		}
+		~Cursor() { cancel(); }
 
 		// Cancel outstanding operations.  Further use of cursor is not allowed.
 		void cancel() {
@@ -905,7 +903,8 @@ public:
 		newTailPage.cancel();
 	}
 
-	FIFOQueue(const FIFOQueue& other) void operator=(const FIFOQueue& rhs) = delete;
+	FIFOQueue(const FIFOQueue& other) = delete;
+	void operator=(const FIFOQueue& rhs) = delete;
 
 	// Create a new queue at newPageID
 	void create(IPager2* p, PhysicalPageID newPageID, std::string queueName, QueueID id, bool extent) {
@@ -3972,7 +3971,7 @@ struct SplitStringRef {
 	StringRef a;
 	StringRef b;
 
-	explicit(false) SplitStringRef(StringRef a = StringRef(), StringRef b = StringRef()) : a(a), b(b) {}
+	explicit SplitStringRef(StringRef a = StringRef(), StringRef b = StringRef()) : a(a), b(b) {}
 
 	SplitStringRef(Arena& arena, const SplitStringRef& toCopy) : a(toStringRef(arena)), b() {}
 

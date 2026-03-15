@@ -421,7 +421,7 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 
 	DDBulkDumpJobManager() = default;
-	explicit(false) DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
+	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
 
 	bool isValid() const { return jobState.isValid(); }
 };

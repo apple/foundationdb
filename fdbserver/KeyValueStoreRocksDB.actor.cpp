@@ -94,7 +94,7 @@ rocksdb::BlockBasedTableOptions::IndexType getIndexType() {
 
 class SharedRocksDBState {
 public:
-	explicit(false) SharedRocksDBState(UID id);
+	explicit SharedRocksDBState(UID id);
 
 	void setClosing() { this->closing = true; }
 	bool isClosing() const { return this->closing; }
@@ -327,7 +327,7 @@ using RocksDBCommon::getErrorReason;
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	explicit(false) RocksDBErrorListener(UID id) : id(id){};
+	explicit RocksDBErrorListener(UID id) : id(id){};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		TraceEvent(SevError, "RocksDBBGError", id)
 		    .detail("Reason", getErrorReason(reason))
@@ -367,7 +367,7 @@ private:
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	explicit(false) RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState){};
+	explicit RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState){};
 
 	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
 		sharedState->setLastFlushTime(now());
@@ -1234,7 +1234,7 @@ Error statusToError(const rocksdb::Status& s) {
 struct RocksDBKeyValueStore : IKeyValueStore {
 	struct Writer : IThreadPoolReceiver {
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
-			explicit(false) CheckpointAction(const CheckpointRequest& request) : request(request) {}
+			explicit CheckpointAction(const CheckpointRequest& request) : request(request) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
@@ -1281,7 +1281,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		void init() override {}
 
 		struct IngestSSTFilesAction : TypedAction<Writer, IngestSSTFilesAction> {
-			explicit(false) IngestSSTFilesAction(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets)
+			explicit IngestSSTFilesAction(std::shared_ptr<BulkLoadFileSetKeyMap> localFileSets)
 			  : localFileSets(localFileSets) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
@@ -1327,7 +1327,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct CompactRangeAction : TypedAction<Writer, CompactRangeAction> {
-			explicit(false) CompactRangeAction(KeyRangeRef range) : range(range) {}
+			explicit CompactRangeAction(KeyRangeRef range) : range(range) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 

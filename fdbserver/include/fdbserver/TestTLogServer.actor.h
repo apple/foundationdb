@@ -84,7 +84,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	explicit(false) TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
+	explicit TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
 // test state

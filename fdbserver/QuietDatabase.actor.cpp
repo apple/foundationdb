@@ -755,7 +755,7 @@ struct QuietDatabaseChecker {
 	ProcessEvents::Event timeoutEvent;
 	std::vector<std::string> lastFailReasons;
 
-	explicit(false) QuietDatabaseChecker(double maxDDRunTime)
+	explicit QuietDatabaseChecker(double maxDDRunTime)
 	  : maxDDRunTime(maxDDRunTime), timeoutEvent({ "Timeout"_sr, "TracedTooManyLines"_sr }, timeoutCallback) {}
 
 	void logFailure(StringRef name, StringRef msg, Error const& e) {

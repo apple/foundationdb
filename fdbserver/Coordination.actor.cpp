@@ -503,7 +503,7 @@ struct LeaderRegisterCollection {
 	OnDemandStore* pStore;
 	Map<Key, double> forwardStartTime;
 
-	explicit(false) LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
+	explicit LeaderRegisterCollection(OnDemandStore* pStore) : actors(false), pStore(pStore) {}
 
 	ACTOR static Future<Void> init(LeaderRegisterCollection* self) {
 		if (!self->pStore->exists())

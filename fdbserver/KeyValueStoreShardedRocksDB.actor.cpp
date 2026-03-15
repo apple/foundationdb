@@ -160,7 +160,7 @@ const char* getFlushReasonString(FlushReason flush_reason) {
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	explicit(false) RocksDBEventListener(UID id)
+	explicit RocksDBEventListener(UID id)
 	  : logId(id), compactionReasons((int)CompactionReason::kNumOfReasons), flushReasons(ROCKSDB_NUM_FLUSH_REASONS),
 	    numRangeDeletionsInTableFile(Histogram::getHistogram(ROCKSDB_STATS_HISTOGRAM_GROUP,
 	                                                         "NumRangeDeletionsInTableFile"_sr,
@@ -2464,7 +2464,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			PhysicalShard* shard;
 			ThreadReturnPromise<Void> done;
 
-			explicit(false) AddShardAction(PhysicalShard* shard) : shard(shard) { ASSERT(shard); }
+			explicit AddShardAction(PhysicalShard* shard) : shard(shard) { ASSERT(shard); }
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 

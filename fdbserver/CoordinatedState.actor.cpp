@@ -77,7 +77,7 @@ struct CoordinatedStateImpl {
 	ActorCollection ac; // Errors are not reported
 	bool initial;
 
-	explicit(false) CoordinatedStateImpl(ServerCoordinators const& c)
+	explicit CoordinatedStateImpl(ServerCoordinators const& c)
 	  : coordinators(c), stage(0), conflictGen(0), doomed(false), ac(false), initial(false) {}
 	uint64_t getConflict() const { return conflictGen; }
 
@@ -257,7 +257,7 @@ struct MovableCoordinatedStateImpl {
 	Optional<Value> lastValue, // The value passed to setExclusive()
 	    lastCSValue; // The value passed to cs.setExclusive()
 
-	explicit(false) MovableCoordinatedStateImpl(ServerCoordinators const& c) : coordinators(c), cs(c) {}
+	explicit MovableCoordinatedStateImpl(ServerCoordinators const& c) : coordinators(c), cs(c) {}
 
 	ACTOR static Future<Value> read(MovableCoordinatedStateImpl* self) {
 		state MovableValue moveState;

@@ -73,7 +73,7 @@ struct SpringCleaningStats {
 };
 
 struct PageChecksumCodec {
-	explicit(false) PageChecksumCodec(std::string const& filename)
+	explicit PageChecksumCodec(std::string const& filename)
 	  : pageSize(0), reserveSize(0), filename(filename), silent(false) {}
 
 	int pageSize;
@@ -1836,7 +1836,7 @@ private:
 
 		struct SetAction final : TypedAction<Writer, SetAction>, FastAllocated<SetAction> {
 			KeyValue kv;
-			explicit(false) SetAction(KeyValue kv) : kv(kv) {}
+			explicit SetAction(KeyValue kv) : kv(kv) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->SET_TIME_ESTIMATE; }
 		};
 		void action(SetAction& a) {
@@ -1851,7 +1851,7 @@ private:
 
 		struct ClearAction final : TypedAction<Writer, ClearAction>, FastAllocated<ClearAction> {
 			KeyRange range;
-			explicit(false) ClearAction(KeyRange range) : range(range) {}
+			explicit ClearAction(KeyRange range) : range(range) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->CLEAR_TIME_ESTIMATE; }
 		};
 		void action(ClearAction& a) {

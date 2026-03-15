@@ -47,7 +47,7 @@ struct IKVSCommitReply {
 	StorageBytes storeBytes;
 
 	IKVSCommitReply() : storeBytes(0, 0, 0, 0) {}
-	explicit(false) IKVSCommitReply(const StorageBytes& sb) : storeBytes(sb) {}
+	explicit IKVSCommitReply(const StorageBytes& sb) : storeBytes(sb) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

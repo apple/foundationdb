@@ -310,7 +310,7 @@ public:
 
 	class DummyRocksDBCheckpointIterator : public ICheckpointIterator {
 	public:
-		explicit(false) DummyRocksDBCheckpointIterator(const UID& logId) : logId(logId) {}
+		explicit DummyRocksDBCheckpointIterator(const UID& logId) : logId(logId) {}
 
 		~DummyRocksDBCheckpointIterator() override = default;
 
@@ -337,7 +337,7 @@ public:
 private:
 	struct Reader : IThreadPoolReceiver {
 		struct OpenAction : TypedAction<Reader, OpenAction> {
-			explicit(false) OpenAction(CheckpointMetaData checkpoint) : checkpoint(std::move(checkpoint)) {}
+			explicit OpenAction(CheckpointMetaData checkpoint) : checkpoint(std::move(checkpoint)) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 

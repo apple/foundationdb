@@ -105,7 +105,7 @@ struct MetricsRule {
 };
 
 struct MetricsConfig {
-	explicit(false) MetricsConfig(Key prefix = KeyRef())
+	explicit MetricsConfig(Key prefix = KeyRef())
 	  : space(prefix), ruleMap(space.get("Rules"_sr).key()), addressMap(space.get("Enum"_sr).get("Address"_sr).key()),
 	    nameAndTypeMap(space.get("Enum"_sr).get("NameType"_sr).key()),
 	    ruleChangeKey(space.get("RulesChanged"_sr).key()), enumsChangeKey(space.get("EnumsChanged"_sr).key()),
@@ -185,7 +185,7 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 // Implementation of IMetricDB
 class MetricDB : public IMetricDB {
 public:
-	explicit(false) MetricDB(ReadYourWritesTransaction* tr = nullptr) : tr(tr) {}
+	explicit MetricDB(ReadYourWritesTransaction* tr = nullptr) : tr(tr) {}
 	~MetricDB() override {}
 
 	// levelKey is the prefix for the entire level, no timestamp at the end

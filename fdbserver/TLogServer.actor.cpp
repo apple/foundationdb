@@ -418,7 +418,12 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		    versionForPoppedLocation(0), poppedLocation(poppedLocation), unpoppedRecovered(unpoppedRecovered),
 		    tag(tag) {}
 
-		TagData(TagData&& r) noexcept void operator=(TagData&& r) noexcept {
+		TagData(TagData&& r) noexcept
+		  : versionMessages(std::move(r.versionMessages)), nothingPersistent(r.nothingPersistent),
+		    poppedRecently(r.poppedRecently), popped(r.popped), persistentPopped(r.persistentPopped),
+		    versionForPoppedLocation(r.versionForPoppedLocation), poppedLocation(r.poppedLocation),
+		    unpoppedRecovered(r.unpoppedRecovered), tag(r.tag) {}
+		void operator=(TagData&& r) noexcept {
 			versionMessages = std::move(r.versionMessages);
 			nothingPersistent = r.nothingPersistent;
 			poppedRecently = r.poppedRecently;

@@ -91,9 +91,7 @@ struct MockS3GlobalStorage {
 		double lastModified;
 
 		ObjectData() : lastModified(now()) {}
-		explicit(false) ObjectData(const std::string& data) : content(data), lastModified(now()) {
-			etag = generateETag(data);
-		}
+		explicit ObjectData(const std::string& data) : content(data), lastModified(now()) { etag = generateETag(data); }
 
 		static std::string generateETag(const std::string& content) {
 			return "\"" + HTTP::computeMD5Sum(content) + "\"";

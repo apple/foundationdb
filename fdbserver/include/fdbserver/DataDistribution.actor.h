@@ -227,8 +227,7 @@ struct BulkLoadShardRequest {
 	                                         // unretryable error.
 	BulkLoadShardRequest() = default;
 
-	explicit(false) BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState)
-	  : bulkLoadTaskState(bulkLoadTaskState) {}
+	explicit BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState) : bulkLoadTaskState(bulkLoadTaskState) {}
 
 	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState, int cancelledDataMovePriority)
 	  : bulkLoadTaskState(bulkLoadTaskState), cancelledDataMovePriority(cancelledDataMovePriority) {}

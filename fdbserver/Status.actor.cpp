@@ -109,8 +109,7 @@ using EventMap = std::map<std::string, TraceEventFields>;
 
 struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	EventMap eventMap;
-	explicit(false) StorageServerStatusInfo(const StorageServerMetaInfo& info)
-	  : StorageServerMetaInfo(info, info.metadata) {}
+	explicit StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
