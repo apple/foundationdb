@@ -565,8 +565,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		failedRanges.coalesce(allKeys);
 		std::vector<KeyRange> failedRangesToCheck;
 		KeyRangeMap<bool>::Ranges failedRangesList = failedRanges.ranges();
-		for (KeyRangeMap<bool>::iterator failedRangesIter = failedRangesList.begin();
-		     failedRangesIter != failedRangesList.end();
+		for (auto failedRangesIter = failedRangesList.begin(); failedRangesIter != failedRangesList.end();
 		     ++failedRangesIter) {
 			if (failedRangesIter->value()) {
 				failedRangesToCheck.push_back(failedRangesIter->range());
