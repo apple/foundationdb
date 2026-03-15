@@ -1,5 +1,5 @@
 /*
- * GrvTransactionRateInfo.actor.cpp
+ * GrvTransactionRateInfo.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 
 #include "fdbserver/core/Knobs.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // must be last include
 
 GrvTransactionRateInfo::GrvTransactionRateInfo(double rateWindow, double maxEmptyQueueBudget, double rate)
   : rateWindow(rateWindow), maxEmptyQueueBudget(maxEmptyQueueBudget), rate(rate), smoothRate(rateWindow),
@@ -98,10 +97,10 @@ static bool isNear(double desired, int64_t actual) {
 	return std::abs(desired - actual) * 10 < desired;
 }
 
-ACTOR static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double desiredRate, int64_t* counter) {
-	loop {
-		state double elapsed = (0.9 + 0.2 * deterministicRandom()->random01()) / desiredRate;
-		wait(delay(elapsed));
+static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double desiredRate, int64_t* counter) {
+	while (true) {
+		double elapsed = (0.9 + 0.2 * deterministicRandom()->random01()) / desiredRate;
+		co_await delay(elapsed);
 		rateInfo->startReleaseWindow();
 		int started = rateInfo->canStart(0, 1) ? 1 : 0;
 		*counter += started;
@@ -112,11 +111,10 @@ ACTOR static Future<Void> mockClient(GrvTransactionRateInfo* rateInfo, double de
 // Rate limit set at 10, but client attempts 20 transactions per second.
 // Client should be throttled to only 10 transactions per second.
 TEST_CASE("/GrvTransactionRateInfo/Simple") {
-	state GrvTransactionRateInfo rateInfo(/*rateWindow=*/2.0, /*maxEmptyQueueBudget=*/100, /*rate=*/10);
-	state int64_t counter;
+	GrvTransactionRateInfo rateInfo(/*rateWindow=*/2.0, /*maxEmptyQueueBudget=*/100, /*rate=*/10);
+	int64_t counter = 0;
 	rateInfo.setRate(10.0);
-	wait(timeout(mockClient(&rateInfo, 20.0, &counter), 60.0, Void()));
+	co_await timeout(mockClient(&rateInfo, 20.0, &counter), 60.0, Void());
 	TraceEvent("GrvTransactionRateInfoTest").detail("Counter", counter);
 	ASSERT(isNear(60.0 * 10.0, counter));
-	return Void();
 }

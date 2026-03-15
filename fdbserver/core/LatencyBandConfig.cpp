@@ -72,7 +72,7 @@ void LatencyBandConfig::CommitConfig::fromJson(JSONDoc json) {
 }
 
 bool LatencyBandConfig::CommitConfig::isEqual(RequestConfig const& r) const {
-	CommitConfig const& other = static_cast<CommitConfig const&>(r);
+	auto const& other = static_cast<CommitConfig const&>(r);
 	return RequestConfig::isEqual(r) && maxCommitBytes == other.maxCommitBytes;
 }
 

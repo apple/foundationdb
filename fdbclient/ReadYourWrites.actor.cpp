@@ -57,13 +57,13 @@ public:
 	struct GetValueReq {
 		explicit GetValueReq(Key key) : key(key) {}
 		Key key;
-		typedef Optional<Value> Result;
+		using Result = Optional<Value>;
 	};
 
 	struct GetKeyReq {
 		explicit GetKeyReq(KeySelector key) : key(key) {}
 		KeySelector key;
-		typedef Key Result;
+		using Result = Key;
 	};
 
 	template <bool reverse>

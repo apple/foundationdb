@@ -363,12 +363,12 @@ struct make_index_sequence_impl;
 
 template <size_t Start, size_t... Indices, size_t End>
 struct make_index_sequence_impl<Start, index_sequence<Indices...>, End> {
-	typedef typename make_index_sequence_impl<Start + 1, index_sequence<Indices..., Start>, End>::type type;
+	using type = typename make_index_sequence_impl<Start + 1, index_sequence<Indices..., Start>, End>::type;
 };
 
 template <size_t End, size_t... Indices>
 struct make_index_sequence_impl<End, index_sequence<Indices...>, End> {
-	typedef index_sequence<Indices...> type;
+	using type = index_sequence<Indices...>;
 };
 
 // The code that actually implements tuple_map
@@ -398,7 +398,7 @@ template <class T>
 struct Descriptor {
 #ifndef NO_INTELLISENSE
 	using fields = std::tuple<>;
-	typedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;
+	using field_indexes = make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type;
 
 	static StringRef typeName() { return ""_sr; }
 #endif

@@ -453,7 +453,7 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 			}
 
 			while (messages.size() < count && feedLatest.size() > 0) {
-				std::map<MessageId, Feed>::iterator latest = feedLatest.begin();
+				auto latest = feedLatest.begin();
 				state MessageId id = latest->first;
 				state Feed f = latest->second;
 				feedLatest.erase(latest);

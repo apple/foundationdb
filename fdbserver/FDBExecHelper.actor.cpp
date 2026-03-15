@@ -464,7 +464,7 @@ struct StorageVersionInfo {
 
 // storage nodes get snapshotted through the worker interface which does not have context about version information,
 // following info is gathered at worker level to facilitate printing of version info during storage snapshots.
-typedef std::map<UID, StorageVersionInfo> UidStorageVersionInfo;
+using UidStorageVersionInfo = std::map<UID, StorageVersionInfo>;
 
 std::map<NetworkAddress, UidStorageVersionInfo> workerStorageVersionInfo;
 

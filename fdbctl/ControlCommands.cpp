@@ -362,8 +362,7 @@ Future<grpc::Status> include(Reference<IDatabase> db, const IncludeRequest* req,
 void addInterfacesFromKVs(RangeResult& kvs,
                           std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
 	for (const auto& kv : kvs) {
-		ClientWorkerInterface workerInterf =
-		    BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+		auto workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 		ClientLeaderRegInterface leaderInterf(workerInterf.address());
 		StringRef ip_port = (kv.key.endsWith(":tls"_sr) ? kv.key.removeSuffix(":tls"_sr) : kv.key)
 		                        .removePrefix("\xff\xff/worker_interfaces/"_sr);

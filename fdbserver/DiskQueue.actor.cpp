@@ -28,8 +28,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-typedef bool (*compare_pages)(void*, void*);
-typedef int64_t loc_t;
+using compare_pages = bool (*)(void*, void*);
+using loc_t = int64_t;
 
 // 0 -> 0
 // 1 -> 4k

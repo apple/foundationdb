@@ -105,7 +105,7 @@ extern int limitReasonEnd;
 extern const char* limitReasonName[];
 extern const char* limitReasonDesc[];
 
-typedef std::map<std::string, TraceEventFields> EventMap;
+using EventMap = std::map<std::string, TraceEventFields>;
 
 struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	EventMap eventMap;
@@ -1756,7 +1756,7 @@ static JsonBuilderObject configurationFetcher(Optional<DatabaseConfiguration> co
 
 			JsonBuilderArray excludedServersArr;
 			std::set<AddressExclusion> excludedServers = configuration.getExcludedServers();
-			for (std::set<AddressExclusion>::iterator it = excludedServers.begin(); it != excludedServers.end(); it++) {
+			for (auto it = excludedServers.begin(); it != excludedServers.end(); it++) {
 				JsonBuilderObject statusObj;
 				statusObj["address"] = it->toString();
 				excludedServersArr.push_back(statusObj);
