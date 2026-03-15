@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/genericactors.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -43,8 +44,8 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 	} else if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() > 4) {
 			fmt::print("Usage: throttle list [throttled|recommended|all] [LIMIT]\n\n");
-			fmt::print("Lists tags that are currently throttled.\n");
-			fmt::print("The default LIMIT is {} tags.\n", defaultThrottleListLimit);
+			fmt::println("Lists tags that are currently throttled.");
+			fmt::println("The default LIMIT is {} tags.", defaultThrottleListLimit);
 			return false;
 		}
 
@@ -58,7 +59,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 				reportThrottled = true;
 				reportRecommended = true;
 			} else if (!tokencmp(tokens[2], "throttled")) {
-				printf("ERROR: failed to parse `%s'.\n", printable(tokens[2]).c_str());
+				fmt::println("ERROR: failed to parse `{}'.", printable(tokens[2]));
 				return false;
 			}
 		}
@@ -68,7 +69,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			char* end;
 			throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
 			if ((tokens.size() > 4 && !std::isspace(*end)) || (tokens.size() == 4 && *end != '\0')) {
-				fprintf(stderr, "ERROR: failed to parse limit `%s'.\n", printable(tokens[3]).c_str());
+				fmt::println(stderr, "ERROR: failed to parse limit `{}'.", printable(tokens[3]));
 				return false;
 			}
 		}
@@ -86,9 +87,9 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		for (auto itr = tags.begin(); itr != tags.end(); ++itr) {
 			if (itr->expirationTime > now()) {
 				if (!anyLogged) {
-					printf("Throttled tags:\n\n");
-					printf("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag\n");
-					printf(" --------------+----------------+-----------+--------+------------+------\n");
+					fmt::print("Throttled tags:\n\n");
+					fmt::println("  Rate (txn/s) | Expiration (s) | Priority  | Type   | Reason     |Tag");
+					fmt::println(" --------------+----------------+-----------+--------+------------+------");
 
 					anyLogged = true;
 				}
@@ -102,34 +103,34 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 					reasonStr = "busy read";
 				}
 
-				printf("  %12d | %13ds | %9s | %6s | %10s |%s\n",
-				       (int)(itr->tpsRate),
-				       std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
-				       transactionPriorityToString(itr->priority, false),
-				       itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
-				       reasonStr.c_str(),
-				       itr->tag.toString().c_str());
+				fmt::println("  {:12} | {:13}s | {:>9} | {:>6} | {:>10} |{}",
+				             (int)(itr->tpsRate),
+				             std::min((int)(itr->expirationTime - now()), (int)(itr->initialDuration)),
+				             transactionPriorityToString(itr->priority, false),
+				             itr->throttleType == TagThrottleType::AUTO ? "auto" : "manual",
+				             reasonStr,
+				             itr->tag.toString());
 			}
 		}
 
 		if (tags.size() == throttleListLimit) {
-			printf("\nThe tag limit `%d' was reached. Use the [LIMIT] argument to view additional tags.\n",
-			       throttleListLimit);
-			printf("Usage: throttle list [LIMIT]\n");
+			fmt::print("\nThe tag limit `{}' was reached. Use the [LIMIT] argument to view additional tags.\n",
+			           throttleListLimit);
+			fmt::println("Usage: throttle list [LIMIT]");
 		}
 		if (!anyLogged) {
-			printf("There are no %s tags\n", reportThrottled ? "throttled" : "recommended");
+			fmt::println("There are no {} tags", reportThrottled ? "throttled" : "recommended");
 		}
 	} else if (tokencmp(tokens[1], "on")) {
 		if (tokens.size() < 4 || !tokencmp(tokens[2], "tag") || tokens.size() > 7) {
-			printf("Usage: throttle on tag <TAG> [RATE] [DURATION] [PRIORITY]\n");
-			printf("\n");
-			printf("Enables throttling for transactions with the specified tag.\n");
-			printf("An optional transactions per second rate can be specified (default 0).\n");
-			printf("An optional duration can be specified, which must include a time suffix (s, m, h, "
-			       "d) (default 1h).\n");
-			printf("An optional priority can be specified. Choices are `default', `immediate', and "
-			       "`batch' (default `default').\n");
+			fmt::println("Usage: throttle on tag <TAG> [RATE] [DURATION] [PRIORITY]");
+			fmt::println("");
+			fmt::println("Enables throttling for transactions with the specified tag.");
+			fmt::println("An optional transactions per second rate can be specified (default 0).");
+			fmt::println(
+			    "An optional duration can be specified, which must include a time suffix (s, m, h, d) (default 1h).");
+			fmt::println("An optional priority can be specified. Choices are `default', `immediate', and `batch' "
+			             "(default `default').");
 			return false;
 		}
 
@@ -141,24 +142,24 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			char* end;
 			tpsRate = std::strtod((const char*)tokens[4].begin(), &end);
 			if ((tokens.size() > 5 && !std::isspace(*end)) || (tokens.size() == 5 && *end != '\0')) {
-				fprintf(stderr, "ERROR: failed to parse rate `%s'.\n", printable(tokens[4]).c_str());
+				fmt::println(stderr, "ERROR: failed to parse rate `{}'.", printable(tokens[4]));
 				return false;
 			}
 			if (tpsRate < 0) {
-				fprintf(stderr, "ERROR: rate cannot be negative `%f'\n", tpsRate);
+				fmt::println(stderr, "ERROR: rate cannot be negative `{:f}'", tpsRate);
 				return false;
 			}
 		}
 		if (tokens.size() == 6) {
 			Optional<uint64_t> parsedDuration = parseDuration(tokens[5].toString());
 			if (!parsedDuration.present()) {
-				fprintf(stderr, "ERROR: failed to parse duration `%s'.\n", printable(tokens[5]).c_str());
+				fmt::println(stderr, "ERROR: failed to parse duration `{}'.", printable(tokens[5]));
 				return false;
 			}
 			duration = parsedDuration.get();
 
 			if (duration == 0) {
-				fprintf(stderr, "ERROR: throttle duration cannot be 0\n");
+				fmt::println(stderr, "ERROR: throttle duration cannot be 0");
 				return false;
 			}
 		}
@@ -170,10 +171,9 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			} else if (tokens[6] == "batch"_sr) {
 				priority = TransactionPriority::BATCH;
 			} else {
-				fprintf(stderr,
-				        "ERROR: unrecognized priority `%s'. Must be one of `default',\n  `immediate', "
-				        "or `batch'.\n",
-				        tokens[6].toString().c_str());
+				fmt::print(stderr,
+				           "ERROR: unrecognized priority `{}'. Must be one of `default',\n  `immediate', or `batch'.\n",
+				           tokens[6].toString());
 				return false;
 			}
 		}
@@ -182,7 +182,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		tagSet.addTag(tokens[3]);
 
 		wait(ThrottleApi::throttleTags(db, tagSet, tpsRate, duration, TagThrottleType::MANUAL, priority));
-		printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
+		fmt::println("Tag `{}' has been throttled", tokens[3].toString());
 	} else if (tokencmp(tokens[1], "off")) {
 		int nextIndex = 2;
 		state TagSet tagSet;
@@ -257,51 +257,51 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			state const char* throttleTypeString =
 			    !throttleType.present() ? "" : (throttleType.get() == TagThrottleType::AUTO ? "auto-" : "manually ");
 			state std::string priorityString =
-			    priority.present() ? format(" at %s priority", transactionPriorityToString(priority.get(), false)) : "";
+			    priority.present() ? fmt::format(" at {} priority", transactionPriorityToString(priority.get(), false))
+			                       : "";
 
 			if (tagSet.size() > 0) {
 				bool success = wait(ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority));
 				if (success) {
-					fmt::print("Unthrottled {0}{1}\n", tagSet.toString(), priorityString);
+					fmt::println("Unthrottled {0}{1}", tagSet.toString(), priorityString);
 				} else {
-					fmt::print("{0} was not {1}throttled{2}\n",
-					           tagSet.toString(Capitalize::True),
-					           throttleTypeString,
-					           priorityString);
+					fmt::println("{0} was not {1}throttled{2}",
+					             tagSet.toString(Capitalize::True),
+					             throttleTypeString,
+					             priorityString);
 				}
 			} else {
 				bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));
 				if (unthrottled) {
-					printf("Unthrottled all %sthrottled tags%s\n", throttleTypeString, priorityString.c_str());
+					fmt::println("Unthrottled all {}throttled tags{}", throttleTypeString, priorityString);
 				} else {
-					printf("There were no tags being %sthrottled%s\n", throttleTypeString, priorityString.c_str());
+					fmt::println("There were no tags being {}throttled{}", throttleTypeString, priorityString);
 				}
 			}
 		} else {
-			printf("Usage: throttle off [all|auto|manual] [tag <TAG>] [PRIORITY]\n");
-			printf("\n");
-			printf("Disables throttling for throttles matching the specified filters. At least one "
-			       "filter must be used.\n\n");
-			printf("An optional qualifier `all', `auto', or `manual' can be used to specify the type "
-			       "of throttle\n");
-			printf("affected. `all' targets all throttles, `auto' targets those created by the "
-			       "cluster, and\n");
-			printf("`manual' targets those created manually (default `manual').\n\n");
-			printf("The `tag' filter can be use to turn off only a specific tag.\n\n");
-			printf("The priority filter can be used to turn off only throttles at specific priorities. "
-			       "Choices are\n");
-			printf("`default', `immediate', or `batch'. By default, all priorities are targeted.\n");
+			fmt::println("Usage: throttle off [all|auto|manual] [tag <TAG>] [PRIORITY]");
+			fmt::println("");
+			fmt::print("Disables throttling for throttles matching the specified filters. At least one filter must be "
+			           "used.\n\n");
+			fmt::println(
+			    "An optional qualifier `all', `auto', or `manual' can be used to specify the type of throttle");
+			fmt::println("affected. `all' targets all throttles, `auto' targets those created by the cluster, and");
+			fmt::print("`manual' targets those created manually (default `manual').\n\n");
+			fmt::print("The `tag' filter can be use to turn off only a specific tag.\n\n");
+			fmt::println(
+			    "The priority filter can be used to turn off only throttles at specific priorities. Choices are");
+			fmt::println("`default', `immediate', or `batch'. By default, all priorities are targeted.");
 		}
 	} else if (tokencmp(tokens[1], "enable") || tokencmp(tokens[1], "disable")) {
 		if (tokens.size() != 3 || !tokencmp(tokens[2], "auto")) {
-			printf("Usage: throttle <enable|disable> auto\n");
-			printf("\n");
-			printf("Enables or disable automatic tag throttling.\n");
+			fmt::println("Usage: throttle <enable|disable> auto");
+			fmt::println("");
+			fmt::println("Enables or disable automatic tag throttling.");
 			return false;
 		}
 		state bool autoTagThrottlingEnabled = tokencmp(tokens[1], "enable");
 		wait(ThrottleApi::enableAuto(db, autoTagThrottlingEnabled));
-		printf("Automatic tag throttling has been %s\n", autoTagThrottlingEnabled ? "enabled" : "disabled");
+		fmt::println("Automatic tag throttling has been {}", autoTagThrottlingEnabled ? "enabled" : "disabled");
 	} else {
 		printUsage(tokens[0]);
 		return false;

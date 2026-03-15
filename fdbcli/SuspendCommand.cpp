@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace fdb_cli {
 
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
@@ -43,23 +44,23 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 		address_interface->clear();
 		co_await getWorkerInterfaces(tr, address_interface, true);
 		if (address_interface->empty()) {
-			printf("\nNo addresses can be suspended.\n");
+			fmt::print("\nNo addresses can be suspended.\n");
 		} else if (address_interface->size() == 1) {
-			printf("\nThe following address can be suspended:\n");
+			fmt::print("\nThe following address can be suspended:\n");
 		} else {
-			printf("\nThe following %zu addresses can be suspended:\n", address_interface->size());
+			fmt::print("\nThe following {} addresses can be suspended:\n", address_interface->size());
 		}
 		for (const auto& it : *address_interface) {
-			printf("%s\n", printable(it.first).c_str());
+			fmt::println("{}", printable(it.first));
 		}
-		printf("\n");
+		fmt::println("");
 	} else if (tokens.size() == 2) {
 		printUsage(tokens[0]);
 		result = false;
 	} else {
 		for (int i = 2; i < tokens.size(); i++) {
 			if (!address_interface->count(tokens[i])) {
-				fprintf(stderr, "ERROR: process `%s' not recognized.\n", printable(tokens[i]).c_str());
+				fmt::println(stderr, "ERROR: process `{}' not recognized.", printable(tokens[i]));
 				result = false;
 				break;
 			}
@@ -83,13 +84,12 @@ Future<bool> suspendCommandActor(Reference<IDatabase> db,
 				    co_await safeThreadFutureToFuture(db->rebootWorker(addressesStr, false, static_cast<int>(seconds)));
 				if (!suspendRequestSent) {
 					result = false;
-					fprintf(
-					    stderr,
-					    "ERROR: failed to send requests to suspend processes `%s', please run the `suspend’ command "
-					    "to fetch latest addresses.\n",
-					    addressesStr.c_str());
+					fmt::println(stderr,
+					             "ERROR: failed to send requests to suspend processes `{}', please run the "
+					             "`suspendâ command to fetch latest addresses.",
+					             addressesStr);
 				} else {
-					printf("Attempted to suspend %zu processes\n", tokens.size() - 2);
+					fmt::println("Attempted to suspend {} processes", tokens.size() - 2);
 				}
 			}
 		}

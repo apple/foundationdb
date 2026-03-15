@@ -26,6 +26,7 @@
 #include "flow/Arena.h"
 
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -41,18 +42,18 @@ void printUsage(StringRef command) {
 	const auto& helpMap = CommandFactory::commands();
 	auto i = helpMap.find(command.toString());
 	if (i != helpMap.end())
-		printf("Usage: %s\n", i->second.usage.c_str());
+		fmt::println("Usage: {}", i->second.usage);
 	else
-		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
+		fmt::println(stderr, "ERROR: Unknown command `{}'", command.toString());
 }
 
 void printLongDesc(StringRef command) {
 	const auto& helpMap = CommandFactory::commands();
 	auto i = helpMap.find(command.toString());
 	if (i != helpMap.end())
-		printf("%s\n", i->second.long_desc.c_str());
+		fmt::println("{}", i->second.long_desc);
 	else
-		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
+		fmt::println(stderr, "ERROR: Unknown command `{}'", command.toString());
 }
 
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
@@ -79,7 +80,7 @@ void addInterfacesFromKVs(RangeResult& kvs,
 			// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
 			workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
 		} catch (Error& e) {
-			fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
+			fmt::println(stderr, "Error: {}; CLI version is too old, please update to use a newer version", e.what());
 			return;
 		}
 		ClientLeaderRegInterface leaderInterf(workerInterf.address());
@@ -138,7 +139,7 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
 					    decodeProcessClassValue(processClasses.get()[i].value);
 				} catch (Error& e) {
-					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
+					fmt::println(stderr, "Error: {}; Client version is too old, please use a newer version", e.what());
 					return false;
 				}
 			}

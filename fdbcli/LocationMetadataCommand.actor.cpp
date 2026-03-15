@@ -26,6 +26,7 @@
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -58,11 +59,11 @@ ACTOR Future<Void> printKeyServersEntry(Reference<ReadYourWritesTransaction> tr,
 	decodeKeyServersValue(UIDtoTagMap, entry, src, dest, srcId, destId);
 	state std::string srcDesc = wait(describeServers(tr, src));
 	std::string destDesc = wait(describeServers(tr, dest));
-	printf("Range: %s, ShardID: %s, Src Servers: %s, Dest Servers: %s\n",
-	       Traceable<KeyRangeRef>::toString(range).c_str(),
-	       srcId.toString().c_str(),
-	       srcDesc.c_str(),
-	       destDesc.c_str());
+	fmt::println("Range: {}, ShardID: {}, Src Servers: {}, Dest Servers: {}",
+	             Traceable<KeyRangeRef>::toString(range),
+	             srcId.toString(),
+	             srcDesc,
+	             destDesc);
 	return Void();
 }
 
@@ -109,7 +110,7 @@ ACTOR Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 		}
 	}
 
-	printf("Found %d %s shards\n", numShards, physicalShard ? "Physical" : "Non-physical");
+	fmt::println("Found {} {} shards", numShards, physicalShard ? "Physical" : "Non-physical");
 
 	return Void();
 }
@@ -156,7 +157,7 @@ ACTOR Future<Void> printPhysicalShardCount(Database cx) {
 		}
 	}
 
-	printf("Total number of shards: %d, number of physical shards: %d\n", numShards, numPhysicalShards);
+	fmt::println("Total number of shards: {}, number of physical shards: {}", numShards, numPhysicalShards);
 
 	return Void();
 }
@@ -185,10 +186,10 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 					DataMovementReason dataMoveReason = DataMovementReason::INVALID;
 					decodeServerKeysValue(
 					    serverShards[i].value, assigned, emptyRange, dataMoveType, shardId, dataMoveReason);
-					printf("Range: %s, ShardID: %s, Assigned: %s\n",
-					       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
-					       shardId.toString().c_str(),
-					       assigned ? "true" : "false");
+					fmt::println("Range: {}, ShardID: {}, Assigned: {}",
+					             Traceable<KeyRangeRef>::toString(currentRange),
+					             shardId.toString(),
+					             assigned ? "true" : "false");
 				}
 
 				begin = serverShards.back().key;

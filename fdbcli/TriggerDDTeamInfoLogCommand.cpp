@@ -27,6 +27,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace fdb_cli {
 
 Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
@@ -39,7 +40,7 @@ Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db) {
 			std::string v = deterministicRandom()->randomUniqueID().toString();
 			tr->set(triggerDDTeamInfoPrintKey, v);
 			co_await safeThreadFutureToFuture(tr->commit());
-			printf("Triggered team info logging in data distribution.\n");
+			fmt::println("Triggered team info logging in data distribution.");
 			co_return true;
 		} catch (Error& e) {
 			err = e;

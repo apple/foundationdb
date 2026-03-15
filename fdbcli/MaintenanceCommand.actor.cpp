@@ -49,14 +49,14 @@ ACTOR Future<Void> printHealthyZone(Reference<IDatabase> db) {
 			RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
 			ASSERT(res.size() <= 1);
 			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
-				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
-				       "maintenance mode is not active.\n");
+				fmt::println("Data distribution has been disabled for all storage server failures in this cluster and "
+				             "thus maintenance mode is not active.");
 			} else if (!res.size() || boost::lexical_cast<double>(res[0].value.toString()) <= 0) {
-				printf("No ongoing maintenance.\n");
+				fmt::println("No ongoing maintenance.");
 			} else {
 				std::string zoneId = res[0].key.removePrefix(fdb_cli::maintenanceSpecialKeyRange.begin).toString();
 				int64_t seconds = static_cast<int64_t>(boost::lexical_cast<double>(res[0].value.toString()));
-				fmt::print("Maintenance for zone {0} will continue for {1} seconds.\n", zoneId, seconds);
+				fmt::println("Maintenance for zone {0} will continue for {1} seconds.", zoneId, seconds);
 			}
 			return Void();
 		} catch (Error& e) {
@@ -88,9 +88,9 @@ ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, dou
 			ASSERT(res.size() <= 1);
 			if (res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				if (printWarning) {
-					fprintf(stderr,
-					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+					fmt::println(stderr,
+					             "ERROR: Maintenance mode cannot be used while data distribution is disabled for "
+					             "storage server failures. Use 'datadistribution on' to reenable data distribution.");
 				}
 				return false;
 			}
@@ -118,9 +118,9 @@ ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db, bool printWarning, 
 			ASSERT(res.size() <= 1);
 			if (!clearSSFailureZoneString && res.size() == 1 && res[0].key == fdb_cli::ignoreSSFailureSpecialKey) {
 				if (printWarning) {
-					fprintf(stderr,
-					        "ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
-					        "server failures. Use 'datadistribution on' to reenable data distribution.\n");
+					fmt::println(stderr,
+					             "ERROR: Maintenance mode cannot be used while data distribution is disabled for "
+					             "storage server failures. Use 'datadistribution on' to reenable data distribution.");
 				}
 				return false;
 			}

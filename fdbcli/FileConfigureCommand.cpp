@@ -30,6 +30,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace fdb_cli {
 
 Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
@@ -40,11 +41,11 @@ Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue config;
 	if (!json_spirit::read_string(contents, config)) {
-		fprintf(stderr, "ERROR: Invalid JSON\n");
+		fmt::println(stderr, "ERROR: Invalid JSON");
 		co_return false;
 	}
 	if (config.type() != json_spirit::obj_type) {
-		fprintf(stderr, "ERROR: Configuration file must contain a JSON object\n");
+		fmt::println(stderr, "ERROR: Configuration file must contain a JSON object");
 		co_return false;
 	}
 	StatusObject configJSON = config.get_obj();
@@ -56,7 +57,7 @@ Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 
 	std::string errorStr;
 	if (!schemaMatch(schema.get_obj(), configJSON, errorStr)) {
-		printf("%s", errorStr.c_str());
+		fmt::print("{}", errorStr);
 		co_return false;
 	}
 
@@ -89,83 +90,83 @@ Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
 	bool ret = true;
 	switch (result) {
 	case ConfigurationResult::NO_OPTIONS_PROVIDED:
-		fprintf(stderr, "ERROR: No options provided\n");
+		fmt::println(stderr, "ERROR: No options provided");
 		ret = false;
 		break;
 	case ConfigurationResult::CONFLICTING_OPTIONS:
-		fprintf(stderr, "ERROR: Conflicting options\n");
+		fmt::println(stderr, "ERROR: Conflicting options");
 		ret = false;
 		break;
 	case ConfigurationResult::UNKNOWN_OPTION:
-		fprintf(stderr, "ERROR: Unknown option\n"); // This should not be possible because of schema match
+		fmt::println(stderr, "ERROR: Unknown option"); // This should not be possible because of schema match
 		ret = false;
 		break;
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		fprintf(stderr,
-		        "ERROR: Must specify both a replication level and a storage engine when creating a new database\n");
+		fmt::println(stderr,
+		             "ERROR: Must specify both a replication level and a storage engine when creating a new database");
 		ret = false;
 		break;
 	case ConfigurationResult::INVALID_CONFIGURATION:
-		fprintf(stderr, "ERROR: These changes would make the configuration invalid\n");
+		fmt::println(stderr, "ERROR: These changes would make the configuration invalid");
 		ret = false;
 		break;
 	case ConfigurationResult::DATABASE_ALREADY_CREATED:
-		fprintf(stderr, "ERROR: Database already exists! To change configuration, don't say `new'\n");
+		fmt::println(stderr, "ERROR: Database already exists! To change configuration, don't say `new'");
 		ret = false;
 		break;
 	case ConfigurationResult::DATABASE_CREATED:
-		printf("Database created\n");
+		fmt::println("Database created");
 		break;
 	case ConfigurationResult::DATABASE_UNAVAILABLE:
-		fprintf(stderr, "ERROR: The database is unavailable\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		fmt::println(stderr, "ERROR: The database is unavailable");
+		fmt::println("Type `fileconfigure FORCE <FILENAME>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::STORAGE_IN_UNKNOWN_DCID:
-		fprintf(stderr, "ERROR: All storage servers must be in one of the known regions\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		fmt::println(stderr, "ERROR: All storage servers must be in one of the known regions");
+		fmt::println("Type `fileconfigure FORCE <FILENAME>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::REGION_NOT_FULLY_REPLICATED:
-		fprintf(stderr,
-		        "ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated "
-		        "before changing the configuration\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		fmt::println(stderr,
+		             "ERROR: When usable_regions > 1, All regions with priority >= 0 must be fully replicated before "
+		             "changing the configuration");
+		fmt::println("Type `fileconfigure FORCE <FILENAME>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::MULTIPLE_ACTIVE_REGIONS:
-		fprintf(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		fmt::println(stderr, "ERROR: When changing usable_regions, only one region can have priority >= 0");
+		fmt::println("Type `fileconfigure FORCE <FILENAME>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::REGIONS_CHANGED:
-		fprintf(stderr,
-		        "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		fmt::println(stderr,
+		             "ERROR: The region configuration cannot be changed while simultaneously changing usable_regions");
+		fmt::println("Type `fileconfigure FORCE <FILENAME>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::NOT_ENOUGH_WORKERS:
-		fprintf(stderr, "ERROR: Not enough processes exist to support the specified configuration\n");
-		printf("Type `fileconfigure FORCE <FILENAME>' to configure without this check\n");
+		fmt::println(stderr, "ERROR: Not enough processes exist to support the specified configuration");
+		fmt::println("Type `fileconfigure FORCE <FILENAME>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::REGION_REPLICATION_MISMATCH:
-		fprintf(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration\n");
-		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
+		fmt::println(stderr, "ERROR: `three_datacenter' replication is incompatible with region configuration");
+		fmt::println("Type `fileconfigure FORCE <TOKEN...>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::DCID_MISSING:
-		fprintf(stderr, "ERROR: `No storage servers in one of the specified regions\n");
-		printf("Type `fileconfigure FORCE <TOKEN...>' to configure without this check\n");
+		fmt::println(stderr, "ERROR: `No storage servers in one of the specified regions");
+		fmt::println("Type `fileconfigure FORCE <TOKEN...>' to configure without this check");
 		ret = false;
 		break;
 	case ConfigurationResult::SUCCESS:
-		printf("Configuration changed\n");
+		fmt::println("Configuration changed");
 		break;
 	case ConfigurationResult::BACKUP_WORKER_ENABLED_RESTRICTED:
-		fprintf(stderr,
-		        "ERROR: backup_worker_enabled configuration is restricted in fdbcli and managed automatically by the "
-		        "backup system\n");
+		fmt::println(stderr,
+		             "ERROR: backup_worker_enabled configuration is restricted in fdbcli and managed automatically by "
+		             "the backup system");
 		ret = false;
 		break;
 	default:

@@ -31,6 +31,7 @@
 #include "flow/FastRef.h"
 #include "flow/NetworkAddress.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace {
 
 ReadHotSubRangeRequest::SplitType parseSplitType(const std::string& typeStr) {
@@ -42,7 +43,7 @@ ReadHotSubRangeRequest::SplitType parseSplitType(const std::string& typeStr) {
 	} else if (typeStr == "readOps") {
 		type = ReadHotSubRangeRequest::READ_OPS;
 	} else {
-		fmt::print("Error: {} is not a valid split type. Will use bytes as the default split type\n", typeStr);
+		fmt::println("Error: {} is not a valid split type. Will use bytes as the default split type", typeStr);
 	}
 	return type;
 }
@@ -62,25 +63,26 @@ Future<bool> hotRangeCommandActor(Database localdb,
 		co_await getStorageServerInterfaces(db, storage_interface);
 		fmt::print("\nThe following {} storage servers can be queried:\n", storage_interface->size());
 		for (const auto& [addr, _] : *storage_interface) {
-			fmt::print("{}\n", addr);
+			fmt::println("{}", addr);
 		}
-		fmt::print("\n");
+		fmt::println("");
 	} else if (tokens.size() == 6) {
 		if (storage_interface->empty()) {
-			fprintf(stderr, "ERROR: no storage processes to query. You must run the `hotrange’ command first.\n");
+			fmt::println(stderr,
+			             "ERROR: no storage processes to query. You must run the `hotrangeâ command first.");
 			co_return false;
 		}
 		Key address = tokens[1];
 		// At present we only support one process(IP:Port) at a time
 		if (!storage_interface->count(address.toString())) {
-			fprintf(stderr, "ERROR: storage process `%s' not recognized.\n", printable(address).c_str());
+			fmt::println(stderr, "ERROR: storage process `{}' not recognized.", printable(address));
 			co_return false;
 		}
 		int splitCount{ 0 };
 		try {
 			splitCount = boost::lexical_cast<int>(tokens[5].toString());
 		} catch (...) {
-			fmt::print("Error: splitCount value: '{}', cannot be parsed to an Integer\n", tokens[5].toString());
+			fmt::println("Error: splitCount value: '{}', cannot be parsed to an Integer", tokens[5].toString());
 			co_return false;
 		}
 		ReadHotSubRangeRequest::SplitType splitType = parseSplitType(tokens[2].toString());

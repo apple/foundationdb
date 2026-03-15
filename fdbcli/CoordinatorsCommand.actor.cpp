@@ -31,6 +31,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -43,15 +44,15 @@ ACTOR Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
 			state ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
 			Optional<Value> description = wait(safeThreadFutureToFuture(descriptionF));
 			ASSERT(description.present());
-			printf("Cluster description: %s\n", description.get().toString().c_str());
+			fmt::println("Cluster description: {}", description.get().toString());
 			// Hold the reference to the standalone's memory
 			state ThreadFuture<Optional<Value>> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
 			Optional<Value> processes = wait(safeThreadFutureToFuture(processesF));
 			ASSERT(processes.present());
 			std::vector<std::string> process_addresses;
 			boost::split(process_addresses, processes.get().toString(), [](char c) { return c == ','; });
-			printf("Cluster coordinators (%zu): %s\n", process_addresses.size(), processes.get().toString().c_str());
-			printf("Type `help coordinators' to learn how to change this information.\n");
+			fmt::println("Cluster coordinators ({}): {}", process_addresses.size(), processes.get().toString());
+			fmt::println("Type `help coordinators' to learn how to change this information.");
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -107,9 +108,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 							// We do not resolve hostnames here. We commit them as is.
 							const auto& hostname = Hostname::parse(t->toString());
 							if (new_coordinators_hostnames.count(hostname)) {
-								fprintf(stderr,
-								        "ERROR: passed redundant coordinators: `%s'\n",
-								        hostname.toString().c_str());
+								fmt::println(stderr, "ERROR: passed redundant coordinators: `{}'", hostname.toString());
 								return true;
 							}
 							new_coordinators_hostnames.insert(hostname);
@@ -117,8 +116,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						} else {
 							const auto& addr = NetworkAddress::parse(t->toString());
 							if (new_coordinators_addresses.count(addr)) {
-								fprintf(
-								    stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
+								fmt::println(stderr, "ERROR: passed redundant coordinators: `{}'", addr.toString());
 								return true;
 							}
 							new_coordinators_addresses.insert(addr);
@@ -126,8 +124,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						}
 					} catch (Error& e) {
 						if (e.code() == error_code_connection_string_invalid) {
-							fprintf(
-							    stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
+							fmt::println(stderr, "ERROR: '{}' is not a valid network endpoint address", t->toString());
 							return true;
 						}
 						throw;
@@ -155,12 +152,12 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				} else if (errorMsgStr ==
 				           ManagementAPI::generateErrorMessage(CoordinatorsResult::SAME_NETWORK_ADDRESSES)) {
 					if (retries)
-						printf("Coordination state changed\n");
+						fmt::println("Coordination state changed");
 					else
-						printf("No change (existing configuration satisfies request)\n");
+						fmt::println("No change (existing configuration satisfies request)");
 					return true;
 				} else {
-					fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+					fmt::println(stderr, "ERROR: {}", errorMsgStr);
 					return false;
 				}
 			}

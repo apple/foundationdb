@@ -31,6 +31,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -45,13 +46,13 @@ ACTOR Future<bool> profileCommandActor(Database db,
 		result = false;
 	} else if (tokencmp(tokens[1], "client")) {
 		if (tokens.size() == 2) {
-			fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
+			fmt::println(stderr, "ERROR: Usage: profile client <get|set>");
 			return false;
 		}
 		wait(db->globalConfig->onInitialized());
 		if (tokencmp(tokens[2], "get")) {
 			if (tokens.size() != 3) {
-				fprintf(stderr, "ERROR: Additional arguments to `get` are not supported.\n");
+				fmt::println(stderr, "ERROR: Additional arguments to `get` are not supported.");
 				return false;
 			}
 			std::string sampleRateStr = "default";
@@ -65,12 +66,11 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			if (sizeLimit != -1) {
 				sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 			}
-			printf("Client profiling rate is set to %s and size limit is set to %s.\n",
-			       sampleRateStr.c_str(),
-			       sizeLimitStr.c_str());
+			fmt::println(
+			    "Client profiling rate is set to {} and size limit is set to {}.", sampleRateStr, sizeLimitStr);
 		} else if (tokencmp(tokens[2], "set")) {
 			if (tokens.size() != 5) {
-				fprintf(stderr, "ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
+				fmt::println(stderr, "ERROR: Usage: profile client set <RATE|default> <SIZE|default>");
 				return false;
 			}
 			double sampleRate;
@@ -80,7 +80,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 				char* end;
 				sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
 				if (!std::isspace(*end)) {
-					fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
+					fmt::println(stderr, "ERROR: {} failed to parse.", printable(tokens[3]));
 					return false;
 				}
 			}
@@ -92,7 +92,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 				if (parsed.present()) {
 					sizeLimit = parsed.get();
 				} else {
-					fprintf(stderr, "ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
+					fmt::println(stderr, "ERROR: `{}` failed to parse.", printable(tokens[4]));
 					return false;
 				}
 			}
@@ -106,12 +106,12 @@ ACTOR Future<bool> profileCommandActor(Database db,
 				wait(safeThreadFutureToFuture(tr->commit()));
 			}
 		} else {
-			fprintf(stderr, "ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
+			fmt::println(stderr, "ERROR: Unknown action: {}", printable(tokens[2]));
 			result = false;
 		}
 	} else if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() != 2) {
-			fprintf(stderr, "ERROR: Usage: profile list\n");
+			fmt::println(stderr, "ERROR: Usage: profile list");
 			return false;
 		}
 		// Hold the reference to the standalone's memory
@@ -122,10 +122,10 @@ ACTOR Future<bool> profileCommandActor(Database db,
 		for (const auto& pair : kvs) {
 			auto ip_port = (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)
 			                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
-			printf("%s\n", printable(ip_port).c_str());
+			fmt::println("{}", printable(ip_port));
 		}
 	} else {
-		fprintf(stderr, "ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
+		fmt::println(stderr, "ERROR: Unknown type: {}", printable(tokens[1]));
 		result = false;
 	}
 	return result;

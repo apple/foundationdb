@@ -39,9 +39,8 @@ std::string getCoordinatorsInfoString(StatusObjectReader statusObj) {
 	try {
 		StatusArray coordinatorsArr = statusObj["client.coordinators.coordinators"].get_array();
 		for (StatusObjectReader coor : coordinatorsArr)
-			outputString += format("\n  %s  (%s)",
-			                       coor["address"].get_str().c_str(),
-			                       coor["reachable"].get_bool() ? "reachable" : "unreachable");
+			outputString += fmt::format(
+			    "\n  {}  ({})", coor["address"].get_str(), coor["reachable"].get_bool() ? "reachable" : "unreachable");
 	} catch (std::runtime_error&) {
 		outputString = "\n  Unable to retrieve list of coordination servers";
 	}
@@ -61,7 +60,7 @@ std::string lineWrap(const char* text, int col) {
 		if (*iter == '\n' || *iter == '\0' || (iter - start == col)) {
 			if (!space)
 				space = iter;
-			out += format("%.*s\n", (int)(space - start), start);
+			out += fmt::format("{:.{}}\n", start, (int)(space - start));
 			start = space;
 			if (*start == ' ' /* || *start == '\n'*/)
 				start++;
@@ -156,7 +155,7 @@ std::string getWorkloadRates(StatusObjectReader statusObj,
 	std::string path = first + "." + second;
 	double value;
 	if (!unknown && statusObj.get(path, value)) {
-		return format("%d Hz", (int)round(value));
+		return fmt::format("{} Hz", (int)round(value));
 	}
 	return "unknown";
 }
@@ -164,7 +163,7 @@ std::string getWorkloadRates(StatusObjectReader statusObj,
 void getBackupDRTags(StatusObjectReader& statusObjCluster,
                      const char* context,
                      std::map<std::string, std::string>& tagMap) {
-	std::string path = format("layers.%s.tags", context);
+	std::string path = fmt::format("layers.{}.tags", context);
 	StatusObjectReader tags;
 	if (statusObjCluster.tryGet(path, tags)) {
 		for (auto itr : tags.obj()) {
@@ -186,11 +185,11 @@ void getBackupDRTags(StatusObjectReader& statusObjCluster,
 std::string logBackupDR(const char* context, std::map<std::string, std::string> const& tagMap) {
 	std::string outputString = "";
 	if (tagMap.size() > 0) {
-		outputString += format("\n\n%s:", context);
+		outputString += fmt::format("\n\n{}:", context);
 		for (auto itr : tagMap) {
-			outputString += format("\n  %-22s", itr.first.c_str());
+			outputString += fmt::format("\n  {:<22}", itr.first);
 			if (itr.second.size() > 0) {
-				outputString += format(" - %s", itr.second.c_str());
+				outputString += fmt::format(" - {}", itr.second);
 			}
 		}
 	}
@@ -204,12 +203,12 @@ namespace fdb_cli {
 
 std::string toBytesString(double bytes) {
 	if (bytes >= 1e12) {
-		return format("%.3f TB", (bytes / 1e12));
+		return fmt::format("{:.3f} TB", (bytes / 1e12));
 	} else if (bytes >= 1e9) {
-		return format("%.3f GB", (bytes / 1e9));
+		return fmt::format("{:.3f} GB", (bytes / 1e9));
 	} else {
 		// no decimal points for MB
-		return format("%d MB", (int)round(bytes / 1e6));
+		return fmt::format("{} MB", (int)round(bytes / 1e6));
 	}
 }
 
@@ -218,7 +217,7 @@ void printStatus(StatusObjectReader statusObj,
                  bool displayDatabaseAvailable,
                  bool hideErrorMessages) {
 	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
-		fprintf(
+		fmt::print(
 		    stderr,
 		    "WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
 	}
@@ -237,7 +236,7 @@ void printStatus(StatusObjectReader statusObj,
 			std::string outputString = "";
 			std::string clusterFilePath;
 			if (statusObjClient.get("cluster_file.path", clusterFilePath))
-				outputString = format("Using cluster file `%s'.\n", clusterFilePath.c_str());
+				outputString = fmt::format("Using cluster file `{}'.\n", clusterFilePath);
 			else
 				outputString = "Using unknown cluster file.\n";
 
@@ -256,7 +255,7 @@ void printStatus(StatusObjectReader statusObj,
 				outputString += "\nCould not communicate with a quorum of coordination servers:";
 				outputString += getCoordinatorsInfoString(statusObj);
 
-				printf("%s\n", outputString.c_str());
+				fmt::println("{}", outputString);
 				return;
 			} else {
 				for (StatusObjectReader coor : coordinatorsArr) {
@@ -299,26 +298,25 @@ void printStatus(StatusObjectReader statusObj,
 							fatalRecoveryState = true;
 
 							if (name == "recruiting_transaction_servers") {
-								description +=
-								    format("\nNeed at least %d log servers across unique zones, %d commit proxies, "
-								           "%d GRV proxies and %d resolvers.",
-								           recoveryState["required_logs"].get_int(),
-								           recoveryState["required_commit_proxies"].get_int(),
-								           recoveryState["required_grv_proxies"].get_int(),
-								           recoveryState["required_resolvers"].get_int());
+								description += fmt::format("\nNeed at least {} log servers across unique zones, {} "
+								                           "commit proxies, {} GRV proxies and {} resolvers.",
+								                           recoveryState["required_logs"].get_int(),
+								                           recoveryState["required_commit_proxies"].get_int(),
+								                           recoveryState["required_grv_proxies"].get_int(),
+								                           recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes")) {
 									auto numOfNonExcludedProcessesAndZones =
 									    getNumOfNonExcludedProcessAndZones(statusObjCluster);
 									description +=
-									    format("\nHave %d non-excluded processes on %d machines across %d zones.",
-									           numOfNonExcludedProcessesAndZones.first,
-									           getNumofNonExcludedMachines(statusObjCluster),
-									           numOfNonExcludedProcessesAndZones.second);
+									    fmt::format("\nHave {} non-excluded processes on {} machines across {} zones.",
+									                numOfNonExcludedProcessesAndZones.first,
+									                getNumofNonExcludedMachines(statusObjCluster),
+									                numOfNonExcludedProcessesAndZones.second);
 								}
 							} else if (name == "locking_old_transaction_servers" &&
 							           recoveryState["missing_logs"].get_str().size()) {
-								description += format("\nNeed one or more of the following log servers: %s",
-								                      recoveryState["missing_logs"].get_str().c_str());
+								description += fmt::format("\nNeed one or more of the following log servers: {}",
+								                           recoveryState["missing_logs"].get_str());
 							}
 							description = lineWrap(description.c_str(), 80);
 							if (!printedCoordinators &&
@@ -379,14 +377,13 @@ void printStatus(StatusObjectReader statusObj,
 										countStr = "Some client(s)";
 									} else {
 										addresses = issue["addresses"].get_array();
-										countStr = format("%d client(s)", addresses.size());
+										countStr = fmt::format("{} client(s)", addresses.size());
 									}
-									outputString +=
-									    format("\n%s reported: %s\n", countStr.c_str(), description.c_str());
+									outputString += fmt::format("\n{} reported: {}\n", countStr, description);
 
 									if (level == StatusClient::StatusLevel::DETAILED) {
 										for (int i = 0; i < addresses.size() && i < 4; ++i) {
-											outputString += format("  %s\n", addresses[i].get_str().c_str());
+											outputString += fmt::format("  {}\n", addresses[i].get_str());
 										}
 										if (addresses.size() > 4) {
 											outputString += "  ...\n";
@@ -404,7 +401,7 @@ void printStatus(StatusObjectReader statusObj,
 			}
 
 			if (fatalRecoveryState) {
-				printf("%s", outputString.c_str());
+				fmt::print("{}", outputString);
 				return;
 			}
 
@@ -458,37 +455,37 @@ void printStatus(StatusObjectReader statusObj,
 					outputString += "unknown";
 
 				if (excludedServersArr.size()) {
-					outputString += format("\n  Exclusions             - %d (type `exclude' for details)",
-					                       excludedServersArr.size());
+					outputString += fmt::format("\n  Exclusions             - {} (type `exclude' for details)",
+					                            excludedServersArr.size());
 				}
 
 				if (statusObjConfig.get("commit_proxies", intVal))
-					outputString += format("\n  Desired Commit Proxies - %d", intVal);
+					outputString += fmt::format("\n  Desired Commit Proxies - {}", intVal);
 
 				if (statusObjConfig.get("grv_proxies", intVal))
-					outputString += format("\n  Desired GRV Proxies    - %d", intVal);
+					outputString += fmt::format("\n  Desired GRV Proxies    - {}", intVal);
 
 				if (statusObjConfig.get("resolvers", intVal))
-					outputString += format("\n  Desired Resolvers      - %d", intVal);
+					outputString += fmt::format("\n  Desired Resolvers      - {}", intVal);
 
 				if (statusObjConfig.get("logs", intVal))
-					outputString += format("\n  Desired Logs           - %d", intVal);
+					outputString += fmt::format("\n  Desired Logs           - {}", intVal);
 
 				if (statusObjConfig.get("remote_logs", intVal))
-					outputString += format("\n  Desired Remote Logs    - %d", intVal);
+					outputString += fmt::format("\n  Desired Remote Logs    - {}", intVal);
 
 				if (statusObjConfig.get("log_routers", intVal))
-					outputString += format("\n  Desired Log Routers    - %d", intVal);
+					outputString += fmt::format("\n  Desired Log Routers    - {}", intVal);
 
 				if (statusObjConfig.get("tss_count", intVal) && intVal > 0) {
 					int activeTss = 0;
 					if (statusObjCluster.has("active_tss_count")) {
 						statusObjCluster.get("active_tss_count", activeTss);
 					}
-					outputString += format("\n  TSS                    - %d/%d", activeTss, intVal);
+					outputString += fmt::format("\n  TSS                    - {}/{}", activeTss, intVal);
 
 					if (statusObjConfig.get("tss_storage_engine", strVal))
-						outputString += format("\n  TSS Storage Engine     - %s", strVal.c_str());
+						outputString += fmt::format("\n  TSS Storage Engine     - {}", strVal);
 				}
 
 				outputString += "\n  Usable Regions         - ";
@@ -525,35 +522,35 @@ void printStatus(StatusObjectReader statusObj,
 						} else {
 							outputString += "\n    Region -";
 						}
-						outputString += format("\n        Datacenter                    - %s", regionDC.c_str());
+						outputString += fmt::format("\n        Datacenter                    - {}", regionDC);
 						if (regionSatelliteDCs.size() > 0) {
 							outputString += "\n        Satellite datacenters         - ";
 							for (int i = 0; i < regionSatelliteDCs.size(); i++) {
 								if (i != regionSatelliteDCs.size() - 1) {
-									outputString += format("%s, ", regionSatelliteDCs[i].c_str());
+									outputString += fmt::format("{}, ", regionSatelliteDCs[i]);
 								} else {
-									outputString += format("%s", regionSatelliteDCs[i].c_str());
+									outputString += fmt::format("{}", regionSatelliteDCs[i]);
 								}
 							}
 						}
 						isPrimary = false;
 						if (region.get("satellite_redundancy_mode", strVal)) {
-							outputString += format("\n        Satellite Redundancy Mode     - %s", strVal.c_str());
+							outputString += fmt::format("\n        Satellite Redundancy Mode     - {}", strVal);
 						}
 						if (region.get("satellite_anti_quorum", intVal)) {
-							outputString += format("\n        Satellite Anti Quorum         - %d", intVal);
+							outputString += fmt::format("\n        Satellite Anti Quorum         - {}", intVal);
 						}
 						if (region.get("satellite_logs", intVal)) {
-							outputString += format("\n        Satellite Logs                - %d", intVal);
+							outputString += fmt::format("\n        Satellite Logs                - {}", intVal);
 						}
 						if (region.get("satellite_log_policy", strVal)) {
-							outputString += format("\n        Satellite Log Policy          - %s", strVal.c_str());
+							outputString += fmt::format("\n        Satellite Log Policy          - {}", strVal);
 						}
 						if (region.get("satellite_log_replicas", intVal)) {
-							outputString += format("\n        Satellite Log Replicas        - %d", intVal);
+							outputString += fmt::format("\n        Satellite Log Replicas        - {}", intVal);
 						}
 						if (region.get("satellite_usable_dcs", intVal)) {
-							outputString += format("\n        Satellite Usable DCs          - %d", intVal);
+							outputString += fmt::format("\n        Satellite Usable DCs          - {}", intVal);
 						}
 					}
 				}
@@ -575,7 +572,7 @@ void printStatus(StatusObjectReader statusObj,
 				outputString += "\n  FoundationDB processes - ";
 				if (statusObjCluster.get("processes", processesMap)) {
 
-					outputString += format("%d", processesMap.obj().size());
+					outputString += fmt::format("{}", processesMap.obj().size());
 
 					int errors = 0;
 					int processExclusions = 0;
@@ -603,14 +600,14 @@ void printStatus(StatusObjectReader statusObj,
 					}
 
 					if (errors > 0 || processExclusions) {
-						outputString += format(" (less %d excluded; %d with errors)", processExclusions, errors);
+						outputString += fmt::format(" (less {} excluded; {} with errors)", processExclusions, errors);
 					}
 
 				} else
 					outputString += "unknown";
 
 				if (zones.size() > 0) {
-					outputString += format("\n  Zones                  - %d", zones.size());
+					outputString += fmt::format("\n  Zones                  - {}", zones.size());
 					int zoneExclusions = 0;
 					for (auto itr : zones) {
 						if (itr.second == 0) {
@@ -618,7 +615,7 @@ void printStatus(StatusObjectReader statusObj,
 						}
 					}
 					if (zoneExclusions > 0) {
-						outputString += format(" (less %d excluded)", zoneExclusions);
+						outputString += fmt::format(" (less {} excluded)", zoneExclusions);
 					}
 				} else {
 					outputString += "\n  Zones                  - unknown";
@@ -626,7 +623,7 @@ void printStatus(StatusObjectReader statusObj,
 
 				outputString += "\n  Machines               - ";
 				if (statusObjCluster.get("machines", machinesMap)) {
-					outputString += format("%d", machinesMap.obj().size());
+					outputString += fmt::format("{}", machinesMap.obj().size());
 
 					int machineExclusions = 0;
 					for (auto mach : machinesMap.obj()) {
@@ -636,7 +633,7 @@ void printStatus(StatusObjectReader statusObj,
 					}
 
 					if (machineExclusions) {
-						outputString += format(" (less %d excluded)", machineExclusions);
+						outputString += fmt::format(" (less {} excluded)", machineExclusions);
 					}
 
 					int64_t minMemoryAvailable = std::numeric_limits<int64_t>::max();
@@ -651,7 +648,8 @@ void printStatus(StatusObjectReader statusObj,
 					if (minMemoryAvailable < std::numeric_limits<int64_t>::max()) {
 						double worstServerGb = minMemoryAvailable / (1024.0 * 1024 * 1024);
 						outputString += "\n  Memory availability    - ";
-						outputString += format("%.1f GB per process on machine with least available", worstServerGb);
+						outputString +=
+						    fmt::format("{:.1f} GB per process on machine with least available", worstServerGb);
 						outputString += minMemoryAvailable < 4294967296
 						                    ? "\n                           >>>>> (WARNING: 4.0 GB recommended) <<<<<"
 						                    : "";
@@ -666,7 +664,7 @@ void printStatus(StatusObjectReader statusObj,
 					}
 
 					if (retransCount > 0) {
-						outputString += format("\n  Retransmissions rate   - %d Hz", (int)round(retransCount));
+						outputString += fmt::format("\n  Retransmissions rate   - {} Hz", (int)round(retransCount));
 					}
 				} else
 					outputString += "\n  Machines               - unknown";
@@ -682,18 +680,17 @@ void printStatus(StatusObjectReader statusObj,
 
 						int minLoss = std::min(availLoss, dataLoss);
 						const char* faultDomain = machinesAreZones ? "machine" : "zone";
-						outputString += format("%d %ss", minLoss, faultDomain);
+						outputString += fmt::format("{} {}s", minLoss, faultDomain);
 
 						if (dataLoss > availLoss) {
-							outputString += format(" (%d without data loss)", dataLoss);
+							outputString += fmt::format(" ({} without data loss)", dataLoss);
 						}
 
 						if (dataLoss == -1) {
 							ASSERT_WE_THINK(availLoss == -1);
-							outputString += format(
-							    "\n\n  Warning: the database may have data loss and availability loss. Please restart "
-							    "following tlog interfaces, otherwise storage servers may never be able to catch "
-							    "up.\n");
+							outputString += fmt::format("\n\n  Warning: the database may have data loss and "
+							                            "availability loss. Please restart following tlog interfaces, "
+							                            "otherwise storage servers may never be able to catch up.\n");
 							StatusObjectReader logs;
 							if (statusObjCluster.has("logs")) {
 								for (StatusObjectReader logEpoch : statusObjCluster.last().get_array()) {
@@ -717,18 +714,18 @@ void printStatus(StatusObjectReader statusObj,
 											if (logInterface.get("healthy", healthy) && !healthy) {
 												logInterface.get("id", id);
 												logInterface.get("address", address);
-												missing_log_interfaces += format("%s,%s ", id.c_str(), address.c_str());
+												missing_log_interfaces += fmt::format("{},{} ", id, address);
 											}
 										}
 									}
-									outputString += format(
-									    "  %s log epoch: %lld begin: %lld end: %s, missing "
-									    "log interfaces(id,address): %s\n",
+									outputString += fmt::format(
+									    "  {} log epoch: {} begin: {} end: {}, missing log interfaces(id,address): "
+									    "{}\n",
 									    current ? "Current" : "Old",
 									    epoch,
 									    beginVersion,
-									    endVersion == invalidVersion ? "(unknown)" : format("%lld", endVersion).c_str(),
-									    missing_log_interfaces.c_str());
+									    endVersion == invalidVersion ? "(unknown)" : format("%lld", endVersion),
+									    missing_log_interfaces);
 								}
 							}
 						}
@@ -780,8 +777,8 @@ void printStatus(StatusObjectReader statusObj,
 					double dataInQueue, dataInFlight;
 					if (movingData.get("in_queue_bytes", dataInQueue) &&
 					    movingData.get("in_flight_bytes", dataInFlight))
-						outputString += format("\n  Moving data            - %.3f GB",
-						                       ((double)dataInQueue + (double)dataInFlight) / 1e9);
+						outputString += fmt::format("\n  Moving data            - {:.3f} GB",
+						                            ((double)dataInQueue + (double)dataInFlight) / 1e9);
 				} else if (dataState == "initializing") {
 					outputString += "\n  Moving data            - unknown (initializing)";
 				} else {
@@ -847,12 +844,12 @@ void printStatus(StatusObjectReader statusObj,
 			try {
 				int64_t val;
 				if (statusObjData.get("least_operating_space_bytes_storage_server", val))
-					operatingSpaceString += format("\n  Storage server         - %.1f GB free on most full server",
-					                               std::max(val / 1e9, 0.0));
+					operatingSpaceString += fmt::format(
+					    "\n  Storage server         - {:.1f} GB free on most full server", std::max(val / 1e9, 0.0));
 
 				if (statusObjData.get("least_operating_space_bytes_log_server", val))
-					operatingSpaceString += format("\n  Log server             - %.1f GB free on most full server",
-					                               std::max(val / 1e9, 0.0));
+					operatingSpaceString += fmt::format(
+					    "\n  Log server             - {:.1f} GB free on most full server", std::max(val / 1e9, 0.0));
 
 			} catch (std::runtime_error&) {
 				operatingSpaceString = "";
@@ -885,13 +882,13 @@ void printStatus(StatusObjectReader statusObj,
 						std::string serverID;
 						limit.get("reason_server_id", serverID);
 						std::string procAddr = getProcessAddressByServerID(processesMap, serverID);
-						performanceLimited = format("\n  Performance limited by %s: %s",
-						                            (procAddr == "unknown")
-						                                ? ("server" + (serverID == "" ? "" : (" " + serverID))).c_str()
-						                                : "process",
-						                            desc.c_str());
+						performanceLimited = fmt::format(
+						    "\n  Performance limited by {}: {}",
+						    (procAddr == "unknown") ? ("server" + (serverID == "" ? "" : (" " + serverID))).c_str()
+						                            : "process",
+						    desc);
 						if (procAddr != "unknown")
-							performanceLimited += format("\n  Most limiting process: %s", procAddr.c_str());
+							performanceLimited += fmt::format("\n  Most limiting process: {}", procAddr);
 					}
 				} catch (std::exception&) {
 					// If anything here throws (such as for an incompatible type) ignore it.
@@ -952,8 +949,8 @@ void printStatus(StatusObjectReader statusObj,
 					}
 				}
 				if (messagesAddrs.size()) {
-					outputString += format("\n\n%d FoundationDB processes reported unable to update cluster file:",
-					                       messagesAddrs.size());
+					outputString += fmt::format("\n\n{} FoundationDB processes reported unable to update cluster file:",
+					                            messagesAddrs.size());
 					for (auto msg : messagesAddrs) {
 						outputString += "\n  " + msg;
 					}
@@ -975,20 +972,20 @@ void printStatus(StatusObjectReader statusObj,
 			std::map<std::string, std::string> drSecondaryTags;
 			getBackupDRTags(statusObjCluster, "dr_backup_dest", drSecondaryTags);
 
-			outputString += format("\n  Running backups        - %d", backupTags.size());
-			outputString += format("\n  Running DRs            - ");
+			outputString += fmt::format("\n  Running backups        - {}", backupTags.size());
+			outputString += fmt::format("\n  Running DRs            - ");
 
 			if (drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
-				outputString += format("%d", 0);
+				outputString += fmt::format("{}", 0);
 			} else {
 				if (drPrimaryTags.size() > 0) {
-					outputString += format("%d as primary", drPrimaryTags.size());
+					outputString += fmt::format("{} as primary", drPrimaryTags.size());
 					if (drSecondaryTags.size() > 0) {
 						outputString += ", ";
 					}
 				}
 				if (drSecondaryTags.size() > 0) {
-					outputString += format("%d as secondary", drSecondaryTags.size());
+					outputString += fmt::format("{} as secondary", drSecondaryTags.size());
 				}
 			}
 
@@ -1015,7 +1012,7 @@ void printStatus(StatusObjectReader statusObj,
 							parsedAddress = NetworkAddress::parse(address);
 						} catch (Error&) {
 							// Groups all invalid IP address/port pair in the end of this detail group.
-							line = format("  %-22s (invalid IP address or port)", address.c_str());
+							line = fmt::format("  {:<22} (invalid IP address or port)", address);
 							IPAddress::IPAddressStore maxIp;
 							for (int i = 0; i < maxIp.size(); ++i) {
 								maxIp[i] = std::numeric_limits<std::remove_reference<decltype(maxIp[0])>::type>::max();
@@ -1054,24 +1051,26 @@ void printStatus(StatusObjectReader statusObj,
 							StatusObjectReader procCPUObj;
 							procObj.get("cpu", procCPUObj);
 
-							line = format("  %-22s (", address.c_str());
+							line = fmt::format("  {:<22} (", address);
 
 							double usageCores;
 							if (procCPUObj.get("usage_cores", usageCores))
-								line += format("%3.0f%% cpu;", usageCores * 100);
+								line += fmt::format("{:3.0f}% cpu;", usageCores * 100);
 
-							line += mCPUUtil != -1 ? format("%3.0f%% machine;", mCPUUtil * 100) : "";
-							line += std::min(tx, rx) != -1 ? format("%6.3f Gbps;", std::max(tx, rx) / 1000.0) : "";
+							line += mCPUUtil != -1 ? fmt::format("{:3.0f}% machine;", mCPUUtil * 100) : "";
+							line +=
+							    std::min(tx, rx) != -1 ? fmt::format("{:6.3f} Gbps;", std::max(tx, rx) / 1000.0) : "";
 
 							double diskBusy;
 							if (procObj.get("disk.busy", diskBusy))
-								line += format("%3.0f%% disk IO;", 100.0 * diskBusy);
+								line += fmt::format("{:3.0f}% disk IO;", 100.0 * diskBusy);
 
-							line += processRSS != -1 ? format("%4.1f GB", processRSS / (1024.0 * 1024 * 1024)) : "";
+							line +=
+							    processRSS != -1 ? fmt::format("{:4.1f} GB", processRSS / (1024.0 * 1024 * 1024)) : "";
 
 							double availableBytes;
 							if (procObj.get("memory.available_bytes", availableBytes))
-								line += format(" / %3.1f GB RAM  )", availableBytes / (1024.0 * 1024 * 1024));
+								line += fmt::format(" / {:3.1f} GB RAM  )", availableBytes / (1024.0 * 1024 * 1024));
 							else
 								line += "  )";
 
@@ -1092,12 +1091,12 @@ void printStatus(StatusObjectReader statusObj,
 						}
 
 						catch (std::runtime_error&) {
-							std::string noMetrics = format("  %-22s (no metrics available)", address.c_str());
+							std::string noMetrics = fmt::format("  {:<22} (no metrics available)", address);
 							workerDetails[parsedAddress] = noMetrics;
 						}
 					}
 					for (auto w : workerDetails)
-						outputString += "\n" + format("%s", w.second.c_str());
+						outputString += "\n" + fmt::format("{}", w.second);
 				} catch (std::runtime_error&) {
 					outputString = outputStringCache;
 					outputString += "\n  Unable to retrieve process performance details";
@@ -1143,7 +1142,7 @@ void printStatus(StatusObjectReader statusObj,
 				}
 			}
 
-			printf("%s\n", outputString.c_str());
+			fmt::println("{}", outputString);
 		}
 
 		// status minimal
@@ -1160,7 +1159,7 @@ void printStatus(StatusObjectReader statusObj,
 
 				// Database unavailable
 				if (!available) {
-					printf("%s", "The database is unavailable; type `status' for more information.\n");
+					fmt::print("{}", "The database is unavailable; type `status' for more information.\n");
 				} else {
 					try {
 						bool healthy = statusObjClientDatabaseStatus["healthy"].get_bool();
@@ -1168,43 +1167,43 @@ void printStatus(StatusObjectReader statusObj,
 						// Database available without issues
 						if (healthy) {
 							if (displayDatabaseAvailable) {
-								printf("The database is available.\n");
+								fmt::println("The database is available.");
 							}
 						} else { // Database running but with issues
-							printf("The database is available, but has issues (type 'status' for more information).\n");
+							fmt::println(
+							    "The database is available, but has issues (type 'status' for more information).");
 						}
 					} catch (std::runtime_error&) {
-						printf("The database is available, but has issues (type 'status' for more information).\n");
+						fmt::println("The database is available, but has issues (type 'status' for more information).");
 					}
 				}
 
 				bool upToDate;
 				if (!statusObjClient.get("cluster_file.up_to_date", upToDate) || !upToDate) {
-					fprintf(stderr,
-					        "WARNING: The cluster file is not up to date. Type 'status' for more information.\n");
+					fmt::println(stderr,
+					             "WARNING: The cluster file is not up to date. Type 'status' for more information.");
 				}
 			} catch (std::runtime_error&) {
-				printf("Unable to determine database state, type 'status' for more information.\n");
+				fmt::println("Unable to determine database state, type 'status' for more information.");
 			}
 
 		}
 
 		// status JSON
 		else if (level == StatusClient::JSON) {
-			printf("%s\n",
-			       json_spirit::write_string(json_spirit::mValue(statusObj.obj()),
-			                                 json_spirit::Output_options::pretty_print)
-			           .c_str());
+			fmt::println("{}",
+			             json_spirit::write_string(json_spirit::mValue(statusObj.obj()),
+			                                       json_spirit::Output_options::pretty_print));
 		}
 	} catch (Error&) {
 		if (hideErrorMessages)
 			return;
 		if (level == StatusClient::MINIMAL) {
-			printf("Unable to determine database state, type 'status' for more information.\n");
+			fmt::println("Unable to determine database state, type 'status' for more information.");
 		} else if (level == StatusClient::JSON) {
-			printf("Could not retrieve status json.\n\n");
+			fmt::print("Could not retrieve status json.\n\n");
 		} else {
-			printf("Could not retrieve status, type 'status json' for more information.\n");
+			fmt::println("Could not retrieve status, type 'status json' for more information.");
 		}
 	}
 }
@@ -1241,7 +1240,7 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
 		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
-			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
+			fmt::println(stderr, "ERROR: Failed to get status json from the cluster");
 		}
 		json_spirit::mValue mv;
 		json_spirit::read_string(statusValue.get().toString(), mv);
@@ -1249,10 +1248,10 @@ ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
 	}
 
 	if (!isExecMode)
-		printf("\n");
+		fmt::println("");
 	printStatus(s, level);
 	if (!isExecMode)
-		printf("\n");
+		fmt::println("");
 	return true;
 }
 

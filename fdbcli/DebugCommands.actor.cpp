@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -33,7 +34,7 @@ std::string toHex(StringRef v) {
 	std::string result;
 	result.reserve(v.size() * 4);
 	for (int i = 0; i < v.size(); i++) {
-		result.append(format("\\x%02x", v[i]));
+		result.append(fmt::format("\\x{:02x}", v[i]));
 	}
 	return result;
 }

@@ -28,6 +28,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -83,7 +84,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 				printf("Expected:   %" PRId64 "\n", versionInfo.get().expectedVersion);
 				printf("Difference: %" PRId64 " (%.2fs)\n", diff, 1.0 * diff / CLIENT_KNOBS->VERSIONS_PER_SECOND);
 			} else {
-				printf("Version epoch is unset\n");
+				fmt::println("Version epoch is unset");
 			}
 			return true;
 		} else if (tokens.size() == 2 && tokencmp(tokens[1], "get")) {
@@ -91,7 +92,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 			if (versionEpoch.present()) {
 				printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
 			} else {
-				printf("Version epoch is unset\n");
+				fmt::println("Version epoch is unset");
 			}
 			return true;
 		} else if (tokens.size() == 2 && tokencmp(tokens[1], "disable")) {
@@ -133,8 +134,8 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 						tr->set(versionEpochSpecialKey, BinaryWriter::toValue(v, Unversioned()));
 						wait(safeThreadFutureToFuture(tr->commit()));
 					} else {
-						printf("Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target "
-						       "version\n");
+						fmt::println("Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the "
+						             "target version");
 						return true;
 					}
 				} catch (Error& e) {
@@ -146,7 +147,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 			if (versionInfo.present()) {
 				wait(advanceVersion(cx, versionInfo.get().expectedVersion));
 			} else {
-				printf("Must set the version epoch before committing it (see `versionepoch enable`)\n");
+				fmt::println("Must set the version epoch before committing it (see `versionepoch enable`)");
 			}
 			return true;
 		}

@@ -28,6 +28,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace {
 
 Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
@@ -38,7 +39,7 @@ Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 		try {
 			tr->set(fdb_cli::lockSpecialKey, id.toString());
 			co_await safeThreadFutureToFuture(tr->commit());
-			printf("Database locked.\n");
+			fmt::println("Database locked.");
 			co_return true;
 		} catch (Error& e) {
 			err = e;
@@ -47,7 +48,7 @@ Future<bool> lockDatabase(Reference<IDatabase> db, UID id) {
 			throw err;
 		if (err.code() == error_code_special_keys_api_failure) {
 			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-			fprintf(stderr, "%s\n", errorMsgStr.c_str());
+			fmt::println(stderr, "{}", errorMsgStr);
 			co_return false;
 		}
 		co_await safeThreadFutureToFuture(tr->onError(err));
@@ -66,7 +67,7 @@ Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> co
 		co_return false;
 	} else {
 		UID lockUID = deterministicRandom()->randomUniqueID();
-		printf("Locking database with lockUID: %s\n", lockUID.toString().c_str());
+		fmt::println("Locking database with lockUID: {}", lockUID.toString());
 		bool result = co_await lockDatabase(db, lockUID);
 		co_return result;
 	}
@@ -85,20 +86,20 @@ Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 				co_return true;
 
 			if (val.present() && UID::fromString(val.get().toString()) != uid) {
-				printf("Unable to unlock database. Make sure to unlock with the correct lock UID.\n");
+				fmt::println("Unable to unlock database. Make sure to unlock with the correct lock UID.");
 				co_return false;
 			}
 
 			tr->clear(fdb_cli::lockSpecialKey);
 			co_await safeThreadFutureToFuture(tr->commit());
-			printf("Database unlocked.\n");
+			fmt::println("Database unlocked.");
 			co_return true;
 		} catch (Error& e) {
 			err = e;
 		}
 		if (err.code() == error_code_special_keys_api_failure) {
 			std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
-			fprintf(stderr, "%s\n", errorMsgStr.c_str());
+			fmt::println(stderr, "{}", errorMsgStr);
 			co_return false;
 		}
 		co_await safeThreadFutureToFuture(tr->onError(err));

@@ -22,6 +22,7 @@
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "fmt/format.h"
 namespace {
 
 Optional<double> parseAgeValue(StringRef token) {
@@ -48,7 +49,7 @@ Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> cons
 				co_return false;
 			}
 			JsonBuilderObject const& status = co_await getIdmpKeyStatus(db);
-			fmt::print("{}\n", status.getJson());
+			fmt::println("{}", status.getJson());
 			co_return true;
 		} else if (action == "clear"_sr) {
 			if (tokens.size() != 3) {
@@ -61,7 +62,7 @@ Future<bool> idempotencyIdsCommandActor(Database db, std::vector<StringRef> cons
 				co_return false;
 			}
 			co_await cleanIdempotencyIds(db, age.get());
-			fmt::print("Successfully cleared idempotency IDs.\n");
+			fmt::println("Successfully cleared idempotency IDs.");
 			co_return true;
 		} else {
 			printUsage(tokens[0]);

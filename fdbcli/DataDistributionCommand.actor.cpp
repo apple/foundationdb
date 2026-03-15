@@ -29,6 +29,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -121,23 +122,23 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 	} else {
 		if (tokencmp(tokens[1], "on")) {
 			wait(success(setDDMode(db, 1)));
-			printf("Data distribution is turned on.\n");
+			fmt::println("Data distribution is turned on.");
 		} else if (tokencmp(tokens[1], "off")) {
 			wait(success(setDDMode(db, 0)));
-			printf("Data distribution is turned off.\n");
+			fmt::println("Data distribution is turned off.");
 		} else if (tokencmp(tokens[1], "disable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
 				wait(success((setHealthyZone(db, "IgnoreSSFailures"_sr, 0))));
-				printf("Data distribution is disabled for storage server failures.\n");
+				fmt::println("Data distribution is disabled for storage server failures.");
 			} else if (tokencmp(tokens[2], "rebalance")) {
 				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
-				printf("Data distribution is disabled for rebalance.\n");
+				fmt::println("Data distribution is disabled for rebalance.");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
 				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK));
-				printf("Data distribution is disabled for rebalance_disk.\n");
+				fmt::println("Data distribution is disabled for rebalance_disk.");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
 				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_READ));
-				printf("Data distribution is disabled for rebalance_read.\n");
+				fmt::println("Data distribution is disabled for rebalance_read.");
 			} else {
 				printf(usage);
 				result = false;
@@ -145,16 +146,16 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 		} else if (tokencmp(tokens[1], "enable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
 				wait(success((clearHealthyZone(db, false, true))));
-				printf("Data distribution is enabled for storage server failures.\n");
+				fmt::println("Data distribution is enabled for storage server failures.");
 			} else if (tokencmp(tokens[2], "rebalance")) {
 				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
-				printf("Data distribution is enabled for rebalance.\n");
+				fmt::println("Data distribution is enabled for rebalance.");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
 				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK));
-				printf("Data distribution is enabled for rebalance_disk.\n");
+				fmt::println("Data distribution is enabled for rebalance_disk.");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
 				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_READ));
-				printf("Data distribution is enabled for rebalance_read.\n");
+				fmt::println("Data distribution is enabled for rebalance_read.");
 			} else {
 				printf(usage);
 				result = false;

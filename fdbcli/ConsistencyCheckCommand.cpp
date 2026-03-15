@@ -26,6 +26,7 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+#include "fmt/format.h"
 namespace fdb_cli {
 
 const KeyRef consistencyCheckSpecialKey = "\xff\xff/management/consistency_check_suspended"_sr;
@@ -40,7 +41,7 @@ Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
 		// hold the returned standalone object's memory
 		ThreadFuture<Optional<Value>> suspendedF = tr->get(consistencyCheckSpecialKey);
 		Optional<Value> suspended = co_await safeThreadFutureToFuture(suspendedF);
-		printf("ConsistencyCheck is %s\n", suspended.present() ? "off" : "on");
+		fmt::println("ConsistencyCheck is {}", suspended.present() ? "off" : "on");
 	} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
 		tr->set(consistencyCheckSpecialKey, Value());
 		if (!intrans)
