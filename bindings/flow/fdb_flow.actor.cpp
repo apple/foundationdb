@@ -100,7 +100,7 @@ void fdb_flow_test() {
 namespace FDB {
 class DatabaseImpl : public Database, NonCopyable {
 public:
-	virtual ~DatabaseImpl() { fdb_database_destroy(db); }
+	~DatabaseImpl() override { fdb_database_destroy(db); }
 
 	Reference<Transaction> createTransaction() override;
 	void setDatabaseOption(FDBDatabaseOption option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -119,7 +119,7 @@ class TransactionImpl : public Transaction, private NonCopyable, public FastAllo
 	friend class DatabaseImpl;
 
 public:
-	virtual ~TransactionImpl() {
+	~TransactionImpl() override {
 		if (tr) {
 			fdb_transaction_destroy(tr);
 		}

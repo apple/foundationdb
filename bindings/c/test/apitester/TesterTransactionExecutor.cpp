@@ -97,7 +97,7 @@ public:
 		}
 	}
 
-	virtual ~TransactionContextBase() { ASSERT(txState == TxState::DONE); }
+	~TransactionContextBase() override { ASSERT(txState == TxState::DONE); }
 
 	// A state machine:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
@@ -165,7 +165,7 @@ public:
 		}
 	}
 
-	virtual void onError(fdb::Error err) override {
+	void onError(fdb::Error err) override {
 		std::unique_lock<std::mutex> lock(mutex);
 		if (txState != TxState::IN_PROGRESS) {
 			// Ignore further errors, if the transaction is in the error handing mode or completed
@@ -438,7 +438,7 @@ protected:
 		onError(err);
 	}
 
-	virtual void handleOnErrorFuture() override {
+	void handleOnErrorFuture() override {
 		ASSERT(txState == TxState::ON_ERROR);
 
 		auto start = timeNow();
@@ -550,7 +550,7 @@ protected:
 		onError(err);
 	}
 
-	virtual void handleOnErrorFuture() override {
+	void handleOnErrorFuture() override {
 		ASSERT(txState == TxState::ON_ERROR);
 
 		onErrorCallTimePoint = timeNow();
@@ -642,7 +642,7 @@ class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
-	~TransactionExecutorBase() {
+	~TransactionExecutorBase() override {
 		if (tamperClusterFileThread.joinable()) {
 			tamperClusterFileThread.join();
 		}

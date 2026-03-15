@@ -140,7 +140,7 @@ public:
 		}
 	}
 
-	~ApiCorrectnessWorkload() override {}
+	~ApiCorrectnessWorkload() override = default;
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Number of Random Operations Performed", numRandomOperations.getValue(), Averaged::False);

@@ -93,7 +93,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 		}
 	}
 
-	~AsyncFileCorrectnessWorkload() override {}
+	~AsyncFileCorrectnessWorkload() override = default;
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)

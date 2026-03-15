@@ -49,7 +49,7 @@
 #include <cmath>
 
 struct IssuesListImpl {
-	IssuesListImpl() {}
+	IssuesListImpl() = default;
 	void addIssue(std::string const& issue) {
 		MutexHolder h(mutex);
 		issues.insert(issue);

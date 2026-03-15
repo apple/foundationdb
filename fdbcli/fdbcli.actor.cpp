@@ -246,7 +246,7 @@ private:
 		std::map<typename T::Option, Optional<Standalone<StringRef>>> options;
 		std::map<std::string, typename T::Option> legalOptions;
 
-		OptionGroup() {}
+		OptionGroup() = default;
 		OptionGroup(OptionGroup<T>& base)
 		  : options(base.options.begin(), base.options.end()), legalOptions(base.legalOptions) {}
 
@@ -329,7 +329,7 @@ public:
 			transactionOptions.legalOptions[itr->second.name] = itr->first;
 	}
 
-	FdbOptions(FdbOptions& base) : transactionOptions(base.transactionOptions) {}
+	FdbOptions(FdbOptions& base) = default;
 };
 
 static std::string formatStringRef(StringRef item, bool fullEscaping = false) {

@@ -20,7 +20,7 @@
 
 #include "workloads.h"
 
-FDBWorkloadFactoryImpl::~FDBWorkloadFactoryImpl() {}
+FDBWorkloadFactoryImpl::~FDBWorkloadFactoryImpl() = default;
 
 std::map<std::string, IFDBWorkloadFactory*>& FDBWorkloadFactoryImpl::factories() {
 	static std::map<std::string, IFDBWorkloadFactory*> _factories;

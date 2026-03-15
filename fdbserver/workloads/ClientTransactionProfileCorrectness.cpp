@@ -121,21 +121,21 @@ struct ParserBase {
 	std::function<void(BinaryReader&)> parseErrorCommit = parseEventErrorCommit;
 	virtual ~ParserBase() = 0;
 };
-ParserBase::~ParserBase() {}
+ParserBase::~ParserBase() = default;
 
 struct Parser_V1 : ParserBase {
-	~Parser_V1() override {}
+	~Parser_V1() override = default;
 };
 struct Parser_V2 : ParserBase {
 	Parser_V2() { parseGetVersion = parseEventGetVersion_V2; }
-	~Parser_V2() override {}
+	~Parser_V2() override = default;
 };
 struct Parser_V3 : ParserBase {
 	Parser_V3() {
 		parseGetVersion = parseEventGetVersion_V3;
 		parseCommit = parseEventCommit_V2;
 	}
-	~Parser_V3() override {}
+	~Parser_V3() override = default;
 };
 
 struct ParserFactory {

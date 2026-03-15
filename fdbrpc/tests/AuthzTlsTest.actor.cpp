@@ -214,7 +214,7 @@ struct SessionProbeRequest {
 };
 
 struct SessionProbeReceiver final : NetworkMessageReceiver {
-	SessionProbeReceiver() {}
+	SessionProbeReceiver() = default;
 	void receive(ArenaObjectReader& reader) override {
 		SessionProbeRequest req;
 		reader.deserialize(req);

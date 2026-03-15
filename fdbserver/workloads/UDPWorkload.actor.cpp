@@ -95,7 +95,7 @@ struct UDPWorkload : TestWorkload {
 
 	public:
 		enum class Type : uint8_t { PING, PONG };
-		Message() {}
+		Message() = default;
 		explicit Message(Type t) {
 			switch (t) {
 			case Type::PING:
