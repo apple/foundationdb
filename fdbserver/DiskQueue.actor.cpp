@@ -50,7 +50,7 @@ struct StringBuffer {
 	int reserved;
 	UID id;
 
-	StringBuffer(UID fromFileID) : reserved(0), id(fromFileID) {}
+	explicit(false) StringBuffer(UID fromFileID) : reserved(0), id(fromFileID) {}
 
 	int size() const { return str.size(); }
 	Standalone<StringRef> get() { return str; }

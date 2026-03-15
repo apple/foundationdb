@@ -47,7 +47,7 @@ struct IKVSCommitReply {
 	StorageBytes storeBytes;
 
 	IKVSCommitReply() : storeBytes(0, 0, 0, 0) {}
-	IKVSCommitReply(const StorageBytes& sb) : storeBytes(sb) {}
+	explicit(false) IKVSCommitReply(const StorageBytes& sb) : storeBytes(sb) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -95,7 +95,8 @@ struct IKVSInterface {
 
 	IKVSInterface() {}
 
-	IKVSInterface(KeyValueStoreType type) : uniqueID(deterministicRandom()->randomUniqueID()), storeType(type) {}
+	explicit(false) IKVSInterface(KeyValueStoreType type)
+	  : uniqueID(deterministicRandom()->randomUniqueID()), storeType(type) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

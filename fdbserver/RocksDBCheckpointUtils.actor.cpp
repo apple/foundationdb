@@ -310,7 +310,7 @@ public:
 
 	class DummyRocksDBCheckpointIterator : public ICheckpointIterator {
 	public:
-		DummyRocksDBCheckpointIterator(const UID& logId) : logId(logId) {}
+		explicit(false) DummyRocksDBCheckpointIterator(const UID& logId) : logId(logId) {}
 
 		~DummyRocksDBCheckpointIterator() override = default;
 
@@ -337,7 +337,7 @@ public:
 private:
 	struct Reader : IThreadPoolReceiver {
 		struct OpenAction : TypedAction<Reader, OpenAction> {
-			OpenAction(CheckpointMetaData checkpoint) : checkpoint(std::move(checkpoint)) {}
+			explicit(false) OpenAction(CheckpointMetaData checkpoint) : checkpoint(std::move(checkpoint)) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
@@ -895,8 +895,8 @@ RangeResult RocksDBSstFileReader::getRange(const KeyRange& range) {
 
 class RocksDBCheckpointByteSampleReader : public ICheckpointByteSampleReader {
 public:
-	RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
-	~RocksDBCheckpointByteSampleReader() override = default;
+	explicit(false) RocksDBCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
+	~RocksDBCheckpointByteSampleReader() = default;
 
 	KeyValue next() override;
 

@@ -33,7 +33,7 @@
 struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	IKeyValueStore* store;
 
-	KeyValueStoreCompressTestData(IKeyValueStore* store) : store(store) {}
+	explicit(false) KeyValueStoreCompressTestData(IKeyValueStore* store) : store(store) {}
 
 	Future<Void> getError() const override { return store->getError(); }
 	Future<Void> onClosed() const override { return store->onClosed(); }

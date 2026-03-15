@@ -45,7 +45,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {
-	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
+	explicit(false) MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
 	  : namePattern(name), enabled(enabled), minLevel(minLevel) {}
 
 	Standalone<StringRef> typePattern;
@@ -105,7 +105,7 @@ struct MetricsRule {
 };
 
 struct MetricsConfig {
-	MetricsConfig(Key prefix = KeyRef())
+	explicit(false) MetricsConfig(Key prefix = KeyRef())
 	  : space(prefix), ruleMap(space.get("Rules"_sr).key()), addressMap(space.get("Enum"_sr).get("Address"_sr).key()),
 	    nameAndTypeMap(space.get("Enum"_sr).get("NameType"_sr).key()),
 	    ruleChangeKey(space.get("RulesChanged"_sr).key()), enumsChangeKey(space.get("EnumsChanged"_sr).key()),
@@ -185,7 +185,7 @@ ACTOR Future<Void> metricRuleUpdater(Database cx, MetricsConfig* config, TDMetri
 // Implementation of IMetricDB
 class MetricDB : public IMetricDB {
 public:
-	MetricDB(ReadYourWritesTransaction* tr = nullptr) : tr(tr) {}
+	explicit(false) MetricDB(ReadYourWritesTransaction* tr = nullptr) : tr(tr) {}
 	~MetricDB() override {}
 
 	// levelKey is the prefix for the entire level, no timestamp at the end

@@ -318,7 +318,7 @@ struct RocksDBCheckpointKeyValues {
 	std::vector<CheckpointFile> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
 	std::vector<KeyRange> ranges; // The ranges we want to fetch.
 
-	RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
+	explicit(false) RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
 	RocksDBCheckpointKeyValues() = default;
 
 	CheckpointFormat format() const { return RocksDBKeyValues; }

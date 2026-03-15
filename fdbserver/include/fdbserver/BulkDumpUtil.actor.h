@@ -127,7 +127,7 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod
 
 class ParallelismLimitor {
 public:
-	ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
+	explicit(false) ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
 
 	inline void decrementTaskCounter() {
 		ASSERT(numRunningTasks.get() <= maxParallelism);

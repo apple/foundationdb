@@ -47,7 +47,7 @@ __attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
 	std::vector<ResolverInterface> resolvers;
 	AsyncTrigger triggerResolution;
 
-	ResolutionBalancer(Version* version) : pVersion(version) {}
+	explicit(false) ResolutionBalancer(Version* version) : pVersion(version) {}
 
 	Future<Void> resolutionBalancing() { return resolutionBalancing_impl(this); }
 

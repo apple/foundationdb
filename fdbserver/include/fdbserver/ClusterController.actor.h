@@ -70,12 +70,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(watcher), reply(reply), gen(gen), reboots(0), initialClass(initialClass), priorityInfo(priorityInfo),
 	    details(interf, processClass, degraded, recoveredDiskFiles), issues(issues) {}
 
-	WorkerInfo(WorkerInfo&& r) noexcept
-	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
-	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
-	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor),
-	    haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {}
-	void operator=(WorkerInfo&& r) noexcept {
+	WorkerInfo(WorkerInfo&& r) noexcept void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
 		gen = r.gen;
@@ -105,7 +100,7 @@ struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitWorkersInfo(RecruitFromConfigurationRequest const& req) : req(req) {}
+	explicit(false) RecruitWorkersInfo(RecruitFromConfigurationRequest const& req) : req(req) {}
 };
 
 struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
@@ -114,7 +109,7 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
+	explicit(false) RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
 struct ClusterRecoveryData;
