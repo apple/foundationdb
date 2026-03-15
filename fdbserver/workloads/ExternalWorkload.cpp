@@ -101,7 +101,7 @@ struct FDBLoggerImpl : FDBLogger {
 namespace capi {
 #include "foundationdb/CWorkload.h"
 #include "fmt/format.h"
-}
+} // namespace capi
 namespace translator {
 template <typename T>
 struct Wrapper {
