@@ -27,11 +27,11 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/RestoreCommon.actor.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/restoreworker/RestoreCommon.actor.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreApplier.actor.h"
+#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreApplier.actor.h"
 
 #include "flow/network.h"
 

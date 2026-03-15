@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTOREWORKER_G_H)
 #define FDBSERVER_RESTOREWORKER_G_H
-#include "fdbserver/RestoreWorker.actor.g.h"
+#include "fdbserver/restoreworker/RestoreWorker.actor.g.h"
 #elif !defined(FDBSERVER_RESTOREWORKER_H)
 #define FDBSERVER_RESTOREWORKER_H
 
@@ -33,12 +33,7 @@
 #include <cstdint>
 #include <cstdarg>
 
-#include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/RestoreCommon.actor.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreLoader.actor.h"
-#include "fdbserver/RestoreApplier.actor.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 
 #include "flow/actorcompiler.h" // must be last include
 

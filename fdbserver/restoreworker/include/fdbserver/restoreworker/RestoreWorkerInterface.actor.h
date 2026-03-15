@@ -24,7 +24,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
 #define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-#include "fdbserver/RestoreWorkerInterface.actor.g.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
 #define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
 
@@ -37,7 +37,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -111,7 +111,7 @@ struct RestoreRoleInterface {
 
 	RestoreRoleInterface() { role = RestoreRole::Invalid; }
 
-	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role) {};
+	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role){};
 
 	UID id() const { return nodeID; }
 
@@ -482,8 +482,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "RestoreSysInfoRequest "
-		   << "rangeVersions.size:" << rangeVersions.size();
+		ss << "RestoreSysInfoRequest " << "rangeVersions.size:" << rangeVersions.size();
 		return ss.str();
 	}
 };
@@ -543,7 +542,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param) {};
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
 
 	bool operator<(RestoreLoadFileRequest const& rhs) const { return batchIndex > rhs.batchIndex; }
 

@@ -23,7 +23,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_CONTROLLER_G_H)
 #define FDBSERVER_RESTORE_CONTROLLER_G_H
-#include "fdbserver/RestoreController.actor.g.h"
+#include "fdbserver/restoreworker/RestoreController.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_CONTROLLER_H)
 #define FDBSERVER_RESTORE_CONTROLLER_H
 
@@ -36,8 +36,10 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreWorker.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
+
+struct RestoreWorkerData;
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -49,7 +51,7 @@ struct VersionBatch {
 	double size; // size of data in range and log files
 	int batchIndex; // Never reset
 
-	VersionBatch() : beginVersion(0), endVersion(0), size(0) {};
+	VersionBatch() : beginVersion(0), endVersion(0), size(0){};
 
 	bool operator<(const VersionBatch& rhs) const {
 		return std::tie(batchIndex, beginVersion, endVersion, logFiles, rangeFiles, size) <

@@ -21,7 +21,7 @@
 // This file implements the functions defined in RestoreCommon.actor.h
 // The functions in this file are copied from BackupAgent
 
-#include "fdbserver/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.actor.h"
 
 // Backup agent header
 #include "fdbclient/BackupAgent.actor.h"

@@ -25,7 +25,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORECOMMON_ACTOR_G_H)
 #define FDBSERVER_RESTORECOMMON_ACTOR_G_H
-#include "fdbserver/RestoreCommon.actor.g.h"
+#include "fdbserver/restoreworker/RestoreCommon.actor.g.h"
 #elif !defined(FDBSERVER_RESTORECOMMON_ACTOR_H)
 #define FDBSERVER_RESTORECOMMON_ACTOR_H
 
@@ -35,7 +35,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -247,7 +247,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 // Save replies to replies if replies != nullptr
 // The UID in a request is the UID of the interface to handle the request
 ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
                              std::map<UID, Interface> interfaces,
                              std::vector<std::pair<UID, Request>> requests,
                              std::vector<REPLY_TYPE(Request)>* replies,
@@ -377,7 +377,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 
 // Similar to getBatchReplies except that the caller does not expect to process the reply info.
 ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::* channel,
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel,
                                std::map<UID, Interface> interfaces,
                                std::vector<std::pair<UID, Request>> requests,
                                TaskPriority taskID = TaskPriority::Low,

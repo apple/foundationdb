@@ -23,7 +23,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_LOADER_G_H)
 #define FDBSERVER_RESTORE_LOADER_G_H
-#include "fdbserver/RestoreLoader.actor.g.h"
+#include "fdbserver/restoreworker/RestoreLoader.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_LOADER_H)
 #define FDBSERVER_RESTORE_LOADER_H
 
@@ -35,9 +35,9 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/RestoreCommon.actor.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 #include "fdbclient/BackupContainer.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -136,7 +136,7 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 	double start;
 
 	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched, double start)
-	  : batchIndex(batchIndex), toSched(toSched), start(start) {};
+	  : batchIndex(batchIndex), toSched(toSched), start(start){};
 	RestoreLoaderSchedSendLoadParamRequest() = default;
 
 	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {
@@ -145,9 +145,8 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "RestoreLoaderSchedSendLoadParamRequest: "
-		   << " batchIndex:" << batchIndex << " toSchedFutureIsReady:" << toSched.getFuture().isReady()
-		   << " start:" << start;
+		ss << "RestoreLoaderSchedSendLoadParamRequest: " << " batchIndex:" << batchIndex
+		   << " toSchedFutureIsReady:" << toSched.getFuture().isReady() << " start:" << start;
 		return ss.str();
 	}
 };
