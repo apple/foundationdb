@@ -1,5 +1,5 @@
 /*
- * BulkLoadCommand.actor.cpp
+ * BulkLoadCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -50,11 +49,11 @@ static const std::string BULK_LOAD_HELP_MESSAGE =
     BULK_LOAD_HISTORY_USAGE + BULK_LOAD_HISTORY_CLEAR_USAGE + BULKLOAD_ADD_LOCK_OWNER_USAGE +
     BULKLOAD_PRINT_LOCK_USAGE + BULKLOAD_PRINT_LOCK_OWNER_USAGE + BULKLOAD_CLEAR_LOCK_USAGE;
 
-ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
-	std::vector<BulkLoadJobState> jobs = wait(getBulkLoadJobFromHistory(cx));
+Future<Void> printPastBulkLoadJob(Database cx) {
+	std::vector<BulkLoadJobState> const& jobs = co_await getBulkLoadJobFromHistory(cx);
 	if (jobs.empty()) {
 		fmt::println("No bulk loading job in the history");
-		return Void();
+		co_return;
 	}
 	for (const auto& job : jobs) {
 		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
@@ -83,7 +82,6 @@ ACTOR Future<Void> printPastBulkLoadJob(Database cx) {
 			fmt::println("Error message: {}", errorMessage.present() ? errorMessage.get() : "Not provided.");
 		}
 	}
-	return Void();
 }
 
 void printBulkLoadJobTotalTaskCount(Optional<uint64_t> count) {
@@ -95,22 +93,24 @@ void printBulkLoadJobTotalTaskCount(Optional<uint64_t> count) {
 	return;
 }
 
-ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
-	state Transaction tr(cx);
-	state Key readBegin = job.getJobRange().begin;
-	state Key readEnd = job.getJobRange().end;
-	state UID jobId = job.getJobId();
-	state RangeResult rangeResult;
-	state size_t completeTaskCount = 0;
-	state size_t submitTaskCount = 0;
-	state size_t errorTaskCount = 0;
-	state Optional<uint64_t> totalTaskCount = job.getTaskCount();
+Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
+	Transaction tr(cx);
+	Key readBegin = job.getJobRange().begin;
+	Key readEnd = job.getJobRange().end;
+	UID jobId = job.getJobId();
+	RangeResult rangeResult;
+	size_t completeTaskCount = 0;
+	size_t submitTaskCount = 0;
+	size_t errorTaskCount = 0;
+	Optional<uint64_t> totalTaskCount = job.getTaskCount();
 	while (readBegin < readEnd) {
+		Error err;
+		bool hasErr = false;
 		try {
 			rangeResult.clear();
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			wait(store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd))));
+			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd)));
 			for (int i = 0; i < rangeResult.size() - 1; ++i) {
 				if (rangeResult[i].value.empty()) {
 					continue;
@@ -125,7 +125,7 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 					    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
 						fmt::println("Job {} has been cancelled or has completed", jobId.toString());
 					}
-					return Void();
+					co_return;
 				}
 				if (bulkLoadTask.phase == BulkLoadPhase::Complete) {
 					completeTaskCount = completeTaskCount + bulkLoadTask.getManifests().size();
@@ -136,20 +136,23 @@ ACTOR Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 			}
 			readBegin = rangeResult.back().key;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 	fmt::println("Submitted {} tasks", submitTaskCount);
 	fmt::println("Finished {} tasks", completeTaskCount);
 	fmt::println("Error {} tasks", errorTaskCount);
 	printBulkLoadJobTotalTaskCount(totalTaskCount);
-	return Void();
 }
 
-ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
+Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 	if (tokencmp(tokens[1], "mode")) {
 		if (tokens.size() == 2) {
-			int mode = wait(getBulkLoadMode(cx));
+			int mode = co_await getBulkLoadMode(cx);
 			if (mode == 0) {
 				fmt::println("Bulkload mode is disabled");
 			} else if (mode == 1) {
@@ -157,41 +160,41 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			} else {
 				fmt::println("Invalid bulkload mode value {}", mode);
 			}
-			return UID();
+			co_return UID();
 		}
 		// Set bulk loading mode
 		if (tokens.size() != 3) {
 			fmt::println("{}", BULK_LOAD_MODE_USAGE);
-			return UID();
+			co_return UID();
 		}
 		if (tokencmp(tokens[2], "on")) {
-			int old = wait(setBulkLoadMode(cx, 1));
+			int old = co_await setBulkLoadMode(cx, 1);
 			TraceEvent("SetBulkLoadModeCommand").detail("OldValue", old).detail("NewValue", 1);
-			return UID();
+			co_return UID();
 		} else if (tokencmp(tokens[2], "off")) {
-			int old = wait(setBulkLoadMode(cx, 0));
+			int old = co_await setBulkLoadMode(cx, 0);
 			TraceEvent("SetBulkLoadModeCommand").detail("OldValue", old).detail("NewValue", 0);
-			return UID();
+			co_return UID();
 		} else {
 			fmt::println("ERROR: Invalid bulkload mode value {}", tokens[2].toString());
 			fmt::println("{}", BULK_LOAD_MODE_USAGE);
-			return UID();
+			co_return UID();
 		}
 	} else if (tokencmp(tokens[1], "load")) {
-		int mode = wait(getBulkLoadMode(cx));
+		int mode = co_await getBulkLoadMode(cx);
 		if (mode == 0) {
 			fmt::println("ERROR: Bulkload mode must be enabled to load data");
-			return UID();
+			co_return UID();
 		}
 		if (tokens.size() != 6) {
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			return UID();
+			co_return UID();
 		}
 		UID jobId = UID::fromString(tokens[2].toString());
 		if (!jobId.isValid()) {
 			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			return UID();
+			co_return UID();
 		}
 		Key rangeBegin = tokens[3];
 		Key rangeEnd = tokens[4];
@@ -200,77 +203,77 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println(
 			    "ERROR: Invalid range: {} to {}, normal key space only", rangeBegin.toString(), rangeEnd.toString());
 			fmt::println("{}", BULK_LOAD_LOAD_USAGE);
-			return UID();
+			co_return UID();
 		}
 		std::string jobRoot = tokens[5].toString();
 		KeyRange range = Standalone(KeyRangeRef(rangeBegin, rangeEnd));
-		state BulkLoadJobState bulkLoadJob = createBulkLoadJob(
+		BulkLoadJobState bulkLoadJob = createBulkLoadJob(
 		    jobId,
 		    range,
 		    jobRoot,
 		    jobRoot.find("blobstore://") == 0 ? BulkLoadTransportMethod::BLOBSTORE : BulkLoadTransportMethod::CP);
-		wait(submitBulkLoadJob(cx, bulkLoadJob));
-		return bulkLoadJob.getJobId();
+		co_await submitBulkLoadJob(cx, bulkLoadJob);
+		co_return bulkLoadJob.getJobId();
 	} else if (tokencmp(tokens[1], "cancel")) {
 		if (tokens.size() != 3) {
 			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
-			return UID();
+			co_return UID();
 		}
-		state UID jobId = UID::fromString(tokens[2].toString());
+		UID jobId = UID::fromString(tokens[2].toString());
 		if (!jobId.isValid()) {
 			fmt::println("ERROR: Invalid job id {}", tokens[2].toString());
 			fmt::println("{}", BULK_LOAD_CANCEL_USAGE);
-			return UID();
+			co_return UID();
 		}
-		wait(cancelBulkLoadJob(cx, jobId));
+		co_await cancelBulkLoadJob(cx, jobId);
 		fmt::println("Job {} has been cancelled. The job range lock has been cleared", jobId.toString());
-		return UID();
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "status")) {
 		if (tokens.size() != 2) {
 			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
-			return UID();
+			co_return UID();
 		}
-		Optional<BulkLoadJobState> job = wait(getRunningBulkLoadJob(cx));
+		Optional<BulkLoadJobState> job = co_await getRunningBulkLoadJob(cx);
 		if (!job.present()) {
 			fmt::println("No bulk loading job is running");
-			return UID();
+			co_return UID();
 		}
 		fmt::println("Running bulk loading job: {}", job.get().getJobId().toString());
 		fmt::println("Job information: {}", job.get().toString());
-		wait(printBulkLoadJobProgress(cx, job.get()));
-		return UID();
+		co_await printBulkLoadJobProgress(cx, job.get());
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "history")) {
 		if (tokens.size() == 2) {
-			wait(printPastBulkLoadJob(cx));
-			return UID();
+			co_await printPastBulkLoadJob(cx);
+			co_return UID();
 		}
 		if (tokens.size() == 3) {
 			if (tokencmp(tokens[2], "clear")) {
 				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-				return UID();
+				co_return UID();
 			} else {
 				fmt::println("ERROR: Invalid history option {}", tokens[2].toString());
 				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-				return UID();
+				co_return UID();
 			}
 		}
 		if (tokens.size() == 4) {
 			if (tokencmp(tokens[2], "clear")) {
 				if (tokencmp(tokens[3], "all")) {
-					wait(clearBulkLoadJobHistory(cx));
+					co_await clearBulkLoadJobHistory(cx);
 					fmt::println("All bulkload job history has been cleared");
-					return UID();
+					co_return UID();
 				} else {
 					fmt::println("ERROR: Invalid history clear option {}", tokens[3].toString());
 					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-					return UID();
+					co_return UID();
 				}
 			} else {
 				fmt::println("ERROR: Invalid history clear option {}", tokens[2].toString());
 				fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-				return UID();
+				co_return UID();
 			}
 		}
 		if (tokens.size() == 5) {
@@ -279,39 +282,39 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 				if (!jobId.isValid()) {
 					fmt::println("ERROR: Invalid job id {}", tokens[4].toString());
 					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-					return UID();
+					co_return UID();
 				}
-				wait(clearBulkLoadJobHistory(cx, jobId));
+				co_await clearBulkLoadJobHistory(cx, jobId);
 				fmt::println("Bulkload job {} has been cleared from history", jobId.toString());
-				return jobId;
+				co_return jobId;
 			}
 		}
 		printLongDesc(tokens[0]);
-		return UID();
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "addlockowner")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 3) {
 			fmt::println("{}", BULK_LOAD_STATUS_USAGE);
-			return UID();
+			co_return UID();
 		}
 		std::string ownerUniqueID = tokens[2].toString();
 		if (ownerUniqueID.empty()) {
 			fmt::println("ERROR: Owner unique id cannot be empty");
 			fmt::println("{}", BULKLOAD_ADD_LOCK_OWNER_USAGE);
-			return UID();
+			co_return UID();
 		}
-		wait(registerRangeLockOwner(cx, ownerUniqueID, ownerUniqueID));
-		return UID();
+		co_await registerRangeLockOwner(cx, ownerUniqueID, ownerUniqueID);
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "printlock")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 2) {
 			fmt::println("{}", BULKLOAD_PRINT_LOCK_USAGE);
-			return UID();
+			co_return UID();
 		}
 		std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges =
-		    wait(findExclusiveReadLockOnRange(cx, normalKeys));
+		    co_await findExclusiveReadLockOnRange(cx, normalKeys);
 		fmt::println("Total {} locked ranges", lockedRanges.size());
 		if (lockedRanges.size() > 10) {
 			fmt::println("First 10 locks are:");
@@ -324,34 +327,34 @@ ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> token
 			fmt::println("Lock {} on {} for {}", count, lock.first.toString(), lock.second.toString());
 			count++;
 		}
-		return UID();
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "printlockowner")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 2) {
 			fmt::println("{}", BULKLOAD_PRINT_LOCK_OWNER_USAGE);
-			return UID();
+			co_return UID();
 		}
-		std::vector<RangeLockOwner> owners = wait(getAllRangeLockOwners(cx));
+		std::vector<RangeLockOwner> const& owners = co_await getAllRangeLockOwners(cx);
 		for (const auto owner : owners) {
 			fmt::println("{}", owner.toString());
 		}
-		return UID();
+		co_return UID();
 
 	} else if (tokencmp(tokens[1], "clearlock")) {
 		// For debugging purposes and invisible to users.
 		if (tokens.size() != 3) {
 			fmt::println("{}", BULKLOAD_CLEAR_LOCK_USAGE);
-			return UID();
+			co_return UID();
 		}
 		std::string ownerUniqueID = tokens[2].toString();
-		wait(releaseExclusiveReadLockByUser(cx, ownerUniqueID));
-		return UID();
+		co_await releaseExclusiveReadLockByUser(cx, ownerUniqueID);
+		co_return UID();
 
 	} else {
 		printUsage(tokens[0]);
 		printLongDesc(tokens[0]);
-		return UID();
+		co_return UID();
 	}
 }
 

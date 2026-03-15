@@ -1,5 +1,5 @@
 /*
- * FlowLineNoise.actor.cpp
+ * FlowLineNoise.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -40,7 +40,6 @@
 #else
 #define HAVE_LINENOISE 0
 #endif
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LineNoiseReader final : IThreadPoolReceiver {
 	void init() override {}
@@ -143,8 +142,8 @@ Future<Optional<std::string>> LineNoise::read(std::string const& prompt) {
 	return f;
 }
 
-ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
-	state boost::asio::signal_set signals(*ios, SIGINT);
+Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
+	boost::asio::signal_set signals(*ios, SIGINT);
 	Promise<Void> result;
 	signals.async_wait([result](const boost::system::error_code& error, int signal_number) {
 		if (error) {
@@ -154,8 +153,7 @@ ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
 		}
 	});
 
-	wait(result.getFuture());
-	return Void();
+	co_await result.getFuture();
 }
 
 Future<Void> LineNoise::onKeyboardInterrupt() {

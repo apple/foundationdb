@@ -1,5 +1,5 @@
 /*
- * RangeConfigCommand.actor.cpp
+ * RangeConfigCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,16 +23,14 @@
 #include <boost/lexical_cast/bad_lexical_cast.hpp>
 #include <list>
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 namespace fdb_cli {
 
-ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens) {
-	state std::function<bool(std::string)> fail = [&](std::string msg) {
+Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens) {
+	std::function<bool(std::string)> fail = [&](std::string msg) {
 		if (!msg.empty()) {
 			fmt::print(stderr, "ERROR: {}\n", msg);
 		}
@@ -40,14 +38,14 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 		return false;
 	};
 
-	state std::list<StringRef> args(tokens.begin() + 1, tokens.end());
-	state std::function<StringRef()> nextArg = [&]() {
+	std::list<StringRef> args(tokens.begin() + 1, tokens.end());
+	std::function<StringRef()> nextArg = [&]() {
 		ASSERT(!args.empty());
 		auto s = args.front();
 		args.pop_front();
 		return s;
 	};
-	state std::function<int()> nextArgInt = [&]() {
+	std::function<int()> nextArgInt = [&]() {
 		if (args.empty()) {
 			throw boost::bad_lexical_cast();
 		}
@@ -55,45 +53,45 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 	};
 
 	if (args.size() < 1) {
-		return fail("No subcommand given.");
+		co_return fail("No subcommand given.");
 	}
 
-	state StringRef cmd = nextArg();
+	StringRef cmd = nextArg();
 
 	if (cmd == "show"_sr) {
-		state bool includeDefault = false;
+		bool includeDefault = false;
 
 		while (!args.empty()) {
 			auto arg = nextArg();
 			if (arg == "includeDefault"_sr) {
 				includeDefault = true;
 			} else {
-				return fail(fmt::format("Unknown argument: '{}'", arg.printable()));
+				co_return fail(fmt::format("Unknown argument: '{}'", arg.printable()));
 			}
 		}
 
 		Reference<DDConfiguration::RangeConfigMapSnapshot> config =
-		    wait(DDConfiguration().userRangeConfig().getSnapshot(
-		        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
+		    co_await DDConfiguration().userRangeConfig().getSnapshot(
+		        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end);
 		fmt::print(
 		    "{}\n",
 		    json_spirit::write_string(DDConfiguration::toJSON(*config, includeDefault), json_spirit::pretty_print));
 
 	} else if (cmd == "update"_sr || cmd == "set"_sr) {
 		if (args.size() < 3) {
-			return fail("Begin, end, and at least one configuration option are required.");
+			co_return fail("Begin, end, and at least one configuration option are required.");
 		}
 
-		state KeyRef begin = nextArg();
-		state KeyRef end = nextArg();
+		KeyRef begin = nextArg();
+		KeyRef end = nextArg();
 		if (end <= begin) {
-			return fail("Range end must be > range begin.");
+			co_return fail("Range end must be > range begin.");
 		}
 
-		state DDRangeConfig rangeConfig;
+		DDRangeConfig rangeConfig;
 
 		while (!args.empty()) {
-			state StringRef option = nextArg();
+			StringRef option = nextArg();
 
 			try {
 				if (option == "replication"_sr) {
@@ -103,21 +101,21 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 				} else if (option == "default"_sr) {
 					rangeConfig = DDRangeConfig();
 				} else {
-					return fail(fmt::format("Unknown range option: '{}'", option.printable()));
+					co_return fail(fmt::format("Unknown range option: '{}'", option.printable()));
 				}
 			} catch (...) {
-				return fail(
+				co_return fail(
 				    fmt::format("Required argument for range option '{}' missing or invalid.", option.toString()));
 			}
 
-			wait(DDConfiguration().userRangeConfig().updateRange(
-			    SystemDBWriteLockedNow(cx.getReference()), begin, end, rangeConfig, cmd == "set"_sr));
+			co_await DDConfiguration().userRangeConfig().updateRange(
+			    SystemDBWriteLockedNow(cx.getReference()), begin, end, rangeConfig, cmd == "set"_sr);
 		}
 	} else {
-		return fail(fmt::format("Unknown command: '{}'", cmd.printable()));
+		co_return fail(fmt::format("Unknown command: '{}'", cmd.printable()));
 	}
 
-	return true;
+	co_return true;
 }
 
 std::vector<const char*> rangeConfigGenerator(std::vector<StringRef> const& tokens, bool inArgument) {

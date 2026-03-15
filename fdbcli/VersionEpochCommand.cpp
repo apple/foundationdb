@@ -1,5 +1,5 @@
 /*
- * VersionEpochCommand.actor.cpp
+ * VersionEpochCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -28,7 +28,6 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -39,44 +38,48 @@ struct VersionInfo {
 	int64_t expectedVersion;
 };
 
-ACTOR static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state Version rv = wait(safeThreadFutureToFuture(tr->getReadVersion()));
-			state ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochKey);
-			Optional<Value> versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
+			Version rv = co_await safeThreadFutureToFuture(tr->getReadVersion());
+			ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochKey);
+			Optional<Value> versionEpochVal = co_await safeThreadFutureToFuture(versionEpochValFuture);
 			if (!versionEpochVal.present()) {
-				return Optional<VersionInfo>();
+				co_return Optional<VersionInfo>();
 			}
 			int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
 			int64_t expected = g_network->timer() * CLIENT_KNOBS->CORE_VERSIONSPERSECOND - versionEpoch;
-			return VersionInfo{ rv, expected };
+			co_return VersionInfo{ rv, expected };
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<ITransaction> tr) {
-	loop {
+static Future<Optional<int64_t>> getVersionEpoch(Reference<ITransaction> tr) {
+	while (true) {
+		Error err;
 		try {
-			state ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochSpecialKey);
-			Optional<Value> versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
-			return versionEpochVal.present() ? boost::lexical_cast<int64_t>(versionEpochVal.get().toString())
-			                                 : Optional<int64_t>();
+			ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochSpecialKey);
+			Optional<Value> versionEpochVal = co_await safeThreadFutureToFuture(versionEpochValFuture);
+			co_return versionEpochVal.present() ? boost::lexical_cast<int64_t>(versionEpochVal.get().toString())
+			                                    : Optional<int64_t>();
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens) {
+Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens) {
 	if (tokens.size() <= 3) {
-		state Reference<ITransaction> tr = db->createTransaction();
+		Reference<ITransaction> tr = db->createTransaction();
 		if (tokens.size() == 1) {
-			Optional<VersionInfo> versionInfo = wait(getVersionInfo(db));
+			Optional<VersionInfo> versionInfo = co_await getVersionInfo(db);
 			if (versionInfo.present()) {
 				int64_t diff = versionInfo.get().expectedVersion - versionInfo.get().version;
 				printf("Version:    %" PRId64 "\n", versionInfo.get().version);
@@ -85,75 +88,79 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 			} else {
 				printf("Version epoch is unset\n");
 			}
-			return true;
+			co_return true;
 		} else if (tokens.size() == 2 && tokencmp(tokens[1], "get")) {
-			Optional<int64_t> versionEpoch = wait(getVersionEpoch(db->createTransaction()));
+			Optional<int64_t> versionEpoch = co_await getVersionEpoch(db->createTransaction());
 			if (versionEpoch.present()) {
 				printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
 			} else {
 				printf("Version epoch is unset\n");
 			}
-			return true;
+			co_return true;
 		} else if (tokens.size() == 2 && tokencmp(tokens[1], "disable")) {
 			// Clearing the version epoch means versions will no longer attempt
 			// to advance at the same rate as the clock. The current version
 			// will remain unchanged.
-			loop {
+			while (true) {
+				Error err;
 				try {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					Optional<int64_t> versionEpoch = wait(getVersionEpoch(db->createTransaction()));
+					Optional<int64_t> versionEpoch = co_await getVersionEpoch(db->createTransaction());
 					if (!versionEpoch.present()) {
-						return true;
+						co_return true;
 					} else {
 						tr->clear(versionEpochSpecialKey);
-						wait(safeThreadFutureToFuture(tr->commit()));
+						co_await safeThreadFutureToFuture(tr->commit());
 					}
 				} catch (Error& e) {
-					wait(safeThreadFutureToFuture(tr->onError(e)));
+					err = e;
 				}
+				co_await safeThreadFutureToFuture(tr->onError(err));
 			}
 		} else if ((tokens.size() == 2 && tokencmp(tokens[1], "enable")) ||
 		           (tokens.size() == 3 && tokencmp(tokens[1], "set"))) {
-			state int64_t v;
+			int64_t v;
 			if (tokens.size() == 3) {
 				int n = 0;
 				if (sscanf(tokens[2].toString().c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != tokens[2].size()) {
 					printUsage(tokens[0]);
-					return false;
+					co_return false;
 				}
 			} else {
 				v = 0; // default version epoch
 			}
 
-			loop {
+			while (true) {
+				Error err;
 				try {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-					Optional<int64_t> versionEpoch = wait(getVersionEpoch(tr));
+					Optional<int64_t> versionEpoch = co_await getVersionEpoch(tr);
 					if (!versionEpoch.present() || (versionEpoch.get() != v && tokens.size() == 3)) {
 						tr->set(versionEpochSpecialKey, BinaryWriter::toValue(v, Unversioned()));
-						wait(safeThreadFutureToFuture(tr->commit()));
+						co_await safeThreadFutureToFuture(tr->commit());
 					} else {
 						printf("Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target "
 						       "version\n");
-						return true;
+						co_return true;
 					}
 				} catch (Error& e) {
-					wait(safeThreadFutureToFuture(tr->onError(e)));
+					err = e;
 				}
+				co_await safeThreadFutureToFuture(tr->onError(err));
 			}
 		} else if (tokens.size() == 2 && tokencmp(tokens[1], "commit")) {
-			Optional<VersionInfo> versionInfo = wait(getVersionInfo(db));
+			Optional<VersionInfo> versionInfo = co_await getVersionInfo(db);
 			if (versionInfo.present()) {
-				wait(advanceVersion(cx, versionInfo.get().expectedVersion));
+				co_await advanceVersion(cx, versionInfo.get().expectedVersion);
 			} else {
 				printf("Must set the version epoch before committing it (see `versionepoch enable`)\n");
 			}
-			return true;
+			co_return true;
 		}
 	}
 
 	printUsage(tokens[0]);
-	return false;
+	co_return false;
 }
 
 CommandFactory versionEpochFactory(

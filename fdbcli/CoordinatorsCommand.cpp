@@ -1,5 +1,5 @@
 /*
- * CoordinatorsCommand.actor.cpp
+ * CoordinatorsCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 
 #include "boost/algorithm/string.hpp"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
@@ -31,39 +31,40 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
-ACTOR Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
 		try {
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
-			Optional<Value> description = wait(safeThreadFutureToFuture(descriptionF));
+			ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
+			Optional<Value> description = co_await safeThreadFutureToFuture(descriptionF);
 			ASSERT(description.present());
 			printf("Cluster description: %s\n", description.get().toString().c_str());
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-			Optional<Value> processes = wait(safeThreadFutureToFuture(processesF));
+			ThreadFuture<Optional<Value>> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+			Optional<Value> processes = co_await safeThreadFutureToFuture(processesF);
 			ASSERT(processes.present());
 			std::vector<std::string> process_addresses;
 			boost::split(process_addresses, processes.get().toString(), [](char c) { return c == ','; });
 			printf("Cluster coordinators (%zu): %s\n", process_addresses.size(), processes.get().toString().c_str());
 			printf("Type `help coordinators' to learn how to change this information.\n");
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	state int retries = 0;
-	state int notEnoughMachineResults = 0;
-	state StringRef new_cluster_description;
-	state std::string auto_coordinators_str;
+Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	int retries = 0;
+	int notEnoughMachineResults = 0;
+	StringRef new_cluster_description;
+	std::string auto_coordinators_str;
 	StringRef nameTokenBegin = "description="_sr;
 	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok) {
 		if (tok->startsWith(nameTokenBegin) && new_cluster_description.empty()) {
@@ -75,10 +76,12 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 		}
 	}
 
-	state bool automatic = tokens.size() == 2 && tokens[1] == "auto"_sr;
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+	bool automatic = tokens.size() == 2 && tokens[1] == "auto"_sr;
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		Error caughtErr;
+		bool hasCaughtErr = false;
 		try {
 			// update cluster description
 			if (new_cluster_description.size()) {
@@ -89,18 +92,17 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				// if previous read failed, retry, otherwise, use the same recommended config
 				if (!auto_coordinators_str.size()) {
 					// Hold the reference to the standalone's memory
-					state ThreadFuture<Optional<Value>> auto_coordinatorsF =
-					    tr->get(fdb_cli::coordinatorsAutoSpecialKey);
-					Optional<Value> auto_coordinators = wait(safeThreadFutureToFuture(auto_coordinatorsF));
+					ThreadFuture<Optional<Value>> auto_coordinatorsF = tr->get(fdb_cli::coordinatorsAutoSpecialKey);
+					Optional<Value> auto_coordinators = co_await safeThreadFutureToFuture(auto_coordinatorsF);
 					ASSERT(auto_coordinators.present());
 					auto_coordinators_str = auto_coordinators.get().toString();
 				}
 				tr->set(fdb_cli::coordinatorsProcessSpecialKey, auto_coordinators_str);
 			} else if (tokens.size() > 1) {
-				state std::set<NetworkAddress> new_coordinators_addresses;
-				state std::set<Hostname> new_coordinators_hostnames;
-				state std::vector<std::string> newCoordinatorslist;
-				state std::vector<StringRef>::iterator t;
+				std::set<NetworkAddress> new_coordinators_addresses;
+				std::set<Hostname> new_coordinators_hostnames;
+				std::vector<std::string> newCoordinatorslist;
+				std::vector<StringRef>::iterator t;
 				for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
 					try {
 						if (Hostname::isHostname(t->toString())) {
@@ -110,7 +112,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 								fprintf(stderr,
 								        "ERROR: passed redundant coordinators: `%s'\n",
 								        hostname.toString().c_str());
-								return true;
+								co_return true;
 							}
 							new_coordinators_hostnames.insert(hostname);
 							newCoordinatorslist.push_back(hostname.toString());
@@ -119,7 +121,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 							if (new_coordinators_addresses.count(addr)) {
 								fprintf(
 								    stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
-								return true;
+								co_return true;
 							}
 							new_coordinators_addresses.insert(addr);
 							newCoordinatorslist.push_back(addr.toString());
@@ -128,7 +130,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						if (e.code() == error_code_connection_string_invalid) {
 							fprintf(
 							    stderr, "ERROR: '%s' is not a valid network endpoint address\n", t->toString().c_str());
-							return true;
+							co_return true;
 						}
 						throw;
 					}
@@ -136,20 +138,26 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				std::string new_coordinators_str = boost::algorithm::join(newCoordinatorslist, ",");
 				tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_coordinators_str);
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
+			co_await safeThreadFutureToFuture(tr->commit());
 			// commit should always fail here
-			// If the commit succeeds, the coordinators change and the commit will fail with commit_unknown_result().
+			// If the commit succeeds, the coordinators change and the commit will fail with
+			// commit_unknown_result().
 			ASSERT(false);
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+			caughtErr = e;
+			hasCaughtErr = true;
+		}
+		if (hasCaughtErr) {
+			Error err(caughtErr);
+			if (caughtErr.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = co_await fdb_cli::getSpecialKeysFailureErrorMessage(tr);
 				if (errorMsgStr == ManagementAPI::generateErrorMessage(CoordinatorsResult::NOT_ENOUGH_MACHINES) &&
 				    notEnoughMachineResults < 1) {
-					// we could get not_enough_machines if we happen to see the database while the cluster controller is
-					// updating the worker list, so make sure it happens twice before returning a failure
+					// we could get not_enough_machines if we happen to see the database while the cluster
+					// controller is updating the worker list, so make sure it happens twice before returning a
+					// failure
 					notEnoughMachineResults++;
-					wait(delay(1.0));
+					co_await delay(1.0);
 					tr->reset();
 					continue;
 				} else if (errorMsgStr ==
@@ -158,13 +166,13 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						printf("Coordination state changed\n");
 					else
 						printf("No change (existing configuration satisfies request)\n");
-					return true;
+					co_return true;
 				} else {
 					fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
-					return false;
+					co_return false;
 				}
 			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
+			co_await safeThreadFutureToFuture(tr->onError(err));
 			++retries;
 		}
 	}
@@ -178,13 +186,13 @@ const KeyRef clusterDescriptionSpecialKey = "\xff\xff/configuration/coordinators
 const KeyRef coordinatorsAutoSpecialKey = "\xff\xff/management/auto_coordinators"_sr;
 const KeyRef coordinatorsProcessSpecialKey = "\xff\xff/configuration/coordinators/processes"_sr;
 
-ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 2) {
-		wait(printCoordinatorsInfo(db));
-		return true;
+		co_await printCoordinatorsInfo(db);
+		co_return true;
 	} else {
-		bool result = wait(changeCoordinators(db, tokens));
-		return result;
+		bool result = co_await changeCoordinators(db, tokens);
+		co_return result;
 	}
 }
 

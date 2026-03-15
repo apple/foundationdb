@@ -1,5 +1,5 @@
 /*
- * fdbcli.actor.h
+ * fdbcli.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,14 +20,6 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated
-// version of this file.  In intellisense use the source version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
-#define FDBCLI_FDBCLI_ACTOR_G_H
-#include "fdbcli/fdbcli.actor.g.h"
-#elif !defined(FDBCLI_FDBCLI_ACTOR_H)
-#define FDBCLI_FDBCLI_ACTOR_H
-
 #include "fdbcli/FlowLineNoise.h"
 
 #include "fdbclient/CoordinationInterface.h"
@@ -35,8 +27,6 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/Arena.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -129,9 +119,9 @@ extern const KeyRangeRef processClassTypeSpecialKeyRange;
 inline const KeyRef errorMsgSpecialKey = "\xff\xff/error_message"_sr;
 inline const KeyRef workerInterfacesVerifyOptionSpecialKey = "\xff\xff/management/options/worker_interfaces/verify"_sr;
 
-ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
-ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
-                                              std::map<std::string, StorageServerInterface>* interfaces);
+Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers);
+Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
+                                        std::map<std::string, StorageServerInterface>* interfaces);
 
 bool tokencmp(StringRef token, const char* command);
 void printUsage(StringRef command);
@@ -139,15 +129,15 @@ void printLongDesc(StringRef command);
 
 // Pre: tr failed with special_keys_api_failure error
 // Read the error message special key and return the message
-ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
+Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr);
 // Using \xff\xff/worker_interfaces/ special key, get all worker interfaces.
 // A worker list will be returned from CC.
 // If verify, we will try to establish connections to all workers returned.
 // In particular, it will deserialize \xff\xff/worker_interfaces/<address>:=<ClientInterface> kv pairs and issue RPC
 // calls, then only return interfaces(kv pairs) the client can talk to
-ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                       bool verify = false);
+Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                 bool verify = false);
 // print cluster status info
 void printStatus(StatusObjectReader statusObj,
                  StatusClient::StatusLevel level,
@@ -157,13 +147,13 @@ void printStatus(StatusObjectReader statusObj,
 // All fdbcli commands (alphabetically)
 // All below actors return true if the command is executed successfully
 // advanceversion command
-ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // configure command
-ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
-                                         Database localDb,
-                                         std::vector<StringRef> tokens,
-                                         LineNoise* linenoise,
-                                         Future<Void> warn);
+Future<bool> configureCommandActor(Reference<IDatabase> db,
+                                   Database localDb,
+                                   std::vector<StringRef> tokens,
+                                   LineNoise* linenoise,
+                                   Future<Void> _warn);
 // consistency command
 Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                           std::vector<StringRef> const& tokens,
@@ -171,13 +161,13 @@ Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
 // consistency scan command
 Future<bool> consistencyScanCommandActor(Database localDb, std::vector<StringRef> const& tokens);
 // coordinators command
-ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // datadistribution command
-ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // exclude command
-ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> warn);
+Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens, Future<Void> _warn);
 // expensive_data_check command
-ACTOR Future<bool> expensiveDataCheckCommandActor(
+Future<bool> expensiveDataCheckCommandActor(
     Reference<IDatabase> db,
     Reference<ITransaction> tr,
     std::vector<StringRef> tokens,
@@ -188,31 +178,30 @@ Future<bool> fileConfigureCommandActor(Reference<IDatabase> db,
                                        bool isNewDatabase,
                                        bool force);
 // Trigger audit storage
-ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile,
-                                           std::vector<StringRef> tokens);
+Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> clusterFile, std::vector<StringRef> tokens);
 // Retrieve audit storage status
-ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
 // Retrieve shard information command
-ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk loading command
-ACTOR Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens);
 // Bulk dumping command
-ACTOR Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 // include command
-ACTOR Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> includeCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // kill command
-ACTOR Future<bool> killCommandActor(Reference<IDatabase> db,
-                                    Reference<ITransaction> tr,
-                                    std::vector<StringRef> tokens,
-                                    std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
+Future<bool> killCommandActor(Reference<IDatabase> db,
+                              Reference<ITransaction> tr,
+                              std::vector<StringRef> tokens,
+                              std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // lock/unlock command
 Future<bool> lockCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
 // blobrestore command
-ACTOR Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
+Future<bool> blobRestoreCommandActor(Database localDb, std::vector<StringRef> tokens);
 // hotrange command
 Future<bool> hotRangeCommandActor(Database localDb,
                                   Reference<IDatabase> db,
@@ -220,53 +209,47 @@ Future<bool> hotRangeCommandActor(Database localDb,
                                   std::map<std::string, StorageServerInterface>* const& storage_interface);
 
 // maintenance command
-ACTOR Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
-ACTOR Future<bool> clearHealthyZone(Reference<IDatabase> db,
-                                    bool printWarning = false,
-                                    bool clearSSFailureZoneString = false);
-ACTOR Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> setHealthyZone(Reference<IDatabase> db, StringRef zoneId, double seconds, bool printWarning = false);
+Future<bool> clearHealthyZone(Reference<IDatabase> db,
+                              bool printWarning = false,
+                              bool clearSSFailureZoneString = false);
+Future<bool> maintenanceCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // profile command
-ACTOR Future<bool> profileCommandActor(Database db,
-                                       Reference<ITransaction> tr,
-                                       std::vector<StringRef> tokens,
-                                       bool intrans);
+Future<bool> profileCommandActor(Database db, Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans);
 // quota command
-ACTOR Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> quotaCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // setclass command
-ACTOR Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> setClassCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // snapshot command
 Future<bool> snapshotCommandActor(Reference<IDatabase> db, std::vector<StringRef> const& tokens);
 // status command
-ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
-                                      Database localDb,
-                                      std::vector<StringRef> tokens,
-                                      bool isExecMode = false);
+Future<bool> statusCommandActor(Reference<IDatabase> db,
+                                Database localDb,
+                                std::vector<StringRef> tokens,
+                                bool isExecMode = false);
 // suspend command
 Future<bool> suspendCommandActor(Reference<IDatabase> db,
                                  Reference<ITransaction> tr,
                                  std::vector<StringRef> const& tokens,
                                  std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface);
 // throttle command
-ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // triggerteaminfolog command
 Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db);
 // tssq command
-ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // versionepoch command
-ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
+Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens);
 // targetversion command
-ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // idempotencyids command
 Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> const& tokens);
 
 // rangeconfig command
-ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);
 
 // debug commands: getlocation, getall
-ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens);
-ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
-ACTOR Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens);
+Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+Future<bool> checkallCommandActor(Database cx, std::vector<StringRef> tokens);
 } // namespace fdb_cli
-
-#include "flow/unactorcompiler.h"
-#endif

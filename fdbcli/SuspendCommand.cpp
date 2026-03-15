@@ -20,7 +20,7 @@
 
 #include "boost/algorithm/string.hpp"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"

@@ -1,5 +1,5 @@
 /*
- * Util.actor.cpp
+ * Util.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/Status.h"
@@ -26,7 +26,6 @@
 #include "flow/Arena.h"
 
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
@@ -55,10 +54,10 @@ void printLongDesc(StringRef command) {
 		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
 }
 
-ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
+Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
 	// hold the returned standalone object's memory
-	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
-	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
+	ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
+	Optional<Value> errorMsg = co_await safeThreadFutureToFuture(errorMsgF);
 	// Error message should be present
 	ASSERT(errorMsg.present());
 	// Read the json string
@@ -68,7 +67,7 @@ ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransacti
 	std::string errorStr;
 	ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 	// return the error message
-	return valueObj["message"].get_str();
+	co_return valueObj["message"].get_str();
 }
 
 void addInterfacesFromKVs(RangeResult& kvs,
@@ -97,49 +96,50 @@ void addInterfacesFromKVs(RangeResult& kvs,
 	}
 }
 
-ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
-                                       std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
-                                       bool verify) {
+Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                 bool verify) {
 	if (verify) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->set(workerInterfacesVerifyOptionSpecialKey, ValueRef());
 	}
 	// Hold the reference to the standalone's memory
-	state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
+	ThreadFuture<RangeResult> kvsFuture = tr->getRange(
 	    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
-	state RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
+	RangeResult kvs = co_await safeThreadFutureToFuture(kvsFuture);
 	ASSERT(!kvs.more);
 	if (verify) {
 		// remove the option if set
 		tr->clear(workerInterfacesVerifyOptionSpecialKey);
 	}
 	addInterfacesFromKVs(kvs, address_interface);
-	return Void();
 }
 
-ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-			state ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
-			wait(success(safeThreadFutureToFuture(processClasses)) && success(safeThreadFutureToFuture(processData)));
+			co_await (success(safeThreadFutureToFuture(processClasses)) &&
+			          success(safeThreadFutureToFuture(processData)));
 			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
 
-			state std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
-			state int i;
+			std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
+			int i{ 0 };
 			for (i = 0; i < processClasses.get().size(); i++) {
 				try {
 					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
 					    decodeProcessClassValue(processClasses.get()[i].value);
 				} catch (Error& e) {
 					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
-					return false;
+					co_return false;
 				}
 			}
 
@@ -155,25 +155,27 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 					workers->push_back(data);
 			}
 
-			return true;
+			co_return true;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "GetWorkersError").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		TraceEvent(SevWarn, "GetWorkersError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
-                                              std::map<std::string, StorageServerInterface>* interfaces) {
-	state Reference<ITransaction> tr = db->createTransaction();
-	loop {
+Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
+                                        std::map<std::string, StorageServerInterface>* interfaces) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
 		interfaces->clear();
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			wait(success(safeThreadFutureToFuture(serverListF)));
+			ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			co_await success(safeThreadFutureToFuture(serverListF));
 			ASSERT(!serverListF.get().more);
 			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
 			RangeResult serverList = serverListF.get();
@@ -182,11 +184,12 @@ ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 				auto ssi = decodeServerListValue(serverList[i].value);
 				(*interfaces)[ssi.address().toString()] = ssi;
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(e);
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 

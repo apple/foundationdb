@@ -1,5 +1,5 @@
 /*
- * ProfileCommand.actor.cpp
+ * ProfileCommand.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 
 #include "boost/lexical_cast.hpp"
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/FDBOptions.g.h"
@@ -31,28 +31,24 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
-ACTOR Future<bool> profileCommandActor(Database db,
-                                       Reference<ITransaction> tr,
-                                       std::vector<StringRef> tokens,
-                                       bool intrans) {
-	state bool result = true;
+Future<bool> profileCommandActor(Database db, Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans) {
+	bool result = true;
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
 		result = false;
 	} else if (tokencmp(tokens[1], "client")) {
 		if (tokens.size() == 2) {
 			fprintf(stderr, "ERROR: Usage: profile client <get|set>\n");
-			return false;
+			co_return false;
 		}
-		wait(db->globalConfig->onInitialized());
+		co_await db->globalConfig->onInitialized();
 		if (tokencmp(tokens[2], "get")) {
 			if (tokens.size() != 3) {
 				fprintf(stderr, "ERROR: Additional arguments to `get` are not supported.\n");
-				return false;
+				co_return false;
 			}
 			std::string sampleRateStr = "default";
 			std::string sizeLimitStr = "default";
@@ -71,7 +67,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 		} else if (tokencmp(tokens[2], "set")) {
 			if (tokens.size() != 5) {
 				fprintf(stderr, "ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
-				return false;
+				co_return false;
 			}
 			double sampleRate;
 			if (tokencmp(tokens[3], "default")) {
@@ -81,7 +77,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 				sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
 				if (!std::isspace(*end)) {
 					fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
-					return false;
+					co_return false;
 				}
 			}
 			int64_t sizeLimit;
@@ -93,7 +89,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 					sizeLimit = parsed.get();
 				} else {
 					fprintf(stderr, "ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
-					return false;
+					co_return false;
 				}
 			}
 
@@ -103,7 +99,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSampleRate), rate.pack());
 			tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 			if (!intrans) {
-				wait(safeThreadFutureToFuture(tr->commit()));
+				co_await safeThreadFutureToFuture(tr->commit());
 			}
 		} else {
 			fprintf(stderr, "ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
@@ -112,12 +108,12 @@ ACTOR Future<bool> profileCommandActor(Database db,
 	} else if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() != 2) {
 			fprintf(stderr, "ERROR: Usage: profile list\n");
-			return false;
+			co_return false;
 		}
 		// Hold the reference to the standalone's memory
-		state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
+		ThreadFuture<RangeResult> kvsFuture = tr->getRange(
 		    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
-		RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
+		RangeResult kvs = co_await safeThreadFutureToFuture(kvsFuture);
 		ASSERT(!kvs.more);
 		for (const auto& pair : kvs) {
 			auto ip_port = (pair.key.endsWith(":tls"_sr) ? pair.key.removeSuffix(":tls"_sr) : pair.key)
@@ -128,7 +124,7 @@ ACTOR Future<bool> profileCommandActor(Database db,
 		fprintf(stderr, "ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
 		result = false;
 	}
-	return result;
+	co_return result;
 }
 
 CommandFactory profileFactory("profile",
