@@ -3871,7 +3871,7 @@ struct DequeAllocator : std::allocator<T> {
 		using other = DequeAllocator<U>;
 	};
 
-	DequeAllocator() {}
+	DequeAllocator() = default;
 
 	template <typename U>
 	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}

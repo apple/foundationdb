@@ -99,7 +99,7 @@ PolicyAcross::PolicyAcross(int count, std::string const& attribKey, Reference<IR
 
 PolicyAcross::PolicyAcross() : _policy(new PolicyOne()) {}
 
-PolicyAcross::~PolicyAcross() {}
+PolicyAcross::~PolicyAcross() = default;
 
 // Debug purpose only
 // Trace all record entries to help debug

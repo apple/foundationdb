@@ -46,7 +46,7 @@ struct ITransactor : ReferenceCounted<ITransactor> {
 	};
 
 	virtual Future<Void> doTransaction(Database const&, Stats* stats) = 0;
-	virtual ~ITransactor() {}
+	virtual ~ITransactor() = default;
 };
 
 struct RWTransactor : ITransactor {
@@ -195,7 +195,7 @@ struct IMeasurer : ReferenceCounted<IMeasurer> {
 		return *this;
 	} // allow copy operator for non-reference counted instances of subclasses
 
-	virtual ~IMeasurer() {}
+	virtual ~IMeasurer() = default;
 };
 
 struct MeasureSinglePeriod : IMeasurer {

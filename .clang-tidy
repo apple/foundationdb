@@ -5,6 +5,8 @@ Checks: >
   bugprone-suspicious-string-compare,
   bugprone-use-after-move,
   modernize-use-auto,
+  modernize-use-equals-default,
+  modernize-use-override,
   modernize-use-using,
   performance-for-range-copy,
   readability-container-contains,

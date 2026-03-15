@@ -2201,10 +2201,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	cleaning = cleanPeriodically(this);
 	logging = logPeriodically(this);
 }
-KeyValueStoreSQLite::~KeyValueStoreSQLite() {
-	// printf("dbf=%lld bytes, wal=%lld bytes\n", getFileSize((filename+".fdb").c_str()),
-	// getFileSize((filename+".fdb-wal").c_str()));
-}
+KeyValueStoreSQLite::~KeyValueStoreSQLite() = default;
 
 StorageBytes KeyValueStoreSQLite::getStorageBytes() const {
 	int64_t free;

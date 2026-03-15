@@ -313,7 +313,7 @@ boost::asio::io_context& ActorLineageProfilerT::context() {
 	return impl->context;
 }
 
-SampleIngestor::~SampleIngestor() {}
+SampleIngestor::~SampleIngestor() = default;
 
 void ProfilerConfigT::reset(std::map<std::string, std::string> const& config) {
 	bool expectNoMore = false, useFluentD = false, useTCP = false;

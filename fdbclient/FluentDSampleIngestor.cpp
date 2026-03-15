@@ -39,7 +39,7 @@ boost::asio::ip::basic_endpoint<Protocol> toEndpoint(NetworkAddress const n) {
 }
 
 struct FluentDSocket {
-	virtual ~FluentDSocket() {}
+	virtual ~FluentDSocket() = default;
 	virtual void connect(NetworkAddress const& endpoint) = 0;
 	virtual void send(std::shared_ptr<Sample> const& sample) = 0;
 	virtual const boost::system::error_code& failed() const = 0;

@@ -265,20 +265,20 @@ public:
 	Workload(capi::FDBWorkload c_workload) : inner(c_workload.inner), vt(c_workload.vt) {}
 	~Workload() { this->vt->free(this->inner); }
 
-	virtual bool init(FDBWorkloadContext* context) override { return true; }
-	virtual void setup(FDBDatabase* db, GenericPromise<bool> done) override {
+	bool init(FDBWorkloadContext* context) override { return true; }
+	void setup(FDBDatabase* db, GenericPromise<bool> done) override {
 		return this->vt->setup(this->inner, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
-	virtual void start(FDBDatabase* db, GenericPromise<bool> done) override {
+	void start(FDBDatabase* db, GenericPromise<bool> done) override {
 		return this->vt->start(this->inner, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
-	virtual void check(FDBDatabase* db, GenericPromise<bool> done) override {
+	void check(FDBDatabase* db, GenericPromise<bool> done) override {
 		return this->vt->check(this->inner, (capi::FDBDatabase*)db, promise::wrap(done));
 	}
-	virtual void getMetrics(std::vector<FDBPerfMetric>& out) const override {
+	void getMetrics(std::vector<FDBPerfMetric>& out) const override {
 		this->vt->getMetrics(this->inner, metrics::wrap(&out));
 	}
-	virtual double getCheckTimeout() override { return this->vt->getCheckTimeout(this->inner); }
+	double getCheckTimeout() override { return this->vt->getCheckTimeout(this->inner); }
 };
 } // namespace translator
 

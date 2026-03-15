@@ -877,7 +877,7 @@ TaskBucket::TaskBucket(const Subspace& subspace,
     timeouts(prefix.get("to"_sr)), timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS), system_access(sysAccess),
     priority_batch(priorityBatch), lockAware(lockAware) {}
 
-TaskBucket::~TaskBucket() {}
+TaskBucket::~TaskBucket() = default;
 
 Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr) {
 	setOptions(tr);
@@ -1043,7 +1043,7 @@ public:
 FutureBucket::FutureBucket(const Subspace& subspace, AccessSystemKeys sysAccess, LockAware lockAware)
   : prefix(subspace), system_access(sysAccess), lockAware(lockAware) {}
 
-FutureBucket::~FutureBucket() {}
+FutureBucket::~FutureBucket() = default;
 
 Future<Void> FutureBucket::clear(Reference<ReadYourWritesTransaction> tr) {
 	setOptions(tr);
@@ -1272,7 +1272,7 @@ public:
 	}
 };
 
-TaskFuture::TaskFuture() {}
+TaskFuture::TaskFuture() = default;
 
 TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBucket(bucket), key(k) {
 	if (k.size() == 0) {
@@ -1284,7 +1284,7 @@ TaskFuture::TaskFuture(const Reference<FutureBucket> bucket, Key k) : futureBuck
 	callbacks = prefix.get("cb"_sr);
 }
 
-TaskFuture::~TaskFuture() {}
+TaskFuture::~TaskFuture() = default;
 
 void TaskFuture::addBlock(Reference<ReadYourWritesTransaction> tr, StringRef block_id) {
 	tr->set(blocks.pack(block_id), ""_sr);
