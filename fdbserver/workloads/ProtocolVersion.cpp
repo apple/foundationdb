@@ -28,7 +28,7 @@ struct ProtocolVersionWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
-		std::vector<ISimulator::ProcessInfo*>::iterator diffVersionProcess =
+		auto diffVersionProcess =
 		    find_if(allProcesses.begin(), allProcesses.end(), [](const ISimulator::ProcessInfo* p) {
 			    return p->protocolVersion != currentProtocolVersion();
 		    });

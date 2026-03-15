@@ -702,7 +702,7 @@ const char* getInterfaceName(const IPAddress& _ip) {
 				break;
 			}
 		} else if (iter->ifa_addr->sa_family == AF_INET6 && _ip.isV6()) {
-			struct sockaddr_in6* ifa_addr = reinterpret_cast<struct sockaddr_in6*>(iter->ifa_addr);
+			auto* ifa_addr = reinterpret_cast<struct sockaddr_in6*>(iter->ifa_addr);
 			if (memcmp(_ip.toV6().data(), &ifa_addr->sin6_addr, 16) == 0) {
 				ifa_name = iter->ifa_name;
 				break;
@@ -2879,7 +2879,7 @@ struct ThreadCreateArgs {
 };
 
 void* runFunc(void* a) {
-	ThreadCreateArgs* args = (ThreadCreateArgs*)a;
+	auto* args = (ThreadCreateArgs*)a;
 	try {
 		(void)args->func(args->arg);
 	} catch (std::exception& e) {
@@ -2909,7 +2909,7 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 		};
 	}
 
-	ThreadCreateArgs* args = new ThreadCreateArgs(func, arg);
+	auto* args = new ThreadCreateArgs(func, arg);
 	pthread_create(&t, &attr, &runFunc, args);
 	pthread_attr_destroy(&attr);
 
@@ -3875,8 +3875,7 @@ void profileHandler(int sig) {
 
 	// We are casting away the volatile-ness of the backtrace array, but we believe that should be reasonably safe in
 	// the signal handler
-	ProfilingSample* ps =
-	    const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
+	auto* ps = const_cast<ProfilingSample*>((volatile ProfilingSample*)(net2backtraces + net2backtraces_offset));
 
 	// We can only read the check thread time in a signal handler if the atomic is lock free.
 	// We can't get the time from a timer() call because it's not signal safe.

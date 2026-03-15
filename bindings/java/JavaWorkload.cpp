@@ -90,17 +90,17 @@ void printTrace(JNIEnv* env, jclass, jlong logger, jint severity, jstring messag
 }
 
 jlong getProcessID(JNIEnv* env, jclass, jlong self) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	return jlong(context->getProcessID());
 }
 
 void setProcessID(JNIEnv* env, jclass, jlong self, jlong processID) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	context->setProcessID(processID);
 }
 
 jboolean getOptionBool(JNIEnv* env, jclass, jlong self, jstring name, jboolean defaultValue) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy = true;
 	const char* utf = env->GetStringUTFChars(name, &isCopy);
 	auto res = jboolean(context->getOption(utf, bool(defaultValue)));
@@ -111,7 +111,7 @@ jboolean getOptionBool(JNIEnv* env, jclass, jlong self, jstring name, jboolean d
 }
 
 jlong getOptionLong(JNIEnv* env, jclass, jlong self, jstring name, jlong defaultValue) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy = true;
 	const char* utf = env->GetStringUTFChars(name, &isCopy);
 	auto res = jlong(context->getOption(utf, long(defaultValue)));
@@ -122,7 +122,7 @@ jlong getOptionLong(JNIEnv* env, jclass, jlong self, jstring name, jlong default
 }
 
 jdouble getOptionDouble(JNIEnv* env, jclass, jlong self, jstring name, jdouble defaultValue) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy = true;
 	const char* utf = env->GetStringUTFChars(name, &isCopy);
 	auto res = jdouble(context->getOption(utf, double(defaultValue)));
@@ -133,7 +133,7 @@ jdouble getOptionDouble(JNIEnv* env, jclass, jlong self, jstring name, jdouble d
 }
 
 jstring getOptionString(JNIEnv* env, jclass, jlong self, jstring name, jstring defaultValue) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	jboolean isCopy;
 	jboolean defIsCopy;
 	const char* nameStr = env->GetStringUTFChars(name, &isCopy);
@@ -149,17 +149,17 @@ jstring getOptionString(JNIEnv* env, jclass, jlong self, jstring name, jstring d
 }
 
 jint getClientID(JNIEnv* env, jclass, jlong self) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	return jint(context->clientId());
 }
 
 jint getClientCount(JNIEnv* env, jclass, jlong self) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	return jint(context->clientCount());
 }
 
 jlong getSharedRandomNumber(JNIEnv* env, jclass, jlong self) {
-	FDBWorkloadContext* context = reinterpret_cast<FDBWorkloadContext*>(self);
+	auto* context = reinterpret_cast<FDBWorkloadContext*>(self);
 	return jlong(context->sharedRandomNumber());
 }
 

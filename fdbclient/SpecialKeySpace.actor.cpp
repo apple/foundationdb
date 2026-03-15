@@ -158,7 +158,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	GetRangeLimits limitsHint(ks->offset >= 1 ? ks->offset : 1 - ks->offset);
 
 	if (skrImpl->isAsync()) {
-		const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(skrImpl);
+		auto* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(skrImpl);
 		RangeResult result_ = wait(ptr->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint, cache));
 		result = result_;
 	} else {
@@ -367,7 +367,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
-				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
+				auto* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
 			} else {
@@ -398,7 +398,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRef keyStart = kr.contains(begin.getKey()) ? begin.getKey() : kr.begin;
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
-				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
+				auto* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
 				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
 			} else {
@@ -2919,8 +2919,7 @@ ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWrite
 		for (const auto& [k_, value] : interfs) {
 			auto k = k_.withPrefix(prefix);
 			if (kr.contains(k)) {
-				ClientWorkerInterface workerInterf =
-				    BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion());
+				auto workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(value, IncludeVersion());
 				verifyInterfs.push_back(verifyInterfaceActor(connectLock, workerInterf));
 			} else {
 				verifyInterfs.push_back(false);

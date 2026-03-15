@@ -96,7 +96,7 @@ struct ResolverBugWorkload : TestWorkload {
 		OnTestFailure(std::shared_ptr<ResolverBug> bug) : bug(bug) {}
 
 		void operator()(StringRef, auto const& data, Error const&) {
-			BaseTraceEvent* trace = std::any_cast<BaseTraceEvent*>(data);
+			auto* trace = std::any_cast<BaseTraceEvent*>(data);
 			if (trace->getSeverity() == SevError) {
 				bug->bugFound = true;
 			}

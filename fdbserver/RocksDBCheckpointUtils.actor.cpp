@@ -291,7 +291,7 @@ public:
 			iterator->Seek(this->beginSlice);
 		}
 
-		~RocksCfCheckpointIterator() { this->reader->numIter--; }
+		~RocksCfCheckpointIterator() override { this->reader->numIter--; }
 
 		Future<RangeResult> nextBatch(const int rowLimit, const int ByteLimit) override;
 
