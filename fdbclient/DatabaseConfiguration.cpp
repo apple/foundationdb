@@ -83,7 +83,7 @@ void parseReplicationPolicy(Reference<IReplicationPolicy>* policy, ValueRef cons
 
 void parse(std::vector<RegionInfo>* regions, ValueRef const& v) {
 	try {
-		StatusObject statusObj = BinaryReader::fromStringRef<StatusObject>(v, IncludeVersion());
+		auto statusObj = BinaryReader::fromStringRef<StatusObject>(v, IncludeVersion());
 		regions->clear();
 		if (statusObj["regions"].type() != json_spirit::array_type) {
 			return;

@@ -27,7 +27,7 @@ struct SidebandMessage {
 	uint64_t key;
 	Version commitVersion;
 
-	SidebandMessage() {}
+	SidebandMessage() = default;
 	SidebandMessage(uint64_t key, Version commitVersion) : key(key), commitVersion(commitVersion) {}
 
 	template <class Ar>

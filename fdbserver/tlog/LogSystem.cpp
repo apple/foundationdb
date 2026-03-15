@@ -75,7 +75,7 @@ void LogSet::populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTa
 	}
 
 	Reference<LocalitySet> serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int, int>>());
-	LocalityMap<std::pair<int, int>>* serverMap = (LocalityMap<std::pair<int, int>>*)serverSet.getPtr();
+	auto* serverMap = (LocalityMap<std::pair<int, int>>*)serverSet.getPtr();
 	std::vector<std::pair<int, int>> resultPairs;
 	for (int loc = 0; loc < satelliteTagLocations.size(); loc++) {
 		int team = loc;
@@ -269,7 +269,7 @@ void LogSet::getPushLocations(VectorRef<Tag> tags,
 	ASSERT(result);
 
 	// Add the new servers to the location array
-	LocalityMap<int>* logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
+	auto* logServerMap = (LocalityMap<int>*)logServerSet.getPtr();
 	for (auto entry : resultEntries) {
 		locations.push_back(locationOffset + *logServerMap->getObject(entry));
 	}

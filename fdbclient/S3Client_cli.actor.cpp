@@ -442,7 +442,7 @@ int main(int argc, char** argv) {
 				fprintf(stderr, "ERROR: proxy format should be either IP:port or host:port\n");
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			auto* pProxy = static_cast<Optional<std::string>*>(g_network->global(INetwork::enProxy));
 			*pProxy = param->proxy.get();
 		}
 

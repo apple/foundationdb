@@ -1,5 +1,5 @@
 /*
- * ResolutionBalancer.actor.cpp
+ * ResolutionBalancer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,8 +24,6 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "flow/flow.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 void ResolutionBalancer::setResolvers(const std::vector<ResolverInterface>& v) {
 	resolvers = v;
@@ -112,22 +110,22 @@ static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_res
 }
 
 // Balance key ranges among resolvers so that their load are evenly distributed.
-ACTOR Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* self) {
-	wait(self->triggerResolution.onTrigger());
+Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalancer* self) {
+	co_await self->triggerResolution.onTrigger();
 
-	state CoalescedKeyRangeMap<int> key_resolver(
+	CoalescedKeyRangeMap<int> key_resolver(
 	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
 	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
-	loop {
-		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
+	while (true) {
+		co_await delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics);
 		while (self->resolverChanges.get().size())
-			wait(self->resolverChanges.onChange());
-		state std::vector<Future<ResolutionMetricsReply>> futures;
+			co_await self->resolverChanges.onChange();
+		std::vector<Future<ResolutionMetricsReply>> futures;
 		for (auto& p : self->resolvers)
 			futures.push_back(
 			    brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
-		wait(waitForAll(futures));
-		state IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
+		co_await waitForAll(futures);
+		IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
 
 		int64_t total = 0;
 		for (int i = 0; i < futures.size(); i++) {
@@ -137,15 +135,15 @@ ACTOR Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalanc
 		}
 		if (metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE) {
 			try {
-				state int src = metrics.lastItem()->second;
-				state int dest = metrics.begin()->second;
-				state int64_t amount = std::min(metrics.lastItem()->first - total / self->resolvers.size(),
-				                                total / self->resolvers.size() - metrics.begin()->first) /
-				                       2;
-				state Standalone<VectorRef<ResolverMoveRef>> movedRanges;
+				int src = metrics.lastItem()->second;
+				int dest = metrics.begin()->second;
+				int64_t amount = std::min(metrics.lastItem()->first - total / self->resolvers.size(),
+				                          total / self->resolvers.size() - metrics.begin()->first) /
+				                 2;
+				Standalone<VectorRef<ResolverMoveRef>> movedRanges;
 
-				loop {
-					state std::pair<KeyRangeRef, bool> range = findRange(key_resolver, movedRanges, src, dest);
+				while (true) {
+					std::pair<KeyRangeRef, bool> range = findRange(key_resolver, movedRanges, src, dest);
 
 					ResolutionSplitRequest req;
 					req.front = range.second;
@@ -153,8 +151,8 @@ ACTOR Future<Void> ResolutionBalancer::resolutionBalancing_impl(ResolutionBalanc
 					req.range = range.first;
 
 					ResolutionSplitReply split =
-					    wait(brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(
-					        req, TaskPriority::ResolutionMetrics)));
+					    co_await brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(
+					        req, TaskPriority::ResolutionMetrics));
 					KeyRangeRef moveRange = range.second ? KeyRangeRef(range.first.begin, split.key)
 					                                     : KeyRangeRef(split.key, range.first.end);
 					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));

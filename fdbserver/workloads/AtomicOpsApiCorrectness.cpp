@@ -221,7 +221,7 @@ public:
 		}
 	}
 
-	typedef std::function<Value(Value, Value)> DoAtomicOpOnEmptyValueFunction;
+	using DoAtomicOpOnEmptyValueFunction = std::function<Value(Value, Value)>;
 
 	// Test Atomic Ops when one of the value is empty
 	Future<Void> testAtomicOpOnEmptyValue(Database cx,
@@ -295,7 +295,7 @@ public:
 		}
 	}
 
-	typedef std::function<uint64_t(uint64_t, uint64_t)> DoAtomicOpFunction;
+	using DoAtomicOpFunction = std::function<uint64_t(uint64_t, uint64_t)>;
 
 	// Test atomic ops in the normal case when the existing value is present
 	Future<Void> testAtomicOpApi(Database cx,

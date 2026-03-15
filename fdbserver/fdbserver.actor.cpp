@@ -2477,8 +2477,7 @@ int main(int argc, char* argv[]) {
 		} else if (role == ServerRole::FDBD) {
 			// Update the global blob credential files list so that both fast
 			// restore workers and backup workers can access blob storage.
-			std::vector<std::string>* pFiles =
-			    (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
+			auto* pFiles = static_cast<std::vector<std::string>*>(g_network->global(INetwork::enBlobCredentialFiles));
 			if (pFiles != nullptr) {
 				for (auto& f : opts.blobCredentials) {
 					pFiles->push_back(f);
@@ -2486,7 +2485,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			// Update proxy string
-			Optional<std::string>* pProxy = (Optional<std::string>*)g_network->global(INetwork::enProxy);
+			auto* pProxy = static_cast<Optional<std::string>*>(g_network->global(INetwork::enProxy));
 			*pProxy = opts.proxy;
 
 			// Call fast restore for the class FastRestoreClass. This is a short-cut to run fast restore in circus

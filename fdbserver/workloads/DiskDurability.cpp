@@ -28,7 +28,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	static constexpr auto NAME = "DiskDurability";
 	struct FileBlock {
 		FileBlock(int blockNum) : blockNum(blockNum), lastData(0), lock(new FlowLock(1)) {}
-		~FileBlock() {}
+		~FileBlock() = default;
 		int blockNum;
 		int64_t lastData;
 		Reference<FlowLock> lock;
@@ -96,7 +96,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 		syncInterval = (double)(getOption(options, "syncIntervalMs"_sr, 2000)) / 1000;
 	}
 
-	~DiskDurabilityWorkload() override {}
+	~DiskDurabilityWorkload() override = default;
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)

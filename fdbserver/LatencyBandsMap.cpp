@@ -1,5 +1,5 @@
 /*
- * LatencyBandsMap.actor.cpp
+ * LatencyBandsMap.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,13 +20,12 @@
 
 #include "fdbserver/core/LatencyBandsMap.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // must be last include
 
 class LatencyBandsMapImpl {
 public:
-	ACTOR static Future<Void> expireOldTagsActor(LatencyBandsMap* self) {
-		loop {
-			wait(delay(5.0));
+	static Future<Void> expireOldTagsActor(LatencyBandsMap* self) {
+		while (true) {
+			co_await delay(5.0);
 			for (auto it = self->map.begin(); it != self->map.end();) {
 				const auto& [tag, expirableBands] = *it;
 				if (now() - expirableBands.lastUpdated > SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER) {
@@ -80,21 +79,21 @@ void LatencyBandsMap::addThreshold(double value) {
 }
 
 TEST_CASE("/fdbserver/LatencyBandsMap/Simple") {
-	state LatencyBandsMap latencyBandsMap("TestLatencyBandsMap", deterministicRandom()->randomUniqueID(), 10.0, 100);
-	state Standalone<VectorRef<TransactionTagRef>> tags;
+	LatencyBandsMap latencyBandsMap("TestLatencyBandsMap", deterministicRandom()->randomUniqueID(), 10.0, 100);
+	Standalone<VectorRef<TransactionTagRef>> tags;
 	tags.push_back_deep(tags.arena(), "a"_sr);
 	tags.push_back_deep(tags.arena(), "b"_sr);
 	tags.push_back_deep(tags.arena(), "c"_sr);
 	latencyBandsMap.addThreshold(0.1);
 	latencyBandsMap.addThreshold(0.2);
 	latencyBandsMap.addThreshold(0.4);
-	state int measurements = 0;
-	loop {
-		wait(delayJittered(0.1));
+	int measurements = 0;
+	while (true) {
+		co_await delayJittered(0.1);
 		auto const tag = deterministicRandom()->randomChoice(tags);
 		latencyBandsMap.addMeasurement(tag, deterministicRandom()->random01());
 		if (++measurements == 1000) {
-			return Void();
+			co_return;
 		}
 	}
 }
@@ -109,7 +108,7 @@ TEST_CASE("/fdbserver/LatencyBandsMap/MaxSize") {
 }
 
 TEST_CASE("/fdbserver/LatencyBandsMap/Expire") {
-	state LatencyBandsMap latencyBandsMap("TestLatencyBandsMap", deterministicRandom()->randomUniqueID(), 10.0, 100);
+	LatencyBandsMap latencyBandsMap("TestLatencyBandsMap", deterministicRandom()->randomUniqueID(), 10.0, 100);
 	latencyBandsMap.addMeasurement("a"_sr, deterministicRandom()->random01());
 	latencyBandsMap.addMeasurement("b"_sr, deterministicRandom()->random01());
 	latencyBandsMap.addMeasurement("c"_sr, deterministicRandom()->random01());
@@ -117,9 +116,9 @@ TEST_CASE("/fdbserver/LatencyBandsMap/Expire") {
 	latencyBandsMap.addThreshold(0.2);
 	latencyBandsMap.addThreshold(0.4);
 	ASSERT_EQ(latencyBandsMap.size(), 3);
-	state int waitIterations = 0;
-	loop {
-		wait(delay(1.0));
+	int waitIterations = 0;
+	while (true) {
+		co_await delay(1.0);
 		latencyBandsMap.addMeasurement("a"_sr, deterministicRandom()->random01());
 		latencyBandsMap.addMeasurement("b"_sr, deterministicRandom()->random01());
 		if (++waitIterations == 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER) {
@@ -127,5 +126,4 @@ TEST_CASE("/fdbserver/LatencyBandsMap/Expire") {
 		}
 	}
 	ASSERT_EQ(latencyBandsMap.size(), 2);
-	return Void();
 }

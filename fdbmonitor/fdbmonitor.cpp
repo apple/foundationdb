@@ -453,7 +453,7 @@ int main(int argc, char** argv) {
 				}
 				break;
 			case EVFILT_READ:
-				Command* cmd = (Command*)ev.udata;
+				auto* cmd = (Command*)ev.udata;
 				for (int i = 0; i < 2; i++) {
 					if (ev.ident == cmd->pipes[i][0]) {
 						read_child_output(cmd, i, watched_fds);
@@ -570,7 +570,7 @@ int main(int argc, char** argv) {
 					log_err("read", errno, "Error reading inotify message");
 
 				while (i < len) {
-					struct inotify_event* event = (struct inotify_event*)&buf[i];
+					auto* event = (struct inotify_event*)&buf[i];
 
 					auto search = additional_watch_wds.find(event->wd);
 					if (event->wd != conffile_wd) {

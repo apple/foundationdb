@@ -122,9 +122,7 @@ struct MockS3GlobalStorage {
 
 	// Note: In FDB simulation, function-local statics are SHARED across all simulated processes
 	// because they all run on the same OS thread. This is exactly what we want for MockS3 storage.
-	MockS3GlobalStorage() {
-		// Note: Don't use TraceEvent in constructor - may be called before GlobalConfig is initialized
-	}
+	MockS3GlobalStorage() = default;
 
 	// Clear all stored data - called at the start of each simulation test to prevent
 	// data accumulation across multiple tests
@@ -608,9 +606,9 @@ public:
 	using MultipartUpload = MockS3GlobalStorage::MultipartUpload;
 
 	// Note: No TraceEvent here - constructor called before GlobalConfig is initialized
-	MockS3ServerImpl() {}
+	MockS3ServerImpl() = default;
 
-	~MockS3ServerImpl() {}
+	~MockS3ServerImpl() = default;
 
 	// S3 Operation Handlers
 	ACTOR static Future<Void> handleRequest(MockS3ServerImpl* self,

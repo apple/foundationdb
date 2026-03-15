@@ -266,7 +266,7 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		swift::Job* _Nullable swiftJob = nullptr;
-		PromiseTask() {}
+		PromiseTask() = default;
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
 		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
@@ -364,7 +364,7 @@ class BindPromise {
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(BindPromise const& r) = default;
 	BindPromise(BindPromise&& r) noexcept
 	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
@@ -814,10 +814,10 @@ private:
 	}
 };
 
-typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket&> ssl_socket;
+using ssl_socket = boost::asio::ssl::stream<boost::asio::ip::tcp::socket&>;
 
 struct SSLHandshakerThread final : IThreadPoolReceiver {
-	SSLHandshakerThread() {}
+	SSLHandshakerThread() = default;
 	void init() override {}
 
 	struct Handshake final : TypedAction<SSLHandshakerThread, Handshake> {
@@ -1608,8 +1608,8 @@ void Net2::run() {
 	}
 
 	// Get the address to the launch function
-	typedef void (*runCycleFuncPtr)();
-	runCycleFuncPtr runFunc = reinterpret_cast<runCycleFuncPtr>(
+	using runCycleFuncPtr = void (*)();
+	auto runFunc = reinterpret_cast<runCycleFuncPtr>(
 	    reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc)));
 
 	started.store(true);
@@ -1759,7 +1759,7 @@ void Net2::run() {
 			if (other_offset) {
 				size_t iter_offset = 0;
 				while (iter_offset < other_offset) {
-					ProfilingSample* ps = (ProfilingSample*)(other_backtraces + iter_offset);
+					auto* ps = (ProfilingSample*)(other_backtraces + iter_offset);
 					TraceEvent(SevWarn, "Net2RunLoopTrace")
 					    .detailf("TraceTime", "%.6f", ps->timestamp)
 					    .detail("Trace", platform::format_backtrace(ps->frames, ps->length));
@@ -1925,7 +1925,7 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	                     // as infinite
 		return Never();
 
-	PromiseTask* t = new PromiseTask;
+	auto* t = new PromiseTask;
 	if (seconds <= 0.) {
 		taskQueue.addReady(taskId, t);
 	} else {
@@ -1942,9 +1942,9 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 
 void Net2::_swiftEnqueue(void* _job) {
 #ifdef WITH_SWIFT
-	swift::Job* job = (swift::Job*)_job;
+	auto* job = (swift::Job*)_job;
 	TaskPriority priority = swift_priority_to_net2(job->getPriority());
-	PromiseTask* t = new PromiseTask(job);
+	auto* t = new PromiseTask(job);
 	taskQueue.addReady(priority, t);
 #endif
 }
@@ -1952,7 +1952,7 @@ void Net2::_swiftEnqueue(void* _job) {
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
 		return;
-	PromiseTask* p = new PromiseTask(std::move(signal));
+	auto* p = new PromiseTask(std::move(signal));
 	if (taskQueue.addReadyThreadSafe(isOnMainThread(), taskID, p)) {
 		reactor.wake();
 	}
@@ -2266,7 +2266,7 @@ struct TestGVR {
 	Optional<std::pair<UID, UID>> debugID;
 	Promise<Optional<Standalone<StringRef>>> reply;
 
-	TestGVR() {}
+	TestGVR() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -2280,7 +2280,7 @@ THREAD_HANDLE startThreadF(F&& func) {
 		F f;
 		Thing(F&& f) : f(std::move(f)) {}
 		THREAD_FUNC start(void* p) {
-			Thing* self = (Thing*)p;
+			auto* self = (Thing*)p;
 			self->f();
 			delete self;
 			THREAD_RETURN;

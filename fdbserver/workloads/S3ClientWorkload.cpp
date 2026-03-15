@@ -74,7 +74,7 @@ struct S3ClientWorkload : TestWorkload {
 		corruptionRate = getOption(options, "corruptionRate"_sr, 0.01);
 		maxDelay = getOption(options, "maxDelay"_sr, 2.0);
 	}
-	~S3ClientWorkload() {
+	~S3ClientWorkload() override {
 		if (pass) {
 			TraceEvent("S3ClientWorkloadPass");
 		} else {

@@ -94,7 +94,7 @@ class ThreadPool final : public IThreadPool, public ReferenceCounted<ThreadPool>
 
 public:
 	ThreadPool(int stackSize, int pri) : dontstop(ios), mode(Run), stackSize(stackSize), pri(pri) {}
-	~ThreadPool() override {}
+	~ThreadPool() override = default;
 	Future<Void> stop(Error const& e = success()) override {
 		if (mode == Shutdown)
 			return Void();

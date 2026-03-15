@@ -110,4 +110,9 @@ function(generate_grpc_protobuf pkg_name)
       APPEND_PATH ${out_rel_path}
       PROTOS ${proto_files}
   )
+
+  get_target_property(_generated_proto_sources ${target_name} SOURCES)
+  if(_generated_proto_sources)
+    set_source_files_properties(${_generated_proto_sources} PROPERTIES SKIP_LINTING ON)
+  endif()
 endfunction()

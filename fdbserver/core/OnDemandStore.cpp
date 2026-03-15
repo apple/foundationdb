@@ -1,5 +1,5 @@
 /*
- * OnDemandStore.actor.cpp
+ * OnDemandStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,12 +19,10 @@
  */
 
 #include "fdbserver/core/OnDemandStore.h"
-#include "flow/actorcompiler.h" // must be last include
 
-ACTOR static Future<Void> onErr(Future<Future<Void>> e) {
-	Future<Void> f = wait(e);
-	wait(f);
-	return Void();
+static Future<Void> onErr(Future<Future<Void>> e) {
+	Future<Void> f = co_await std::move(e);
+	co_await f;
 }
 
 void OnDemandStore::open() {
@@ -70,6 +68,7 @@ void OnDemandStore::dispose() {
 		store = nullptr;
 	}
 }
+
 void OnDemandStore::close() {
 	if (store) {
 		store->close();

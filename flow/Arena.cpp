@@ -107,7 +107,7 @@ void makeUndefined(void*, size_t) {}
 #endif
 } // namespace
 
-Arena::Arena() : impl(nullptr) {}
+Arena::Arena() = default;
 Arena::Arena(size_t reservedSize) : impl(0) {
 	UNSTOPPABLE_ASSERT(reservedSize < std::numeric_limits<int>::max());
 	static SimpleCounter<int64_t>* created = SimpleCounter<int64_t>::makeCounter("/flow/arena/arenasCreated");
@@ -271,7 +271,7 @@ size_t ArenaBlock::totalSize(std::unordered_set<ArenaBlock*>& visited) const {
 		static SimpleCounter<int64_t>* count =
 		    SimpleCounter<int64_t>::makeCounter("/flow/arena/totalSizeBlocksExamined");
 		count->increment(1);
-		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		auto* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 		if (r->aligned4kBufferSize != 0) {
 			totalSizeEstimate += r->aligned4kBufferSize;
@@ -314,7 +314,7 @@ void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 
 	int o = nextBlockOffset;
 	while (o) {
-		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
+		auto* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 
 		// If next is valid recursively count its blocks
@@ -341,7 +341,7 @@ int ArenaBlock::addUsed(int bytes) {
 }
 
 void ArenaBlock::makeReference(ArenaBlock* next) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	auto* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
 	makeDefined(r, sizeof(ArenaBlockRef));
 	r->aligned4kBufferSize = 0;
 	r->next = next;
@@ -353,7 +353,7 @@ void ArenaBlock::makeReference(ArenaBlock* next) {
 }
 
 void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
-	ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
+	auto* r = (ArenaBlockRef*)((char*)getData() + bigUsed);
 	makeDefined(r, sizeof(ArenaBlockRef));
 	r->aligned4kBufferSize = size;
 	r->aligned4kBuffer = allocateFast4kAligned(size);
@@ -533,7 +533,7 @@ void ArenaBlock::destroy() {
 		if (!b->isTiny()) {
 			int o = b->nextBlockOffset;
 			while (o) {
-				ArenaBlockRef* br = (ArenaBlockRef*)((char*)b->getData() + o);
+				auto* br = (ArenaBlockRef*)((char*)b->getData() + o);
 				makeDefined(br, sizeof(ArenaBlockRef));
 
 				// If aligned4kBuffer is valid, free it

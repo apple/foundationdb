@@ -376,7 +376,7 @@ Future<Void> MovableCoordinatedState::move(ClusterConnectionString const& nc) {
 
 Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey) {
 	Optional<Value> result;
-	MovableValue moveVal = BinaryReader::fromStringRef<MovableValue>(
+	auto moveVal = BinaryReader::fromStringRef<MovableValue>(
 	    movableVal, IncludeVersion(ProtocolVersion::withMovableCoordinatedStateV2()));
 	if (moveVal.other.present() && moveVal.other.get().startsWith(oldClusterKey)) {
 		TraceEvent(SevDebug, "UpdateCCSInMovableValue").detail("OldConnectionString", moveVal.other.get());

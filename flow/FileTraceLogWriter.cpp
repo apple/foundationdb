@@ -49,7 +49,7 @@
 #include <cmath>
 
 struct IssuesListImpl {
-	IssuesListImpl() {}
+	IssuesListImpl() = default;
 	void addIssue(std::string const& issue) {
 		MutexHolder h(mutex);
 		issues.insert(issue);
@@ -258,7 +258,7 @@ void FileTraceLogWriter::cleanupTraceFiles() {
 			std::sort(existingTraceFiles.begin(), existingTraceFiles.end(), std::greater<std::string>());
 
 			uint64_t runningTotal = 0;
-			std::vector<std::string>::iterator fileListIterator = existingTraceFiles.begin();
+			auto fileListIterator = existingTraceFiles.begin();
 
 			while (runningTotal < maxLogsSize && fileListIterator != existingTraceFiles.end()) {
 				runningTotal += (fileSize(joinPath(directory, *fileListIterator)) + FLOW_KNOBS->ZERO_LENGTH_FILE_PAD);

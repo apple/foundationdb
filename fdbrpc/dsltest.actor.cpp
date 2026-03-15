@@ -630,7 +630,7 @@ void showArena(ArenaBlock* a, ArenaBlock* parent) {
 	if (!a->isTiny()) {
 		int o = a->nextBlockOffset;
 		while (o) {
-			ArenaBlockRef* r = (ArenaBlockRef*)((char*)a->getData() + o);
+			auto* r = (ArenaBlockRef*)((char*)a->getData() + o);
 
 			// If alignedBuffer is valid then print its pointer and size, else recurse
 			if (r->aligned4kBufferSize != 0) {
@@ -978,7 +978,7 @@ ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b
 
 struct AddReply {
 	int sum;
-	AddReply() {}
+	AddReply() = default;
 	AddReply(int x) : sum(x) {}
 
 	template <class Ar>
@@ -991,7 +991,7 @@ struct AddRequest {
 	int a, b;
 	Promise<AddReply> reply; // Self-addressed envelope
 
-	AddRequest() {}
+	AddRequest() = default;
 	AddRequest(int a, int b) : a(a), b(b) {}
 
 	template <class Ar>

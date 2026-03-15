@@ -382,7 +382,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 };
 
 // Writes a log file in the old backup format, described in backup-dataFormat.md.
-// This is similar to the LogFileWriter in FileBackupAgent.actor.cpp.
+// This is similar to the LogFileWriter in FileBackupAgent.cpp.
 struct LogFileWriter {
 	LogFileWriter() : blockSize(-1) {}
 	LogFileWriter(Reference<IBackupFile> f, int bsize) : file(f), blockSize(bsize) {}

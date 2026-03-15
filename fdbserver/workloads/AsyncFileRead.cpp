@@ -183,7 +183,7 @@ struct AsyncFileReadWorkload : public AsyncFileWorkload {
 		fixedRate = getOption(options, "fixedRate"_sr, 0.0);
 	}
 
-	~AsyncFileReadWorkload() override {}
+	~AsyncFileReadWorkload() override = default;
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)

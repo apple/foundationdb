@@ -600,7 +600,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			incorrectTime = Optional<double>();
 		}
 
-		Optional<EncryptKeyProxyInterface> fakeEpkInterf;
 		RegisterWorkerRequest request(interf,
 		                              initialClass,
 		                              processClass,
@@ -608,7 +607,6 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
-		                              fakeEpkInterf,
 		                              csInterf->get(),
 		                              degraded->get(),
 		                              recoveredDiskFiles.isSet(),
@@ -2458,8 +2456,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 		loop choose {
 			when(UpdateServerDBInfoRequest req = waitNext(interf.updateServerDBInfo.getFuture())) {
-				ServerDBInfo localInfo = BinaryReader::fromStringRef<ServerDBInfo>(
-				    req.serializedDbInfo, AssumeVersion(g_network->protocolVersion()));
+				auto localInfo = BinaryReader::fromStringRef<ServerDBInfo>(req.serializedDbInfo,
+				                                                           AssumeVersion(g_network->protocolVersion()));
 				localInfo.myLocality = locality;
 
 				if (localInfo.infoGeneration < dbInfo->get().infoGeneration &&

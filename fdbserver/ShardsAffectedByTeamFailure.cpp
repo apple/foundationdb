@@ -260,11 +260,11 @@ void ShardsAffectedByTeamFailure::removeFailedServerForRange(KeyRangeRef keys, c
 	auto rs = shard_teams.intersectingRanges(keys);
 	for (auto it = rs.begin(); it != rs.end(); ++it) {
 		// first team vector
-		for (std::vector<Team>::iterator t = it->value().first.begin(); t != it->value().first.end(); ++t) {
+		for (auto t = it->value().first.begin(); t != it->value().first.end(); ++t) {
 			removeFailedServerForSingleRange(*t, serverID, it->range());
 		}
 		// second team vector
-		for (std::vector<Team>::iterator t = it->value().second.begin(); t != it->value().second.end(); ++t) {
+		for (auto t = it->value().second.begin(); t != it->value().second.end(); ++t) {
 			removeFailedServerForSingleRange(*t, serverID, it->range());
 		}
 	}

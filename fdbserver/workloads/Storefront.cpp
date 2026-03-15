@@ -27,7 +27,7 @@
 // Items table will have an entry for each item and the current total of "unfilled" orders
 // Orders table will have an entry for each order with a 16-character representation list of each item ordered
 
-typedef uint64_t orderID;
+using orderID = uint64_t;
 
 struct StorefrontWorkload : TestWorkload {
 	static constexpr auto NAME = "Storefront";
@@ -212,7 +212,7 @@ struct StorefrontWorkload : TestWorkload {
 
 	Future<bool> inventoryCheck(Database cx, StorefrontWorkload* self, bool ok) {
 		std::vector<Future<bool>> checkers;
-		std::map<orderID, std::map<int, int>>::iterator it(self->orders.begin());
+		auto it = self->orders.begin();
 		while (it != self->orders.end()) {
 			for (int a = 0; a < self->actorCount && it != self->orders.end(); a++) {
 				std::vector<orderID> orderIDs;

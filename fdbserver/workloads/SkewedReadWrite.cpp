@@ -42,7 +42,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	double hotReadWriteServerOverlap; // the portion of intersection of write and hot server
 
 	// hot server state
-	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
+	using IndexRangeVec = std::vector<std::pair<int64_t, int64_t>>;
 	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
 	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
 	std::map<UID, StorageServerInterface> serverInterfaces;

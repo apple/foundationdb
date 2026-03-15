@@ -833,7 +833,7 @@ ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newCl
 			store->set(KeyValueRef(newClusterKey, value));
 		} else {
 			// parse the value part
-			GenerationRegVal regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
+			auto regVal = BinaryReader::fromStringRef<GenerationRegVal>(value, IncludeVersion());
 			if (regVal.val.present()) {
 				Optional<Value> newVal = updateCCSInMovableValue(regVal.val.get(), oldClusterKey, newClusterKey);
 				if (newVal.present()) {

@@ -96,7 +96,7 @@ struct AlternativeTLogQueueEntryRef {
 	}
 };
 
-typedef Standalone<TLogQueueEntryRef> TLogQueueEntry;
+using TLogQueueEntry = Standalone<TLogQueueEntryRef>;
 struct LogData;
 struct TLogData;
 
@@ -3308,10 +3308,10 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		DUMPTOKEN(recruited.enablePopRequest);
 		DUMPTOKEN(recruited.snapRequest);
 
-		ProtocolVersion protocolVersion =
+		auto protocolVersion =
 		    BinaryReader::fromStringRef<ProtocolVersion>(fProtocolVersions.get()[idx].value, Unversioned());
-		TLogSpillType logSpillType = BinaryReader::fromStringRef<TLogSpillType>(fTLogSpillTypes.get()[idx].value,
-		                                                                        AssumeVersion(protocolVersion));
+		auto logSpillType = BinaryReader::fromStringRef<TLogSpillType>(fTLogSpillTypes.get()[idx].value,
+		                                                               AssumeVersion(protocolVersion));
 
 		// We do not need the remoteTag, because we will not be loading any additional data
 		logData = makeReference<LogData>(self,
@@ -3868,10 +3868,10 @@ template <class T>
 struct DequeAllocator : std::allocator<T> {
 	template <typename U>
 	struct rebind {
-		typedef DequeAllocator<U> other;
+		using other = DequeAllocator<U>;
 	};
 
-	DequeAllocator() {}
+	DequeAllocator() = default;
 
 	template <typename U>
 	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
@@ -3895,7 +3895,7 @@ struct DequeAllocator : std::allocator<T> {
 
 TEST_CASE("Lfdbserver/tlogserver/VersionMessagesOverheadFactor") {
 
-	typedef std::pair<Version, LengthPrefixedStringRef> TestType; // type used by versionMessages
+	using TestType = std::pair<Version, LengthPrefixedStringRef>; // type used by versionMessages
 
 	for (int i = 1; i < 9; ++i) {
 		for (int j = 0; j < 20; ++j) {

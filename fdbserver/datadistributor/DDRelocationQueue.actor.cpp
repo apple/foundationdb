@@ -42,8 +42,8 @@
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!
 
-typedef Reference<IDataDistributionTeam> ITeamRef;
-typedef std::pair<ITeamRef, ITeamRef> SrcDestTeamPair;
+using ITeamRef = Reference<IDataDistributionTeam>;
+using SrcDestTeamPair = std::pair<ITeamRef, ITeamRef>;
 
 inline bool isDataMovementForDiskBalancing(DataMovementReason reason) {
 	return reason == DataMovementReason::REBALANCE_UNDERUTILIZED_TEAM ||

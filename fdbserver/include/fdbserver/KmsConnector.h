@@ -29,8 +29,7 @@
 // FDB encryption needs to interact with external Key Management Services (KMS) solutions to lookup/refresh encryption
 // keys. KmsConnector interface is an abstract interface enabling implementing specialized KMS connector
 // implementations.
-// FDB KMSConnector implementation should inherit from KmsConnector and implement pure virtual function,
-// EncryptKeyProxyServer instantiates desired implementation object based on SERVER_KNOB->KMS_CONNECTOR_TYPE knob.
+// FDB KMSConnector implementations should inherit from KmsConnector and implement the pure virtual function below.
 
 class KmsConnector : public NonCopyable {
 public:

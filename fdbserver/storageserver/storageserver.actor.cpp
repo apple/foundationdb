@@ -295,8 +295,7 @@ ACTOR Future<Void> MoveInUpdates::loadUpdates(MoveInUpdates* self, Version begin
 	std::vector<Standalone<VerUpdateRef>> restored;
 	for (int i = 0; i < res.size(); ++i) {
 		const Version version = decodePersistUpdateVersion(res[i].key.removePrefix(self->range.begin));
-		Standalone<VerUpdateRef> vur =
-		    BinaryReader::fromStringRef<Standalone<VerUpdateRef>>(res[i].value, IncludeVersion());
+		auto vur = BinaryReader::fromStringRef<Standalone<VerUpdateRef>>(res[i].value, IncludeVersion());
 		ASSERT(version == vur.version);
 		TraceEvent(self->logSev, "MoveInUpdatesLoadedMutations", self->id)
 		    .detail("Version", version)
@@ -847,7 +846,7 @@ private:
 };
 
 struct StorageServer : public IStorageMetricsService {
-	typedef VersionedMap<KeyRef, ValueOrClearToRef> VersionedData;
+	using VersionedData = VersionedMap<KeyRef, ValueOrClearToRef>;
 
 private:
 	// versionedData contains sets and clears.
@@ -2507,7 +2506,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	}
 
 	try {
-		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
+		auto it = self->checkpoints.begin();
 		for (; it != self->checkpoints.end(); ++it) {
 			const CheckpointMetaData& md = it->second;
 			if (md.version == req.version && md.format == req.format && req.actionId == md.actionId &&
@@ -7320,7 +7319,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// in WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive
 					// and could get more expensive if we started having many more blocks per shard. May need
 					// optimization in the future.
-					std::deque<Standalone<VerUpdateRef>>::iterator u = updatesToSplit.begin();
+					auto u = updatesToSplit.begin();
 					for (; u != updatesToSplit.end(); ++u) {
 						splitMutations(data, data->shards, *u);
 					}
@@ -8511,8 +8510,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 		    shardLoc + 1 == storageShards.size()
 		        ? allKeys.end
 		        : storageShards[shardLoc + 1].key.removePrefix(persistStorageServerShardKeys.begin));
-		StorageServerShard shard =
-		    ObjectReader::fromStringRef<StorageServerShard>(storageShards[shardLoc].value, IncludeVersion());
+		auto shard = ObjectReader::fromStringRef<StorageServerShard>(storageShards[shardLoc].value, IncludeVersion());
 		shard.range = shardRange;
 		TraceEvent(SevVerbose, "RestoreShardsStorageShard", data->thisServerID)
 		    .detail("Range", shardRange)
@@ -8536,7 +8534,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 
 		auto ranges = data->shards.getAffectedRangesAfterInsertion(shard.range, Reference<ShardInfo>());
 		for (int i = 0; i < ranges.size(); i++) {
-			KeyRangeRef& range = static_cast<KeyRangeRef&>(ranges[i]);
+			auto& range = static_cast<KeyRangeRef&>(ranges[i]);
 			TraceEvent(SevVerbose, "RestoreShardsAddShard", data->thisServerID)
 			    .detail("Shard", shard.toString())
 			    .detail("Range", range);

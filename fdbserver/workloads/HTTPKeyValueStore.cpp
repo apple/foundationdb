@@ -149,7 +149,7 @@ struct KeyValueRequestHandler : HTTP::IRequestHandler, ReferenceCounted<KeyValue
 	// global kv store for all request handler instances during simulation
 	Reference<SimHTTPKVStore> myKVStore;
 
-	KeyValueRequestHandler() {}
+	KeyValueRequestHandler() = default;
 
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override {

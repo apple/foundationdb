@@ -59,13 +59,11 @@
 #include "flow/Trace.h"
 #include "flow/CoroUtils.h"
 
-WorkloadContext::WorkloadContext() {}
+WorkloadContext::WorkloadContext() = default;
 
-WorkloadContext::WorkloadContext(const WorkloadContext& r)
-  : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo), ccr(r.ccr), rangesToCheck(r.rangesToCheck) {}
+WorkloadContext::WorkloadContext(const WorkloadContext& r) = default;
 
-WorkloadContext::~WorkloadContext() {}
+WorkloadContext::~WorkloadContext() = default;
 
 const char HEX_CHAR_LOOKUP[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
 

@@ -1561,7 +1561,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						wait(krmSetRangeCoalescing(
 						    &tr, keyServersPrefix, currentKeys, keys, keyServersValue(UIDtoTagMap, dest)));
 
-						std::set<UID>::iterator asi = allServers.begin();
+						auto asi = allServers.begin();
 						std::vector<Future<Void>> actors;
 						while (asi != allServers.end()) {
 							bool destHasServer = std::find(dest.begin(), dest.end(), *asi) != dest.end();
