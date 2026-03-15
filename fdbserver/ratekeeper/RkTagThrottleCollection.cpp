@@ -20,7 +20,7 @@
  */
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/ratekeeper/RkTagThrottleCollection.h"
+#include "fdbserver/ratekeeper/include/fdbserver/ratekeeper/RkTagThrottleCollection.h"
 
 double RkTagThrottleCollection::RkTagThrottleData::getTargetRate(Optional<double> requestRate) const {
 	if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
