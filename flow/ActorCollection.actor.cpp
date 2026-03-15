@@ -29,7 +29,7 @@ struct Runner : public boost::intrusive::list_base_hook<>, FastAllocated<Runner>
 };
 
 // An intrusive list of Runners, which are FastAllocated.  Each runner holds a handler future
-typedef boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>> RunnerList;
+using RunnerList = boost::intrusive::list<Runner, boost::intrusive::constant_time_size<false>>;
 
 // The runners list in the ActorCollection must be destroyed when the actor is destructed rather
 // than before returning or throwing

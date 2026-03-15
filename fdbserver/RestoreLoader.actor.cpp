@@ -37,7 +37,7 @@
 // Key is the signature/version of the mutation list; Value.first is the mutation list which may come from multiple
 // data blocks of log file; Value.second is the largest part number of the mutation list, which is used to sanity check
 // the data blocks for the same mutation list are concatenated in increasing order of part number.
-typedef std::map<Standalone<StringRef>, std::pair<Standalone<StringRef>, uint32_t>> SerializedMutationListMap;
+using SerializedMutationListMap = std::map<Standalone<StringRef>, std::pair<Standalone<StringRef>, uint32_t>>;
 
 std::vector<UID> getApplierIDs(std::map<Key, UID>& rangeToApplier);
 void splitMutation(const KeyRangeMap<UID>& krMap,
@@ -807,8 +807,8 @@ ACTOR Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequ
 }
 
 void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToApplier) {
-	std::map<Key, UID>::iterator beginKey = pRangeToApplier->begin();
-	std::map<Key, UID>::iterator endKey = std::next(beginKey, 1);
+	auto beginKey = pRangeToApplier->begin();
+	auto endKey = std::next(beginKey, 1);
 	while (endKey != pRangeToApplier->end()) {
 		krMap->insert(KeyRangeRef(beginKey->first, endKey->first), beginKey->second);
 		beginKey = endKey;
@@ -929,7 +929,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 					kvCount++;
 				}
 			} else { // mutation operates on a particular key
-				std::map<Key, UID>::iterator itlow = pRangeToApplier->upper_bound(kvm.param1);
+				auto itlow = pRangeToApplier->upper_bound(kvm.param1);
 				--itlow; // make sure itlow->first <= m.param1
 				ASSERT(itlow->first <= kvm.param1);
 				UID applierID = itlow->second;

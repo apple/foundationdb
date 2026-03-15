@@ -197,7 +197,7 @@ struct PageChecksumCodec {
 	}
 
 	static void* codec(void* vpSelf, void* data, Pgno pageNumber, int op) {
-		PageChecksumCodec* self = (PageChecksumCodec*)vpSelf;
+		auto* self = (PageChecksumCodec*)vpSelf;
 
 		// Page write operations are 6 for DB page and 7 for journal page
 		bool write = (op == 6 || op == 7);
@@ -239,13 +239,13 @@ struct PageChecksumCodec {
 	}
 
 	static void sizeChange(void* vpSelf, int new_pageSize, int new_reserveSize) {
-		PageChecksumCodec* self = (PageChecksumCodec*)vpSelf;
+		auto* self = (PageChecksumCodec*)vpSelf;
 		self->pageSize = new_pageSize;
 		self->reserveSize = new_reserveSize;
 	}
 
 	static void free(void* vpSelf) {
-		PageChecksumCodec* self = (PageChecksumCodec*)vpSelf;
+		auto* self = (PageChecksumCodec*)vpSelf;
 		delete self;
 	}
 };

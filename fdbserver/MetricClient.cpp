@@ -65,19 +65,19 @@ void UDPMetricClient::send(MetricCollection* metrics) {
 
 		// Define custom serialize functions
 		auto f_sums = [](const std::vector<OTEL::OTELSum>& vec, MsgpackBuffer& buf) {
-			typedef void (*func_ptr)(const OTEL::OTELSum&, MsgpackBuffer&);
+			using func_ptr = void (*)(const OTEL::OTELSum&, MsgpackBuffer&);
 			func_ptr f = OTEL::serialize;
 			serialize_vector(vec, buf, f);
 		};
 
 		auto f_hists = [](const std::vector<OTEL::OTELHistogram>& vec, MsgpackBuffer& buf) {
-			typedef void (*func_ptr)(const OTEL::OTELHistogram&, MsgpackBuffer&);
+			using func_ptr = void (*)(const OTEL::OTELHistogram&, MsgpackBuffer&);
 			func_ptr f = OTEL::serialize;
 			serialize_vector(vec, buf, f);
 		};
 
 		auto f_gauge = [](const std::vector<OTEL::OTELGauge>& vec, MsgpackBuffer& buf) {
-			typedef void (*func_ptr)(const OTEL::OTELGauge&, MsgpackBuffer&);
+			using func_ptr = void (*)(const OTEL::OTELGauge&, MsgpackBuffer&);
 			func_ptr f = OTEL::serialize;
 			serialize_vector(vec, buf, f);
 		};

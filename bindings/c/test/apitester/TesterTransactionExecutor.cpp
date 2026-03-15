@@ -503,7 +503,7 @@ protected:
 
 	static void futureReadyCallback(fdb::Future f, void* param) {
 		try {
-			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
+			auto* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onFutureReady(f);
 		} catch (std::exception& err) {
 			fmt::print("Unexpected exception in callback {}\n", err.what());
@@ -565,7 +565,7 @@ protected:
 
 	static void onErrorReadyCallback(fdb::Future f, void* param) {
 		try {
-			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
+			auto* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onErrorReady(f);
 		} catch (std::exception& err) {
 			fmt::print("Unexpected exception in callback {}\n", err.what());

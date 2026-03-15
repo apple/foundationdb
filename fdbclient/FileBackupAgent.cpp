@@ -238,7 +238,7 @@ std::string secondsToTimeFormat(int64_t seconds) {
 const Key FileBackupAgent::keyLastRestorable = "last_restorable"_sr;
 
 // For convenience
-typedef FileBackupAgent::ERestoreState ERestoreState;
+using ERestoreState = FileBackupAgent::ERestoreState;
 
 StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 	switch (id) {
@@ -420,7 +420,7 @@ public:
 		}
 	};
 
-	typedef KeyBackedSet<RestoreFile> FileSetT;
+	using FileSetT = KeyBackedSet<RestoreFile>;
 	FileSetT fileSet() { return configSpace.pack(__FUNCTION__sr); }
 
 	FileSetT logFileSet() { return configSpace.pack(__FUNCTION__sr); }
@@ -555,7 +555,7 @@ public:
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) { return getFullStatus_impl(*this, tr); }
 };
 
-typedef RestoreConfig::RestoreFile RestoreFile;
+using RestoreFile = RestoreConfig::RestoreFile;
 
 Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1415,7 +1415,7 @@ struct RangeFileWriter : public IRangeFileWriter {
 	}
 
 	// Used in simulation only to create backup file sizes which are an integer multiple of the block size
-	Future<Void> padEnd(bool final) {
+	Future<Void> padEnd(bool final) override {
 		ASSERT(g_network->isSimulated());
 		if (file->size() > 0) {
 			return newBlock(this, 0, final);
@@ -1441,7 +1441,7 @@ struct RangeFileWriter : public IRangeFileWriter {
 		co_return;
 	}
 
-	Future<Void> writeKV(Key k, Value v) { return writeKV_impl(this, k, v); }
+	Future<Void> writeKV(Key k, Value v) override { return writeKV_impl(this, k, v); }
 
 	// Write begin key or end key.
 	static Future<Void> writeKey_impl(RangeFileWriter* self, Key k) {
@@ -1451,9 +1451,9 @@ struct RangeFileWriter : public IRangeFileWriter {
 		co_return;
 	}
 
-	Future<Void> writeKey(Key k) { return writeKey_impl(this, k); }
+	Future<Void> writeKey(Key k) override { return writeKey_impl(this, k); }
 
-	Future<Void> finish() { return Void(); }
+	Future<Void> finish() override { return Void(); }
 
 	Reference<IBackupFile> file;
 	int blockSize;
@@ -4232,7 +4232,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				// If bulkDumpJobId is empty, read it from the snapshot file metadata
 				if (bulkDumpJobId.empty()) {
 					// Use the backup container we already opened to find the snapshot file for our restore version
-					BackupContainerFileSystem* bcfsPtr = dynamic_cast<BackupContainerFileSystem*>(bcRef.getPtr());
+					auto* bcfsPtr = dynamic_cast<BackupContainerFileSystem*>(bcRef.getPtr());
 					if (bcfsPtr != nullptr) {
 						Reference<BackupContainerFileSystem> bcfs =
 						    Reference<BackupContainerFileSystem>::addRef(bcfsPtr);
@@ -6241,7 +6241,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		Key doneKey = co_await completionKey.get(tr, taskBucket);
 
 		// Use high priority for dispatch tasks that have to queue more blocks for the current batch
-		unsigned int priority = (remainingInBatch > 0) ? 1 : 0;
+		auto priority = (remainingInBatch > 0) ? 1u : 0u;
 		Reference<Task> task(
 		    new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
 

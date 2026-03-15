@@ -307,7 +307,7 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
-	~RocksDBErrorListener() {
+	~RocksDBErrorListener() override {
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;

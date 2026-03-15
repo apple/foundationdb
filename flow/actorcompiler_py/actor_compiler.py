@@ -227,7 +227,7 @@ class DescrCompiler:
         writer.write(
             f'{indent}\tstatic StringRef typeName() {{ return "{self.descr.name}"_sr; }}\n'
         )
-        writer.write(f"{indent}\ttypedef {self.descr.name} type;\n")
+        writer.write(f"{indent}\tusing type = {self.descr.name};\n")
         lines += 3
         for dec in self.descr.body:
             writer.write(f"{indent}\tstruct {dec.name}Descriptor {{\n")
@@ -240,22 +240,22 @@ class DescrCompiler:
             writer.write(
                 f'{indent}\t\tstatic StringRef comment() {{ return "{dec.comment}"_sr; }}\n'
             )
-            writer.write(f"{indent}\t\ttypedef {dec.type} type;\n")
+            writer.write(f"{indent}\t\tusing type = {dec.type};\n")
             writer.write(
                 f"{indent}\t\tstatic inline type get({self.descr.name}& from);\n"
             )
             writer.write(f"{indent}\t}};\n")
             lines += 7
-        writer.write(f"{indent}\ttypedef std::tuple<")
+        writer.write(f"{indent}\tusing fields = std::tuple<")
         first = True
         for dec in self.descr.body:
             if not first:
                 writer.write(",")
             writer.write(f"{dec.name}Descriptor")
             first = False
-        writer.write("> fields;\n")
+        writer.write(">;\n")
         writer.write(
-            f"{indent}\ttypedef make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type field_indexes;\n"
+            f"{indent}\tusing field_indexes = make_index_sequence_impl<0, index_sequence<>, std::tuple_size<fields>::value>::type;\n"
         )
         writer.write(f"{indent}}};\n")
         if self.descr.super_class_list:

@@ -106,8 +106,8 @@ Key TagThrottleKey::toKey() const {
 
 TagThrottleKey TagThrottleKey::fromKey(const KeyRef& key) {
 	const uint8_t* str = key.substr(tagThrottleKeysPrefix.size()).begin();
-	TagThrottleType throttleType = TagThrottleType(*(str++));
-	TransactionPriority priority = TransactionPriority(*(str++));
+	auto throttleType = TagThrottleType(*(str++));
+	auto priority = TransactionPriority(*(str++));
 	TagSet tags;
 
 	while (str < key.end()) {
