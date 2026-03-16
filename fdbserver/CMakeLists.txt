@@ -6,35 +6,8 @@ function(configure_fdbserver_common_includes target_name)
     ${CMAKE_BINARY_DIR}/bindings/c)
 endfunction()
 
-function(configure_fdbserver_executable_role_includes target_name)
-  target_include_directories(${target_name} PRIVATE
-    ${CMAKE_SOURCE_DIR}/fdbserver/restoreworker/include
-    ${CMAKE_BINARY_DIR}/fdbserver/restoreworker/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/clustercontroller/include
-    ${CMAKE_BINARY_DIR}/fdbserver/clustercontroller/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/commitproxy/include
-    ${CMAKE_BINARY_DIR}/fdbserver/commitproxy/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/coordinator/include
-    ${CMAKE_BINARY_DIR}/fdbserver/coordinator/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/datadistributor/include
-    ${CMAKE_BINARY_DIR}/fdbserver/datadistributor/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/grvproxy/include
-    ${CMAKE_BINARY_DIR}/fdbserver/grvproxy/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/ratekeeper/include
-    ${CMAKE_BINARY_DIR}/fdbserver/ratekeeper/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include
-    ${CMAKE_BINARY_DIR}/fdbserver/sequencer/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/storageserver/include
-    ${CMAKE_BINARY_DIR}/fdbserver/storageserver/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/tester/include
-    ${CMAKE_BINARY_DIR}/fdbserver/tester/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/tlog/include
-    ${CMAKE_BINARY_DIR}/fdbserver/tlog/include)
-endfunction()
-
 function(configure_fdbserver_target_includes target_name)
   configure_fdbserver_common_includes(${target_name})
-  configure_fdbserver_executable_role_includes(${target_name})
   target_include_directories(${target_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
