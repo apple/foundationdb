@@ -107,9 +107,6 @@
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/genericactors.actor.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/ratekeeper/Ratekeeper.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #ifndef __INTEL_COMPILER

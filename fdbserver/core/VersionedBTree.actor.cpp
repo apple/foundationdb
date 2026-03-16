@@ -27,7 +27,7 @@
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/IPager.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/VersionedBTreeDebug.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"

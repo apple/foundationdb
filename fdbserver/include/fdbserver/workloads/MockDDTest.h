@@ -21,8 +21,8 @@
 #define FOUNDATIONDB_MOCKDDTEST_H
 
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/DDSharedContext.h"
-#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 

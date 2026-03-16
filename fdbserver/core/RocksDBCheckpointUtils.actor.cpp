@@ -37,7 +37,7 @@
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"

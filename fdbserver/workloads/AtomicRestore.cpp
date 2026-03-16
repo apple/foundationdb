@@ -22,7 +22,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainerFileSystem.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"

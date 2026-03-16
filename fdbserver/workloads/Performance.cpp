@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "flow/CoroUtils.h"
 
 // TODO: explain purpose of this workload. Obviously simulation is aimed at correctness,

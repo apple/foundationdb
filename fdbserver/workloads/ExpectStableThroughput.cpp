@@ -2,7 +2,7 @@
  * ExpectStableThroughput.cpp
  */
 
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
 
 // This workload is meant to be run with the ThroughputQuotaWorklaod.

@@ -44,7 +44,7 @@
 
 #endif // WITH_ROCKSDB
 
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/RocksDBCommon.h"

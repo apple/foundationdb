@@ -26,7 +26,7 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/ApplyMetadataMutation.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/LogSystem.h"
 #include "flow/Error.h"

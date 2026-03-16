@@ -23,7 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/mocks3/MockS3ServerChaos.h"

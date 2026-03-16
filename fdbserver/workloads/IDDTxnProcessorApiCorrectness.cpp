@@ -20,12 +20,12 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/DDSharedContext.h"
-#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 
 std::string describe(const DDShardInfo& a) {

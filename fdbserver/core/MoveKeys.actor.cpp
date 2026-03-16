@@ -31,7 +31,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "fdbserver/core/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 

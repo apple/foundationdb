@@ -20,7 +20,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/workloads.actor.h"
-#include <fdbserver/Knobs.h>
+#include "fdbserver/core/Knobs.h"
 
 namespace {
 

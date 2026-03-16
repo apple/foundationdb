@@ -58,7 +58,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/MoveKeys.actor.h"

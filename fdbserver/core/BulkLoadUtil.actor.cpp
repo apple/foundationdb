@@ -23,7 +23,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/S3Client.actor.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "flow/genericactors.actor.h"

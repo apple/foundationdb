@@ -25,11 +25,11 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IRandom.h"
 
