@@ -40,7 +40,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/ApplyMetadataMutation.h"
-#include "fdbserver/core/ConflictSet.h"
+#include "fdbserver/core/ConflictBatch.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
@@ -1085,7 +1085,7 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	// Thus, we use this nextTr to track the correct transaction index on each resolver.
 	self->nextTr.resize(self->resolution.size());
 	for (int t = 0; t < trs.size(); t++) {
-		uint8_t commit = ConflictBatch::TransactionCommitted;
+		uint8_t commit = ConflictBatchStatus::TransactionCommitted;
 		for (int r : self->transactionResolverMap[t]) {
 			commit = std::min(self->resolution[r].committed[self->nextTr[r]++], commit);
 		}
@@ -1103,7 +1103,7 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	    pProxyCommitData->txnStateStore->readValue(mustContainSystemMutationsKey).get();
 	if (mustContainSystemKey.present() && mustContainSystemKey.get().size()) {
 		for (int t = 0; t < trs.size(); t++) {
-			if (self->committed[t] == ConflictBatch::TransactionCommitted) {
+			if (self->committed[t] == ConflictBatchStatus::TransactionCommitted) {
 				bool foundSystem = false;
 				for (auto& m : trs[t].transaction.mutations) {
 					if ((m.type == MutationRef::ClearRange ? m.param2 : m.param1) >= nonMetadataSystemKeys.end) {
@@ -1112,7 +1112,7 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 					}
 				}
 				if (!foundSystem) {
-					self->committed[t] = ConflictBatch::TransactionConflict;
+					self->committed[t] = ConflictBatchStatus::TransactionConflict;
 				}
 			}
 		}
@@ -1127,7 +1127,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
-		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
+		if (self->committed[t] == ConflictBatchStatus::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
@@ -1143,7 +1143,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		}
 
 		if (self->firstStateMutations) {
-			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
+			ASSERT(self->committed[t] == ConflictBatchStatus::TransactionCommitted);
 			self->firstStateMutations = false;
 			self->forceRecovery = false;
 		}
@@ -1151,7 +1151,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	if (self->forceRecovery) {
 		for (; t < trs.size(); t++)
-			self->committed[t] = ConflictBatch::TransactionConflict;
+			self->committed[t] = ConflictBatchStatus::TransactionConflict;
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", pProxyCommitData->dbgid).detail("Stage", "AwaitCommit");
 	}
 	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
@@ -1277,7 +1277,7 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 	ASSERT(pProxyCommitData->rangeLock != nullptr);
 	std::vector<CommitTransactionRequest>& trs = self->trs;
 	for (int i = self->transactionNum; i < trs.size(); i++) {
-		if (self->committed[i] != ConflictBatch::TransactionCommitted) {
+		if (self->committed[i] != ConflictBatchStatus::TransactionCommitted) {
 			continue;
 		} else if (trs[i].isLockAware()) {
 			continue; // rangeLock is transparent to lock-aware transactions
@@ -1293,7 +1293,7 @@ void rejectMutationsForReadLockOnRange(CommitBatchContext* self) {
 			}
 			bool shouldReject = pProxyCommitData->rangeLock->isLocked(rangeToCheck);
 			if (shouldReject) {
-				self->committed[i] = ConflictBatch::TransactionLockReject;
+				self->committed[i] = ConflictBatchStatus::TransactionLockReject;
 				trs[i].reply.sendError(transaction_rejected_range_locked());
 				break;
 			}
@@ -1308,7 +1308,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
 
 	for (; self->transactionNum < trs.size(); self->transactionNum++) {
-		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted &&
+		if (!(self->committed[self->transactionNum] == ConflictBatchStatus::TransactionCommitted &&
 		      (!self->locked || trs[self->transactionNum].isLockAware()))) {
 			continue;
 		}
@@ -1580,7 +1580,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	                            self->idempotencyKVBuilder,
 	                            self->commitVersion,
 	                            self->committed,
-	                            ConflictBatch::TransactionCommitted,
+	                            ConflictBatchStatus::TransactionCommitted,
 	                            self->locked,
 	                            [&](const KeyValue& kv) {
 		                            MutationRef idempotencyIdSet;
@@ -1908,15 +1908,15 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	std::unordered_map<uint8_t, int16_t> idCountsForKey;
 	for (int t = 0; t < self->trs.size(); t++) {
 		auto& tr = self->trs[t];
-		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || tr.isLockAware())) {
+		if (self->committed[t] == ConflictBatchStatus::TransactionCommitted && (!self->locked || tr.isLockAware())) {
 			ASSERT_WE_THINK(self->commitVersion != invalidVersion);
 			if (self->trs[t].idempotencyId.valid()) {
 				idCountsForKey[uint8_t(t >> 8)] += 1;
 			}
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
-		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
+		} else if (self->committed[t] == ConflictBatchStatus::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
-		} else if (self->committed[t] == ConflictBatch::TransactionLockReject) {
+		} else if (self->committed[t] == ConflictBatchStatus::TransactionLockReject) {
 			// We already sent the error
 			ASSERT(tr.reply.isSet());
 		} else {

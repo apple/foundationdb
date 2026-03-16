@@ -1,5 +1,5 @@
 /*
- * SkipList.cpp
+ * ConflictSet.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -32,7 +32,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/core/ConflictSet.h"
+#include "fdbserver/resolver/ConflictSet.h"
 #include "flow/UnitTest.h"
 
 static std::vector<PerfDoubleCounter*> skc;

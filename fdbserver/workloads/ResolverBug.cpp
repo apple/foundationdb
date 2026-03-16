@@ -19,7 +19,7 @@
  */
 #include "flow/ProcessEvents.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/core/ResolverBug.h"
+#include "fdbserver/resolver/ResolverBug.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 
 namespace {

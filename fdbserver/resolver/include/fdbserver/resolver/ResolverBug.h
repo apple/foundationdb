@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_RESOLVER_BUG_H
-#define FDBSERVER_RESOLVER_BUG_H
+#ifndef FDBSERVER_RESOLVER_RESOLVER_BUG_H
+#define FDBSERVER_RESOLVER_RESOLVER_BUG_H
 #pragma once
 
 #include "flow/SimBugInjector.h"
@@ -41,4 +41,4 @@ public:
 	std::shared_ptr<ISimBug> create() const override;
 };
 
-#endif // FDBSERVER_RESOLVER_BUG_H
+#endif // FDBSERVER_RESOLVER_RESOLVER_BUG_H

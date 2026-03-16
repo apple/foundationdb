@@ -27,7 +27,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/ApplyMetadataMutation.h"
-#include "fdbserver/core/ConflictSet.h"
+#include "fdbserver/core/ConflictBatch.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
@@ -39,6 +39,7 @@
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/core/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/resolver/ConflictSet.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/Histogram.h"
@@ -358,11 +359,11 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		reply.debugID = req.debugID;
 		reply.committed.resize(reply.arena, req.transactions.size());
 		for (int c = 0; c < commitList.size(); c++)
-			reply.committed[commitList[c]] = ConflictBatch::TransactionCommitted;
+			reply.committed[commitList[c]] = ConflictBatchStatus::TransactionCommitted;
 
 		for (int c = 0; c < tooOldList.size(); c++) {
-			ASSERT(reply.committed[tooOldList[c]] == ConflictBatch::TransactionConflict);
-			reply.committed[tooOldList[c]] = ConflictBatch::TransactionTooOld;
+			ASSERT(reply.committed[tooOldList[c]] == ConflictBatchStatus::TransactionConflict);
+			reply.committed[tooOldList[c]] = ConflictBatchStatus::TransactionTooOld;
 		}
 
 		self->transactionsAccepted += commitList.size();
@@ -403,7 +404,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 			stateBytes += req.transactions[t].mutations.expectedSize();
 			stateTransactions.push_back_deep(
 			    stateTransactions.arena(),
-			    StateTransactionRef(reply.committed[t] == ConflictBatch::TransactionCommitted,
+			    StateTransactionRef(reply.committed[t] == ConflictBatchStatus::TransactionCommitted,
 			                        req.transactions[t].mutations));
 
 			// for (const auto& m : req.transactions[t].mutations)
@@ -411,7 +412,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 
 			// Generate private mutations for metadata mutations
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
-			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
+			if (reply.committed[t] == ConflictBatchStatus::TransactionCommitted && !self->forceRecovery &&
 			    shouldApplyResolverPrivateMutations && (!isLocked || req.transactions[t].lock_aware)) {
 				SpanContext spanContext =
 				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanContext();

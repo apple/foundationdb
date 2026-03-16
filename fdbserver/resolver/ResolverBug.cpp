@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "fdbserver/core/ResolverBug.h"
+#include "fdbserver/resolver/ResolverBug.h"
 
 std::shared_ptr<ISimBug> ResolverBugID::create() const {
 	return std::make_shared<ResolverBug>();

@@ -26,26 +26,19 @@
 #include <vector>
 
 #include "fdbclient/CommitTransaction.h"
-#include "fdbserver/core/ResolverBug.h"
+#include "fdbserver/core/ConflictBatch.h"
+#include "fdbserver/resolver/ResolverBug.h"
 
 struct ConflictSet;
 ConflictSet* newConflictSet();
 void clearConflictSet(ConflictSet*, Version);
 void destroyConflictSet(ConflictSet*);
 
-struct ConflictBatch {
+struct ConflictBatch : ConflictBatchStatus {
 	explicit ConflictBatch(ConflictSet*,
 	                       std::map<int, VectorRef<int>>* conflictingKeyRangeMap = nullptr,
 	                       Arena* resolveBatchReplyArena = nullptr);
 	~ConflictBatch();
-
-	enum TransactionCommitResult {
-		TransactionConflict = 0,
-		TransactionTooOld,
-		TransactionUnusedResultValue1,
-		TransactionCommitted,
-		TransactionLockReject,
-	};
 
 	void addTransaction(const CommitTransactionRef& transaction, Version newOldestVersion);
 	void detectConflicts(Version now,
