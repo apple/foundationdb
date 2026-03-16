@@ -47,7 +47,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/RocksDBCommon.h"
+#include "RocksDBCommon.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef WITH_ROCKSDB

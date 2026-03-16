@@ -19,7 +19,7 @@
  */
 
 #ifdef WITH_ROCKSDB
-#include "fdbserver/RocksDBLogForwarder.h"
+#include "RocksDBLogForwarder.h"
 
 #include "flow/network.h"
 #include "flow/Trace.h"

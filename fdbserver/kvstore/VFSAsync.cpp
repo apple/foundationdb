@@ -47,7 +47,7 @@
 #include <fcntl.h>
 #endif
 
-#include "fdbserver/VFSAsync.h"
+#include "VFSAsync.h"
 
 /*
 ** The maximum pathname length supported by this VFS.

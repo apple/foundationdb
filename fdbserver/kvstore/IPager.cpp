@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "fdbserver/core/IPager.h"
+#include "IPager.h"
 
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"

@@ -31,7 +31,7 @@
 #include <map>
 #include <stdexcept>
 
-#include "fdbserver/IKeyValueContainer.h"
+#include "IKeyValueContainer.h"
 #include "flow/Arena.h"
 
 // forward declaration

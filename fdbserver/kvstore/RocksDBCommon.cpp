@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RocksDBCommon.h"
+#include "RocksDBCommon.h"
 
 #ifdef WITH_ROCKSDB
 

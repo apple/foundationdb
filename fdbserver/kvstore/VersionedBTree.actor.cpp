@@ -24,11 +24,11 @@
 #include "fdbclient/Tuple.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/DeltaTree.h"
+#include "DeltaTree.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/IPager.h"
+#include "IPager.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/VersionedBTreeDebug.h"
+#include "VersionedBTreeDebug.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
@@ -5248,7 +5248,7 @@ private:
 	};
 
 public:
-#include "fdbserver/ArtMutationBuffer.h"
+#include "ArtMutationBuffer.h"
 	struct MutationBufferStdMap {
 		MutationBufferStdMap() {
 			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
@@ -7561,7 +7561,7 @@ public:
 	}
 };
 
-#include "fdbserver/core/art_impl.h"
+#include "art_impl.h"
 
 RedwoodRecordRef VersionedBTree::dbBegin(""_sr);
 RedwoodRecordRef VersionedBTree::dbEnd("\xff\xff\xff\xff\xff"_sr);

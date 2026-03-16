@@ -51,7 +51,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
-#include "fdbserver/RocksDBLogForwarder.h"
+#include "RocksDBLogForwarder.h"
 #include "flow/ActorCollection.h"
 #include "flow/flow.h"
 #include "flow/IThreadPool.h"
@@ -68,7 +68,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/RocksDBCommon.h"
+#include "RocksDBCommon.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -327,7 +327,7 @@ using RocksDBCommon::getErrorReason;
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener(UID id) : id(id) {};
+	RocksDBErrorListener(UID id) : id(id){};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		TraceEvent(SevError, "RocksDBBGError", id)
 		    .detail("Reason", getErrorReason(reason))
@@ -367,7 +367,7 @@ private:
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState) {};
+	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState){};
 
 	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
 		sharedState->setLastFlushTime(now());

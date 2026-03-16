@@ -20,7 +20,7 @@
 
 #include "fdbclient/SystemData.h"
 
-#include "fdbserver/core/TransactionStoreMutationTracking.h"
+#include "TransactionStoreMutationTracking.h"
 #if defined(FDB_CLEAN_BUILD) && DEBUG_TRANSACTION_STATE_STORE_ENABLED
 #error "You cannot use transaction store mutation tracking in a clean/release build."
 #endif

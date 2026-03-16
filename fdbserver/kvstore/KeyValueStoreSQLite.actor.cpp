@@ -36,8 +36,8 @@ extern "C" {
 u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 }
 #include "flow/ThreadPrimitives.h"
-#include "fdbserver/VFSAsync.h"
-#include "fdbserver/template_fdb.h"
+#include "VFSAsync.h"
+#include "template_fdb.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1692,7 +1692,7 @@ private:
 			Key key;
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
-			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID) {};
+			ReadValueAction(Key key, Optional<UID> debugID) : key(key), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValueAction& rv) {
@@ -1720,7 +1720,7 @@ private:
 			Optional<UID> debugID;
 			ThreadReturnPromise<Optional<Value>> result;
 			ReadValuePrefixAction(Key key, int maxLength, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), debugID(debugID) {};
+			  : key(key), maxLength(maxLength), debugID(debugID){};
 			double getTimeEstimate() const override { return SERVER_KNOBS->READ_VALUE_TIME_ESTIMATE; }
 		};
 		void action(ReadValuePrefixAction& rv) {
