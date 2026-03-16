@@ -24,7 +24,7 @@
 // version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_G_H)
 #define FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_G_H
-#include "fdbserver/datadistributor/ExclusionTracker.actor.g.h"
+#include "ExclusionTracker.actor.g.h"
 #elif !defined(FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_H)
 #define FDBSERVER_DATADISTRIBUTOR_EXCLUSION_TRACKER_ACTOR_H
 

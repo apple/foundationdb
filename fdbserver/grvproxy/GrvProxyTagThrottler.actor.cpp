@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/Knobs.h"
-#include "fdbserver/grvproxy/GrvProxyTagThrottler.h"
+#include "GrvProxyTagThrottler.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include

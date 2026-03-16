@@ -6,5 +6,8 @@ configure_fdbserver_common_includes(fdbserver_grvproxy)
 target_include_directories(fdbserver_grvproxy
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include)
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(fdbserver_grvproxy PRIVATE fdbclient fdbserver_core)
