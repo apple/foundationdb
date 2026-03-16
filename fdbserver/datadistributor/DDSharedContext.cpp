@@ -1,5 +1,5 @@
 /*
- * DDShardTracker.h
+ * DDSharedContext.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,6 +18,17 @@
  * limitations under the License.
  */
 
-#pragma once
+#include "fdbserver/datadistributor/DDSharedContext.h"
 
-#include "fdbserver/datadistributor/DDShardTracker.h"
+#include "DDRelocationQueue.h"
+
+DDSharedContext::DDSharedContext() = default;
+
+DDSharedContext::DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) {
+	interface = iface;
+}
+
+DDSharedContext::DDSharedContext(UID id)
+  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}
+
+DDSharedContext::~DDSharedContext() = default;

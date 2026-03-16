@@ -37,7 +37,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"
-#include "fdbserver/datadistributor/DDRelocationQueue.h"
+#include "DDRelocationQueue.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000 // This is not a knob; it is a fixed point scaling factor!

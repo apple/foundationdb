@@ -21,10 +21,11 @@
 #define FOUNDATIONDB_DDSHAREDCONTEXT_H
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/MoveKeys.actor.h"
-#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/DDShardTracker.h"
-#include "fdbserver/datadistributor/DDRelocationQueue.h"
+#include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
+
+class DDQueue;
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same
 // context.
@@ -46,12 +47,10 @@ public:
 	Reference<DDQueue> ddQueue;
 	Reference<DDTeamCollection> primaryTeamCollection, remoteTeamCollection;
 
-	DDSharedContext() = default;
-
-	explicit DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) { interface = iface; }
-
-	explicit DDSharedContext(UID id)
-	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}
+	DDSharedContext();
+	~DDSharedContext();
+	explicit DDSharedContext(const DataDistributorInterface& iface);
+	explicit DDSharedContext(UID id);
 
 	UID id() const { return ddId; }
 

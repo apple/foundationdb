@@ -23,7 +23,7 @@
 #include <numeric>
 
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
-#include "fdbserver/datadistributor/MovingWindow.h"
+#include "MovingWindow.h"
 
 // send request/signal to DDRelocationQueue through interface
 // call synchronous method from components outside DDRelocationQueue
