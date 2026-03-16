@@ -95,20 +95,15 @@ public:
 
 	T const& get() const&
 	    requires(!std::is_void_v<T>);
-	T get() &&
-	    requires(!std::is_void_v<T>);
+	T get() && requires(!std::is_void_v<T>);
 	T getValue() const&
 	    requires(!std::is_void_v<T>)
 	{
 		return get();
 	}
-	T getValue() &&
-	    requires(!std::is_void_v<T>)
-	{
-		return std::move(*this).get();
-	}
+	T getValue() && requires(!std::is_void_v<T>) { return std::move(*this).get(); }
 
-	auto operator co_await() &;
+	    auto operator co_await() &;
 	auto operator co_await() &&;
 
 private:
@@ -302,15 +297,14 @@ T const& AsyncResult<T>::get() const&
 }
 
 template <class T>
-T AsyncResult<T>::get() &&
-    requires(!std::is_void_v<T>)
-{
-	ASSERT(state);
-	return state->take();
-}
+    T AsyncResult<T>::get() &&
+    requires(!std::is_void_v<T>) {
+	    ASSERT(state);
+	    return state->take();
+    }
 
-template <class T>
-auto AsyncResult<T>::operator co_await() & {
+    template <class T>
+    auto AsyncResult<T>::operator co_await() & {
 	return coro::AsyncResultAwaiter<T>{ std::move(*this) };
 }
 
