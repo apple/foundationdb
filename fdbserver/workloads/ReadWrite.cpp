@@ -298,8 +298,7 @@ void ReadWriteCommon::getMetrics(std::vector<PerfMetric>& m) {
 	    "Bytes written/sec", (writes * (keyBytes + (minValueBytes + maxValueBytes) * 0.5)) / duration, Averaged::False);
 	m.insert(m.end(), periodicMetrics.begin(), periodicMetrics.end());
 
-	auto ratesItr = ratesAtKeyCounts.begin();
-	for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
+	for (auto ratesItr = ratesAtKeyCounts.begin(); ratesItr != ratesAtKeyCounts.end(); ++ratesItr)
 		m.emplace_back(format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 }
 

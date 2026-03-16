@@ -194,8 +194,7 @@ struct MakoWorkload : TestWorkload {
 		if (populateData) {
 			m.emplace_back("Mean load time (seconds)", loadTime, Averaged::True);
 			// The importing rate of keys, controlled by parameter "insertionCountsToMeasure"
-			auto ratesItr = ratesAtKeyCounts.begin();
-			for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++) {
+			for (auto ratesItr = ratesAtKeyCounts.begin(); ratesItr != ratesAtKeyCounts.end(); ++ratesItr) {
 				m.emplace_back(
 				    format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 			}

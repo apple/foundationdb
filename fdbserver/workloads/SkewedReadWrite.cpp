@@ -76,8 +76,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	                                                            SkewedReadWriteWorkload* self,
 	                                                            Standalone<VectorRef<KeyRef>> boundaries) {
 		IndexRangeVec res;
-		int i = 0;
-		for (; i < boundaries.size() - 1; ++i) {
+		for (int i = 0; i < boundaries.size() - 1; ++i) {
 			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i + 1]);
 			// std::cout << currentShard.toString() << "\n";
 			std::vector<RangeResult> ranges = co_await runRYWTransaction(

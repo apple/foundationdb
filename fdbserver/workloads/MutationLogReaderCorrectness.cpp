@@ -89,10 +89,9 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					int i = iStart;
 					int iEnd = std::min(iStart + batchSize, self->records);
 
-					for (; i < iEnd; ++i) {
+					for (int i = iStart; i < iEnd; ++i) {
 						Key key = self->recordKey(i);
 						Value value = self->recordValue(i);
 						tr.set(key, value);
