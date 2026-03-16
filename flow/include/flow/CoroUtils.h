@@ -25,10 +25,48 @@
 
 namespace coro {
 
+template <class Parent, int Idx, class ValueType>
+struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
+	AsyncResultState<ValueType>* state = nullptr;
+
+	void bind(AsyncResult<ValueType>& result) { state = result.state; }
+
+	void remove() {
+		if (state) {
+			state->clearCallback(this);
+			state = nullptr;
+		}
+	}
+
+	void fire(ValueType const& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<Parent*>(this)->lineageAddr());
+#endif
+		static_cast<Parent*>(this)->a_callback_fire(this, value);
+	}
+
+	void fire(ValueType&& value) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<Parent*>(this)->lineageAddr());
+#endif
+		static_cast<Parent*>(this)->a_callback_fire(this, std::move(value));
+	}
+
+	void error(Error e) override {
+#ifdef ENABLE_SAMPLING
+		LineageScope _(static_cast<Parent*>(this)->lineageAddr());
+#endif
+		static_cast<Parent*>(this)->a_callback_error(this, e);
+	}
+};
+
 template <class Parent, int Idx, class F>
-using ConditionalActorCallback = std::conditional_t<GetFutureTypeV<F> == FutureType::Future,
-                                                    ActorCallback<Parent, Idx, FutureReturnTypeT<F>>,
-                                                    ActorSingleCallback<Parent, Idx, FutureReturnTypeT<F>>>;
+using ConditionalActorCallback =
+    std::conditional_t<GetFutureTypeV<F> == FutureType::Future,
+                       ActorCallback<Parent, Idx, FutureReturnTypeT<F>>,
+                       std::conditional_t<GetFutureTypeV<F> == FutureType::FutureStream,
+                                          ActorSingleCallback<Parent, Idx, FutureReturnTypeT<F>>,
+                                          ActorAsyncResultCallback<Parent, Idx, FutureReturnTypeT<F>>>>;
 
 template <class Parent, int Idx, class... Args>
 struct ChooseImplCallback;
@@ -216,25 +254,27 @@ template <class... Futures>
 using RaceResult = std::variant<FutureReturnTypeT<std::decay_t<Futures>>...>;
 
 template <std::size_t Idx, class Result, class F>
-Future<Result> raceReadyResult(F const& future) {
+Future<Result> raceReadyResult(F&& future) {
 	if (future.isError()) {
 		return future.getError();
 	}
-	if constexpr (GetFutureTypeV<F> == FutureType::Future) {
+	if constexpr (GetFutureTypeV<std::remove_cvref_t<F>> == FutureType::Future) {
 		return Result(std::in_place_index<Idx>, future.get());
-	} else {
+	} else if constexpr (GetFutureTypeV<std::remove_cvref_t<F>> == FutureType::FutureStream) {
 		auto fs = future;
 		return Result(std::in_place_index<Idx>, fs.pop());
+	} else {
+		return Result(std::in_place_index<Idx>, std::forward<F>(future).get());
 	}
 }
 
 template <std::size_t Idx, class Result, class First, class... Rest>
-Future<Result> raceReady(First const& first, Rest const&... rest) {
+Future<Result> raceReady(First&& first, Rest&&... rest) {
 	if (first.isReady()) {
-		return raceReadyResult<Idx, Result>(first);
+		return raceReadyResult<Idx, Result>(std::forward<First>(first));
 	}
 	if constexpr (sizeof...(Rest) > 0) {
-		return raceReady<Idx + 1, Result>(rest...);
+		return raceReady<Idx + 1, Result>(std::forward<Rest>(rest)...);
 	}
 	return Future<Result>();
 }
@@ -256,9 +296,12 @@ struct RaceImplCallback<Parent, Idx, F, Futures...>
 		if constexpr (futureType == FutureType::Future) {
 			StrictFuture<ValueType> sf = std::get<Idx>(getParent()->futures);
 			sf.addCallbackAndClear(static_cast<ThisCallback*>(this));
-		} else {
+		} else if constexpr (futureType == FutureType::FutureStream) {
 			auto sf = std::get<Idx>(getParent()->futures);
 			sf.addCallbackAndClear(static_cast<ThisCallback*>(this));
+		} else {
+			ThisCallback::bind(std::get<Idx>(getParent()->futures));
+			std::move(std::get<Idx>(getParent()->futures)).addCallbackAndClear(static_cast<ThisCallback*>(this));
 		}
 		if constexpr (sizeof...(Futures) > 0) {
 			RaceImplCallback<Parent, Idx + 1, Futures...>::registerCallbacks();
@@ -266,6 +309,7 @@ struct RaceImplCallback<Parent, Idx, F, Futures...>
 	}
 
 	void a_callback_fire(ThisCallback*, ValueType const& value) { getParent()->template finish<Idx>(value); }
+	void a_callback_fire(ThisCallback*, ValueType&& value) { getParent()->template finish<Idx>(std::move(value)); }
 
 	void a_callback_error(ThisCallback*, Error e) { getParent()->fail(e); }
 
@@ -299,10 +343,10 @@ struct RaceImplActor final : Actor<Result>,
 	}
 
 	template <std::size_t Idx, class T>
-	void finish(T const& value) {
+	void finish(T&& value) {
 		this->actor_wait_state = ACTOR_WAIT_STATE_NOT_WAITING;
 		RaceImplCallback<RaceImplActor<Result, Futures...>, 0, Futures...>::removeCallbacks();
-		this->SAV<Result>::sendAndDelPromiseRef(Result(std::in_place_index<Idx>, value));
+		this->SAV<Result>::sendAndDelPromiseRef(Result(std::in_place_index<Idx>, std::forward<T>(value)));
 	}
 
 	void fail(Error e) {

@@ -60,10 +60,25 @@ struct FutureReturnType<FutureStream<T> const&> {
 	using type = T;
 };
 
+template <class T>
+struct FutureReturnType<AsyncResult<T>> {
+	using type = T;
+};
+
+template <class T>
+struct FutureReturnType<AsyncResult<T>&> {
+	using type = T;
+};
+
+template <class T>
+struct FutureReturnType<AsyncResult<T> const&> {
+	using type = T;
+};
+
 template <class F>
 using FutureReturnTypeT = typename FutureReturnType<F>::type;
 
-enum class FutureType { FutureStream, Future };
+enum class FutureType { FutureStream, Future, AsyncResult };
 
 template <class F>
 struct GetFutureType;
@@ -86,6 +101,21 @@ struct GetFutureType<Future<T> const&> {
 template <class T>
 struct GetFutureType<FutureStream<T> const&> {
 	constexpr static FutureType value = FutureType::FutureStream;
+};
+
+template <class T>
+struct GetFutureType<AsyncResult<T>> {
+	constexpr static FutureType value = FutureType::AsyncResult;
+};
+
+template <class T>
+struct GetFutureType<AsyncResult<T>&> {
+	constexpr static FutureType value = FutureType::AsyncResult;
+};
+
+template <class T>
+struct GetFutureType<AsyncResult<T> const&> {
+	constexpr static FutureType value = FutureType::AsyncResult;
 };
 
 template <class F>
@@ -128,6 +158,15 @@ struct CoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 };
 
 template <class T>
+struct AsyncResultCallback {
+	virtual ~AsyncResultCallback() = default;
+	virtual void fire(T const&) {}
+	virtual void fire(T&&) {}
+	virtual void error(Error) {}
+	virtual void unwait() {}
+};
+
+template <class T>
 struct AsyncResultState : FastAllocated<AsyncResultState<T>> {
 	int refs = 1;
 	bool ready = false;
@@ -140,6 +179,7 @@ private:
 public:
 	Error error;
 	n_coroutine::coroutine_handle<> continuation;
+	AsyncResultCallback<T>* callback = nullptr;
 	n_coroutine::coroutine_handle<> producerHandle;
 	int8_t* producerWaitState = nullptr;
 
@@ -192,11 +232,25 @@ public:
 
 	void registerContinuation(n_coroutine::coroutine_handle<> h) {
 		ASSERT(!ready);
+		ASSERT(!callback);
 		ASSERT(!continuation);
 		continuation = h;
 	}
 
 	void clearContinuation() { continuation = {}; }
+
+	void registerCallback(AsyncResultCallback<T>* cb) {
+		ASSERT(!ready);
+		ASSERT(!continuation);
+		ASSERT(!callback);
+		callback = cb;
+	}
+
+	void clearCallback(AsyncResultCallback<T>* cb) {
+		if (callback == cb) {
+			callback = nullptr;
+		}
+	}
 
 	void cancelProducer() {
 		if (!cancellable || ready || !producerHandle || !producerWaitState) {
@@ -215,7 +269,15 @@ public:
 		ready = true;
 		producerHandle = {};
 		producerWaitState = nullptr;
-		if (continuation) {
+		if (callback) {
+			auto cb = callback;
+			callback = nullptr;
+			if (error.isValid()) {
+				cb->error(error);
+			} else {
+				cb->fire(std::move(value()));
+			}
+		} else if (continuation) {
 			auto h = continuation;
 			continuation = {};
 			h.resume();

@@ -46,6 +46,9 @@ namespace coro {
 template <class T>
 struct AsyncResultState;
 
+template <class T>
+struct AsyncResultCallback;
+
 template <class T, bool IsCancellable>
 struct AsyncResultPromise;
 
@@ -54,6 +57,9 @@ struct AwaitableAsyncResult;
 
 template <class U>
 struct AsyncResultAwaiter;
+
+template <class Parent, int Idx, class ValueType>
+struct ActorAsyncResultCallback;
 } // namespace coro
 
 template <class T>
@@ -82,6 +88,7 @@ public:
 	bool canGet() const;
 	Error& getError() const;
 	void cancel() const;
+	void addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb) &&;
 
 	T const& get() const&
 	    requires(!std::is_void_v<T>);
@@ -113,6 +120,8 @@ private:
 	friend struct coro::AwaitableAsyncResult;
 	template <class U>
 	friend struct coro::AsyncResultAwaiter;
+	template <class Parent, int Idx, class ValueType>
+	friend struct coro::ActorAsyncResultCallback;
 };
 
 #include "flow/CoroutinesImpl.h"
@@ -272,6 +281,13 @@ void AsyncResult<T>::cancel() const {
 	if (state) {
 		state->cancelProducer();
 	}
+}
+
+template <class T>
+void AsyncResult<T>::addCallbackAndClear(coro::AsyncResultCallback<StoredT>* cb) && {
+	ASSERT(state);
+	state->registerCallback(cb);
+	state = nullptr;
 }
 
 template <class T>
