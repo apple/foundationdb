@@ -20,7 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/TransactionTagCounter.h"
+#include "TransactionTagCounter.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h"
 

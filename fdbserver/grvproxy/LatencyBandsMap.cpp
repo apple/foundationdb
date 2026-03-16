@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/LatencyBandsMap.h"
+#include "LatencyBandsMap.h"
 #include "flow/UnitTest.h"
 
 class LatencyBandsMapImpl {

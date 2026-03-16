@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/ReadLatencySamples.h"
+#include "ReadLatencySamples.h"
 #include "fdbserver/core/Knobs.h"
 
 namespace {
