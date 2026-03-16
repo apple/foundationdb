@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -362,9 +362,8 @@ struct AtomicOpsWorkload : TestWorkload {
 	}
 
 	Future<bool> _check(Database cx, AtomicOpsWorkload* self) {
-		int g = 0;
 		bool ret = true;
-		for (; g < 100; g++) {
+		for (int g = 0; g < 100; ++g) {
 			ReadYourWritesTransaction tr(cx);
 			RangeResult log;
 			while (true) {

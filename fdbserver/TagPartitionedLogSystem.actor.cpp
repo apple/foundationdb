@@ -24,7 +24,7 @@
 #include <utility>
 
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbserver/WaitFailure.h"
+#include "fdbserver/core/WaitFailure.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

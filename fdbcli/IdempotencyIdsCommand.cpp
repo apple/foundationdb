@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"

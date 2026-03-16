@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -108,8 +108,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override { return _start(cx); }
 
 	Future<Void> _start(Database cx) {
-		int i = 0;
-		for (; i < numTransactions; ++i) {
+		for (int i = 0; i < numTransactions; ++i) {
 			// Half direct representation, half indirect representation
 			int length = deterministicRandom()->coinflip() ? 16 : deterministicRandom()->randomInt(17, 256);
 			Value idempotencyId = makeString(length);

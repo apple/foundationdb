@@ -22,8 +22,8 @@
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -202,8 +202,7 @@ struct ValidateStorage : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult res = co_await tr.getRange(auditKeyRange(type), GetRangeLimits());
 				ASSERT(!res.more);
-				int i = 0;
-				for (; i < res.size(); ++i) {
+				for (int i = 0; i < res.size(); ++i) {
 					AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
 					TraceEvent("TestAuditStorageCheckPersistStateExists")
 					    .detail("Context", context)
@@ -690,9 +689,8 @@ struct ValidateStorage : TestWorkload {
 			KeyRangeRef("TestKeyBB"_sr, "TestKeyBC"_sr),
 		};
 		std::vector<KeyRange> progressRanges = shuffleRanges(progressRangesCollection);
-		int i = 0;
 		std::vector<KeyRange> alreadyPersisteRanges;
-		for (; i < progressRanges.size(); i++) {
+		for (int i = 0; i < progressRanges.size(); ++i) {
 			AuditStorageState auditState(auditId, auditType);
 			auditState.range = progressRanges[i];
 			auditState.ddId = ddId;

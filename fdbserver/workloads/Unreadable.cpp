@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -292,10 +292,9 @@ struct UnreadableWorkload : TestWorkload {
 	}
 
 	Future<Void> _start(Database cx) {
-		int testCount = 0;
 		Reverse reverse = Reverse::False;
 		Snapshot snapshot = Snapshot::False;
-		for (; testCount < 100; testCount++) {
+		for (int testCount = 0; testCount < 100; ++testCount) {
 			//TraceEvent("RYWT_Start").detail("TestCount", testCount);
 			ReadYourWritesTransaction tr(cx);
 			Arena arena;
@@ -303,7 +302,6 @@ struct UnreadableWorkload : TestWorkload {
 			std::map<KeyRef, ValueRef> setMap;
 			KeyRangeMap<bool> unreadableMap;
 
-			int opCount = 0;
 			KeyRangeRef range;
 			KeyRef key;
 			ValueRef value;
@@ -318,7 +316,7 @@ struct UnreadableWorkload : TestWorkload {
 			setMap[normalKeys.begin] = ValueRef();
 			setMap[normalKeys.end] = ValueRef();
 
-			for (; opCount < 500; opCount++) {
+			for (int opCount = 0; opCount < 500; ++opCount) {
 				int r = deterministicRandom()->randomInt(0, 19);
 				if (r <= 10) {
 					key = RandomTestImpl::getRandomKey(arena);

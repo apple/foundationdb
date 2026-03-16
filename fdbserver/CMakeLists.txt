@@ -6,6 +6,22 @@ else()
   list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
 endif()
 
+function(configure_fdbserver_common_includes target_name)
+  target_include_directories(${target_name} PRIVATE
+    ${CMAKE_SOURCE_DIR}/bindings/c
+    ${CMAKE_BINARY_DIR}/bindings/c)
+endfunction()
+
+function(configure_fdbserver_target_includes target_name)
+  configure_fdbserver_common_includes(${target_name})
+  target_include_directories(${target_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+  )
+endfunction()
+
+add_subdirectory(core)
+add_subdirectory(ratekeeper)
 
 if(WITH_ROCKSDB)
   find_package(LZ4 REQUIRED)
@@ -127,11 +143,8 @@ if (WITH_SWIFT)
   )
 endif()
 
-target_include_directories(fdbserver PRIVATE
-  ${CMAKE_SOURCE_DIR}/bindings/c
-  ${CMAKE_BINARY_DIR}/bindings/c
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_BINARY_DIR}/include)
+configure_fdbserver_target_includes(fdbserver)
+target_link_libraries(fdbserver PRIVATE fdbserver_ratekeeper fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

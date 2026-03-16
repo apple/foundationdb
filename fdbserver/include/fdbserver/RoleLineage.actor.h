@@ -29,7 +29,7 @@
 #include "flow/singleton.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ActorLineageProfiler.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 
 #include <string_view>
 #include <msgpack.hpp>

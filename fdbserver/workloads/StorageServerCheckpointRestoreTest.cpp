@@ -22,10 +22,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -142,8 +142,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint.
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		auto it = records.begin();
-		for (; it != records.end(); ++it) {
+		for (auto it = records.begin(); it != records.end(); ++it) {
 			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				Error err;

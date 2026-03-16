@@ -24,7 +24,8 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Simplified backup and restore workload specifically for restore validation testing
 // This avoids the complexity of BackupAndRestoreCorrectness which is used by many tests

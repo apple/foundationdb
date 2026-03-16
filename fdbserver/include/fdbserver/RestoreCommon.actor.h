@@ -35,7 +35,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

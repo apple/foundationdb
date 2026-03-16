@@ -33,7 +33,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DDTxnProcessor.h"
 #include "flow/DebugTrace.h"

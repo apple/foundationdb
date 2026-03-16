@@ -29,7 +29,7 @@
 #include "flow/UnitTest.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/actorcompiler.h"
 
 const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;

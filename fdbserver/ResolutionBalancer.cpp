@@ -21,8 +21,8 @@
 #include "fdbserver/ResolutionBalancer.actor.h"
 
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/flow.h"
 
 void ResolutionBalancer::setResolvers(const std::vector<ResolverInterface>& v) {

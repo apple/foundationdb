@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
@@ -34,7 +34,7 @@ Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                           std::vector<StringRef> const& tokens,
                                           bool intrans) {
 	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.
-	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
+	// If not, the outer loop catch block(fdbcli.cpp) will handle the error and print out the error message
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
 		// hold the returned standalone object's memory

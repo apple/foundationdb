@@ -38,12 +38,12 @@
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/ClusterController.actor.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 #include "flow/SystemMonitor.h"
 

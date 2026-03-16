@@ -24,7 +24,7 @@
 #include "fdbserver/DDShardTracker.h"
 #include "fdbserver/DDRelocationQueue.h"
 #include "fdbserver/DDTeamCollection.h"
-#include "fdbserver/DataDistributorInterface.h"
+#include "fdbserver/core/DataDistributorInterface.h"
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same
 // context.

@@ -25,12 +25,12 @@
 
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/IDiskQueue.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/IRandom.h"
 #include "flow/DebugTrace.h"
 

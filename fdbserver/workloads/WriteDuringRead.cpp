@@ -21,7 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -632,13 +632,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 		while (true) {
 			co_await self->writeBarrier(cx);
 
-			int i = 0;
 			int keysPerBatch =
 			    std::min<int64_t>(1000,
 			                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 6 /
 			                              (self->getKeyForIndex(self->nodes).size() + self->valueSizeRange.second));
 			self->memoryDatabase = std::map<Key, Value>();
-			for (; i < self->nodes; i += keysPerBatch) {
+			for (int i = 0; i < self->nodes; i += keysPerBatch) {
 				Transaction tr(cx);
 				while (true) {
 					Error err;
@@ -840,12 +839,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 				Error err;
 				try {
 					int numWaits = deterministicRandom()->randomInt(1, 5);
-					int i = 0;
-					for (; i < numWaits && memLimit > 0; i++) {
+					for (int i = 0; i < numWaits && memLimit > 0; ++i) {
 						//TraceEvent("WDROps").detail("Count", i).detail("Max", numWaits).detail("ReadYourWritesDisabled",readYourWritesDisabled);
 						int numOps = deterministicRandom()->randomInt(1, self->numOps);
-						int j = 0;
-						for (; j < numOps && memLimit > 0; j++) {
+						for (int j = 0; j < numOps && memLimit > 0; ++j) {
 							if (commits.getResult().isError())
 								throw commits.getResult().getError();
 							try {

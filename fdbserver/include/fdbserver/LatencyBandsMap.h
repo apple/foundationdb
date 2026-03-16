@@ -22,7 +22,7 @@
 
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Stats.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 class LatencyBandsMap {
 	friend class LatencyBandsMapImpl;

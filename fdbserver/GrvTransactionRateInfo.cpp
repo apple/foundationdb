@@ -20,7 +20,7 @@
 
 #include "fdbserver/GrvTransactionRateInfo.h"
 
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/UnitTest.h"
 
 GrvTransactionRateInfo::GrvTransactionRateInfo(double rateWindow, double maxEmptyQueueBudget, double rate)

@@ -23,7 +23,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 struct RangeLocking : TestWorkload {
@@ -178,8 +178,7 @@ struct RangeLocking : TestWorkload {
 	Future<Void> updateDBWithRandomOperations(RangeLocking* self, Database cx) {
 		self->kvOperations.clear();
 		int iterationCount = deterministicRandom()->randomInt(1, 10);
-		int i = 0;
-		for (; i < iterationCount; i++) {
+		for (int i = 0; i < iterationCount; ++i) {
 			bool acceptedByDB = true;
 			if (deterministicRandom()->coinflip()) {
 				KeyValue kv = self->getRandomKeyValue();
@@ -222,9 +221,8 @@ struct RangeLocking : TestWorkload {
 
 	Future<Void> updateLockMapWithRandomOperation(RangeLocking* self, Database cx) {
 		self->lockRangeOperations.clear();
-		int i = 0;
 		int iterationCount = deterministicRandom()->randomInt(1, 10);
-		for (; i < iterationCount; i++) {
+		for (int i = 0; i < iterationCount; ++i) {
 			KeyRange range = self->getRandomRange();
 			bool lock = deterministicRandom()->coinflip();
 			if (lock) {

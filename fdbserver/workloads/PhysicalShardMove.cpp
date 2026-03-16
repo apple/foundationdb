@@ -22,9 +22,9 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -603,8 +603,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
-				int i = 0;
-				for (; i < dataMoves.size(); ++i) {
+				for (int i = 0; i < dataMoves.size(); ++i) {
 					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
 					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);

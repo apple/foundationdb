@@ -19,11 +19,11 @@
  */
 
 #include "fdbrpc/Stats.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/LogSystem.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/TLogInterface.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"

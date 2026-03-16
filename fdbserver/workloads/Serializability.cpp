@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -234,8 +234,7 @@ struct SerializabilityWorkload : TestWorkload {
 	                                   std::vector<Future<RangeResult>>* getRangeFutures,
 	                                   std::vector<Future<Void>>* watchFutures,
 	                                   bool checkSnapshotReads) {
-		int opNum = 0;
-		for (; opNum < ops.size(); opNum++) {
+		for (int opNum = 0; opNum < ops.size(); ++opNum) {
 			if (ops[opNum].getKeyOp.present()) {
 				auto& op = ops[opNum].getKeyOp.get();
 				//TraceEvent("SRL_GetKey").detail("Key", op.key.toString()).detail("Snapshot", op.snapshot);

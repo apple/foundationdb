@@ -25,11 +25,11 @@
 #include "flow/ProcessEvents.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -190,8 +190,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		int64_t numShardToCheck = -1;
 		int64_t numCompleteShards = 0;
 		int64_t numFailedShards = 0;
-		int shardIdx = 0;
-		for (; shardIdx < shardLocationPairList.size(); ++shardIdx) {
+		for (int shardIdx = 0; shardIdx < shardLocationPairList.size(); ++shardIdx) {
 			numShardToCheck = numShardThisClient - shardIdx;
 			KeyRangeRef range = shardLocationPairList[shardIdx].first;
 			// Step 1: Get source server id of the shard
@@ -566,8 +565,8 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 		failedRanges.coalesce(allKeys);
 		std::vector<KeyRange> failedRangesToCheck;
 		KeyRangeMap<bool>::Ranges failedRangesList = failedRanges.ranges();
-		KeyRangeMap<bool>::iterator failedRangesIter = failedRangesList.begin();
-		for (; failedRangesIter != failedRangesList.end(); ++failedRangesIter) {
+		for (auto failedRangesIter = failedRangesList.begin(); failedRangesIter != failedRangesList.end();
+		     ++failedRangesIter) {
 			if (failedRangesIter->value()) {
 				failedRangesToCheck.push_back(failedRangesIter->range());
 			}
