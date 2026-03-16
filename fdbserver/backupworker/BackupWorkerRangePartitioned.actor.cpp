@@ -218,7 +218,6 @@ ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self,
 		for (; cursor->hasMessage(); cursor->nextMessage()) {
 			state Version msgVersion = cursor->version().version;
 			state StringRef message = cursor->getMessage();
-			state VectorRef<Tag> tags = cursor->getTags();
 			state Arena arena = cursor->arena();
 			ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
 			if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
