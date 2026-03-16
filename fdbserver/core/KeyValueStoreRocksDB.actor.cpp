@@ -327,7 +327,7 @@ using RocksDBCommon::getErrorReason;
 // could potentially cause segmentation fault.
 class RocksDBErrorListener : public rocksdb::EventListener {
 public:
-	RocksDBErrorListener(UID id) : id(id){};
+	RocksDBErrorListener(UID id) : id(id) {};
 	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
 		TraceEvent(SevError, "RocksDBBGError", id)
 		    .detail("Reason", getErrorReason(reason))
@@ -367,7 +367,7 @@ private:
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState){};
+	RocksDBEventListener(std::shared_ptr<SharedRocksDBState> sharedState) : sharedState(sharedState) {};
 
 	void OnFlushCompleted(rocksdb::DB* db, const rocksdb::FlushJobInfo& info) override {
 		sharedState->setLastFlushTime(now());
