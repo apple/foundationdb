@@ -1,5 +1,13 @@
 fdb_find_sources(FDBSERVER_CORE_LOCAL_SRCS)
-add_flow_target(STATIC_LIBRARY NAME fdbserver_core SRCS ${FDBSERVER_CORE_LOCAL_SRCS})
+
+set(FDBSERVER_CORE_SRCS ${FDBSERVER_CORE_LOCAL_SRCS})
+if(${COROUTINE_IMPL} STREQUAL libcoro)
+  list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlowCoro.actor.cpp)
+else()
+  list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlow.actor.cpp)
+endif()
+
+add_flow_target(STATIC_LIBRARY NAME fdbserver_core SRCS ${FDBSERVER_CORE_SRCS})
 
 configure_fdbserver_common_includes(fdbserver_core)
 target_include_directories(fdbserver_core

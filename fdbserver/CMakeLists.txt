@@ -1,11 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
 
-if(${COROUTINE_IMPL} STREQUAL libcoro)
-  list(APPEND FDBSERVER_SRCS coroimpl/CoroFlowCoro.actor.cpp)
-else()
-  list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
-endif()
-
 function(configure_fdbserver_common_includes target_name)
   target_include_directories(${target_name} PRIVATE
     ${CMAKE_SOURCE_DIR}/bindings/c
@@ -46,8 +40,11 @@ function(configure_fdbserver_target_includes target_name)
 endfunction()
 
 function(add_fdbserver_link_test target_name)
+  set(link_libs ${ARGN})
+  list(GET link_libs 0 primary_lib)
+  list(REMOVE_AT link_libs 0)
   add_flow_target(LINK_TEST NAME ${target_name} SRCS ../fdbclient/LinkTest.cpp)
-  target_link_libraries(${target_name} PRIVATE ${ARGN} rapidxml)
+  target_link_libraries(${target_name} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${primary_lib}>" ${link_libs} rapidxml)
 endfunction()
 
 if(WITH_ROCKSDB)

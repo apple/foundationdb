@@ -71,10 +71,6 @@ extern const char* getSourceVersion();
 
 using namespace std::literals;
 
-bool isSimulatorProcessUnreliable() {
-	return g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable();
-}
-
 namespace {
 
 constexpr bool hasRocksDB =
@@ -2895,9 +2891,4 @@ int getMaxSatelliteLogs() {
 
 	// Cap at 6 (the original max) and ensure at least 1
 	return std::max(1, std::min(6, minSatelliteMachines));
-}
-
-BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
-	TestConfig config(testConfig);
-	return SimulationConfig(config);
 }

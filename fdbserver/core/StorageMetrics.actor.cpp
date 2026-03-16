@@ -18,8 +18,15 @@
  * limitations under the License.
  */
 
-#include "flow/UnitTest.h"
+#include <algorithm>
+
 #include "fdbserver/core/StorageMetrics.actor.h"
+#include "flow/CodeProbe.h"
+#include "flow/Hash3.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
+#include "flow/UnitTest.h"
+#include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 CommonStorageCounters::CommonStorageCounters(const std::string& name,
@@ -37,6 +44,33 @@ CommonStorageCounters::CommonStorageCounters(const std::string& name,
 		specialCounter(cc, "BytesWriteSampleCount", [metrics]() { return metrics->bytesWriteSample.queue.size(); });
 		specialCounter(cc, "IopsReadSampleCount", [metrics]() { return metrics->iopsSample.queue.size(); });
 	}
+}
+
+ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
+	ASSERT(totalKvSize >= key.size());
+	ByteSampleInfo info;
+
+	if (totalKvSize == 0) {
+		info.size = 0;
+		info.probability = 0.0;
+		info.inSample = false;
+		info.sampledSize = 0;
+		return info;
+	}
+
+	info.size = totalKvSize;
+
+	uint32_t a = 0;
+	uint32_t b = 0;
+	hashlittle2(key.begin(), key.size(), &a, &b);
+
+	info.probability =
+	    (double)info.size / (key.size() + SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD) / SERVER_KNOBS->BYTE_SAMPLING_FACTOR;
+	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
+	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
+	info.sampledSize = info.size / info.probability;
+
+	return info;
 }
 
 // TODO: update the cost as bytesReadPerKSecond + opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY. The source of
@@ -600,6 +634,92 @@ void StorageServerMetrics::add(KeyRangeMap<int>& map, KeyRangeRef const& keys, i
 		r->value() += delta;
 	collapse(map, keys.begin);
 	collapse(map, keys.end);
+}
+
+ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest req, Future<Void> timeout) {
+	state PromiseStream<StorageMetrics> change;
+	state StorageMetrics metrics = self->getMetrics(req.keys);
+	state Error error = success();
+	state bool timedout = false;
+
+	DisabledTraceEvent(SevDebug, "WaitMetrics", metricReqId)
+	    .detail("Keys", req.keys)
+	    .detail("Metrics", metrics.toString())
+	    .detail("ReqMin", req.min.toString())
+	    .detail("ReqMax", req.max.toString());
+	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
+		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
+		req.reply.send(metrics);
+		return Void();
+	}
+
+	{
+		auto rs = self->waitMetricsMap.modify(req.keys);
+		for (auto r = rs.begin(); r != rs.end(); ++r) {
+			r->value().push_back(change);
+		}
+		loop {
+			try {
+				choose {
+					when(StorageMetrics c = waitNext(change.getFuture())) {
+						metrics += c;
+					}
+					when(wait(timeout)) {
+						timedout = true;
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
+				error = e;
+				break;
+			}
+
+			if (timedout) {
+				CODE_PROBE(true, "ShardWaitMetrics return on timeout");
+				if (deterministicRandom()->random01() < SERVER_KNOBS->WAIT_METRICS_WRONG_SHARD_CHANCE) {
+					req.reply.sendError(wrong_shard_server());
+				} else {
+					req.reply.send(metrics);
+				}
+				break;
+			}
+
+			if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
+				CODE_PROBE(true, "ShardWaitMetrics return case 2 (delayed)");
+				req.reply.send(metrics);
+				break;
+			}
+		}
+
+		wait(delay(0));
+	}
+	auto rs = self->waitMetricsMap.modify(req.keys);
+	for (auto i = rs.begin(); i != rs.end(); ++i) {
+		auto& x = i->value();
+		for (int j = 0; j < x.size(); j++) {
+			if (x[j] == change) {
+				swapAndPop(&x, j);
+				break;
+			}
+		}
+	}
+	self->waitMetricsMap.coalesce(req.keys);
+
+	if (error.code() != error_code_success) {
+		if (error.code() != error_code_wrong_shard_server) {
+			throw error;
+		}
+		CODE_PROBE(true, "ShardWaitMetrics delayed wrong_shard_server()");
+		req.reply.sendError(error);
+	}
+
+	return Void();
+}
+
+Future<Void> StorageServerMetrics::waitMetrics(WaitMetricsRequest req, Future<Void> delay) {
+	return ::waitMetrics(this, req, delay);
 }
 
 // Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)

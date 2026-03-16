@@ -74,20 +74,6 @@ void emplaceIndex(uint8_t* data, int offset, int64_t index) {
 	}
 }
 
-Key doubleToTestKey(double p) {
-	return StringRef(format("%016llx", *(uint64_t*)&p));
-}
-
-double testKeyToDouble(const KeyRef& p) {
-	uint64_t x = 0;
-	sscanf(p.toString().c_str(), "%" SCNx64, &x);
-	return *(double*)&x;
-}
-
-Key doubleToTestKey(double p, const KeyRef& prefix) {
-	return doubleToTestKey(p).withPrefix(prefix);
-}
-
 Key KVWorkload::getRandomKey() const {
 	return getRandomKey(absentFrac);
 }
@@ -143,10 +129,6 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	// ASSERT(indexForKey(result) == (int64_t)index); // debug assert
 
 	return result;
-}
-
-double testKeyToDouble(const KeyRef& p, const KeyRef& prefix) {
-	return testKeyToDouble(p.removePrefix(prefix));
 }
 
 Future<Void> poisson(double* last, double meanInterval) {

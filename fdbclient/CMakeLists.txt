@@ -1,4 +1,6 @@
 fdb_find_sources(FDBCLIENT_SRCS)
+list(REMOVE_ITEM FDBCLIENT_SRCS LinkTest.cpp)
+list(REMOVE_ITEM FDBCLIENT_SRCS S3Client_cli.actor.cpp)
 list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
@@ -186,7 +188,7 @@ if(WIN32)
 endif()
 
 add_flow_target(LINK_TEST NAME fdbclientlinktest SRCS LinkTest.cpp)
-target_link_libraries(fdbclientlinktest PRIVATE fdbclient rapidxml) # re-link rapidxml due to private link interface
+target_link_libraries(fdbclientlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbclient>" rapidxml) # re-link rapidxml due to private link interface
 
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl azure-storage-lite)

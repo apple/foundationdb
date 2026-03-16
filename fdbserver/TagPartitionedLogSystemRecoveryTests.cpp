@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tlog/TagPartitionedLogSystem.actor.h"
+#include "fdbserver/core/TagPartitionedLogSystem.actor.h"
 #include "flow/UnitTest.h"
 
 namespace {

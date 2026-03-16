@@ -69,29 +69,6 @@
 
 using WriteMutationRefVar = std::variant<MutationRef, VectorRef<MutationRef>>;
 
-ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply) {
-	state ReplyPromise<Void> reply = req.reply;
-	resetReply(req);
-	std::vector<Future<Void>> replies;
-	int currentStream = 0;
-	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
-	for (int i = 0; i < sendAmount && currentStream < broadcastEndpoints.size(); i++) {
-		std::vector<Endpoint> endpoints;
-		RequestStream<TxnStateRequest> cur(broadcastEndpoints[currentStream++]);
-		while (currentStream < broadcastEndpoints.size() * (i + 1) / sendAmount) {
-			endpoints.push_back(broadcastEndpoints[currentStream++]);
-		}
-		req.broadcastInfo = endpoints;
-		replies.push_back(brokenPromiseToNever(cur.getReply(req)));
-		resetReply(req);
-	}
-	wait(waitForAll(replies));
-	if (sendReply) {
-		reply.send(Void());
-	}
-	return Void();
-}
-
 ACTOR void discardCommit(UID id, Future<LogSystemDiskQueueAdapter::CommitMessage> fcm, Future<Void> dummyCommitState) {
 	ASSERT(!dummyCommitState.isReady());
 	LogSystemDiskQueueAdapter::CommitMessage cm = wait(fcm);
