@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbcli/fdbcli.actor.h"
+#include "fdbcli/fdbcli.h"
 
 #include "fdbclient/IClientApi.h"
 

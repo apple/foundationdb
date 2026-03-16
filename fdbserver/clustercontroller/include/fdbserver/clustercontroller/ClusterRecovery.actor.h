@@ -325,5 +325,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self);
 bool isNormalClusterRecoveryError(const Error&);
 
 #include "flow/unactorcompiler.h"
+#include "fdbserver/MoveKeys.actor.h"
 
 #endif

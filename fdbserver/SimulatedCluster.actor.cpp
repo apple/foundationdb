@@ -1263,6 +1263,7 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 }
 
 #include "fdbclient/MonitorLeader.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 
 // Configures the system according to the given specifications in order to run
 // simulation, but with the additional consideration that it is meant to act

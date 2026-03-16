@@ -31,6 +31,7 @@
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
 #include "flow/network.h"
+#include "fdbserver/Status.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

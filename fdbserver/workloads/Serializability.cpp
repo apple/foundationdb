@@ -234,8 +234,7 @@ struct SerializabilityWorkload : TestWorkload {
 	                                   std::vector<Future<RangeResult>>* getRangeFutures,
 	                                   std::vector<Future<Void>>* watchFutures,
 	                                   bool checkSnapshotReads) {
-		int opNum = 0;
-		for (; opNum < ops.size(); opNum++) {
+		for (int opNum = 0; opNum < ops.size(); ++opNum) {
 			if (ops[opNum].getKeyOp.present()) {
 				auto& op = ops[opNum].getKeyOp.get();
 				//TraceEvent("SRL_GetKey").detail("Key", op.key.toString()).detail("Snapshot", op.snapshot);

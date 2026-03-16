@@ -23,6 +23,7 @@
 #include "fdbserver/QuietDatabase.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/Status.actor.h"
 
 struct DDMetricsWorkload : TestWorkload {
 	static constexpr auto NAME = "DDMetrics";

@@ -59,6 +59,7 @@
 
 #include "flow/Trace.h"
 #include "flow/CoroUtils.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 
 WorkloadContext::WorkloadContext() = default;
 

@@ -23,7 +23,7 @@
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include <string.h>
 
 #define DELTATREE_DEBUG 0

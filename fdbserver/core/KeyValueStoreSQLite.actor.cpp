@@ -24,7 +24,7 @@
 #include "crc32/crc32c.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 

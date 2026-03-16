@@ -21,3 +21,15 @@
 #pragma once
 
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbclient/BulkLoading.h"
+#include "fdbserver/DDTxnProcessor.h"
+#include "fdbserver/DataDistribution.actor.g.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
+#include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbserver/TCInfo.h"

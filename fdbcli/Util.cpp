@@ -1,0 +1,196 @@
+/*
+ * Util.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "fdbcli/fdbcli.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/Schemas.h"
+#include "fdbclient/Status.h"
+
+#include "flow/Arena.h"
+
+#include "flow/ThreadHelper.actor.h"
+
+namespace fdb_cli {
+
+bool tokencmp(StringRef token, const char* command) {
+	if (token.size() != strlen(command))
+		return false;
+
+	return !memcmp(token.begin(), command, token.size());
+}
+
+void printUsage(StringRef command) {
+	const auto& helpMap = CommandFactory::commands();
+	auto i = helpMap.find(command.toString());
+	if (i != helpMap.end())
+		printf("Usage: %s\n", i->second.usage.c_str());
+	else
+		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
+}
+
+void printLongDesc(StringRef command) {
+	const auto& helpMap = CommandFactory::commands();
+	auto i = helpMap.find(command.toString());
+	if (i != helpMap.end())
+		printf("%s\n", i->second.long_desc.c_str());
+	else
+		fprintf(stderr, "ERROR: Unknown command `%s'\n", command.toString().c_str());
+}
+
+Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
+	// hold the returned standalone object's memory
+	ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
+	Optional<Value> errorMsg = co_await safeThreadFutureToFuture(errorMsgF);
+	// Error message should be present
+	ASSERT(errorMsg.present());
+	// Read the json string
+	auto valueObj = readJSONStrictly(errorMsg.get().toString()).get_obj();
+	// verify schema
+	auto schema = readJSONStrictly(JSONSchemas::managementApiErrorSchema.toString()).get_obj();
+	std::string errorStr;
+	ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
+	// return the error message
+	co_return valueObj["message"].get_str();
+}
+
+void addInterfacesFromKVs(RangeResult& kvs,
+                          std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface) {
+	for (const auto& kv : kvs) {
+		ClientWorkerInterface workerInterf;
+		try {
+			// the interface is back-ward compatible, thus if parsing failed, it needs to upgrade cli version
+			workerInterf = BinaryReader::fromStringRef<ClientWorkerInterface>(kv.value, IncludeVersion());
+		} catch (Error& e) {
+			fprintf(stderr, "Error: %s; CLI version is too old, please update to use a newer version\n", e.what());
+			return;
+		}
+		ClientLeaderRegInterface leaderInterf(workerInterf.address());
+		StringRef ip_port = (kv.key.endsWith(":tls"_sr) ? kv.key.removeSuffix(":tls"_sr) : kv.key)
+		                        .removePrefix("\xff\xff/worker_interfaces/"_sr);
+		(*address_interface)[ip_port] = std::make_pair(kv.value, leaderInterf);
+
+		if (workerInterf.reboot.getEndpoint().addresses.secondaryAddress.present()) {
+			Key full_ip_port2 =
+			    StringRef(workerInterf.reboot.getEndpoint().addresses.secondaryAddress.get().toString());
+			StringRef ip_port2 =
+			    full_ip_port2.endsWith(":tls"_sr) ? full_ip_port2.removeSuffix(":tls"_sr) : full_ip_port2;
+			(*address_interface)[ip_port2] = std::make_pair(kv.value, leaderInterf);
+		}
+	}
+}
+
+Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
+                                 std::map<Key, std::pair<Value, ClientLeaderRegInterface>>* address_interface,
+                                 bool verify) {
+	if (verify) {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->set(workerInterfacesVerifyOptionSpecialKey, ValueRef());
+	}
+	// Hold the reference to the standalone's memory
+	ThreadFuture<RangeResult> kvsFuture = tr->getRange(
+	    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
+	RangeResult kvs = co_await safeThreadFutureToFuture(kvsFuture);
+	ASSERT(!kvs.more);
+	if (verify) {
+		// remove the option if set
+		tr->clear(workerInterfacesVerifyOptionSpecialKey);
+	}
+	addInterfacesFromKVs(kvs, address_interface);
+}
+
+Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>* workers) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+			ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+
+			co_await (success(safeThreadFutureToFuture(processClasses)) &&
+			          success(safeThreadFutureToFuture(processData)));
+			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+			std::map<Optional<Standalone<StringRef>>, ProcessClass> id_class;
+			int i{ 0 };
+			for (i = 0; i < processClasses.get().size(); i++) {
+				try {
+					id_class[decodeProcessClassKey(processClasses.get()[i].key)] =
+					    decodeProcessClassValue(processClasses.get()[i].value);
+				} catch (Error& e) {
+					fprintf(stderr, "Error: %s; Client version is too old, please use a newer version\n", e.what());
+					co_return false;
+				}
+			}
+
+			for (i = 0; i < processData.get().size(); i++) {
+				ProcessData data = decodeWorkerListValue(processData.get()[i].value);
+				ProcessClass processClass = id_class[data.locality.processId()];
+
+				if (processClass.classSource() == ProcessClass::DBSource ||
+				    data.processClass.classType() == ProcessClass::UnsetClass)
+					data.processClass = processClass;
+
+				if (data.processClass.classType() != ProcessClass::TesterClass)
+					workers->push_back(data);
+			}
+
+			co_return true;
+		} catch (Error& e) {
+			err = e;
+		}
+		TraceEvent(SevWarn, "GetWorkersError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
+}
+
+Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
+                                        std::map<std::string, StorageServerInterface>* interfaces) {
+	Reference<ITransaction> tr = db->createTransaction();
+	while (true) {
+		interfaces->clear();
+		Error err;
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			co_await success(safeThreadFutureToFuture(serverListF));
+			ASSERT(!serverListF.get().more);
+			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
+			RangeResult serverList = serverListF.get();
+			// decode server interfaces
+			for (int i = 0; i < serverList.size(); i++) {
+				auto ssi = decodeServerListValue(serverList[i].value);
+				(*interfaces)[ssi.address().toString()] = ssi;
+			}
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		TraceEvent(SevWarn, "GetStorageServerInterfacesError").error(err);
+		co_await safeThreadFutureToFuture(tr->onError(err));
+	}
+}
+
+} // namespace fdb_cli

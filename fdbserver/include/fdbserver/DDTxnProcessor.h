@@ -21,3 +21,7 @@
 #pragma once
 
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "flow/FastRef.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/MockGlobalState.h"
+#include "fdbserver/MoveKeys.actor.h"

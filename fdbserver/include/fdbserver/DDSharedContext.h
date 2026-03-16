@@ -21,3 +21,9 @@
 #pragma once
 
 #include "fdbserver/datadistributor/DDSharedContext.h"
+#include "fdbserver/DDRelocationQueue.h"
+#include "fdbserver/DDShardTracker.h"
+#include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/core/DataDistributorInterface.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"

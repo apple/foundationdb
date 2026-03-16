@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/workloads.actor.h"

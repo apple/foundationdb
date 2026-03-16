@@ -64,6 +64,7 @@
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/network.h"
+#include "fdbserver/ConflictSet.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

@@ -102,8 +102,7 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 	}
 
 	Future<Void> runTest(Database cx) {
-		int roundNum = 0;
-		for (; roundNum < numRounds; ++roundNum) {
+		for (int roundNum = 0; roundNum < numRounds; ++roundNum) {
 			std::vector<Future<Void>> futures;
 			int numTransactions = deterministicRandom()->randomInt(1, maxTransactionsPerRound + 1);
 			for (int i = 0; i < numTransactions; ++i) {

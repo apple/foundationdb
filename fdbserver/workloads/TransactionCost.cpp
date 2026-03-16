@@ -296,11 +296,10 @@ class TransactionCostWorkload : public TestWorkload {
 	}
 
 	Future<Void> runTests(Database cx) {
-		uint64_t testNumber = 0;
 		Future<Void> f;
 		// Must use shared_ptr because Flow doesn't support perfect forwarding into actors
 		std::shared_ptr<ITest> test;
-		for (; testNumber < iterations; ++testNumber) {
+		for (uint64_t testNumber = 0; testNumber < iterations; ++testNumber) {
 			test = createRandomTest(testNumber);
 			co_await runTest(cx, test.get());
 		}

@@ -23,8 +23,8 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/RecoveryState.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/workloads.actor.h"
@@ -128,9 +128,8 @@ struct GcGenerationsWorkload : TestWorkload {
 
 	Future<Void> generateMultipleTxnGenerations(GcGenerationsWorkload* self, Database cx) {
 		co_await self->clogRemoteDc(self, cx);
-		int i = 0;
 		int generationCount = 0;
-		for (; i < 6; ++i) {
+		for (int i = 0; i < 6; ++i) {
 			// Sometimes Cycle Setup can take a long time, so we need to extend
 			// connection failures injection for clogRemoteDc() to work properly.
 			// We also want to make sure connection failures are still active when we
