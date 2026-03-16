@@ -115,22 +115,6 @@ ACTOR void destroyChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 	FlowTransport::transport().resetConnection(childInfo->address);
 }
 
-ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
-                                 double maxWaitTime,
-                                 bool isSync,
-                                 double maxSimDelayTime,
-                                 IClosable* parent) {
-	(void)paramList;
-	(void)maxWaitTime;
-	(void)isSync;
-	(void)maxSimDelayTime;
-	(void)parent;
-	TraceEvent(SevError, "SpawnProcessUnsupportedInSimulation").log();
-	ASSERT(false);
-	wait(Never());
-	return 0;
-}
-
 #if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
@@ -138,10 +122,6 @@ ACTOR Future<int> spawnProcess(std::string binPath,
                                bool isSync,
                                double maxSimDelayTime,
                                IClosable* parent) {
-	if (g_network->isSimulated() && getExecPath() == binPath) {
-		int res = wait(spawnSimulated(paramList, maxWaitTime, isSync, maxSimDelayTime, parent));
-		return res;
-	}
 	wait(delay(0.0));
 	return 0;
 }
@@ -192,10 +172,6 @@ ACTOR Future<int> spawnProcess(std::string path,
                                bool isSync,
                                double maxSimDelayTime,
                                IClosable* parent) {
-	if (g_network->isSimulated() && getExecPath() == path) {
-		int res = wait(spawnSimulated(args, maxWaitTime, isSync, maxSimDelayTime, parent));
-		return res;
-	}
 	// for async calls in simulator, always delay by a deterministic amount of time and then
 	// do the call synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
