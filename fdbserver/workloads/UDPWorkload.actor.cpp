@@ -129,6 +129,9 @@ struct UDPWorkload : TestWorkload {
 	static Message ping() { return Message{ Message::Type::PING }; }
 	static Message pong() { return Message{ Message::Type::PONG }; }
 
+	// TODO: Overload timeout to support FutureStream to replace this helper function
+	static Future<NetworkAddress> nextToAck(FutureStream<NetworkAddress> toAck) { co_return co_await toAck; }
+
 	static Future<Void> _receiver(UDPWorkload* self) {
 		Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
 		uint8_t* packet = mutateString(packetString);
@@ -148,24 +151,22 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> serverSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
-		state Standalone<StringRef> packetString;
-		state NetworkAddress peer;
-		loop {
-			choose {
-				when(wait(delay(0.1))) {
-					peer = deterministicRandom()->randomChoice(*remotes);
-					packetString = BinaryWriter::toValue(Message{ Message::Type::PING }, IncludeVersion());
-					self->sent[peer] += 1;
-				}
-				when(NetworkAddress p = waitNext(self->toAck.getFuture())) {
-					peer = p;
-					packetString = BinaryWriter::toValue(pong(), IncludeVersion());
-					self->acked[peer] += 1;
-				}
+	static Future<Void> serverSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
+		Standalone<StringRef> packetString;
+		NetworkAddress peer;
+		while (true) {
+			auto const p = co_await timeout(nextToAck(self->toAck.getFuture()), 0.1);
+			if (p.present()) {
+				peer = p.get();
+				packetString = BinaryWriter::toValue(pong(), IncludeVersion());
+				self->acked[peer] += 1;
+			} else {
+				peer = deterministicRandom()->randomChoice(*remotes);
+				packetString = BinaryWriter::toValue(Message{ Message::Type::PING }, IncludeVersion());
+				self->sent[peer] += 1;
 			}
-			int res = wait(self->serverSocket->sendTo(packetString.begin(), packetString.end(), peer));
-			ASSERT(res == packetString.size());
+			int res = co_await self->serverSocket->sendTo(packetString.begin(), packetString.end(), peer);
+			ASSERT_EQ(res, packetString.size());
 		}
 	}
 
