@@ -20,8 +20,8 @@
 
 #include "fdbserver/core/WorkerInterface.actor.h"
 
-Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> const& in,
-                                     Reference<AsyncVar<Optional<ClusterInterface>>> const& out) {
+Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
+                                     Reference<AsyncVar<Optional<ClusterInterface>>> out) {
 	while (true) {
 		if (in->get().present()) {
 			out->set(in->get().get().clientInterface);

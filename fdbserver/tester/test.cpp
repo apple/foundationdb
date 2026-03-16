@@ -1047,11 +1047,9 @@ Future<Void> clearData(Database cx) {
 	TraceEvent("ClearData_TrCreated").detail("Phase", "Loop1_Start");
 
 	while (true) {
-		bool needsErrorHandling = false;
-		Error caughtError;
-
 		TraceEvent("ClearData_Loop1_Iteration").detail("Phase", "TryBlock");
 
+		Error err;
 		try {
 			tr.debugTransaction(debugRandom()->randomUniqueID());
 			TraceEvent("ClearData_DebugSet").detail("Phase", "Loop1_Debug");
@@ -1077,14 +1075,11 @@ Future<Void> clearData(Database cx) {
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingDatabaseError", tr.trState->readOptions.get().debugID.get()).error(e);
 			TraceEvent("ClearData_Loop1_Catch").detail("Phase", "Loop1_Error").detail("ErrorCode", e.code());
-			caughtError = e;
-			needsErrorHandling = true;
+			err = e;
 		}
 
-		if (needsErrorHandling) {
-			TraceEvent("ClearData_Loop1_ErrorHandling").detail("Phase", "Loop1_OnError");
-			co_await tr.onError(caughtError);
-		}
+		TraceEvent("ClearData_Loop1_ErrorHandling").detail("Phase", "Loop1_OnError");
+		co_await tr.onError(err);
 	}
 
 	TraceEvent("ClearData_Loop1_Done").detail("Phase", "Loop2_Start");
