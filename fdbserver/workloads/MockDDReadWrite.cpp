@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/workloads/MockDDTest.h"
-#include "fdbserver/MockDataDistributor.h"
+#include "fdbserver/datadistributor/MockDataDistributor.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 
 class MockDDReadWriteWorkload : public MockDDTestWorkload {
