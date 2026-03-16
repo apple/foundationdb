@@ -70,7 +70,6 @@
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
-#include "fdbserver/core/OnDemandStore.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/core/workloads.actor.h"
 #ifdef WITH_ROCKSDB

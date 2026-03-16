@@ -28,26 +28,11 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/TLogInterface.h"
 
 struct ServerDBInfo;
-
-enum limitReason_t {
-	unlimited,
-	storage_server_write_queue_size,
-	storage_server_write_bandwidth_mvcc,
-	storage_server_readable_behind,
-	log_server_mvcc_write_bandwidth,
-	log_server_write_queue,
-	storage_server_min_free_space,
-	storage_server_min_free_space_ratio,
-	log_server_min_free_space,
-	log_server_min_free_space_ratio,
-	storage_server_durability_lag,
-	storage_server_list_fetch_failed,
-	limitReason_t_end
-};
 
 class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };

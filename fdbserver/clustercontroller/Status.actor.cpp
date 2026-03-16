@@ -40,6 +40,7 @@
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
@@ -100,11 +101,6 @@ const char* RecoveryStatus::descriptions[] = {
 };
 static_assert(sizeof(RecoveryStatus::descriptions) == sizeof(RecoveryStatus::descriptions[0]) * RecoveryStatus::END,
               "RecoveryStatus::descriptions[] size");
-
-// From Ratekeeper.actor.cpp
-extern int limitReasonEnd;
-extern const char* limitReasonName[];
-extern const char* limitReasonDesc[];
 
 using EventMap = std::map<std::string, TraceEventFields>;
 
