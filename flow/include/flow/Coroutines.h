@@ -62,6 +62,9 @@ template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback;
 } // namespace coro
 
+// Move-only coroutine result that transfers ownership through co_await.
+// Unlike Future<T>, awaiting AsyncResult<T> produces T by value so expensive
+// payloads do not need an extra copy at the await site.
 template <class T>
 class SWIFT_SENDABLE AsyncResult {
 public:
