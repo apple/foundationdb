@@ -1127,7 +1127,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
-		if (self->committed[t] == ConflictBatchStatus::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
+		if (self->committed[t] == ConflictBatchStatus::TransactionCommitted &&
+		    (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
 			applyMetadataMutations(trs[t].spanContext,
 			                       *pProxyCommitData,
