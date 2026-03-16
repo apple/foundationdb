@@ -24,10 +24,10 @@
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
-#include "fdbserver/BackupPartitionMap.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/backupworker/BackupPartitionMap.actor.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose

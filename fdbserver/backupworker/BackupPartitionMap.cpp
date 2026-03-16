@@ -18,8 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/BackupPartitionMap.actor.h"
-#include "fdbserver/DDShardTracker.h"
+#include "fdbserver/backupworker/BackupPartitionMap.actor.h"
+#include "fdbclient/JsonBuilder.h"
+#include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/SystemData.h"
 
 std::string serializePartitionListJSON(PartitionMap const& partitionMap) {
 	JsonBuilderObject root;

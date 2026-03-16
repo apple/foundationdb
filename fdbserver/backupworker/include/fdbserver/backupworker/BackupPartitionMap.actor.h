@@ -23,7 +23,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/DDShardTracker.h"
+#include "fdbserver/core/ShardMetrics.h"
 #include <unordered_map>
 #include <vector>
 

@@ -29,6 +29,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbserver/core/DataMovement.h"
+#include "fdbserver/core/ShardMetrics.h"
 #include "fdbserver/core/ShardSizing.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
@@ -243,27 +244,6 @@ FDB_BOOLEAN_PARAM(PhysicalShardHasMoreThanKeyRange);
 FDB_BOOLEAN_PARAM(InOverSizePhysicalShard);
 FDB_BOOLEAN_PARAM(PhysicalShardAvailable);
 FDB_BOOLEAN_PARAM(MoveKeyRangeOutPhysicalShard);
-
-struct ShardMetrics {
-	StorageMetrics metrics;
-	double lastLowBandwidthStartTime;
-	int shardCount; // number of smaller shards whose metrics are aggregated in the ShardMetrics
-
-	bool operator==(ShardMetrics const& rhs) const {
-		return metrics == rhs.metrics && lastLowBandwidthStartTime == rhs.lastLowBandwidthStartTime &&
-		       shardCount == rhs.shardCount;
-	}
-
-	ShardMetrics(StorageMetrics const& metrics, double lastLowBandwidthStartTime, int shardCount)
-	  : metrics(metrics), lastLowBandwidthStartTime(lastLowBandwidthStartTime), shardCount(shardCount) {}
-};
-
-struct ShardTrackedData {
-	Future<Void> trackShard;
-	Future<Void> trackBytes;
-	Future<Void> trackUsableRegion;
-	Reference<AsyncVar<Optional<ShardMetrics>>> stats;
-};
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
