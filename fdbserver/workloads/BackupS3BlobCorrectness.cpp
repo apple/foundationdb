@@ -91,8 +91,8 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/MockS3ServerChaos.h"
+#include "fdbserver/mocks3/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3ServerChaos.h"
 #include "flow/IRandom.h"
 
 // Counters to verify BulkDump/BulkLoad were actually used

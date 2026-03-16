@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3Server.h"
 
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
@@ -2188,3 +2188,5 @@ Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress, const st
 Future<Void> registerMockS3Server(std::string ip, std::string port) {
 	return registerMockS3Server_impl(ip, port);
 }
+
+void forceLinkMockS3ServerTests() {}

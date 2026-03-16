@@ -20,8 +20,8 @@
 
 // Design: design/mocks3server_chaos_design.md
 
-#include "fdbserver/MockS3ServerChaos.h"
-#include "fdbserver/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3ServerChaos.h"
+#include "fdbserver/mocks3/MockS3Server.h"
 #include "flow/ChaosMetrics.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"

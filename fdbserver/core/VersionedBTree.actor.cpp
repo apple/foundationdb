@@ -26,7 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/IPager.h"
+#include "fdbserver/core/IPager.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/core/VersionedBTreeDebug.h"
 #include "fdbserver/core/WorkerInterface.actor.h"

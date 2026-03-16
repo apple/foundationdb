@@ -17,7 +17,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "fdbserver/IPager.h"
+#include "fdbserver/core/IPager.h"
 
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
@@ -47,3 +47,5 @@ TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
 	}
 	return Void();
 }
+
+void forceLinkIPagerTests() {}

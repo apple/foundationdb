@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/MockS3ServerChaos.h"
+#include "fdbserver/mocks3/MockS3Server.h"
+#include "fdbserver/mocks3/MockS3ServerChaos.h"
 
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
