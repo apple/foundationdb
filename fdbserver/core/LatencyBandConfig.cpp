@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/LatencyBandConfig.h"
+#include "fdbserver/core/LatencyBandConfig.h"
 
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/Schemas.h"

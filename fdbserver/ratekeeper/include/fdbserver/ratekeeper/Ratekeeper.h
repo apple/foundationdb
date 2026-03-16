@@ -28,23 +28,23 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/RatekeeperInterface.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbserver/core/RatekeeperInterface.h"
+#include "fdbserver/core/TLogInterface.h"
+
+struct ServerDBInfo;
 
 enum limitReason_t {
-	unlimited, // TODO: rename to workload?
-	storage_server_write_queue_size, // 1
+	unlimited,
+	storage_server_write_queue_size,
 	storage_server_write_bandwidth_mvcc,
 	storage_server_readable_behind,
 	log_server_mvcc_write_bandwidth,
-	log_server_write_queue, // 5
-	storage_server_min_free_space, // a storage server's normal limits are being reduced by low free space
-	storage_server_min_free_space_ratio, // a storage server's normal limits are being reduced by a low free space ratio
+	log_server_write_queue,
+	storage_server_min_free_space,
+	storage_server_min_free_space_ratio,
 	log_server_min_free_space,
 	log_server_min_free_space_ratio,
-	storage_server_durability_lag, // 10
+	storage_server_durability_lag,
 	storage_server_list_fetch_failed,
 	limitReason_t_end
 };
@@ -53,14 +53,11 @@ class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };
 	int totalWriteOps{ 0 };
 
-	// refresh periodically
 	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
 
 	UID ratekeeperID;
 	Smoother smoothFreeSpace, smoothTotalSpace;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-
-	// Currently unused
 	Smoother smoothDurableVersion, smoothLatestVersion;
 
 public:
@@ -74,14 +71,12 @@ public:
 
 	StorageQueueInfo(const UID& id, const LocalityData& locality);
 	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
-	// Summarizes up the commit cost per storage server. Returns the UpdateCommitCostRequest for corresponding SS.
 	UpdateCommitCostRequest refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
 
-	// Accessor methods for Smoothers
 	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
 	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
 	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
@@ -89,8 +84,6 @@ public:
 	double getVerySmoothDurableBytesRate() const { return verySmoothDurableBytes.smoothRate(); }
 
 	Version getLatestVersion() const { return lastReply.version; }
-
-	// Determine the ratio (limit / current throughput) for throttling based on write queue size
 	Optional<double> getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const;
 };
 
@@ -104,7 +97,6 @@ public:
 	bool valid;
 	UID id;
 
-	// Accessor methods for Smoothers
 	double getSmoothFreeSpace() const { return smoothFreeSpace.smoothTotal(); }
 	double getSmoothTotalSpace() const { return smoothTotalSpace.smoothTotal(); }
 	double getSmoothDurableBytes() const { return smoothDurableBytes.smoothTotal(); }
@@ -152,7 +144,6 @@ struct RatekeeperLimits {
 class Ratekeeper {
 	friend class RatekeeperImpl;
 
-	// Differentiate from GrvProxyInfo in DatabaseContext.h
 	struct GrvProxyInfo {
 		int64_t totalTransactions{ 0 };
 		int64_t batchTransactions{ 0 };
@@ -193,7 +184,6 @@ class Ratekeeper {
 
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
-	// Maps storage server ID to storage server interface
 	std::unordered_map<UID, StorageServerInterface> storageServerInterfaces;
 
 	RatekeeperLimits normalLimits;
@@ -231,8 +221,6 @@ class Ratekeeper {
 	void updateRate(RatekeeperLimits* limits);
 	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
-
-	// SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
 	Future<Void> trackStorageServerQueueInfo(StorageServerInterface);
 	Future<Void> trackTLogQueueInfo(TLogInterface);
 

@@ -35,12 +35,13 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags = 0) {
+ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags) {
 	loop {
 		choose {
 			when(std::vector<WorkerDetails> w = wait(brokenPromiseToNever(
@@ -233,7 +234,7 @@ ACTOR Future<std::pair<int64_t, int64_t>> getTLogQueueInfo(Database cx,
 	return std::make_pair(maxQueueSize, maxPoppedVersionLag);
 }
 
-ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority = false) {
+ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx, bool use_system_priority) {
 	state Transaction tr(cx);
 	loop {
 		if (use_system_priority) {

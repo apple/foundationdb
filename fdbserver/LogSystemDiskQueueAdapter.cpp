@@ -21,7 +21,7 @@
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/CoroUtils.h"
 
 class LogSystemDiskQueueAdapterImpl {

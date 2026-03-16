@@ -20,8 +20,8 @@
 
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbserver/TesterInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbserver/workloads/workloads.actor.h"

@@ -29,11 +29,11 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

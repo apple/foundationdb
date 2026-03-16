@@ -1,0 +1,53 @@
+/*
+ * WaitFailure.actor.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#pragma once
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_WAIT_FAILURE_ACTOR_G_H)
+#define FDBSERVER_CORE_WAIT_FAILURE_ACTOR_G_H
+#include "fdbserver/core/WaitFailure.actor.g.h"
+#elif !defined(FDBSERVER_CORE_WAIT_FAILURE_ACTOR_H)
+#define FDBSERVER_CORE_WAIT_FAILURE_ACTOR_H
+
+#include "fdbrpc/fdbrpc.h"
+#include "flow/flow.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure);
+
+ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
+                                     double failureReactionTime = 0,
+                                     double failureReactionSlope = 0,
+                                     bool trace = false,
+                                     Optional<Standalone<StringRef>> traceMsg = Optional<Standalone<StringRef>>(),
+                                     TaskPriority taskID = TaskPriority::DefaultEndpoint);
+
+ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
+                                           double failureReactionTime = 0,
+                                           TaskPriority taskID = TaskPriority::DefaultEndpoint);
+
+ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
+                                      Reference<AsyncVar<bool>> failed,
+                                      double failureReactionTime = 0,
+                                      double failureReactionSlope = 0,
+                                      TaskPriority taskID = TaskPriority::DefaultEndpoint);
+
+#include "flow/unactorcompiler.h"
+
+#endif

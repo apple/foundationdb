@@ -26,12 +26,11 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbserver/core/TLogInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/ResolverInterface.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
 #include "flow/swift_support.h"
 
 #ifdef WITH_SWIFT

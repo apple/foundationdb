@@ -21,7 +21,7 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	static constexpr auto NAME = "TimeKeeperCorrectness";

@@ -26,10 +26,10 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "fdbserver/LogSystemConfig.h"
-#include "fdbserver/MasterInterface.h"
+#include "fdbserver/core/LogSystemConfig.h"
+#include "fdbserver/core/MasterInterface.h"
 #include "flow/ObjectSerializerTraits.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 class LogSet;
 struct OldLogData;

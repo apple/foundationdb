@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_SERVERDBINFO_H
-#define FDBSERVER_SERVERDBINFO_H
+#ifndef FDBSERVER_CORE_SERVERDBINFO_H
+#define FDBSERVER_CORE_SERVERDBINFO_H
 #pragma once
 
-#include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/core/ServerDBInfo.actor.h"
 
 #endif

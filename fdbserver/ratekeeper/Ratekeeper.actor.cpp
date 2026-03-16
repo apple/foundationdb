@@ -19,12 +19,11 @@
  */
 
 #include "fdbclient/ClientKnobs.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/Ratekeeper.h"
-#include "fdbserver/TagThrottler.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/ratekeeper/Ratekeeper.h"
+#include "fdbserver/ratekeeper/TagThrottler.h"
 #include "flow/OwningResource.h"
 
 #include "flow/actorcompiler.h" // must be last include

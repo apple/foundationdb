@@ -21,25 +21,25 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_WORKERINTERFACE_ACTOR_G_H)
 #define FDBSERVER_WORKERINTERFACE_ACTOR_G_H
-#include "fdbserver/WorkerInterface.actor.g.h"
+#include "fdbserver/core/WorkerInterface.actor.g.h"
 #elif !defined(FDBSERVER_WORKERINTERFACE_ACTOR_H)
 #define FDBSERVER_WORKERINTERFACE_ACTOR_H
 
-#include "fdbserver/BackupInterface.h"
-#include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/TLogInterface.h"
-#include "fdbserver/RatekeeperInterface.h"
+#include "fdbserver/core/BackupInterface.h"
+#include "fdbserver/core/DataDistributorInterface.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
-#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/core/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
-#include "fdbserver/RecoveryState.h"
+#include "fdbserver/core/RecoveryState.h"
 #include "flow/actorcompiler.h"
 
 struct WorkerInterface {
@@ -1262,6 +1262,6 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	}
 }
 
-#include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/core/ServerDBInfo.h"
 #include "flow/unactorcompiler.h"
 #endif

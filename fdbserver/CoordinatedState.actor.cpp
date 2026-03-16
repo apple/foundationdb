@@ -21,7 +21,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "fdbserver/LeaderElection.h"
 #include "flow/actorcompiler.h" // has to be last include

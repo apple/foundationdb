@@ -22,10 +22,8 @@
 
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/Ratekeeper.h"
+#include "fdbserver/ratekeeper/Ratekeeper.h"
 
-// The ServerThroughputTracker class is responsible for tracking
-// every tag's reported throughput across all storage servers
 class ServerThroughputTracker {
 	enum class OpType {
 		READ,
@@ -52,27 +50,11 @@ class ServerThroughputTracker {
 
 public:
 	~ServerThroughputTracker();
-
-	// Returns all tags running significant workload on the specified storage server.
 	std::vector<TransactionTag> getTagsAffectingStorageServer(UID storageServerId) const;
-
-	// Updates throughput statistics based on new storage queue info
 	void update(Map<UID, StorageQueueInfo> const&);
-
-	// Returns the current throughput for the provided tag on the
-	// provided storage server
 	Optional<double> getThroughput(UID storageServerId, TransactionTag const&) const;
-
-	// Returns the current cluster-wide throughput for the provided tag
 	double getThroughput(TransactionTag const&) const;
-
-	// Returns the current throughput on the provided storage server, summed
-	// across all throttling IDs
 	Optional<double> getThroughput(UID storageServerId) const;
-
-	// Used to remove a tag which has expired
 	void removeTag(TransactionTag const&);
-
-	// Returns the number of storage servers currently being tracked
 	int storageServersTracked() const;
 };

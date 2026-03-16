@@ -22,7 +22,7 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTERINTERFACE_ACTOR_G_H)
 #define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
-#include "fdbserver/TesterInterface.actor.g.h"
+#include "fdbserver/core/TesterInterface.actor.g.h"
 #elif !defined(FDBSERVER_TESTERINTERFACE_ACTOR_H)
 #define FDBSERVER_TESTERINTERFACE_ACTOR_H
 

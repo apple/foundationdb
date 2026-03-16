@@ -20,7 +20,7 @@
 
 #include "fdbserver/IDiskQueue.h"
 #include "flow/IAsyncFile.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "crc32/crc32c.h"
 #include "flow/genericactors.actor.h"

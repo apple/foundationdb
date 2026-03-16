@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/AccumulativeChecksumUtil.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 
 void updateMutationWithAcsAndAddMutationToAcsBuilder(std::shared_ptr<AccumulativeChecksumBuilder> acsBuilder,
                                                      MutationRef& mutation,

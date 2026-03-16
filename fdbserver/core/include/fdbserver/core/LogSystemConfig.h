@@ -22,8 +22,8 @@
 #define FDBSERVER_LOGSYSTEMCONFIG_H
 #pragma once
 
-#include "fdbserver/BackupInterface.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbserver/core/BackupInterface.h"
+#include "fdbserver/core/TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbclient/DatabaseConfiguration.h"
 

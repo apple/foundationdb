@@ -19,8 +19,10 @@
  * limitations under the License.
  */
 
-#include "fdbserver/TagThrottler.h"
-#include "fdbserver/RkTagThrottleCollection.h"
+#include "fdbserver/core/Knobs.h"
+#include "fdbserver/ratekeeper/RkTagThrottleCollection.h"
+#include "fdbserver/ratekeeper/TagThrottler.h"
+#include "flow/CoroUtils.h"
 
 class TagThrottlerImpl {
 	Database db;

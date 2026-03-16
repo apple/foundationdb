@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/LogSystemConfig.h"
+#include "fdbserver/core/LogSystemConfig.h"
 
 std::string TLogSet::toString() const {
 	return format("anti: %d replication: %d local: %d routers: %d tLogs: %s backupWorkers: %s locality: %d",

@@ -20,20 +20,20 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SERVERDBINFO_ACTOR_G_H)
 #define FDBSERVER_SERVERDBINFO_ACTOR_G_H
-#include "fdbserver/ServerDBInfo.actor.g.h"
+#include "fdbserver/core/ServerDBInfo.actor.g.h"
 #elif !defined(FDBSERVER_SERVERDBINFO_ACTOR_H)
 #define FDBSERVER_SERVERDBINFO_ACTOR_H
 #define FDBSERVER_SERVERDBINFO_H
 #pragma once
 
 #include "fdbclient/ConsistencyScanInterface.actor.h"
-#include "fdbserver/DataDistributorInterface.h"
-#include "fdbserver/MasterInterface.h"
-#include "fdbserver/LogSystemConfig.h"
-#include "fdbserver/RatekeeperInterface.h"
-#include "fdbserver/RecoveryState.h"
-#include "fdbserver/LatencyBandConfig.h"
-#include "fdbserver/WorkerInterface.actor.h"
+#include "fdbserver/core/DataDistributorInterface.h"
+#include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/LogSystemConfig.h"
+#include "fdbserver/core/RatekeeperInterface.h"
+#include "fdbserver/core/RecoveryState.h"
+#include "fdbserver/core/LatencyBandConfig.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ServerDBInfo {

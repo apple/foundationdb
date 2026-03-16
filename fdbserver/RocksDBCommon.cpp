@@ -22,7 +22,7 @@
 
 #ifdef WITH_ROCKSDB
 
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "flow/Trace.h"
 
 namespace RocksDBCommon {

@@ -30,8 +30,8 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/QuietDatabase.h"
+#include "fdbserver/core/ServerDBInfo.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbrpc/simulator.h"
 
 template <class T>

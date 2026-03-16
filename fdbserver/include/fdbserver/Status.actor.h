@@ -26,8 +26,8 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
-#include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/MasterInterface.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"
 
 #include "flow/actorcompiler.h" // has to be last include
