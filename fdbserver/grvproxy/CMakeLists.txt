@@ -10,4 +10,4 @@ target_include_directories(fdbserver_grvproxy
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(fdbserver_grvproxy PRIVATE fdbclient fdbserver_core)
+target_link_libraries(fdbserver_grvproxy PRIVATE fdbclient fdbserver_core fdbserver_logsystem)

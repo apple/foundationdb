@@ -19,6 +19,14 @@ set(FDBSERVER_CORE_TO_KVSTORE_SRCS
   VersionedBTreeDebug.cpp)
 list(REMOVE_ITEM FDBSERVER_CORE_LOCAL_SRCS ${FDBSERVER_CORE_TO_KVSTORE_SRCS})
 
+set(FDBSERVER_CORE_TO_LOGSYSTEM_SRCS
+  LogSystemDiskQueueAdapter.cpp
+  LogSystemFactory.actor.cpp
+  LogSystemPeekCursor.actor.cpp
+  TagPartitionedLogSystem.actor.cpp
+  TagPartitionedLogSystemRecoveryTests.cpp)
+list(REMOVE_ITEM FDBSERVER_CORE_LOCAL_SRCS ${FDBSERVER_CORE_TO_LOGSYSTEM_SRCS})
+
 set(FDBSERVER_CORE_SRCS ${FDBSERVER_CORE_LOCAL_SRCS})
 if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_CORE_SRCS ../coroimpl/CoroFlowCoro.actor.cpp)

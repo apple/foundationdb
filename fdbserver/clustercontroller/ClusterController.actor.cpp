@@ -46,7 +46,7 @@
 #include "fdbserver/core/LeaderElection.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.actor.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"

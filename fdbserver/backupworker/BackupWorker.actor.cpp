@@ -28,6 +28,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogProtocolMessage.h"
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.actor.h"
@@ -1066,7 +1067,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		loop choose {
 			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
-				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
+				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
 				if (hasPseudoLocality) {
 					self.logSystem.set(ls);

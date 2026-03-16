@@ -46,7 +46,8 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
+#include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/ProxyCommitData.actor.h"
@@ -2865,7 +2866,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		r->value().emplace_back(0, 0);
 	commitData.systemKeyVersions.push_back(0);
 
-	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
+	commitData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(
@@ -2932,7 +2933,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 			dbInfoChange = commitData.db->onChange();
 			if (masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
 			    commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
-				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
+				commitData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 				for (auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}

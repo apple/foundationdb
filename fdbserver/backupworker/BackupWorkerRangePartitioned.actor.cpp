@@ -27,6 +27,7 @@
 #include "BackupPartitionMap.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WaitFailure.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -163,7 +164,7 @@ ACTOR Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		loop choose {
 			when(wait(dbInfoChange)) {
 				dbInfoChange = db->onChange();
-				Reference<ILogSystem> ls = ILogSystem::fromServerDBInfo(self.myId, db->get(), true);
+				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 			}
 			when(wait(done)) {
 				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);

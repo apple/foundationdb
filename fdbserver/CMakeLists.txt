@@ -58,6 +58,7 @@ if(WITH_ROCKSDB)
 endif()
 
 add_subdirectory(core)
+add_subdirectory(logsystem)
 add_subdirectory(kvstore)
 add_subdirectory(mocks3)
 add_subdirectory(restoreworker)
@@ -79,12 +80,17 @@ add_subdirectory(tlog)
 add_fdbserver_link_test(fdbserver_corelinktest
   fdbserver_core
   fdbclient)
+add_fdbserver_link_test(fdbserver_logsystemlinktest
+  fdbserver_logsystem
+  fdbserver_core
+  fdbclient)
 add_fdbserver_link_test(fdbserver_kvstorelinktest
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_backupworkerlinktest
   fdbserver_backupworker
+  fdbserver_logsystem
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_restoreworkerlinktest
@@ -93,11 +99,13 @@ add_fdbserver_link_test(fdbserver_restoreworkerlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
   fdbserver_clustercontroller
+  fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_commitproxylinktest
   fdbserver_commitproxy
+  fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
@@ -116,10 +124,12 @@ add_fdbserver_link_test(fdbserver_datadistributorlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_grvproxylinktest
   fdbserver_grvproxy
+  fdbserver_logsystem
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_logrouterlinktest
   fdbserver_logrouter
+  fdbserver_logsystem
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_ratekeeperlinktest
@@ -128,6 +138,7 @@ add_fdbserver_link_test(fdbserver_ratekeeperlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_resolverlinktest
   fdbserver_resolver
+  fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
@@ -137,6 +148,7 @@ add_fdbserver_link_test(fdbserver_sequencerlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_storageserverlinktest
   fdbserver_storageserver
+  fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
@@ -146,6 +158,7 @@ add_fdbserver_link_test(fdbserver_testerlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_tloglinktest
   fdbserver_tlog
+  fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
@@ -271,7 +284,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_mocks3 fdbserver_backupworker fdbserver_restoreworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_kvstore fdbserver_logrouter fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tester fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_mocks3 fdbserver_backupworker fdbserver_restoreworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_kvstore fdbserver_logrouter fdbserver_logsystem fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tester fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

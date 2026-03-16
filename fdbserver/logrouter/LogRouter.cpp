@@ -21,6 +21,8 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemTypes.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/TLogInterface.h"
@@ -851,7 +853,7 @@ Future<Void> logRouterCore(TLogInterface interf,
 			          dbInfoChange = db->onChange();
 			          logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			                                    db->get().recoveryCount >= req.recoveryCount;
-			          logRouterData.logSystem->set(ILogSystem::fromServerDBInfo(logRouterData.dbgid, db->get(), true));
+			          logRouterData.logSystem->set(makeLogSystemFromServerDBInfo(logRouterData.dbgid, db->get(), true));
 		          })
 		    .When(interf.peekMessages.getFuture(),
 		          [&](const TLogPeekRequest& req) {

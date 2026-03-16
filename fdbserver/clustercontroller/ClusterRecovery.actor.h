@@ -41,7 +41,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 #include "flow/SystemMonitor.h"

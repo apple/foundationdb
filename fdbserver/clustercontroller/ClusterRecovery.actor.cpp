@@ -30,6 +30,7 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Error.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
@@ -1555,12 +1556,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems(new AsyncVar<Reference<ILogSystem>>);
 	state Future<Void> recoverAndEndEpoch =
-	    ILogSystem::recoverAndEndEpoch(oldLogSystems,
-	                                   self->dbgid,
-	                                   self->cstate.prevDBState,
-	                                   self->clusterController.tlogRejoin.getFuture(),
-	                                   self->controllerData->db.serverInfo->get().myLocality,
-	                                   std::addressof(self->forceRecovery));
+	    recoverAndEndLogSystemEpoch(oldLogSystems,
+	                                self->dbgid,
+	                                self->cstate.prevDBState,
+	                                self->clusterController.tlogRejoin.getFuture(),
+	                                self->controllerData->db.serverInfo->get().myLocality,
+	                                std::addressof(self->forceRecovery));
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;

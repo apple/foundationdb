@@ -30,7 +30,8 @@
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
+#include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
@@ -1139,7 +1140,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	}
 	// Do we need to wait for any db info change? Yes. To update latency band.
 	state Future<Void> dbInfoChange = grvProxyData.db->onChange();
-	grvProxyData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
+	grvProxyData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
 
 	grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 
@@ -1159,7 +1160,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 			if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
 			    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 				grvProxyData.logSystem =
-				    ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
+				    makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
 			}
 			grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 		}

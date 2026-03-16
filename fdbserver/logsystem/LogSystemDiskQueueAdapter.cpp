@@ -20,7 +20,7 @@
 
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/CoroUtils.h"
 

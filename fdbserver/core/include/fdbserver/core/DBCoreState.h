@@ -31,7 +31,6 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "flow/ObjectSerializerTraits.h"
 
-class LogSet;
 struct OldLogData;
 
 // This structure is stored persistently in CoordinatedState and must be versioned carefully!
@@ -60,8 +59,6 @@ struct CoreTLogSet {
 	CoreTLogSet()
 	  : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid),
 	    startVersion(invalidVersion) {}
-	explicit CoreTLogSet(const LogSet& logset);
-
 	bool operator==(CoreTLogSet const& rhs) const {
 		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum &&
 		       tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal &&
@@ -97,8 +94,6 @@ struct OldTLogCoreData {
 	LogEpoch epoch;
 
 	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
-	explicit OldTLogCoreData(const OldLogData&);
-
 	bool operator==(const OldTLogCoreData& rhs) const {
 		if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
 			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&

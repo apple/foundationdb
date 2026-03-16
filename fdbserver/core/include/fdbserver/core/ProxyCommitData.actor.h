@@ -31,7 +31,6 @@
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
@@ -45,6 +44,8 @@ DESCR struct SingleKeyMutation {
 	int64_t tag2;
 	int64_t tag3;
 };
+
+class LogSystemDiskQueueAdapter;
 
 struct ApplyMutationsData {
 	Future<Void> worker;

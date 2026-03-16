@@ -31,7 +31,8 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/core/LogSystemDiskQueueAdapter.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
+#include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbserver/core/RestoreUtil.h"
@@ -736,7 +737,7 @@ ACTOR Future<Void> resolverCore(ResolverInterface resolver,
 	}
 
 	// Initialize txnStateStore
-	self->logSystem = ILogSystem::fromServerDBInfo(resolver.id(), db->get(), false, addActor);
+	self->logSystem = makeLogSystemFromServerDBInfo(resolver.id(), db->get(), false, addActor);
 	self->localTLogCount = db->get().logSystemConfig.numLogs();
 	state Future<Void> onError =
 	    transformError(actorCollection(addActor.getFuture()), broken_promise(), resolver_failed());

@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_TAGPARTITIONEDLOGSYSTEM_ACTOR_G_H)
-#define FDBSERVER_CORE_TAGPARTITIONEDLOGSYSTEM_ACTOR_G_H
-#include "fdbserver/core/TagPartitionedLogSystem.actor.g.h"
-#elif !defined(FDBSERVER_CORE_TAGPARTITIONEDLOGSYSTEM_ACTOR_H)
-#define FDBSERVER_CORE_TAGPARTITIONEDLOGSYSTEM_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_G_H)
+#define FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_G_H
+#include "fdbserver/logsystem/TagPartitionedLogSystem.actor.g.h"
+#elif !defined(FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_H)
+#define FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_H
 
 #pragma once
 
 #include "fdbrpc/Replication.h"
 #include "fdbserver/core/DBCoreState.h"
-#include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemTypes.h"
 #include "flow/ActorCollection.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -448,4 +448,4 @@ std::vector<T> TagPartitionedLogSystem::getReadyNonError(std::vector<Future<T>> 
 }
 
 #include "flow/unactorcompiler.h"
-#endif // FDBSERVER_CORE_TAGPARTITIONEDLOGSYSTEM_ACTOR_H
+#endif // FDBSERVER_LOGSYSTEM_TAGPARTITIONEDLOGSYSTEM_ACTOR_H

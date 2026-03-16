@@ -91,6 +91,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -11945,7 +11946,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-					self->logSystem = ILogSystem::fromServerDBInfo(self->thisServerID, self->db->get());
+					self->logSystem = makeLogSystemFromServerDBInfo(self->thisServerID, self->db->get());
 					if (self->logSystem) {
 						if (self->db->get().logSystemConfig.recoveredAt.present()) {
 							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();

@@ -43,6 +43,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/LogSystem.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Histogram.h"
 #include "flow/DebugTrace.h"
 #include "flow/genericactors.actor.h"
@@ -2808,7 +2809,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 				}
 			}
 			if (found && self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
-				logData->logSystem->set(ILogSystem::fromServerDBInfo(self->dbgid, self->dbInfo->get()));
+				logData->logSystem->set(makeLogSystemFromServerDBInfo(self->dbgid, self->dbInfo->get()));
 				if (!logData->isPrimary) {
 					logData->logSystem->get()->pop(logData->logRouterPoppedVersion,
 					                               logData->remoteTag,
@@ -3498,13 +3499,13 @@ ACTOR Future<Void> updateLogSystem(TLogData* self,
 		bool found = self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID;
 		if (found) {
 			if (self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom)) {
-				logSystem->set(ILogSystem::fromOldLogSystemConfig(
+				logSystem->set(makeOldLogSystemFromLogSystemConfig(
 				    logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig));
 			} else if (self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom)) {
-				logSystem->set(ILogSystem::fromLogSystemConfig(
+				logSystem->set(makeLogSystemFromLogSystemConfig(
 				    logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, false, true));
 			} else if (self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-				logSystem->set(ILogSystem::fromLogSystemConfig(
+				logSystem->set(makeLogSystemFromLogSystemConfig(
 				    logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, true));
 			} else {
 				found = false;
