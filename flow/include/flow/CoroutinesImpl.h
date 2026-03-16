@@ -30,6 +30,9 @@ class Generator;
 template <class T>
 class AsyncGenerator;
 
+template <class T>
+class AsyncResult;
+
 struct Uncancellable;
 
 namespace coro {
@@ -124,6 +127,102 @@ struct CoroActor final : Actor<std::conditional_t<std::is_void_v<T>, Void, T>> {
 	}
 };
 
+template <class T>
+struct AsyncResultState : FastAllocated<AsyncResultState<T>> {
+	int refs = 1;
+	bool ready = false;
+	bool hasValue = false;
+	bool cancellable = false;
+
+private:
+	typename std::aligned_storage<sizeof(T), __alignof(T)>::type value_storage;
+
+public:
+	Error error;
+	n_coroutine::coroutine_handle<> continuation;
+	n_coroutine::coroutine_handle<> producerHandle;
+	int8_t* producerWaitState = nullptr;
+
+	~AsyncResultState() {
+		if (hasValue) {
+			value().~T();
+		}
+	}
+
+	T& value() { return *reinterpret_cast<T*>(&value_storage); }
+	T const& value() const { return *reinterpret_cast<T const*>(&value_storage); }
+
+	void addRef() { ++refs; }
+	void delRef() {
+		if (!--refs) {
+			delete this;
+		}
+	}
+
+	bool isReady() const { return ready; }
+	bool isError() const { return ready && error.isValid(); }
+	bool canGet() const { return ready && !error.isValid(); }
+
+	Error& getError() {
+		ASSERT(isError());
+		return error;
+	}
+
+	template <class U>
+	void setValue(U&& v) {
+		ASSERT(!hasValue && !error.isValid());
+		new (&value_storage) T(std::forward<U>(v));
+		hasValue = true;
+	}
+
+	void setError(Error const& e) {
+		ASSERT(!hasValue && !error.isValid());
+		error = e;
+	}
+
+	T const& get() const {
+		ASSERT(canGet());
+		return value();
+	}
+
+	T take() {
+		ASSERT(canGet());
+		return std::move(value());
+	}
+
+	void registerContinuation(n_coroutine::coroutine_handle<> h) {
+		ASSERT(!ready);
+		ASSERT(!continuation);
+		continuation = h;
+	}
+
+	void clearContinuation() { continuation = {}; }
+
+	void cancelProducer() {
+		if (!cancellable || ready || !producerHandle || !producerWaitState) {
+			return;
+		}
+
+		auto prevWaitState = *producerWaitState;
+		*producerWaitState = ACTOR_WAIT_STATE_CANCELLED;
+		if (actorWaitStateIsWaiting(prevWaitState)) {
+			auto h = producerHandle;
+			h.resume();
+		}
+	}
+
+	void complete() {
+		ready = true;
+		producerHandle = {};
+		producerWaitState = nullptr;
+		if (continuation) {
+			auto h = continuation;
+			continuation = {};
+			h.resume();
+		}
+	}
+};
+
 template <class U>
 struct AwaitableFutureStore {
 	std::variant<Error, U> data;
@@ -151,6 +250,69 @@ struct AwaitableFutureStore {
 			return std::get<1>(std::move(data));
 		}
 		UNREACHABLE();
+	}
+};
+
+template <class F, class U>
+struct AwaitableAsyncResult {
+	using StateType = typename AsyncResult<U>::StoredT;
+
+	AsyncResult<U> result;
+	F* pt = nullptr;
+
+	AwaitableAsyncResult(AsyncResult<U>&& result, F* pt) : result(std::move(result)), pt(pt) {}
+
+	[[nodiscard]] bool await_ready() const {
+		ASSERT(result.state);
+		if (actorWaitStateIsCancelled(pt->waitState())) {
+			pt->waitState() = ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK;
+			return true;
+		}
+		return result.state->isReady();
+	}
+
+	void await_suspend(n_coroutine::coroutine_handle<> h) {
+		ASSERT(result.state);
+		pt->setHandle(h);
+		pt->waitState() = ACTOR_WAIT_STATE_WAITING;
+		result.state->registerContinuation(h);
+	}
+
+	bool resumeImpl() {
+		switch (pt->waitState()) {
+		case ACTOR_WAIT_STATE_CANCELLED:
+			if (result.state) {
+				result.state->clearContinuation();
+			}
+		case ACTOR_WAIT_STATE_CANCELLED_DURING_READY_CHECK:
+			throw actor_cancelled();
+		}
+
+		bool wasReady = pt->waitState() == ACTOR_WAIT_STATE_NOT_WAITING;
+		if (actorWaitStateIsWaiting(pt->waitState())) {
+			result.state->clearContinuation();
+			pt->waitState() = ACTOR_WAIT_STATE_NOT_WAITING;
+		}
+		return wasReady;
+	}
+
+	void await_resume()
+	    requires(std::is_void_v<U>)
+	{
+		resumeImpl();
+		if (result.state->isError()) {
+			throw result.state->getError();
+		}
+	}
+
+	U await_resume()
+	    requires(!std::is_void_v<U>)
+	{
+		resumeImpl();
+		if (result.state->isError()) {
+			throw result.state->getError();
+		}
+		return result.state->take();
 	}
 };
 
@@ -359,6 +521,19 @@ struct CoroReturn<Void, Promise> {
 	void return_void() { static_cast<Promise*>(this)->coroActor.set(Void()); }
 };
 
+template <class T, class Promise>
+struct AsyncResultReturn {
+	template <class U>
+	void return_value(U&& value) {
+		static_cast<Promise*>(this)->state->setValue(std::forward<U>(value));
+	}
+};
+
+template <class Promise>
+struct AsyncResultReturn<Void, Promise> {
+	void return_void() { static_cast<Promise*>(this)->state->setValue(Void()); }
+};
+
 template <class T, bool IsCancellable>
 struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 	using promise_type = CoroPromise<T, IsCancellable>;
@@ -437,6 +612,105 @@ struct CoroPromise : CoroReturn<T, CoroPromise<T, IsCancellable>> {
 	template <class U>
 	auto await_transform(const FutureStream<U>& futureStream) {
 		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>&& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
+	}
+
+	template <class U>
+	auto await_transform(const ThreadFutureStream<U>& futureStream) {
+		return coro::ThreadAwaitableFutureStream<promise_type, U>{ futureStream, this };
+	}
+};
+
+template <class T, bool IsCancellable>
+struct AsyncResultPromise : AsyncResultReturn<T, AsyncResultPromise<T, IsCancellable>> {
+	using promise_type = AsyncResultPromise<T, IsCancellable>;
+	using ReturnValue = std::conditional_t<std::is_void_v<T>, Void, T>;
+	using ReturnAsyncResultType = AsyncResult<T>;
+	using State = AsyncResultState<ReturnValue>;
+
+	State* state = new State();
+	n_coroutine::coroutine_handle<> producerHandle;
+	int8_t producerWaitState = ACTOR_WAIT_STATE_NOT_WAITING;
+
+	AsyncResultPromise() = default;
+
+	n_coroutine::coroutine_handle<promise_type> handle() {
+		return n_coroutine::coroutine_handle<promise_type>::from_promise(*this);
+	}
+
+	static void* operator new(size_t s) { return allocateFast(int(s)); }
+	static void operator delete(void* p, size_t s) { freeFast(int(s), p); }
+
+	ReturnAsyncResultType get_return_object() noexcept {
+		producerHandle = handle();
+		state->cancellable = IsCancellable;
+		state->producerHandle = producerHandle;
+		state->producerWaitState = &producerWaitState;
+		state->addRef();
+		return ReturnAsyncResultType(state);
+	}
+
+	[[nodiscard]] n_coroutine::suspend_never initial_suspend() const noexcept { return {}; }
+
+	auto final_suspend() noexcept {
+		struct FinalAwaitable {
+			State* state;
+
+			[[nodiscard]] bool await_ready() const noexcept { return false; }
+			void await_resume() const noexcept {}
+
+			bool await_suspend(n_coroutine::coroutine_handle<>) const noexcept {
+				state->complete();
+				state->delRef();
+				return false;
+			}
+		};
+		return FinalAwaitable{ state };
+	}
+
+	void unhandled_exception() {
+		try {
+			std::rethrow_exception(std::current_exception());
+		} catch (const Error& error) {
+			state->setError(error);
+		} catch (...) {
+			state->setError(unknown_error());
+		}
+	}
+
+	void setHandle(n_coroutine::coroutine_handle<> h) { producerHandle = h; }
+
+	void resume() { producerHandle.resume(); }
+
+	int8_t& waitState() { return producerWaitState; }
+
+	template <class U>
+	auto await_transform(const Future<U>& future) {
+		return coro::AwaitableFuture<promise_type, U, false>{ future, this };
+	}
+
+	template <class U>
+	auto await_transform(const FutureStream<U>& futureStream) {
+		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>&& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
 	}
 
 	template <class U>
@@ -537,9 +811,51 @@ struct AsyncGeneratorPromise {
 		return coro::AwaitableFuture<promise_type, U, true>{ futureStream, this };
 	}
 
+	template <class U>
+	auto await_transform(AsyncResult<U>& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
+	}
+
+	template <class U>
+	auto await_transform(AsyncResult<U>&& result) {
+		return coro::AwaitableAsyncResult<promise_type, U>{ std::move(result), this };
+	}
+
 	n_coroutine::coroutine_handle<> mHandle;
 	PromiseStream<T> nextPromise;
 	int8_t mWaitState = 0;
+};
+
+template <class U>
+struct AsyncResultAwaiter {
+	AsyncResult<U> result;
+
+	[[nodiscard]] bool await_ready() const {
+		ASSERT(result.state);
+		return result.state->isReady();
+	}
+
+	void await_suspend(n_coroutine::coroutine_handle<> h) {
+		ASSERT(result.state);
+		result.state->registerContinuation(h);
+	}
+
+	void await_resume()
+	    requires(std::is_void_v<U>)
+	{
+		if (result.state->isError()) {
+			throw result.state->getError();
+		}
+	}
+
+	U await_resume()
+	    requires(!std::is_void_v<U>)
+	{
+		if (result.state->isError()) {
+			throw result.state->getError();
+		}
+		return result.state->take();
+	}
 };
 
 template <class... Args>

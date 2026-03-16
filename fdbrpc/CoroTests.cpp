@@ -1133,6 +1133,15 @@ struct Tracker {
 	}
 };
 
+AsyncResult<Tracker> immediateAsyncResultTracker() {
+	co_return Tracker{};
+}
+
+AsyncResult<Tracker> delayedAsyncResultTracker(Future<Void> signal) {
+	co_await signal;
+	co_return Tracker{};
+}
+
 } // namespace
 
 TEST_CASE("/flow/coro/PromiseStream/move") {
@@ -1200,6 +1209,23 @@ TEST_CASE("/flow/coro/PromiseStream/move2") {
 	ASSERT(tracker.moved);
 	ASSERT(!movedTracker.moved);
 	ASSERT(movedTracker.copied == 0);
+}
+
+TEST_CASE("/flow/coro/AsyncResult/move") {
+	{
+		Tracker tracker = co_await immediateAsyncResultTracker();
+		ASSERT(!tracker.moved);
+		ASSERT(tracker.copied == 0);
+	}
+
+	{
+		Promise<Void> signal;
+		AsyncResult<Tracker> result = delayedAsyncResultTracker(signal.getFuture());
+		signal.send(Void());
+		Tracker tracker = co_await result;
+		ASSERT(!tracker.moved);
+		ASSERT(tracker.copied == 0);
+	}
 }
 
 namespace {
