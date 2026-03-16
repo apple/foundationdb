@@ -23,7 +23,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_LOADER_G_H)
 #define FDBSERVER_RESTORE_LOADER_G_H
-#include "fdbserver/restoreworker/RestoreLoader.actor.g.h"
+#include "RestoreLoader.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_LOADER_H)
 #define FDBSERVER_RESTORE_LOADER_H
 
@@ -36,7 +36,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
-#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
+#include "RestoreRoleCommon.actor.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 #include "fdbclient/BackupContainer.h"
 
@@ -136,7 +136,7 @@ struct RestoreLoaderSchedSendLoadParamRequest {
 	double start;
 
 	explicit RestoreLoaderSchedSendLoadParamRequest(int batchIndex, Promise<Void> toSched, double start)
-	  : batchIndex(batchIndex), toSched(toSched), start(start) {};
+	  : batchIndex(batchIndex), toSched(toSched), start(start){};
 	RestoreLoaderSchedSendLoadParamRequest() = default;
 
 	bool operator<(RestoreLoaderSchedSendLoadParamRequest const& rhs) const {

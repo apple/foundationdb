@@ -20,7 +20,7 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TLOG_TEST_TLOG_ACTOR_G_H)
 #define FDBSERVER_TLOG_TEST_TLOG_ACTOR_G_H
-#include "fdbserver/tlog/TestTLogServer.actor.g.h"
+#include "TestTLogServer.actor.g.h"
 #elif !defined(FDBSERVER_TLOG_TEST_TLOG_ACTOR_H)
 #define FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
 
@@ -84,7 +84,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID) {};
+	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
 // test state

@@ -32,7 +32,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/resolver/ConflictSet.h"
+#include "ConflictSet.h"
 #include "flow/UnitTest.h"
 
 static std::vector<PerfDoubleCounter*> skc;

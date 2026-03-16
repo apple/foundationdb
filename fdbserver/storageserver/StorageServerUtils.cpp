@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/storageserver/StorageServerUtils.h"
+#include "StorageServerUtils.h"
 
 #define PERSIST_PREFIX "\xff\xff"
 

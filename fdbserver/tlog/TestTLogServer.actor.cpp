@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tlog/TestTLogServer.actor.h"
+#include "TestTLogServer.actor.h"
 
 #include <filesystem>
 #include <vector>

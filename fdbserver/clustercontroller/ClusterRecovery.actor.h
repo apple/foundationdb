@@ -27,7 +27,7 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_G_H
-#include "fdbserver/clustercontroller/ClusterRecovery.actor.g.h"
+#include "ClusterRecovery.actor.g.h"
 #elif !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_H)
 #define FDBSERVER_CLUSTERCONTROLLER_CLUSTERRECOVERY_ACTOR_H
 
@@ -36,7 +36,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "fdbserver/clustercontroller/ClusterController.actor.h"
+#include "ClusterController.actor.h"
 #include "fdbserver/core/DBCoreState.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"

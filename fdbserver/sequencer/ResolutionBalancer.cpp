@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/sequencer/ResolutionBalancer.actor.h"
+#include "ResolutionBalancer.actor.h"
 
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbserver/core/Knobs.h"

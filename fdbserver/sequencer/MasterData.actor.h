@@ -27,7 +27,7 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
-#include "fdbserver/sequencer/ResolutionBalancer.actor.h"
+#include "ResolutionBalancer.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
@@ -47,7 +47,7 @@ struct MasterData;
 // version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_G_H)
 #define FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_G_H
-#include "fdbserver/sequencer/MasterData.actor.g.h"
+#include "MasterData.actor.g.h"
 #elif !defined(FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_H)
 #define FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_H
 #include "flow/actorcompiler.h" // This must be the last #include

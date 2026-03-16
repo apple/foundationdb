@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/coordinator/OnDemandStore.h"
+#include "OnDemandStore.h"
 
 static Future<Void> onErr(Future<Future<Void>> e) {
 	Future<Void> f = co_await std::move(e);

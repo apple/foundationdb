@@ -24,7 +24,7 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/clustercontroller/Status.actor.h"
+#include "Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
@@ -34,7 +34,7 @@
 #include "fdbserver/core/WorkerEvents.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
-#include "fdbserver/clustercontroller/ClusterRecovery.actor.h"
+#include "ClusterRecovery.actor.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"

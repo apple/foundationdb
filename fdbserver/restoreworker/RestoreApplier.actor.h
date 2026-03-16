@@ -23,7 +23,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_APPLIER_G_H)
 #define FDBSERVER_RESTORE_APPLIER_G_H
-#include "fdbserver/restoreworker/RestoreApplier.actor.g.h"
+#include "RestoreApplier.actor.g.h"
 #elif !defined(FDBSERVER_RESTORE_APPLIER_H)
 #define FDBSERVER_RESTORE_APPLIER_H
 
@@ -37,7 +37,7 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
+#include "RestoreRoleCommon.actor.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include

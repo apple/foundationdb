@@ -22,8 +22,8 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.actor.h"
-#include "fdbserver/ratekeeper/Ratekeeper.h"
-#include "fdbserver/ratekeeper/TagThrottler.h"
+#include "Ratekeeper.h"
+#include "TagThrottler.h"
 #include "flow/OwningResource.h"
 
 #include "flow/actorcompiler.h" // must be last include

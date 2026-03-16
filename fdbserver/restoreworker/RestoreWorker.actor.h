@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTOREWORKER_G_H)
 #define FDBSERVER_RESTOREWORKER_G_H
-#include "fdbserver/restoreworker/RestoreWorker.actor.g.h"
+#include "RestoreWorker.actor.g.h"
 #elif !defined(FDBSERVER_RESTOREWORKER_H)
 #define FDBSERVER_RESTOREWORKER_H
 

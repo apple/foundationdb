@@ -94,7 +94,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/storageserver/StorageServerUtils.h"
+#include "StorageServerUtils.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"

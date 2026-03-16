@@ -37,10 +37,10 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/restoreworker/RestoreWorker.actor.h"
-#include "fdbserver/restoreworker/RestoreLoader.actor.h"
-#include "fdbserver/restoreworker/RestoreApplier.actor.h"
-#include "fdbserver/restoreworker/RestoreController.actor.h"
+#include "RestoreWorker.actor.h"
+#include "RestoreLoader.actor.h"
+#include "RestoreApplier.actor.h"
+#include "RestoreController.actor.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

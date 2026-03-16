@@ -251,9 +251,6 @@ if (WITH_SWIFT)
   if(NOT FDBSERVER_MODULE_HEADERS)
     set(FDBSERVER_MODULE_HEADERS "")
   endif()
-  list(APPEND FDBSERVER_MODULE_HEADERS
-    "${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include/fdbserver/sequencer/MasterData.actor.h"
-    "${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include/fdbserver/sequencer/ResolutionBalancer.actor.h")
   generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "FDBServer" fdbserver
      HEADERS ${FDBSERVER_MODULE_HEADERS}
      OMIT

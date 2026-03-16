@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbserver/clustercontroller/ClusterController.actor.h"
+#include "ClusterController.actor.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 

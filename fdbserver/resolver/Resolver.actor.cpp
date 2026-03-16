@@ -39,7 +39,7 @@
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/core/WaitFailure.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/resolver/ConflictSet.h"
+#include "ConflictSet.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/Histogram.h"

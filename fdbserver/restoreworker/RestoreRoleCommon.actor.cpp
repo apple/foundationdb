@@ -24,10 +24,10 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
-#include "fdbserver/restoreworker/RestoreLoader.actor.h"
-#include "fdbserver/restoreworker/RestoreApplier.actor.h"
-#include "fdbserver/restoreworker/RestoreController.actor.h"
+#include "RestoreRoleCommon.actor.h"
+#include "RestoreLoader.actor.h"
+#include "RestoreApplier.actor.h"
+#include "RestoreController.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

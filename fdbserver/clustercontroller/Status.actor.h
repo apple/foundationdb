@@ -20,7 +20,7 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_G_H
-#include "fdbserver/clustercontroller/Status.actor.g.h"
+#include "Status.actor.g.h"
 #elif !defined(FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_H)
 #define FDBSERVER_CLUSTERCONTROLLER_STATUS_ACTOR_H
 #pragma once

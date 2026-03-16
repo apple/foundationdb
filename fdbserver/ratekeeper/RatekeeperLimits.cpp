@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ratekeeper/Ratekeeper.h"
+#include "Ratekeeper.h"
 #include "fdbserver/core/Knobs.h"
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,

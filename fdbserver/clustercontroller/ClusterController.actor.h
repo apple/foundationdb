@@ -22,7 +22,7 @@
 // version.
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_G_H)
 #define FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_G_H
-#include "fdbserver/clustercontroller/ClusterController.actor.g.h"
+#include "ClusterController.actor.g.h"
 #elif !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_H)
 #define FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_H
 #pragma once

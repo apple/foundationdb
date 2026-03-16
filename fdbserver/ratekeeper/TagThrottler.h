@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbclient/PImpl.h"
-#include "fdbserver/ratekeeper/Ratekeeper.h"
+#include "Ratekeeper.h"
 
 class ITagThrottler {
 public:

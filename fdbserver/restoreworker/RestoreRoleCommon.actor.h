@@ -24,7 +24,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreRoleCommon_G_H)
 #define FDBSERVER_RestoreRoleCommon_G_H
-#include "fdbserver/restoreworker/RestoreRoleCommon.actor.g.h"
+#include "RestoreRoleCommon.actor.g.h"
 #elif !defined(FDBSERVER_RestoreRoleCommon_H)
 #define FDBSERVER_RestoreRoleCommon_H
 
@@ -101,8 +101,7 @@ public:
 	NotifiedVersion versionBatchId; // The index of the version batch that has been initialized and put into pipeline
 	NotifiedVersion finishedBatch; // The highest batch index all appliers have applied mutations
 
-	RestoreRoleData()
-	  : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0), delayedActors(0) {};
+	RestoreRoleData() : role(RestoreRole::Invalid), cpuUsage(0.0), memory(0.0), residentMemory(0.0), delayedActors(0){};
 
 	virtual ~RestoreRoleData() = default;
 

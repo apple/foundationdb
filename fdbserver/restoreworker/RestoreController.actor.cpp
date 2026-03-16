@@ -28,12 +28,12 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/restoreworker/RestoreWorker.actor.h"
+#include "RestoreWorker.actor.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
-#include "fdbserver/restoreworker/RestoreRoleCommon.actor.h"
-#include "fdbserver/restoreworker/RestoreController.actor.h"
-#include "fdbserver/restoreworker/RestoreApplier.actor.h"
-#include "fdbserver/restoreworker/RestoreLoader.actor.h"
+#include "RestoreRoleCommon.actor.h"
+#include "RestoreController.actor.h"
+#include "RestoreApplier.actor.h"
+#include "RestoreLoader.actor.h"
 
 #include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
