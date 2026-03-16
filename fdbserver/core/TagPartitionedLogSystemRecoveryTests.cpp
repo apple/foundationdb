@@ -55,6 +55,8 @@ std::tuple<int, std::vector<TLogLockResult>, bool> makeLogGroupResults(
 
 } // namespace
 
+void forceLinkTagPartitionedLogSystemRecoveryTests() {}
+
 TEST_CASE("/TagPartitionedLogSystem/GetRecoverVersionUnicast/Simple") {
 	if (!SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		return Void();

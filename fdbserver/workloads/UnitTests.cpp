@@ -48,6 +48,7 @@ void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
+void forceLinkTagPartitionedLogSystemRecoveryTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -115,6 +116,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
+		forceLinkTagPartitionedLogSystemRecoveryTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();
