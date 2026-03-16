@@ -28,7 +28,7 @@
 #include "fdbserver/IKeyValueContainer.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
-#include "fdbserver/TransactionStoreMutationTracking.h"
+#include "fdbserver/core/TransactionStoreMutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "flow/EncryptUtils.h"
 #include "flow/Knobs.h"
