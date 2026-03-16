@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/core/WorkerEvents.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
