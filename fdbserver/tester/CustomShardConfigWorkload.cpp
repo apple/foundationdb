@@ -23,6 +23,7 @@
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
+#include "fdbserver/tester/tester.h"
 
 Future<Void> customShardConfigWorkload(Database const& cxUnsafe) {
 	auto cx = cxUnsafe;

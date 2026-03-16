@@ -67,7 +67,7 @@
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/core/OnDemandStore.h"
@@ -474,67 +474,6 @@ void testSerializationSpeed() {
 	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
 	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
 	printf("\n");
-}
-
-std::string toHTML(const StringRef& binaryString) {
-	std::string s;
-
-	for (int i = 0; i < binaryString.size(); i++) {
-		uint8_t c = binaryString[i];
-		if (c == '<')
-			s += "&lt;";
-		else if (c == '>')
-			s += "&gt;";
-		else if (c == '&')
-			s += "&amp;";
-		else if (c == '"')
-			s += "&quot;";
-		else if (c == ' ')
-			s += "&nbsp;";
-		else if (c > 32 && c < 127)
-			s += c;
-		else
-			s += format("<span class=\"binary\">[%02x]</span>", c);
-	}
-
-	return s;
-}
-
-ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRange range = allKeys) {
-	try {
-		state Transaction tr(cx);
-		loop {
-			state FILE* output = fopen(outputFilename.c_str(), "wt");
-			try {
-				state KeySelectorRef iter = firstGreaterOrEqual(range.begin);
-				state Arena arena;
-				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
-				Version ver = wait(tr.getReadVersion());
-				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
-
-				loop {
-					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
-					for (int r = 0; r < results.size(); r++) {
-						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
-						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
-					}
-					if (results.size() < 1000)
-						break;
-					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
-				}
-				fprintf(output, "</body></html>");
-				fclose(output);
-				TraceEvent("DatabaseDumped").detail("Filename", outputFilename);
-				return Void();
-			} catch (Error& e) {
-				fclose(output);
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
-		throw;
-	}
 }
 
 void memoryTest();

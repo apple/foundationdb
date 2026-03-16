@@ -53,7 +53,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h" // for poisson()
+#include "fdbserver/tester/tester.h"
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/DataDistributorInterface.h"
@@ -2959,18 +2959,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 		wait(deregisterGrpcService(interf.id()));
 		throw e;
-	}
-}
-
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
-                                           Reference<AsyncVar<Optional<ClusterInterface>>> out) {
-	loop {
-		if (in->get().present()) {
-			out->set(in->get().get().clientInterface);
-		} else {
-			out->set(Optional<ClusterInterface>());
-		}
-		wait(in->onChange());
 	}
 }
 

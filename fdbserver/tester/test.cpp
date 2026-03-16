@@ -1,5 +1,5 @@
 /*
- * tester.actor.cpp
+ * test.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,6 +19,7 @@
  */
 
 #include <cinttypes>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -46,13 +47,13 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/core/KnobProtectiveGroups.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/QuietDatabase.actor.h"
+#include "fdbserver/tester/tester.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/Knobs.h"
+#include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.actor.h"
 #include "flow/Platform.h"
 
@@ -1135,7 +1136,77 @@ Future<Void> clearData(Database cx) {
 	co_return;
 }
 
-Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range);
+namespace {
+
+std::string toHTML(const StringRef& binaryString) {
+	std::string s;
+
+	for (int i = 0; i < binaryString.size(); i++) {
+		uint8_t c = binaryString[i];
+		if (c == '<') {
+			s += "&lt;";
+		} else if (c == '>') {
+			s += "&gt;";
+		} else if (c == '&') {
+			s += "&amp;";
+		} else if (c == '"') {
+			s += "&quot;";
+		} else if (c == ' ') {
+			s += "&nbsp;";
+		} else if (c > 32 && c < 127) {
+			s += c;
+		} else {
+			s += format("<span class=\"binary\">[%02x]</span>", c);
+		}
+	}
+
+	return s;
+}
+
+Future<Void> dumpDatabase(Database const& cx, std::string const& outputFilename, KeyRange const& range) {
+	try {
+		Transaction tr(cx);
+		while (true) {
+			FILE* output = fopen(outputFilename.c_str(), "wt");
+			Error err;
+			bool success = false;
+			try {
+				KeySelectorRef iter = firstGreaterOrEqual(range.begin);
+				Arena arena;
+				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
+				Version ver = co_await tr.getReadVersion();
+				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
+
+				while (true) {
+					RangeResult results = co_await tr.getRange(iter, firstGreaterOrEqual(range.end), 1000);
+					for (int r = 0; r < results.size(); r++) {
+						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
+						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
+					}
+					if (results.size() < 1000) {
+						break;
+					}
+					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
+				}
+				fprintf(output, "</body></html>");
+				success = true;
+			} catch (Error& e) {
+				err = e;
+			}
+			fclose(output);
+			if (success) {
+				TraceEvent("DatabaseDumped").detail("Filename", outputFilename);
+				co_return;
+			}
+			co_await tr.onError(err);
+		}
+	} catch (Error& e) {
+		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
+		throw;
+	}
+}
+
+} // namespace
 
 int passCount = 0;
 int failCount = 0;
