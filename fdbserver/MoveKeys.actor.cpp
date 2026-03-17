@@ -168,8 +168,6 @@ Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range, std::
 		tr->set(kvs[i].key, kvs[i].value);
 		tr->set(kvs[i + 1].key, kvs[i + 1].value);
 	}
-
-	co_return;
 }
 
 Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID dataMoveId) {
@@ -197,8 +195,6 @@ Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID
 		tr->clear(singleKeyRange(key));
 		TraceEvent(SevDebug, "DataMoveDeleteCheckpoint", dataMoveId).detail("Checkpoint", checkpoint.toString());
 	}
-
-	co_return;
 }
 } // namespace
 
@@ -262,7 +258,6 @@ Future<Void> readMoveKeysLock(Transaction* tr, MoveKeysLock* lock) {
 		Optional<Value> readVal = co_await tr->get(moveKeysLockWriteKey);
 		lock->prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 	}
-	co_return;
 }
 
 Future<MoveKeysLock> readMoveKeysLock(Database cx) {
@@ -542,7 +537,6 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
 			// If no corruption detected, exit silently
 		}
 	}
-	co_return;
 }
 
 Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
@@ -669,7 +663,6 @@ Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::s
 			retryCount++;
 		}
 	}
-	co_return;
 }
 
 // Cleans up dest servers of a single shard, and unassigns the keyrange from the dest servers if necessary.
@@ -766,8 +759,6 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 	}
 
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveEnd", dataMoveId).detail("Range", keys);
-
-	co_return;
 }
 
 Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
@@ -1169,8 +1160,6 @@ static Future<Void> startMoveKeys(Database occ,
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> waitForShardReady(StorageServerInterface server,
@@ -1618,7 +1607,6 @@ static Future<Void> finishMoveKeys(Database occ,
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
-	co_return;
 }
 
 // keyServer: map from keys to destination servers.
@@ -1991,8 +1979,6 @@ static Future<Void> startMoveShards(Database occ,
 	}
 
 	TraceEvent(SevInfo, "StartMoveShardsEnd", relocationIntervalId).detail("DataMoveID", dataMoveId);
-
-	co_return;
 }
 
 static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, KeyRange keys, UID relocationIntervalId) {
@@ -2057,8 +2043,6 @@ static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, KeyRange
 		TraceEvent(SevDebug, "CheckDataMoveCompleteError", relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
-
-	co_return;
 }
 
 // Set keyServers[keys].src = keyServers[keys].dest and keyServers[keys].dest=[], return when successful
@@ -2449,7 +2433,6 @@ static Future<Void> finishMoveShards(Database occ,
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("BulkLoadTaskID", bulkLoadTaskState.present() ? bulkLoadTaskState.get().getTaskId().toString() : "")
 	    .detail("DataMove", dataMove.toString());
-	co_return;
 }
 
 }; // anonymous namespace
@@ -2978,7 +2961,6 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 // In cleanUpDataMoveCore, to do the actual cleanup, we suppose the target data move already update its
@@ -3043,8 +3025,6 @@ Future<Void> cleanUpDataMoveBackground(Database occ,
 	TraceEvent(SevDebug, "CleanUpDataMoveBackgroundEnd", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("DataMoveRange", keys);
-
-	co_return;
 }
 
 Future<Void> cleanUpDataMoveCore(Database occ,
@@ -3237,8 +3217,6 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 	TraceEvent(SevInfo, "CleanUpDataMoveEnd", dataMoveId)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("DataMoveRange", range.toString());
-
-	co_return;
 }
 
 Future<Void> cleanUpDataMove(Database occ,
@@ -3270,8 +3248,6 @@ Future<Void> cleanUpDataMove(Database occ,
 			throw e;
 		}
 	}
-
-	co_return;
 }
 
 Future<Void> rawStartMovement(Database occ,
@@ -3370,8 +3346,6 @@ Future<Void> moveKeys(Database occ, MoveKeysParams params) {
 	completionSignaller.cancel();
 	if (!params.dataMovementComplete.isSet())
 		params.dataMovementComplete.send(Void());
-
-	co_return;
 }
 
 // Called by the master server to write the very first transaction to the database
@@ -3482,7 +3456,6 @@ Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::s
 			TraceEvent("UnassignKeys", traceId).detail("Keys", keys).detail("SS", id);
 		}
 	}
-	co_return;
 }
 
 // Assign given key range to specified storage server.
@@ -3493,5 +3466,4 @@ Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID se
 	co_await krmSetRangeCoalescing(tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue);
 	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
 	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
-	co_return;
 }
