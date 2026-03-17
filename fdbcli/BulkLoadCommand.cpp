@@ -60,22 +60,22 @@ Future<Void> printPastBulkLoadJob(Database cx) {
 		ASSERT(job.getPhase() == BulkLoadJobPhase::Complete || job.getPhase() == BulkLoadJobPhase::Error ||
 		       job.getPhase() == BulkLoadJobPhase::Cancelled);
 		if (!job.getTaskCount().present()) {
-			fmt::println("Job {} submitted at {} for range {}. The job has not initialized for {} mins and exited "
+			fmt::println("Job {} submitted at {} for range {}. The job has not initialized for {:.1f} mins and exited "
 			             "with status {}.",
 			             job.getJobId().toString(),
-			             std::to_string(job.getSubmitTime()),
+			             formatTimeISO8601(job.getSubmitTime()),
 			             job.getJobRange().toString(),
-			             std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+			             (job.getEndTime() - job.getSubmitTime()) / 60.0,
 			             convertBulkLoadJobPhaseToString(job.getPhase()));
 		} else {
 			fmt::println(
-			    "Job {} submitted at {} for range {}. The job has {} tasks. The job ran for {} mins and exited "
+			    "Job {} submitted at {} for range {}. The job has {} tasks. The job ran for {:.1f} mins and exited "
 			    "with status {}.",
 			    job.getJobId().toString(),
-			    std::to_string(job.getSubmitTime()),
+			    formatTimeISO8601(job.getSubmitTime()),
 			    job.getJobRange().toString(),
 			    job.getTaskCount().get(),
-			    std::to_string((job.getEndTime() - job.getSubmitTime()) / 60.0),
+			    (job.getEndTime() - job.getSubmitTime()) / 60.0,
 			    convertBulkLoadJobPhaseToString(job.getPhase()));
 		}
 		if (job.getPhase() == BulkLoadJobPhase::Error) {

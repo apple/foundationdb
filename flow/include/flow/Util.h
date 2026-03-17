@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <functional>
 #include <iosfwd>
 #include <string>
@@ -212,6 +213,20 @@ inline std::string formatElapsedTimeLine(double elapsedSeconds) {
 	}
 	char buf[128];
 	std::snprintf(buf, sizeof(buf), " Elapsed time - %s", formatDurationHumanReadable((int)elapsedSeconds).c_str());
+	return std::string(buf);
+}
+
+// Format Unix timestamp as ISO8601 string in UTC (e.g., "2026-03-16T17:51:58Z")
+inline std::string formatTimeISO8601(double epochSeconds) {
+	time_t t = static_cast<time_t>(epochSeconds);
+	struct tm timeinfo;
+#ifdef _WIN32
+	gmtime_s(&timeinfo, &t);
+#else
+	gmtime_r(&t, &timeinfo);
+#endif
+	char buf[32];
+	std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
 	return std::string(buf);
 }
 
