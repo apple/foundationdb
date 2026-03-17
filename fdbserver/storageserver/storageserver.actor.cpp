@@ -5260,8 +5260,14 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                            SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
 			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
-			// Write to SST file
-			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
+			// getRangeDataToDump() uses lastKey == range.end as a sentinel when the current batch
+			// consumed the rest of the task range. Avoid keyAfter(range.end) in that case.
+			state bool reachedRangeEnd = rangeDumpRawData->lastKey == rangeToDump.end;
+			state KeyRange dataRange =
+			    reachedRangeEnd
+			        ? (rangeDumpRawData->kvs.empty() ? KeyRangeRef(rangeBegin, rangeBegin)
+			                                         : rangeToDump & KeyRangeRef(rangeBegin, rangeToDump.end))
+			        : rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
 			state BulkLoadManifest manifest =
 			    wait(dumpDataFileToLocalDirectory(data->thisServerID,
 			                                      rangeDumpRawData,
@@ -5308,11 +5314,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			}
 
 			// Move to the next range
-			rangeBegin = keyAfter(rangeDumpRawData->lastKey);
-			if (rangeBegin >= rangeEnd || batchNum >= SERVER_KNOBS->SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST) {
+			if (reachedRangeEnd || batchNum >= SERVER_KNOBS->SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST) {
 				req.reply.send(req.bulkDumpState);
 				break;
 			}
+			rangeBegin = keyAfter(rangeDumpRawData->lastKey);
 			batchNum++;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
