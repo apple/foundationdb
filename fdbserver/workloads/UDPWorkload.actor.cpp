@@ -216,12 +216,13 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> _start(UDPWorkload* self, Database cx) {
-		state ReadYourWritesTransaction tr(cx);
-		state std::vector<NetworkAddress> remotes;
-		loop {
+	static Future<Void> _start(UDPWorkload* self, Database cx) {
+		ReadYourWritesTransaction tr(cx);
+		std::vector<NetworkAddress> remotes;
+		while (true) {
+			Error err;
 			try {
-				RangeResult range = wait(tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+				RangeResult range = co_await tr.getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!range.more);
 				for (auto const& p : range) {
 					auto cID = BinaryReader::fromStringRef<decltype(self->clientId)>(
@@ -232,13 +233,14 @@ struct UDPWorkload : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
-		wait(clientSender(self, &remotes) && serverSender(self, &remotes) && _receiver(self));
+		co_await (clientSender(self, &remotes) && serverSender(self, &remotes) && _receiver(self));
 		UNSTOPPABLE_ASSERT(false);
-		return Void();
 	}
+
 	Future<Void> start(Database const& cx) override { return delay(runFor) || _start(this, cx); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {
