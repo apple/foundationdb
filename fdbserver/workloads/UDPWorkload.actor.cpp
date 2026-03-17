@@ -62,30 +62,32 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> _setup(UDPWorkload* self, Database cx) {
-		state NetworkAddress localAddress(g_network->getLocalAddress().ip,
-		                                  deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
-		                                  true,
-		                                  false);
-		state Key key = self->keyPrefix.withSuffix(BinaryWriter::toValue(self->clientId, Unversioned()));
-		state Value serializedLocalAddress = BinaryWriter::toValue(localAddress, IncludeVersion());
-		state ReadYourWritesTransaction tr(cx);
-		Reference<IUDPSocket> s = wait(INetworkConnections::net()->createUDPSocket(localAddress.isV6()));
-		self->serverSocket = std::move(s);
+	static Future<Void> _setup(UDPWorkload* self, Database cx) {
+		NetworkAddress localAddress(g_network->getLocalAddress().ip,
+		                            deterministicRandom()->randomInt(self->minPort, self->maxPort + 1),
+		                            true,
+		                            false);
+		Key key = self->keyPrefix.withSuffix(BinaryWriter::toValue(self->clientId, Unversioned()));
+		Value serializedLocalAddress = BinaryWriter::toValue(localAddress, IncludeVersion());
+		ReadYourWritesTransaction tr(cx);
+		auto socketFuture = INetworkConnections::net()->createUDPSocket(localAddress.isV6());
+		self->serverSocket = co_await socketFuture;
 		self->serverSocket->bind(localAddress);
 		self->serverAddress = localAddress;
-		loop {
+		Error err;
+		while (true) {
 			try {
-				Optional<Value> v = wait(tr.get(key));
+				Optional<Value> v = co_await tr.get(key);
 				if (v.present()) {
-					return Void();
+					co_return;
 				}
 				tr.set(key, serializedLocalAddress);
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
