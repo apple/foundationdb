@@ -32,6 +32,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct RangeDumpRawData {
+	Arena arena;
 	std::map<Key, Value> kvs;
 	std::map<Key, Value> sampled;
 	Key lastKey;

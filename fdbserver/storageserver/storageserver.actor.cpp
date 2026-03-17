@@ -5104,12 +5104,13 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
                                       Version version,
                                       std::shared_ptr<RangeDumpRawData> output) {
 	state std::map<Key, Value> kvsToDump;
+	output->arena = Arena();
 	output->kvs.clear();
 	output->sampled.clear();
 	state std::map<Key, Value> sample;
 	output->kvsBytes = 0;
 	state Key beginKey = range.begin;
-	output->lastKey = range.begin;
+	output->lastKey = KeyRef(output->arena, range.begin);
 	state bool immediateError = true;
 	// Accumulate data read from local storage to output->kvs and make sampling until any error presents
 	loop {
@@ -5143,13 +5144,15 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 
 		// Given the data, create KVS and sample. Stop if the accumulated data size is too large.
 		for (const auto& kv : rep.get().data) { // TODO(BulkDump): directly read from special key space.
-			output->lastKey = kv.key;
-			auto res = output->kvs.insert({ kv.key, kv.value });
+			Key key = KeyRef(output->arena, kv.key);
+			Value value = ValueRef(output->arena, kv.value);
+			output->lastKey = key;
+			auto res = output->kvs.insert({ key, value });
 			ASSERT(res.second);
 			ByteSampleInfo sampleInfo = isKeyValueInSample(KeyValueRef(kv.key, kv.value));
 			if (sampleInfo.inSample) {
-				auto resSample =
-				    output->sampled.insert({ kv.key, BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned()) });
+				Value sampleValue = BinaryWriter::toValue(sampleInfo.sampledSize, Unversioned());
+				auto resSample = output->sampled.insert({ key, ValueRef(output->arena, sampleValue) });
 				ASSERT(resSample.second);
 			}
 			output->kvsBytes = output->kvsBytes + kv.expectedSize();
@@ -5162,7 +5165,7 @@ ACTOR Future<Void> getRangeDataToDump(StorageServer* data,
 		if (output->kvsBytes >= SERVER_KNOBS->SS_BULKDUMP_BATCH_BYTES) {
 			break;
 		} else if (!rep.get().more) {
-			output->lastKey = range.end; // Use the range end as the output->lastKey
+			output->lastKey = KeyRef(output->arena, range.end); // Use the range end as the output->lastKey
 			break;
 		}
 
