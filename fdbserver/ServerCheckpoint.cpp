@@ -1,5 +1,5 @@
 /*
- *ServerCheckpoint.actor.cpp
+ *ServerCheckpoint.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,10 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/ServerCheckpoint.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
                                        const CheckpointAsKeyValues checkpointAsKeyValues,

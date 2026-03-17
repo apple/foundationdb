@@ -27,7 +27,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/RestoreLoader.actor.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreRoleCommon.h"
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/StorageMetrics.actor.h"
 

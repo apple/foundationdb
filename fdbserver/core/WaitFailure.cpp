@@ -1,5 +1,5 @@
 /*
- * WaitFailure.actor.cpp
+ * WaitFailure.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,14 +22,12 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/Deque.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/WaitFailure.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/core/WaitFailure.h"
 
 Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure) {
 	// when this actor is cancelled, the promises in the queue will send broken_promise
 	Deque<ReplyPromise<Void>> queue;
-	loop {
+	while (true) {
 		ReplyPromise<Void> P = co_await waitFailure;
 		queue.push_back(P);
 		if (queue.size() > SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS) {
@@ -46,7 +44,7 @@ Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
                                bool trace,
                                Optional<Standalone<StringRef>> traceMsg,
                                TaskPriority taskID) {
-	loop {
+	while (true) {
 		try {
 			double start = now();
 			ErrorOr<Void> x =
@@ -78,7 +76,7 @@ Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
 Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
                                      double failureReactionTime,
                                      TaskPriority taskID) {
-	loop {
+	while (true) {
 		co_await waitFailureClient(waitFailure,
 		                           /* failureReactionTime */ 0,
 		                           /* failureReactionSlope */ 0,
@@ -98,7 +96,7 @@ Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
                                 double reactionTime,
                                 double reactionSlope,
                                 TaskPriority taskID) {
-	loop {
+	while (true) {
 		try {
 			failed->set(IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed());
 			if (failed->get()) {

@@ -1,5 +1,5 @@
 /*
- * RestoreRoleCommon.actor.cpp
+ * RestoreRoleCommon.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,12 +24,10 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 
 #include "fdbserver/RestoreUtil.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreRoleCommon.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreController.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class Database;
 struct RestoreWorkerData;
@@ -114,7 +112,7 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name) {
 	self->delayedActors++;
 	double memoryThresholdBytes = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 1024 * 1024;
-	loop {
+	while (true) {
 		double memory = getSystemStatistics().processMemory;
 		if (g_network->isSimulated() && BUGGIFY) {
 			// Intentionally randomly block actors for low memory reason.
@@ -154,14 +152,14 @@ Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex,
 
 // Updated process metrics will be used by scheduler for throttling as well
 Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self) {
-	loop {
+	while (true) {
 		updateProcessStats(self);
 		co_await delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 	}
 }
 
 Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
-	loop {
+	while (true) {
 		TraceEvent("FastRestoreTraceProcessMetrics", self->nodeID)
 		    .detail("Role", role)
 		    .detail("PipelinedMaxVersionBatchIndex", self->versionBatchId.get())
@@ -175,7 +173,7 @@ Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string ro
 }
 
 Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role) {
-	loop {
+	while (true) {
 		int batchIndex = self->finishedBatch.get();
 		int maxBatchIndex = self->versionBatchId.get();
 		int maxPrintBatchIndex = batchIndex + SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM;

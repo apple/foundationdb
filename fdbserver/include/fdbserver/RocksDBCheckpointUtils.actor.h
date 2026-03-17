@@ -26,7 +26,7 @@
 #define FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/ServerCheckpoint.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include

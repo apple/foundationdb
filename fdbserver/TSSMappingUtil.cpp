@@ -1,5 +1,5 @@
 /*
- * TSSMappingUtil.actor.cpp
+ * TSSMappingUtil.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,9 +20,7 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/TSSMappingUtil.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
+#include "fdbserver/TSSMappingUtil.h"
 Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
                                std::map<UID, StorageServerInterface>* tssMapping) {
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
@@ -54,7 +52,7 @@ Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterfac
 Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
 	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);

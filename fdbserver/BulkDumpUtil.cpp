@@ -1,5 +1,5 @@
 /*
- * BulkDumpUtils.actor.cpp
+ * BulkDumpUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,13 +23,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/S3Client.actor.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
+#include "fdbserver/BulkDumpUtil.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/StorageMetrics.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
-
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
 	StorageServerInterface targetServer;
@@ -290,7 +288,7 @@ Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpSta
 	Key endKey = bulkDumpState.getRange().end;
 	KeyRange rangeToPersist;
 	RangeResult result;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);

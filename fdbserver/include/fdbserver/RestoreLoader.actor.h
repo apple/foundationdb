@@ -36,7 +36,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreCommon.actor.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreRoleCommon.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbclient/BackupContainer.h"
 
