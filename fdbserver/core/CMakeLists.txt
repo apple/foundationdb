@@ -10,7 +10,6 @@ set(FDBSERVER_CORE_TO_KVSTORE_SRCS
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreShardedRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
-  RemoteIKeyValueStore.actor.cpp
   RocksDBCommon.cpp
   RocksDBLogForwarder.cpp
   TransactionStoreMutationTracking.cpp
