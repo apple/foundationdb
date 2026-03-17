@@ -44,33 +44,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-/*
- * ACTOR STATE VARIABLE INITIALIZATION REQUIREMENT
- *
- * ACTORs with early returns (before any wait()) crash with canBeSet() assertion if no state
- * variable is declared before the return. The actor compiler generates a member initialization
- * list (": member(value)") in the state class constructor only when it sees state variables.
- * This initialization list ensures the Actor<T> base class and its internal Promise are fully
- * initialized before any code runs. Without it, early returns try to use an uninitialized Promise.
- *
- * FIX: Declare at least one state variable BEFORE any early return. Declaration alone is enough.
- *
- * CORRECT:
- *   ACTOR Future<Void> someActor(...) {
- *       state std::string data;                // Triggers member init list (requires default ctor)
- *       if (earlyExitCondition) return Void(); // Safe - Promise is initialized
- *       data = computeValue();                 // Can initialize later
- *   }
- *
- *   // Or if no default constructor: state MyType x(params); and initialize at declaration
- *
- * WRONG (canBeSet() crash):
- *   ACTOR Future<Void> someActor(...) {
- *       if (earlyExitCondition) return Void(); // CRASH - no member init list generated yet
- *       state std::string data;                // Too late - compiler didn't see it early enough
- *   }
- */
-
 // MockS3 persistence file extensions and constants
 namespace {
 constexpr const char* DEFAULT_MOCKS3_PERSISTENCE_DIR = "simfdb/mocks3";
