@@ -170,25 +170,26 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> clientReceiver(UDPWorkload* self, Reference<IUDPSocket> socket, Future<Void> done) {
-		state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
-		state uint8_t* packet = mutateString(packetString);
-		state NetworkAddress peer;
-		state Future<Void> finished = Never();
-		loop {
-			choose {
-				when(int sz = wait(socket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peer))) {
-					auto res = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
-					ASSERT(res.type() == Message::Type::PONG);
-					self->successes[peer] += 1;
-				}
-				when(wait(done)) {
-					finished = delay(1.0);
-					done = Never();
-				}
-				when(wait(finished)) {
-					return Void();
-				}
+	static Future<Void> clientReceiver(UDPWorkload* self, Reference<IUDPSocket> socket, Future<Void> done) {
+		Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+		uint8_t* packet = mutateString(packetString);
+		NetworkAddress peer;
+		Future<Void> finished = Never();
+		while (true) {
+			auto const res =
+			    co_await race(socket->receiveFrom(packet, packet + IUDPSocket::MAX_PACKET_SIZE, &peer), done, finished);
+			if (res.index() == 0) {
+				int const sz = std::get<0>(res);
+				auto resp = BinaryReader::fromStringRef<Message>(packetString.substr(0, sz), IncludeVersion());
+				ASSERT(resp.type() == Message::Type::PONG);
+				self->successes[peer] += 1;
+			} else if (res.index() == 1) {
+				// done
+				finished = delay(1.0);
+				done = Never();
+			} else {
+				// finished
+				co_return;
 			}
 		}
 	}
