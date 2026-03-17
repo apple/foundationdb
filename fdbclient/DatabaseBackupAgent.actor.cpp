@@ -129,8 +129,6 @@ Future<Void> checkTaskVersion(Tr tr, Reference<Task> task, StringRef name, uint3
 
 		throw task_invalid_version();
 	}
-
-	co_return;
 }
 
 struct BackupRangeTaskFunc : TaskFuncBase {
@@ -519,8 +517,6 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		}
 
 		co_await waitForAll(addTaskVector);
-
-		co_return;
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -559,8 +555,6 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		} else {
 			co_await (taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 		}
-
-		co_return;
 	}
 };
 StringRef BackupRangeTaskFunc::name = "dr_backup_range"_sr;
@@ -588,8 +582,6 @@ struct FinishFullBackupTaskFunc : TaskFuncBase {
 		tr->set(states.pack(DatabaseBackupAgent::keyCopyStop), BinaryWriter::toValue(readVersion, Unversioned()));
 		TraceEvent("DBA_FinishFullBackup").detail("CopyStop", readVersion);
 		co_await taskBucket->finish(tr, task);
-
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -729,7 +721,6 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 		Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 		co_await (taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
-		co_return;
 	}
 };
 StringRef EraseLogRangeTaskFunc::name = "dr_erase_log_range"_sr;
@@ -981,7 +972,6 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		if (nextVersion < endVersion) {
 			task->params[CopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(nextVersion, Unversioned());
 		}
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -1038,8 +1028,6 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		} else {
 			co_await (taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 		}
-
-		co_return;
 	}
 };
 StringRef CopyLogRangeTaskFunc::name = "dr_copy_log_range"_sr;
@@ -1147,8 +1135,6 @@ struct CopyLogsTaskFunc : TaskFuncBase {
 			co_await (onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			tr->set(states.pack(DatabaseBackupAgent::keyStateStop), BinaryWriter::toValue(beginVersion, Unversioned()));
 		}
-
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -1338,7 +1324,6 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		        StringRef(BackupAgentBase::getStateText(EBackupState::STATE_COMPLETED)));
 
 		co_await taskBucket->finish(tr, task);
-		co_return;
 	}
 
 	Future<Void> execute(Database cx,
@@ -1437,7 +1422,6 @@ struct CopyDiffLogsTaskFunc : TaskFuncBase {
 		} else {
 			co_await (onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
 		}
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -1499,7 +1483,6 @@ struct SkipOldEraseLogRangeTaskFunc : TaskFuncBase {
 	                            Reference<Task> task) {
 		Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 		co_await (taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
-		co_return;
 	}
 
 	StringRef getName() const override { return name; };
@@ -1709,8 +1692,6 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 			task->params[OldCopyLogRangeTaskFunc::keyNextBeginVersion] =
 			    BinaryWriter::toValue(newEndVersion, Unversioned());
 		}
-
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -1767,8 +1748,6 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		} else {
 			co_await (taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 		}
-
-		co_return;
 	}
 };
 StringRef OldCopyLogRangeTaskFunc::name = "db_copy_log_range"_sr;
@@ -1815,8 +1794,6 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 
 		TraceEvent("DBA_AbortOldBackup").detail("TagName", tagNameKey.printable());
 		co_await srcDrAgent.abortBackup(cx, tagNameKey, PartialBackup::False, AbortOldBackup::True);
-
-		co_return;
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -1824,7 +1801,6 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 	                            Reference<FutureBucket> futureBucket,
 	                            Reference<Task> task) {
 		co_await taskBucket->finish(tr, task);
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -1987,8 +1963,6 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 
 		task->params[BackupAgentBase::destUid] = destUidValue;
 		ASSERT(destUidValue == logUidValue);
-
-		co_return;
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -2015,7 +1989,6 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		}
 
 		co_await taskBucket->finish(tr, task);
-		co_return;
 	}
 
 	StringRef getName() const override { return name; };
@@ -2129,7 +2102,6 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 		}
 
 		co_await taskBucket->finish(tr, task);
-		co_return;
 	}
 
 	static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr,
@@ -2362,8 +2334,6 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				}
 			}
 		}
-
-		co_return;
 	}
 
 	static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr,
@@ -2417,7 +2387,6 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		    BackupRestorableTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), kvBackupComplete));
 
 		co_await taskBucket->finish(tr, task);
-		co_return;
 	}
 
 	static Future<Key> addTask(
@@ -2849,8 +2818,6 @@ public:
 		    .detail("Tag", tagName)
 		    .detail("Key", backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId))
 		    .detail("MapPrefix", mapPrefix);
-
-		co_return;
 	}
 
 	static Future<Void> unlockBackup(DatabaseBackupAgent* backupAgent,
@@ -2859,7 +2826,6 @@ public:
 		UID logUid = co_await backupAgent->getLogUid(tr, tagName);
 		co_await unlockDatabase(tr, logUid);
 		TraceEvent("DBA_Unlock").detail("Tag", tagName);
-		co_return;
 	}
 
 	static Future<Void> atomicSwitchover(DatabaseBackupAgent* backupAgent,
@@ -3025,8 +2991,6 @@ public:
 		co_await backupAgent->unlockBackup(dest, tagName);
 
 		TraceEvent("DBA_SwitchoverUnlocked").log();
-
-		co_return;
 	}
 
 	static Future<Void> discontinueBackup(DatabaseBackupAgent* backupAgent,
@@ -3054,8 +3018,6 @@ public:
 		tr->set(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned()))
 		            .pack(BackupAgentBase::keyConfigStopWhenDoneKey),
 		        StringRef());
-
-		co_return;
 	}
 
 	static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent,
