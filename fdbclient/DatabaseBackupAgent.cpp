@@ -1,5 +1,5 @@
 /*
- * DatabaseBackupAgent.actor.cpp
+ * DatabaseBackupAgent.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,8 +36,6 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include <inttypes.h>
 #include <map>
-
-#include "flow/actorcompiler.h" // has to be last include
 
 const Key DatabaseBackupAgent::keyAddPrefix = "add_prefix"_sr;
 const Key DatabaseBackupAgent::keyRemovePrefix = "remove_prefix"_sr;
@@ -255,7 +253,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		RangeResultWithVersion nextValues;
 		int64_t nextValuesSize = 0;
 		nextValues.second = invalidVersion;
-		loop {
+		while (true) {
 			if (endOfStream && nextValues.second == invalidVersion) {
 				co_return;
 			}
@@ -266,7 +264,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 			nextValuesSize = 0;
 
 			if (!endOfStream) {
-				loop {
+				while (true) {
 					Error err;
 					try {
 						RangeResultWithVersion v = co_await results.getFuture();
@@ -321,7 +319,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 			int valueLoc = 0;
 			int committedValueLoc = 0;
 			Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				bool hasErr = false;
 				try {
@@ -403,7 +401,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					std::vector<Future<Void>> setRanges;
 					int64_t bytesSet = 0;
 
-					loop {
+					while (true) {
 						while (versionLoc < backupVersions.get().size() - 1 &&
 						       (backupVersions.get()[versionLoc].value.size() < sizeof(Version) ||
 						        BinaryReader::fromStringRef<Version>(backupVersions.get()[versionLoc].value,
@@ -645,7 +643,7 @@ struct EraseLogRangeTaskFunc : TaskFuncBase {
 		co_await checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version);
 
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(taskBucket->src));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -755,7 +753,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		Optional<KeyRef> lastKey;
 		Version lastVersion{ 0 };
 		int64_t nextMutationSize = 0;
-		loop {
+		while (true) {
 			Error err;
 			try {
 				if (endOfStream && !nextMutationSize) {
@@ -768,7 +766,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				nextMutationSize = 0;
 
 				if (!endOfStream) {
-					loop {
+					while (true) {
 						try {
 							RCGroup group = co_await results.getFuture();
 							lock->release(group.items.expectedSize());
@@ -798,7 +796,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 				Optional<Version> nextVersionAfterBreak;
 				Transaction tr(cx);
 
-				loop {
+				while (true) {
 					Error err;
 					bool hasErr = false;
 					try {
@@ -904,7 +902,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		double breakTime = timer_monotonic() + CLIENT_KNOBS->COPY_LOG_TASK_DURATION_SECONDS;
 		int rangeN = 0;
 
-		loop {
+		while (true) {
 			if (rangeN >= nRanges)
 				break;
 
@@ -1180,7 +1178,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		co_await checkTaskVersion(cx, task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version);
 
 		Transaction tr2(cx);
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -1216,7 +1214,7 @@ struct FinishedFullBackupTaskFunc : TaskFuncBase {
 		Version backupUid =
 		    BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned());
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -1515,7 +1513,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 
 		std::vector<RangeResult> nextMutations;
 		int64_t nextMutationSize = 0;
-		loop {
+		while (true) {
 			Error err;
 			try {
 				if (endOfStream && !nextMutationSize) {
@@ -1528,7 +1526,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 				nextMutationSize = 0;
 
 				if (!endOfStream) {
-					loop {
+					while (true) {
 						try {
 							RCGroup group = co_await results.getFuture();
 							lock->release(group.items.expectedSize());
@@ -1557,7 +1555,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 
 				Transaction tr(cx);
 
-				loop {
+				while (true) {
 					Error err;
 					bool hasErr = false;
 					try {
@@ -1730,7 +1728,7 @@ struct AbortOldBackupTaskFunc : TaskFuncBase {
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		Key tagNameKey;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -1832,7 +1830,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		// Retrieve backupRanges
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -1861,7 +1859,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		// Set destUidValue and versionKey on src side
 		Key destUidValue(logUidValue);
 		Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(taskBucket->src));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -1979,7 +1977,7 @@ struct BackupRestorableTaskFunc : TaskFuncBase {
 		                            .get(task->params[BackupAgentBase::keyConfigLogUid]);
 		co_await checkTaskVersion(cx, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version);
 		Transaction tr(taskBucket->src);
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2122,7 +2120,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		Key beginVersionKey;
 
 		Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(taskBucket->src));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2178,7 +2176,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 			}
 		}
 
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			Error err;
 			bool hasErr = false;
@@ -2216,7 +2214,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		}
 
 		Reference<ReadYourWritesTransaction> srcTr2(new ReadYourWritesTransaction(taskBucket->src));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2259,7 +2257,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 		}
 
 		Reference<ReadYourWritesTransaction> srcTr3(new ReadYourWritesTransaction(taskBucket->src));
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2499,10 +2497,10 @@ public:
 		    .detail("DrVersionKey", drVersionKey.printable())
 		    .detail("LogUid", BinaryWriter::toValue(logUid, Unversioned()).printable());
 
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-			loop {
+			while (true) {
 				Error err;
 				bool hasErr = false;
 				try {
@@ -2546,7 +2544,7 @@ public:
 		Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 		                    .pack(DatabaseBackupAgent::keyStateStatus);
 
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2585,7 +2583,7 @@ public:
 		Key statusKey = backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 		                    .pack(DatabaseBackupAgent::keyStateStatus);
 
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2799,7 +2797,7 @@ public:
 		// Lock src, record commit version
 		Transaction tr(backupAgent->taskBucket->src);
 		Version commitVersion{ 0 };
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2821,7 +2819,7 @@ public:
 
 		// Wait for the destination to apply mutations up to the lock commit before switching over.
 		ReadYourWritesTransaction tr2(dest);
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2872,7 +2870,7 @@ public:
 		TraceEvent("DBA_SwitchoverStopped").log();
 
 		ReadYourWritesTransaction tr3(dest);
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -2964,7 +2962,7 @@ public:
 		UID destUid;
 		Value backupUid;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -3023,7 +3021,7 @@ public:
 		}
 
 		tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
+		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			// dumpData's commits are unstoppable, and we need to make sure that no dumpData commits
@@ -3073,7 +3071,7 @@ public:
 			Future<Void> partialTimeout = partial ? delay(30.0) : Never();
 			Reference<ReadYourWritesTransaction> srcTr(new ReadYourWritesTransaction(backupAgent->taskBucket->src));
 
-			loop {
+			while (true) {
 				Error err;
 				bool hasErr = false;
 				try {
@@ -3141,7 +3139,7 @@ public:
 		}
 
 		tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -3176,7 +3174,7 @@ public:
 		std::string statusText;
 		int retries = 0;
 
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
