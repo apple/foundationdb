@@ -122,8 +122,7 @@ Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 					fmt::println("Finished {} tasks", completeTaskCount);
 					fmt::println("Error {} tasks", errorTaskCount);
 					printBulkLoadJobTotalTaskCount(totalTaskCount);
-					if (bulkLoadTask.phase == BulkLoadPhase::Submitted &&
-					    bulkLoadTask.getJobId() != UID::fromString("00000000-0000-0000-0000-000000000000")) {
+					if (bulkLoadTask.phase == BulkLoadPhase::Submitted && bulkLoadTask.getJobId().isValid()) {
 						fmt::println("Job {} has been cancelled or has completed", jobId.toString());
 					}
 					co_return;
@@ -311,12 +310,7 @@ Future<UID> bulkLoadCommandActor(Database cx, std::vector<StringRef> tokens) {
 		}
 		if (tokens.size() == 5) {
 			if (tokencmp(tokens[2], "clear") && tokencmp(tokens[3], "id")) {
-				UID jobId = UID::fromString(tokens[4].toString());
-				if (!jobId.isValid()) {
-					fmt::println("ERROR: Invalid job id {}", tokens[4].toString());
-					fmt::println("{}", BULK_LOAD_HISTORY_CLEAR_USAGE);
-					co_return UID();
-				}
+				UID jobId = validateBulkJobId(tokens[4], BULK_LOAD_HISTORY_CLEAR_USAGE.c_str());
 				co_await clearBulkLoadJobHistory(cx, jobId);
 				fmt::println("Bulkload job {} has been cleared from history", jobId.toString());
 				co_return jobId;
