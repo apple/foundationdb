@@ -1,5 +1,5 @@
 /*
- * RestoreController.actor.cpp
+ * RestoreController.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -35,7 +35,6 @@
 #include "fdbserver/RestoreLoader.actor.h"
 
 #include "flow/Platform.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // TODO: Support [[maybe_unused]] attribute for actors
 // ACTOR static Future<Void> clearDB(Database cx);
@@ -88,7 +87,7 @@ void splitKeyRangeForAppliers(Reference<ControllerBatchData> batchData,
                               int batchIndex);
 
 Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControllerInterface ci) {
-	loop {
+	while (true) {
 		try {
 			RestoreSamplesRequest req = co_await ci.samples.getFuture();
 			TraceEvent(SevDebug, "FastRestoreControllerSampleBackups")
@@ -293,7 +292,7 @@ Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, 
 }
 
 static Future<Void> monitorFinishedVersion(Reference<RestoreControllerData> self, RestoreRequest request) {
-	loop {
+	while (true) {
 		TraceEvent("FastRestoreMonitorFinishedVersion", self->id())
 		    .detail("RestoreRequest", request.toString())
 		    .detail("BatchIndex", self->finishedBatch.get());
@@ -701,7 +700,7 @@ static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx) {
 	ReadYourWritesTransaction tr(cx);
 
 	// restoreRequestTriggerKey should already been set
-	loop {
+	while (true) {
 		Error err;
 		try {
 			TraceEvent("FastRestoreControllerPhaseCollectRestoreRequestsWait").log();
@@ -944,7 +943,7 @@ static Future<Void> updateApplierWriteBW(Reference<ControllerBatchData> batchDat
 		applierRemainMB[applier.first] = SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS;
 	}
 
-	loop {
+	while (true) {
 		requests.clear();
 		for (auto& applier : appliersInterf) {
 			double writeRate = totalRemainMB > 1 ? (applierRemainMB[applier.first] / totalRemainMB) *
@@ -1100,7 +1099,7 @@ static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self
 	co_await delay(5.0); // Give some time for loaders and appliers to exit
 
 	// Notify tester that the restore has finished
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1144,7 +1143,7 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> s
                    std::back_inserter(nodes),
                    [](const std::pair<UID, RestoreApplierInterface>& in) { return in.first; });
 
-    loop {
+    while (true) {
         loader = self->loadersInterf.begin();
         applier = self->appliersInterf.begin();
         index = 0;
@@ -1186,7 +1185,7 @@ ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> s
 
 // Check if a restore role dies or disconnected
 static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> self) {
-	loop {
+	while (true) {
 		co_await delay(SERVER_KNOBS->FASTRESTORE_HEARTBEAT_MAX_DELAY);
 		for (auto& role : self->rolesHeartBeatTime) {
 			if (now() - role.second > SERVER_KNOBS->FASTRESTORE_HEARTBEAT_MAX_DELAY) {
