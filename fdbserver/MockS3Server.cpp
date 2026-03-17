@@ -1,5 +1,5 @@
 /*
- * MockS3Server.actor.cpp
+ * MockS3Server.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -41,8 +41,6 @@
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/prettywriter.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // MockS3 persistence file extensions and constants
 namespace {
