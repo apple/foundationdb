@@ -437,12 +437,8 @@ public:
 	int SS_BULKLOAD_GETRANGE_BATCH_SIZE; // the max number of keys to scan before do context switch
 	int DD_HEALTHY_ZONE_READ_RETRY_COUNT; // numbers of attempts to read \xff\02/healthyZone on startup
 
-	// Run storage engine on a child process on the same machine with storage process
-	bool REMOTE_KV_STORE;
 	// A delay to avoid race on file resources after seeing lock_file_failure
 	double REBOOT_KV_STORE_DELAY;
-	// max waiting time for the remote kv store to initialize
-	double REMOTE_KV_STORE_MAX_INIT_DURATION;
 
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
