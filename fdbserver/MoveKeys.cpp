@@ -1,5 +1,5 @@
 /*
- * MoveKeys.actor.cpp
+ * MoveKeys.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,8 +34,6 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 template <typename... T>
 static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
@@ -262,7 +260,7 @@ Future<Void> readMoveKeysLock(Transaction* tr, MoveKeysLock* lock) {
 
 Future<MoveKeysLock> readMoveKeysLock(Database cx) {
 	Transaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			MoveKeysLock lock;
@@ -280,7 +278,7 @@ Future<MoveKeysLock> readMoveKeysLock(Database cx) {
 
 Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	Transaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			MoveKeysLock lock;
@@ -406,7 +404,7 @@ Future<bool> validateRangeAssignment(Database occ,
 	Key toReadRangeBegin = range.begin;
 	bool allCorrect = true;
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	loop {
+	while (true) {
 		RangeResult readResult = co_await krmGetRanges(tr,
 		                                               serverKeysPrefixFor(ssid),
 		                                               KeyRangeRef(toReadRangeBegin, range.end),
@@ -559,10 +557,10 @@ Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::s
 	    .detail("By", "PostCheck")
 	    .detail("Context", context)
 	    .detail("Range", range);
-	loop {
+	while (true) {
 		Error err;
 		try {
-			loop {
+			while (true) {
 				Error err;
 				try {
 					actors.clear();
@@ -677,7 +675,7 @@ Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 	bool runPreCheck = true;
 
-	loop {
+	while (true) {
 		Transaction tr(occ);
 
 		Error err;
@@ -944,7 +942,7 @@ Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards,
 
 Future<Void> logWarningAfter(const char* context, double duration, std::vector<UID> servers) {
 	double startTime = now();
-	loop {
+	while (true) {
 		co_await delay(duration);
 		TraceEvent(SevWarnAlways, context).detail("Duration", now() - startTime).detail("Servers", describe(servers));
 	}
@@ -991,7 +989,7 @@ static Future<Void> startMoveKeys(Database occ,
 			Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
 			int retries = 0;
 
-			loop {
+			while (true) {
 				Error err;
 				try {
 					retries++;
@@ -1166,7 +1164,7 @@ Future<Void> waitForShardReady(StorageServerInterface server,
                                KeyRange keys,
                                Version minVersion,
                                GetShardStateRequest::waitMode mode) {
-	loop {
+	while (true) {
 		Error err;
 		try {
 			GetShardStateReply rep =
@@ -1199,7 +1197,7 @@ Future<Void> checkFetchingState(Database cx,
                                 std::map<UID, StorageServerInterface> tssMapping) {
 	Transaction tr(cx);
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			if (BUGGIFY)
@@ -1301,7 +1299,7 @@ static Future<Void> finishMoveKeys(Database occ,
 			Transaction tr(occ);
 
 			// printf("finishMoveKeys( '%s'-'%s' )\n", begin.toString().c_str(), keys.end.toString().c_str());
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr.trState->taskID = TaskPriority::MoveKeys;
@@ -1645,7 +1643,7 @@ static Future<Void> startMoveShards(Database occ,
 	bool cancelDataMove = false;
 	bool runPreCheck = true;
 	try {
-		loop {
+		while (true) {
 			Key begin = keys.begin;
 			KeyRange currentKeys = keys;
 
@@ -1986,7 +1984,7 @@ static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, KeyRange
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
 		Key begin = keys.begin;
 		while (begin < keys.end) {
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
@@ -2084,7 +2082,7 @@ static Future<Void> finishMoveShards(Database occ,
 
 		// This process can be split up into multiple transactions if getRange() doesn't return the entire
 		// target range.
-		loop {
+		while (true) {
 			std::vector<UID> completeSrc;
 			std::vector<UID> destServers;
 			std::unordered_set<UID> allServers;
@@ -2445,7 +2443,7 @@ Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInter
 
 	int maxSkipTags = 1;
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2666,7 +2664,7 @@ Future<Void> removeStorageServer(Database cx,
 	bool retry = false;
 	int noCanRemoveCount = 0;
 
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2797,7 +2795,7 @@ Future<Void> removeKeysFromFailedServer(Database cx,
 	// Multi-transactional removal in case of large number of shards, concern in violating 5s transaction limit
 	while (begin < allKeys.end) {
 		Transaction tr(cx);
-		loop {
+		while (true) {
 			Error err;
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
@@ -2997,7 +2995,7 @@ Future<Void> cleanUpDataMoveBackground(Database occ,
 	FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
 	DataMoveMetaData dataMove;
 	Transaction tr(occ);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.trState->taskID = TaskPriority::MoveKeys;
@@ -3043,7 +3041,7 @@ Future<Void> cleanUpDataMoveCore(Database occ,
 	FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
 
 	try {
-		loop {
+		while (true) {
 			Transaction tr(occ);
 			std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			std::set<UID> oldDests;
