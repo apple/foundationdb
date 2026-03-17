@@ -216,7 +216,6 @@ Future<Void> bulkDumpTransportCP_impl(BulkLoadFileSet srcFileSet,
 		                      abspath(destFileSet.getBytesSampleFileFullPath()),
 		                      fileBytesMax);
 	}
-	co_return;
 }
 
 // Dump files to blobstore.
@@ -226,7 +225,6 @@ Future<Void> bulkDumpTransportBlobstore_impl(BulkLoadFileSet sourceFileSet,
                                              UID logId) {
 	// TODO(BulkDump): Make use of fileBytesMax
 	co_await copyUpBulkDumpFileSet(destinationFileSet.getRootPath(), sourceFileSet, destinationFileSet);
-	co_return;
 }
 
 Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
@@ -254,7 +252,6 @@ Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
 		    .detail("TransportMethod", transportMethod);
 		ASSERT(false);
 	}
-	co_return;
 }
 
 Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
@@ -278,7 +275,6 @@ Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMeth
 		ASSERT(false);
 	}
 	// TODO(BulkDump): check uploaded file exist
-	co_return;
 }
 
 Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
@@ -330,5 +326,4 @@ Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpSta
 		}
 		co_await tr.onError(err);
 	}
-	co_return;
 }

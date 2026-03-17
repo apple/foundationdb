@@ -33,7 +33,6 @@ Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
 		Optional<Value> v = co_await tr->get(serverListKeyFor(mapItr->second));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
-	co_return;
 }
 
 Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping) {
@@ -46,7 +45,6 @@ Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterfac
 		Optional<Value> v = co_await tr->get(serverListKeyFor(tssId));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
-	co_return;
 }
 
 Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
@@ -70,5 +68,4 @@ Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, U
 		}
 		co_await tr->onError(err);
 	}
-	co_return;
 }

@@ -37,7 +37,6 @@ struct RestoreWorkerData;
 Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
 	co_await delayJittered(5.0); // Random jitter reduces heat beat monitor's pressure
 	req.reply.send(RestoreCommonReply(id));
-	co_return;
 }
 
 void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self) {
@@ -72,7 +71,6 @@ Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Refer
 	}
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	co_return;
 }
 
 void updateProcessStats(Reference<RestoreRoleData> self) {
@@ -147,7 +145,6 @@ Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex,
 			co_await (delay(SERVER_KNOBS->FASTRESTORE_WAIT_FOR_MEMORY_LATENCY) || self->checkMemory.onTrigger());
 		}
 	}
-	co_return;
 }
 
 // Updated process metrics will be used by scheduler for throttling as well

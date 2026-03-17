@@ -46,8 +46,6 @@ Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	} else {
 		throw not_implemented();
 	}
-
-	co_return;
 }
 
 Future<CheckpointMetaData> fetchCheckpoint(Database cx,
