@@ -1,5 +1,5 @@
 /*
- * UDPWorkload.actor.cpp
+ * UDPWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,6 @@
 #include <functional>
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace {
 
