@@ -26,11 +26,11 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure) {
+Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure) {
 	// when this actor is cancelled, the promises in the queue will send broken_promise
-	state Deque<ReplyPromise<Void>> queue;
+	Deque<ReplyPromise<Void>> queue;
 	loop {
-		ReplyPromise<Void> P = waitNext(waitFailure);
+		ReplyPromise<Void> P = co_await waitFailure;
 		queue.push_back(P);
 		if (queue.size() > SERVER_KNOBS->MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS) {
 			CODE_PROBE(true, "wait server queue full");
@@ -40,17 +40,17 @@ ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailur
 	}
 }
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
-                                     double reactionTime,
-                                     double reactionSlope,
-                                     bool trace,
-                                     Optional<Standalone<StringRef>> traceMsg,
-                                     TaskPriority taskID) {
+Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
+                               double reactionTime,
+                               double reactionSlope,
+                               bool trace,
+                               Optional<Standalone<StringRef>> traceMsg,
+                               TaskPriority taskID) {
 	loop {
 		try {
-			state double start = now();
+			double start = now();
 			ErrorOr<Void> x =
-			    wait(waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
+			    co_await waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID);
 			if (!x.present()) {
 				if (trace) {
 					TraceEvent te("WaitFailureClient");
@@ -60,11 +60,12 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 						te.detail("Context", traceMsg.get());
 					}
 				}
-				return Void();
+				co_return;
 			}
 			double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
-			if (w > 0)
-				wait(delay(w, taskID));
+			if (w > 0) {
+				co_await delay(w, taskID);
+			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
@@ -74,42 +75,43 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 	}
 }
 
-ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
-                                           double failureReactionTime,
-                                           TaskPriority taskID) {
+Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
+                                     double failureReactionTime,
+                                     TaskPriority taskID) {
 	loop {
-		wait(waitFailureClient(waitFailure,
-		                       /* failureReactionTime */ 0,
-		                       /* failureReactionSlope */ 0,
-		                       /* trace */ false,
-		                       /* traceMsg */ Optional<Standalone<StringRef>>(),
-		                       taskID));
-		wait(delay(failureReactionTime, taskID) ||
-		     IFailureMonitor::failureMonitor().onStateEqual(waitFailure.getEndpoint(), FailureStatus(false)));
+		co_await waitFailureClient(waitFailure,
+		                           /* failureReactionTime */ 0,
+		                           /* failureReactionSlope */ 0,
+		                           /* trace */ false,
+		                           /* traceMsg */ Optional<Standalone<StringRef>>(),
+		                           taskID);
+		co_await (delay(failureReactionTime, taskID) ||
+		          IFailureMonitor::failureMonitor().onStateEqual(waitFailure.getEndpoint(), FailureStatus(false)));
 		if (IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed()) {
-			return Void();
+			co_return;
 		}
 	}
 }
 
-ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
-                                      Reference<AsyncVar<bool>> failed,
-                                      double reactionTime,
-                                      double reactionSlope,
-                                      TaskPriority taskID) {
+Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
+                                Reference<AsyncVar<bool>> failed,
+                                double reactionTime,
+                                double reactionSlope,
+                                TaskPriority taskID) {
 	loop {
 		try {
 			failed->set(IFailureMonitor::failureMonitor().getState(waitFailure.getEndpoint()).isFailed());
 			if (failed->get()) {
-				wait(IFailureMonitor::failureMonitor().onStateChanged(waitFailure.getEndpoint()));
+				co_await IFailureMonitor::failureMonitor().onStateChanged(waitFailure.getEndpoint());
 			} else {
-				state double start = now();
-				ErrorOr<Void> x = wait(
-				    waitFailure.getReplyUnlessFailedFor(ReplyPromise<Void>(), reactionTime, reactionSlope, taskID));
+				double start = now();
+				ErrorOr<Void> x = co_await waitFailure.getReplyUnlessFailedFor(
+				    ReplyPromise<Void>(), reactionTime, reactionSlope, taskID);
 				if (x.present()) {
 					double w = start + SERVER_KNOBS->WAIT_FAILURE_DELAY_LIMIT - now();
-					if (w > 0)
-						wait(delay(w, taskID));
+					if (w > 0) {
+						co_await delay(w, taskID);
+					}
 				}
 			}
 		} catch (Error& e) {

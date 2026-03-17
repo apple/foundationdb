@@ -19,35 +19,24 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_WAIT_FAILURE_ACTOR_G_H)
-#define FDBSERVER_CORE_WAIT_FAILURE_ACTOR_G_H
-#include "fdbserver/core/WaitFailure.actor.g.h"
-#elif !defined(FDBSERVER_CORE_WAIT_FAILURE_ACTOR_H)
-#define FDBSERVER_CORE_WAIT_FAILURE_ACTOR_H
-
 #include "fdbrpc/fdbrpc.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure);
+Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure);
 
-ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
+Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailure,
+                               double failureReactionTime = 0,
+                               double failureReactionSlope = 0,
+                               bool trace = false,
+                               Optional<Standalone<StringRef>> traceMsg = Optional<Standalone<StringRef>>(),
+                               TaskPriority taskID = TaskPriority::DefaultEndpoint);
+
+Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
                                      double failureReactionTime = 0,
-                                     double failureReactionSlope = 0,
-                                     bool trace = false,
-                                     Optional<Standalone<StringRef>> traceMsg = Optional<Standalone<StringRef>>(),
                                      TaskPriority taskID = TaskPriority::DefaultEndpoint);
 
-ACTOR Future<Void> waitFailureClientStrict(RequestStream<ReplyPromise<Void>> waitFailure,
-                                           double failureReactionTime = 0,
-                                           TaskPriority taskID = TaskPriority::DefaultEndpoint);
-
-ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
-                                      Reference<AsyncVar<bool>> failed,
-                                      double failureReactionTime = 0,
-                                      double failureReactionSlope = 0,
-                                      TaskPriority taskID = TaskPriority::DefaultEndpoint);
-
-#include "flow/unactorcompiler.h"
-
-#endif
+Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFailure,
+                                Reference<AsyncVar<bool>> failed,
+                                double failureReactionTime = 0,
+                                double failureReactionSlope = 0,
+                                TaskPriority taskID = TaskPriority::DefaultEndpoint);
