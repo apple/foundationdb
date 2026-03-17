@@ -702,7 +702,7 @@ static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx) {
 
 	// restoreRequestTriggerKey should already been set
 	loop {
-		Optional<Error> err;
+		Error err;
 		try {
 			TraceEvent("FastRestoreControllerPhaseCollectRestoreRequestsWait").log();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -724,12 +724,11 @@ static Future<std::vector<RestoreRequest>> collectRestoreRequests(Database cx) {
 			}
 			TraceEvent(SevError, "FastRestoreControllerPhaseCollectRestoreRequestsEmptyRequests").log();
 			co_await delay(5.0);
+			continue;
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.present()) {
-			co_await tr.onError(err.get());
-		}
+		co_await tr.onError(err);
 	}
 
 	co_return restoreRequests;
@@ -1102,7 +1101,7 @@ static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self
 
 	// Notify tester that the restore has finished
 	loop {
-		Optional<Error> err;
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1115,9 +1114,7 @@ static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self
 		} catch (Error& e) {
 			err = e;
 		}
-		if (err.present()) {
-			co_await tr->onError(err.get());
-		}
+		co_await tr->onError(err);
 	}
 
 	TraceEvent("FastRestoreControllerAllRestoreCompleted").log();
