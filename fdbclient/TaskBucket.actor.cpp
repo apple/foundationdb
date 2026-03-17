@@ -415,7 +415,7 @@ public:
 		if (!task || !TaskFuncBase::isValidTask(task))
 			co_return false;
 
-		Optional<Error> err;
+		Error err;
 		try {
 			taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
@@ -425,7 +425,7 @@ public:
 					loop {
 						Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 						taskBucket->setOptions(tr);
-						Error err;
+						Error innerErr;
 						try {
 							bool validTask = co_await taskVerify(taskBucket, tr, task);
 
@@ -439,9 +439,9 @@ public:
 							}
 							break;
 						} catch (Error& e) {
-							err = e;
+							innerErr = e;
 						}
-						co_await tr->onError(err);
+						co_await tr->onError(innerErr);
 					}
 				}
 
@@ -459,12 +459,12 @@ public:
 			err = e;
 		}
 		TraceEvent(SevWarn, "TaskBucketExecuteFailure")
-		    .error(err.get())
+		    .error(err)
 		    .detail("TaskUID", task->key)
 		    .detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
 		    .detail("Priority", task->getPriority());
 		try {
-			co_await taskFunc->handleError(cx, task, err.get());
+			co_await taskFunc->handleError(cx, task, err);
 		} catch (Error& handleErr) {
 			TraceEvent(SevWarn, "TaskBucketExecuteFailureLogErrorFailed")
 			    .error(handleErr) // output handleError() error instead of original task error
