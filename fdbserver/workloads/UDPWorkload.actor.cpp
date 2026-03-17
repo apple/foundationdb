@@ -194,28 +194,24 @@ struct UDPWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> clientSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
-		state AsyncVar<Reference<IUDPSocket>> socket;
-		state Standalone<StringRef> sendString;
-		state ActorCollection actors(false);
-		state NetworkAddress peer;
+	static Future<Void> clientSender(UDPWorkload* self, std::vector<NetworkAddress>* remotes) {
+		AsyncVar<Reference<IUDPSocket>> socket;
+		Standalone<StringRef> sendString;
+		ActorCollection actors(false);
+		NetworkAddress peer;
 
-		loop {
-			choose {
-				when(wait(delay(0.1))) {}
-				when(wait(actors.getResult())) {
-					UNSTOPPABLE_ASSERT(false);
-				}
-			}
+		while (true) {
+			auto delayResult = co_await race(delay(0.1), actors.getResult());
+			UNSTOPPABLE_ASSERT(delayResult.index() == 0);
 			if (!socket.get().isValid() || deterministicRandom()->random01() < 0.05) {
 				peer = deterministicRandom()->randomChoice(*remotes);
-				Reference<IUDPSocket> s = wait(INetworkConnections::net()->createUDPSocket(peer));
+				Reference<IUDPSocket> s = co_await INetworkConnections::net()->createUDPSocket(peer);
 				socket.set(s);
 				actors.add(clientReceiver(self, socket.get(), socket.onChange()));
 			}
 			sendString = BinaryWriter::toValue(ping(), IncludeVersion());
-			int res = wait(socket.get()->send(sendString.begin(), sendString.end()));
-			ASSERT(res == sendString.size());
+			int res = co_await socket.get()->send(sendString.begin(), sendString.end());
+			ASSERT_EQ(res, sendString.size());
 			self->sent[peer] += 1;
 		}
 	}
