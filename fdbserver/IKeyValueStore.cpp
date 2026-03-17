@@ -29,12 +29,8 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             int64_t memoryLimit,
                             bool checkChecksums,
                             bool checkIntegrity,
-                            bool openRemotely,
                             Reference<AsyncVar<ServerDBInfo> const> db,
                             int64_t pageCacheBytes) {
-	if (openRemotely) {
-		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
-	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);
