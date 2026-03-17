@@ -114,8 +114,6 @@ Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControl
 			break;
 		}
 	}
-
-	co_return;
 }
 
 Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
@@ -141,8 +139,6 @@ Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorke
 			TraceEvent(SevError, "FastRestoreControllerStart").error(e).detail("Reason", "Unexpected unhandled error");
 		}
 	}
-
-	co_return;
 }
 
 // RestoreWorker that has restore controller role: Recruite a role for each worker
@@ -205,8 +201,6 @@ Future<Void> recruitRestoreRoles(Reference<RestoreWorkerData> controllerWorker,
 	TraceEvent("FastRestoreRecruitRestoreRolesDone", controllerData->id())
 	    .detail("Workers", controllerWorker->workerInterfaces.size())
 	    .detail("RecruitedRoles", replies.size());
-
-	co_return;
 }
 
 Future<Void> distributeRestoreSysInfo(Reference<RestoreControllerData> controllerData,
@@ -237,8 +231,6 @@ Future<Void> distributeRestoreSysInfo(Reference<RestoreControllerData> controlle
 	co_await sendBatchRequests(&RestoreLoaderInterface::updateRestoreSysInfo, controllerData->loadersInterf, requests);
 	TraceEvent("FastRestoreDistributeRestoreSysInfoToLoadersDone", controllerData->id())
 	    .detail("Loaders", controllerData->loadersInterf.size());
-
-	co_return;
 }
 
 // The server of the restore controller. It drives the restore progress with the following steps:
@@ -298,8 +290,6 @@ Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, 
 	co_await signalRestoreCompleted(self, cx);
 
 	TraceEvent("FastRestoreControllerRestoreCompleted", self->id());
-
-	co_return;
 }
 
 static Future<Void> monitorFinishedVersion(Reference<RestoreControllerData> self, RestoreRequest request) {
@@ -533,7 +523,6 @@ static Future<Void> loadFilesOnLoaders(Reference<ControllerBatchData> batchData,
 	    .detail("FileTypeLoadedInVersionBatch", isRangeFile)
 	    .detail("BeginVersion", versionBatch.beginVersion)
 	    .detail("EndVersion", versionBatch.endVersion);
-	co_return;
 }
 
 // Ask loaders to send its buffered mutations to appliers
@@ -565,8 +554,6 @@ static Future<Void> sendMutationsFromLoaders(Reference<ControllerBatchData> batc
 	    .detail("BatchIndex", batchIndex)
 	    .detail("UseRangeFiles", useRangeFile)
 	    .detail("Loaders", loadersInterf.size());
-
-	co_return;
 }
 
 // Process a version batch. Phases (loading files, send mutations) should execute in order
@@ -636,8 +623,6 @@ static Future<Void> distributeWorkloadPerVersionBatch(Reference<RestoreControlle
 	    .detail("BatchSize", versionBatch.size)
 	    .detail("RunningVersionBatches", self->runningVersionBatches.get())
 	    .detail("Latency", now() - startTime);
-
-	co_return;
 }
 
 // Decide which key range should be taken by which applier
@@ -879,8 +864,6 @@ static Future<Void> insertRangeVersion(KeyRangeMap<Version>* pRangeVersions,
 			    .detail("RangeVersion", r->value());
 		}
 	}
-
-	co_return;
 }
 
 // Build the version skyline of snapshot ranges by parsing range files;
@@ -906,8 +889,6 @@ static Future<Void> buildRangeVersions(KeyRangeMap<Version>* pRangeVersions,
 	}
 
 	co_await waitForAll(fInsertRangeVersions);
-
-	co_return;
 }
 
 /*
@@ -947,7 +928,6 @@ static Future<Void> initializeVersionBatch(std::map<UID, RestoreApplierInterface
 	co_await sendBatchRequests(&RestoreLoaderInterface::initVersionBatch, loadersInterf, requestsToLoaders);
 
 	TraceEvent("FastRestoreControllerPhaseInitVersionBatchForAppliersDone").detail("BatchIndex", batchIndex);
-	co_return;
 }
 
 // Calculate the amount of data each applier should keep outstanding to DB;
@@ -1070,8 +1050,6 @@ static Future<Void> notifyApplierToApplyMutations(Reference<ControllerBatchData>
 	TraceEvent("FastRestoreControllerPhaseApplyToDBDone")
 	    .detail("BatchIndex", batchIndex)
 	    .detail("FinishedBatch", finishedBatch->get());
-
-	co_return;
 }
 
 // Notify loaders that all data in the version batch has been applied to DB.
@@ -1085,8 +1063,6 @@ static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoade
 	}
 	co_await sendBatchRequests(&RestoreLoaderInterface::finishVersionBatch, loadersInterf, requestsToLoaders);
 	TraceEvent("FastRestoreControllerPhaseNotifyLoadersVersionBatchFinishedDone").detail("BatchIndex", batchIndex);
-
-	co_return;
 }
 
 // Ask all loaders and appliers to perform housecleaning at the end of a restore request
@@ -1114,8 +1090,6 @@ static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData> self
 	}
 
 	TraceEvent("FastRestoreControllerPhaseNotifyRestoreCompletedDone").log();
-
-	co_return;
 }
 
 // Register the restoreRequestDoneKey to signal the end of restore
@@ -1147,8 +1121,6 @@ static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self
 	}
 
 	TraceEvent("FastRestoreControllerAllRestoreCompleted").log();
-
-	co_return;
 }
 
 /*
