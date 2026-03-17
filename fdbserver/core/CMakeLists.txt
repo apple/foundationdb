@@ -45,3 +45,15 @@ target_include_directories(fdbserver_core
     ${CMAKE_SOURCE_DIR}/fdbserver/include
     ${CMAKE_BINARY_DIR}/fdbserver/include)
 target_link_libraries(fdbserver_core PRIVATE fdbclient)
+
+if(WITH_ROCKSDB)
+  add_dependencies(fdbserver_core rocksdb)
+  if(WITH_LIBURING)
+    target_include_directories(fdbserver_core PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
+    target_link_libraries(fdbserver_core PRIVATE ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${LZ4_LIBRARY})
+  else()
+    target_include_directories(fdbserver_core PRIVATE ${ROCKSDB_INCLUDE_DIR})
+    target_link_libraries(fdbserver_core PRIVATE ${ROCKSDB_LIBRARIES} ${LZ4_LIBRARY})
+  endif()
+  target_compile_definitions(fdbserver_core PUBLIC WITH_ROCKSDB)
+endif()
