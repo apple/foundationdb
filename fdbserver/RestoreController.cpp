@@ -36,8 +36,6 @@
 
 #include "flow/Platform.h"
 
-// TODO: Support [[maybe_unused]] attribute for actors
-// ACTOR static Future<Void> clearDB(Database cx);
 static Future<Version> collectBackupFiles(Reference<IBackupContainer> bc,
                                           std::vector<RestoreFileFR>* rangeFiles,
                                           std::vector<RestoreFileFR>* logFiles,
