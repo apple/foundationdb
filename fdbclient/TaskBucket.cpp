@@ -1,5 +1,5 @@
 /*
- * TaskBucket.actor.cpp
+ * TaskBucket.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,6 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
 	return fb->unpack(params[reservedTaskParamKeyDone]);
@@ -312,7 +311,7 @@ public:
 	}
 
 	static Future<bool> taskVerify(Reference<TaskBucket> tb, Database cx, Reference<Task> task) {
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			Error err;
 			try {
@@ -362,7 +361,7 @@ public:
 			return map(tr->getReadVersion(), [=](Version v) { return v; });
 		});
 
-		loop {
+		while (true) {
 			FlowLock::Releaser releaser;
 
 			// Wait until we are half way to the timeout version of this task
@@ -381,7 +380,7 @@ public:
 			co_await task->extendMutex.take();
 			releaser = FlowLock::Releaser(task->extendMutex, 1);
 
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr->reset();
@@ -418,7 +417,7 @@ public:
 				verifyTask.set(task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
 
 				if (verifyTask) {
-					loop {
+					while (true) {
 						Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 						taskBucket->setOptions(tr);
 						Error innerErr;
@@ -492,7 +491,7 @@ public:
 		std::vector<Future<Reference<Task>>> getTasks;
 		unsigned int getBatchSize = 1;
 
-		loop {
+		while (true) {
 			// Start running tasks while slots are available and we keep finding work to do
 			++taskBucket->dispatchSlotChecksStarted;
 			while (!availableSlots.empty()) {
@@ -553,7 +552,7 @@ public:
 	}
 
 	static Future<Void> watchPaused(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> paused) {
-		loop {
+		while (true) {
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			Error err;
 			try {
@@ -579,7 +578,7 @@ public:
 		Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 		taskBucket->metricLogger = taskBucket->cc.traceCounters(
 		    "TaskBucketMetrics", taskBucket->dbgid, CLIENT_KNOBS->TASKBUCKET_LOGGING_DELAY);
-		loop {
+		while (true) {
 			while (paused->get()) {
 				co_await (paused->onChange() || watchPausedFuture);
 			}
@@ -673,7 +672,7 @@ public:
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		Optional<Value> startingValue;
 
-		loop {
+		while (true) {
 			Error err;
 			try {
 				taskBucket->setOptions(tr);
@@ -697,7 +696,7 @@ public:
 		int idx = 0;
 		for (; idx < CLIENT_KNOBS->TASKBUCKET_CHECK_ACTIVE_AMOUNT; ++idx) {
 			tr = makeReference<ReadYourWritesTransaction>(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					taskBucket->setOptions(tr);
