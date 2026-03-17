@@ -267,8 +267,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 
 			if (!endOfStream) {
 				loop {
-					Error caughtErr;
-					bool hasCaughtErr = false;
+					Error err;
 					try {
 						RangeResultWithVersion v = co_await results.getFuture();
 						int64_t resultSize = v.first.expectedSize();
@@ -288,30 +287,27 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 						}
 
 						valuesSize += resultSize;
+						continue;
 					} catch (Error& e) {
-						caughtErr = e;
-						hasCaughtErr = true;
+						err = e;
 					}
-					if (hasCaughtErr) {
-						Error err = caughtErr;
-						if (err.code() == error_code_actor_cancelled)
-							throw err;
-
-						if (err.code() == error_code_end_of_stream) {
-							endOfStream = true;
-							if (values.second != invalidVersion)
-								break;
-							co_return;
-						}
-
-						co_await logError(cx,
-						                  Subspace(databaseBackupPrefixRange.begin)
-						                      .get(BackupAgentBase::keyErrors)
-						                      .pack(task->params[BackupAgentBase::keyConfigLogUid]),
-						                  format("ERROR: %s", err.what()));
-
+					if (err.code() == error_code_actor_cancelled)
 						throw err;
+
+					if (err.code() == error_code_end_of_stream) {
+						endOfStream = true;
+						if (values.second != invalidVersion)
+							break;
+						co_return;
 					}
+
+					co_await logError(cx,
+					                  Subspace(databaseBackupPrefixRange.begin)
+					                      .get(BackupAgentBase::keyErrors)
+					                      .pack(task->params[BackupAgentBase::keyConfigLogUid]),
+					                  format("ERROR: %s", err.what()));
+
+					throw err;
 				}
 			}
 
@@ -760,8 +756,7 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 		Version lastVersion{ 0 };
 		int64_t nextMutationSize = 0;
 		loop {
-			Error caughtErr;
-			bool hasCaughtErr = false;
+			Error err;
 			try {
 				if (endOfStream && !nextMutationSize) {
 					co_return Optional<Version>();
@@ -862,23 +857,20 @@ struct CopyLogRangeTaskFunc : TaskFuncBase {
 					lastVersion = getLogKeyVersion(lastKey.get());
 					isTimeoutOccurred = true;
 				}
+				continue;
 			} catch (Error& e) {
-				caughtErr = e;
-				hasCaughtErr = true;
+				err = e;
 			}
-			if (hasCaughtErr) {
-				if (caughtErr.code() == error_code_actor_cancelled || caughtErr.code() == error_code_backup_error)
-					throw caughtErr;
-
-				Error err = caughtErr;
-				co_await logError(cx,
-				                  Subspace(databaseBackupPrefixRange.begin)
-				                      .get(BackupAgentBase::keyErrors)
-				                      .pack(task->params[BackupAgentBase::keyConfigLogUid]),
-				                  format("ERROR: Failed to dump mutations because of error %s", err.what()));
-
+			if (err.code() == error_code_actor_cancelled || err.code() == error_code_backup_error)
 				throw err;
-			}
+
+			co_await logError(cx,
+			                  Subspace(databaseBackupPrefixRange.begin)
+			                      .get(BackupAgentBase::keyErrors)
+			                      .pack(task->params[BackupAgentBase::keyConfigLogUid]),
+			                  format("ERROR: Failed to dump mutations because of error %s", err.what()));
+
+			throw err;
 		}
 	}
 
@@ -1524,8 +1516,7 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 		std::vector<RangeResult> nextMutations;
 		int64_t nextMutationSize = 0;
 		loop {
-			Error caughtErr;
-			bool hasCaughtErr = false;
+			Error err;
 			try {
 				if (endOfStream && !nextMutationSize) {
 					co_return;
@@ -1602,23 +1593,20 @@ struct OldCopyLogRangeTaskFunc : TaskFuncBase {
 						co_await tr.onError(err);
 					}
 				}
+				continue;
 			} catch (Error& e) {
-				caughtErr = e;
-				hasCaughtErr = true;
+				err = e;
 			}
-			if (hasCaughtErr) {
-				if (caughtErr.code() == error_code_actor_cancelled || caughtErr.code() == error_code_backup_error)
-					throw caughtErr;
-
-				Error err = caughtErr;
-				co_await logError(cx,
-				                  Subspace(databaseBackupPrefixRange.begin)
-				                      .get(BackupAgentBase::keyErrors)
-				                      .pack(task->params[BackupAgentBase::keyConfigLogUid]),
-				                  format("ERROR: Failed to dump mutations because of error %s", err.what()));
-
+			if (err.code() == error_code_actor_cancelled || err.code() == error_code_backup_error)
 				throw err;
-			}
+
+			co_await logError(cx,
+			                  Subspace(databaseBackupPrefixRange.begin)
+			                      .get(BackupAgentBase::keyErrors)
+			                      .pack(task->params[BackupAgentBase::keyConfigLogUid]),
+			                  format("ERROR: Failed to dump mutations because of error %s", err.what()));
+
+			throw err;
 		}
 	}
 
