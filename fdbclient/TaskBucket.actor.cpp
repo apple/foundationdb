@@ -58,8 +58,6 @@ struct UnblockFutureTaskFunc : TaskFuncBase {
 		if (is_set) {
 			co_await future->performAllActions(tr, taskBucket);
 		}
-
-		co_return;
 	}
 };
 StringRef UnblockFutureTaskFunc::name = "UnblockFuture"_sr;
@@ -348,8 +346,6 @@ public:
 		} else {
 			co_await taskFunc->finish(tr, taskBucket, futureBucket, task);
 		}
-
-		co_return;
 	}
 
 	static Future<bool> doOne(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket) {
@@ -813,8 +809,6 @@ public:
 		        .detail("Key", s.key)
 		        .detail("Value", s.value);
 		}*/
-
-		co_return;
 	}
 
 	static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr,
@@ -1092,8 +1086,6 @@ public:
 		tr->clear(taskFuture->blocks.pack(StringRef()));
 
 		co_await _join(tr, taskBucket, taskFuture, vectorFuture);
-
-		co_return;
 	}
 
 	static Future<Void> _join(Reference<ReadYourWritesTransaction> tr,
@@ -1112,8 +1104,6 @@ public:
 		}
 
 		co_await waitForAll(onSetFutures);
-
-		co_return;
 	}
 
 	static Future<bool> isSet(Reference<ReadYourWritesTransaction> tr, Reference<TaskFuture> taskFuture) {
@@ -1145,8 +1135,6 @@ public:
 				tr->set(callbackSpace.pack(v.key), v.value);
 			}
 		}
-
-		co_return;
 	}
 
 	static Future<Void> set(Reference<ReadYourWritesTransaction> tr,
@@ -1157,8 +1145,6 @@ public:
 		tr->clear(taskFuture->blocks.range());
 
 		co_await performAllActions(tr, taskBucket, taskFuture);
-
-		co_return;
 	}
 
 	static Future<Void> performAction(Reference<ReadYourWritesTransaction> tr,
@@ -1173,8 +1159,6 @@ public:
 				co_await taskFunc->finish(tr, taskBucket, taskFuture->futureBucket, task);
 			}
 		}
-
-		co_return;
 	}
 
 	static Future<Void> performAllActions(Reference<ReadYourWritesTransaction> tr,
@@ -1208,8 +1192,6 @@ public:
 		}
 
 		co_await waitForAll(actions);
-
-		co_return;
 	}
 
 	static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr,
@@ -1221,8 +1203,6 @@ public:
 		task->params[Task::reservedTaskParamKeyAddTask] = task->params[Task::reservedTaskParamKeyType];
 		task->params[Task::reservedTaskParamKeyType] = "AddTask"_sr;
 		co_await onSet(tr, taskBucket, taskFuture, task);
-
-		co_return;
 	}
 
 	static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr,
@@ -1245,8 +1225,6 @@ public:
 		task->params[Task::reservedTaskParamValidValue] = validationValue.get();
 
 		co_await onSetAddTask(tr, taskBucket, taskFuture, task);
-
-		co_return;
 	}
 
 	static Future<Void> onSetAddTask(Reference<ReadYourWritesTransaction> tr,
