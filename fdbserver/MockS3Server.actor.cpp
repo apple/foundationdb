@@ -229,7 +229,6 @@ static Future<Void> atomicWriteFile(std::string path, std::string content) {
 			// Ignore cleanup errors
 		}
 	}
-	co_return;
 }
 
 // ACTOR: Read file content using simulation filesystem without chaos
@@ -274,7 +273,6 @@ static Future<Void> deletePersistedFile(std::string path) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistenceDeleteException").error(e).detail("Path", path);
 	}
-	co_return;
 }
 
 // JSON Serialization using rapidjson
@@ -450,8 +448,6 @@ static Future<Void> persistObject(std::string bucket, std::string object) {
 	} catch (Error& e) {
 		TraceEvent(SevError, "MockS3PersistObjectFailed").error(e).detail("Bucket", bucket).detail("Object", object);
 	}
-
-	co_return;
 }
 
 // ACTOR: Persist multipart upload state
@@ -516,8 +512,6 @@ static Future<Void> persistMultipartState(std::string uploadId) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistMultipartFailed").error(e).detail("UploadId", uploadId);
 	}
-
-	co_return;
 }
 
 // ACTOR: Delete persisted object
@@ -542,8 +536,6 @@ static Future<Void> deletePersistedObject(std::string bucket, std::string object
 		    .detail("Bucket", bucket)
 		    .detail("Object", object);
 	}
-
-	co_return;
 }
 
 // ACTOR: Delete persisted multipart upload
@@ -595,8 +587,6 @@ static Future<Void> deletePersistedMultipart(std::string uploadId) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3DeletePersistedMultipartFailed").error(e).detail("UploadId", uploadId);
 	}
-
-	co_return;
 }
 
 // Mock S3 Server Implementation for deterministic testing
@@ -697,8 +687,6 @@ public:
 			TraceEvent(SevError, "MockS3RequestError").error(e).detail("Resource", req->resource);
 			self->sendError(response, 500, "InternalError", "Internal server error");
 		}
-
-		co_return;
 	}
 
 	void parseS3Request(const std::string& resource,
@@ -839,8 +827,6 @@ public:
 		                         uploadId.c_str());
 
 		self->sendXMLResponse(response, 200, xml);
-
-		co_return;
 	}
 
 	static Future<Void> handleUploadPart(MockS3ServerImpl* self,
@@ -888,8 +874,6 @@ public:
 		    .detail("UploadId", uploadId)
 		    .detail("PartNumber", partNumber)
 		    .detail("ETag", etag);
-
-		co_return;
 	}
 
 	static Future<Void> handleMultipartComplete(MockS3ServerImpl* self,
@@ -961,8 +945,6 @@ public:
 		self->sendXMLResponse(response, 200, xml);
 
 		TraceEvent("MockS3MultipartCompleted").detail("UploadId", uploadId).detail("FinalSize", combinedContent.size());
-
-		co_return;
 	}
 
 	static Future<Void> handleMultipartAbort(MockS3ServerImpl* self,
@@ -993,8 +975,6 @@ public:
 		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3MultipartAborted").detail("UploadId", uploadId);
-
-		co_return;
 	}
 
 	// Object Tagging Operations
@@ -1109,8 +1089,6 @@ public:
 		    .detail("ResponseCode", response->code)
 		    .detail("ContentLen", response->data.contentLen)
 		    .detail("HasContent", response->data.content != nullptr);
-
-		co_return;
 	}
 
 	static Future<Void> handleGetObject(MockS3ServerImpl* self,
@@ -1226,8 +1204,6 @@ public:
 		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3ObjectDeleted").detail("Bucket", bucket).detail("Object", object);
-
-		co_return;
 	}
 
 	static Future<Void> handleHeadObject(MockS3ServerImpl* self,
@@ -1617,8 +1593,6 @@ Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 		    .detail("ErrorName", e.name());
 		throw;
 	}
-
-	co_return;
 }
 
 // Public Interface Implementation
@@ -1642,8 +1616,6 @@ Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		TraceEvent(SevError, "MockS3ServerStartError").error(e).detail("ListenAddress", listenAddress.toString());
 		throw;
 	}
-
-	co_return;
 }
 
 // Clear all MockS3 global storage - called at the start of each simulation test
@@ -1734,8 +1706,6 @@ static Future<Void> loadPersistedObjects(std::string persistenceDir) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3LoadObjectsFailed").error(e);
 	}
-
-	co_return;
 }
 
 // ACTOR: Load persisted multipart uploads from disk
@@ -1818,8 +1788,6 @@ static Future<Void> loadPersistedMultipartUploads(std::string persistenceDir) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3LoadMultipartFailed").error(e);
 	}
-
-	co_return;
 }
 
 // ACTOR: Load all persisted state from disk
@@ -1849,8 +1817,6 @@ static Future<Void> loadMockS3PersistedStateImpl() {
 		TraceEvent(SevError, "MockS3LoadPersistedStateFailed").error(e);
 		throw;
 	}
-
-	co_return;
 }
 
 // Load persisted state from disk (called at server startup) - returns Future for use in ACTOR context
@@ -1872,7 +1838,6 @@ Future<Void> initializeMockS3Persistence(std::string serverKey) {
 		// Load any previously persisted state (for crash recovery in simulation)
 		co_await loadMockS3PersistedStateFuture();
 	}
-	co_return;
 }
 
 // Unit Tests for MockS3Server
@@ -2177,7 +2142,6 @@ Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std::strin
 
 	// Keep the server running indefinitely
 	co_await Future<Void>(Never());
-	co_return;
 }
 
 Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress, const std::string& persistenceDir) {
