@@ -1,5 +1,5 @@
 /*
- * MockS3Server.actor.cpp
+ * MockS3Server.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -41,35 +41,6 @@
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/prettywriter.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-/*
- * ACTOR STATE VARIABLE INITIALIZATION REQUIREMENT
- *
- * ACTORs with early returns (before any wait()) crash with canBeSet() assertion if no state
- * variable is declared before the return. The actor compiler generates a member initialization
- * list (": member(value)") in the state class constructor only when it sees state variables.
- * This initialization list ensures the Actor<T> base class and its internal Promise are fully
- * initialized before any code runs. Without it, early returns try to use an uninitialized Promise.
- *
- * FIX: Declare at least one state variable BEFORE any early return. Declaration alone is enough.
- *
- * CORRECT:
- *   ACTOR Future<Void> someActor(...) {
- *       state std::string data;                // Triggers member init list (requires default ctor)
- *       if (earlyExitCondition) return Void(); // Safe - Promise is initialized
- *       data = computeValue();                 // Can initialize later
- *   }
- *
- *   // Or if no default constructor: state MyType x(params); and initialize at declaration
- *
- * WRONG (canBeSet() crash):
- *   ACTOR Future<Void> someActor(...) {
- *       if (earlyExitCondition) return Void(); // CRASH - no member init list generated yet
- *       state std::string data;                // Too late - compiler didn't see it early enough
- *   }
- */
 
 // MockS3 persistence file extensions and constants
 namespace {
@@ -189,7 +160,7 @@ static void createParentDirectories(const std::string& filePath) {
 // (see AsyncFileChaos.h:40). OPEN_NO_AIO controls AsyncFileNonDurable behavior.
 // Uses unique temp filename per caller to avoid race conditions when multiple
 // MockS3 servers write to the same path simultaneously (last writer wins).
-ACTOR static Future<Void> atomicWriteFile(std::string path, std::string content) {
+static Future<Void> atomicWriteFile(std::string path, std::string content) {
 	// Generate unique temp filename to avoid collision with other MockS3 servers
 	// writing to the same path. Each server gets its own temp file, and the
 	// last rename wins (correct S3 semantics).
@@ -199,21 +170,21 @@ ACTOR static Future<Void> atomicWriteFile(std::string path, std::string content)
 	// cause the simulation's random state to diverge between platforms.
 	// We use OPEN_ATOMIC_WRITE_AND_CREATE which creates a .part file internally,
 	// so the full chain is: path.{uuid}.tmp.part -> path.{uuid}.tmp -> path
-	state std::string tempPath = path + "." + nondeterministicRandom()->randomUniqueID().toString() + ".tmp";
+	std::string tempPath = path + "." + nondeterministicRandom()->randomUniqueID().toString() + ".tmp";
 
 	try {
 		// Create all parent directories
 		createParentDirectories(path);
 
 		// Write to unique temp file using atomic write (simulation requires this flag with OPEN_CREATE)
-		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
+		Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
 		    tempPath,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE |
 		        IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO,
-		    0644));
+		    0644);
 
-		wait(file->write(content.data(), content.size(), 0));
-		wait(file->sync()); // Renames .part -> tempPath
+		co_await file->write(content.data(), content.size(), 0);
+		co_await file->sync(); // Renames .part -> tempPath
 		file = Reference<IAsyncFile>();
 
 		// Rename unique temp file to final path (last writer wins)
@@ -229,26 +200,25 @@ ACTOR static Future<Void> atomicWriteFile(std::string path, std::string content)
 			// Ignore cleanup errors
 		}
 	}
-	return Void();
 }
 
 // ACTOR: Read file content using simulation filesystem without chaos
 // Chaos-free because AsyncFileChaos only affects files with "storage-" in the name
-ACTOR static Future<std::string> readFileContent(std::string path) {
-	state bool exists = fileExists(path); // State variable before any early returns
+static Future<std::string> readFileContent(std::string path) {
+	bool exists = fileExists(path); // State variable before any early returns
 
 	try {
 		if (!exists) {
-			return std::string();
+			co_return std::string();
 		}
 
-		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-		    path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0644));
-		state int64_t fileSize = wait(file->size());
+		Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
+		    path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0644);
+		int64_t fileSize = co_await file->size();
 
-		state std::string content;
+		std::string content;
 		content.resize(fileSize);
-		int bytesRead = wait(file->read((uint8_t*)content.data(), fileSize, 0));
+		int bytesRead = co_await file->read((uint8_t*)content.data(), fileSize, 0);
 		file = Reference<IAsyncFile>();
 
 		if (bytesRead != fileSize) {
@@ -258,23 +228,22 @@ ACTOR static Future<std::string> readFileContent(std::string path) {
 			    .detail("Actual", bytesRead);
 		}
 
-		return content;
+		co_return content;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistenceReadException").error(e).detail("Path", path);
-		return std::string();
+		co_return std::string();
 	}
 }
 
 // ACTOR: Delete file using simulation filesystem
 // Wraps deleteFile with trace events and error handling for MockS3 persistence cleanup
-ACTOR static Future<Void> deletePersistedFile(std::string path) {
+static Future<Void> deletePersistedFile(std::string path) {
 	try {
-		wait(IAsyncFileSystem::filesystem()->deleteFile(path, true)); // Durable delete
+		co_await IAsyncFileSystem::filesystem()->deleteFile(path, true); // Durable delete
 		TraceEvent("MockS3PersistenceDelete").detail("Path", path);
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistenceDeleteException").error(e).detail("Path", path);
 	}
-	return Void();
 }
 
 // JSON Serialization using rapidjson
@@ -369,9 +338,9 @@ static void deserializeMultipartState(const std::string& jsonStr, MockS3GlobalSt
 }
 
 // Forward declarations for state loading functions
-ACTOR static Future<Void> loadPersistedObjects(std::string persistenceDir);
-ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceDir);
-ACTOR static Future<Void> loadMockS3PersistedStateImpl();
+static Future<Void> loadPersistedObjects(std::string persistenceDir);
+static Future<Void> loadPersistedMultipartUploads(std::string persistenceDir);
+static Future<Void> loadMockS3PersistedStateImpl();
 Future<Void> loadMockS3PersistedStateFuture();
 
 static std::string serializePartMeta(const std::string& etag) {
@@ -388,7 +357,7 @@ static std::string serializePartMeta(const std::string& etag) {
 }
 
 // ACTOR: Persist object data and metadata
-ACTOR static Future<Void> persistObject(std::string bucket, std::string object) {
+static Future<Void> persistObject(std::string bucket, std::string object) {
 	auto& storage = getGlobalStorage();
 
 	// In simulation, automatically enable persistence on first access (process-local storage)
@@ -398,28 +367,28 @@ ACTOR static Future<Void> persistObject(std::string bucket, std::string object) 
 	}
 
 	if (!storage.persistenceEnabled) {
-		return Void(); // Persistence not enabled, skip
+		co_return; // Persistence not enabled, skip
 	}
 
 	auto bucketIter = storage.buckets.find(bucket);
 	if (bucketIter == storage.buckets.end()) {
-		return Void();
+		co_return;
 	}
 
 	auto objectIter = bucketIter->second.find(object);
 	if (objectIter == bucketIter->second.end()) {
-		return Void();
+		co_return;
 	}
 
 	// Copy data to state variables (needed across wait() boundaries)
-	state std::string content = objectIter->second.content;
-	state std::string metaJson = serializeObjectMeta(objectIter->second);
+	std::string content = objectIter->second.content;
+	std::string metaJson = serializeObjectMeta(objectIter->second);
 
 	try {
 
 		// Compute paths before wait() calls
-		state std::string dataPath = storage.getObjectDataPath(bucket, object);
-		state std::string metaPath = storage.getObjectMetaPath(bucket, object);
+		std::string dataPath = storage.getObjectDataPath(bucket, object);
+		std::string metaPath = storage.getObjectMetaPath(bucket, object);
 
 		// Skip if already persisted (race condition: multiple processes may try to persist same object)
 		// Check both final file and .part file to close race window
@@ -428,7 +397,7 @@ ACTOR static Future<Void> persistObject(std::string bucket, std::string object) 
 			    .detail("Bucket", bucket)
 			    .detail("Object", object)
 			    .detail("DataPath", dataPath);
-			return Void();
+			co_return;
 		}
 
 		TraceEvent("MockS3PersistingObject")
@@ -438,10 +407,10 @@ ACTOR static Future<Void> persistObject(std::string bucket, std::string object) 
 		    .detail("Size", content.size());
 
 		// Persist object content
-		wait(atomicWriteFile(dataPath, content));
+		co_await atomicWriteFile(dataPath, content);
 
 		// Persist object metadata
-		wait(atomicWriteFile(metaPath, metaJson));
+		co_await atomicWriteFile(metaPath, metaJson);
 
 		TraceEvent("MockS3ObjectPersisted")
 		    .detail("Bucket", bucket)
@@ -450,14 +419,12 @@ ACTOR static Future<Void> persistObject(std::string bucket, std::string object) 
 	} catch (Error& e) {
 		TraceEvent(SevError, "MockS3PersistObjectFailed").error(e).detail("Bucket", bucket).detail("Object", object);
 	}
-
-	return Void();
 }
 
 // ACTOR: Persist multipart upload state
-ACTOR static Future<Void> persistMultipartState(std::string uploadId) {
-	state std::string persistenceDir; // Declare state before any early returns
-	state std::map<int, std::pair<std::string, std::string>> parts;
+static Future<Void> persistMultipartState(std::string uploadId) {
+	std::string persistenceDir; // Declare state before any early returns
+	std::map<int, std::pair<std::string, std::string>> parts;
 
 	auto& storage = getGlobalStorage();
 
@@ -468,12 +435,12 @@ ACTOR static Future<Void> persistMultipartState(std::string uploadId) {
 	}
 
 	if (!storage.persistenceEnabled) {
-		return Void(); // Persistence not enabled, skip
+		co_return; // Persistence not enabled, skip
 	}
 
 	auto uploadIter = storage.multipartUploads.find(uploadId);
 	if (uploadIter == storage.multipartUploads.end()) {
-		return Void();
+		co_return;
 	}
 
 	const auto& upload = uploadIter->second;
@@ -489,25 +456,25 @@ ACTOR static Future<Void> persistMultipartState(std::string uploadId) {
 		// Check both final file and .part file to close race window
 		if (fileExists(statePath) || fileExists(statePath + ".part")) {
 			TraceEvent("MockS3MultipartAlreadyPersisted").detail("UploadId", uploadId).detail("StatePath", statePath);
-			return Void();
+			co_return;
 		}
 
 		std::string stateJson = serializeMultipartState(upload);
-		wait(atomicWriteFile(statePath, stateJson));
+		co_await atomicWriteFile(statePath, stateJson);
 
 		// Persist each part
-		state std::map<int, std::pair<std::string, std::string>>::iterator partIter = parts.begin();
+		std::map<int, std::pair<std::string, std::string>>::iterator partIter = parts.begin();
 		while (partIter != parts.end()) {
-			state int partNum = partIter->first;
-			state std::string etag = partIter->second.first;
-			state std::string partData = partIter->second.second;
+			int partNum = partIter->first;
+			std::string etag = partIter->second.first;
+			std::string partData = partIter->second.second;
 
-			state std::string partPath = persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum);
-			wait(atomicWriteFile(partPath, partData));
+			std::string partPath = persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum);
+			co_await atomicWriteFile(partPath, partData);
 
-			state std::string partMetaPath = partPath + ".meta.json";
-			state std::string partMetaJson = serializePartMeta(etag);
-			wait(atomicWriteFile(partMetaPath, partMetaJson));
+			std::string partMetaPath = partPath + ".meta.json";
+			std::string partMetaJson = serializePartMeta(etag);
+			co_await atomicWriteFile(partMetaPath, partMetaJson);
 
 			partIter++;
 		}
@@ -516,14 +483,12 @@ ACTOR static Future<Void> persistMultipartState(std::string uploadId) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3PersistMultipartFailed").error(e).detail("UploadId", uploadId);
 	}
-
-	return Void();
 }
 
 // ACTOR: Delete persisted object
-ACTOR static Future<Void> deletePersistedObject(std::string bucket, std::string object) {
-	state std::string dataPath; // Declare state before any early returns
-	state std::string metaPath;
+static Future<Void> deletePersistedObject(std::string bucket, std::string object) {
+	std::string dataPath; // Declare state before any early returns
+	std::string metaPath;
 
 	auto& storage = getGlobalStorage();
 	ASSERT(storage.persistenceEnabled); // Caller should check before calling
@@ -532,8 +497,8 @@ ACTOR static Future<Void> deletePersistedObject(std::string bucket, std::string 
 	metaPath = storage.getObjectMetaPath(bucket, object);
 
 	try {
-		wait(deletePersistedFile(dataPath));
-		wait(deletePersistedFile(metaPath));
+		co_await deletePersistedFile(dataPath);
+		co_await deletePersistedFile(metaPath);
 
 		TraceEvent("MockS3ObjectDeleted").detail("Bucket", bucket).detail("Object", object);
 	} catch (Error& e) {
@@ -542,17 +507,15 @@ ACTOR static Future<Void> deletePersistedObject(std::string bucket, std::string 
 		    .detail("Bucket", bucket)
 		    .detail("Object", object);
 	}
-
-	return Void();
 }
 
 // ACTOR: Delete persisted multipart upload
-ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
-	state int maxPart; // Declare state before any early returns
-	state std::string persistenceDir;
-	state int partNum;
-	state std::string partPath;
-	state std::string partMetaPath;
+static Future<Void> deletePersistedMultipart(std::string uploadId) {
+	int maxPart{ 0 }; // Declare state before any early returns
+	std::string persistenceDir;
+	int partNum{ 0 };
+	std::string partPath;
+	std::string partMetaPath;
 
 	auto& storage = getGlobalStorage();
 	ASSERT(storage.persistenceEnabled); // Caller should check before calling
@@ -572,7 +535,7 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 
 		// Delete state file
 		std::string statePath = persistenceDir + "/multipart/" + uploadId + ".state.json";
-		wait(deletePersistedFile(statePath));
+		co_await deletePersistedFile(statePath);
 
 		// Delete all part files (try all possible part numbers)
 		// Yield very frequently with delays to prevent blocking other MockS3 requests
@@ -580,14 +543,14 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 		while (partNum <= maxPart + 10) {
 			partPath = persistenceDir + "/multipart/" + uploadId + ".part." + std::to_string(partNum);
 			partMetaPath = partPath + ".meta.json";
-			wait(deletePersistedFile(partPath));
-			wait(deletePersistedFile(partMetaPath));
+			co_await deletePersistedFile(partPath);
+			co_await deletePersistedFile(partMetaPath);
 			partNum++;
 
 			// Yield every 2 parts with 20ms delay to allow HTTP requests to be processed
 			// For 110 parts: ~55 yields = ~1.1s total delay time
 			if (partNum % 2 == 0) {
-				wait(delay(0.02));
+				co_await delay(0.02);
 			}
 		}
 
@@ -595,8 +558,6 @@ ACTOR static Future<Void> deletePersistedMultipart(std::string uploadId) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3DeletePersistedMultipartFailed").error(e).detail("UploadId", uploadId);
 	}
-
-	return Void();
 }
 
 // Mock S3 Server Implementation for deterministic testing
@@ -611,9 +572,9 @@ public:
 	~MockS3ServerImpl() = default;
 
 	// S3 Operation Handlers
-	ACTOR static Future<Void> handleRequest(MockS3ServerImpl* self,
-	                                        Reference<HTTP::IncomingRequest> req,
-	                                        Reference<HTTP::OutgoingResponse> response) {
+	static Future<Void> handleRequest(MockS3ServerImpl* self,
+	                                  Reference<HTTP::IncomingRequest> req,
+	                                  Reference<HTTP::OutgoingResponse> response) {
 
 		TraceEvent("MockS3Request")
 		    .detail("Method", req->verb)
@@ -639,23 +600,23 @@ public:
 
 			// Route to appropriate handler based on operation type
 			if (queryParams.count("uploads")) {
-				wait(self->handleMultipartStart(self, req, response, bucket, object));
+				co_await self->handleMultipartStart(self, req, response, bucket, object);
 			} else if (queryParams.count("uploadId")) {
 				if (queryParams.count("partNumber")) {
-					wait(self->handleUploadPart(self, req, response, bucket, object, queryParams));
+					co_await self->handleUploadPart(self, req, response, bucket, object, queryParams);
 				} else if (req->verb == "POST") {
-					wait(self->handleMultipartComplete(self, req, response, bucket, object, queryParams));
+					co_await self->handleMultipartComplete(self, req, response, bucket, object, queryParams);
 				} else if (req->verb == "DELETE") {
-					wait(self->handleMultipartAbort(self, req, response, bucket, object, queryParams));
+					co_await self->handleMultipartAbort(self, req, response, bucket, object, queryParams);
 				} else {
 					self->sendError(
 					    response, HTTP::HTTP_STATUS_CODE_BAD_GATEWAY, "InvalidRequest", "Unknown multipart operation");
 				}
 			} else if (queryParams.count("tagging")) {
 				if (req->verb == "PUT") {
-					wait(self->handlePutObjectTags(self, req, response, bucket, object));
+					co_await self->handlePutObjectTags(self, req, response, bucket, object);
 				} else if (req->verb == "GET") {
-					wait(self->handleGetObjectTags(self, req, response, bucket, object));
+					co_await self->handleGetObjectTags(self, req, response, bucket, object);
 				} else {
 					self->sendError(response,
 					                HTTP::HTTP_STATUS_CODE_BAD_GATEWAY,
@@ -664,13 +625,13 @@ public:
 				}
 			} else if (queryParams.count("list-type") || (req->verb == "GET" && object.empty())) {
 				// ListObjects operation (when GET request to bucket)
-				wait(self->handleListObjects(self, req, response, bucket, queryParams));
+				co_await self->handleListObjects(self, req, response, bucket, queryParams);
 			} else if (object.empty()) {
 				// Bucket-level operations
 				if (req->verb == "HEAD") {
-					wait(self->handleHeadBucket(self, req, response, bucket));
+					co_await self->handleHeadBucket(self, req, response, bucket);
 				} else if (req->verb == "PUT") {
-					wait(self->handlePutBucket(self, req, response, bucket));
+					co_await self->handlePutBucket(self, req, response, bucket);
 				} else {
 					self->sendError(response,
 					                HTTP::HTTP_STATUS_CODE_BAD_GATEWAY,
@@ -680,13 +641,13 @@ public:
 			} else {
 				// Basic object operations
 				if (req->verb == "PUT") {
-					wait(self->handlePutObject(self, req, response, bucket, object));
+					co_await self->handlePutObject(self, req, response, bucket, object);
 				} else if (req->verb == "GET") {
-					wait(self->handleGetObject(self, req, response, bucket, object));
+					co_await self->handleGetObject(self, req, response, bucket, object);
 				} else if (req->verb == "DELETE") {
-					wait(self->handleDeleteObject(self, req, response, bucket, object));
+					co_await self->handleDeleteObject(self, req, response, bucket, object);
 				} else if (req->verb == "HEAD") {
-					wait(self->handleHeadObject(self, req, response, bucket, object));
+					co_await self->handleHeadObject(self, req, response, bucket, object);
 				} else {
 					self->sendError(
 					    response, HTTP::HTTP_STATUS_CODE_BAD_GATEWAY, "MethodNotAllowed", "Method not supported");
@@ -697,8 +658,6 @@ public:
 			TraceEvent(SevError, "MockS3RequestError").error(e).detail("Resource", req->resource);
 			self->sendError(response, 500, "InternalError", "Internal server error");
 		}
-
-		return Void();
 	}
 
 	void parseS3Request(const std::string& resource,
@@ -788,11 +747,11 @@ public:
 	}
 
 	// Multipart Upload Operations
-	ACTOR static Future<Void> handleMultipartStart(MockS3ServerImpl* self,
-	                                               Reference<HTTP::IncomingRequest> req,
-	                                               Reference<HTTP::OutgoingResponse> response,
-	                                               std::string bucket,
-	                                               std::string object) {
+	static Future<Void> handleMultipartStart(MockS3ServerImpl* self,
+	                                         Reference<HTTP::IncomingRequest> req,
+	                                         Reference<HTTP::OutgoingResponse> response,
+	                                         std::string bucket,
+	                                         std::string object) {
 
 		TraceEvent("MockS3MultipartStart").detail("Bucket", bucket).detail("Object", object);
 
@@ -811,7 +770,7 @@ public:
 			}
 		}
 
-		state std::string uploadId;
+		std::string uploadId;
 		if (!existingUploadId.empty()) {
 			uploadId = existingUploadId;
 			// No need to persist - already exists and was persisted on first creation
@@ -823,7 +782,7 @@ public:
 
 			// Persist only the newly created upload
 			if (getGlobalStorage().persistenceEnabled) {
-				wait(persistMultipartState(uploadId));
+				co_await persistMultipartState(uploadId);
 			}
 		}
 
@@ -839,19 +798,17 @@ public:
 		                         uploadId.c_str());
 
 		self->sendXMLResponse(response, 200, xml);
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> handleUploadPart(MockS3ServerImpl* self,
-	                                           Reference<HTTP::IncomingRequest> req,
-	                                           Reference<HTTP::OutgoingResponse> response,
-	                                           std::string bucket,
-	                                           std::string object,
-	                                           std::map<std::string, std::string> queryParams) {
+	static Future<Void> handleUploadPart(MockS3ServerImpl* self,
+	                                     Reference<HTTP::IncomingRequest> req,
+	                                     Reference<HTTP::OutgoingResponse> response,
+	                                     std::string bucket,
+	                                     std::string object,
+	                                     std::map<std::string, std::string> queryParams) {
 
-		state std::string uploadId = queryParams.at("uploadId");
-		state int partNumber = std::stoi(queryParams.at("partNumber"));
+		std::string uploadId = queryParams.at("uploadId");
+		int partNumber = std::stoi(queryParams.at("partNumber"));
 
 		TraceEvent("MockS3UploadPart")
 		    .detail("UploadId", uploadId)
@@ -866,16 +823,16 @@ public:
 		auto uploadIter = getGlobalStorage().multipartUploads.find(uploadId);
 		if (uploadIter == getGlobalStorage().multipartUploads.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchUpload", "Upload not found");
-			return Void();
+			co_return;
 		}
 
 		// Store part data
-		state std::string etag = ObjectData::generateETag(req->data.content);
+		std::string etag = ObjectData::generateETag(req->data.content);
 		uploadIter->second.parts[partNumber] = { etag, req->data.content };
 
 		// Persist multipart state (includes all parts)
 		if (getGlobalStorage().persistenceEnabled) {
-			wait(persistMultipartState(uploadId));
+			co_await persistMultipartState(uploadId);
 		}
 
 		// Return ETag in response
@@ -888,29 +845,27 @@ public:
 		    .detail("UploadId", uploadId)
 		    .detail("PartNumber", partNumber)
 		    .detail("ETag", etag);
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> handleMultipartComplete(MockS3ServerImpl* self,
-	                                                  Reference<HTTP::IncomingRequest> req,
-	                                                  Reference<HTTP::OutgoingResponse> response,
-	                                                  std::string bucket,
-	                                                  std::string object,
-	                                                  std::map<std::string, std::string> queryParams) {
+	static Future<Void> handleMultipartComplete(MockS3ServerImpl* self,
+	                                            Reference<HTTP::IncomingRequest> req,
+	                                            Reference<HTTP::OutgoingResponse> response,
+	                                            std::string bucket,
+	                                            std::string object,
+	                                            std::map<std::string, std::string> queryParams) {
 
-		state std::string uploadId = queryParams.at("uploadId");
+		std::string uploadId = queryParams.at("uploadId");
 
 		TraceEvent("MockS3MultipartComplete").detail("UploadId", uploadId);
 
 		auto uploadIter = getGlobalStorage().multipartUploads.find(uploadId);
 		if (uploadIter == getGlobalStorage().multipartUploads.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchUpload", "Upload not found");
-			return Void();
+			co_return;
 		}
 
 		// Combine all parts in order
-		state std::string combinedContent;
+		std::string combinedContent;
 		for (auto& part : uploadIter->second.parts) {
 			combinedContent += part.second.second;
 		}
@@ -938,13 +893,13 @@ public:
 
 		// Persist final object
 		if (getGlobalStorage().persistenceEnabled) {
-			wait(persistObject(bucket, object));
+			co_await persistObject(bucket, object);
 		}
 
 		// Clean up multipart upload (in-memory and persisted)
 		getGlobalStorage().multipartUploads.erase(uploadId);
 		if (getGlobalStorage().persistenceEnabled) {
-			wait(deletePersistedMultipart(uploadId));
+			co_await deletePersistedMultipart(uploadId);
 		}
 
 		// Generate completion XML response
@@ -961,31 +916,29 @@ public:
 		self->sendXMLResponse(response, 200, xml);
 
 		TraceEvent("MockS3MultipartCompleted").detail("UploadId", uploadId).detail("FinalSize", combinedContent.size());
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> handleMultipartAbort(MockS3ServerImpl* self,
-	                                               Reference<HTTP::IncomingRequest> req,
-	                                               Reference<HTTP::OutgoingResponse> response,
-	                                               std::string bucket,
-	                                               std::string object,
-	                                               std::map<std::string, std::string> queryParams) {
+	static Future<Void> handleMultipartAbort(MockS3ServerImpl* self,
+	                                         Reference<HTTP::IncomingRequest> req,
+	                                         Reference<HTTP::OutgoingResponse> response,
+	                                         std::string bucket,
+	                                         std::string object,
+	                                         std::map<std::string, std::string> queryParams) {
 
-		state std::string uploadId = queryParams.at("uploadId");
+		std::string uploadId = queryParams.at("uploadId");
 
 		TraceEvent("MockS3MultipartAbort").detail("UploadId", uploadId);
 
 		auto uploadIter = getGlobalStorage().multipartUploads.find(uploadId);
 		if (uploadIter == getGlobalStorage().multipartUploads.end()) {
 			self->sendError(response, HTTP::HTTP_STATUS_CODE_NOT_FOUND, "NoSuchUpload", "Upload not found");
-			return Void();
+			co_return;
 		}
 
 		// Remove multipart upload (in-memory and persisted)
 		getGlobalStorage().multipartUploads.erase(uploadId);
 		if (getGlobalStorage().persistenceEnabled) {
-			wait(deletePersistedMultipart(uploadId));
+			co_await deletePersistedMultipart(uploadId);
 		}
 
 		response->code = 204; // No Content
@@ -993,8 +946,6 @@ public:
 		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3MultipartAborted").detail("UploadId", uploadId);
-
-		return Void();
 	}
 
 	// Object Tagging Operations
@@ -1070,11 +1021,11 @@ public:
 	}
 
 	// Basic Object Operations
-	ACTOR static Future<Void> handlePutObject(MockS3ServerImpl* self,
-	                                          Reference<HTTP::IncomingRequest> req,
-	                                          Reference<HTTP::OutgoingResponse> response,
-	                                          std::string bucket,
-	                                          std::string object) {
+	static Future<Void> handlePutObject(MockS3ServerImpl* self,
+	                                    Reference<HTTP::IncomingRequest> req,
+	                                    Reference<HTTP::OutgoingResponse> response,
+	                                    std::string bucket,
+	                                    std::string object) {
 
 		TraceEvent("MockS3PutObject_Debug")
 		    .detail("Bucket", bucket)
@@ -1084,7 +1035,7 @@ public:
 		    .detail("ContentPreview", req->data.content.substr(0, std::min(100, (int)req->data.content.size())));
 
 		ObjectData obj(req->data.content);
-		state std::string etag = obj.etag;
+		std::string etag = obj.etag;
 		getGlobalStorage().buckets[bucket][object] = std::move(obj);
 
 		TraceEvent("MockS3PutObject_Stored")
@@ -1095,7 +1046,7 @@ public:
 
 		// Persist object to disk
 		if (getGlobalStorage().persistenceEnabled) {
-			wait(persistObject(bucket, object));
+			co_await persistObject(bucket, object);
 		}
 
 		response->code = 200;
@@ -1109,8 +1060,6 @@ public:
 		    .detail("ResponseCode", response->code)
 		    .detail("ContentLen", response->data.contentLen)
 		    .detail("HasContent", response->data.content != nullptr);
-
-		return Void();
 	}
 
 	static Future<Void> handleGetObject(MockS3ServerImpl* self,
@@ -1203,11 +1152,11 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> handleDeleteObject(MockS3ServerImpl* self,
-	                                             Reference<HTTP::IncomingRequest> req,
-	                                             Reference<HTTP::OutgoingResponse> response,
-	                                             std::string bucket,
-	                                             std::string object) {
+	static Future<Void> handleDeleteObject(MockS3ServerImpl* self,
+	                                       Reference<HTTP::IncomingRequest> req,
+	                                       Reference<HTTP::OutgoingResponse> response,
+	                                       std::string bucket,
+	                                       std::string object) {
 
 		TraceEvent("MockS3DeleteObject").detail("Bucket", bucket).detail("Object", object);
 
@@ -1218,7 +1167,7 @@ public:
 
 		// Delete persisted object
 		if (getGlobalStorage().persistenceEnabled) {
-			wait(deletePersistedObject(bucket, object));
+			co_await deletePersistedObject(bucket, object);
 		}
 
 		response->code = 204; // No Content
@@ -1226,8 +1175,6 @@ public:
 		response->data.content->discardAll(); // Clear existing content
 
 		TraceEvent("MockS3ObjectDeleted").detail("Bucket", bucket).detail("Object", object);
-
-		return Void();
 	}
 
 	static Future<Void> handleHeadObject(MockS3ServerImpl* self,
@@ -1564,8 +1511,8 @@ Reference<HTTP::IRequestHandler> MockS3RequestHandler::clone() {
 }
 
 // Safe server registration that prevents conflicts (internal implementation)
-ACTOR Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
-	state std::string serverKey = ip + ":" + port; // State variable before any early returns
+Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
+	std::string serverKey = ip + ":" + port; // State variable before any early returns
 
 	// DIAGNOSTIC: Enhanced registration logging
 	TraceEvent("MockS3ServerDiagnostic")
@@ -1579,7 +1526,7 @@ ACTOR Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 	// Check if server is already registered
 	if (registeredServers.count(serverKey)) {
 		TraceEvent(SevWarn, "MockS3ServerAlreadyRegistered").detail("Address", serverKey);
-		return Void();
+		co_return;
 	}
 
 	try {
@@ -1593,14 +1540,14 @@ ACTOR Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 			    .detail("PersistenceDir", persistenceDir);
 
 			// Load any previously persisted state (for crash recovery in simulation)
-			wait(loadMockS3PersistedStateFuture());
+			co_await loadMockS3PersistedStateFuture();
 		}
 
 		TraceEvent("MockS3ServerDiagnostic")
 		    .detail("Phase", "Calling registerSimHTTPServer")
 		    .detail("Address", serverKey);
 
-		wait(g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3RequestHandler>()));
+		co_await g_simulator->registerSimHTTPServer(ip, port, makeReference<MockS3RequestHandler>());
 		registeredServers[serverKey] = true;
 
 		TraceEvent("MockS3ServerRegistered").detail("Address", serverKey).detail("Success", true);
@@ -1617,12 +1564,10 @@ ACTOR Future<Void> registerMockS3Server_impl(std::string ip, std::string port) {
 		    .detail("ErrorName", e.name());
 		throw;
 	}
-
-	return Void();
 }
 
 // Public Interface Implementation
-ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
+Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 	TraceEvent("MockS3ServerStarting").detail("ListenAddress", listenAddress.toString());
 
 	try {
@@ -1632,7 +1577,7 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		    .detail("IsSimulated", g_network->isSimulated());
 
 		// Persistence is automatically enabled in registerMockS3Server_impl()
-		wait(registerMockS3Server_impl(listenAddress.ip.toString(), std::to_string(listenAddress.port)));
+		co_await registerMockS3Server_impl(listenAddress.ip.toString(), std::to_string(listenAddress.port));
 
 		TraceEvent("MockS3ServerStarted")
 		    .detail("ListenAddress", listenAddress.toString())
@@ -1642,8 +1587,6 @@ ACTOR Future<Void> startMockS3Server(NetworkAddress listenAddress) {
 		TraceEvent(SevError, "MockS3ServerStartError").error(e).detail("ListenAddress", listenAddress.toString());
 		throw;
 	}
-
-	return Void();
 }
 
 // Clear all MockS3 global storage - called at the start of each simulation test
@@ -1665,45 +1608,45 @@ bool isMockS3PersistenceEnabled() {
 }
 
 // ACTOR: Load persisted objects from disk
-ACTOR static Future<Void> loadPersistedObjects(std::string persistenceDir) {
-	state std::string objectsDir = persistenceDir + "/objects"; // State variable before any early returns
+static Future<Void> loadPersistedObjects(std::string persistenceDir) {
+	std::string objectsDir = persistenceDir + "/objects"; // State variable before any early returns
 
 	if (!fileExists(objectsDir)) {
 		TraceEvent("MockS3LoadObjects").detail("Status", "NoObjectsDir");
-		return Void();
+		co_return;
 	}
 
 	try {
 		// Get list of bucket directories
-		state std::vector<std::string> buckets = platform::listFiles(objectsDir, "");
+		std::vector<std::string> buckets = platform::listFiles(objectsDir, "");
 		// Sort for deterministic load order (platform::listFiles returns OS-dependent order)
 		std::sort(buckets.begin(), buckets.end());
-		state int bucketIdx = 0;
+		int bucketIdx = 0;
 
 		for (bucketIdx = 0; bucketIdx < buckets.size(); bucketIdx++) {
-			state std::string bucket = buckets[bucketIdx];
+			std::string bucket = buckets[bucketIdx];
 			if (bucket == "." || bucket == "..")
 				continue;
 
-			state std::string bucketDir = objectsDir + "/" + bucket;
+			std::string bucketDir = objectsDir + "/" + bucket;
 			if (!directoryExists(bucketDir))
 				continue;
 
 			// Get all files in the bucket directory (including nested paths)
-			state std::vector<std::string> files = platform::listFiles(bucketDir, "");
+			std::vector<std::string> files = platform::listFiles(bucketDir, "");
 			std::sort(files.begin(), files.end()); // Deterministic order
-			state int fileIdx = 0;
+			int fileIdx = 0;
 
 			for (fileIdx = 0; fileIdx < files.size(); fileIdx++) {
-				state std::string fileName = files[fileIdx];
+				std::string fileName = files[fileIdx];
 
 				// Look for .meta.json files to identify objects
 				if (fileName.size() > OBJECT_META_SUFFIX_LEN &&
 				    fileName.substr(fileName.size() - OBJECT_META_SUFFIX_LEN) == OBJECT_META_SUFFIX) {
 					// Extract object name by removing .meta.json suffix
-					state std::string objectName = fileName.substr(0, fileName.size() - OBJECT_META_SUFFIX_LEN);
-					state std::string dataPath = bucketDir + "/" + objectName + OBJECT_DATA_SUFFIX;
-					state std::string metaPath = bucketDir + "/" + fileName;
+					std::string objectName = fileName.substr(0, fileName.size() - OBJECT_META_SUFFIX_LEN);
+					std::string dataPath = bucketDir + "/" + objectName + OBJECT_DATA_SUFFIX;
+					std::string metaPath = bucketDir + "/" + fileName;
 
 					if (!fileExists(dataPath)) {
 						TraceEvent(SevWarn, "MockS3LoadObjectSkipped")
@@ -1714,8 +1657,8 @@ ACTOR static Future<Void> loadPersistedObjects(std::string persistenceDir) {
 					}
 
 					// Read object content and metadata
-					state std::string content = wait(readFileContent(dataPath));
-					state std::string metaJson = wait(readFileContent(metaPath));
+					std::string content = co_await readFileContent(dataPath);
+					std::string metaJson = co_await readFileContent(metaPath);
 
 					// Parse metadata using rapidjson
 					MockS3GlobalStorage::ObjectData obj(content);
@@ -1734,36 +1677,34 @@ ACTOR static Future<Void> loadPersistedObjects(std::string persistenceDir) {
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3LoadObjectsFailed").error(e);
 	}
-
-	return Void();
 }
 
 // ACTOR: Load persisted multipart uploads from disk
-ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceDir) {
-	state std::string multipartDir = persistenceDir + "/multipart"; // State variable before any early returns
+static Future<Void> loadPersistedMultipartUploads(std::string persistenceDir) {
+	std::string multipartDir = persistenceDir + "/multipart"; // State variable before any early returns
 
 	if (!fileExists(multipartDir)) {
 		TraceEvent("MockS3LoadMultipart").detail("Status", "NoMultipartDir");
-		return Void();
+		co_return;
 	}
 
 	try {
 		// Get all files in multipart directory
-		state std::vector<std::string> files = platform::listFiles(multipartDir, "");
+		std::vector<std::string> files = platform::listFiles(multipartDir, "");
 		std::sort(files.begin(), files.end()); // Deterministic order
-		state int fileIdx = 0;
+		int fileIdx = 0;
 
 		for (fileIdx = 0; fileIdx < files.size(); fileIdx++) {
-			state std::string fileName = files[fileIdx];
+			std::string fileName = files[fileIdx];
 
 			// Look for .state.json files
 			if (fileName.size() > MULTIPART_STATE_SUFFIX_LEN &&
 			    fileName.substr(fileName.size() - MULTIPART_STATE_SUFFIX_LEN) == MULTIPART_STATE_SUFFIX) {
-				state std::string uploadId = fileName.substr(0, fileName.size() - MULTIPART_STATE_SUFFIX_LEN);
-				state std::string statePath = multipartDir + "/" + fileName;
+				std::string uploadId = fileName.substr(0, fileName.size() - MULTIPART_STATE_SUFFIX_LEN);
+				std::string statePath = multipartDir + "/" + fileName;
 
 				// Read state file
-				state std::string stateJson = wait(readFileContent(statePath));
+				std::string stateJson = co_await readFileContent(statePath);
 				if (stateJson.empty()) {
 					TraceEvent(SevWarn, "MockS3LoadMultipartSkipped")
 					    .detail("UploadId", uploadId)
@@ -1772,23 +1713,23 @@ ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceD
 				}
 
 				// Parse multipart upload state using rapidjson
-				state MockS3GlobalStorage::MultipartUpload upload("", "");
+				MockS3GlobalStorage::MultipartUpload upload("", "");
 				upload.uploadId = uploadId;
 				deserializeMultipartState(stateJson, upload);
 
 				// Load all parts for this upload
-				state int partNum = 1;
-				state int maxAttempts = 10000; // Reasonable limit
+				int partNum = 1;
+				int maxAttempts = 10000; // Reasonable limit
 				for (partNum = 1; partNum <= maxAttempts; partNum++) {
-					state std::string partPath = multipartDir + "/" + uploadId + ".part." + std::to_string(partNum);
-					state std::string partMetaPath = partPath + ".meta.json";
+					std::string partPath = multipartDir + "/" + uploadId + ".part." + std::to_string(partNum);
+					std::string partMetaPath = partPath + ".meta.json";
 
 					if (!fileExists(partPath) || !fileExists(partMetaPath))
 						break; // No more parts
 
 					// Read part data and metadata
-					state std::string partData = wait(readFileContent(partPath));
-					state std::string partMetaJson = wait(readFileContent(partMetaPath));
+					std::string partData = co_await readFileContent(partPath);
+					std::string partMetaJson = co_await readFileContent(partMetaPath);
 
 					// Parse part metadata using rapidjson
 					using namespace rapidjson;
@@ -1818,16 +1759,14 @@ ACTOR static Future<Void> loadPersistedMultipartUploads(std::string persistenceD
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "MockS3LoadMultipartFailed").error(e);
 	}
-
-	return Void();
 }
 
 // ACTOR: Load all persisted state from disk
-ACTOR static Future<Void> loadMockS3PersistedStateImpl() {
-	state std::string persistenceDir; // Declare state before any early returns
+static Future<Void> loadMockS3PersistedStateImpl() {
+	std::string persistenceDir; // Declare state before any early returns
 
 	if (!getGlobalStorage().persistenceEnabled || getGlobalStorage().persistenceLoaded) {
-		return Void();
+		co_return;
 	}
 
 	persistenceDir = getGlobalStorage().persistenceDir;
@@ -1835,10 +1774,10 @@ ACTOR static Future<Void> loadMockS3PersistedStateImpl() {
 
 	try {
 		// Load objects
-		wait(loadPersistedObjects(persistenceDir));
+		co_await loadPersistedObjects(persistenceDir);
 
 		// Load multipart uploads
-		wait(loadPersistedMultipartUploads(persistenceDir));
+		co_await loadPersistedMultipartUploads(persistenceDir);
 
 		getGlobalStorage().persistenceLoaded = true;
 
@@ -1849,8 +1788,6 @@ ACTOR static Future<Void> loadMockS3PersistedStateImpl() {
 		TraceEvent(SevError, "MockS3LoadPersistedStateFailed").error(e);
 		throw;
 	}
-
-	return Void();
 }
 
 // Load persisted state from disk (called at server startup) - returns Future for use in ACTOR context
@@ -1862,7 +1799,7 @@ Future<Void> loadMockS3PersistedStateFuture() {
 }
 
 // Initialize MockS3 persistence for simulation tests (exported for MockS3ServerChaos)
-ACTOR Future<Void> initializeMockS3Persistence(std::string serverKey) {
+Future<Void> initializeMockS3Persistence(std::string serverKey) {
 	if (!getGlobalStorage().persistenceEnabled) {
 		enableMockS3Persistence(DEFAULT_MOCKS3_PERSISTENCE_DIR);
 		TraceEvent("MockS3ServerPersistenceEnabled")
@@ -1870,9 +1807,8 @@ ACTOR Future<Void> initializeMockS3Persistence(std::string serverKey) {
 		    .detail("PersistenceDir", DEFAULT_MOCKS3_PERSISTENCE_DIR);
 
 		// Load any previously persisted state (for crash recovery in simulation)
-		wait(loadMockS3PersistedStateFuture());
+		co_await loadMockS3PersistedStateFuture();
 	}
-	return Void();
 }
 
 // Unit Tests for MockS3Server
@@ -2150,7 +2086,7 @@ TEST_CASE("/MockS3Server/RangeHeader/StartGreaterThanEnd") {
 }
 
 // Real HTTP Server Implementation for ctests
-ACTOR Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std::string persistenceDir) {
+Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std::string persistenceDir) {
 	TraceEvent("MockS3ServerRealStarting").detail("ListenAddress", listenAddress.toString());
 
 	// Enable persistence for standalone MockS3Server
@@ -2165,10 +2101,10 @@ ACTOR Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std:
 		    .detail("PersistenceDir", persistenceDir);
 
 		// Load any previously persisted state (for crash recovery)
-		wait(loadMockS3PersistedStateFuture());
+		co_await loadMockS3PersistedStateFuture();
 	}
 
-	state Reference<HTTP::SimServerContext> server = makeReference<HTTP::SimServerContext>();
+	Reference<HTTP::SimServerContext> server = makeReference<HTTP::SimServerContext>();
 	server->registerNewServer(listenAddress, makeReference<MockS3RequestHandler>());
 
 	TraceEvent("MockS3ServerRealStarted")
@@ -2176,8 +2112,7 @@ ACTOR Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std:
 	    .detail("ServerPtr", format("%p", server.getPtr()));
 
 	// Keep the server running indefinitely
-	wait(Never());
-	return Void();
+	co_await Future<Void>(Never());
 }
 
 Future<Void> startMockS3ServerReal(const NetworkAddress& listenAddress, const std::string& persistenceDir) {
