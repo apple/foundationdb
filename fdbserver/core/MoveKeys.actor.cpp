@@ -33,7 +33,7 @@
 #include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/TSSMappingUtil.actor.h"
+#include "fdbserver/TSSMappingUtil.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 

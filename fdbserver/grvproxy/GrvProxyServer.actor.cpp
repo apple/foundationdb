@@ -32,7 +32,7 @@
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
 #include "flow/Buggify.h"

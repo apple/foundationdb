@@ -1,5 +1,5 @@
 /*
- *ServerCheckpoint.actor.h
+ *ServerCheckpoint.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,17 +19,10 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_G_H)
-#define FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_G_H
-#include "fdbserver/core/ServerCheckpoint.actor.g.h"
-#elif !defined(FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_H)
-#define FDBSERVER_CORE_SERVER_CHECKPOINT_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "flow/flow.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 FDB_BOOLEAN_PARAM(CheckpointAsKeyValues);
 
@@ -69,26 +62,22 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
                                        UID logID);
 
 // Delete a checkpoint.
-ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
+Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 
 // Fetches checkpoint to a local `dir`, `initialState` provides the checkpoint formats, location, restart point, etc.
 // If cFun is provided, the progress can be checkpointed.
 // Returns a CheckpointMetaData, which could contain KVS-specific results, e.g., the list of fetched checkpoint files.
-ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
-                                                 CheckpointMetaData initialState,
-                                                 std::string dir,
-                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                           CheckpointMetaData initialState,
+                                           std::string dir,
+                                           std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 // Same as above, except that the checkpoint is fetched as key-value pairs.
-ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(
-    Database cx,
-    CheckpointMetaData initialState,
-    std::string dir,
-    std::vector<KeyRange> ranges,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
+                                                 CheckpointMetaData initialState,
+                                                 std::string dir,
+                                                 std::vector<KeyRange> ranges,
+                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId);
 std::string fetchedCheckpointDir(const std::string& baseDir, const UID& checkpointId);
-#include "flow/unactorcompiler.h"
-
-#endif

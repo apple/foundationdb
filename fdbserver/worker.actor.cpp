@@ -52,7 +52,7 @@
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"

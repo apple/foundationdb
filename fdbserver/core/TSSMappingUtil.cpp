@@ -1,5 +1,5 @@
 /*
- * TSSMappingUtil.actor.cpp
+ * TSSMappingUtil.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,43 +20,38 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/TSSMappingUtil.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
-                                     std::map<UID, StorageServerInterface>* tssMapping) {
+#include "fdbserver/TSSMappingUtil.h"
+Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
+                               std::map<UID, StorageServerInterface>* tssMapping) {
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	state KeyBackedMap<UID, UID>::RangeResultType uidMapping =
-	    wait(tssMapDB.getRange(tr, UID(), Optional<UID>(), CLIENT_KNOBS->TOO_MANY));
+	KeyBackedMap<UID, UID>::RangeResultType uidMapping =
+	    co_await tssMapDB.getRange(tr, UID(), Optional<UID>(), CLIENT_KNOBS->TOO_MANY);
 	ASSERT(uidMapping.results.size() < CLIENT_KNOBS->TOO_MANY);
 
-	state std::map<UID, StorageServerInterface> mapping;
-	state std::vector<std::pair<UID, UID>>::iterator mapItr;
-	for (mapItr = uidMapping.results.begin(); mapItr != uidMapping.results.end(); ++mapItr) {
-		state UID ssId = mapItr->first;
-		Optional<Value> v = wait(tr->get(serverListKeyFor(mapItr->second)));
+	for (auto mapItr = uidMapping.results.begin(); mapItr != uidMapping.results.end(); ++mapItr) {
+		UID ssId = mapItr->first;
+		Optional<Value> v = co_await tr->get(serverListKeyFor(mapItr->second));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
-	return Void();
 }
 
-ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping) {
-	state RangeResult mappingList = wait(tr->getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY));
+Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping) {
+	RangeResult mappingList = co_await tr->getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!mappingList.more && mappingList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	for (auto& it : mappingList) {
-		state UID ssId = TupleCodec<UID>::unpack(it.key.removePrefix(tssMappingKeys.begin));
+		UID ssId = TupleCodec<UID>::unpack(it.key.removePrefix(tssMappingKeys.begin));
 		UID tssId = TupleCodec<UID>::unpack(it.value);
-		Optional<Value> v = wait(tr->get(serverListKeyFor(tssId)));
+		Optional<Value> v = co_await tr->get(serverListKeyFor(tssId));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
-	return Void();
 }
 
-ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-	state KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
-	loop {
+Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -66,11 +61,11 @@ ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<
 				tr->clear(serverTagKeyFor(tssPair.second));
 				tssMapDB.erase(tr, tssPair.first);
 			}
-			wait(tr->commit());
+			co_await tr->commit();
 			break;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
-	return Void();
 }

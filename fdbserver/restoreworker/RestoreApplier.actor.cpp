@@ -30,7 +30,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "RestoreRoleCommon.actor.h"
+#include "RestoreRoleCommon.h"
 #include "RestoreApplier.actor.h"
 
 #include "flow/network.h"

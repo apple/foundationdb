@@ -39,7 +39,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "fdbserver/core/AccumulativeChecksumUtil.h"
-#include "fdbserver/core/BulkDumpUtil.actor.h"
+#include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/FDBRocksDBVersion.h"
@@ -53,13 +53,13 @@
 #include "ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/core/ServerCheckpoint.actor.h"
+#include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/StorageCorruptionBug.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "TransactionTagCounter.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -5263,14 +5263,8 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			                                            SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD,
 			                                            SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY);
 
-			// getRangeDataToDump() uses lastKey == range.end as a sentinel when the current batch
-			// consumed the rest of the task range. Avoid keyAfter(range.end) in that case.
-			state bool reachedRangeEnd = rangeDumpRawData->lastKey == rangeToDump.end;
-			state KeyRange dataRange =
-			    reachedRangeEnd
-			        ? (rangeDumpRawData->kvs.empty() ? KeyRangeRef(rangeBegin, rangeBegin)
-			                                         : rangeToDump & KeyRangeRef(rangeBegin, rangeToDump.end))
-			        : rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
+			// Write to SST file
+			state KeyRange dataRange = rangeToDump & KeyRangeRef(rangeBegin, keyAfter(rangeDumpRawData->lastKey));
 			state BulkLoadManifest manifest =
 			    wait(dumpDataFileToLocalDirectory(data->thisServerID,
 			                                      rangeDumpRawData,

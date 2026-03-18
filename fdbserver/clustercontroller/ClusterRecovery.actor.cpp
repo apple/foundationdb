@@ -29,7 +29,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/Error.h"
 #include "flow/ProtocolVersion.h"

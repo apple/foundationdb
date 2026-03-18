@@ -39,7 +39,7 @@
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/ShardSizing.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "flow/DeterministicRandom.h"

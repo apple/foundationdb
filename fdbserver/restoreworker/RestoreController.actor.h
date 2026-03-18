@@ -37,7 +37,7 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
-#include "RestoreRoleCommon.actor.h"
+#include "RestoreRoleCommon.h"
 
 struct RestoreWorkerData;
 

@@ -31,7 +31,7 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 

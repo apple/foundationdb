@@ -34,7 +34,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/SpanContextMessage.h"
 #include "fdbserver/core/TLogInterface.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"

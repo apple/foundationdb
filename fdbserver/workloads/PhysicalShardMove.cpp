@@ -25,7 +25,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/core/ServerCheckpoint.actor.h"
+#include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"

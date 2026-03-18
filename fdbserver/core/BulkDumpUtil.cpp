@@ -1,5 +1,5 @@
 /*
- * BulkDumpUtils.actor.cpp
+ * BulkDumpUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,13 +23,11 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/S3Client.actor.h"
-#include "fdbserver/core/BulkDumpUtil.actor.h"
+#include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
-
 SSBulkDumpTask getSSBulkDumpTask(const std::map<std::string, std::vector<StorageServerInterface>>& locations,
                                  const BulkDumpState& bulkDumpState) {
 	StorageServerInterface targetServer;
@@ -112,15 +110,15 @@ void writeKVSToSSTFile(std::string filePath, std::map<Key, Value>& sortedKVS, UI
 	return;
 }
 
-ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                            std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
-                                                            BulkLoadFileSet localFileSet,
-                                                            BulkLoadFileSet remoteFileSet,
-                                                            BulkLoadByteSampleSetting byteSampleSetting,
-                                                            Version dumpVersion,
-                                                            KeyRange dumpRange,
-                                                            BulkLoadType dumpType,
-                                                            BulkLoadTransportMethod transportMethod) {
+Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
+                                                      std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
+                                                      BulkLoadFileSet localFileSet,
+                                                      BulkLoadFileSet remoteFileSet,
+                                                      BulkLoadByteSampleSetting byteSampleSetting,
+                                                      Version dumpVersion,
+                                                      KeyRange dumpRange,
+                                                      BulkLoadType dumpType,
+                                                      BulkLoadTransportMethod transportMethod) {
 	// Step 1: Clean up local folder
 	resetFileFolder((abspath(localFileSet.getFolder())));
 
@@ -157,19 +155,19 @@ ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
 	                              containDataFile ? remoteFileSet.getDataFileName() : std::string(),
 	                              containByteSampleFile ? remoteFileSet.getByteSampleFileName() : std::string(),
 	                              BulkLoadChecksum());
-	state BulkLoadManifest manifestMetadata(fileSetRemote,
-	                                        dumpRange.begin,
-	                                        dumpRange.end,
-	                                        dumpVersion,
-	                                        rangeDumpRawData->kvsBytes,
-	                                        rangeDumpRawData->kvs.size(),
-	                                        byteSampleSetting,
-	                                        dumpType,
-	                                        transportMethod);
-	state std::string manifestStr = manifestMetadata.toString();
-	state std::shared_ptr<std::string> manifest = std::make_shared<std::string>(std::move(manifestStr));
-	wait(writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), manifest));
-	return manifestMetadata;
+	BulkLoadManifest manifestMetadata(fileSetRemote,
+	                                  dumpRange.begin,
+	                                  dumpRange.end,
+	                                  dumpVersion,
+	                                  rangeDumpRawData->kvsBytes,
+	                                  rangeDumpRawData->kvs.size(),
+	                                  byteSampleSetting,
+	                                  dumpType,
+	                                  transportMethod);
+	std::string manifestStr = manifestMetadata.toString();
+	std::shared_ptr<std::string> manifest = std::make_shared<std::string>(std::move(manifestStr));
+	co_await writeBulkFileBytes(abspath(localFileSet.getManifestFileFullPath()), manifest);
+	co_return manifestMetadata;
 }
 
 // Validate the invariant of filenames. Source is the file stored locally. Destination is the file going to move to.
@@ -197,44 +195,42 @@ bool validateSourceDestinationFileSets(const BulkLoadFileSet& source, const Bulk
 }
 
 // Copy files between local file folders, used to mock blobstore in the test.
-ACTOR Future<Void> bulkDumpTransportCP_impl(BulkLoadFileSet srcFileSet,
-                                            BulkLoadFileSet destFileSet,
-                                            size_t fileBytesMax,
-                                            UID logId) {
+Future<Void> bulkDumpTransportCP_impl(BulkLoadFileSet srcFileSet,
+                                      BulkLoadFileSet destFileSet,
+                                      size_t fileBytesMax,
+                                      UID logId) {
 	// Clear remote existing folder
 	resetFileFolder(abspath(destFileSet.getFolder()));
 	// Copy bulk dump files to the remote folder
 	ASSERT(srcFileSet.hasManifestFile() && destFileSet.hasManifestFile());
-	wait(copyBulkFile(
-	    abspath(srcFileSet.getManifestFileFullPath()), abspath(destFileSet.getManifestFileFullPath()), fileBytesMax));
+	co_await copyBulkFile(
+	    abspath(srcFileSet.getManifestFileFullPath()), abspath(destFileSet.getManifestFileFullPath()), fileBytesMax);
 	if (srcFileSet.hasDataFile()) {
 		ASSERT(destFileSet.hasDataFile());
-		wait(copyBulkFile(
-		    abspath(srcFileSet.getDataFileFullPath()), abspath(destFileSet.getDataFileFullPath()), fileBytesMax));
+		co_await copyBulkFile(
+		    abspath(srcFileSet.getDataFileFullPath()), abspath(destFileSet.getDataFileFullPath()), fileBytesMax);
 	}
 	if (srcFileSet.hasByteSampleFile()) {
 		ASSERT(srcFileSet.hasDataFile() && destFileSet.hasByteSampleFile());
-		wait(copyBulkFile(abspath(srcFileSet.getBytesSampleFileFullPath()),
-		                  abspath(destFileSet.getBytesSampleFileFullPath()),
-		                  fileBytesMax));
+		co_await copyBulkFile(abspath(srcFileSet.getBytesSampleFileFullPath()),
+		                      abspath(destFileSet.getBytesSampleFileFullPath()),
+		                      fileBytesMax);
 	}
-	return Void();
 }
 
 // Dump files to blobstore.
-ACTOR Future<Void> bulkDumpTransportBlobstore_impl(BulkLoadFileSet sourceFileSet,
-                                                   BulkLoadFileSet destinationFileSet,
-                                                   size_t fileBytesMax,
-                                                   UID logId) {
+Future<Void> bulkDumpTransportBlobstore_impl(BulkLoadFileSet sourceFileSet,
+                                             BulkLoadFileSet destinationFileSet,
+                                             size_t fileBytesMax,
+                                             UID logId) {
 	// TODO(BulkDump): Make use of fileBytesMax
-	wait(copyUpBulkDumpFileSet(destinationFileSet.getRootPath(), sourceFileSet, destinationFileSet));
-	return Void();
+	co_await copyUpBulkDumpFileSet(destinationFileSet.getRootPath(), sourceFileSet, destinationFileSet);
 }
 
-ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
-                                         BulkLoadFileSet sourceFileSet,
-                                         BulkLoadFileSet destinationFileSet,
-                                         UID logId) {
+Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
+                                   BulkLoadFileSet sourceFileSet,
+                                   BulkLoadFileSet destinationFileSet,
+                                   UID logId) {
 	// Validate file names of source and destination
 	if (!validateSourceDestinationFileSets(sourceFileSet, destinationFileSet)) {
 		TraceEvent(SevWarnAlways, "SSBulkDumpUploadFilesError", logId)
@@ -245,33 +241,33 @@ ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod
 	}
 	// Upload to blobstore or mock file copy
 	if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
-		wait(bulkDumpTransportBlobstore_impl(
-		    sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
+		co_await bulkDumpTransportBlobstore_impl(
+		    sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
 	} else if (transportMethod == BulkLoadTransportMethod::CP) {
-		wait(bulkDumpTransportCP_impl(sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId));
+		co_await bulkDumpTransportCP_impl(
+		    sourceFileSet, destinationFileSet, SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX, logId);
 	} else {
 		TraceEvent(SevError, "SSBulkDumpUploadFilesError", logId)
 		    .detail("Reason", "Transport method is not implemented")
 		    .detail("TransportMethod", transportMethod);
 		ASSERT(false);
 	}
-	return Void();
 }
 
-ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
-                                                 std::string localJobManifestFilePath,
-                                                 std::string remoteFolder,
-                                                 std::string remoteJobManifestFileName,
-                                                 UID logId) {
+Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
+                                           std::string localJobManifestFilePath,
+                                           std::string remoteFolder,
+                                           std::string remoteJobManifestFileName,
+                                           UID logId) {
 	auto remoteJobManifestFilePath = appendToPath(remoteFolder, remoteJobManifestFileName);
 	TraceEvent(SevInfo, "UploadBulkDumpJobManifest", logId)
 	    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
 	if (transportMethod == BulkLoadTransportMethod::BLOBSTORE) {
-		wait(copyUpFile(localJobManifestFilePath, remoteJobManifestFilePath));
+		co_await copyUpFile(localJobManifestFilePath, remoteJobManifestFilePath);
 	} else if (transportMethod == BulkLoadTransportMethod::CP) {
-		wait(copyBulkFile(abspath(localJobManifestFilePath),
-		                  abspath(remoteJobManifestFilePath),
-		                  SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX));
+		co_await copyBulkFile(abspath(localJobManifestFilePath),
+		                      abspath(remoteJobManifestFilePath),
+		                      SERVER_KNOBS->BULKLOAD_FILE_BYTES_MAX);
 	} else {
 		TraceEvent(SevError, "UploadBulkDumpJobManifestFileError", logId)
 		    .detail("Reason", "Transport method is not implemented")
@@ -279,23 +275,23 @@ ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transpo
 		ASSERT(false);
 	}
 	// TODO(BulkDump): check uploaded file exist
-	return Void();
 }
 
-ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
-	state Transaction tr(cx);
+Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState) {
+	Transaction tr(cx);
 	ASSERT(bulkDumpState.isMetadataValid());
-	state Key beginKey = bulkDumpState.getRange().begin;
-	state Key endKey = bulkDumpState.getRange().end;
-	state KeyRange rangeToPersist;
-	state RangeResult result;
-	loop {
+	Key beginKey = bulkDumpState.getRange().begin;
+	Key endKey = bulkDumpState.getRange().end;
+	KeyRange rangeToPersist;
+	RangeResult result;
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			rangeToPersist = Standalone(KeyRangeRef(beginKey, endKey));
-			wait(store(result, krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist)));
+			co_await store(result, krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist));
 			bool anyNew = false;
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (result[i].value.empty()) { // has been cancelled
@@ -317,8 +313,8 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 			if (!anyNew) {
 				throw bulkdump_task_outdated();
 			}
-			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpState.getRange(), bulkDumpStateValue(bulkDumpState)));
-			wait(tr.commit());
+			co_await krmSetRange(&tr, bulkDumpPrefix, bulkDumpState.getRange(), bulkDumpStateValue(bulkDumpState));
+			co_await tr.commit();
 			beginKey = result[result.size() - 1].key;
 			if (beginKey >= endKey) {
 				break;
@@ -326,8 +322,8 @@ ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkD
 				tr.reset();
 			}
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
