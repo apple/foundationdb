@@ -981,6 +981,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		const auto minFreeSpace =
 		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE,
 		             static_cast<int64_t>(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * tl.getSmoothTotalSpace()));
+		// Start shrinking the tlog queue budget once available space drops below the configured ratio,
+		// then ramp down linearly until reaching minFreeSpace.
 		const auto throttleStartSpace = std::max(
 		    minFreeSpace + 1,
 		    static_cast<int64_t>(SERVER_KNOBS->TLOG_THROTTLE_START_AVAILABLE_SPACE_RATIO * tl.getSmoothTotalSpace()));
