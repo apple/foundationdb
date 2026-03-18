@@ -5086,6 +5086,7 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 			                         di.storageWigglerState.getFuture(),
 			                         di.triggerAudit.getFuture());
 			if (res.index() == 0) {
+				// distributor or collection should never return
 				ASSERT(false);
 				throw internal_error();
 			} else if (res.index() == 1) {
