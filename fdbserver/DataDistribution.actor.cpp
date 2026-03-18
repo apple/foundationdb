@@ -320,7 +320,6 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 		TraceEvent("DDTrackerStarting").detail("RecoveryState", (int)db->get().recoveryState);
 		co_await db->onChange();
 	}
-	co_return;
 }
 
 // Ensures that the serverKeys key space is properly coalesced
@@ -581,7 +580,6 @@ public:
 		                               SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT);
 		self->resumeAuditStorage(self, auditStatesToResume);
 		self->auditStorageInitialized.send(Void());
-		co_return;
 	}
 
 	static Future<Void> waitUntilDataDistributorExitSecurityMode(Reference<DataDistributor> self) {
@@ -734,7 +732,6 @@ public:
 			    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
 			    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
 		}
-		co_return;
 	}
 
 	static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
@@ -771,7 +768,6 @@ public:
 			// DD needs not restart when removing tombstone gets failed unless this actor gets cancelled
 			// So, do not throw error
 		}
-		co_return;
 	}
 
 	static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
@@ -880,7 +876,6 @@ public:
 
 			co_await yield(TaskPriority::DataDistribution);
 		}
-		co_return;
 	}
 
 	// TODO: unit test needed
@@ -954,7 +949,6 @@ public:
 		if (!self->txnProcessor->isMocked()) {
 			self->addActor.send(self->removeDataMoveTombstoneBackground(self));
 		}
-		co_return;
 	}
 
 	// Resume inflight relocations from the previous DD
@@ -1159,7 +1153,6 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 // A bulk load task is guaranteed to be either complete or overwritten by another task
@@ -1252,7 +1245,6 @@ Future<Void> doBulkLoadTask(Reference<DataDistributor> self, KeyRange range, UID
 		// sliently exits
 	}
 	self->bulkLoadEngineParallelismLimitor.decrementTaskCounter();
-	co_return;
 }
 
 Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRange, UID taskId) {
@@ -1304,7 +1296,6 @@ Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRan
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
@@ -1389,7 +1380,6 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		}
 	}
 	co_await waitForAll(bulkLoadActors);
-	co_return;
 }
 
 Future<Void> bulkLoadTaskCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
@@ -1683,7 +1673,6 @@ Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		// Currently, all errors here come from the bulkload job mechanism.
 		// BulkLoad task is guaranteed to be completed by the engine given a task metadata is persisted.
 	}
-	co_return;
 }
 
 // Given a bulkload task range, find the task and wait until the task is complete or error.
@@ -1746,7 +1735,6 @@ Future<Void> bulkLoadJobMonitorTask(Reference<DataDistributor> self,
 		// Currently, all errors here come from the bulkload job mechanism.
 		// BulkLoad task is guaranteed to be completed by the engine given a task metadata is persisted.
 	}
-	co_return;
 }
 
 Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self) {
@@ -1792,7 +1780,6 @@ Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self) {
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 // Remove the bulkload job metadata from the range map metadata.
@@ -1824,7 +1811,6 @@ Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self, std:
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 // Download the job manifest file from the remoteJobManifestFilePath to the localJobManifestFilePath.
@@ -1911,7 +1897,6 @@ Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> self,
 			throw err;
 		}
 	}
-	co_return;
 }
 
 Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> errorOut) {
@@ -2021,7 +2006,6 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 		}
 	}
 	co_await waitForAll(actors);
-	co_return;
 }
 
 Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> self) {
@@ -2193,7 +2177,6 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
@@ -2270,7 +2253,6 @@ Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 		}
 		co_await delay(SERVER_KNOBS->DD_BULKLOAD_SCHEDULE_MIN_INTERVAL_SEC);
 	}
-	co_return;
 }
 
 Future<Void> bulkLoadJobCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
@@ -2336,7 +2318,6 @@ Future<Void> doBulkDumpTask(Reference<DataDistributor> self,
 		// Sliently exit for other errors
 	}
 	self->bulkDumpParallelismLimitor.decrementTaskCounter();
-	co_return;
 }
 
 Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
@@ -2446,7 +2427,6 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	}
 	co_await waitForAll(actors);
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
-	co_return;
 }
 
 Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
@@ -2529,7 +2509,6 @@ Future<Void> generateLocalBulkDumpJobManifestFile(Reference<DataDistributor> sel
 	TraceEvent(SevInfo, "GenerateBulkDumpJobManifestWriteLocal", self->ddId)
 	    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 	    .detail("ContentSize", content->size());
-	co_return;
 }
 
 Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self) {
@@ -2555,7 +2534,6 @@ Future<Void> bulkDumpUploadJobManifestFile(Reference<DataDistributor> self) {
 	    .detail("RemoteFolder", remoteFolder)
 	    .detail("JobManifestFileName", jobManifestFileName)
 	    .detail("TaskCount", self->bulkDumpJobManager.taskManifestMap.size());
-	co_return;
 }
 
 // Setup self->bulkDumpJobManager.jobManifest by scanning the entire bulkDump key space
@@ -2610,7 +2588,6 @@ Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 		}
 	}
 	ASSERT(!self->bulkDumpJobManager.taskManifestMap.empty());
-	co_return;
 }
 
 Future<Optional<BulkDumpState>> getAliveBulkDumpJob(Database cx) {
@@ -2670,7 +2647,6 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 		}
 		co_await delay(SERVER_KNOBS->DD_BULKDUMP_SCHEDULE_MIN_INTERVAL_SEC);
 	}
-	co_return;
 }
 
 Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
@@ -3023,7 +2999,6 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 		    .detail("PeerAddress", stream.getEndpoint().getPrimaryAddress());
 		throw e;
 	}
-	co_return;
 }
 
 Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, WorkerSnapRequest req) {
@@ -3355,7 +3330,6 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 			throw e;
 		}
 	}
-	co_return;
 }
 
 Future<Void> ddSnapCreate(
@@ -3424,7 +3398,6 @@ Future<Void> ddSnapCreate(
 	}
 	bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 	ASSERT(success);
-	co_return;
 }
 
 // FIXME: explain purpose
@@ -3460,7 +3433,6 @@ Future<Void> ddExclusionSafetyCheck(DistributorExclusionSafetyCheckRequest req,
 	reply.safe = self->teamCollection->exclusionSafetyCheck(excludeServerIDs);
 	TraceEvent("DDExclusionSafetyCheckFinish", self->ddId).log();
 	req.reply.send(reply);
-	co_return;
 }
 
 static int64_t getMedianShardSize(VectorRef<DDMetricsRef> metricVec) {
@@ -3504,8 +3476,6 @@ Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 		}
 		req.reply.send(rep);
 	}
-
-	co_return;
 }
 
 Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared_ptr<DDAudit> audit) {
@@ -3782,7 +3752,6 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			}
 		}
 	}
-	co_return;
 }
 
 // runAuditStorage is the only entry to start an Audit entity
@@ -3989,7 +3958,6 @@ Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		    .detail("AuditType", req.getType());
 		req.reply.sendError(cancel_audit_storage_failed());
 	}
-	co_return;
 }
 
 // Handling audit requests
@@ -4078,7 +4046,6 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 		}
 		break;
 	}
-	co_return;
 }
 
 // The entry of starting a series of audit workers
@@ -4178,8 +4145,6 @@ Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self,
 		    .detail("AuditType", auditType);
 		audit->auditStorageAnyChildFailed = true;
 	}
-
-	co_return;
 }
 
 // This function dedicates to audit ssshard
@@ -4222,8 +4187,6 @@ Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, st
 		    .detail("AuditType", auditType);
 		audit->auditStorageAnyChildFailed = true;
 	}
-
-	co_return;
 }
 
 // Schedule audit ssshard task on the input storage server (ssi)
@@ -4339,8 +4302,6 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 			}
 		}
 	}
-
-	co_return;
 }
 
 // This function is for ha/replica/restore audits
@@ -4419,8 +4380,6 @@ Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_p
 		    .detail("AuditType", auditType);
 		audit->auditStorageAnyChildFailed = true;
 	}
-
-	co_return;
 }
 
 Future<std::unordered_map<UID, KeyValueStoreType>> getStorageType(std::vector<StorageServerInterface> storageServers) {
@@ -4759,8 +4718,6 @@ Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 		audit->auditStorageAnyChildFailed = true;
 	}
-
-	co_return;
 }
 
 Future<Void> skipAuditOnRange(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange rangeToSkip) {
@@ -4817,7 +4774,6 @@ Future<Void> skipAuditOnRange(Reference<DataDistributor> self, std::shared_ptr<D
 			audit->actors.add(scheduleAuditOnRange(self, audit, rangeToSkip));
 		}
 	}
-	co_return;
 }
 
 // Request SS to do the audit
@@ -4917,7 +4873,6 @@ Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 			audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
 		}
 	}
-	co_return;
 }
 
 // Check consistency between KeyServers and ServerKeys system key space
@@ -5215,8 +5170,6 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 			audit->actors.add(dispatchAuditLocationMetadata(self, audit, auditRange));
 		}
 	}
-
-	co_return;
 }
 
 Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDistributor> self, IsMocked isMocked) {
@@ -5340,8 +5293,6 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 		}
 		TraceEvent("DataDistributorDied", di.id()).errorUnsuppressed(err);
 	}
-
-	co_return;
 }
 
 Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor) {
