@@ -318,7 +318,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 
 			int valueLoc = 0;
 			int committedValueLoc = 0;
-			Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			while (true) {
 				Error err;
 				bool hasErr = false;

@@ -445,7 +445,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	}
 
 	Future<Version> populateData(PhysicalShardMoveWorkLoad* self, Database cx, std::map<Key, Value>* kvs) {
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
 		while (true) {
@@ -533,7 +533,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 	Future<Version> writeAndVerify(PhysicalShardMoveWorkLoad* self, Database cx, Key key, Optional<Value> value) {
 		// state Transaction tr(cx);
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		Version version{ 0 };
 		UID debugID;
 		while (true) {

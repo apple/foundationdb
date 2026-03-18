@@ -48,7 +48,7 @@ Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterfac
 }
 
 Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
 	while (true) {
 		Error err;

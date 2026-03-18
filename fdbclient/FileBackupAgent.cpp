@@ -6333,7 +6333,7 @@ Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key 
 }
 
 Future<ERestoreState> abortRestore(Database cx, Key tagName) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	while (true) {
 		Error err;
@@ -8013,7 +8013,7 @@ public:
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     UsePartitionedLog fastRestore) {
-		Reference<ReadYourWritesTransaction> ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
@@ -8151,26 +8151,26 @@ public:
 			}
 			if (!systemRestoreRange.empty()) {
 				// restore system keys
-				co_await success(restore(backupAgent,
-				                         cx,
-				                         cx,
-				                         "system_restore"_sr,
-				                         KeyRef(bc->getURL()),
-				                         bc->getProxy(),
-				                         systemRestoreRange,
-				                         {},
-				                         WaitForComplete::True,
-				                         ::invalidVersion,
-				                         Verbose::True,
-				                         addPrefix,
-				                         removePrefix,
-				                         LockDB::True,
-				                         UnlockDB::False,
-				                         OnlyApplyMutationLogs::False,
-				                         InconsistentSnapshotOnly::False,
-				                         {},
-				                         randomUid));
-				Reference<ReadYourWritesTransaction> rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
+				co_await restore(backupAgent,
+				                 cx,
+				                 cx,
+				                 "system_restore"_sr,
+				                 KeyRef(bc->getURL()),
+				                 bc->getProxy(),
+				                 systemRestoreRange,
+				                 {},
+				                 WaitForComplete::True,
+				                 ::invalidVersion,
+				                 Verbose::True,
+				                 addPrefix,
+				                 removePrefix,
+				                 LockDB::True,
+				                 UnlockDB::False,
+				                 OnlyApplyMutationLogs::False,
+				                 InconsistentSnapshotOnly::False,
+				                 {},
+				                 randomUid);
+				auto rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
 				while (true) {
 					Error err;
