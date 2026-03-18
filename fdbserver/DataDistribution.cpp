@@ -1,5 +1,5 @@
 /*
- * DataDistribution.actor.cpp
+ * DataDistribution.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -54,7 +54,6 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 static const std::string ddServerBulkDumpFolder = "ddBulkDumpFiles";
 static const std::string ddServerBulkLoadFolder = "ddBulkLoadFiles";
@@ -326,7 +325,7 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 // This method is only used for testing and is not implemented in a manner that is safe for large databases
 Future<Void> debugCheckCoalescing(Database cx) {
 	Transaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
@@ -582,7 +581,7 @@ public:
 
 	static Future<Void> waitUntilDataDistributorExitSecurityMode(Reference<DataDistributor> self) {
 		Transaction tr(self->txnProcessor->context());
-		loop {
+		while (true) {
 			co_await delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -613,7 +612,7 @@ public:
 	// DataDistributor start working. Doesn't include initialization of optional components, like DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	static Future<Void> init(Reference<DataDistributor> self) {
-		loop {
+		while (true) {
 			co_await self->waitDataDistributorEnabled();
 			TraceEvent("DataDistributionEnabled").log();
 
@@ -732,7 +731,7 @@ public:
 		try {
 			Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 			Transaction tr(cx);
-			loop {
+			while (true) {
 				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1042,7 +1041,7 @@ inline std::unordered_map<UID, std::shared_ptr<DDAudit>> getAuditsForType(Refere
 Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	ASSERT(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD);
-	loop {
+	while (true) {
 		self->cleanUpPhysicalShardCollection();
 		self->logPhysicalShardCollection();
 		co_await delay(SERVER_KNOBS->PHYSICAL_SHARD_METRICS_DELAY);
@@ -1053,7 +1052,7 @@ Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection> self)
 Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<DataDistributor> self,
                                                                   KeyRange taskRange,
                                                                   UID taskId) {
-	loop {
+	while (true) {
 		Database cx = self->txnProcessor->context();
 		Transaction tr(cx);
 		BulkLoadTaskState newBulkLoadTaskState;
@@ -1104,7 +1103,7 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
 	BulkLoadTaskState bulkLoadTaskState;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1235,7 +1234,7 @@ Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRan
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
 	BulkLoadTaskState bulkLoadTask;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1318,7 +1317,7 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 				    bulkLoadTaskState.phase == BulkLoadPhase::Triggered ||
 				    bulkLoadTaskState.phase == BulkLoadPhase::Running) {
 					// Limit parallelism
-					loop {
+					while (true) {
 						if (self->bulkLoadEngineParallelismLimitor.canStart()) {
 							break;
 						}
@@ -1362,7 +1361,7 @@ Future<Void> bulkLoadTaskCore(Reference<DataDistributor> self, Future<Void> read
 	Database cx = self->txnProcessor->context();
 	co_await registerRangeLockOwner(cx, rangeLockNameForBulkLoad, rangeLockNameForBulkLoad);
 	TraceEvent(SevInfo, "DDBulkLoadTaskCoreStart", self->ddId);
-	loop {
+	while (true) {
 		try {
 			co_await scheduleBulkLoadTasks(self);
 		} catch (Error& e) {
@@ -1445,7 +1444,7 @@ Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDistributo
 	BulkLoadTaskState bulkLoadTaskState;
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -1489,7 +1488,7 @@ Future<BulkLoadTaskState> bulkLoadJobSubmitTask(Reference<DataDistributor> self,
 	Transaction tr(cx);
 	// We define the task range is the range of the min begin key and the max end key among all input manifests
 	BulkLoadTaskState bulkLoadTask(jobId, manifests, taskRange);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			// At any time, there must be at most one bulkload job
@@ -1521,7 +1520,7 @@ Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> 
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
 	BulkLoadTaskState currentTask;
-	loop {
+	while (true) {
 		Error err;
 		bool hasErr = false;
 		try {
@@ -1718,7 +1717,7 @@ Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self) {
 	ASSERT(jobState.getTaskCount().present());
 	uint64_t taskCount = jobState.getTaskCount().get();
 	BulkLoadJobState currentJobState;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
@@ -1760,7 +1759,7 @@ Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self, std:
 	ASSERT(self->bulkLoadJobManager.present() && self->bulkLoadJobManager.get().isValid());
 	UID jobId = self->bulkLoadJobManager.get().jobState.getJobId();
 	KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
-	loop {
+	while (true) {
 		Error err;
 		try {
 			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
@@ -1874,7 +1873,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 	// We load the bulkload task from the job manifest.
 	// The job manifest is organized in a sorted map. The key is the beginKey of the manifest.
 	// The value is the manifest. For details, please see comments in getBulkLoadJobManifestData.
-	loop {
+	while (true) {
 		Error err;
 		try {
 			RangeResult res =
@@ -1909,7 +1908,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 							// Otherwise, the parallelism limitor will slow down the task submission.
 							if (self->bulkLoadJobManager.get().allTaskSubmitted) {
 								// Limit parallelism
-								loop {
+								while (true) {
 									if (self->bulkLoadParallelismLimitor.canStart()) {
 										break;
 									}
@@ -2186,7 +2185,7 @@ Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 	// We turn on the traffic and shard boundary change only for completed range when bulkload
 	// on all ranges have been completed or error
 	Promise<Void> errorOut; // Capture errors from bulkLoadJobExecuteTask
-	loop {
+	while (true) {
 		bool complete = co_await checkBulkLoadTaskCompleteOrError(self);
 		if (complete) {
 			TraceEvent(SevInfo, "DDBulkLoadJobManagerAllTaskComplete", self->ddId)
@@ -2212,7 +2211,7 @@ Future<Void> bulkLoadJobManager(Reference<DataDistributor> self) {
 
 Future<Void> bulkLoadJobCore(Reference<DataDistributor> self, Future<Void> readyToStart) {
 	co_await readyToStart;
-	loop {
+	while (true) {
 		try {
 			co_await bulkLoadJobManager(self);
 		} catch (Error& e) {
@@ -2344,7 +2343,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 					taskRange = rangeLocations[rangeLocationIndex].range;
 					ASSERT(!taskRange.empty());
 					// Limit parallelism
-					loop {
+					while (true) {
 						if (self->bulkDumpParallelismLimitor.canStart()) {
 							break;
 						}
@@ -2531,7 +2530,7 @@ Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 Future<Optional<BulkDumpState>> getAliveBulkDumpJob(Database cx) {
 	Transaction tr(cx);
 	Optional<BulkDumpState> res;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			co_await store(res, getSubmittedBulkDumpJob(&tr));
@@ -2557,7 +2556,7 @@ Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 	    .setMaxFieldLength(-1)
 	    .detail("Job", job.get().toString());
 	self->bulkDumpJobManager = DDBulkDumpJobManager(job.get());
-	loop {
+	while (true) {
 		bool allComplete = co_await checkBulkDumpJobComplete(self);
 		if (allComplete) {
 			TraceEvent(SevInfo, "DDBulkDumpManagerJobAllTaskComplete", self->ddId).detail("JobId", jobId);
@@ -2589,7 +2588,7 @@ Future<Void> bulkDumpCore(Reference<DataDistributor> self, Future<Void> readyToS
 	co_await readyToStart;
 	Database cx = self->txnProcessor->context();
 	TraceEvent(SevInfo, "DDBulkDumpCoreStart", self->ddId);
-	loop {
+	while (true) {
 		// Dynamically check if BulkDump mode is enabled
 		int currentMode = co_await getBulkDumpMode(cx);
 		if (!bulkDumpIsEnabled(currentMode)) {
@@ -2634,7 +2633,7 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 	TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "DDConfigWatch Initialized");
 
-	loop {
+	while (true) {
 		self->context->trackerCancelled = false;
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
@@ -2934,7 +2933,7 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 Future<ErrorOr<Void>> trySendSnapReq(RequestStream<WorkerSnapRequest> stream, WorkerSnapRequest req) {
 	int snapReqRetry = 0;
 	double snapRetryBackoff = FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
-	loop {
+	while (true) {
 		ErrorOr<REPLY_TYPE(WorkerSnapRequest)> reply = co_await stream.tryGetReply(req);
 		if (reply.isError()) {
 			TraceEvent("SnapDataDistributor_ReqError")
@@ -2966,7 +2965,7 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 	std::map<NetworkAddress, WorkerInterface> workersMap;
 	Transaction tr(cx);
 	DatabaseConfiguration configuration;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			// necessary options
@@ -3099,7 +3098,7 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 	Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 
 	ReadYourWritesTransaction tr(cx);
-	loop {
+	while (true) {
 		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3202,7 +3201,7 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		tr.reset();
-		loop {
+		while (true) {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -3571,89 +3570,85 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		// this audit does removeAuditFromAuditMap
 		throw err;
 	}
-	    TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
-		    .errorUnsuppressed(err)
-		    .detail("Context", audit->getDDAuditContext())
+	TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
+	    .errorUnsuppressed(err)
+	    .detail("Context", audit->getDDAuditContext())
+	    .detail("AuditID", auditID)
+	    .detail("AuditStorageCoreGeneration", currentRetryCount)
+	    .detail("RetryCount", audit->retryCount)
+	    .detail("AuditType", auditType)
+	    .detail("Range", audit->coreState.range);
+	if (err.code() == error_code_movekeys_conflict) {
+		removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
+		// Silently exit
+	} else if (err.code() == error_code_audit_storage_task_outdated) {
+		// DD failover occurred - storage server completed audit with old DD ID
+		// Remove from map so it can be properly resumed/retried
+		removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id);
+		// Silently exit
+	} else if (err.code() == error_code_audit_storage_cancelled) {
+		// If this audit is cancelled, the place where cancelling
+		// this audit does removeAuditFromAuditMap
+	} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX && err.code() != error_code_not_implemented) {
+		audit->retryCount++;
+		audit->actors.clear(true);
+		TraceEvent(SevVerbose, "DDAuditStorageCoreRetry", self->ddId)
 		    .detail("AuditID", auditID)
+		    .detail("AuditType", auditType)
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount)
+		    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+		co_await delay(0.1);
+		TraceEvent(SevVerbose, "DDAuditStorageCoreRetryAfterWait", self->ddId)
+		    .detail("AuditID", auditID)
 		    .detail("AuditType", auditType)
-		    .detail("Range", audit->coreState.range);
-		if (err.code() == error_code_movekeys_conflict) {
-			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
-			// Silently exit
-		} else if (err.code() == error_code_audit_storage_task_outdated) {
-			// DD failover occurred - storage server completed audit with old DD ID
-			// Remove from map so it can be properly resumed/retried
-			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id);
-			// Silently exit
-		} else if (err.code() == error_code_audit_storage_cancelled) {
-			// If this audit is cancelled, the place where cancelling
-			// this audit does removeAuditFromAuditMap
-		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX &&
-		           err.code() != error_code_not_implemented) {
-			audit->retryCount++;
-			audit->actors.clear(true);
-			TraceEvent(SevVerbose, "DDAuditStorageCoreRetry", self->ddId)
-			    .detail("AuditID", auditID)
-			    .detail("AuditType", auditType)
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount)
-			    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
-			co_await delay(0.1);
-			TraceEvent(SevVerbose, "DDAuditStorageCoreRetryAfterWait", self->ddId)
-			    .detail("AuditID", auditID)
-			    .detail("AuditType", auditType)
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount)
-			    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
-			// Erase the old audit from map and spawn a new audit inherit from the old audit
-			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
-			if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-				runAuditStorage(self,
-				                audit->coreState,
-				                audit->retryCount,
-				                DDAuditContext::RETRY,
-				                audit->serversFinishedSSShardAudit);
-			} else {
-				runAuditStorage(self, audit->coreState, audit->retryCount, DDAuditContext::RETRY);
-			}
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount)
+		    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+		// Erase the old audit from map and spawn a new audit inherit from the old audit
+		removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
+		if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
+			runAuditStorage(
+			    self, audit->coreState, audit->retryCount, DDAuditContext::RETRY, audit->serversFinishedSSShardAudit);
 		} else {
-			try {
-				audit->coreState.setPhase(AuditPhase::Failed);
-				co_await persistAuditState(self->txnProcessor->context(),
-				                           audit->coreState,
-				                           "AuditStorageCoreError",
-				                           lockInfo,
-				                           self->context->isDDEnabled());
-				TraceEvent(SevWarn, "DDAuditStorageCoreSetAuditFailed", self->ddId)
-				    .detail("Context", audit->getDDAuditContext())
-				    .detail("AuditID", auditID)
-				    .detail("AuditType", auditType)
-				    .detail("AuditStorageCoreGeneration", currentRetryCount)
-				    .detail("RetryCount", audit->retryCount)
-				    .detail("AuditState", audit->coreState.toString());
-			} catch (Error& err) {
-				TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
-				    .errorUnsuppressed(err)
-				    .detail("Context", audit->getDDAuditContext())
-				    .detail("AuditID", auditID)
-				    .detail("AuditType", auditType)
-				    .detail("AuditStorageCoreGeneration", currentRetryCount)
-				    .detail("RetryCount", audit->retryCount)
-				    .detail("AuditState", audit->coreState.toString());
-				// unexpected error when persistAuditState
-				// However, we do not want any audit error kills the DD
-				// So, we silently remove audit from auditMap
-				// As a result, this audit can be in RUNNING state on disk but not alive
-				// We call this audit a zombie audit
-				// Note that a client may wait for the state on disk to proceed to "complete"
-				// However, this progress can never happen to a zombie audit
-				// For this case, the client should be able to be timed out
-				// A zombie audit will be either: (1) resumed by the next DD; (2) removed by client
-			}
-			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
-	    }
+			runAuditStorage(self, audit->coreState, audit->retryCount, DDAuditContext::RETRY);
+		}
+	} else {
+		try {
+			audit->coreState.setPhase(AuditPhase::Failed);
+			co_await persistAuditState(self->txnProcessor->context(),
+			                           audit->coreState,
+			                           "AuditStorageCoreError",
+			                           lockInfo,
+			                           self->context->isDDEnabled());
+			TraceEvent(SevWarn, "DDAuditStorageCoreSetAuditFailed", self->ddId)
+			    .detail("Context", audit->getDDAuditContext())
+			    .detail("AuditID", auditID)
+			    .detail("AuditType", auditType)
+			    .detail("AuditStorageCoreGeneration", currentRetryCount)
+			    .detail("RetryCount", audit->retryCount)
+			    .detail("AuditState", audit->coreState.toString());
+		} catch (Error& err) {
+			TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
+			    .errorUnsuppressed(err)
+			    .detail("Context", audit->getDDAuditContext())
+			    .detail("AuditID", auditID)
+			    .detail("AuditType", auditType)
+			    .detail("AuditStorageCoreGeneration", currentRetryCount)
+			    .detail("RetryCount", audit->retryCount)
+			    .detail("AuditState", audit->coreState.toString());
+			// unexpected error when persistAuditState
+			// However, we do not want any audit error kills the DD
+			// So, we silently remove audit from auditMap
+			// As a result, this audit can be in RUNNING state on disk but not alive
+			// We call this audit a zombie audit
+			// Note that a client may wait for the state on disk to proceed to "complete"
+			// However, this progress can never happen to a zombie audit
+			// For this case, the client should be able to be timed out
+			// A zombie audit will be either: (1) resumed by the next DD; (2) removed by client
+		}
+		removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
+	}
 }
 
 // runAuditStorage is the only entry to start an Audit entity
@@ -3899,7 +3894,7 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 	}
 
 	int retryCount = 0;
-	loop {
+	while (true) {
 		Error err;
 		try {
 			TraceEvent(SevDebug, "DDAuditStorageStart", self->ddId)
@@ -3922,25 +3917,25 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 		if (err.code() == error_code_actor_cancelled) {
 			throw err;
 		}
-		    TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("RetryCount", retryCount)
-			    .detail("AuditType", req.getType())
-			    .detail("KeyValueStoreType", req.engineType.toString())
-			    .detail("Range", req.range);
-			if (err.code() == error_code_operation_failed && g_network->isSimulated()) {
-				throw audit_storage_failed(); // to trigger dd restart
-			} else if (err.code() == error_code_audit_storage_exceeded_request_limit) {
-				req.reply.sendError(audit_storage_exceeded_request_limit());
-			} else if (err.code() == error_code_persist_new_audit_metadata_error) {
-				req.reply.sendError(audit_storage_failed());
-			} else if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-				retryCount++;
-				co_await delay(0.1);
-				continue;
-			} else {
-				req.reply.sendError(audit_storage_failed());
-		    }
+		TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("RetryCount", retryCount)
+		    .detail("AuditType", req.getType())
+		    .detail("KeyValueStoreType", req.engineType.toString())
+		    .detail("Range", req.range);
+		if (err.code() == error_code_operation_failed && g_network->isSimulated()) {
+			throw audit_storage_failed(); // to trigger dd restart
+		} else if (err.code() == error_code_audit_storage_exceeded_request_limit) {
+			req.reply.sendError(audit_storage_exceeded_request_limit());
+		} else if (err.code() == error_code_persist_new_audit_metadata_error) {
+			req.reply.sendError(audit_storage_failed());
+		} else if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+			retryCount++;
+			co_await delay(0.1);
+			continue;
+		} else {
+			req.reply.sendError(audit_storage_failed());
+		}
 		break;
 	}
 }
@@ -4163,33 +4158,33 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 	if (err.code() == error_code_actor_cancelled) {
 		throw err;
 	}
-	    TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
-		    .errorUnsuppressed(err)
-		    .detail("AuditID", audit->coreState.id)
-		    .detail("AuditType", auditType)
-		    .detail("IssuedDoAuditCount", issueDoAuditCount);
+	TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
+	    .errorUnsuppressed(err)
+	    .detail("AuditID", audit->coreState.id)
+	    .detail("AuditType", auditType)
+	    .detail("IssuedDoAuditCount", issueDoAuditCount);
 
-		if (err.code() == error_code_not_implemented || err.code() == error_code_audit_storage_cancelled) {
-			throw err;
-		} else if (err.code() == error_code_audit_storage_error) {
-			audit->foundError = true;
-		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-			throw audit_storage_failed();
-		} else {
-			if (err.code() != error_code_audit_storage_failed) {
-				try {
-					bool ssRemoved = co_await checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID);
-					if (ssRemoved) {
-						// It is possible that the input ss has been removed, then silently exit
-						co_return;
-					}
-				} catch (Error& err) {
-					// retry
+	if (err.code() == error_code_not_implemented || err.code() == error_code_audit_storage_cancelled) {
+		throw err;
+	} else if (err.code() == error_code_audit_storage_error) {
+		audit->foundError = true;
+	} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+		throw audit_storage_failed();
+	} else {
+		if (err.code() != error_code_audit_storage_failed) {
+			try {
+				bool ssRemoved = co_await checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID);
+				if (ssRemoved) {
+					// It is possible that the input ss has been removed, then silently exit
+					co_return;
 				}
+			} catch (Error& err) {
+				// retry
 			}
-			audit->retryCount++;
-			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
-	    }
+		}
+		audit->retryCount++;
+		audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
+	}
 }
 
 // This function is for ha/replica/restore audits
@@ -4803,7 +4798,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 	double rateLimiterTotalWaitTime = 0;
 
 	try {
-		loop {
+		while (true) {
 			Error err;
 			bool hasErr = false;
 			try {
@@ -5082,7 +5077,7 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 	                                              &normalDataDistributorErrors());
 
 	try {
-		loop {
+		while (true) {
 			auto res = co_await race(distributor || collection,
 			                         di.haltDataDistributor.getFuture(),
 			                         di.dataDistributorMetrics.getFuture(),
