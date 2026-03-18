@@ -1,5 +1,5 @@
 /*
- * RestoreRoleCommon.actor.cpp
+ * RestoreRoleCommon.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,22 +24,19 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 
 #include "fdbserver/RestoreUtil.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreRoleCommon.h"
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreController.actor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class Database;
 struct RestoreWorkerData;
 
 // id is the id of the worker to be monitored
 // This actor is used for both restore loader and restore applier
-ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
-	wait(delayJittered(5.0)); // Random jitter reduces heat beat monitor's pressure
+Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id) {
+	co_await delayJittered(5.0); // Random jitter reduces heat beat monitor's pressure
 	req.reply.send(RestoreCommonReply(id));
-	return Void();
 }
 
 void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self) {
@@ -52,7 +49,7 @@ void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<Resto
 }
 
 // Multiple version batches may execute in parallel and init their version batches
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
+Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self) {
 	TraceEvent("FastRestoreRolePhaseInitVersionBatch", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("Role", getRoleStr(self->role))
@@ -61,7 +58,7 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	ASSERT(self->finishedBatch.get() < req.batchIndex);
 
 	// batchId is continuous. (req.batchIndex-1) is the id of the just finished batch.
-	wait(self->versionBatchId.whenAtLeast(req.batchIndex - 1));
+	co_await self->versionBatchId.whenAtLeast(req.batchIndex - 1);
 
 	if (self->versionBatchId.get() == req.batchIndex - 1) {
 		self->initVersionBatch(req.batchIndex);
@@ -74,7 +71,6 @@ ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req,
 	}
 
 	req.reply.send(RestoreCommonReply(self->id()));
-	return Void();
 }
 
 void updateProcessStats(Reference<RestoreRoleData> self) {
@@ -111,10 +107,10 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 // the actor to run to avoid dead-lock.
 // Future: When we release the actors that are blocked by memory usage, we should release them
 // in increasing order of their version batch.
-ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name) {
+Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name) {
 	self->delayedActors++;
-	state double memoryThresholdBytes = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 1024 * 1024;
-	loop {
+	double memoryThresholdBytes = SERVER_KNOBS->FASTRESTORE_MEMORY_THRESHOLD_MB_SOFT * 1024 * 1024;
+	while (true) {
 		double memory = getSystemStatistics().processMemory;
 		if (g_network->isSimulated() && BUGGIFY) {
 			// Intentionally randomly block actors for low memory reason.
@@ -146,22 +142,21 @@ ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatch
 			    .detail("Actor", name)
 			    .detail("CurrentMemory", memory);
 			// TODO: Set FASTRESTORE_WAIT_FOR_MEMORY_LATENCY to a large value. It should be able to avoided
-			wait(delay(SERVER_KNOBS->FASTRESTORE_WAIT_FOR_MEMORY_LATENCY) || self->checkMemory.onTrigger());
+			co_await (delay(SERVER_KNOBS->FASTRESTORE_WAIT_FOR_MEMORY_LATENCY) || self->checkMemory.onTrigger());
 		}
 	}
-	return Void();
 }
 
 // Updated process metrics will be used by scheduler for throttling as well
-ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self) {
-	loop {
+Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self) {
+	while (true) {
 		updateProcessStats(self);
-		wait(delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL));
+		co_await delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
 	}
 }
 
-ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
-	loop {
+Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role) {
+	while (true) {
 		TraceEvent("FastRestoreTraceProcessMetrics", self->nodeID)
 		    .detail("Role", role)
 		    .detail("PipelinedMaxVersionBatchIndex", self->versionBatchId.get())
@@ -170,12 +165,12 @@ ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::str
 		    .detail("CpuUsage", self->cpuUsage)
 		    .detail("UsedMemory", self->memory)
 		    .detail("ResidentMemory", self->residentMemory);
-		wait(delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY));
+		co_await delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY);
 	}
 }
 
-ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role) {
-	loop {
+Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role) {
+	while (true) {
 		int batchIndex = self->finishedBatch.get();
 		int maxBatchIndex = self->versionBatchId.get();
 		int maxPrintBatchIndex = batchIndex + SERVER_KNOBS->FASTRESTORE_VB_PARALLELISM;
@@ -196,7 +191,7 @@ ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self
 			batchIndex++;
 		}
 
-		wait(delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY));
+		co_await delay(SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY);
 	}
 }
 

@@ -22,11 +22,6 @@
 // RestoreController, RestoreLoader, RestoreApplier
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RestoreRoleCommon_G_H)
-#define FDBSERVER_RestoreRoleCommon_G_H
-#include "fdbserver/RestoreRoleCommon.actor.g.h"
-#elif !defined(FDBSERVER_RestoreRoleCommon_H)
-#define FDBSERVER_RestoreRoleCommon_H
 
 #include <sstream>
 #include "flow/SystemMonitor.h"
@@ -39,8 +34,6 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/RestoreUtil.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 struct RestoreRoleInterface;
 struct RestoreLoaderInterface;
@@ -60,9 +53,9 @@ struct RestoreSimpleRequest;
 // backup workers.
 using VersionedMutationsMap = std::map<LogMessageVersion, MutationsVec>;
 
-ACTOR Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
-ACTOR Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
-ACTOR Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
+Future<Void> isSchedulable(Reference<RestoreRoleData> self, int actorBatchIndex, std::string name);
+Future<Void> handleHeartbeat(RestoreSimpleRequest req, UID id);
+Future<Void> handleInitVersionBatchRequest(RestoreVersionBatchRequest req, Reference<RestoreRoleData> self);
 void handleFinishRestoreRequest(const RestoreFinishRequest& req, Reference<RestoreRoleData> self);
 
 class RoleVersionBatchState {
@@ -122,9 +115,6 @@ public:
 };
 
 void updateProcessStats(Reference<RestoreRoleData> self);
-ACTOR Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self);
-ACTOR Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
-ACTOR Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> updateProcessMetrics(Reference<RestoreRoleData> self);
+Future<Void> traceProcessMetrics(Reference<RestoreRoleData> self, std::string role);
+Future<Void> traceRoleVersionBatchProgress(Reference<RestoreRoleData> self, std::string role);
