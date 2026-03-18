@@ -36,7 +36,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
-#include "fdbserver/RestoreRoleCommon.actor.h"
+#include "fdbserver/RestoreRoleCommon.h"
 #include "fdbserver/RestoreWorker.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -156,7 +156,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	void addref() { return ReferenceCounted<RestoreControllerData>::addref(); }
 	void delref() { return ReferenceCounted<RestoreControllerData>::delref(); }
 
-	RestoreControllerData(UID interfId) {
+	explicit(false) RestoreControllerData(UID interfId) {
 		role = RestoreRole::Controller;
 		nodeID = interfId;
 		runningVersionBatches.set(0);

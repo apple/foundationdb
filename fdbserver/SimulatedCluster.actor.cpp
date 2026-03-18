@@ -149,7 +149,7 @@ class TestConfig : public BasicTestConfig {
 
 		struct visitor {
 			const value_type& value;
-			visitor(const value_type& v) : value(v) {}
+			explicit visitor(const value_type& v) : value(v) {}
 			void operator()(int* val) const { *val = value.as_integer(); }
 			void operator()(Optional<int>* val) const { *val = value.as_integer(); }
 			void operator()(float* val) const { *val = value.as_floating(); }
@@ -548,7 +548,7 @@ public:
 	}
 
 	TestConfig() = default;
-	TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
+	explicit(false) TestConfig(const BasicTestConfig& config) : BasicTestConfig(config) {}
 };
 
 template <class T>

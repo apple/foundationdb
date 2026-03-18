@@ -33,7 +33,7 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/TSSMappingUtil.actor.h"
+#include "fdbserver/TSSMappingUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"

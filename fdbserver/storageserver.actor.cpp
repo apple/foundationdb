@@ -70,7 +70,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/AccumulativeChecksumUtil.h"
-#include "fdbserver/BulkDumpUtil.actor.h"
+#include "fdbserver/BulkDumpUtil.h"
 #include "fdbserver/BulkLoadUtil.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
@@ -86,13 +86,13 @@
 #include "fdbserver/ReadLatencySamples.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/ServerCheckpoint.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/TransactionTagCounter.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/StorageCorruptionBug.h"
 #include "fdbserver/StorageServerUtils.h"
@@ -731,7 +731,8 @@ struct UpdateEagerReadInfo {
 	Arena arena;
 	bool enableClearRangeEagerReads;
 
-	UpdateEagerReadInfo(bool enableClearRangeEagerReads) : enableClearRangeEagerReads(enableClearRangeEagerReads) {}
+	explicit UpdateEagerReadInfo(bool enableClearRangeEagerReads)
+	  : enableClearRangeEagerReads(enableClearRangeEagerReads) {}
 
 	void addMutations(VectorRef<MutationRef> const& mutations) {
 		for (auto& m : mutations)
@@ -831,7 +832,7 @@ struct BusiestWriteTagContext {
 	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 	double lastUpdateTime;
 
-	BusiestWriteTagContext(const UID& thisServerID)
+	explicit BusiestWriteTagContext(const UID& thisServerID)
 	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };

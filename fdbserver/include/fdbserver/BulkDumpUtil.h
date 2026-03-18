@@ -1,5 +1,5 @@
 /*
- * BulkDumpUtil.actor.h
+ * BulkDumpUtil.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,16 +20,10 @@
 
 #include <cstdint>
 #include <string>
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BULKDUMPUTIL_ACTOR_G_H)
-#define FDBSERVER_BULKDUMPUTIL_ACTOR_G_H
-#include "fdbserver/BulkDumpUtil.actor.g.h"
-#elif !defined(FDBSERVER_BULKDUMPUTIL_ACTOR_H)
-#define FDBSERVER_BULKDUMPUTIL_ACTOR_H
 #pragma once
 
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 struct RangeDumpRawData {
 	std::map<Key, Value> kvs;
@@ -83,7 +77,7 @@ std::pair<BulkLoadFileSet, BulkLoadFileSet> getLocalRemoteFileSetSetting(Version
 
 // Persist the complete progress of bulkDump by writing the metadata with Complete phase
 // to the bulk dump system key space.
-ACTOR Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState);
+Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpState);
 
 // Define bulk dump job folder. Job is set by user. At most one job at a time globally.
 std::string generateBulkDumpJobFolder(const UID& jobId);
@@ -99,35 +93,35 @@ std::string getBulkLoadJobRoot(const std::string& root, const UID& jobId);
 // TODO(BulkDump): can cause slow tasks, do the task in a separate thread in the future.
 // The size of sortedData is defined at the place of generating the data (getRangeDataToDump).
 // The size is configured by MOVE_SHARD_KRM_ROW_LIMIT.
-ACTOR Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
-                                                            std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
-                                                            BulkLoadFileSet localFileSet,
-                                                            BulkLoadFileSet remoteFileSet,
-                                                            BulkLoadByteSampleSetting byteSampleSetting,
-                                                            Version dumpVersion,
-                                                            KeyRange dumpRange,
-                                                            BulkLoadType dumpType,
-                                                            BulkLoadTransportMethod transportMethod);
+Future<BulkLoadManifest> dumpDataFileToLocalDirectory(UID logId,
+                                                      std::shared_ptr<RangeDumpRawData> rangeDumpRawData,
+                                                      BulkLoadFileSet localFileSet,
+                                                      BulkLoadFileSet remoteFileSet,
+                                                      BulkLoadByteSampleSetting byteSampleSetting,
+                                                      Version dumpVersion,
+                                                      KeyRange dumpRange,
+                                                      BulkLoadType dumpType,
+                                                      BulkLoadTransportMethod transportMethod);
 
 // Upload manifest file for bulkdump job
 // Each job has one manifest file including manifest paths of all tasks.
 // The local file path:	<localRootLocal>/<jobId>-manifest.txt
 // The remote file folder and the name of the file in the remote folder.
-ACTOR Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
-                                                 std::string localJobManifestFilePath,
-                                                 std::string remoteFolder,
-                                                 std::string jobManifestFileName,
-                                                 UID logId);
+Future<Void> uploadBulkDumpJobManifestFile(BulkLoadTransportMethod transportMethod,
+                                           std::string localJobManifestFilePath,
+                                           std::string remoteFolder,
+                                           std::string jobManifestFileName,
+                                           UID logId);
 
 // Upload file for each task. Each task is spawned by bulkdump job according to the shard boundary
-ACTOR Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
-                                         BulkLoadFileSet sourceFileSet,
-                                         BulkLoadFileSet destinationFileSet,
-                                         UID logId);
+Future<Void> uploadBulkDumpFileSet(BulkLoadTransportMethod transportMethod,
+                                   BulkLoadFileSet sourceFileSet,
+                                   BulkLoadFileSet destinationFileSet,
+                                   UID logId);
 
 class ParallelismLimitor {
 public:
-	ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
+	explicit(false) ParallelismLimitor(int maxParallelism) : maxParallelism(maxParallelism) {}
 
 	inline void decrementTaskCounter() {
 		ASSERT(numRunningTasks.get() <= maxParallelism);
@@ -156,6 +150,3 @@ private:
 	AsyncVar<int> numRunningTasks;
 	int maxParallelism;
 };
-
-#include "flow/unactorcompiler.h"
-#endif

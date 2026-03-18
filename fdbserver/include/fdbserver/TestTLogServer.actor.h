@@ -84,7 +84,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID) {};
+	explicit TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID) {};
 };
 
 // test state
@@ -104,7 +104,7 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 
 	ACTOR static Future<Void> peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t logGroupID, uint32_t tag);
 
-	TLogTestContext(TestTLogOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
+	explicit(false) TLogTestContext(TestTLogOptions& tLogOptions) : tLogOptions(tLogOptions), epoch(1) {}
 
 	// paramaters
 	std::string diskQueueBasename;

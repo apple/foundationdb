@@ -1650,7 +1650,7 @@ public:
 	// must eventually give them back with moveIn() or remove them with reclaim().
 	class Evictor : NonCopyable {
 	public:
-		Evictor(int64_t sizeLimit = 0) : sizeLimit(sizeLimit) {}
+		explicit(false) Evictor(int64_t sizeLimit = 0) : sizeLimit(sizeLimit) {}
 
 		// Evictors are normally singletons, either one per real process or one per virtual process in simulation
 		static Evictor* getEvictor() {
@@ -1783,7 +1783,7 @@ public:
 		int64_t movedOutCount = 0;
 	};
 
-	ObjectCache(Evictor* evictor = nullptr) : pEvictor(evictor) {
+	explicit(false) ObjectCache(Evictor* evictor = nullptr) : pEvictor(evictor) {
 		if (pEvictor == nullptr) {
 			pEvictor = Evictor::getEvictor();
 		}
@@ -1957,9 +1957,9 @@ public:
 
 	struct RemappedPage {
 		enum Type { NONE = 'N', REMAP = 'R', FREE = 'F', DETACH = 'D' };
-		RemappedPage(Version v = invalidVersion,
-		             LogicalPageID o = invalidLogicalPageID,
-		             LogicalPageID n = invalidLogicalPageID)
+		explicit(false) RemappedPage(Version v = invalidVersion,
+		                             LogicalPageID o = invalidLogicalPageID,
+		                             LogicalPageID n = invalidLogicalPageID)
 		  : version(v), originalPageID(o), newPageID(n) {}
 
 		Version version;
@@ -3971,7 +3971,7 @@ struct SplitStringRef {
 	StringRef a;
 	StringRef b;
 
-	SplitStringRef(StringRef a = StringRef(), StringRef b = StringRef()) : a(a), b(b) {}
+	explicit SplitStringRef(StringRef a = StringRef(), StringRef b = StringRef()) : a(a), b(b) {}
 
 	SplitStringRef(Arena& arena, const SplitStringRef& toCopy) : a(toStringRef(arena)), b() {}
 
@@ -4071,7 +4071,7 @@ std::string toString(BTreeNodeLinkRef id) {
 struct RedwoodRecordRef {
 	using byte = uint8_t;
 
-	RedwoodRecordRef(KeyRef key = KeyRef(), Optional<ValueRef> value = {}) : key(key), value(value) {}
+	explicit(false) RedwoodRecordRef(KeyRef key = KeyRef(), Optional<ValueRef> value = {}) : key(key), value(value) {}
 
 	RedwoodRecordRef(Arena& arena, const RedwoodRecordRef& toCopy) : key(arena, toCopy.key) {
 		if (toCopy.value.present()) {
@@ -5185,7 +5185,7 @@ private:
 		// Clear
 		SingleKeyMutation() : op(MutationRef::ClearRange) {}
 		// Set
-		SingleKeyMutation(Value val) : op(MutationRef::SetValue), value(val) {}
+		explicit(false) SingleKeyMutation(Value val) : op(MutationRef::SetValue), value(val) {}
 		// Atomic Op
 		SingleKeyMutation(MutationRef::Type op, Value val) : op(op), value(val) {}
 
@@ -5268,7 +5268,7 @@ public:
 		struct iterator : public MutationsT::iterator {
 			using Base = MutationsT::iterator;
 			iterator() = default;
-			iterator(const MutationsT::iterator& i) : Base(i) {}
+			explicit(false) iterator(const MutationsT::iterator& i) : Base(i) {}
 
 			const KeyRef& key() { return (*this)->first; }
 
@@ -5278,8 +5278,8 @@ public:
 		struct const_iterator : public MutationsT::const_iterator {
 			using Base = MutationsT::const_iterator;
 			const_iterator() = default;
-			const_iterator(const MutationsT::const_iterator& i) : Base(i) {}
-			const_iterator(const MutationsT::iterator& i) : Base(i) {}
+			explicit(false) const_iterator(const MutationsT::const_iterator& i) : Base(i) {}
+			explicit(false) const_iterator(const MutationsT::iterator& i) : Base(i) {}
 
 			const KeyRef& key() { return (*this)->first; }
 
@@ -10587,7 +10587,7 @@ struct KVSource {
 	// TODO there is probably a better way to do this
 	Prefix extraRangePrefix;
 
-	KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
+	explicit(false) KVSource(const std::vector<PrefixSegment>& desc, int numPrefixes = 0) : desc(desc) {
 		if (numPrefixes == 0) {
 			numPrefixes = 1;
 			for (auto& p : desc) {
