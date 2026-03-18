@@ -92,9 +92,9 @@ std::vector<fdb::KeyValue> KeyValueStore::getRange(fdb::KeyRef begin, fdb::KeyRe
 	std::unique_lock<std::mutex> lock(mutex);
 	std::vector<fdb::KeyValue> results;
 	if (!reverse) {
-		auto mapItr = store.lower_bound(begin);
-
-		for (; mapItr != store.end() && mapItr->first < end && results.size() < limit; mapItr++)
+		for (auto mapItr = store.lower_bound(begin);
+		     mapItr != store.end() && mapItr->first < end && results.size() < limit;
+		     mapItr++)
 			results.push_back(fdb::KeyValue{ mapItr->first, mapItr->second });
 	}
 

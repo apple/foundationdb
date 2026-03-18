@@ -1274,8 +1274,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.mode = MODE_RUN;
 			} else if (strcmp(optarg, "report") == 0) {
 				args.mode = MODE_REPORT;
-				int i = optind;
-				for (; i < argc; i++) {
+				for (int i = optind; i < argc; i++) {
 					if (argv[i][0] != '-') {
 						const std::string report_file = argv[i];
 						strncpy(args.report_files[args.num_report_files], report_file.c_str(), report_file.size());

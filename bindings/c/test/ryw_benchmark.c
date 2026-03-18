@@ -50,8 +50,7 @@ int runTest(int (*testFxn)(FDBTransaction*, struct ResultSet*),
             const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
-	int i = 0;
-	for (; i < numRuns; ++i) {
+	for (int i = 0; i < numRuns; ++i) {
 		results[i] = testFxn(tr, rs);
 		if (results[i] < 0) {
 			free(results);
