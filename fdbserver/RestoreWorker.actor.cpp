@@ -145,7 +145,7 @@ Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Da
 	std::vector<RestoreWorkerInterface> agents; // agents is cmdsInterf
 
 	while (true) {
-		Optional<Error> err;
+		Error err;
 		try {
 			self->workerInterfaces.clear();
 			agents.clear();
@@ -173,7 +173,7 @@ Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Da
 		} catch (Error& e) {
 			err = e;
 		}
-		co_await tr.onError(err.get());
+		co_await tr.onError(err);
 	}
 	ASSERT(agents.size() >= min_num_workers); // ASSUMPTION: We must have at least 1 loader and 1 applier
 
@@ -280,7 +280,7 @@ static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
 	// wait for the restoreRequestTriggerKey to be set by the client/test workload
 	TraceEvent("FastRestoreWaitOnRestoreRequest", nodeID).log();
 	while (true) {
-		Optional<Error> err;
+		Error err;
 		try {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -301,7 +301,7 @@ static Future<Void> waitOnRestoreRequests(Database cx, UID nodeID = UID()) {
 		} catch (Error& e) {
 			err = e;
 		}
-		co_await tr.onError(err.get());
+		co_await tr.onError(err);
 	}
 }
 
@@ -315,7 +315,7 @@ Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader,
 	RestoreWorkerInterface leaderInterf;
 	ReadYourWritesTransaction tr(cx); // MX: Somewhere here program gets stuck
 	while (true) {
-		Optional<Error> err;
+		Error err;
 		try {
 			count++;
 			tr.reset();
@@ -344,10 +344,8 @@ Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader,
 		} catch (Error& e) {
 			err = e;
 		}
-		TraceEvent(SevInfo, "FastRestoreLeaderElection")
-		    .detail("ErrorCode", err.get().code())
-		    .detail("Error", err.get().what());
-		co_await tr.onError(err.get());
+		TraceEvent(SevInfo, "FastRestoreLeaderElection").detail("ErrorCode", err.code()).detail("Error", err.what());
+		co_await tr.onError(err);
 	}
 
 	TraceEvent("FastRestoreWorker", myWorkerInterf.id())
