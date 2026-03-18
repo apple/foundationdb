@@ -1,5 +1,5 @@
 /*
- * TSSMappingUtil.actor.h
+ * TSSMappingUtil.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,31 +20,19 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(TSS_MAPPING_UTIL_SERVER_G_H)
-#define TSS_MAPPING_UTIL_SERVER_G_H
-#include "fdbserver/TSSMappingUtil.actor.g.h"
-#elif !defined(TSS_MAPPING_UTIL_SERVER_H)
-#define TSS_MAPPING_UTIL_SERVER_H
-
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 /*
  * Collection of utility functions for dealing with the TSS mapping
  */
 
 // Reads the current cluster TSS mapping as part of the RYW transaction
-ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
-                                     std::map<UID, StorageServerInterface>* tssMapping);
+Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
+                               std::map<UID, StorageServerInterface>* tssMapping);
 
 // Reads the current cluster TSS mapping as part of the given Transaction
-ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping);
+Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping);
 
 // Removes the TSS pairs from the cluster
-ACTOR Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> removeTSSPairsFromCluster(Database cx, std::vector<std::pair<UID, UID>> pairsToRemove);

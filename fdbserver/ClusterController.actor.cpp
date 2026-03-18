@@ -51,7 +51,7 @@
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/SingletonRoles.h"

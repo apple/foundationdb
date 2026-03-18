@@ -1,5 +1,5 @@
 /*
- *ServerCheckpoint.actor.cpp
+ *ServerCheckpoint.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,10 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/ServerCheckpoint.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
                                        const CheckpointAsKeyValues checkpointAsKeyValues,
@@ -36,8 +34,8 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
 	return nullptr;
 }
 
-ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
-	wait(delay(0, TaskPriority::FetchKeys));
+Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
+	co_await delay(0, TaskPriority::FetchKeys);
 	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == DataMoveRocksCF || format == RocksDB || format == RocksDBKeyValues) {
 		if (!checkpoint.dir.empty()) {
@@ -48,40 +46,38 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	} else {
 		throw not_implemented();
 	}
-
-	return Void();
 }
 
-ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
-                                                 CheckpointMetaData initialState,
-                                                 std::string dir,
-                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                           CheckpointMetaData initialState,
+                                           std::string dir,
+                                           std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent("FetchCheckpointBegin", initialState.checkpointID).detail("CheckpointMetaData", initialState.toString());
 
-	state CheckpointMetaData result;
+	CheckpointMetaData result;
 	const CheckpointFormat format = initialState.getFormat();
 	ASSERT(format != RocksDBKeyValues);
 	if (format == DataMoveRocksCF || format == RocksDB) {
-		wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
+		co_await store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
 	} else {
 		throw not_implemented();
 	}
 
 	TraceEvent("FetchCheckpointEnd", initialState.checkpointID).detail("CheckpointMetaData", result.toString());
-	return result;
+	co_return result;
 }
 
-ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
-                                                       CheckpointMetaData initialState,
-                                                       std::string dir,
-                                                       std::vector<KeyRange> ranges,
-                                                       std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
+                                                 CheckpointMetaData initialState,
+                                                 std::string dir,
+                                                 std::vector<KeyRange> ranges,
+                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent(SevDebug, "FetchCheckpointRangesBegin", initialState.checkpointID)
 	    .detail("CheckpointMetaData", initialState.toString())
 	    .detail("Ranges", describe(ranges));
 	ASSERT(!ranges.empty());
 
-	state CheckpointMetaData result;
+	CheckpointMetaData result;
 	const CheckpointFormat format = initialState.getFormat();
 	if (format != RocksDBKeyValues) {
 		if (format != DataMoveRocksCF) {
@@ -94,12 +90,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 		    ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion()));
 	}
 
-	wait(store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun)));
+	co_await store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
 
 	TraceEvent(SevDebug, "FetchCheckpointRangesEnd", initialState.checkpointID)
 	    .detail("CheckpointMetaData", result.toString())
 	    .detail("Ranges", describe(ranges));
-	return result;
+	co_return result;
 }
 
 std::string serverCheckpointDir(const std::string& baseDir, const UID& checkpointId) {

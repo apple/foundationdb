@@ -23,7 +23,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/ServerCheckpoint.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
