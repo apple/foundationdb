@@ -26,7 +26,7 @@
 #define FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/ServerCheckpoint.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
@@ -318,7 +318,7 @@ struct RocksDBCheckpointKeyValues {
 	std::vector<CheckpointFile> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
 	std::vector<KeyRange> ranges; // The ranges we want to fetch.
 
-	RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
+	explicit RocksDBCheckpointKeyValues(std::vector<KeyRange> ranges) : ranges(ranges) {}
 	RocksDBCheckpointKeyValues() = default;
 
 	CheckpointFormat format() const { return RocksDBKeyValues; }

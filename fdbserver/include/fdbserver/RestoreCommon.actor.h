@@ -56,8 +56,8 @@ struct RestoreFileFR;
 // non-functional changes in RestoreConfig
 class RestoreConfigFR : public KeyBackedTaskConfig, public ReferenceCounted<RestoreConfigFR> {
 public:
-	RestoreConfigFR(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
-	RestoreConfigFR(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
+	explicit(false) RestoreConfigFR(UID uid = UID()) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, uid) {}
+	explicit(false) RestoreConfigFR(Reference<Task> task) : KeyBackedTaskConfig(fileRestorePrefixRange.begin, task) {}
 
 	KeyBackedProperty<ERestoreState> stateEnum();
 

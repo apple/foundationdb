@@ -60,7 +60,7 @@ public:
 		WRITE_SPLIT,
 		__COUNT
 	};
-	RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
+	explicit(false) RelocateReason(Value v) : value(v) { ASSERT(value != __COUNT); }
 	explicit RelocateReason(int v) : value((Value)v) { ASSERT(value != __COUNT); }
 	std::string toString() const {
 		switch (value) {
@@ -160,7 +160,7 @@ struct GetMetricsRequest {
 	KeyRange keys;
 	Promise<StorageMetrics> reply;
 	GetMetricsRequest() {}
-	GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	explicit(false) GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
 };
 
 struct GetTopKMetricsReply {
@@ -186,10 +186,10 @@ public:
 	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
-	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
-	                      int topK = 1,
-	                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minReadLoadPerKSecond = 0)
+	explicit(false) GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
+	                                      int topK = 1,
+	                                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                                      double minReadLoadPerKSecond = 0)
 	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
 	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
@@ -227,7 +227,7 @@ struct BulkLoadShardRequest {
 	                                         // unretryable error.
 	BulkLoadShardRequest() = default;
 
-	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState) : bulkLoadTaskState(bulkLoadTaskState) {}
+	explicit BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState) : bulkLoadTaskState(bulkLoadTaskState) {}
 
 	BulkLoadShardRequest(BulkLoadTaskState const& bulkLoadTaskState, int cancelledDataMovePriority)
 	  : bulkLoadTaskState(bulkLoadTaskState), cancelledDataMovePriority(cancelledDataMovePriority) {}
@@ -271,7 +271,7 @@ struct ShardTrackedData {
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
 	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
-	PhysicalShardCollection(Reference<IDDTxnProcessor> db)
+	explicit(false) PhysicalShardCollection(Reference<IDDTxnProcessor> db)
 	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
@@ -604,7 +604,9 @@ inline bool bulkDumpIsEnabled(int bulkDumpModeValue) {
 
 class BulkLoadTaskCollection : public ReferenceCounted<BulkLoadTaskCollection> {
 public:
-	BulkLoadTaskCollection(UID ddId) : ddId(ddId) { bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>()); }
+	explicit(false) BulkLoadTaskCollection(UID ddId) : ddId(ddId) {
+		bulkLoadTaskMap.insert(allKeys, Optional<DDBulkLoadEngineTask>());
+	}
 
 	// Return true if there exists a bulk load job/task or the collection has not been initialized.
 	// This takes effect only when DDBulkLoad Mode is enabled.

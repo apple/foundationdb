@@ -51,7 +51,7 @@ struct UDPWorkload : TestWorkload {
 	std::unordered_map<NetworkAddress, unsigned> sent, received, acked, successes;
 	PromiseStream<NetworkAddress> toAck;
 
-	UDPWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	explicit(false) UDPWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		keyPrefix = getOption(options, "keyPrefix"_sr, "/udp/"_sr);
 		runFor = getOption(options, "runFor"_sr, 60.0);
 		minPort = getOption(options, "minPort"_sr, 5000);

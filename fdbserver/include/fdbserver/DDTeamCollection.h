@@ -41,7 +41,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/TCInfo.h"
 #include "fdbserver/core/TLogInterface.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"

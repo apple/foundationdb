@@ -37,7 +37,7 @@
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/StorageMetrics.actor.h"
-#include "fdbserver/core/WaitFailure.actor.h"
+#include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
