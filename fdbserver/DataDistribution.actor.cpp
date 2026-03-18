@@ -588,7 +588,6 @@ public:
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Error err;
-			bool hasErr = false;
 			try {
 				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
 				if (!mode.present()) {
@@ -602,13 +601,11 @@ public:
 				}
 				co_await checkMoveKeysLockReadOnly(&tr, self->context->lock, self->context->ddEnabledState.get());
 				tr.reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -1295,7 +1292,6 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	KeyRange range;
 	while (beginKey < endKey) {
 		Error err;
-		bool hasErr = false;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			result.clear();
@@ -1349,16 +1345,14 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 				}
 			}
 			beginKey = result.back().key;
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
-			}
-			co_await tr.onError(err);
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
 		}
+		co_await tr.onError(err);
 	}
 	co_await waitForAll(bulkLoadActors);
 }
@@ -1882,7 +1876,6 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 	// The value is the manifest. For details, please see comments in getBulkLoadJobManifestData.
 	loop {
 		Error err;
-		bool hasErr = false;
 		try {
 			RangeResult res =
 			    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, jobState.getJobRange().end));
@@ -1967,13 +1960,11 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 				self->bulkLoadJobManager.get().allTaskSubmitted = true;
 				break;
 			}
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 	co_await waitForAll(actors);
 }
@@ -1990,7 +1981,6 @@ Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> self) {
 	RangeResult bulkLoadTaskResult;
 	while (beginKey < endKey) {
 		Error err;
-		bool hasErr = false;
 		try {
 			bulkLoadTaskResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
@@ -2031,13 +2021,11 @@ Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> self) {
 				}
 			}
 			beginKey = bulkLoadTaskResult.back().key;
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 	co_return true;
 }
@@ -2058,7 +2046,6 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 	bool allFinish = false;
 	while (beginKey < endKey) {
 		Error err;
-		bool hasErr = false;
 		try {
 			tr.reset();
 			bulkLoadTaskResult.clear();
@@ -2136,16 +2123,14 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 			    .detail("ExistTaskID", existTask.getTaskId())
 			    .detail("ExistTaskRange", existTask.getRange());
 			beginKey = lastKey.get();
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			// Currently, only bulkload job uses the range lock, and one job exists at a time.
-			// TODO(BulkLoad): support multiple jobs at a time
-			ASSERT(err.code() != error_code_range_unlock_reject);
-			co_await tr.onError(err);
-		}
+		// Currently, only bulkload job uses the range lock, and one job exists at a time.
+		// TODO(BulkLoad): support multiple jobs at a time
+		ASSERT(err.code() != error_code_range_unlock_reject);
+		co_await tr.onError(err);
 	}
 }
 
@@ -2309,7 +2294,6 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	Transaction tr(cx);
 	while (beginKey < endKey) {
 		Error err;
-		bool hasErr = false;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
@@ -2380,16 +2364,14 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				beginKey = rangeLocations.back().range.end;
 				break;
 			}
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
-			}
-			co_await tr.onError(err);
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
 		}
+		co_await tr.onError(err);
 	}
 	co_await waitForAll(actors);
 	TraceEvent(SevInfo, "DDBulkDumpJobScheduleEnd", self->ddId).detail("JobId", jobId).detail("JobRange", jobRange);
@@ -2407,7 +2389,6 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 	Transaction tr(cx);
 	while (beginKey < endKey) {
 		Error err;
-		bool hasErr = false;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
@@ -2424,13 +2405,11 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 				}
 			}
 			beginKey = bulkDumpResult.back().key;
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 	co_return true;
 }
@@ -2514,7 +2493,6 @@ Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 	self->bulkDumpJobManager.taskManifestMap.clear();
 	while (beginKey < endKey) {
 		Error err;
-		bool hasErr = false;
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
@@ -2538,16 +2516,14 @@ Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 				ASSERT(res.second);
 			}
 			beginKey = bulkDumpResult.back().key;
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
-			}
-			co_await tr.onError(err);
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
 		}
+		co_await tr.onError(err);
 	}
 	ASSERT(!self->bulkDumpJobManager.taskManifestMap.empty());
 }
@@ -3489,7 +3465,6 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	lockInfo.prevWrite = self->lock.prevWrite;
 
 	Error err;
-	bool hasErr = false;
 	try {
 		ASSERT(audit != nullptr);
 		ASSERT(audit->coreState.ddId == self->ddId);
@@ -3592,17 +3567,16 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("Range", audit->coreState.range)
 		    .detail("AuditStorageCoreGeneration", currentRetryCount)
 		    .detail("RetryCount", audit->retryCount);
+		co_return;
 	} catch (Error& e) {
 		err = e;
-		hasErr = true;
 	}
-	if (hasErr) {
-		if (err.code() == error_code_actor_cancelled) {
-			// If this audit is cancelled, the place where cancelling
-			// this audit does removeAuditFromAuditMap
-			throw err;
-		}
-		TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
+	if (err.code() == error_code_actor_cancelled) {
+		// If this audit is cancelled, the place where cancelling
+		// this audit does removeAuditFromAuditMap
+		throw err;
+	}
+	    TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("Context", audit->getDDAuditContext())
 		    .detail("AuditID", auditID)
@@ -3684,8 +3658,7 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				// A zombie audit will be either: (1) resumed by the next DD; (2) removed by client
 			}
 			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
-		}
-	}
+	    }
 }
 
 // runAuditStorage is the only entry to start an Audit entity
@@ -3933,7 +3906,6 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 	int retryCount = 0;
 	loop {
 		Error err;
-		bool hasErr = false;
 		try {
 			TraceEvent(SevDebug, "DDAuditStorageStart", self->ddId)
 			    .detail("RetryCount", retryCount)
@@ -3948,15 +3920,14 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 			    .detail("KeyValueStoreType", req.engineType.toString())
 			    .detail("Range", req.range)
 			    .detail("AuditID", auditID);
+			break;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
-			}
-			TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		    TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
 			    .errorUnsuppressed(err)
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
@@ -3974,8 +3945,7 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 				continue;
 			} else {
 				req.reply.sendError(audit_storage_failed());
-			}
-		}
+		    }
 		break;
 	}
 }
@@ -4139,7 +4109,6 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 	std::vector<AuditStorageState> auditStates;
 	int64_t issueDoAuditCount = 0;
 	Error err;
-	bool hasErr = false;
 	try {
 		while (begin < allKeys.end) {
 			currentRange = KeyRangeRef(begin, allKeys.end);
@@ -4192,15 +4161,14 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
+		co_return;
 	} catch (Error& e) {
 		err = e;
-		hasErr = true;
 	}
-	if (hasErr) {
-		if (err.code() == error_code_actor_cancelled) {
-			throw err;
-		}
-		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
+	if (err.code() == error_code_actor_cancelled) {
+		throw err;
+	}
+	    TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
 		    .errorUnsuppressed(err)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
@@ -4226,8 +4194,7 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 			}
 			audit->retryCount++;
 			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
-		}
-	}
+	    }
 }
 
 // This function is for ha/replica/restore audits
