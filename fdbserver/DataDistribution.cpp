@@ -5213,9 +5213,9 @@ TEST_CASE("/DataDistribution/StorageWiggler/Order") {
 }
 
 TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
-	state Reference<DDSharedContext> context(new DDSharedContext(UID()));
-	state Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-	state Reference<DataDistributor> self(new DataDistributor(dbInfo, UID(), context, ""));
+	Reference<DDSharedContext> context(new DDSharedContext(UID()));
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Reference<DataDistributor> self(new DataDistributor(dbInfo, UID(), context, ""));
 
 	self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
@@ -5238,7 +5238,7 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	}
 	self->initData->shards.emplace_back(DDShardInfo(allKeys.end));
 	std::cout << "Start resuming...\n";
-	wait(DataDistributor::resumeFromShards(self, false));
+	co_await DataDistributor::resumeFromShards(self, false);
 	std::cout << "Start validation...\n";
 	auto relocateFuture = self->relocationProducer.getFuture();
 	for (int i = 0; i < SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM; ++i) {
@@ -5254,5 +5254,5 @@ TEST_CASE("/DataDistribution/Initialization/ResumeFromShard") {
 	}
 	self->shardsAffectedByTeamFailure->setCheckMode(ShardsAffectedByTeamFailure::CheckMode::ForceCheck);
 	self->shardsAffectedByTeamFailure->check();
-	return Void();
+	co_return;
 }
