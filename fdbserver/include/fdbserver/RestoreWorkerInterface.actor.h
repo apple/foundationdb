@@ -712,10 +712,8 @@ struct RestoreUpdateRateRequest : TimedRequest {
 std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
-ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality);
-ACTOR Future<Void> restoreWorker(Reference<IClusterConnectionRecord> ccr,
-                                 LocalityData locality,
-                                 std::string coordFolder);
+Future<Void> _restoreWorker(Database cx, LocalityData locality);
+Future<Void> restoreWorker(Reference<IClusterConnectionRecord> ccr, LocalityData locality, std::string coordFolder);
 
 extern const KeyRef restoreLeaderKey;
 extern const KeyRangeRef restoreWorkersKeys;
