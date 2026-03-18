@@ -308,10 +308,6 @@ var _ = Describe("Testing FDB Pod client", func() {
 				return fakeClient, internalCache, nil
 			})
 
-			// Currently the patch type is not supported in the fake client:
-			// https://github.com/kubernetes/kubernetes/issues/115598
-			podClient.patchType = client.Merge
-
 			Expect(err).NotTo(HaveOccurred())
 			// Execute the update annotations.
 			Expect(podClient.updateAnnotations(mon)).NotTo(HaveOccurred())
