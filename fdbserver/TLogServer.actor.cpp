@@ -393,6 +393,19 @@ struct TLogData : NonCopyable {
 	    enablePrimaryTxnSystemHealthCheck(enablePrimaryTxnSystemHealthCheck) {
 		cx = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	}
+
+	double availableSpaceRatio(StorageBytes const& kvStoreBytes, StorageBytes const& queueBytes) const {
+		auto ratio = [](StorageBytes const& storageBytes) -> double {
+			return storageBytes.total > 0 ? double(storageBytes.available) / storageBytes.total : 1.0;
+		};
+		return std::min(ratio(kvStoreBytes), ratio(queueBytes));
+	}
+
+	bool shouldAcceptNewData(StorageBytes const& kvStoreBytes,
+	                         StorageBytes const& queueBytes,
+	                         double minAvailableSpaceRatio) const {
+		return minAvailableSpaceRatio <= 0.0 || availableSpaceRatio(kvStoreBytes, queueBytes) >= minAvailableSpaceRatio;
+	}
 };
 
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
@@ -2848,10 +2861,26 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			//TraceEvent("TLogCommitReq", logData->logId).detail("Ver", req.version).detail("PrevVer", req.prevVersion).detail("LogVer", logData->version.get());
 			ASSERT(logData->isPrimary);
 			CODE_PROBE(logData->stopped(), "TLogCommitRequest while stopped");
-			if (!logData->stopped())
-				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
-			else
+			if (logData->stopped()) {
 				req.reply.sendError(tlog_stopped());
+			} else {
+				StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+				StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+				if (!self->shouldAcceptNewData(
+				        kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
+					TraceEvent te(SevWarn, "TLogCommitRejectedLowDiskSpace", logData->logId);
+					te.suppressFor(1.0)
+					    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
+					    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+					    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+					    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+					    .detail("QueueDiskBytesAvailable", queueBytes.available)
+					    .detail("QueueDiskBytesTotal", queueBytes.total);
+					req.reply.sendError(tlog_stopped());
+				} else {
+					logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
+				}
+			}
 		}
 		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
 			logData->addActor.send(tLogLock(self, reply, logData));
@@ -2999,6 +3028,31 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
+					state double lowDiskWarningStart = now();
+					while (!logData->stopped()) {
+						StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+						StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+						if (self->shouldAcceptNewData(
+						        kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
+							break;
+						}
+						if (now() - lowDiskWarningStart >= 1.0) {
+							TraceEvent(SevWarn, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+							    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
+							    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+							    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+							    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+							    .detail("QueueDiskBytesAvailable", queueBytes.available)
+							    .detail("QueueDiskBytesTotal", queueBytes.total)
+							    .detail("Version", ver);
+							lowDiskWarningStart = now();
+						}
+						wait(delayJittered(.005, TaskPriority::TLogCommit));
+					}
+					if (logData->stopped()) {
+						return Void();
+					}
+
 					commitMessages(self, logData, ver, messages);
 
 					if (self->terminated.isSet()) {
@@ -3038,6 +3092,31 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
 							logData->minKnownCommittedVersion =
 							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
+						}
+
+						state double emptyCommitLowDiskWarningStart = now();
+						while (!logData->stopped()) {
+							StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+							StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+							if (self->shouldAcceptNewData(
+							        kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
+								break;
+							}
+							if (now() - emptyCommitLowDiskWarningStart >= 1.0) {
+								TraceEvent(SevWarn, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+								    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
+								    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+								    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+								    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+								    .detail("QueueDiskBytesAvailable", queueBytes.available)
+								    .detail("QueueDiskBytesTotal", queueBytes.total)
+								    .detail("Version", ver);
+								emptyCommitLowDiskWarningStart = now();
+							}
+							wait(delayJittered(.005, TaskPriority::TLogCommit));
+						}
+						if (logData->stopped()) {
+							return Void();
 						}
 
 						if (self->terminated.isSet()) {
