@@ -448,7 +448,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyRangeArray_Future
 		return JNI_NULL;
 	}
 
-	jobjectArray kr_values = jenv->NewObjectArray(count, keyrange_class, NULL);
+	jobjectArray kr_values = jenv->NewObjectArray(count, keyrange_class, nullptr);
 	if (!kr_values) {
 		if (!jenv->ExceptionOccurred())
 			throwOutOfMem(jenv);
@@ -600,7 +600,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		return JNI_NULL;
 	}
 
-	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, NULL);
+	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, nullptr);
 	if (!mrr_values) {
 		if (!jenv->ExceptionOccurred())
 			throwOutOfMem(jenv);
