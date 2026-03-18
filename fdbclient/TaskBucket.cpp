@@ -553,7 +553,7 @@ public:
 
 	static Future<Void> watchPaused(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> paused) {
 		while (true) {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			auto tr = makeReference<ReadYourWritesTransaction>(cx);
 			Error err;
 			try {
 				taskBucket->setOptions(tr);
@@ -562,6 +562,7 @@ public:
 				Future<Void> watchPausedFuture = tr->watch(taskBucket->pauseKey);
 				co_await tr->commit();
 				co_await watchPausedFuture;
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
