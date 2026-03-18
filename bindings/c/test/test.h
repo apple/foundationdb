@@ -42,8 +42,9 @@ double getTime() {
 }
 
 void writeKey(uint8_t** dest, int key, int keySize) {
-	*dest = (uint8_t*)malloc((sizeof(uint8_t)) * keySize);
-	snprintf((char*)*dest, keySize, "%0*d", keySize, key);
+	size_t bufsize = keySize + 1;
+	*dest = (uint8_t*)malloc(bufsize);
+	snprintf((char*)*dest, bufsize, "%0*d", keySize, key);
 }
 
 uint8_t** generateKeys(int numKeys, int keySize) {
