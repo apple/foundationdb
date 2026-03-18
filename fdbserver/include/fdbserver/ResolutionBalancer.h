@@ -1,5 +1,5 @@
 /*
- * ResolutionBalancer.actor.h
+ * ResolutionBalancer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,22 +18,17 @@
  * limitations under the License.
  */
 
-#include "fdbclient/CommitProxyInterface.h"
-#include "fdbserver/core/ResolverInterface.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESOLUTION_BALANCER_G_H)
-#define FDBSERVER_RESOLUTION_BALANCER_G_H
-#include "fdbserver/ResolutionBalancer.actor.g.h"
-#elif !defined(FDBSERVER_RESOLUTION_BALANCER_H)
-#define FDBSERVER_RESOLUTION_BALANCER_H
+#pragma once
 
+#include "fdbclient/CommitProxyInterface.h"
 #include <set>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/MasterInterface.h"
+#include "fdbserver/core/ResolverInterface.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h" // must be last include
 
 struct __attribute__((swift_attr("import_reference"))) __attribute__((swift_attr("retain:immortal")))
 __attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
@@ -61,6 +56,3 @@ __attribute__((swift_attr("release:immortal"))) ResolutionBalancer {
 
 	void setChangesInReply(UID requestingProxy, GetCommitVersionReply& rep);
 };
-
-#include "flow/unactorcompiler.h"
-#endif
