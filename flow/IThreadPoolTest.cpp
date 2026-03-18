@@ -1,5 +1,5 @@
 /*
- * IThreadPoolTest.actor.cpp
+ * IThreadPoolTest.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,8 +26,8 @@
 #include <pthread.h>
 #include <iostream>
 
+#include "flow/Coroutines.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 void forceLinkIThreadPoolTests() {}
 
@@ -60,7 +60,7 @@ struct ThreadNameReceiver final : IThreadPoolReceiver {
 TEST_CASE("/flow/IThreadPool/NamedThread") {
 	noUnseed = true;
 
-	state Reference<IThreadPool> pool = createGenericThreadPool();
+	Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadNameReceiver(), "thread-foo");
 
 	// Warning: this action is a little racy with the call to `pthread_setname_np`. In practice,
@@ -71,15 +71,13 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 	auto fut = a->name.getFuture();
 	pool->post(a);
 
-	std::string name = wait(fut);
+	std::string name = co_await fut;
 	if (name != "thread-foo") {
 		std::cout << "Incorrect thread name: " << name << std::endl;
 		ASSERT(false);
 	}
 
-	wait(pool->stop());
-
-	return Void();
+	co_await pool->stop();
 }
 
 struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
@@ -117,27 +115,26 @@ private:
 TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	noUnseed = true;
 
-	state std::unique_ptr<ThreadReturnPromiseStream<std::string>> notifications(
-	    new ThreadReturnPromiseStream<std::string>());
+	std::unique_ptr<ThreadReturnPromiseStream<std::string>> notifications(new ThreadReturnPromiseStream<std::string>());
 
-	state Reference<IThreadPool> pool = createGenericThreadPool();
+	Reference<IThreadPool> pool = createGenericThreadPool();
 	pool->addThread(new ThreadSafePromiseStreamSender(notifications.get()), "thread-foo");
 
 	// Warning: this action is a little racy with the call to `pthread_setname_np`. In practice,
 	// ~nothing should depend on the thread name being set instantaneously. If this test ever
 	// flakes, we can make `startThread` in platform a little bit more complex to clearly order
 	// the actions.
-	state int num = 3;
+	int num = 3;
 	for (int i = 0; i < num; ++i) {
 		auto* a = new ThreadSafePromiseStreamSender::GetNameAction();
 		pool->post(a);
 	}
 
-	state ThreadFutureStream<std::string> futs = notifications->getFuture();
+	ThreadFutureStream<std::string> futs = notifications->getFuture();
 
-	state int n = 0;
+	int n = 0;
 	while (n < num) {
-		std::string name = waitNext(futs);
+		std::string name = co_await futs;
 		if (name != "thread-foo") {
 			std::cout << "Incorrect thread name: " << name << std::endl;
 			ASSERT(false);
@@ -151,15 +148,13 @@ TEST_CASE("/flow/IThreadPool/ThreadReturnPromiseStream") {
 	pool->post(faultyAction);
 
 	try {
-		std::string name = waitNext(futs);
+		std::string name = co_await futs;
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT(e.isInjectedFault());
 	}
 
-	wait(pool->stop());
-
-	return Void();
+	co_await pool->stop();
 }
 
 struct MockReceiver : public IThreadPoolReceiver {
@@ -194,24 +189,22 @@ Reference<IThreadPool> initTestPool() {
 TEST_CASE("/flow/IThreadPool/ExplicitStop") {
 	noUnseed = true;
 
-	state Reference<IThreadPool> pool = initTestPool();
+	Reference<IThreadPool> pool = initTestPool();
 	auto task = new MockTask();
 	auto future = task->promise.getFuture();
 	pool->post(task);
-	wait(future);
-	wait(pool->stop());
-	return Void();
+	co_await future;
+	co_await pool->stop();
 }
 
 TEST_CASE("/flow/IThreadPool/ImplicitStop") {
 	noUnseed = true;
 
-	state Reference<IThreadPool> pool = initTestPool();
+	Reference<IThreadPool> pool = initTestPool();
 	auto task = new MockTask();
 	auto future = task->promise.getFuture();
 	pool->post(task);
-	wait(future);
-	return Void();
+	co_await future;
 }
 
 #else

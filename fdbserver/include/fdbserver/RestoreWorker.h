@@ -1,5 +1,5 @@
 /*
- * RestoreWorker.actor.h
+ * RestoreWorker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTOREWORKER_G_H)
-#define FDBSERVER_RESTOREWORKER_G_H
-#include "fdbserver/RestoreWorker.actor.g.h"
-#elif !defined(FDBSERVER_RESTOREWORKER_H)
-#define FDBSERVER_RESTOREWORKER_H
 
 #include "fdbclient/Tuple.h"
 #include "flow/flow.h"
@@ -39,8 +34,6 @@
 #include "fdbserver/RestoreLoader.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
-
-#include "flow/actorcompiler.h" // must be last include
 
 // Each restore worker (a process) is assigned for a role.
 // MAYBE Later: We will support multiple restore roles on a worker
@@ -69,6 +62,3 @@ struct RestoreWorkerData : NonCopyable, public ReferenceCounted<RestoreWorkerDat
 		return ss.str();
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_RESTOREWORKER_H
