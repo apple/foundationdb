@@ -113,7 +113,7 @@ enum class DDAuditContext : uint8_t {
 };
 
 struct DDAudit {
-	DDAudit(AuditStorageState coreState)
+	explicit(false) DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0), overallSkippedDoAuditCount(0),
 	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX), context(DDAuditContext::INVALID) {}
@@ -415,7 +415,7 @@ struct DDBulkDumpJobManager {
 	std::map<Key, BulkLoadManifest> taskManifestMap;
 
 	DDBulkDumpJobManager() = default;
-	DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
+	explicit DDBulkDumpJobManager(const BulkDumpState& jobState) : jobState(jobState) {}
 
 	bool isValid() const { return jobState.isValid(); }
 };
