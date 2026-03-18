@@ -327,33 +327,31 @@ Future<Void> remoteRecovered(Reference<AsyncVar<ServerDBInfo> const> db) {
 Future<Void> debugCheckCoalescing(Database cx) {
 	Transaction tr(cx);
 	loop {
-		{
-			Error err;
-			try {
-				RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+		Error err;
+		try {
+			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
-				int i{ 0 };
-				for (i = 0; i < serverList.size(); i++) {
-					UID id = decodeServerListValue(serverList[i].value).id();
-					RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
-					ASSERT(ranges.end()[-1].key == allKeys.end);
+			int i{ 0 };
+			for (i = 0; i < serverList.size(); i++) {
+				UID id = decodeServerListValue(serverList[i].value).id();
+				RangeResult ranges = co_await krmGetRanges(&tr, serverKeysPrefixFor(id), allKeys);
+				ASSERT(ranges.end()[-1].key == allKeys.end);
 
-					for (int j = 0; j < ranges.size() - 2; j++)
-						if (ranges[j].value == ranges[j + 1].value)
-							TraceEvent(SevError, "UncoalescedValues", id)
-							    .detail("Key1", ranges[j].key)
-							    .detail("Key2", ranges[j + 1].key)
-							    .detail("Value", ranges[j].value);
-				}
-
-				TraceEvent("DoneCheckingCoalescing").log();
-				co_return;
-			} catch (Error& e) {
-				err = e;
+				for (int j = 0; j < ranges.size() - 2; j++)
+					if (ranges[j].value == ranges[j + 1].value)
+						TraceEvent(SevError, "UncoalescedValues", id)
+						    .detail("Key1", ranges[j].key)
+						    .detail("Key2", ranges[j + 1].key)
+						    .detail("Value", ranges[j].value);
 			}
-			co_await tr.onError(err);
+
+			TraceEvent("DoneCheckingCoalescing").log();
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -589,29 +587,27 @@ public:
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
-					if (!mode.present()) {
-						co_return;
-					}
-					BinaryReader rd(mode.get(), Unversioned());
-					int ddMode = 1;
-					rd >> ddMode;
-					if (ddMode != 2) {
-						co_return;
-					}
-					co_await checkMoveKeysLockReadOnly(&tr, self->context->lock, self->context->ddEnabledState.get());
-					tr.reset();
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+			Error err;
+			bool hasErr = false;
+			try {
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
+				if (!mode.present()) {
+					co_return;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
+				BinaryReader rd(mode.get(), Unversioned());
+				int ddMode = 1;
+				rd >> ddMode;
+				if (ddMode != 2) {
+					co_return;
 				}
+				co_await checkMoveKeysLockReadOnly(&tr, self->context->lock, self->context->ddEnabledState.get());
+				tr.reset();
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -740,23 +736,21 @@ public:
 			Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 			Transaction tr(cx);
 			loop {
-				{
-					Error err;
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						for (UID& dataMoveID : self->initData->toCleanDataMoveTombstone) {
-							currentID = dataMoveID;
-							tr.clear(dataMoveKeyFor(currentID));
-							TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
-						}
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
+				Error err;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					for (UID& dataMoveID : self->initData->toCleanDataMoveTombstone) {
+						currentID = dataMoveID;
+						tr.clear(dataMoveKeyFor(currentID));
+						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
 					}
-					co_await tr.onError(err);
+					co_await tr.commit();
+					break;
+				} catch (Error& e) {
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -1066,47 +1060,42 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 		Database cx = self->txnProcessor->context();
 		Transaction tr(cx);
 		BulkLoadTaskState newBulkLoadTaskState;
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-				std::vector<BulkLoadPhase> phase;
-				co_await store(
-				    newBulkLoadTaskState,
-				    getBulkLoadTask(&tr,
-				                    taskRange,
-				                    taskId,
-				                    { BulkLoadPhase::Submitted, BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
-				newBulkLoadTaskState.phase = BulkLoadPhase::Triggered;
-				newBulkLoadTaskState.clearDataMoveId();
-				newBulkLoadTaskState.restartCount = newBulkLoadTaskState.restartCount + 1;
-				newBulkLoadTaskState.triggerTime = now();
-				co_await krmSetRange(&tr,
-				                     bulkLoadTaskPrefix,
-				                     newBulkLoadTaskState.getRange(),
-				                     bulkLoadTaskStateValue(newBulkLoadTaskState));
-				co_await tr.commit();
-				Version commitVersion = tr.getCommittedVersion();
-				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistTriggerState", self->ddId)
-				    .detail("CommitVersion", commitVersion)
-				    .detail("TaskID", newBulkLoadTaskState.getTaskId())
-				    .detail("JobID", newBulkLoadTaskState.getJobId());
-				ASSERT(commitVersion != invalidVersion);
-				co_return std::make_pair(newBulkLoadTaskState, commitVersion);
-
-			} catch (Error& e) {
-				err = e;
-			}
-			if (err.code() != error_code_actor_cancelled) {
-				TraceEvent(SevWarn, "DDBulkLoadTaskPersistTriggerStateError", self->ddId)
-				    .errorUnsuppressed(err)
-				    .detail("TaskID", newBulkLoadTaskState.getTaskId())
-				    .detail("JobID", newBulkLoadTaskState.getJobId());
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
+			std::vector<BulkLoadPhase> phase;
+			co_await store(
+			    newBulkLoadTaskState,
+			    getBulkLoadTask(&tr,
+			                    taskRange,
+			                    taskId,
+			                    { BulkLoadPhase::Submitted, BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
+			newBulkLoadTaskState.phase = BulkLoadPhase::Triggered;
+			newBulkLoadTaskState.clearDataMoveId();
+			newBulkLoadTaskState.restartCount = newBulkLoadTaskState.restartCount + 1;
+			newBulkLoadTaskState.triggerTime = now();
+			co_await krmSetRange(
+			    &tr, bulkLoadTaskPrefix, newBulkLoadTaskState.getRange(), bulkLoadTaskStateValue(newBulkLoadTaskState));
+			co_await tr.commit();
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistTriggerState", self->ddId)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("TaskID", newBulkLoadTaskState.getTaskId())
+			    .detail("JobID", newBulkLoadTaskState.getJobId());
+			ASSERT(commitVersion != invalidVersion);
+			co_return std::make_pair(newBulkLoadTaskState, commitVersion);
+		} catch (Error& e) {
+			err = e;
 		}
+		if (err.code() != error_code_actor_cancelled) {
+			TraceEvent(SevWarn, "DDBulkLoadTaskPersistTriggerStateError", self->ddId)
+			    .errorUnsuppressed(err)
+			    .detail("TaskID", newBulkLoadTaskState.getTaskId())
+			    .detail("JobID", newBulkLoadTaskState.getJobId());
+		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -1119,39 +1108,37 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 	Transaction tr(cx);
 	BulkLoadTaskState bulkLoadTaskState;
 	loop {
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-				co_await store(
-				    bulkLoadTaskState,
-				    getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
-				bulkLoadTaskState.phase = BulkLoadPhase::Error;
-				bulkLoadTaskState.setCancelledDataMovePriority(cancelledDataMovePriority);
-				ASSERT(taskRange == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
-				ASSERT(normalKeys.contains(taskRange));
-				co_await krmSetRange(
-				    &tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState));
-				co_await tr.commit();
-				Version commitVersion = tr.getCommittedVersion();
-				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistErrorState", self->ddId)
-				    .detail("CommitVersion", commitVersion)
-				    .detail("TaskID", bulkLoadTaskState.getTaskId())
-				    .detail("JobID", bulkLoadTaskState.getJobId());
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			if (err.code() != error_code_actor_cancelled) {
-				TraceEvent(SevWarn, "DDBulkLoadTaskPersistErrorStateError", self->ddId)
-				    .errorUnsuppressed(err)
-				    .detail("TaskID", bulkLoadTaskState.getTaskId())
-				    .detail("JobID", bulkLoadTaskState.getJobId());
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
+			co_await store(
+			    bulkLoadTaskState,
+			    getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
+			bulkLoadTaskState.phase = BulkLoadPhase::Error;
+			bulkLoadTaskState.setCancelledDataMovePriority(cancelledDataMovePriority);
+			ASSERT(taskRange == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
+			ASSERT(normalKeys.contains(taskRange));
+			co_await krmSetRange(
+			    &tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState));
+			co_await tr.commit();
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskPersistErrorState", self->ddId)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("TaskID", bulkLoadTaskState.getTaskId())
+			    .detail("JobID", bulkLoadTaskState.getJobId());
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		if (err.code() != error_code_actor_cancelled) {
+			TraceEvent(SevWarn, "DDBulkLoadTaskPersistErrorStateError", self->ddId)
+			    .errorUnsuppressed(err)
+			    .detail("TaskID", bulkLoadTaskState.getTaskId())
+			    .detail("JobID", bulkLoadTaskState.getJobId());
+		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -1252,49 +1239,46 @@ Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRan
 	Transaction tr(cx);
 	BulkLoadTaskState bulkLoadTask;
 	loop {
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				co_await store(bulkLoadTask, getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Acknowledged }));
-				co_await krmSetRangeCoalescing(
-				    &tr, bulkLoadTaskPrefix, taskRange, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
-				co_await tr.commit();
-				Version commitVersion = tr.getCommittedVersion();
-				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskEraseState", self->ddId)
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			co_await store(bulkLoadTask, getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Acknowledged }));
+			co_await krmSetRangeCoalescing(
+			    &tr, bulkLoadTaskPrefix, taskRange, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
+			co_await tr.commit();
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskEraseState", self->ddId)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("TaskRange", taskRange)
+			    .detail("TaskID", taskId);
+			self->bulkLoadTaskCollection->eraseTask(bulkLoadTask);
+			Optional<int> cancelledDataMovePriority = bulkLoadTask.getCancelledDataMovePriority();
+			if (cancelledDataMovePriority.present() &&
+			    cancelledDataMovePriority.get() != SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
+				// When cancelledDataMovePriority is set, we want to issue a data move. For details, see comments at
+				// cancelledDataMovePriority of BulkLoadTaskState.
+				self->triggerShardBulkLoading.send(BulkLoadShardRequest(bulkLoadTask, cancelledDataMovePriority.get()));
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskTriggerShardDatamove", self->ddId)
 				    .detail("CommitVersion", commitVersion)
 				    .detail("TaskRange", taskRange)
 				    .detail("TaskID", taskId);
-				self->bulkLoadTaskCollection->eraseTask(bulkLoadTask);
-				Optional<int> cancelledDataMovePriority = bulkLoadTask.getCancelledDataMovePriority();
-				if (cancelledDataMovePriority.present() &&
-				    cancelledDataMovePriority.get() != SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
-					// When cancelledDataMovePriority is set, we want to issue a data move. For details, see comments at
-					// cancelledDataMovePriority of BulkLoadTaskState.
-					self->triggerShardBulkLoading.send(
-					    BulkLoadShardRequest(bulkLoadTask, cancelledDataMovePriority.get()));
-					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskTriggerShardDatamove", self->ddId)
-					    .detail("CommitVersion", commitVersion)
-					    .detail("TaskRange", taskRange)
-					    .detail("TaskID", taskId);
-				}
-				break;
-			} catch (Error& e) {
-				err = e;
 			}
-			if (err.code() != error_code_actor_cancelled) {
-				TraceEvent(SevWarn, "DDBulkLoadTaskEraseStateError", self->ddId)
-				    .errorUnsuppressed(err)
-				    .detail("TaskRange", taskRange)
-				    .detail("TaskID", taskId);
-			}
-			if (err.code() == error_code_bulkload_task_outdated) {
-				// Silently exit
-				break;
-			}
-			co_await tr.onError(err);
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		if (err.code() != error_code_actor_cancelled) {
+			TraceEvent(SevWarn, "DDBulkLoadTaskEraseStateError", self->ddId)
+			    .errorUnsuppressed(err)
+			    .detail("TaskRange", taskRange)
+			    .detail("TaskID", taskId);
+		}
+		if (err.code() == error_code_bulkload_task_outdated) {
+			// Silently exit
+			break;
+		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -1310,73 +1294,70 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	std::vector<Future<Void>> bulkLoadActors;
 	KeyRange range;
 	while (beginKey < endKey) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				result.clear();
-				co_await store(
-				    result,
-				    krmGetRanges(
-				        &tr, bulkLoadTaskPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
-				i = 0;
-				for (; i < result.size() - 1; i++) {
-					if (result[i].value.empty()) {
-						continue;
-					}
-					range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
-					bulkLoadTaskState = decodeBulkLoadTaskState(result[i].value);
-					if (!bulkLoadTaskState.isValid()) {
-						co_await delay(0.1);
-						continue;
-					}
-					if (range != bulkLoadTaskState.getRange()) {
-						// This task is outdated
-						co_await delay(0.1);
-						continue;
-					}
-					if (bulkLoadTaskState.phase == BulkLoadPhase::Submitted ||
-					    bulkLoadTaskState.phase == BulkLoadPhase::Triggered ||
-					    bulkLoadTaskState.phase == BulkLoadPhase::Running) {
-						// Limit parallelism
-						loop {
-							if (self->bulkLoadEngineParallelismLimitor.canStart()) {
-								break;
-							}
-							co_await self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged();
+		Error err;
+		bool hasErr = false;
+		try {
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			result.clear();
+			co_await store(
+			    result,
+			    krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
+			i = 0;
+			for (; i < result.size() - 1; i++) {
+				if (result[i].value.empty()) {
+					continue;
+				}
+				range = Standalone(KeyRangeRef(result[i].key, result[i + 1].key));
+				bulkLoadTaskState = decodeBulkLoadTaskState(result[i].value);
+				if (!bulkLoadTaskState.isValid()) {
+					co_await delay(0.1);
+					continue;
+				}
+				if (range != bulkLoadTaskState.getRange()) {
+					// This task is outdated
+					co_await delay(0.1);
+					continue;
+				}
+				if (bulkLoadTaskState.phase == BulkLoadPhase::Submitted ||
+				    bulkLoadTaskState.phase == BulkLoadPhase::Triggered ||
+				    bulkLoadTaskState.phase == BulkLoadPhase::Running) {
+					// Limit parallelism
+					loop {
+						if (self->bulkLoadEngineParallelismLimitor.canStart()) {
+							break;
 						}
-						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSchedule", self->ddId)
-						    .detail("Range", bulkLoadTaskState.getRange())
-						    .detail("TaskID", bulkLoadTaskState.getTaskId())
-						    .detail("Phase", bulkLoadTaskState.phase);
-						bulkLoadActors.push_back(
-						    doBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
-					} else if (bulkLoadTaskState.phase == BulkLoadPhase::Acknowledged) {
-						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskClearMetadata", self->ddId)
-						    .detail("Range", bulkLoadTaskState.getRange())
-						    .detail("TaskID", bulkLoadTaskState.getTaskId());
-						// We do one metadata erase at a time to aviod unnecessary transaction conflicts
-						co_await eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId());
-					} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
-						TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
-						    .detail("Range", bulkLoadTaskState.getRange())
-						    .detail("TaskID", bulkLoadTaskState.getTaskId());
-					} else {
-						ASSERT(bulkLoadTaskState.phase == BulkLoadPhase::Complete);
+						co_await self->bulkLoadEngineParallelismLimitor.waitUntilCounterChanged();
 					}
+					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskSchedule", self->ddId)
+					    .detail("Range", bulkLoadTaskState.getRange())
+					    .detail("TaskID", bulkLoadTaskState.getTaskId())
+					    .detail("Phase", bulkLoadTaskState.phase);
+					bulkLoadActors.push_back(
+					    doBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId()));
+				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Acknowledged) {
+					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadTaskClearMetadata", self->ddId)
+					    .detail("Range", bulkLoadTaskState.getRange())
+					    .detail("TaskID", bulkLoadTaskState.getTaskId());
+					// We do one metadata erase at a time to aviod unnecessary transaction conflicts
+					co_await eraseBulkLoadTask(self, bulkLoadTaskState.getRange(), bulkLoadTaskState.getTaskId());
+				} else if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadTaskUnretriableError", self->ddId)
+					    .detail("Range", bulkLoadTaskState.getRange())
+					    .detail("TaskID", bulkLoadTaskState.getTaskId());
+				} else {
+					ASSERT(bulkLoadTaskState.phase == BulkLoadPhase::Complete);
 				}
-				beginKey = result.back().key;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				co_await tr.onError(err);
+			beginKey = result.back().key;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
 			}
+			co_await tr.onError(err);
 		}
 	}
 	co_await waitForAll(bulkLoadActors);
@@ -1471,38 +1452,36 @@ Future<Optional<BulkLoadTaskState>> bulkLoadJobFindTask(Reference<DataDistributo
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
 	loop {
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				BulkLoadJobState checkJobState =
-				    co_await getBulkLoadJob(&tr, jobId, jobRange); // Make sure the current job is the input one
-				ASSERT(!range.empty());
-				RangeResult result = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, range);
-				// The task map has been initialized when submitBulkLoadJob, so we check the invariant here.
-				ASSERT(!result[0].value.empty() && result.size() == 2);
-				bulkLoadTaskState = decodeBulkLoadTaskState(result[0].value);
-				if (!bulkLoadTaskState.isValid()) {
-					co_return Optional<BulkLoadTaskState>();
-				}
-				KeyRange currentRange = Standalone(KeyRangeRef(result[0].key, result[1].key));
-				ASSERT(result[0].key != result[1].key);
-				if (bulkLoadTaskState.getRange() != currentRange) {
-					TraceEvent(SevError, "DDBulkLoadJobExecutorFindRangeMismatch", logId)
-					    .detail("InputRange", range)
-					    .detail("InputJobID", jobId)
-					    .detail("CurrentRange", currentRange)
-					    .detail("TaskRange", bulkLoadTaskState.getRange())
-					    .detail("TaskID", bulkLoadTaskState.getTaskId())
-					    .detail("JobID", bulkLoadTaskState.getJobId());
-					ASSERT(false);
-				}
-				break;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			BulkLoadJobState checkJobState =
+			    co_await getBulkLoadJob(&tr, jobId, jobRange); // Make sure the current job is the input one
+			ASSERT(!range.empty());
+			RangeResult result = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, range);
+			// The task map has been initialized when submitBulkLoadJob, so we check the invariant here.
+			ASSERT(!result[0].value.empty() && result.size() == 2);
+			bulkLoadTaskState = decodeBulkLoadTaskState(result[0].value);
+			if (!bulkLoadTaskState.isValid()) {
+				co_return Optional<BulkLoadTaskState>();
 			}
-			co_await tr.onError(err);
+			KeyRange currentRange = Standalone(KeyRangeRef(result[0].key, result[1].key));
+			ASSERT(result[0].key != result[1].key);
+			if (bulkLoadTaskState.getRange() != currentRange) {
+				TraceEvent(SevError, "DDBulkLoadJobExecutorFindRangeMismatch", logId)
+				    .detail("InputRange", range)
+				    .detail("InputJobID", jobId)
+				    .detail("CurrentRange", currentRange)
+				    .detail("TaskRange", bulkLoadTaskState.getRange())
+				    .detail("TaskID", bulkLoadTaskState.getTaskId())
+				    .detail("JobID", bulkLoadTaskState.getJobId());
+				ASSERT(false);
+			}
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 	co_return bulkLoadTaskState;
 }
@@ -1517,28 +1496,26 @@ Future<BulkLoadTaskState> bulkLoadJobSubmitTask(Reference<DataDistributor> self,
 	// We define the task range is the range of the min begin key and the max end key among all input manifests
 	BulkLoadTaskState bulkLoadTask(jobId, manifests, taskRange);
 	loop {
-		{
-			Error err;
-			try {
-				// At any time, there must be at most one bulkload job
-				co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-				co_await setBulkLoadSubmissionTransaction(&tr, bulkLoadTask);
-				// setBulkLoadSubmissionTransaction shuts down traffic to the range
-				co_await tr.commit();
-				Version commitVersion = tr.getCommittedVersion();
-				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorSubmitTask", self->ddId)
-				    .detail("InputJobID", jobId)
-				    .detail("ManifestCount", manifests.size())
-				    .detail("TaskID", bulkLoadTask.getTaskId())
-				    .detail("TaskRange", bulkLoadTask.getRange())
-				    .detail("TaskJobID", bulkLoadTask.getJobId())
-				    .detail("CommitVersion", commitVersion);
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			// At any time, there must be at most one bulkload job
+			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
+			co_await setBulkLoadSubmissionTransaction(&tr, bulkLoadTask);
+			// setBulkLoadSubmissionTransaction shuts down traffic to the range
+			co_await tr.commit();
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorSubmitTask", self->ddId)
+			    .detail("InputJobID", jobId)
+			    .detail("ManifestCount", manifests.size())
+			    .detail("TaskID", bulkLoadTask.getTaskId())
+			    .detail("TaskRange", bulkLoadTask.getRange())
+			    .detail("TaskJobID", bulkLoadTask.getJobId())
+			    .detail("CommitVersion", commitVersion);
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 	co_return bulkLoadTask;
 }
@@ -1748,37 +1725,35 @@ Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self) {
 	uint64_t taskCount = jobState.getTaskCount().get();
 	BulkLoadJobState currentJobState;
 	loop {
-		{
-			Error err;
-			try {
-				co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
-				if (currentJobState.getTaskCount().present()) {
-					if (currentJobState.getTaskCount().get() != taskCount) {
-						TraceEvent(SevError, "DDBulkLoadJobManagerFindTaskCountMismatch", self->ddId)
-						    .detail("JobID", jobId)
-						    .detail("JobRange", jobRange)
-						    .detail("InputTaskCount", taskCount)
-						    .detail("CurrentJobID", currentJobState.getJobId())
-						    .detail("CurrentJobRange", currentJobState.getJobRange());
-						ASSERT(false);
-					}
-					co_return;
+		Error err;
+		try {
+			co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
+			if (currentJobState.getTaskCount().present()) {
+				if (currentJobState.getTaskCount().get() != taskCount) {
+					TraceEvent(SevError, "DDBulkLoadJobManagerFindTaskCountMismatch", self->ddId)
+					    .detail("JobID", jobId)
+					    .detail("JobRange", jobRange)
+					    .detail("InputTaskCount", taskCount)
+					    .detail("CurrentJobID", currentJobState.getJobId())
+					    .detail("CurrentJobRange", currentJobState.getJobRange());
+					ASSERT(false);
 				}
-				currentJobState.setTaskCount(taskCount);
-				co_await krmSetRange(&tr, bulkLoadJobPrefix, jobRange, bulkLoadJobValue(currentJobState));
-				co_await tr.commit();
-				Version commitVersion = tr.getCommittedVersion();
-				TraceEvent(SevInfo, "DDBulkLoadJobManagerPersistTaskCountToJobMetadata", self->ddId)
-				    .detail("JobID", jobId)
-				    .detail("JobRange", jobRange)
-				    .detail("CommitVersion", commitVersion)
-				    .detail("TaskCount", taskCount);
-				break;
-			} catch (Error& e) {
-				err = e;
+				co_return;
 			}
-			co_await tr.onError(err);
+			currentJobState.setTaskCount(taskCount);
+			co_await krmSetRange(&tr, bulkLoadJobPrefix, jobRange, bulkLoadJobValue(currentJobState));
+			co_await tr.commit();
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(SevInfo, "DDBulkLoadJobManagerPersistTaskCountToJobMetadata", self->ddId)
+			    .detail("JobID", jobId)
+			    .detail("JobRange", jobRange)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("TaskCount", taskCount);
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -1792,24 +1767,22 @@ Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self, std:
 	UID jobId = self->bulkLoadJobManager.get().jobState.getJobId();
 	KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
 	loop {
-		{
-			Error err;
-			try {
-				co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-				co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
-				co_await krmSetRange(
-				    &tr, bulkLoadJobPrefix, currentJobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
-				currentJobState.setErrorPhase(errorMessage);
-				currentJobState.setEndTime(now());
-				co_await addBulkLoadJobToHistory(&tr, currentJobState);
-				co_await releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad);
-				co_await tr.commit();
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
+			co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
+			co_await krmSetRange(
+			    &tr, bulkLoadJobPrefix, currentJobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
+			currentJobState.setErrorPhase(errorMessage);
+			currentJobState.setEndTime(now());
+			co_await addBulkLoadJobToHistory(&tr, currentJobState);
+			co_await releaseExclusiveReadLockOnRange(&tr, jobRange, rangeLockNameForBulkLoad);
+			co_await tr.commit();
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -1825,77 +1798,74 @@ Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> self,
 	double beginTime = now();
 	KeyRange jobRange = self->bulkLoadJobManager.get().jobState.getJobRange();
 	KeyRange manifestMapRange;
-	{
-		Error caughtErr;
-		bool hasCaughtErr = false;
-		try {
-			if (!fileExists(abspath(localJobManifestFilePath))) {
-				TraceEvent(SevDebug, "DDBulkLoadJobManagerDownloadJobManifest", self->ddId)
-				    .detail("JobTransportMethod", jobTransportMethod)
-				    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-				    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
-				co_await downloadBulkLoadJobManifestFile(
-				    jobTransportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId);
-				TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestDownloaded", self->ddId)
-				    .detail("JobTransportMethod", jobTransportMethod)
-				    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-				    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-				    .detail("Duration", now() - beginTime);
-			}
-			// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
-			// This job manifest file stores all remote manifest filepath per range.
-			// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-			co_await store(manifestMapRange,
-			               getBulkLoadJobFileManifestEntryFromJobManifestFile(
-			                   localJobManifestFilePath,
-			                   jobRange,
-			                   self->ddId,
-			                   /*output=*/self->bulkLoadJobManager.get().manifestEntryMap));
-			// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
-			// range. In this case, we give up the bulkload job immediately without loading any range..
-			if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
-				TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerManifestMapRangeMismatch", self->ddId)
-				    .detail("JobRange", jobRange)
-				    .detail("ManifestMapRange", manifestMapRange);
-				throw bulkload_dataset_not_cover_required_range();
-			}
-			self->bulkLoadJobManager.get().jobState.setTaskCount(
-			    self->bulkLoadJobManager.get().manifestEntryMap->size());
-			TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestMapBuilt", self->ddId)
+	Error caughtErr;
+	bool hasCaughtErr = false;
+	try {
+		if (!fileExists(abspath(localJobManifestFilePath))) {
+			TraceEvent(SevDebug, "DDBulkLoadJobManagerDownloadJobManifest", self->ddId)
+			    .detail("JobTransportMethod", jobTransportMethod)
+			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath);
+			co_await downloadBulkLoadJobManifestFile(
+			    jobTransportMethod, localJobManifestFilePath, remoteJobManifestFilePath, self->ddId);
+			TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestDownloaded", self->ddId)
 			    .detail("JobTransportMethod", jobTransportMethod)
 			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
 			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-			    .detail("TaskCount", self->bulkLoadJobManager.get().manifestEntryMap->size())
 			    .detail("Duration", now() - beginTime);
-		} catch (Error& e) {
-			caughtErr = e;
-			hasCaughtErr = true;
 		}
-		if (hasCaughtErr) {
-			if (caughtErr.code() == error_code_actor_cancelled) {
-				throw caughtErr;
-			}
-			Error err = caughtErr;
-			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretryableError", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("JobTransportMethod", jobTransportMethod)
-			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-			    .detail("Duration", now() - beginTime);
-			std::string errorMessage = "Failed to build job-manifest map with error code " +
-			                           std::to_string(err.code()) + ". The remote file path is " +
-			                           remoteJobManifestFilePath + ". The local file path is " +
-			                           localJobManifestFilePath + ". The transport method is " +
-			                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
-			co_await moveErrorBulkLoadJobToHistory(self, errorMessage);
-			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretryableError", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("JobTransportMethod", jobTransportMethod)
-			    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
-			    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
-			    .detail("Duration", now() - beginTime);
-			throw err;
+		// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
+		// This job manifest file stores all remote manifest filepath per range.
+		// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
+		co_await store(manifestMapRange,
+		               getBulkLoadJobFileManifestEntryFromJobManifestFile(
+		                   localJobManifestFilePath,
+		                   jobRange,
+		                   self->ddId,
+		                   /*output=*/self->bulkLoadJobManager.get().manifestEntryMap));
+		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
+		// range. In this case, we give up the bulkload job immediately without loading any range..
+		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
+			TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerManifestMapRangeMismatch", self->ddId)
+			    .detail("JobRange", jobRange)
+			    .detail("ManifestMapRange", manifestMapRange);
+			throw bulkload_dataset_not_cover_required_range();
 		}
+		self->bulkLoadJobManager.get().jobState.setTaskCount(self->bulkLoadJobManager.get().manifestEntryMap->size());
+		TraceEvent(SevInfo, "DDBulkLoadJobManagerManifestMapBuilt", self->ddId)
+		    .detail("JobTransportMethod", jobTransportMethod)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+		    .detail("TaskCount", self->bulkLoadJobManager.get().manifestEntryMap->size())
+		    .detail("Duration", now() - beginTime);
+	} catch (Error& e) {
+		caughtErr = e;
+		hasCaughtErr = true;
+	}
+	if (hasCaughtErr) {
+		if (caughtErr.code() == error_code_actor_cancelled) {
+			throw caughtErr;
+		}
+		Error err = caughtErr;
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindUnretryableError", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("JobTransportMethod", jobTransportMethod)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+		    .detail("Duration", now() - beginTime);
+		std::string errorMessage = "Failed to build job-manifest map with error code " + std::to_string(err.code()) +
+		                           ". The remote file path is " + remoteJobManifestFilePath +
+		                           ". The local file path is " + localJobManifestFilePath +
+		                           ". The transport method is " +
+		                           convertBulkLoadTransportMethodToString(jobTransportMethod) + ".";
+		co_await moveErrorBulkLoadJobToHistory(self, errorMessage);
+		TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerPersistUnretryableError", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("JobTransportMethod", jobTransportMethod)
+		    .detail("LocalJobManifestFilePath", localJobManifestFilePath)
+		    .detail("RemoteJobManifestFilePath", remoteJobManifestFilePath)
+		    .detail("Duration", now() - beginTime);
+		throw err;
 	}
 }
 
@@ -2338,91 +2308,87 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 	std::vector<Future<Void>> actors;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				bulkDumpResult.clear();
-				co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
-				// We rely on random assignment of shards for the load balancing. Also, there is a flow lock to prevent
-				// SS from being overloaded.
-				bulkDumpResultIndex = 0;
-				for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
-					if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
-						beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
-						continue;
-					}
-					bulkDumpRange = Standalone(KeyRangeRef(bulkDumpResult[bulkDumpResultIndex].key,
-					                                       bulkDumpResult[bulkDumpResultIndex + 1].key));
-					bulkDumpState = decodeBulkDumpState(bulkDumpResult[bulkDumpResultIndex].value);
-					if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
-						TraceEvent(SevWarn, "DDBulkDumpJobScheduleJobOutdated", self->ddId)
-						    .detail("JobId", jobId)
-						    .detail("CurrentJob", bulkDumpState.getJobId());
-						throw bulkdump_task_outdated();
-					}
-					if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
-						TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
-						    .setMaxEventLength(-1)
-						    .setMaxFieldLength(-1)
-						    .detail("JobId", jobId)
-						    .detail("NumShard", rangeLocations.size())
-						    .detail("RangeToRead", rangeToRead)
-						    .detail("BulkDumpRange", bulkDumpRange)
-						    .detail("DumpState", bulkDumpState.toString())
-						    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key);
-						beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
-						continue;
-					}
-					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
-					// Partition the job in the unit of shard
-					co_await store(rangeLocations,
-					               self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange));
-					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobScheduleJobPartition", self->ddId)
+		Error err;
+		bool hasErr = false;
+		try {
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			bulkDumpResult.clear();
+			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			// We rely on random assignment of shards for the load balancing. Also, there is a flow lock to prevent
+			// SS from being overloaded.
+			bulkDumpResultIndex = 0;
+			for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
+				if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
+					beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
+					continue;
+				}
+				bulkDumpRange = Standalone(
+				    KeyRangeRef(bulkDumpResult[bulkDumpResultIndex].key, bulkDumpResult[bulkDumpResultIndex + 1].key));
+				bulkDumpState = decodeBulkDumpState(bulkDumpResult[bulkDumpResultIndex].value);
+				if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
+					TraceEvent(SevWarn, "DDBulkDumpJobScheduleJobOutdated", self->ddId)
+					    .detail("JobId", jobId)
+					    .detail("CurrentJob", bulkDumpState.getJobId());
+					throw bulkdump_task_outdated();
+				}
+				if (bulkDumpState.getPhase() == BulkDumpPhase::Complete) {
+					TraceEvent(SevDebug, "DDBulkDumpJobScheduleJobSeeCompleteTask", self->ddId)
+					    .setMaxEventLength(-1)
+					    .setMaxFieldLength(-1)
 					    .detail("JobId", jobId)
 					    .detail("NumShard", rangeLocations.size())
 					    .detail("RangeToRead", rangeToRead)
 					    .detail("BulkDumpRange", bulkDumpRange)
-					    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
-					    .detail("EndKey", rangeLocations.back().range.end);
-					rangeLocationIndex = 0;
-					for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
-						// Spawn task per shard
-						taskRange = rangeLocations[rangeLocationIndex].range;
-						ASSERT(!taskRange.empty());
-						// Limit parallelism
-						loop {
-							if (self->bulkDumpParallelismLimitor.canStart()) {
-								break;
-							}
-							co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
+					    .detail("DumpState", bulkDumpState.toString())
+					    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key);
+					beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
+					continue;
+				}
+				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
+				// Partition the job in the unit of shard
+				co_await store(rangeLocations, self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange));
+				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobScheduleJobPartition", self->ddId)
+				    .detail("JobId", jobId)
+				    .detail("NumShard", rangeLocations.size())
+				    .detail("RangeToRead", rangeToRead)
+				    .detail("BulkDumpRange", bulkDumpRange)
+				    .detail("BeginKey", bulkDumpResult[bulkDumpResultIndex].key)
+				    .detail("EndKey", rangeLocations.back().range.end);
+				rangeLocationIndex = 0;
+				for (; rangeLocationIndex < rangeLocations.size(); ++rangeLocationIndex) {
+					// Spawn task per shard
+					taskRange = rangeLocations[rangeLocationIndex].range;
+					ASSERT(!taskRange.empty());
+					// Limit parallelism
+					loop {
+						if (self->bulkDumpParallelismLimitor.canStart()) {
+							break;
 						}
-						SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
-						                                        bulkDumpState.generateRangeTask(taskRange));
-						// Issue task
-						TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobSpawnRange", self->ddId)
-						    .detail("JobID", jobId)
-						    .detail("TargetSS", task.targetServer.id())
-						    .detail("TaskJobID", bulkDumpState.getJobId())
-						    .detail("TaskRange", taskRange)
-						    .detail("TaskID", task.bulkDumpState.getTaskId());
-						actors.push_back(
-						    doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
+						co_await self->bulkDumpParallelismLimitor.waitUntilCounterChanged();
 					}
-					beginKey = rangeLocations.back().range.end;
-					break;
+					SSBulkDumpTask task = getSSBulkDumpTask(rangeLocations[rangeLocationIndex].servers,
+					                                        bulkDumpState.generateRangeTask(taskRange));
+					// Issue task
+					TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobSpawnRange", self->ddId)
+					    .detail("JobID", jobId)
+					    .detail("TargetSS", task.targetServer.id())
+					    .detail("TaskJobID", bulkDumpState.getJobId())
+					    .detail("TaskRange", taskRange)
+					    .detail("TaskID", task.bulkDumpState.getTaskId());
+					actors.push_back(doBulkDumpTask(self, task.targetServer, task.bulkDumpState, task.checksumServers));
 				}
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				beginKey = rangeLocations.back().range.end;
+				break;
 			}
-			if (hasErr) {
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				co_await tr.onError(err);
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
 			}
+			co_await tr.onError(err);
 		}
 	}
 	co_await waitForAll(actors);
@@ -2440,32 +2406,30 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 	KeyRange rangeToRead;
 	Transaction tr(cx);
 	while (beginKey < endKey) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				bulkDumpResult.clear();
-				co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
-				for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
-					ASSERT(!bulkDumpResult[i].value.empty());
-					bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
-					if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
-						throw bulkdump_task_outdated();
-					}
-					if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
-						ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
-						co_return false;
-					}
+		Error err;
+		bool hasErr = false;
+		try {
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			bulkDumpResult.clear();
+			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+				ASSERT(!bulkDumpResult[i].value.empty());
+				bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
+				if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
+					throw bulkdump_task_outdated();
 				}
-				beginKey = bulkDumpResult.back().key;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				if (bulkDumpState.getPhase() != BulkDumpPhase::Complete) {
+					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
+					co_return false;
+				}
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			beginKey = bulkDumpResult.back().key;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 	co_return true;
@@ -2549,42 +2513,40 @@ Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 	Transaction tr(cx);
 	self->bulkDumpJobManager.taskManifestMap.clear();
 	while (beginKey < endKey) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				bulkDumpResult.clear();
-				co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
-				for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
-					ASSERT(!bulkDumpResult[i].value.empty());
-					BulkDumpState bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
-					if (bulkDumpState.getJobId() != jobId) {
-						throw bulkdump_task_outdated();
-					}
-					ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Complete &&
-					       bulkDumpState.getManifest().getRange() ==
-					           KeyRangeRef(bulkDumpResult[i].key, bulkDumpResult[i + 1].key));
-					// Important! This is how to build job manifest file.
-					// The taskManifestMap is a sorted map. Each item is a manifest. The key of the item is the beginkey
-					// of the manifest. The endkey of the manifest must be the map key of the next item. When doing
-					// bulkload job, we decode the map in the same way. Please check scheduleBulkLoadJob where we decode
-					// the job manifest file.
-					auto res = self->bulkDumpJobManager.taskManifestMap.insert(
-					    { bulkDumpState.getManifest().getBeginKey(), bulkDumpState.getManifest() });
-					ASSERT(res.second);
+		Error err;
+		bool hasErr = false;
+		try {
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			bulkDumpResult.clear();
+			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+				ASSERT(!bulkDumpResult[i].value.empty());
+				BulkDumpState bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
+				if (bulkDumpState.getJobId() != jobId) {
+					throw bulkdump_task_outdated();
 				}
-				beginKey = bulkDumpResult.back().key;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Complete &&
+				       bulkDumpState.getManifest().getRange() ==
+				           KeyRangeRef(bulkDumpResult[i].key, bulkDumpResult[i + 1].key));
+				// Important! This is how to build job manifest file.
+				// The taskManifestMap is a sorted map. Each item is a manifest. The key of the item is the beginkey
+				// of the manifest. The endkey of the manifest must be the map key of the next item. When doing
+				// bulkload job, we decode the map in the same way. Please check scheduleBulkLoadJob where we decode
+				// the job manifest file.
+				auto res = self->bulkDumpJobManager.taskManifestMap.insert(
+				    { bulkDumpState.getManifest().getBeginKey(), bulkDumpState.getManifest() });
+				ASSERT(res.second);
 			}
-			if (hasErr) {
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				co_await tr.onError(err);
+			beginKey = bulkDumpResult.back().key;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
 			}
+			co_await tr.onError(err);
 		}
 	}
 	ASSERT(!self->bulkDumpJobManager.taskManifestMap.empty());
@@ -2594,16 +2556,14 @@ Future<Optional<BulkDumpState>> getAliveBulkDumpJob(Database cx) {
 	Transaction tr(cx);
 	Optional<BulkDumpState> res;
 	loop {
-		{
-			Error err;
-			try {
-				co_await store(res, getSubmittedBulkDumpJob(&tr));
-				break;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			co_await store(res, getSubmittedBulkDumpJob(&tr));
+			break;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 	co_return res;
 }
@@ -2707,265 +2667,259 @@ Future<Void> dataDistribution(Reference<DataDistributor> self,
 		// when tracker is cancelled
 		KeyRangeMap<ShardTrackedData> shards;
 		Promise<UID> removeFailedServer;
-		{
-			Error caughtErr;
-			bool hasCaughtErr = false;
-			try {
-				co_await DataDistributor::init(self);
+		Error caughtErr;
+		bool hasCaughtErr = false;
+		try {
+			co_await DataDistributor::init(self);
 
-				TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
+			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Metadata Initialized");
 
-				PromiseStream<Promise<int64_t>> getAverageShardBytes;
-				PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
-				PromiseStream<Promise<int>> getUnhealthyRelocationCount;
-				PromiseStream<GetMetricsRequest> getShardMetrics;
-				PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
-				Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
-				Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
+			PromiseStream<Promise<int64_t>> getAverageShardBytes;
+			PromiseStream<RebalanceStorageQueueRequest> triggerStorageQueueRebalance;
+			PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+			PromiseStream<GetMetricsRequest> getShardMetrics;
+			PromiseStream<GetTopKMetricsRequest> getTopKShardMetrics;
+			Reference<AsyncVar<bool>> processingUnhealthy(new AsyncVar<bool>(false));
+			Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
-				self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
-				self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-				self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
-				co_await self->resumeRelocations();
+			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
+			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
+			self->bulkLoadTaskCollection = makeReference<BulkLoadTaskCollection>(self->ddId);
+			co_await self->resumeRelocations();
 
-				TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Relocation Resumed");
+			TraceEvent(SevInfo, "DataDistributionInitProgress", self->ddId).detail("Phase", "Relocation Resumed");
 
-				std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
-				Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
-				std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
+			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
+			Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
+			std::vector<Reference<AsyncVar<bool>>> zeroHealthyTeams; // primary and remote
 
+			tcis.push_back(TeamCollectionInterface());
+			zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
+			ASSERT(self->configuration.storageTeamSize > 0);
+			int replicaSize = self->configuration.storageTeamSize;
+
+			std::vector<Future<Void>> actors;
+			actors.push_back(self->onConfigChange);
+
+			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
+				replicaSize = 2 * self->configuration.storageTeamSize;
+
 				zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
-				ASSERT(self->configuration.storageTeamSize > 0);
-				int replicaSize = self->configuration.storageTeamSize;
+				anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
+				actors.push_back(anyTrue(zeroHealthyTeams, anyZeroHealthyTeams));
+			} else {
+				anyZeroHealthyTeams = zeroHealthyTeams[0];
+			}
 
-				std::vector<Future<Void>> actors;
-				actors.push_back(self->onConfigChange);
+			actors.push_back(self->pollMoveKeysLock());
 
-				if (self->configuration.usableRegions > 1) {
-					tcis.push_back(TeamCollectionInterface());
-					replicaSize = 2 * self->configuration.storageTeamSize;
+			self->context->tracker = makeReference<DataDistributionTracker>(
+			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
+			                                       .distributorId = self->ddId,
+			                                       .readyToStart = self->initialized,
+			                                       .output = self->relocationProducer,
+			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                                       .physicalShardCollection = self->physicalShardCollection,
+			                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			                                       .shards = &shards,
+			                                       .trackerCancelled = &self->context->trackerCancelled,
+			                                       .usableRegions = self->configuration.usableRegions });
+			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
+			                                                                 self->initData,
+			                                                                 getShardMetrics.getFuture(),
+			                                                                 getTopKShardMetrics.getFuture(),
+			                                                                 getShardMetricsList.getFuture(),
+			                                                                 getAverageShardBytes.getFuture(),
+			                                                                 triggerStorageQueueRebalance.getFuture(),
+			                                                                 self->triggerShardBulkLoading.getFuture()),
+			                                    "DDTracker",
+			                                    self->ddId,
+			                                    &normalDDQueueErrors()));
 
-					zeroHealthyTeams.push_back(makeReference<AsyncVar<bool>>(true));
-					anyZeroHealthyTeams = makeReference<AsyncVar<bool>>(true);
-					actors.push_back(anyTrue(zeroHealthyTeams, anyZeroHealthyTeams));
-				} else {
-					anyZeroHealthyTeams = zeroHealthyTeams[0];
-				}
+			self->context->ddQueue = makeReference<DDQueue>(
+			    DDQueueInitParams{ .id = self->ddId,
+			                       .lock = self->lock,
+			                       .db = self->txnProcessor,
+			                       .teamCollections = tcis,
+			                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                       .physicalShardCollection = self->physicalShardCollection,
+			                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
+			                       .getAverageShardBytes = getAverageShardBytes,
+			                       .teamSize = replicaSize,
+			                       .singleRegionTeamSize = self->configuration.storageTeamSize,
+			                       .relocationProducer = self->relocationProducer,
+			                       .relocationConsumer = self->relocationConsumer.getFuture(),
+			                       .getShardMetrics = getShardMetrics,
+			                       .getTopKMetrics = getTopKShardMetrics });
+			actors.push_back(reportErrorsExcept(DDQueue::run(self->context->ddQueue,
+			                                                 processingUnhealthy,
+			                                                 processingWiggle,
+			                                                 getUnhealthyRelocationCount.getFuture(),
+			                                                 self->context->ddEnabledState.get()),
+			                                    "DDQueue",
+			                                    self->ddId,
+			                                    &normalDDQueueErrors()));
 
-				actors.push_back(self->pollMoveKeysLock());
-
-				self->context->tracker = makeReference<DataDistributionTracker>(
-				    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
-				                                       .distributorId = self->ddId,
-				                                       .readyToStart = self->initialized,
-				                                       .output = self->relocationProducer,
-				                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-				                                       .physicalShardCollection = self->physicalShardCollection,
-				                                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-				                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
-				                                       .shards = &shards,
-				                                       .trackerCancelled = &self->context->trackerCancelled,
-				                                       .usableRegions = self->configuration.usableRegions });
-				actors.push_back(
-				    reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
-				                                                    self->initData,
-				                                                    getShardMetrics.getFuture(),
-				                                                    getTopKShardMetrics.getFuture(),
-				                                                    getShardMetricsList.getFuture(),
-				                                                    getAverageShardBytes.getFuture(),
-				                                                    triggerStorageQueueRebalance.getFuture(),
-				                                                    self->triggerShardBulkLoading.getFuture()),
-				                       "DDTracker",
-				                       self->ddId,
-				                       &normalDDQueueErrors()));
-
-				self->context->ddQueue = makeReference<DDQueue>(
-				    DDQueueInitParams{ .id = self->ddId,
-				                       .lock = self->lock,
-				                       .db = self->txnProcessor,
-				                       .teamCollections = tcis,
-				                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
-				                       .physicalShardCollection = self->physicalShardCollection,
-				                       .bulkLoadTaskCollection = self->bulkLoadTaskCollection,
-				                       .getAverageShardBytes = getAverageShardBytes,
-				                       .teamSize = replicaSize,
-				                       .singleRegionTeamSize = self->configuration.storageTeamSize,
-				                       .relocationProducer = self->relocationProducer,
-				                       .relocationConsumer = self->relocationConsumer.getFuture(),
-				                       .getShardMetrics = getShardMetrics,
-				                       .getTopKMetrics = getTopKShardMetrics });
-				actors.push_back(reportErrorsExcept(DDQueue::run(self->context->ddQueue,
-				                                                 processingUnhealthy,
-				                                                 processingWiggle,
-				                                                 getUnhealthyRelocationCount.getFuture(),
-				                                                 self->context->ddEnabledState.get()),
-				                                    "DDQueue",
-				                                    self->ddId,
-				                                    &normalDDQueueErrors()));
-
-				std::vector<DDTeamCollection*> teamCollectionsPtrs;
-				self->context->primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
-				    self->txnProcessor,
-				    self->ddId,
-				    self->lock,
-				    self->relocationProducer,
-				    self->shardsAffectedByTeamFailure,
-				    self->configuration,
-				    self->primaryDcId,
-				    self->configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(),
-				    self->initialized.getFuture(),
-				    zeroHealthyTeams[0],
-				    IsPrimary::True,
-				    processingUnhealthy,
-				    processingWiggle,
-				    getShardMetrics,
-				    removeFailedServer,
-				    getUnhealthyRelocationCount,
-				    getAverageShardBytes,
-				    triggerStorageQueueRebalance,
-				    self->bulkLoadTaskCollection });
-				teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
-				Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
-				if (!isMocked) {
-					recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
-					    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
-				}
-				if (self->configuration.usableRegions > 1) {
-					self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
-					    DDTeamCollectionInitParams{ self->txnProcessor,
-					                                self->ddId,
-					                                self->lock,
-					                                self->relocationProducer,
-					                                self->shardsAffectedByTeamFailure,
-					                                self->configuration,
-					                                self->remoteDcIds,
-					                                Optional<std::vector<Optional<Key>>>(),
-					                                self->initialized.getFuture() && remoteRecovered(self->dbInfo),
-					                                zeroHealthyTeams[1],
-					                                IsPrimary::False,
-					                                processingUnhealthy,
-					                                processingWiggle,
-					                                getShardMetrics,
-					                                removeFailedServer,
-					                                getUnhealthyRelocationCount,
-					                                getAverageShardBytes,
-					                                triggerStorageQueueRebalance,
-					                                self->bulkLoadTaskCollection });
-					teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
-					self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
-					actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
-					                                                          self->initData,
-					                                                          tcis[1],
-					                                                          recruitStorage,
-					                                                          *self->context->ddEnabledState.get()),
-					                                    "DDTeamCollectionSecondary",
-					                                    self->ddId,
-					                                    &normalDDQueueErrors()));
-					actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->remoteTeamCollection));
-				}
-				self->context->primaryTeamCollection->teamCollections = teamCollectionsPtrs;
-				self->teamCollection = self->context->primaryTeamCollection.getPtr();
-				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->primaryTeamCollection,
+			std::vector<DDTeamCollection*> teamCollectionsPtrs;
+			self->context->primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
+			    self->txnProcessor,
+			    self->ddId,
+			    self->lock,
+			    self->relocationProducer,
+			    self->shardsAffectedByTeamFailure,
+			    self->configuration,
+			    self->primaryDcId,
+			    self->configuration.usableRegions > 1 ? self->remoteDcIds : std::vector<Optional<Key>>(),
+			    self->initialized.getFuture(),
+			    zeroHealthyTeams[0],
+			    IsPrimary::True,
+			    processingUnhealthy,
+			    processingWiggle,
+			    getShardMetrics,
+			    removeFailedServer,
+			    getUnhealthyRelocationCount,
+			    getAverageShardBytes,
+			    triggerStorageQueueRebalance,
+			    self->bulkLoadTaskCollection });
+			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
+			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
+			if (!isMocked) {
+				recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
+				    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
+			}
+			if (self->configuration.usableRegions > 1) {
+				self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
+				    DDTeamCollectionInitParams{ self->txnProcessor,
+				                                self->ddId,
+				                                self->lock,
+				                                self->relocationProducer,
+				                                self->shardsAffectedByTeamFailure,
+				                                self->configuration,
+				                                self->remoteDcIds,
+				                                Optional<std::vector<Optional<Key>>>(),
+				                                self->initialized.getFuture() && remoteRecovered(self->dbInfo),
+				                                zeroHealthyTeams[1],
+				                                IsPrimary::False,
+				                                processingUnhealthy,
+				                                processingWiggle,
+				                                getShardMetrics,
+				                                removeFailedServer,
+				                                getUnhealthyRelocationCount,
+				                                getAverageShardBytes,
+				                                triggerStorageQueueRebalance,
+				                                self->bulkLoadTaskCollection });
+				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
+				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
+				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
 				                                                          self->initData,
-				                                                          tcis[0],
+				                                                          tcis[1],
 				                                                          recruitStorage,
 				                                                          *self->context->ddEnabledState.get()),
-				                                    "DDTeamCollectionPrimary",
+				                                    "DDTeamCollectionSecondary",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
-
-				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->primaryTeamCollection));
-				actors.push_back(yieldPromiseStream(self->relocationProducer.getFuture(), self->relocationConsumer));
-				if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
-					actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
-				}
-
-				if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
-					TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
-					    .detail("UsableRegions", self->configuration.usableRegions);
-					self->bulkLoadEnabled = true;
-					if (self->configuration.usableRegions > 1) {
-						// The core actor to handle bulkload tasks
-						actors.push_back(
-						    bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-						// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
-						actors.push_back(
-						    bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
-					} else {
-						actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
-						actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
-					}
-				} else {
-					self->bulkLoadTaskCollection->removeBulkLoadJobRange();
-				}
-
-				// Always spawn bulkDumpCore - it will dynamically check the mode
-				// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
-				// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
-				// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
-				TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
-				    .detail("UsableRegions", self->configuration.usableRegions)
-				    .detail("InitialMode", self->initData->bulkDumpMode);
-				actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
-
-				co_await waitForAll(actors);
-				ASSERT_WE_THINK(false);
-				co_return;
-			} catch (Error& e) {
-				caughtErr = e;
-				hasCaughtErr = true;
+				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->remoteTeamCollection));
 			}
-			if (hasCaughtErr) {
-				self->context->tracker.clear();
-				self->context->ddQueue.clear();
-				self->context->markTrackerCancelled();
-				Error err = caughtErr;
-				TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(caughtErr);
-				std::vector<UID> teamForDroppedRange;
-				if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
-					// Choose a random healthy team to host the to-be-dropped range.
-					const UID serverID = removeFailedServer.getFuture().get();
-					std::vector<UID> pTeam = self->context->primaryTeamCollection->getRandomHealthyTeam(serverID);
-					teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
-					if (self->configuration.usableRegions > 1) {
-						std::vector<UID> rTeam = self->context->remoteTeamCollection->getRandomHealthyTeam(serverID);
-						teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
-					}
-				}
-				self->teamCollection = nullptr;
-				self->context->primaryTeamCollection = Reference<DDTeamCollection>();
-				self->context->remoteTeamCollection = Reference<DDTeamCollection>();
-				if (err.code() == error_code_actor_cancelled) {
-					// When cancelled, we cannot clear asynchronously because
-					// this will result in invalid memory access. This should only
-					// be an issue in simulation.
-					if (!g_network->isSimulated()) {
-						TraceEvent(SevWarn, "DataDistributorCancelled");
-					}
-					shards.clear();
-					throw caughtErr;
-				} else {
-					co_await shards.clearAsync();
-				}
-				TraceEvent("DataDistributorTeamCollectionsDestroyed", self->ddId).error(err);
-				if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
-					TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
-					co_await self->removeKeysFromFailedServer(removeFailedServer.getFuture().get(),
-					                                          teamForDroppedRange);
-					co_await self->removeStorageServer(removeFailedServer.getFuture().get());
-				} else {
-					if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
-						throw err;
-					}
+			self->context->primaryTeamCollection->teamCollections = teamCollectionsPtrs;
+			self->teamCollection = self->context->primaryTeamCollection.getPtr();
+			actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->primaryTeamCollection,
+			                                                          self->initData,
+			                                                          tcis[0],
+			                                                          recruitStorage,
+			                                                          *self->context->ddEnabledState.get()),
+			                                    "DDTeamCollectionPrimary",
+			                                    self->ddId,
+			                                    &normalDDQueueErrors()));
 
-					bool ddEnabled = co_await self->isDataDistributionEnabled();
-					TraceEvent("DataDistributionError", self->ddId)
-					    .error(err)
-					    .detail("DataDistributionEnabled", ddEnabled);
-					if (ddEnabled) {
-						throw err;
-					}
+			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->primaryTeamCollection));
+			actors.push_back(yieldPromiseStream(self->relocationProducer.getFuture(), self->relocationConsumer));
+			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
+				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
+			}
+
+			if (bulkLoadIsEnabled(self->initData->bulkLoadMode)) {
+				TraceEvent(SevInfo, "DDBulkLoadModeEnabled", self->ddId)
+				    .detail("UsableRegions", self->configuration.usableRegions);
+				self->bulkLoadEnabled = true;
+				if (self->configuration.usableRegions > 1) {
+					// The core actor to handle bulkload tasks
+					actors.push_back(
+					    bulkLoadTaskCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+					// The core actor to convert a bulkload job to tasks which are executed by bulkLoadTaskCore
+					actors.push_back(
+					    bulkLoadJobCore(self, self->initialized.getFuture() && remoteRecovered(self->dbInfo)));
+				} else {
+					actors.push_back(bulkLoadTaskCore(self, self->initialized.getFuture()));
+					actors.push_back(bulkLoadJobCore(self, self->initialized.getFuture()));
+				}
+			} else {
+				self->bulkLoadTaskCollection->removeBulkLoadJobRange();
+			}
+
+			// Always spawn bulkDumpCore - it will dynamically check the mode
+			// NOTE: BulkDump does NOT require remoteRecovered() in HA configurations.
+			// BulkDump is read-only: it reads from primary DC and writes to external storage (S3).
+			// Waiting for remoteRecovered() caused hangs when remote DC couldn't form teams.
+			TraceEvent(SevInfo, "DDBulkDumpCoreSpawned", self->ddId)
+			    .detail("UsableRegions", self->configuration.usableRegions)
+			    .detail("InitialMode", self->initData->bulkDumpMode);
+			actors.push_back(bulkDumpCore(self, self->initialized.getFuture()));
+
+			co_await waitForAll(actors);
+			ASSERT_WE_THINK(false);
+			co_return;
+		} catch (Error& e) {
+			caughtErr = e;
+			hasCaughtErr = true;
+		}
+		if (hasCaughtErr) {
+			self->context->tracker.clear();
+			self->context->ddQueue.clear();
+			self->context->markTrackerCancelled();
+			Error err = caughtErr;
+			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(caughtErr);
+			std::vector<UID> teamForDroppedRange;
+			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				// Choose a random healthy team to host the to-be-dropped range.
+				const UID serverID = removeFailedServer.getFuture().get();
+				std::vector<UID> pTeam = self->context->primaryTeamCollection->getRandomHealthyTeam(serverID);
+				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
+				if (self->configuration.usableRegions > 1) {
+					std::vector<UID> rTeam = self->context->remoteTeamCollection->getRandomHealthyTeam(serverID);
+					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
+				}
+			}
+			self->teamCollection = nullptr;
+			self->context->primaryTeamCollection = Reference<DDTeamCollection>();
+			self->context->remoteTeamCollection = Reference<DDTeamCollection>();
+			if (err.code() == error_code_actor_cancelled) {
+				// When cancelled, we cannot clear asynchronously because
+				// this will result in invalid memory access. This should only
+				// be an issue in simulation.
+				if (!g_network->isSimulated()) {
+					TraceEvent(SevWarn, "DataDistributorCancelled");
+				}
+				shards.clear();
+				throw caughtErr;
+			} else {
+				co_await shards.clearAsync();
+			}
+			TraceEvent("DataDistributorTeamCollectionsDestroyed", self->ddId).error(err);
+			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
+				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
+				co_await self->removeKeysFromFailedServer(removeFailedServer.getFuture().get(), teamForDroppedRange);
+				co_await self->removeStorageServer(removeFailedServer.getFuture().get());
+			} else {
+				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
+					throw err;
+				}
+
+				bool ddEnabled = co_await self->isDataDistributionEnabled();
+				TraceEvent("DataDistributionError", self->ddId).error(err).detail("DataDistributionEnabled", ddEnabled);
+				if (ddEnabled) {
+					throw err;
 				}
 			}
 		}
@@ -3037,134 +2991,130 @@ Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> getSta
 	Transaction tr(cx);
 	DatabaseConfiguration configuration;
 	loop {
-		{
-			Error err;
-			try {
-				// necessary options
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		Error err;
+		try {
+			// necessary options
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-				// get database configuration
-				DatabaseConfiguration _configuration = co_await getDatabaseConfiguration(&tr);
-				configuration = _configuration;
+			// get database configuration
+			DatabaseConfiguration _configuration = co_await getDatabaseConfiguration(&tr);
+			configuration = _configuration;
 
-				// get storages
-				RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-				std::vector<StorageServerInterface> storageServers;
-				storageServers.reserve(serverList.size());
-				for (int i = 0; i < serverList.size(); i++)
-					storageServers.push_back(decodeServerListValue(serverList[i].value));
+			// get storages
+			RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+			std::vector<StorageServerInterface> storageServers;
+			storageServers.reserve(serverList.size());
+			for (int i = 0; i < serverList.size(); i++)
+				storageServers.push_back(decodeServerListValue(serverList[i].value));
 
-				// get workers
-				std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
-				for (const auto& worker : workers) {
-					workersMap[worker.interf.address()] = worker.interf;
-				}
-
-				Optional<Value> regionsValue = co_await tr.get("usable_regions"_sr.withPrefix(configKeysPrefix));
-				int usableRegions = 1;
-				if (regionsValue.present()) {
-					usableRegions = atoi(regionsValue.get().toString().c_str());
-				}
-				auto masterDcId = dbInfo->get().master.locality.dcId();
-				int storageFailures = 0;
-				for (const auto& server : storageServers) {
-					TraceEvent(SevDebug, "StorageServerDcIdInfo")
-					    .detail("Address", server.address().toString())
-					    .detail("ServerLocalityID", server.locality.dcId())
-					    .detail("MasterDcID", masterDcId);
-					if (usableRegions == 1 || server.locality.dcId() == masterDcId) {
-						auto itr = workersMap.find(server.address());
-						if (itr == workersMap.end()) {
-							TraceEvent(SevWarn, "GetStorageWorkers")
-							    .detail("Reason", "Could not find worker for storage server")
-							    .detail("SS", server.id());
-							++storageFailures;
-						} else {
-							if (result.contains(server.address())) {
-								ASSERT(itr->second.id() == result[server.address()].first.id());
-								if (result[server.address()].second.find("storage") == std::string::npos)
-									result[server.address()].second.append(",storage");
-							} else {
-								result[server.address()] = std::make_pair(itr->second, "storage");
-							}
-						}
-					}
-				}
-
-				*storageFaultTolerance = std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
-				                                  configuration.storageTeamSize - 1) -
-				                         storageFailures;
-				if (*storageFaultTolerance < 0) {
-					CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
-					throw snap_storage_failed();
-				}
-
-				for (const auto& tlog : *tlogs) {
-					TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
-					if (workersMap.find(tlog.address()) == workersMap.end()) {
-						TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
-						throw snap_tlog_failed();
-					}
-					if (result.contains(tlog.address())) {
-						ASSERT(workersMap[tlog.address()].id() == result[tlog.address()].first.id());
-						result[tlog.address()].second.append(",tlog");
-					} else {
-						result[tlog.address()] = std::make_pair(workersMap[tlog.address()], "tlog");
-					}
-				}
-
-				Optional<Value> coordinators = co_await tr.get(coordinatorsKey);
-				if (!coordinators.present()) {
-					CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
-					throw operation_failed();
-				}
-				ClusterConnectionString ccs(coordinators.get().toString());
-				std::vector<NetworkAddress> coordinatorsAddr = co_await ccs.tryResolveHostnames();
-				std::set<NetworkAddress> coordinatorsAddrSet(coordinatorsAddr.begin(), coordinatorsAddr.end());
-				for (const auto& worker : workers) {
-					// Note : only considers second address for coordinators,
-					// as we use primary addresses from storage and tlog interfaces above
-					NetworkAddress primary = worker.interf.address();
-					Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
-					if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
-					    (secondary.present() &&
-					     (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
-						if (result.contains(primary)) {
-							ASSERT(workersMap[primary].id() == result[primary].first.id());
-							result[primary].second.append(",coord");
-						} else {
-							result[primary] = std::make_pair(workersMap[primary], "coord");
-						}
-					}
-				}
-				if (SERVER_KNOBS->SNAPSHOT_ALL_STATEFUL_PROCESSES) {
-					for (const auto& worker : workers) {
-						const auto& processAddress = worker.interf.address();
-						// skip processes that are already included
-						if (result.contains(processAddress))
-							continue;
-						const auto& processClassType = worker.processClass.classType();
-						// coordinators are always configured to be recruited
-						if (processClassType == ProcessClass::StorageClass) {
-							result[processAddress] = std::make_pair(worker.interf, "storage");
-							TraceEvent(SevInfo, "SnapUnRecruitedStorageProcess")
-							    .detail("ProcessAddress", processAddress);
-						} else if (processClassType == ProcessClass::TransactionClass ||
-						           processClassType == ProcessClass::LogClass) {
-							result[processAddress] = std::make_pair(worker.interf, "tlog");
-							TraceEvent(SevInfo, "SnapUnRecruitedLogProcess").detail("ProcessAddress", processAddress);
-						}
-					}
-				}
-				co_return result;
-			} catch (Error& e) {
-				err = e;
+			// get workers
+			std::vector<WorkerDetails> workers = co_await getWorkers(dbInfo);
+			for (const auto& worker : workers) {
+				workersMap[worker.interf.address()] = worker.interf;
 			}
-			co_await tr.onError(err);
-			result.clear();
+
+			Optional<Value> regionsValue = co_await tr.get("usable_regions"_sr.withPrefix(configKeysPrefix));
+			int usableRegions = 1;
+			if (regionsValue.present()) {
+				usableRegions = atoi(regionsValue.get().toString().c_str());
+			}
+			auto masterDcId = dbInfo->get().master.locality.dcId();
+			int storageFailures = 0;
+			for (const auto& server : storageServers) {
+				TraceEvent(SevDebug, "StorageServerDcIdInfo")
+				    .detail("Address", server.address().toString())
+				    .detail("ServerLocalityID", server.locality.dcId())
+				    .detail("MasterDcID", masterDcId);
+				if (usableRegions == 1 || server.locality.dcId() == masterDcId) {
+					auto itr = workersMap.find(server.address());
+					if (itr == workersMap.end()) {
+						TraceEvent(SevWarn, "GetStorageWorkers")
+						    .detail("Reason", "Could not find worker for storage server")
+						    .detail("SS", server.id());
+						++storageFailures;
+					} else {
+						if (result.contains(server.address())) {
+							ASSERT(itr->second.id() == result[server.address()].first.id());
+							if (result[server.address()].second.find("storage") == std::string::npos)
+								result[server.address()].second.append(",storage");
+						} else {
+							result[server.address()] = std::make_pair(itr->second, "storage");
+						}
+					}
+				}
+			}
+
+			*storageFaultTolerance = std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
+			                                  configuration.storageTeamSize - 1) -
+			                         storageFailures;
+			if (*storageFaultTolerance < 0) {
+				CODE_PROBE(true, "Too many failed storage servers to complete snapshot", probe::decoration::rare);
+				throw snap_storage_failed();
+			}
+
+			for (const auto& tlog : *tlogs) {
+				TraceEvent(SevDebug, "GetStatefulWorkersTLog").detail("Addr", tlog.address());
+				if (workersMap.find(tlog.address()) == workersMap.end()) {
+					TraceEvent(SevWarn, "MissingTLogWorkerInterface").detail("TlogAddress", tlog.address());
+					throw snap_tlog_failed();
+				}
+				if (result.contains(tlog.address())) {
+					ASSERT(workersMap[tlog.address()].id() == result[tlog.address()].first.id());
+					result[tlog.address()].second.append(",tlog");
+				} else {
+					result[tlog.address()] = std::make_pair(workersMap[tlog.address()], "tlog");
+				}
+			}
+
+			Optional<Value> coordinators = co_await tr.get(coordinatorsKey);
+			if (!coordinators.present()) {
+				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
+				throw operation_failed();
+			}
+			ClusterConnectionString ccs(coordinators.get().toString());
+			std::vector<NetworkAddress> coordinatorsAddr = co_await ccs.tryResolveHostnames();
+			std::set<NetworkAddress> coordinatorsAddrSet(coordinatorsAddr.begin(), coordinatorsAddr.end());
+			for (const auto& worker : workers) {
+				// Note : only considers second address for coordinators,
+				// as we use primary addresses from storage and tlog interfaces above
+				NetworkAddress primary = worker.interf.address();
+				Optional<NetworkAddress> secondary = worker.interf.tLog.getEndpoint().addresses.secondaryAddress;
+				if (coordinatorsAddrSet.find(primary) != coordinatorsAddrSet.end() ||
+				    (secondary.present() && (coordinatorsAddrSet.find(secondary.get()) != coordinatorsAddrSet.end()))) {
+					if (result.contains(primary)) {
+						ASSERT(workersMap[primary].id() == result[primary].first.id());
+						result[primary].second.append(",coord");
+					} else {
+						result[primary] = std::make_pair(workersMap[primary], "coord");
+					}
+				}
+			}
+			if (SERVER_KNOBS->SNAPSHOT_ALL_STATEFUL_PROCESSES) {
+				for (const auto& worker : workers) {
+					const auto& processAddress = worker.interf.address();
+					// skip processes that are already included
+					if (result.contains(processAddress))
+						continue;
+					const auto& processClassType = worker.processClass.classType();
+					// coordinators are always configured to be recruited
+					if (processClassType == ProcessClass::StorageClass) {
+						result[processAddress] = std::make_pair(worker.interf, "storage");
+						TraceEvent(SevInfo, "SnapUnRecruitedStorageProcess").detail("ProcessAddress", processAddress);
+					} else if (processClassType == ProcessClass::TransactionClass ||
+					           processClassType == ProcessClass::LogClass) {
+						result[processAddress] = std::make_pair(worker.interf, "tlog");
+						TraceEvent(SevInfo, "SnapUnRecruitedLogProcess").detail("ProcessAddress", processAddress);
+					}
+				}
+			}
+			co_return result;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
+		result.clear();
 	}
 }
 
@@ -3174,161 +3124,153 @@ Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar
 
 	ReadYourWritesTransaction tr(cx);
 	loop {
-		{
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			TraceEvent("SnapDataDistributor_WriteFlagAttempt")
+			    .detail("SnapPayload", snapReq.snapPayload)
+			    .detail("SnapUID", snapReq.snapUID);
+			tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
+			co_await tr.commit();
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		TraceEvent("SnapDataDistributor_WriteFlagError").error(err);
+		co_await tr.onError(err);
+	}
+	TraceEvent("SnapDataDistributor_SnapReqEnter")
+	    .detail("SnapPayload", snapReq.snapPayload)
+	    .detail("SnapUID", snapReq.snapUID);
+	Error caughtErr;
+	bool hasCaughtErr = false;
+	try {
+		std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
+		std::vector<Future<Void>> disablePops;
+		disablePops.reserve(tlogs.size());
+		for (const auto& tlog : tlogs) {
+			disablePops.push_back(sendSnapReq(
+			    tlog.disablePopRequest, TLogDisablePopRequest{ snapReq.snapUID }, snap_disable_tlog_pop_failed()));
+		}
+		co_await waitForAll(disablePops);
+
+		TraceEvent("SnapDataDistributor_AfterDisableTLogPop")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+
+		int storageFaultTolerance{ 0 };
+		std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
+		    co_await transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance), snap_storage_failed());
+
+		TraceEvent("SnapDataDistributor_GotStatefulWorkers")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID)
+		    .detail("StorageFaultTolerance", storageFaultTolerance);
+
+		// we need to snapshot storage nodes before snapshot any tlogs
+		// FIXME: if it's non-obvious enough to comment about, then also explain why
+		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("storage") != std::string::npos)
+				storageSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr)));
+		}
+		co_await waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed());
+		TraceEvent("SnapDataDistributor_AfterSnapStorage")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+
+		std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
+		tLogSnapReqs.reserve(tlogs.size());
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("tlog") != std::string::npos)
+				tLogSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "tlog"_sr)));
+		}
+		co_await waitForMost(tLogSnapReqs, 0, snap_tlog_failed());
+
+		TraceEvent("SnapDataDistributor_AfterTLogStorage")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+
+		std::vector<Future<Void>> enablePops;
+		enablePops.reserve(tlogs.size());
+		for (const auto& tlog : tlogs) {
+			enablePops.push_back(sendSnapReq(
+			    tlog.enablePopRequest, TLogEnablePopRequest{ snapReq.snapUID }, snap_enable_tlog_pop_failed()));
+		}
+		co_await waitForAll(enablePops);
+
+		TraceEvent("SnapDataDistributor_AfterEnableTLogPops")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+
+		std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
+		for (const auto& [addr, entry] : statefulWorkers) {
+			auto& [interf, role] = entry;
+			if (role.find("coord") != std::string::npos)
+				coordSnapReqs.push_back(trySendSnapReq(
+				    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
+		}
+		// At present, the fault injection workload doesn't respect the KNOB
+		// MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE Consequently, we ignore it in simulation tests
+		auto const coordFaultTolerance = std::min<int>(
+		    std::max<int>(0, (coordSnapReqs.size() - 1) / 2),
+		    g_network->isSimulated() ? coordSnapReqs.size() : SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
+		co_await waitForMost(coordSnapReqs, coordFaultTolerance, snap_coord_failed());
+
+		TraceEvent("SnapDataDistributor_AfterSnapCoords")
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+		tr.reset();
+		loop {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				TraceEvent("SnapDataDistributor_WriteFlagAttempt")
+				TraceEvent("SnapDataDistributor_ClearFlagAttempt")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
-				tr.set(writeRecoveryKey, writeRecoveryKeyTrue);
+				tr.clear(writeRecoveryKey);
 				co_await tr.commit();
 				break;
 			} catch (Error& e) {
 				err = e;
 			}
-			TraceEvent("SnapDataDistributor_WriteFlagError").error(err);
+			TraceEvent("SnapDataDistributor_ClearFlagError").error(err);
 			co_await tr.onError(err);
 		}
+	} catch (Error& err) {
+		caughtErr = err;
+		hasCaughtErr = true;
 	}
-	TraceEvent("SnapDataDistributor_SnapReqEnter")
-	    .detail("SnapPayload", snapReq.snapPayload)
-	    .detail("SnapUID", snapReq.snapUID);
-	{
-		Error caughtErr;
-		bool hasCaughtErr = false;
-		try {
+	if (hasCaughtErr) {
+		Error e = caughtErr;
+		TraceEvent("SnapDataDistributor_SnapReqExit")
+		    .errorUnsuppressed(e)
+		    .detail("SnapPayload", snapReq.snapPayload)
+		    .detail("SnapUID", snapReq.snapUID);
+		if (e.code() == error_code_snap_storage_failed || e.code() == error_code_snap_tlog_failed ||
+		    e.code() == error_code_operation_cancelled || e.code() == error_code_snap_disable_tlog_pop_failed) {
+			// enable tlog pop on local tlog nodes
 			std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
-			std::vector<Future<Void>> disablePops;
-			disablePops.reserve(tlogs.size());
-			for (const auto& tlog : tlogs) {
-				disablePops.push_back(sendSnapReq(
-				    tlog.disablePopRequest, TLogDisablePopRequest{ snapReq.snapUID }, snap_disable_tlog_pop_failed()));
-			}
-			co_await waitForAll(disablePops);
-
-			TraceEvent("SnapDataDistributor_AfterDisableTLogPop")
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-
-			int storageFaultTolerance{ 0 };
-			std::map<NetworkAddress, std::pair<WorkerInterface, std::string>> statefulWorkers =
-			    co_await transformErrors(getStatefulWorkers(cx, db, &tlogs, &storageFaultTolerance),
-			                             snap_storage_failed());
-
-			TraceEvent("SnapDataDistributor_GotStatefulWorkers")
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID)
-			    .detail("StorageFaultTolerance", storageFaultTolerance);
-
-			// we need to snapshot storage nodes before snapshot any tlogs
-			// FIXME: if it's non-obvious enough to comment about, then also explain why
-			std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
-			for (const auto& [addr, entry] : statefulWorkers) {
-				auto& [interf, role] = entry;
-				if (role.find("storage") != std::string::npos)
-					storageSnapReqs.push_back(trySendSnapReq(
-					    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr)));
-			}
-			co_await waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed());
-			TraceEvent("SnapDataDistributor_AfterSnapStorage")
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-
-			std::vector<Future<ErrorOr<Void>>> tLogSnapReqs;
-			tLogSnapReqs.reserve(tlogs.size());
-			for (const auto& [addr, entry] : statefulWorkers) {
-				auto& [interf, role] = entry;
-				if (role.find("tlog") != std::string::npos)
-					tLogSnapReqs.push_back(trySendSnapReq(
-					    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "tlog"_sr)));
-			}
-			co_await waitForMost(tLogSnapReqs, 0, snap_tlog_failed());
-
-			TraceEvent("SnapDataDistributor_AfterTLogStorage")
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-
-			std::vector<Future<Void>> enablePops;
-			enablePops.reserve(tlogs.size());
-			for (const auto& tlog : tlogs) {
-				enablePops.push_back(sendSnapReq(
-				    tlog.enablePopRequest, TLogEnablePopRequest{ snapReq.snapUID }, snap_enable_tlog_pop_failed()));
-			}
-			co_await waitForAll(enablePops);
-
-			TraceEvent("SnapDataDistributor_AfterEnableTLogPops")
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-
-			std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
-			for (const auto& [addr, entry] : statefulWorkers) {
-				auto& [interf, role] = entry;
-				if (role.find("coord") != std::string::npos)
-					coordSnapReqs.push_back(trySendSnapReq(
-					    interf.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
-			}
-			// At present, the fault injection workload doesn't respect the KNOB
-			// MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE Consequently, we ignore it in simulation tests
-			auto const coordFaultTolerance =
-			    std::min<int>(std::max<int>(0, (coordSnapReqs.size() - 1) / 2),
-			                  g_network->isSimulated() ? coordSnapReqs.size()
-			                                           : SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
-			co_await waitForMost(coordSnapReqs, coordFaultTolerance, snap_coord_failed());
-
-			TraceEvent("SnapDataDistributor_AfterSnapCoords")
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-			tr.reset();
-			loop {
-				{
-					Error err;
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-						TraceEvent("SnapDataDistributor_ClearFlagAttempt")
-						    .detail("SnapPayload", snapReq.snapPayload)
-						    .detail("SnapUID", snapReq.snapUID);
-						tr.clear(writeRecoveryKey);
-						co_await tr.commit();
-						break;
-					} catch (Error& e) {
-						err = e;
-					}
-					TraceEvent("SnapDataDistributor_ClearFlagError").error(err);
-					co_await tr.onError(err);
+			try {
+				std::vector<Future<Void>> enablePops;
+				enablePops.reserve(tlogs.size());
+				for (const auto& tlog : tlogs) {
+					enablePops.push_back(transformErrors(
+					    throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))),
+					    snap_enable_tlog_pop_failed()));
 				}
+				co_await waitForAll(enablePops);
+			} catch (Error& error) {
+				TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure").log();
 			}
-		} catch (Error& err) {
-			caughtErr = err;
-			hasCaughtErr = true;
 		}
-		if (hasCaughtErr) {
-			Error e = caughtErr;
-			TraceEvent("SnapDataDistributor_SnapReqExit")
-			    .errorUnsuppressed(e)
-			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID);
-			if (e.code() == error_code_snap_storage_failed || e.code() == error_code_snap_tlog_failed ||
-			    e.code() == error_code_operation_cancelled || e.code() == error_code_snap_disable_tlog_pop_failed) {
-				// enable tlog pop on local tlog nodes
-				std::vector<TLogInterface> tlogs = db->get().logSystemConfig.allLocalLogs(false);
-				try {
-					std::vector<Future<Void>> enablePops;
-					enablePops.reserve(tlogs.size());
-					for (const auto& tlog : tlogs) {
-						enablePops.push_back(transformErrors(
-						    throwErrorOr(tlog.enablePopRequest.tryGetReply(TLogEnablePopRequest(snapReq.snapUID))),
-						    snap_enable_tlog_pop_failed()));
-					}
-					co_await waitForAll(enablePops);
-				} catch (Error& error) {
-					TraceEvent(SevDebug, "IgnoreEnableTLogPopFailure").log();
-				}
-			}
-			throw e;
-		}
+		throw e;
 	}
 }
 
@@ -3350,36 +3292,34 @@ Future<Void> ddSnapCreate(
 		co_return;
 	}
 	try {
-		{
-			auto choice = co_await race(
-			    dbInfoChange, ddSnapCreateCore(snapReq, db), delay(SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT));
-			if (choice.index() == 0) {
+		auto choice =
+		    co_await race(dbInfoChange, ddSnapCreateCore(snapReq, db), delay(SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT));
+		if (choice.index() == 0) {
 
-				TraceEvent("SnapDDCreateDBInfoChanged")
-				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID);
-				ddSnapMap->at(snapReq.snapUID).reply.sendError(snap_with_recovery_unsupported());
-				ddSnapMap->erase(snapReq.snapUID);
-				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(snap_with_recovery_unsupported());
-			} else if (choice.index() == 1) {
+			TraceEvent("SnapDDCreateDBInfoChanged")
+			    .detail("SnapPayload", snapReq.snapPayload)
+			    .detail("SnapUID", snapReq.snapUID);
+			ddSnapMap->at(snapReq.snapUID).reply.sendError(snap_with_recovery_unsupported());
+			ddSnapMap->erase(snapReq.snapUID);
+			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(snap_with_recovery_unsupported());
+		} else if (choice.index() == 1) {
 
-				TraceEvent("SnapDDCreateSuccess")
-				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID);
-				ddSnapMap->at(snapReq.snapUID).reply.send(Void());
-				ddSnapMap->erase(snapReq.snapUID);
-				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
-			} else if (choice.index() == 2) {
+			TraceEvent("SnapDDCreateSuccess")
+			    .detail("SnapPayload", snapReq.snapPayload)
+			    .detail("SnapUID", snapReq.snapUID);
+			ddSnapMap->at(snapReq.snapUID).reply.send(Void());
+			ddSnapMap->erase(snapReq.snapUID);
+			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
+		} else if (choice.index() == 2) {
 
-				TraceEvent("SnapDDCreateTimedOut")
-				    .detail("SnapPayload", snapReq.snapPayload)
-				    .detail("SnapUID", snapReq.snapUID);
-				ddSnapMap->at(snapReq.snapUID).reply.sendError(timed_out());
-				ddSnapMap->erase(snapReq.snapUID);
-				(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(timed_out());
-			} else {
-				UNREACHABLE();
-			}
+			TraceEvent("SnapDDCreateTimedOut")
+			    .detail("SnapPayload", snapReq.snapPayload)
+			    .detail("SnapUID", snapReq.snapUID);
+			ddSnapMap->at(snapReq.snapUID).reply.sendError(timed_out());
+			ddSnapMap->erase(snapReq.snapUID);
+			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(timed_out());
+		} else {
+			UNREACHABLE();
 		}
 	} catch (Error& e) {
 		TraceEvent("SnapDDCreateError")
@@ -3548,208 +3488,202 @@ Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	lockInfo.prevOwner = self->lock.prevOwner;
 	lockInfo.prevWrite = self->lock.prevWrite;
 
-	{
-		Error err;
-		bool hasErr = false;
-		try {
-			ASSERT(audit != nullptr);
-			ASSERT(audit->coreState.ddId == self->ddId);
-			loadAndDispatchAudit(self, audit);
-			TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
-			    .detail("Context", audit->getDDAuditContext())
-			    .detail("AuditID", audit->coreState.id)
-			    .detail("Range", audit->coreState.range)
-			    .detail("AuditType", audit->coreState.getType())
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount);
-			co_await audit->actors.getResult(); // goto exception handler if any actor is failed
-			TraceEvent(SevInfo, "DDAuditStorageCoreAllActorsComplete", self->ddId)
-			    .detail("AuditID", audit->coreState.id)
-			    .detail("Range", audit->coreState.range)
-			    .detail("AuditType", audit->coreState.getType())
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount)
-			    .detail("DDDoAuditTasksIssued", audit->overallIssuedDoAuditCount)
-			    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount)
-			    .detail("DDDoAuditTasksSkipped", audit->overallSkippedDoAuditCount);
+	Error err;
+	bool hasErr = false;
+	try {
+		ASSERT(audit != nullptr);
+		ASSERT(audit->coreState.ddId == self->ddId);
+		loadAndDispatchAudit(self, audit);
+		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
+		    .detail("Context", audit->getDDAuditContext())
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("Range", audit->coreState.range)
+		    .detail("AuditType", audit->coreState.getType())
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount);
+		co_await audit->actors.getResult(); // goto exception handler if any actor is failed
+		TraceEvent(SevInfo, "DDAuditStorageCoreAllActorsComplete", self->ddId)
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("Range", audit->coreState.range)
+		    .detail("AuditType", audit->coreState.getType())
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount)
+		    .detail("DDDoAuditTasksIssued", audit->overallIssuedDoAuditCount)
+		    .detail("DDDoAuditTasksComplete", audit->overallCompleteDoAuditCount)
+		    .detail("DDDoAuditTasksSkipped", audit->overallSkippedDoAuditCount);
 
-			if (audit->foundError) {
+		if (audit->foundError) {
+			audit->coreState.setPhase(AuditPhase::Error);
+		} else if (audit->auditStorageAnyChildFailed) {
+			audit->auditStorageAnyChildFailed = false;
+			TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+			    .detail("Reason", "AuditStorageAnyChildFailed")
+			    .detail("AuditID", auditID)
+			    .detail("RetryCount", audit->retryCount)
+			    .detail("AuditType", auditType);
+			throw retry();
+		} else {
+			// Check audit persist progress to double check if any range omitted to be check
+			if (audit->coreState.getType() == AuditType::ValidateHA ||
+			    audit->coreState.getType() == AuditType::ValidateReplica ||
+			    audit->coreState.getType() == AuditType::ValidateRestore) {
+				bool allFinish = co_await checkAuditProgressCompleteByRange(self->txnProcessor->context(),
+				                                                            audit->coreState.getType(),
+				                                                            audit->coreState.id,
+				                                                            audit->coreState.range);
+				if (!allFinish) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "AuditReplicaNotFinish")
+					    .detail("AuditID", auditID)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
+					throw retry();
+				}
+			} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
+				bool allFinish = co_await checkAuditProgressCompleteByRange(
+				    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, allKeys);
+				if (!allFinish) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "AuditLocationMetadataNotFinish")
+					    .detail("AuditID", auditID)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
+					throw retry();
+				}
+			} else {
+				bool allFinish = co_await checkAuditProgressCompleteForSSShard(self->txnProcessor->context(), audit);
+				if (!allFinish) {
+					TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+					    .detail("Reason", "AuditSSShardNotFinish")
+					    .detail("AuditID", auditID)
+					    .detail("RetryCount", audit->retryCount)
+					    .detail("AuditType", auditType);
+					throw retry();
+				}
+			}
+			if (!audit->foundError) {
+				audit->coreState.setPhase(AuditPhase::Complete);
+			} else {
 				audit->coreState.setPhase(AuditPhase::Error);
-			} else if (audit->auditStorageAnyChildFailed) {
-				audit->auditStorageAnyChildFailed = false;
-				TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
-				    .detail("Reason", "AuditStorageAnyChildFailed")
-				    .detail("AuditID", auditID)
-				    .detail("RetryCount", audit->retryCount)
-				    .detail("AuditType", auditType);
-				throw retry();
-			} else {
-				// Check audit persist progress to double check if any range omitted to be check
-				if (audit->coreState.getType() == AuditType::ValidateHA ||
-				    audit->coreState.getType() == AuditType::ValidateReplica ||
-				    audit->coreState.getType() == AuditType::ValidateRestore) {
-					bool allFinish = co_await checkAuditProgressCompleteByRange(self->txnProcessor->context(),
-					                                                            audit->coreState.getType(),
-					                                                            audit->coreState.id,
-					                                                            audit->coreState.range);
-					if (!allFinish) {
-						TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
-						    .detail("Reason", "AuditReplicaNotFinish")
-						    .detail("AuditID", auditID)
-						    .detail("RetryCount", audit->retryCount)
-						    .detail("AuditType", auditType);
-						throw retry();
-					}
-				} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-					bool allFinish = co_await checkAuditProgressCompleteByRange(
-					    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, allKeys);
-					if (!allFinish) {
-						TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
-						    .detail("Reason", "AuditLocationMetadataNotFinish")
-						    .detail("AuditID", auditID)
-						    .detail("RetryCount", audit->retryCount)
-						    .detail("AuditType", auditType);
-						throw retry();
-					}
-				} else {
-					bool allFinish =
-					    co_await checkAuditProgressCompleteForSSShard(self->txnProcessor->context(), audit);
-					if (!allFinish) {
-						TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
-						    .detail("Reason", "AuditSSShardNotFinish")
-						    .detail("AuditID", auditID)
-						    .detail("RetryCount", audit->retryCount)
-						    .detail("AuditType", auditType);
-						throw retry();
-					}
-				}
-				if (!audit->foundError) {
-					audit->coreState.setPhase(AuditPhase::Complete);
-				} else {
-					audit->coreState.setPhase(AuditPhase::Error);
-				}
 			}
-			TraceEvent(SevVerbose, "DDAuditStorageCoreCompleteAudit", self->ddId)
-			    .detail("Context", audit->getDDAuditContext())
-			    .detail("AuditState", audit->coreState.toString())
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount);
-			co_await persistAuditState(self->txnProcessor->context(),
-			                           audit->coreState,
-			                           "AuditStorageCore",
-			                           lockInfo,
-			                           self->context->isDDEnabled());
-			TraceEvent(SevVerbose, "DDAuditStorageCoreSetResult", self->ddId)
-			    .detail("Context", audit->getDDAuditContext())
-			    .detail("AuditState", audit->coreState.toString())
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount);
-			removeAuditFromAuditMap(self, audit->coreState.getType(),
-			                        audit->coreState.id); // remove audit
+		}
+		TraceEvent(SevVerbose, "DDAuditStorageCoreCompleteAudit", self->ddId)
+		    .detail("Context", audit->getDDAuditContext())
+		    .detail("AuditState", audit->coreState.toString())
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount);
+		co_await persistAuditState(self->txnProcessor->context(),
+		                           audit->coreState,
+		                           "AuditStorageCore",
+		                           lockInfo,
+		                           self->context->isDDEnabled());
+		TraceEvent(SevVerbose, "DDAuditStorageCoreSetResult", self->ddId)
+		    .detail("Context", audit->getDDAuditContext())
+		    .detail("AuditState", audit->coreState.toString())
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount);
+		removeAuditFromAuditMap(self, audit->coreState.getType(),
+		                        audit->coreState.id); // remove audit
 
-			TraceEvent(SevInfo, "DDAuditStorageCoreEnd", self->ddId)
-			    .detail("Context", audit->getDDAuditContext())
+		TraceEvent(SevInfo, "DDAuditStorageCoreEnd", self->ddId)
+		    .detail("Context", audit->getDDAuditContext())
+		    .detail("AuditID", auditID)
+		    .detail("AuditType", auditType)
+		    .detail("Range", audit->coreState.range)
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount);
+	} catch (Error& e) {
+		err = e;
+		hasErr = true;
+	}
+	if (hasErr) {
+		if (err.code() == error_code_actor_cancelled) {
+			// If this audit is cancelled, the place where cancelling
+			// this audit does removeAuditFromAuditMap
+			throw err;
+		}
+		TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("Context", audit->getDDAuditContext())
+		    .detail("AuditID", auditID)
+		    .detail("AuditStorageCoreGeneration", currentRetryCount)
+		    .detail("RetryCount", audit->retryCount)
+		    .detail("AuditType", auditType)
+		    .detail("Range", audit->coreState.range);
+		if (err.code() == error_code_movekeys_conflict) {
+			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
+			// Silently exit
+		} else if (err.code() == error_code_audit_storage_task_outdated) {
+			// DD failover occurred - storage server completed audit with old DD ID
+			// Remove from map so it can be properly resumed/retried
+			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id);
+			// Silently exit
+		} else if (err.code() == error_code_audit_storage_cancelled) {
+			// If this audit is cancelled, the place where cancelling
+			// this audit does removeAuditFromAuditMap
+		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX &&
+		           err.code() != error_code_not_implemented) {
+			audit->retryCount++;
+			audit->actors.clear(true);
+			TraceEvent(SevVerbose, "DDAuditStorageCoreRetry", self->ddId)
 			    .detail("AuditID", auditID)
 			    .detail("AuditType", auditType)
-			    .detail("Range", audit->coreState.range)
-			    .detail("AuditStorageCoreGeneration", currentRetryCount)
-			    .detail("RetryCount", audit->retryCount);
-		} catch (Error& e) {
-			err = e;
-			hasErr = true;
-		}
-		if (hasErr) {
-			if (err.code() == error_code_actor_cancelled) {
-				// If this audit is cancelled, the place where cancelling
-				// this audit does removeAuditFromAuditMap
-				throw err;
-			}
-			TraceEvent(SevInfo, "DDAuditStorageCoreError", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("Context", audit->getDDAuditContext())
-			    .detail("AuditID", auditID)
 			    .detail("AuditStorageCoreGeneration", currentRetryCount)
 			    .detail("RetryCount", audit->retryCount)
+			    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+			co_await delay(0.1);
+			TraceEvent(SevVerbose, "DDAuditStorageCoreRetryAfterWait", self->ddId)
+			    .detail("AuditID", auditID)
 			    .detail("AuditType", auditType)
-			    .detail("Range", audit->coreState.range);
-			if (err.code() == error_code_movekeys_conflict) {
-				removeAuditFromAuditMap(self, audit->coreState.getType(),
-				                        audit->coreState.id); // remove audit
-				// Silently exit
-			} else if (err.code() == error_code_audit_storage_task_outdated) {
-				// DD failover occurred - storage server completed audit with old DD ID
-				// Remove from map so it can be properly resumed/retried
-				removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id);
-				// Silently exit
-			} else if (err.code() == error_code_audit_storage_cancelled) {
-				// If this audit is cancelled, the place where cancelling
-				// this audit does removeAuditFromAuditMap
-			} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX &&
-			           err.code() != error_code_not_implemented) {
-				audit->retryCount++;
-				audit->actors.clear(true);
-				TraceEvent(SevVerbose, "DDAuditStorageCoreRetry", self->ddId)
-				    .detail("AuditID", auditID)
-				    .detail("AuditType", auditType)
-				    .detail("AuditStorageCoreGeneration", currentRetryCount)
-				    .detail("RetryCount", audit->retryCount)
-				    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
-				co_await delay(0.1);
-				TraceEvent(SevVerbose, "DDAuditStorageCoreRetryAfterWait", self->ddId)
-				    .detail("AuditID", auditID)
-				    .detail("AuditType", auditType)
-				    .detail("AuditStorageCoreGeneration", currentRetryCount)
-				    .detail("RetryCount", audit->retryCount)
-				    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
-				// Erase the old audit from map and spawn a new audit inherit from the old audit
-				removeAuditFromAuditMap(self, audit->coreState.getType(),
-				                        audit->coreState.id); // remove audit
-				if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-					runAuditStorage(self,
-					                audit->coreState,
-					                audit->retryCount,
-					                DDAuditContext::RETRY,
-					                audit->serversFinishedSSShardAudit);
-				} else {
-					runAuditStorage(self, audit->coreState, audit->retryCount, DDAuditContext::RETRY);
-				}
+			    .detail("AuditStorageCoreGeneration", currentRetryCount)
+			    .detail("RetryCount", audit->retryCount)
+			    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+			// Erase the old audit from map and spawn a new audit inherit from the old audit
+			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
+			if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
+				runAuditStorage(self,
+				                audit->coreState,
+				                audit->retryCount,
+				                DDAuditContext::RETRY,
+				                audit->serversFinishedSSShardAudit);
 			} else {
-				try {
-					audit->coreState.setPhase(AuditPhase::Failed);
-					co_await persistAuditState(self->txnProcessor->context(),
-					                           audit->coreState,
-					                           "AuditStorageCoreError",
-					                           lockInfo,
-					                           self->context->isDDEnabled());
-					TraceEvent(SevWarn, "DDAuditStorageCoreSetAuditFailed", self->ddId)
-					    .detail("Context", audit->getDDAuditContext())
-					    .detail("AuditID", auditID)
-					    .detail("AuditType", auditType)
-					    .detail("AuditStorageCoreGeneration", currentRetryCount)
-					    .detail("RetryCount", audit->retryCount)
-					    .detail("AuditState", audit->coreState.toString());
-				} catch (Error& err) {
-					TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
-					    .errorUnsuppressed(err)
-					    .detail("Context", audit->getDDAuditContext())
-					    .detail("AuditID", auditID)
-					    .detail("AuditType", auditType)
-					    .detail("AuditStorageCoreGeneration", currentRetryCount)
-					    .detail("RetryCount", audit->retryCount)
-					    .detail("AuditState", audit->coreState.toString());
-					// unexpected error when persistAuditState
-					// However, we do not want any audit error kills the DD
-					// So, we silently remove audit from auditMap
-					// As a result, this audit can be in RUNNING state on disk but not alive
-					// We call this audit a zombie audit
-					// Note that a client may wait for the state on disk to proceed to "complete"
-					// However, this progress can never happen to a zombie audit
-					// For this case, the client should be able to be timed out
-					// A zombie audit will be either: (1) resumed by the next DD; (2) removed by client
-				}
-				removeAuditFromAuditMap(self, audit->coreState.getType(),
-				                        audit->coreState.id); // remove audit
+				runAuditStorage(self, audit->coreState, audit->retryCount, DDAuditContext::RETRY);
 			}
+		} else {
+			try {
+				audit->coreState.setPhase(AuditPhase::Failed);
+				co_await persistAuditState(self->txnProcessor->context(),
+				                           audit->coreState,
+				                           "AuditStorageCoreError",
+				                           lockInfo,
+				                           self->context->isDDEnabled());
+				TraceEvent(SevWarn, "DDAuditStorageCoreSetAuditFailed", self->ddId)
+				    .detail("Context", audit->getDDAuditContext())
+				    .detail("AuditID", auditID)
+				    .detail("AuditType", auditType)
+				    .detail("AuditStorageCoreGeneration", currentRetryCount)
+				    .detail("RetryCount", audit->retryCount)
+				    .detail("AuditState", audit->coreState.toString());
+			} catch (Error& err) {
+				TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
+				    .errorUnsuppressed(err)
+				    .detail("Context", audit->getDDAuditContext())
+				    .detail("AuditID", auditID)
+				    .detail("AuditType", auditType)
+				    .detail("AuditStorageCoreGeneration", currentRetryCount)
+				    .detail("RetryCount", audit->retryCount)
+				    .detail("AuditState", audit->coreState.toString());
+				// unexpected error when persistAuditState
+				// However, we do not want any audit error kills the DD
+				// So, we silently remove audit from auditMap
+				// As a result, this audit can be in RUNNING state on disk but not alive
+				// We call this audit a zombie audit
+				// Note that a client may wait for the state on disk to proceed to "complete"
+				// However, this progress can never happen to a zombie audit
+				// For this case, the client should be able to be timed out
+				// A zombie audit will be either: (1) resumed by the next DD; (2) removed by client
+			}
+			removeAuditFromAuditMap(self, audit->coreState.getType(), audit->coreState.id); // remove audit
 		}
 	}
 }
@@ -3998,50 +3932,48 @@ Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest r
 
 	int retryCount = 0;
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				TraceEvent(SevDebug, "DDAuditStorageStart", self->ddId)
-				    .detail("RetryCount", retryCount)
-				    .detail("AuditType", req.getType())
-				    .detail("KeyValueStoreType", req.engineType.toString())
-				    .detail("Range", req.range);
-				UID auditID = co_await launchAudit(self, req.range, req.getType(), req.engineType);
-				req.reply.send(auditID);
-				TraceEvent(SevVerbose, "DDAuditStorageReply", self->ddId)
-				    .detail("RetryCount", retryCount)
-				    .detail("AuditType", req.getType())
-				    .detail("KeyValueStoreType", req.engineType.toString())
-				    .detail("Range", req.range)
-				    .detail("AuditID", auditID);
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+		Error err;
+		bool hasErr = false;
+		try {
+			TraceEvent(SevDebug, "DDAuditStorageStart", self->ddId)
+			    .detail("RetryCount", retryCount)
+			    .detail("AuditType", req.getType())
+			    .detail("KeyValueStoreType", req.engineType.toString())
+			    .detail("Range", req.range);
+			UID auditID = co_await launchAudit(self, req.range, req.getType(), req.engineType);
+			req.reply.send(auditID);
+			TraceEvent(SevVerbose, "DDAuditStorageReply", self->ddId)
+			    .detail("RetryCount", retryCount)
+			    .detail("AuditType", req.getType())
+			    .detail("KeyValueStoreType", req.engineType.toString())
+			    .detail("Range", req.range)
+			    .detail("AuditID", auditID);
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			if (err.code() == error_code_actor_cancelled) {
+				throw err;
 			}
-			if (hasErr) {
-				if (err.code() == error_code_actor_cancelled) {
-					throw err;
-				}
-				TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
-				    .errorUnsuppressed(err)
-				    .detail("RetryCount", retryCount)
-				    .detail("AuditType", req.getType())
-				    .detail("KeyValueStoreType", req.engineType.toString())
-				    .detail("Range", req.range);
-				if (err.code() == error_code_operation_failed && g_network->isSimulated()) {
-					throw audit_storage_failed(); // to trigger dd restart
-				} else if (err.code() == error_code_audit_storage_exceeded_request_limit) {
-					req.reply.sendError(audit_storage_exceeded_request_limit());
-				} else if (err.code() == error_code_persist_new_audit_metadata_error) {
-					req.reply.sendError(audit_storage_failed());
-				} else if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-					retryCount++;
-					co_await delay(0.1);
-					continue;
-				} else {
-					req.reply.sendError(audit_storage_failed());
-				}
+			TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
+			    .errorUnsuppressed(err)
+			    .detail("RetryCount", retryCount)
+			    .detail("AuditType", req.getType())
+			    .detail("KeyValueStoreType", req.engineType.toString())
+			    .detail("Range", req.range);
+			if (err.code() == error_code_operation_failed && g_network->isSimulated()) {
+				throw audit_storage_failed(); // to trigger dd restart
+			} else if (err.code() == error_code_audit_storage_exceeded_request_limit) {
+				req.reply.sendError(audit_storage_exceeded_request_limit());
+			} else if (err.code() == error_code_persist_new_audit_metadata_error) {
+				req.reply.sendError(audit_storage_failed());
+			} else if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+				retryCount++;
+				co_await delay(0.1);
+				continue;
+			} else {
+				req.reply.sendError(audit_storage_failed());
 			}
 		}
 		break;
@@ -4206,100 +4138,94 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 	KeyRange currentRange = allKeys;
 	std::vector<AuditStorageState> auditStates;
 	int64_t issueDoAuditCount = 0;
-
-	{
-		Error err;
-		bool hasErr = false;
-		try {
-			while (begin < allKeys.end) {
-				currentRange = KeyRangeRef(begin, allKeys.end);
-				co_await store(
-				    auditStates,
-				    getAuditStateByServer(
-				        self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange));
-				ASSERT(!auditStates.empty());
-				begin = auditStates.back().range.end;
-				TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerDispatch", self->ddId)
-				    .detail("ServerID", serverId)
-				    .detail("AuditID", audit->coreState.id)
-				    .detail("CurrentRange", currentRange)
-				    .detail("AuditType", auditType)
-				    .detail("NextBegin", begin)
-				    .detail("RangeEnd", allKeys.end);
-				int i = 0;
-				for (; i < auditStates.size(); i++) {
-					AuditPhase phase = auditStates[i].getPhase();
-					ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
-					if (phase == AuditPhase::Complete) {
-						continue; // pass
-					} else if (phase == AuditPhase::Error) {
-						audit->foundError = true;
-					} else {
-						ASSERT(phase == AuditPhase::Invalid);
-						// Set doAuditOnStorageServer
-						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
-						while (audit->remainingBudgetForAuditTasks.get() == 0) {
-							co_await audit->remainingBudgetForAuditTasks.onChange();
-							ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
-						}
-						audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() - 1);
-						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
-						TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-						    .detail("Loc", "scheduleAuditStorageShardOnServer")
-						    .detail("Ops", "Decrease")
-						    .detail("Val", audit->remainingBudgetForAuditTasks.get())
-						    .detail("AuditType", auditType);
-						AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
-						issueDoAuditCount++;
-						req.ddId = self->ddId; // send this ddid to SS
-						co_await doAuditOnStorageServer(self, audit, ssi, req); // do audit one by one
-					}
-				}
-				co_await delay(0.1);
-			}
-
-			TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerEnd", self->ddId)
+	Error err;
+	bool hasErr = false;
+	try {
+		while (begin < allKeys.end) {
+			currentRange = KeyRangeRef(begin, allKeys.end);
+			co_await store(auditStates,
+			               getAuditStateByServer(
+			                   self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange));
+			ASSERT(!auditStates.empty());
+			begin = auditStates.back().range.end;
+			TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerDispatch", self->ddId)
 			    .detail("ServerID", serverId)
 			    .detail("AuditID", audit->coreState.id)
+			    .detail("CurrentRange", currentRange)
 			    .detail("AuditType", auditType)
-			    .detail("IssuedDoAuditCount", issueDoAuditCount);
-
-		} catch (Error& e) {
-			err = e;
-			hasErr = true;
-		}
-		if (hasErr) {
-			if (err.code() == error_code_actor_cancelled) {
-				throw err;
-			}
-			TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
-			    .errorUnsuppressed(err)
-			    .detail("AuditID", audit->coreState.id)
-			    .detail("AuditType", auditType)
-			    .detail("IssuedDoAuditCount", issueDoAuditCount);
-
-			if (err.code() == error_code_not_implemented || err.code() == error_code_audit_storage_cancelled) {
-				throw err;
-			} else if (err.code() == error_code_audit_storage_error) {
-				audit->foundError = true;
-			} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-				throw audit_storage_failed();
-			} else {
-				if (err.code() != error_code_audit_storage_failed) {
-					try {
-						bool ssRemoved =
-						    co_await checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID);
-						if (ssRemoved) {
-							// It is possible that the input ss has been removed, then silently exit
-							co_return;
-						}
-					} catch (Error& err) {
-						// retry
+			    .detail("NextBegin", begin)
+			    .detail("RangeEnd", allKeys.end);
+			int i = 0;
+			for (; i < auditStates.size(); i++) {
+				AuditPhase phase = auditStates[i].getPhase();
+				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
+				if (phase == AuditPhase::Complete) {
+					continue; // pass
+				} else if (phase == AuditPhase::Error) {
+					audit->foundError = true;
+				} else {
+					ASSERT(phase == AuditPhase::Invalid);
+					// Set doAuditOnStorageServer
+					ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+					while (audit->remainingBudgetForAuditTasks.get() == 0) {
+						co_await audit->remainingBudgetForAuditTasks.onChange();
+						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 					}
+					audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() - 1);
+					ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+					TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+					    .detail("Loc", "scheduleAuditStorageShardOnServer")
+					    .detail("Ops", "Decrease")
+					    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+					    .detail("AuditType", auditType);
+					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
+					issueDoAuditCount++;
+					req.ddId = self->ddId; // send this ddid to SS
+					co_await doAuditOnStorageServer(self, audit, ssi, req); // do audit one by one
 				}
-				audit->retryCount++;
-				audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
 			}
+			co_await delay(0.1);
+		}
+
+		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerEnd", self->ddId)
+		    .detail("ServerID", serverId)
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("AuditType", auditType)
+		    .detail("IssuedDoAuditCount", issueDoAuditCount);
+	} catch (Error& e) {
+		err = e;
+		hasErr = true;
+	}
+	if (hasErr) {
+		if (err.code() == error_code_actor_cancelled) {
+			throw err;
+		}
+		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
+		    .errorUnsuppressed(err)
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("AuditType", auditType)
+		    .detail("IssuedDoAuditCount", issueDoAuditCount);
+
+		if (err.code() == error_code_not_implemented || err.code() == error_code_audit_storage_cancelled) {
+			throw err;
+		} else if (err.code() == error_code_audit_storage_error) {
+			audit->foundError = true;
+		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+			throw audit_storage_failed();
+		} else {
+			if (err.code() != error_code_audit_storage_failed) {
+				try {
+					bool ssRemoved = co_await checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID);
+					if (ssRemoved) {
+						// It is possible that the input ss has been removed, then silently exit
+						co_return;
+					}
+				} catch (Error& err) {
+					// retry
+				}
+			}
+			audit->retryCount++;
+			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
 		}
 	}
 }
