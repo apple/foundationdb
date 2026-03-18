@@ -5312,11 +5312,11 @@ ACTOR Future<Void> bulkDumpQ(StorageServer* data, BulkDumpRequest req) {
 			}
 
 			// Move to the next range
-			if (reachedRangeEnd || batchNum >= SERVER_KNOBS->SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST) {
+			rangeBegin = keyAfter(rangeDumpRawData->lastKey);
+			if (rangeBegin >= rangeEnd || batchNum >= SERVER_KNOBS->SS_BULKDUMP_BATCH_COUNT_MAX_PER_REQUEST) {
 				req.reply.send(req.bulkDumpState);
 				break;
 			}
-			rangeBegin = keyAfter(rangeDumpRawData->lastKey);
 			batchNum++;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
