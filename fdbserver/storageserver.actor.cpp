@@ -731,7 +731,8 @@ struct UpdateEagerReadInfo {
 	Arena arena;
 	bool enableClearRangeEagerReads;
 
-	UpdateEagerReadInfo(bool enableClearRangeEagerReads) : enableClearRangeEagerReads(enableClearRangeEagerReads) {}
+	explicit UpdateEagerReadInfo(bool enableClearRangeEagerReads)
+	  : enableClearRangeEagerReads(enableClearRangeEagerReads) {}
 
 	void addMutations(VectorRef<MutationRef> const& mutations) {
 		for (auto& m : mutations)
@@ -831,7 +832,7 @@ struct BusiestWriteTagContext {
 	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 	double lastUpdateTime;
 
-	BusiestWriteTagContext(const UID& thisServerID)
+	explicit BusiestWriteTagContext(const UID& thisServerID)
 	  : busiestWriteTagTrackingKey(thisServerID.toString() + "/BusiestWriteTag"), ratekeeperID(UID()),
 	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(busiestWriteTagTrackingKey)), lastUpdateTime(-1) {}
 };
