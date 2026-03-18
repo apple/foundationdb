@@ -38,17 +38,12 @@
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
-#include "fdbrpc/FlowProcess.actor.h"
-#include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbrpc/WellKnownEndpoints.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
@@ -120,119 +115,6 @@ ACTOR void destroyChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 	FlowTransport::transport().resetConnection(childInfo->address);
 }
 
-ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
-                                 double maxWaitTime,
-                                 bool isSync,
-                                 double maxSimDelayTime,
-                                 IClosable* parent) {
-	state ISimulator::ProcessInfo* self = g_simulator->getCurrentProcess();
-	state ISimulator::ProcessInfo* child;
-
-	state std::string role;
-	state std::string addr;
-	state std::string flowProcessName;
-	state Endpoint parentProcessEndpoint;
-	state int i = 0;
-	// fdbserver -r flowprocess --process-name ikvs --process-endpoint ip:port,token,id
-	for (; i < paramList.size(); i++) {
-		if (paramList.size() > i + 1) {
-			// temporary args parser that only supports the flowprocess role
-			if (paramList[i] == "-r") {
-				role = paramList[i + 1];
-			} else if (paramList[i] == "-p" || paramList[i] == "--public_address") {
-				addr = paramList[i + 1];
-			} else if (paramList[i] == "--process-name") {
-				flowProcessName = paramList[i + 1];
-			} else if (paramList[i] == "--process-endpoint") {
-				state std::vector<std::string> addressArray;
-				boost::split(addressArray, paramList[i + 1], [](char c) { return c == ','; });
-				if (addressArray.size() != 3) {
-					std::cerr << "Invalid argument, expected 3 elements in --process-endpoint got "
-					          << addressArray.size() << std::endl;
-					flushAndExit(FDB_EXIT_ERROR);
-				}
-				try {
-					auto addr = NetworkAddress::parse(addressArray[0]);
-					uint64_t fst = std::stoul(addressArray[1]);
-					uint64_t snd = std::stoul(addressArray[2]);
-					UID token(fst, snd);
-					NetworkAddressList l;
-					l.address = addr;
-					parentProcessEndpoint = Endpoint(l, token);
-				} catch (Error& e) {
-					std::cerr << "Could not parse network address " << addressArray[0] << std::endl;
-					flushAndExit(FDB_EXIT_ERROR);
-				}
-			}
-		}
-	}
-	state int result = 0;
-	child = g_simulator->newProcess(
-	    "remote flow process",
-	    self->address.ip,
-	    0,
-	    self->address.isTLS(),
-	    self->addresses.secondaryAddress.present() ? 2 : 1,
-	    self->locality,
-	    ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
-	    self->dataFolder.c_str(),
-	    self->coordinationFolder.c_str(), // do we need to customize this coordination folder path?
-	    self->protocolVersion,
-	    false);
-	wait(g_simulator->onProcess(child));
-	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
-	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
-	state Future<Void> flowProcessF;
-
-	try {
-		TraceEvent(SevDebug, "SpawnedChildProcess")
-		    .detail("Child", child->toString())
-		    .detail("Parent", self->toString());
-		std::string role = "";
-		std::string addr = "";
-		for (int i = 0; i < paramList.size(); i++) {
-			if (paramList.size() > i + 1 && paramList[i] == "-r") {
-				role = paramList[i + 1];
-			}
-		}
-		if (role == "flowprocess" && !parentShutdown.isReady()) {
-			self->childs.push_back(child);
-			state Future<Void> parentSSClosed = parent->onClosed();
-			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
-			FlowTransport::transport().bind(child->address, child->address);
-			Sim2FileSystem::newFileSystem();
-			ProcessFactory<KeyValueStoreProcess>(flowProcessName.c_str());
-			flowProcessF = runFlowProcess(flowProcessName, parentProcessEndpoint);
-
-			choose {
-				when(wait(flowProcessF)) {
-					TraceEvent(SevDebug, "ChildProcessKilled").log();
-					wait(g_simulator->onProcess(self));
-					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
-					destroyChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
-				}
-				when(wait(success(onShutdown))) {
-					ASSERT(false);
-					// In prod, we use prctl to bind parent and child processes to die together
-					// In simulation, we simply disable killing parent or child processes as we cannot use the same
-					// mechanism here
-				}
-				when(wait(success(parentShutdown))) {
-					ASSERT(false);
-					// Parent process is not killed, see above
-				}
-			}
-		} else {
-			ASSERT(false);
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "RemoteIKVSDied").errorUnsuppressed(e);
-		result = -1;
-	}
-
-	return result;
-}
-
 #if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
@@ -240,10 +122,6 @@ ACTOR Future<int> spawnProcess(std::string binPath,
                                bool isSync,
                                double maxSimDelayTime,
                                IClosable* parent) {
-	if (g_network->isSimulated() && getExecPath() == binPath) {
-		int res = wait(spawnSimulated(paramList, maxWaitTime, isSync, maxSimDelayTime, parent));
-		return res;
-	}
 	wait(delay(0.0));
 	return 0;
 }
@@ -294,10 +172,6 @@ ACTOR Future<int> spawnProcess(std::string path,
                                bool isSync,
                                double maxSimDelayTime,
                                IClosable* parent) {
-	if (g_network->isSimulated() && getExecPath() == path) {
-		int res = wait(spawnSimulated(args, maxWaitTime, isSync, maxSimDelayTime, parent));
-		return res;
-	}
 	// for async calls in simulator, always delay by a deterministic amount of time and then
 	// do the call synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {

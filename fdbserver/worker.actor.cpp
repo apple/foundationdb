@@ -59,7 +59,6 @@
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
@@ -297,7 +296,6 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			ErrorInfo err = _err;
 			bool ok = err.error.code() == error_code_success || err.error.code() == error_code_please_reboot ||
 			          err.error.code() == error_code_actor_cancelled ||
-			          err.error.code() == error_code_remote_kvs_cancelled ||
 			          err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
 			          err.error.code() == error_code_shutdown_in_progress ||
 			          err.error.code() == error_code_audit_storage_task_outdated; // Expected during DD failover
@@ -1720,19 +1718,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			filesClosed->add(rebootKVStore->getFuture());
 			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY));
 			// reopen KV store
-			store = openKVStore(
-			    storeType,
-			    filename,
-			    id,
-			    memoryLimit,
-			    false,
-			    validateDataFiles,
-			    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
-			        (g_network->isSimulated()
-			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
-			                deterministicRandom()->coinflip())
-			             : true),
-			    db);
+			store = openKVStore(storeType, filename, id, memoryLimit, false, validateDataFiles, db);
 			Promise<Void> nextRebootKVStorePromise;
 			filesClosed->add(store->onClosed() ||
 			                 nextRebootKVStorePromise
@@ -2036,7 +2022,7 @@ ACTOR Future<Void> deleteStorageFile(KeyValueStoreType storeType,
                                      UID storeID,
                                      int64_t memoryLimit,
                                      Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	state IKeyValueStore* kvs = openKVStore(storeType, filename, storeID, memoryLimit, false, false, false, dbInfo, {});
+	state IKeyValueStore* kvs = openKVStore(storeType, filename, storeID, memoryLimit, false, false, dbInfo, {});
 	wait(ready(kvs->init()));
 	TraceEvent("KVSRemoved").detail("Reason", "WorkerRemoved");
 	kvs->dispose();
@@ -2294,21 +2280,14 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 
-				IKeyValueStore* kv = openKVStore(
-				    s.storeType,
-				    s.filename,
-				    s.storeID,
-				    memoryLimit,
-				    false,
-				    validateDataFiles,
-				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
-				        (g_network->isSimulated()
-				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
-				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-				                deterministicRandom()->coinflip())
-				             : true),
-				    dbInfo,
-				    /* document constants =*/0);
+				IKeyValueStore* kv = openKVStore(s.storeType,
+				                                 s.filename,
+				                                 s.storeID,
+				                                 memoryLimit,
+				                                 false,
+				                                 validateDataFiles,
+				                                 dbInfo,
+				                                 /* document constants =*/0);
 				Future<Void> kvClosed =
 				    kv->onClosed() ||
 				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
@@ -2389,8 +2368,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				IKeyValueStore* kv = openKVStore(
-				    s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, false, dbInfo);
+				IKeyValueStore* kv =
+				    openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles, false, dbInfo);
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
@@ -2745,7 +2724,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					IKeyValueStore* data =
-					    openKVStore(req.storeType, filename, logId, memoryLimit, false, false, false, dbInfo);
+					    openKVStore(req.storeType, filename, logId, memoryLimit, false, false, dbInfo);
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
@@ -2858,21 +2837,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   folder,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
-					IKeyValueStore* data = openKVStore(
-					    req.storeType,
-					    filename,
-					    recruited.id(),
-					    memoryLimit,
-					    false,
-					    false,
-					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
-					        (g_network->isSimulated()
-					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
-					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
-					                deterministicRandom()->coinflip())
-					             : true),
-					    dbInfo,
-					    0);
+					IKeyValueStore* data =
+					    openKVStore(req.storeType, filename, recruited.id(), memoryLimit, false, false, dbInfo, 0);
 					TraceEvent("StorageServerInitProgress", recruited.id())
 					    .detail("ReqID", req.reqId)
 					    .detail("StorageType", req.storeType.toString())
