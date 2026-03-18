@@ -182,8 +182,6 @@ struct GcGenerationsWorkload : TestWorkload {
 	}
 
 	Future<Void> gcGenerationsTestClient(GcGenerationsWorkload* self, Database cx) {
-		g_simulator->disableTLogRecoveryFinish = true;
-
 		co_await delay(self->startDelay);
 
 		TraceEvent("WaitingForDbAvailable").detail("RecoveryState", self->dbInfo->get().recoveryState);
@@ -195,13 +193,18 @@ struct GcGenerationsWorkload : TestWorkload {
 		double workloadEnd = now() + self->testDuration;
 		TraceEvent("GcGenerations").detail("StartTime", startTime).detail("EndTime", workloadEnd);
 
+		// Block TLog recovery while creating generations to test generation accumulation during recovery
+		g_simulator->disableTLogRecoveryFinish = true;
+
 		co_await self->generateMultipleTxnGenerations(self, cx);
 		self->unclogAll();
 		disableConnectionFailures("GcGenerations");
 
-		co_await self->generationReduced(self);
-
+		// Unblock TLogs before waiting for generation reduction
+		// The June 2025 fix prevents generation GC when TLogs are blocked
 		g_simulator->disableTLogRecoveryFinish = false;
+
+		co_await self->generationReduced(self);
 
 		TraceEvent("WaitingForDbFullyRecovered").detail("RecoveryState", self->dbInfo->get().recoveryState);
 		while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
