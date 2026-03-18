@@ -1561,41 +1561,39 @@ Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> 
 	Transaction tr(cx);
 	BulkLoadTaskState currentTask;
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				co_await store(currentTask,
-				               getBulkLoadTask(&tr,
-				                               bulkLoadTask.getRange(),
-				                               bulkLoadTask.getTaskId(),
-				                               { BulkLoadPhase::Submitted,
-				                                 BulkLoadPhase::Triggered,
-				                                 BulkLoadPhase::Running,
-				                                 BulkLoadPhase::Complete,
-				                                 BulkLoadPhase::Acknowledged,
-				                                 BulkLoadPhase::Error }));
-				if (currentTask.getJobId() != bulkLoadTask.getJobId()) {
-					throw bulkload_task_outdated();
-				}
-				if (currentTask.phase == BulkLoadPhase::Error) {
-					TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretryableError", self->ddId)
-					    .detail("InputJobID", jobId)
-					    .detail("TaskJobID", currentTask.getJobId())
-					    .detail("TaskRange", currentTask.getRange())
-					    .detail("TaskID", currentTask.getTaskId());
-					co_return;
-				}
-				if (currentTask.phase == BulkLoadPhase::Complete || currentTask.phase == BulkLoadPhase::Acknowledged) {
-					co_return;
-				}
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+		Error err;
+		bool hasErr = false;
+		try {
+			co_await store(currentTask,
+			               getBulkLoadTask(&tr,
+			                               bulkLoadTask.getRange(),
+			                               bulkLoadTask.getTaskId(),
+			                               { BulkLoadPhase::Submitted,
+			                                 BulkLoadPhase::Triggered,
+			                                 BulkLoadPhase::Running,
+			                                 BulkLoadPhase::Complete,
+			                                 BulkLoadPhase::Acknowledged,
+			                                 BulkLoadPhase::Error }));
+			if (currentTask.getJobId() != bulkLoadTask.getJobId()) {
+				throw bulkload_task_outdated();
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
+			if (currentTask.phase == BulkLoadPhase::Error) {
+				TraceEvent(SevWarnAlways, "DDBulkLoadJobExecutorFindUnretryableError", self->ddId)
+				    .detail("InputJobID", jobId)
+				    .detail("TaskJobID", currentTask.getJobId())
+				    .detail("TaskRange", currentTask.getRange())
+				    .detail("TaskID", currentTask.getTaskId());
+				co_return;
 			}
+			if (currentTask.phase == BulkLoadPhase::Complete || currentTask.phase == BulkLoadPhase::Acknowledged) {
+				co_return;
+			}
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 		co_await delay(SERVER_KNOBS->DD_BULKLOAD_JOB_MONITOR_PERIOD_SEC);
 	}
@@ -1928,100 +1926,98 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 	// The job manifest is organized in a sorted map. The key is the beginKey of the manifest.
 	// The value is the manifest. For details, please see comments in getBulkLoadJobManifestData.
 	loop {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				RangeResult res =
-				    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, jobState.getJobRange().end));
-				int i = 0;
-				for (; i < res.size() - 1; i++) {
-					// Proceeding the beginKey for submitted/completed tasks.
-					// Bypass completed tasks.
-					// Start monitoring for submitted tasks.
-					if (!res[i].value.empty()) {
-						BulkLoadTaskState task = decodeBulkLoadTaskState(res[i].value);
-						if (task.isValid()) {
-							if (task.getJobId() != self->bulkLoadJobManager.get().jobState.getJobId()) {
-								throw bulkload_task_outdated();
-							}
-							// Check key invariant, the task begin key must be in the manifestEntryMap.
-							// No matter whether the task range is aligned with the manifest entry range, the task
-							// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
-							// details.
-							ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
-							       self->bulkLoadJobManager.get().manifestEntryMap->end());
-							if (task.onAnyPhase(
-							        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
-								ASSERT(task.getRange().end == res[i + 1].key);
-								beginKey = task.getRange().end;
-								// Bypass completed tasks
-								continue;
-							} else if (task.onAnyPhase({ BulkLoadPhase::Submitted,
-							                             BulkLoadPhase::Triggered,
-							                             BulkLoadPhase::Running })) {
-								// Do not monitor any task until all tasks are submitted.
-								// Otherwise, the parallelism limitor will slow down the task submission.
-								if (self->bulkLoadJobManager.get().allTaskSubmitted) {
-									// Limit parallelism
-									loop {
-										if (self->bulkLoadParallelismLimitor.canStart()) {
-											break;
-										}
-										co_await self->bulkLoadParallelismLimitor.waitUntilCounterChanged();
+		Error err;
+		bool hasErr = false;
+		try {
+			RangeResult res =
+			    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, jobState.getJobRange().end));
+			int i = 0;
+			for (; i < res.size() - 1; i++) {
+				// Proceeding the beginKey for submitted/completed tasks.
+				// Bypass completed tasks.
+				// Start monitoring for submitted tasks.
+				if (!res[i].value.empty()) {
+					BulkLoadTaskState task = decodeBulkLoadTaskState(res[i].value);
+					if (task.isValid()) {
+						if (task.getJobId() != self->bulkLoadJobManager.get().jobState.getJobId()) {
+							throw bulkload_task_outdated();
+						}
+						// Check key invariant, the task begin key must be in the manifestEntryMap.
+						// No matter whether the task range is aligned with the manifest entry range, the task
+						// begin key must be in the manifestEntryMap. See manifestEntryMap definition for more
+						// details.
+						ASSERT(self->bulkLoadJobManager.get().manifestEntryMap->find(task.getRange().begin) !=
+						       self->bulkLoadJobManager.get().manifestEntryMap->end());
+						if (task.onAnyPhase(
+						        { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })) {
+							ASSERT(task.getRange().end == res[i + 1].key);
+							beginKey = task.getRange().end;
+							// Bypass completed tasks
+							continue;
+						} else if (task.onAnyPhase({ BulkLoadPhase::Submitted,
+						                             BulkLoadPhase::Triggered,
+						                             BulkLoadPhase::Running })) {
+							// Do not monitor any task until all tasks are submitted.
+							// Otherwise, the parallelism limitor will slow down the task submission.
+							if (self->bulkLoadJobManager.get().allTaskSubmitted) {
+								// Limit parallelism
+								loop {
+									if (self->bulkLoadParallelismLimitor.canStart()) {
+										break;
 									}
-									// Monitor submitted tasks
-									actors.push_back(bulkLoadJobMonitorTask(
-									    self, task.getJobId(), jobState.getJobRange(), task.getRange(), errorOut));
+									co_await self->bulkLoadParallelismLimitor.waitUntilCounterChanged();
 								}
-								ASSERT(task.getRange().end == res[i + 1].key);
-								beginKey = task.getRange().end;
-								continue;
-							} else {
-								UNREACHABLE();
+								// Monitor submitted tasks
+								actors.push_back(bulkLoadJobMonitorTask(
+								    self, task.getJobId(), jobState.getJobRange(), task.getRange(), errorOut));
 							}
+							ASSERT(task.getRange().end == res[i + 1].key);
+							beginKey = task.getRange().end;
+							continue;
+						} else {
+							UNREACHABLE();
 						}
 					}
-					// Schedule new tasks on range between res[i].key and res[i + 1].key
-					// Need not limit parallelism here since the execution parallelism is limited by the
-					// bulkLoadEngineParallelismLimitor. Without limiting the parallelism here, we can
-					// dispatch all tasks of the job at once.
-					ASSERT(beginKey == res[i].key);
-					while (beginKey < res[i + 1].key) {
-						std::vector<BulkLoadJobFileManifestEntry> manifestEntries;
-						while (manifestEntries.size() < SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK &&
-						       beginKey < res[i + 1].key) {
-							auto it = self->bulkLoadJobManager.get().manifestEntryMap->find(beginKey);
-							ASSERT(it != self->bulkLoadJobManager.get().manifestEntryMap->end());
-							manifestEntry = it->second;
-							manifestEntries.push_back(manifestEntry);
-							beginKey = manifestEntry.getEndKey();
-						}
-						ASSERT(!manifestEntries.empty());
-						actors.push_back(bulkLoadJobNewTask(self,
-						                                    jobState.getJobId(),
-						                                    jobState.getJobRoot(),
-						                                    jobState.getJobRange(),
-						                                    jobState.getTransportMethod(),
-						                                    self->bulkLoadJobManager.get().manifestLocalTempFolder,
-						                                    manifestEntries,
-						                                    errorOut));
-						co_await delay(SERVER_KNOBS->DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC); // Avoid busy loop
+				}
+				// Schedule new tasks on range between res[i].key and res[i + 1].key
+				// Need not limit parallelism here since the execution parallelism is limited by the
+				// bulkLoadEngineParallelismLimitor. Without limiting the parallelism here, we can
+				// dispatch all tasks of the job at once.
+				ASSERT(beginKey == res[i].key);
+				while (beginKey < res[i + 1].key) {
+					std::vector<BulkLoadJobFileManifestEntry> manifestEntries;
+					while (manifestEntries.size() < SERVER_KNOBS->MANIFEST_COUNT_MAX_PER_BULKLOAD_TASK &&
+					       beginKey < res[i + 1].key) {
+						auto it = self->bulkLoadJobManager.get().manifestEntryMap->find(beginKey);
+						ASSERT(it != self->bulkLoadJobManager.get().manifestEntryMap->end());
+						manifestEntry = it->second;
+						manifestEntries.push_back(manifestEntry);
+						beginKey = manifestEntry.getEndKey();
 					}
-					ASSERT(beginKey == res[i + 1].key || beginKey > jobState.getJobRange().end);
+					ASSERT(!manifestEntries.empty());
+					actors.push_back(bulkLoadJobNewTask(self,
+					                                    jobState.getJobId(),
+					                                    jobState.getJobRoot(),
+					                                    jobState.getJobRange(),
+					                                    jobState.getTransportMethod(),
+					                                    self->bulkLoadJobManager.get().manifestLocalTempFolder,
+					                                    manifestEntries,
+					                                    errorOut));
+					co_await delay(SERVER_KNOBS->DD_BULKLOAD_TASK_SUBMISSION_INTERVAL_SEC); // Avoid busy loop
 				}
-				if (beginKey >= jobState.getJobRange().end) {
-					// last round
-					self->bulkLoadJobManager.get().allTaskSubmitted = true;
-					break;
-				}
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				ASSERT(beginKey == res[i + 1].key || beginKey > jobState.getJobRange().end);
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
+			if (beginKey >= jobState.getJobRange().end) {
+				// last round
+				self->bulkLoadJobManager.get().allTaskSubmitted = true;
+				break;
 			}
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 	co_await waitForAll(actors);
@@ -2039,57 +2035,54 @@ Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> self) {
 	KeyRange rangeToRead;
 	RangeResult bulkLoadTaskResult;
 	while (beginKey < endKey) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				bulkLoadTaskResult.clear();
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				BulkLoadJobState checkJobState =
-				    co_await getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange());
-				co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead));
-				for (int i = 0; i < bulkLoadTaskResult.size() - 1; i++) {
-					ASSERT(!bulkLoadTaskResult[i].value.empty());
-					existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
-					if (!existTask.isValid()) {
-						// At this time, the task metadata must be existing since no one acknowledges this task.
-						co_return false;
-					}
-					// When start loading a job, the old job metadata must be cleared at first.
-					// So, any existing bulkload job id must match the running job id.
-					if (existTask.getJobId() != jobState.getJobId()) {
-						TraceEvent(SevError, "DDBulkLoadJobManagerFindIdMisMatch", self->ddId)
-						    .detail("TaskJobID", existTask.getJobId())
-						    .detail("TaskID", existTask.getTaskId())
-						    .detail("TaskRange", existTask.getRange())
-						    .detail("InputJobID", jobState.getJobId());
-						ASSERT(false);
-					}
-					if (existTask.phase == BulkLoadPhase::Error) {
-						TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindErrorTask", self->ddId)
-						    .detail("TaskJobID", existTask.getJobId())
-						    .detail("TaskID", existTask.getTaskId())
-						    .detail("TaskRange", existTask.getRange())
-						    .detail("InputJobID", jobState.getJobId());
-						continue;
-					}
-					if (existTask.phase != BulkLoadPhase::Complete) {
-						TraceEvent(SevDebug, "DDBulkLoadJobManageFindRunningTask", self->ddId)
-						    .detail("TaskJobID", existTask.getJobId())
-						    .detail("TaskID", existTask.getTaskId())
-						    .detail("TaskRange", existTask.getRange())
-						    .detail("InputJobID", jobState.getJobId());
-						co_return false;
-					}
+		Error err;
+		bool hasErr = false;
+		try {
+			bulkLoadTaskResult.clear();
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			BulkLoadJobState checkJobState = co_await getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange());
+			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead));
+			for (int i = 0; i < bulkLoadTaskResult.size() - 1; i++) {
+				ASSERT(!bulkLoadTaskResult[i].value.empty());
+				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
+				if (!existTask.isValid()) {
+					// At this time, the task metadata must be existing since no one acknowledges this task.
+					co_return false;
 				}
-				beginKey = bulkLoadTaskResult.back().key;
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				// When start loading a job, the old job metadata must be cleared at first.
+				// So, any existing bulkload job id must match the running job id.
+				if (existTask.getJobId() != jobState.getJobId()) {
+					TraceEvent(SevError, "DDBulkLoadJobManagerFindIdMisMatch", self->ddId)
+					    .detail("TaskJobID", existTask.getJobId())
+					    .detail("TaskID", existTask.getTaskId())
+					    .detail("TaskRange", existTask.getRange())
+					    .detail("InputJobID", jobState.getJobId());
+					ASSERT(false);
+				}
+				if (existTask.phase == BulkLoadPhase::Error) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerFindErrorTask", self->ddId)
+					    .detail("TaskJobID", existTask.getJobId())
+					    .detail("TaskID", existTask.getTaskId())
+					    .detail("TaskRange", existTask.getRange())
+					    .detail("InputJobID", jobState.getJobId());
+					continue;
+				}
+				if (existTask.phase != BulkLoadPhase::Complete) {
+					TraceEvent(SevDebug, "DDBulkLoadJobManageFindRunningTask", self->ddId)
+					    .detail("TaskJobID", existTask.getJobId())
+					    .detail("TaskID", existTask.getTaskId())
+					    .detail("TaskRange", existTask.getRange())
+					    .detail("InputJobID", jobState.getJobId());
+					co_return false;
+				}
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			beginKey = bulkLoadTaskResult.back().key;
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 	co_return true;
@@ -2110,100 +2103,94 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 	int i = 0;
 	bool allFinish = false;
 	while (beginKey < endKey) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				tr.reset();
-				bulkLoadTaskResult.clear();
-				BulkLoadJobState currentJobState =
-				    co_await getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange());
-				hasError = hasError && (currentJobState.getPhase() == BulkLoadJobPhase::Error);
-				co_await store(bulkLoadTaskResult,
-				               krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
-				i = 0;
-				for (; i < bulkLoadTaskResult.size() - 1; i++) {
-					ASSERT(!bulkLoadTaskResult[i].value.empty());
-					existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
-					if (!existTask.isValid()) {
-						lastKey = bulkLoadTaskResult[i + 1].key;
-						continue; // Has been acknowledged and cleared by the engine
-					}
-					ASSERT(existTask.getRange() ==
-					       KeyRangeRef(bulkLoadTaskResult[i].key, bulkLoadTaskResult[i + 1].key));
-					// We only clear the metadata if it has the same jobId as the input Id.
-					// When there is a new jobId persisted different than the input Id,
-					// a new job has been submitted successfully. Since a new job can be submitted successfully if and
-					// only if no old metadata exists (the old job metadata has been cleared). So, we can stop at this
-					// point.
-					ASSERT(existTask.getJobId() == jobState.getJobId());
-					if (existTask.phase == BulkLoadPhase::Error) {
-						TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerStopClearMetadata", self->ddId)
+		Error err;
+		bool hasErr = false;
+		try {
+			tr.reset();
+			bulkLoadTaskResult.clear();
+			BulkLoadJobState currentJobState =
+			    co_await getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange());
+			hasError = hasError && (currentJobState.getPhase() == BulkLoadJobPhase::Error);
+			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+			i = 0;
+			for (; i < bulkLoadTaskResult.size() - 1; i++) {
+				ASSERT(!bulkLoadTaskResult[i].value.empty());
+				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
+				if (!existTask.isValid()) {
+					lastKey = bulkLoadTaskResult[i + 1].key;
+					continue; // Has been acknowledged and cleared by the engine
+				}
+				ASSERT(existTask.getRange() == KeyRangeRef(bulkLoadTaskResult[i].key, bulkLoadTaskResult[i + 1].key));
+				// We only clear the metadata if it has the same jobId as the input Id.
+				// When there is a new jobId persisted different than the input Id,
+				// a new job has been submitted successfully. Since a new job can be submitted successfully if and only
+				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
+				ASSERT(existTask.getJobId() == jobState.getJobId());
+				if (existTask.phase == BulkLoadPhase::Error) {
+					TraceEvent(SevWarnAlways, "DDBulkLoadJobManagerStopClearMetadata", self->ddId)
+					    .detail("JobID", jobState.getJobId())
+					    .detail("JobRange", jobState.getJobRange())
+					    .detail("ExistTaskJobID", existTask.getJobId())
+					    .detail("ExistTaskID", existTask.getTaskId())
+					    .detail("ExistTaskRange", existTask.getRange());
+					// User should manually ack an error task.
+					hasError = true;
+				} else {
+					if (existTask.phase != BulkLoadPhase::Complete && existTask.phase != BulkLoadPhase::Acknowledged) {
+						TraceEvent(SevError, "DDBulkLoadJobManagerWrongTaskPhase", self->ddId)
 						    .detail("JobID", jobState.getJobId())
 						    .detail("JobRange", jobState.getJobRange())
 						    .detail("ExistTaskJobID", existTask.getJobId())
 						    .detail("ExistTaskID", existTask.getTaskId())
 						    .detail("ExistTaskRange", existTask.getRange());
-						// User should manually ack an error task.
-						hasError = true;
-					} else {
-						if (existTask.phase != BulkLoadPhase::Complete &&
-						    existTask.phase != BulkLoadPhase::Acknowledged) {
-							TraceEvent(SevError, "DDBulkLoadJobManagerWrongTaskPhase", self->ddId)
-							    .detail("JobID", jobState.getJobId())
-							    .detail("JobRange", jobState.getJobRange())
-							    .detail("ExistTaskJobID", existTask.getJobId())
-							    .detail("ExistTaskID", existTask.getTaskId())
-							    .detail("ExistTaskRange", existTask.getRange());
-							ASSERT(false);
-						}
-						// Persist metadata and turn on traffic
-						co_await setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId());
+						ASSERT(false);
 					}
-					lastKey = bulkLoadTaskResult[i + 1].key;
-					break; // We actively break because we do not want transaction large
+					// Persist metadata and turn on traffic
+					co_await setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId());
 				}
-				if (hasError) {
-					jobState.setErrorPhase("BulkLoadTask Error.");
-				} else {
-					jobState.setCompletePhase();
-				}
-				ASSERT(lastKey.present());
-				jobCompleteRange = KeyRangeRef(jobState.getJobRange().begin, lastKey.get());
-				co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-				allFinish = jobCompleteRange == jobState.getJobRange();
-				if (allFinish) {
-					// Move the complete job from job range map to the history map
-					jobState.setEndTime(now());
-					co_await krmSetRange(
-					    &tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
-					co_await addBulkLoadJobToHistory(&tr, jobState);
-					co_await releaseExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad);
-				} else {
-					co_await krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState));
-				}
-				co_await tr.commit();
-				Version commitVersion = tr.getCommittedVersion();
-				TraceEvent(SevInfo, "DDBulkLoadJobManagerFinalizeRange", self->ddId)
-				    .detail("JobCompleteRange", jobCompleteRange)
-				    .detail("CommitVersion", commitVersion)
-				    .detail("AllFinish", allFinish)
-				    .detail("JobID", jobState.getJobId())
-				    .detail("JobRange", jobState.getJobRange())
-				    .detail("ExistTaskJobID", existTask.getJobId())
-				    .detail("ExistTaskID", existTask.getTaskId())
-				    .detail("ExistTaskRange", existTask.getRange());
-				beginKey = lastKey.get();
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+				lastKey = bulkLoadTaskResult[i + 1].key;
+				break; // We actively break because we do not want transaction large
 			}
-			if (hasErr) {
-				// Currently, only bulkload job uses the range lock, and one job exists at a time.
-				// TODO(BulkLoad): support multiple jobs at a time
-				ASSERT(err.code() != error_code_range_unlock_reject);
-				co_await tr.onError(err);
+			if (hasError) {
+				jobState.setErrorPhase("BulkLoadTask Error.");
+			} else {
+				jobState.setCompletePhase();
 			}
+			ASSERT(lastKey.present());
+			jobCompleteRange = KeyRangeRef(jobState.getJobRange().begin, lastKey.get());
+			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
+			allFinish = jobCompleteRange == jobState.getJobRange();
+			if (allFinish) {
+				// Move the complete job from job range map to the history map
+				jobState.setEndTime(now());
+				co_await krmSetRange(
+				    &tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
+				co_await addBulkLoadJobToHistory(&tr, jobState);
+				co_await releaseExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad);
+			} else {
+				co_await krmSetRange(&tr, bulkLoadJobPrefix, jobCompleteRange, bulkLoadJobValue(jobState));
+			}
+			co_await tr.commit();
+			Version commitVersion = tr.getCommittedVersion();
+			TraceEvent(SevInfo, "DDBulkLoadJobManagerFinalizeRange", self->ddId)
+			    .detail("JobCompleteRange", jobCompleteRange)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("AllFinish", allFinish)
+			    .detail("JobID", jobState.getJobId())
+			    .detail("JobRange", jobState.getJobRange())
+			    .detail("ExistTaskJobID", existTask.getJobId())
+			    .detail("ExistTaskID", existTask.getTaskId())
+			    .detail("ExistTaskRange", existTask.getRange());
+			beginKey = lastKey.get();
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			// Currently, only bulkload job uses the range lock, and one job exists at a time.
+			// TODO(BulkLoad): support multiple jobs at a time
+			ASSERT(err.code() != error_code_range_unlock_reject);
+			co_await tr.onError(err);
 		}
 	}
 	co_return;
@@ -4974,223 +4961,220 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 
 	try {
 		loop {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					// Read
-					actors.clear();
-					errors.clear();
-					mapFromServerKeys.clear();
-					mapFromKeyServers.clear();
-					serverKeyResMap.clear();
-					mapFromKeyServersRaw.clear();
-					remoteReadBytes = 0;
+			Error err;
+			bool hasErr = false;
+			try {
+				// Read
+				actors.clear();
+				errors.clear();
+				mapFromServerKeys.clear();
+				mapFromKeyServers.clear();
+				serverKeyResMap.clear();
+				mapFromKeyServersRaw.clear();
+				remoteReadBytes = 0;
 
-					rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
-					ASSERT(!rangeToRead.empty());
+				rangeToRead = KeyRangeRef(rangeToReadBegin, auditRange.end);
+				ASSERT(!rangeToRead.empty());
 
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					// Read KeyServers
-					co_await store(keyServerRes, getShardMapFromKeyServers(self->ddId, &tr, rangeToRead));
-					completeRangeByKeyServer = keyServerRes.completeRange;
-					readAtVersion = keyServerRes.readAtVersion;
-					mapFromKeyServersRaw = keyServerRes.rangeOwnershipMap;
-					remoteReadBytes += keyServerRes.readBytes;
-					// Use ssid of mapFromKeyServersRaw to read ServerKeys
-					for (auto& [ssid, _] : mapFromKeyServersRaw) {
-						actors.push_back(
-						    store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, &tr, rangeToRead)));
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				// Read KeyServers
+				co_await store(keyServerRes, getShardMapFromKeyServers(self->ddId, &tr, rangeToRead));
+				completeRangeByKeyServer = keyServerRes.completeRange;
+				readAtVersion = keyServerRes.readAtVersion;
+				mapFromKeyServersRaw = keyServerRes.rangeOwnershipMap;
+				remoteReadBytes += keyServerRes.readBytes;
+				// Use ssid of mapFromKeyServersRaw to read ServerKeys
+				for (auto& [ssid, _] : mapFromKeyServersRaw) {
+					actors.push_back(
+					    store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, &tr, rangeToRead)));
+				}
+				co_await waitForAll(actors);
+
+				// Decide claimRange and check readAtVersion
+				claimRange = completeRangeByKeyServer;
+				for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
+					KeyRange serverKeyCompleteRange = serverKeyRes.completeRange;
+					TraceEvent(SevVerbose, "DDDoAuditLocationMetadataGetClaimRange", self->ddId)
+					    .detail("ServerId", ssid)
+					    .detail("ServerKeyCompleteRange", serverKeyCompleteRange)
+					    .detail("CurrentClaimRange", claimRange);
+					KeyRange overlappingRange = serverKeyCompleteRange & claimRange;
+					if (serverKeyCompleteRange.begin != claimRange.begin || overlappingRange.empty() ||
+					    readAtVersion != serverKeyRes.readAtVersion) {
+						TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
+						           "DDDoAuditLocationMetadataReadCheckWrong",
+						           self->ddId)
+						    .detail("ServerKeyCompleteRangeBegin", serverKeyCompleteRange.begin)
+						    .detail("ClaimRangeBegin", claimRange.begin)
+						    .detail("OverlappingRange", overlappingRange)
+						    .detail("ReadAtVersion", readAtVersion)
+						    .detail("ServerKeyResReadAtVersion", serverKeyRes.readAtVersion);
+						throw audit_storage_cancelled();
 					}
-					co_await waitForAll(actors);
-
-					// Decide claimRange and check readAtVersion
-					claimRange = completeRangeByKeyServer;
-					for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
-						KeyRange serverKeyCompleteRange = serverKeyRes.completeRange;
-						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataGetClaimRange", self->ddId)
-						    .detail("ServerId", ssid)
-						    .detail("ServerKeyCompleteRange", serverKeyCompleteRange)
-						    .detail("CurrentClaimRange", claimRange);
-						KeyRange overlappingRange = serverKeyCompleteRange & claimRange;
-						if (serverKeyCompleteRange.begin != claimRange.begin || overlappingRange.empty() ||
-						    readAtVersion != serverKeyRes.readAtVersion) {
-							TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways,
-							           "DDDoAuditLocationMetadataReadCheckWrong",
-							           self->ddId)
-							    .detail("ServerKeyCompleteRangeBegin", serverKeyCompleteRange.begin)
-							    .detail("ClaimRangeBegin", claimRange.begin)
-							    .detail("OverlappingRange", overlappingRange)
-							    .detail("ReadAtVersion", readAtVersion)
-							    .detail("ServerKeyResReadAtVersion", serverKeyRes.readAtVersion);
-							throw audit_storage_cancelled();
+					claimRange = overlappingRange;
+					remoteReadBytes += serverKeyRes.readBytes;
+				}
+				// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
+				int64_t numValidatedServerKeys = 0;
+				for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
+					for (auto& range : serverKeyRes.ownRanges) {
+						KeyRange overlappingRange = range & claimRange;
+						if (overlappingRange.empty()) {
+							continue;
 						}
-						claimRange = overlappingRange;
-						remoteReadBytes += serverKeyRes.readBytes;
+						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToServerKeyMap", self->ddId)
+						    .detail("RawRange", range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("Range", overlappingRange)
+						    .detail("SSID", ssid);
+						mapFromServerKeys[ssid].push_back(overlappingRange);
+						numValidatedServerKeys++;
 					}
-					// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
-					int64_t numValidatedServerKeys = 0;
-					for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
-						for (auto& range : serverKeyRes.ownRanges) {
-							KeyRange overlappingRange = range & claimRange;
-							if (overlappingRange.empty()) {
-								continue;
-							}
-							TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToServerKeyMap", self->ddId)
-							    .detail("RawRange", range)
-							    .detail("ClaimRange", claimRange)
-							    .detail("Range", overlappingRange)
-							    .detail("SSID", ssid);
-							mapFromServerKeys[ssid].push_back(overlappingRange);
-							numValidatedServerKeys++;
-						}
-					}
-					cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + numValidatedServerKeys;
+				}
+				cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + numValidatedServerKeys;
 
-					int64_t numValidatedKeyServers = 0;
-					for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
-						std::vector mergedRanges = coalesceRangeList(ranges);
-						for (auto& range : mergedRanges) {
-							KeyRange overlappingRange = range & claimRange;
-							if (overlappingRange.empty()) {
-								continue;
-							}
-							TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToKeyServerMap", self->ddId)
-							    .detail("RawRange", range)
-							    .detail("ClaimRange", claimRange)
-							    .detail("Range", overlappingRange)
-							    .detail("SSID", ssid);
-							mapFromKeyServers[ssid].push_back(overlappingRange);
-							numValidatedKeyServers++;
+				int64_t numValidatedKeyServers = 0;
+				for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
+					std::vector mergedRanges = coalesceRangeList(ranges);
+					for (auto& range : mergedRanges) {
+						KeyRange overlappingRange = range & claimRange;
+						if (overlappingRange.empty()) {
+							continue;
 						}
+						TraceEvent(SevVerbose, "DDDoAuditLocationMetadataAddToKeyServerMap", self->ddId)
+						    .detail("RawRange", range)
+						    .detail("ClaimRange", claimRange)
+						    .detail("Range", overlappingRange)
+						    .detail("SSID", ssid);
+						mapFromKeyServers[ssid].push_back(overlappingRange);
+						numValidatedKeyServers++;
 					}
-					cumulatedValidatedKeyServersNum = cumulatedValidatedKeyServersNum + numValidatedKeyServers;
+				}
+				cumulatedValidatedKeyServersNum = cumulatedValidatedKeyServersNum + numValidatedKeyServers;
 
-					// Compare: check if mapFromKeyServers === mapFromServerKeys
-					// 1. check mapFromKeyServers => mapFromServerKeys
-					for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
-						if (!mapFromServerKeys.contains(ssid)) {
-							std::string error =
-							    format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
-							           "on Server(%s) in KeyServers but not ServerKeys",
-							           claimRange.toString().c_str(),
-							           claimRange.toString().c_str(),
-							           ssid.toString().c_str());
-							errors.push_back(error);
-							TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-							    .setMaxFieldLength(-1)
-							    .setMaxEventLength(-1)
-							    .detail("AuditId", audit->coreState.id)
-							    .detail("AuditRange", auditRange)
-							    .detail("ClaimRange", claimRange)
-							    .detail("ErrorMessage", error);
-						}
-						std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
-						Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
-						    rangesSame(keyServerRanges, serverKeyRanges);
-						if (anyMismatch.present()) { // mismatch detected
-							KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
-							KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
-							std::string error =
-							    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
-							           ssid.toString().c_str(),
-							           mismatchedRangeByKeyServer.toString().c_str(),
-							           mismatchedRangeByServerKey.toString().c_str());
-							errors.push_back(error);
-							TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-							    .setMaxFieldLength(-1)
-							    .setMaxEventLength(-1)
-							    .detail("AuditId", audit->coreState.id)
-							    .detail("AuditRange", auditRange)
-							    .detail("ClaimRange", claimRange)
-							    .detail("ErrorMessage", error)
-							    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
-							    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
-						}
-					}
-					// 2. check mapFromServerKeys => mapFromKeyServers
-					for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
-						if (!mapFromKeyServers.contains(ssid)) {
-							std::string error =
-							    format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
-							           "on Server(%s) in ServerKeys but not KeyServers",
-							           claimRange.toString().c_str(),
-							           claimRange.toString().c_str(),
-							           ssid.toString().c_str());
-							errors.push_back(error);
-							TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
-							    .setMaxFieldLength(-1)
-							    .setMaxEventLength(-1)
-							    .detail("AuditId", audit->coreState.id)
-							    .detail("AuditRange", auditRange)
-							    .detail("ClaimRange", claimRange)
-							    .detail("ErrorMessage", error);
-						}
-					}
-
-					// Log statistic
-					TraceEvent(SevInfo, "DDDoAuditLocationMetadataStatistic", self->ddId)
-					    .suppressFor(30.0)
-					    .detail("AuditType", audit->coreState.getType())
-					    .detail("AuditId", audit->coreState.id)
-					    .detail("AuditRange", auditRange)
-					    .detail("CurrentValidatedServerKeysNum", numValidatedServerKeys)
-					    .detail("CurrentValidatedKeyServersNum", numValidatedServerKeys)
-					    .detail("CurrentValidatedInclusiveRange", claimRange)
-					    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
-					    .detail("CumulatedValidatedKeyServersNum", cumulatedValidatedKeyServersNum)
-					    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(auditRange.begin, claimRange.end));
-
-					// Return result
-					if (!errors.empty()) {
+				// Compare: check if mapFromKeyServers === mapFromServerKeys
+				// 1. check mapFromKeyServers => mapFromServerKeys
+				for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
+					if (!mapFromServerKeys.contains(ssid)) {
+						std::string error =
+						    format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
+						           "on Server(%s) in KeyServers but not ServerKeys",
+						           claimRange.toString().c_str(),
+						           claimRange.toString().c_str(),
+						           ssid.toString().c_str());
+						errors.push_back(error);
 						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
 						    .setMaxFieldLength(-1)
 						    .setMaxEventLength(-1)
 						    .detail("AuditId", audit->coreState.id)
 						    .detail("AuditRange", auditRange)
-						    .detail("NumErrors", errors.size())
-						    .detail("Version", readAtVersion)
-						    .detail("ClaimRange", claimRange);
-						res.range = claimRange;
-						res.setPhase(AuditPhase::Error);
-						res.ddId = self->ddId; // used to compare self->ddId with existing persisted ddId
-						co_await persistAuditStateByRange(self->txnProcessor->context(), res);
-						throw audit_storage_error();
-					} else {
-						// Expand persisted complete range
-						res.range = Standalone(KeyRangeRef(auditRange.begin, claimRange.end));
-						res.setPhase(AuditPhase::Complete);
-						res.ddId = self->ddId; // used to compare self->ddId with existing persisted ddId
-						co_await persistAuditStateByRange(self->txnProcessor->context(), res);
-						if (res.range.end < auditRange.end) {
-							TraceEvent(SevInfo, "DDDoAuditLocationMetadataPartialDone", self->ddId)
-							    .suppressFor(10.0)
-							    .detail("AuditId", audit->coreState.id)
-							    .detail("AuditRange", auditRange)
-							    .detail("Version", readAtVersion)
-							    .detail("CompleteRange", res.range)
-							    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
-							    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
-							rangeToReadBegin = res.range.end;
-						} else { // complete
-							TraceEvent(SevInfo, "DDDoAuditLocationMetadataComplete", self->ddId)
-							    .detail("AuditId", audit->coreState.id)
-							    .detail("AuditRange", auditRange)
-							    .detail("CompleteRange", res.range)
-							    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
-							    .detail("NumValidatedKeyServers", cumulatedValidatedKeyServersNum)
-							    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
-							break;
-						}
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error);
 					}
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+					std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
+					Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, serverKeyRanges);
+					if (anyMismatch.present()) { // mismatch detected
+						KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
+						KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
+						std::string error =
+						    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+						           ssid.toString().c_str(),
+						           mismatchedRangeByKeyServer.toString().c_str(),
+						           mismatchedRangeByServerKey.toString().c_str());
+						errors.push_back(error);
+						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error)
+						    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
+						    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
+					}
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
+				// 2. check mapFromServerKeys => mapFromKeyServers
+				for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
+					if (!mapFromKeyServers.contains(ssid)) {
+						std::string error =
+						    format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
+						           "on Server(%s) in ServerKeys but not KeyServers",
+						           claimRange.toString().c_str(),
+						           claimRange.toString().c_str(),
+						           ssid.toString().c_str());
+						errors.push_back(error);
+						TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+						    .setMaxFieldLength(-1)
+						    .setMaxEventLength(-1)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("ClaimRange", claimRange)
+						    .detail("ErrorMessage", error);
+					}
 				}
+
+				// Log statistic
+				TraceEvent(SevInfo, "DDDoAuditLocationMetadataStatistic", self->ddId)
+				    .suppressFor(30.0)
+				    .detail("AuditType", audit->coreState.getType())
+				    .detail("AuditId", audit->coreState.id)
+				    .detail("AuditRange", auditRange)
+				    .detail("CurrentValidatedServerKeysNum", numValidatedServerKeys)
+				    .detail("CurrentValidatedKeyServersNum", numValidatedServerKeys)
+				    .detail("CurrentValidatedInclusiveRange", claimRange)
+				    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
+				    .detail("CumulatedValidatedKeyServersNum", cumulatedValidatedKeyServersNum)
+				    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(auditRange.begin, claimRange.end));
+
+				// Return result
+				if (!errors.empty()) {
+					TraceEvent(SevError, "DDDoAuditLocationMetadataError", self->ddId)
+					    .setMaxFieldLength(-1)
+					    .setMaxEventLength(-1)
+					    .detail("AuditId", audit->coreState.id)
+					    .detail("AuditRange", auditRange)
+					    .detail("NumErrors", errors.size())
+					    .detail("Version", readAtVersion)
+					    .detail("ClaimRange", claimRange);
+					res.range = claimRange;
+					res.setPhase(AuditPhase::Error);
+					res.ddId = self->ddId; // used to compare self->ddId with existing persisted ddId
+					co_await persistAuditStateByRange(self->txnProcessor->context(), res);
+					throw audit_storage_error();
+				} else {
+					// Expand persisted complete range
+					res.range = Standalone(KeyRangeRef(auditRange.begin, claimRange.end));
+					res.setPhase(AuditPhase::Complete);
+					res.ddId = self->ddId; // used to compare self->ddId with existing persisted ddId
+					co_await persistAuditStateByRange(self->txnProcessor->context(), res);
+					if (res.range.end < auditRange.end) {
+						TraceEvent(SevInfo, "DDDoAuditLocationMetadataPartialDone", self->ddId)
+						    .suppressFor(10.0)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("Version", readAtVersion)
+						    .detail("CompleteRange", res.range)
+						    .detail("LastRateLimiterWaitTime", lastRateLimiterWaitTime)
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
+						rangeToReadBegin = res.range.end;
+					} else { // complete
+						TraceEvent(SevInfo, "DDDoAuditLocationMetadataComplete", self->ddId)
+						    .detail("AuditId", audit->coreState.id)
+						    .detail("AuditRange", auditRange)
+						    .detail("CompleteRange", res.range)
+						    .detail("NumValidatedServerKeys", cumulatedValidatedServerKeysNum)
+						    .detail("NumValidatedKeyServers", cumulatedValidatedKeyServersNum)
+						    .detail("RateLimiterTotalWaitTime", rateLimiterTotalWaitTime);
+						break;
+					}
+				}
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 
 			rateLimiterBeforeWaitTime = now();
