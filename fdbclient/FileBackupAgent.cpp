@@ -2289,15 +2289,15 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 		if (nextKey != endKey) {
 			// Add task to cover nextKey to the end, using the priority of the current task
-			co_await success(addTask(tr,
-			                         taskBucket,
-			                         task,
-			                         task->getPriority(),
-			                         nextKey,
-			                         endKey,
-			                         TaskCompletionKey::joinWith(onDone),
-			                         Reference<TaskFuture>(),
-			                         task->getPriority()));
+			co_await addTask(tr,
+			                 taskBucket,
+			                 task,
+			                 task->getPriority(),
+			                 nextKey,
+			                 endKey,
+			                 TaskCompletionKey::joinWith(onDone),
+			                 Reference<TaskFuture>(),
+			                 task->getPriority());
 		}
 
 		co_return;
@@ -2891,16 +2891,16 @@ struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		// snapshot dispatch task. In either case, the task should wait for snapshotBatchFuture. The snapshot done
 		// key, passed to the current task, is also passed on.
 		if (Params.snapshotFinished().getOrDefault(task, false)) {
-			co_await success(addSnapshotManifestTask(
-			    tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture));
+			co_await addSnapshotManifestTask(
+			    tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture);
 		} else {
-			co_await success(addTask(tr,
-			                         taskBucket,
-			                         task,
-			                         1,
-			                         TaskCompletionKey::signal(snapshotFinishedFuture),
-			                         snapshotBatchFuture,
-			                         Params.nextDispatchVersion().get(task)));
+			co_await addTask(tr,
+			                 taskBucket,
+			                 task,
+			                 1,
+			                 TaskCompletionKey::signal(snapshotFinishedFuture),
+			                 snapshotBatchFuture,
+			                 Params.nextDispatchVersion().get(task));
 		}
 
 		// This snapshot batch is finished, so set the batch done future.
@@ -3331,22 +3331,22 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 			// Add the initial log range task to read/copy the mutations and the next logs dispatch task which will
 			// run after this batch is done
 			// read blog/ prefix and write those (param1, param2) into files
-			co_await success(BackupLogRangeTaskFunc::addTask(tr,
-			                                                 taskBucket,
-			                                                 task,
-			                                                 priority,
-			                                                 beginVersion,
-			                                                 endVersion,
-			                                                 TaskCompletionKey::joinWith(logDispatchBatchFuture)));
+			co_await BackupLogRangeTaskFunc::addTask(tr,
+			                                         taskBucket,
+			                                         task,
+			                                         priority,
+			                                         beginVersion,
+			                                         endVersion,
+			                                         TaskCompletionKey::joinWith(logDispatchBatchFuture));
 			// issue the next key range
-			co_await success(BackupLogsDispatchTask::addTask(tr,
-			                                                 taskBucket,
-			                                                 task,
-			                                                 priority,
-			                                                 beginVersion,
-			                                                 endVersion,
-			                                                 TaskCompletionKey::signal(onDone),
-			                                                 logDispatchBatchFuture));
+			co_await BackupLogsDispatchTask::addTask(tr,
+			                                         taskBucket,
+			                                         task,
+			                                         priority,
+			                                         beginVersion,
+			                                         endVersion,
+			                                         TaskCompletionKey::signal(onDone),
+			                                         logDispatchBatchFuture);
 
 			// Do not erase at the first time
 			if (prevBeginVersion > 0) {
@@ -3357,15 +3357,15 @@ struct BackupLogsDispatchTask : BackupTaskFuncBase {
 			// Skip mutation copy and erase backup mutations. Just check back periodically.
 			Version scheduledVersion = tr->getReadVersion().get() +
 			                           CLIENT_KNOBS->BACKUP_POLL_PROGRESS_SECONDS * CLIENT_KNOBS->VERSIONS_PER_SECOND;
-			co_await success(BackupLogsDispatchTask::addTask(tr,
-			                                                 taskBucket,
-			                                                 task,
-			                                                 1,
-			                                                 beginVersion,
-			                                                 endVersion,
-			                                                 TaskCompletionKey::signal(onDone),
-			                                                 Reference<TaskFuture>(),
-			                                                 scheduledVersion));
+			co_await BackupLogsDispatchTask::addTask(tr,
+			                                         taskBucket,
+			                                         task,
+			                                         1,
+			                                         beginVersion,
+			                                         endVersion,
+			                                         TaskCompletionKey::signal(onDone),
+			                                         Reference<TaskFuture>(),
+			                                         scheduledVersion);
 		}
 
 		co_await taskBucket->finish(tr, task);
@@ -3789,7 +3789,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 				if (!jobAlreadyRunning) {
 					// Enable BulkDump mode at the DD level before submitting the job
-					co_await success(setBulkDumpMode(cx, 1));
+					co_await setBulkDumpMode(cx, 1);
 
 					// Configure BulkDump job for the full keyspace
 					// BulkDump/BulkLoad requires the load range to be a subset of the dump range.
@@ -3829,7 +3829,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// 1. We actually enabled the mode (not if we just monitored an existing job)
 				// 2. The original mode was different from what we set
 				if (!jobAlreadyRunning && originalBulkDumpMode != 1) {
-					co_await success(setBulkDumpMode(cx, originalBulkDumpMode));
+					co_await setBulkDumpMode(cx, originalBulkDumpMode);
 				}
 
 				// Write the keyspace snapshot file to mark the backup as complete
@@ -3881,7 +3881,7 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 			// Restore original BulkDump mode on error, but only if we were the ones who enabled it
 			try {
 				if (!jobAlreadyRunning && originalBulkDumpMode != 1) {
-					co_await success(setBulkDumpMode(cx, originalBulkDumpMode));
+					co_await setBulkDumpMode(cx, originalBulkDumpMode);
 				}
 			} catch (Error& e2) {
 				TraceEvent(SevWarn, "BulkDumpTaskRestoreModeError").error(e2);
@@ -3973,7 +3973,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				partitionedLog = config.partitionedLogEnabled().get(tr);
-				co_await success(partitionedLog);
+				co_await partitionedLog;
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -3987,7 +3987,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		if (!backupWorkerEnabled && partitionedLog.get().present() && partitionedLog.get().get()) {
 			// Change configuration only when we set to use partitioned logs and
 			// the flag was not set before.
-			co_await success(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true));
+			co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true);
 			backupWorkerEnabled = true;
 			// the user is responsible for manually disabling backup worker after the last backup is done
 		}
@@ -4001,7 +4001,7 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Future<Version> startVersionFuture = tr->getReadVersion();
-				co_await success(startVersionFuture);
+				co_await startVersionFuture;
 				Params.beginVersion().set(task, startVersionFuture.get());
 				break;
 			} catch (Error& e) {
@@ -4115,24 +4115,23 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				int currentBulkDumpMode = co_await getBulkDumpMode(tr->getDatabase());
 				config.originalBulkDumpMode().set(tr, currentBulkDumpMode);
 
-				co_await success(BulkDumpTaskFunc::addTask(
-				    tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
+				co_await BulkDumpTaskFunc::addTask(
+				    tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished));
 			}
 
 			// Add traditional range file snapshot if mode is RANGEFILE(0) or BOTH(2)
 			if (snapshotModeValue == 0 || snapshotModeValue == 2) {
-				co_await success(BackupSnapshotDispatchTask::addTask(
-				    tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished)));
+				co_await BackupSnapshotDispatchTask::addTask(
+				    tr, taskBucket, task, 1, TaskCompletionKey::joinWith(backupFinished));
 			}
 		}
 
-		co_await success(BackupLogsDispatchTask::addTask(
-		    tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
+		co_await BackupLogsDispatchTask::addTask(
+		    tr, taskBucket, task, 1, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished));
 
 		// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then
 		// the following task will clean up and set the completed state.
-		co_await success(
-		    FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished));
+		co_await FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished);
 
 		co_await taskBucket->finish(tr, task);
 
@@ -4325,7 +4324,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 				originalBulkLoadMode = mode;
 
 				// Enable BulkLoad mode at DD level so the job will be processed
-				co_await success(setBulkLoadMode(cx, 1));
+				co_await setBulkLoadMode(cx, 1);
 
 				TraceEvent("BulkLoadRestoreEnabledMode")
 				    .detail("RestoreUID", restore.getUid())
@@ -4353,14 +4352,14 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 					    .detail("TimeoutDuration", CLIENT_KNOBS->BULKLOAD_JOB_TIMEOUT);
 					// Restore original BulkLoad mode before throwing
 					if (originalBulkLoadMode != 1) {
-						co_await success(setBulkLoadMode(cx, originalBulkLoadMode));
+						co_await setBulkLoadMode(cx, originalBulkLoadMode);
 					}
 					throw timed_out();
 				}
 
 				// Restore original BulkLoad mode now that the job is complete
 				if (originalBulkLoadMode != 1) {
-					co_await success(setBulkLoadMode(cx, originalBulkLoadMode));
+					co_await setBulkLoadMode(cx, originalBulkLoadMode);
 				}
 
 				TraceEvent("BulkLoadRestoreTaskComplete")
@@ -4381,7 +4380,7 @@ struct BulkLoadRestoreTaskFunc : RestoreTaskFuncBase {
 			// Restore original BulkLoad mode on error
 			try {
 				if (originalBulkLoadMode != 1) {
-					co_await success(setBulkLoadMode(cx, originalBulkLoadMode));
+					co_await setBulkLoadMode(cx, originalBulkLoadMode);
 				}
 			} catch (Error& e2) {
 				TraceEvent(SevWarn, "BulkLoadRestoreRestoreModeError").error(e2);
@@ -5689,8 +5688,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 		if (applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-			co_await success(RestoreDispatchPartitionedTaskFunc::addTask(
-			    tr, taskBucket, task, firstVersion, beginVersion, endVersion));
+			co_await RestoreDispatchPartitionedTaskFunc::addTask(
+			    tr, taskBucket, task, firstVersion, beginVersion, endVersion);
 
 			TraceEvent("FileRestorePartitionDispatch")
 			    .detail("RestoreUID", restore.getUid())
@@ -5758,7 +5757,7 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 			if (applyLag == 0) {
 				// i am the last batch
 				// If apply lag is 0 then we are done so create the completion task
-				co_await success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
+				co_await RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal());
 
 				TraceEvent("FileRestorePartitionDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -5772,8 +5771,8 @@ struct RestoreDispatchPartitionedTaskFunc : RestoreTaskFuncBase {
 				// same task.
 				// this is only to create a dummy one wait for it to finish
 				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				co_await success(RestoreDispatchPartitionedTaskFunc::addTask(
-				    tr, taskBucket, task, firstVersion, beginVersion, endVersion));
+				co_await RestoreDispatchPartitionedTaskFunc::addTask(
+				    tr, taskBucket, task, firstVersion, beginVersion, endVersion);
 
 				TraceEvent("FileRestorePartitionDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -5931,8 +5930,8 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 		if (!addingToExistingBatch && applyLag > (BUGGIFY ? 1 : CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 300)) {
 			// Wait a small amount of time and then re-add this same task.
 			co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-			co_await success(RestoreDispatchTaskFunc::addTask(
-			    tr, taskBucket, task, beginVersion, "", 0, batchSize, remainingInBatch));
+			co_await RestoreDispatchTaskFunc::addTask(
+			    tr, taskBucket, task, beginVersion, "", 0, batchSize, remainingInBatch);
 
 			TraceEvent("FileRestoreDispatch")
 			    .detail("RestoreUID", restore.getUid())
@@ -5975,16 +5974,16 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			if (addingToExistingBatch) {
 				// Setting next begin to restoreVersion + 1 so that any files in the file map at the restore version
 				// won't be dispatched again.
-				co_await success(RestoreDispatchTaskFunc::addTask(tr,
-				                                                  taskBucket,
-				                                                  task,
-				                                                  restoreVersion + 1,
-				                                                  "",
-				                                                  0,
-				                                                  batchSize,
-				                                                  0,
-				                                                  TaskCompletionKey::noSignal(),
-				                                                  allPartsDone));
+				co_await RestoreDispatchTaskFunc::addTask(tr,
+				                                          taskBucket,
+				                                          task,
+				                                          restoreVersion + 1,
+				                                          "",
+				                                          0,
+				                                          batchSize,
+				                                          0,
+				                                          TaskCompletionKey::noSignal(),
+				                                          allPartsDone);
 
 				TraceEvent("FileRestoreDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -5997,8 +5996,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			} else if (beginVersion < restoreVersion) {
 				// If beginVersion is less than restoreVersion then do one more dispatch task to get there
 				// there are no more files between beginVersion and restoreVersion
-				co_await success(
-				    RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion, "", 0, batchSize));
+				co_await RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion, "", 0, batchSize);
 
 				TraceEvent("FileRestoreDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -6010,7 +6008,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 				    .detail("Decision", "apply_to_restore_version");
 			} else if (applyLag == 0) {
 				// If apply lag is 0 then we are done so create the completion task
-				co_await success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
+				co_await RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal());
 
 				TraceEvent("FileRestoreDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -6024,8 +6022,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 				// same task.
 				// this is only to create a dummy one wait for it to finish
 				co_await delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
-				co_await success(
-				    RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize));
+				co_await RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize);
 
 				TraceEvent("FileRestoreDispatch")
 				    .detail("RestoreUID", restore.getUid())
@@ -6148,15 +6145,15 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			    .detail("Decision", decision)
 			    .detail("RemainingInBatch", remainingInBatch);
 
-			co_await success(RestoreDispatchTaskFunc::addTask(tr,
-			                                                  taskBucket,
-			                                                  task,
-			                                                  endVersion,
-			                                                  beginFile,
-			                                                  beginBlock,
-			                                                  batchSize,
-			                                                  remainingInBatch,
-			                                                  TaskCompletionKey::joinWith((allPartsDone))));
+			co_await RestoreDispatchTaskFunc::addTask(tr,
+			                                          taskBucket,
+			                                          task,
+			                                          endVersion,
+			                                          beginFile,
+			                                          beginBlock,
+			                                          batchSize,
+			                                          remainingInBatch,
+			                                          TaskCompletionKey::joinWith((allPartsDone)));
 
 			// If adding to existing batch then task is joined with a batch future so set done future.
 			// Note that this must be done after joining at least one task with the batch future in case all other
@@ -6675,7 +6672,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			co_await restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", nullptr);
 			std::string tag = co_await restore.tag().getD(tr);
-			co_await success(abortRestore(tr, StringRef(tag)));
+			co_await abortRestore(tr, StringRef(tag));
 			co_return;
 		}
 
@@ -6718,44 +6715,44 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 			Reference<TaskFuture> bulkLoadDone = futureBucket->future(tr);
 
 			// Add BulkLoad task for range data
-			co_await success(BulkLoadRestoreTaskFunc::addTask(tr,
-			                                                  taskBucket,
-			                                                  task,
-			                                                  restoreVersion,
-			                                                  bc->getURL(),
-			                                                  bulkDumpJobId,
-			                                                  TaskCompletionKey::signal(bulkLoadDone)));
+			co_await BulkLoadRestoreTaskFunc::addTask(tr,
+			                                          taskBucket,
+			                                          task,
+			                                          restoreVersion,
+			                                          bc->getURL(),
+			                                          bulkDumpJobId,
+			                                          TaskCompletionKey::signal(bulkLoadDone));
 
 			// After BulkLoad completes, run RestoreDispatch to apply mutation logs
 			// Set onlyApplyMutationLogs so it only processes logs, not range files
 			restore.onlyApplyMutationLogs().set(tr, true);
 
 			// Add RestoreDispatch task that waits for BulkLoad to complete
-			co_await success(RestoreDispatchTaskFunc::addTask(tr,
-			                                                  taskBucket,
-			                                                  task,
-			                                                  0,
-			                                                  "",
-			                                                  0,
-			                                                  CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE,
-			                                                  0,
-			                                                  TaskCompletionKey::noSignal(),
-			                                                  bulkLoadDone));
+			co_await RestoreDispatchTaskFunc::addTask(tr,
+			                                          taskBucket,
+			                                          task,
+			                                          0,
+			                                          "",
+			                                          0,
+			                                          CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE,
+			                                          0,
+			                                          TaskCompletionKey::noSignal(),
+			                                          bulkLoadDone);
 		} else if (transformPartitionedLog) {
 			// Traditional restore with partitioned logs
 			Version endVersion =
 			    std::min(firstVersion + CLIENT_KNOBS->RESTORE_PARTITIONED_BATCH_VERSION_SIZE, restoreVersion);
-			co_await success(RestoreDispatchPartitionedTaskFunc::addTask(
-			    tr, taskBucket, task, firstVersion, firstVersion, endVersion));
+			co_await RestoreDispatchPartitionedTaskFunc::addTask(
+			    tr, taskBucket, task, firstVersion, firstVersion, endVersion);
 		} else {
 			// Traditional restore with non-partitioned logs
-			co_await success(RestoreDispatchTaskFunc::addTask(
-			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE));
+			co_await RestoreDispatchTaskFunc::addTask(
+			    tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE);
 		}
 
 		// Initialize apply mutations map.
 		Future<Optional<bool>> logsOnly = restore.onlyApplyMutationLogs().get(tr);
-		co_await success(logsOnly);
+		co_await logsOnly;
 		if (logsOnly.get().present() && logsOnly.get().get()) {
 			//  If this is an incremental restore, we need to set the applyMutationsMapPrefix
 			//  to the earliest log version so no mutations are missed
@@ -7368,7 +7365,7 @@ public:
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 			Key destUidValue = co_await config.destUidValue().getOrThrow(tr);
-			co_await success(tr->getReadVersion());
+			co_await tr->getReadVersion();
 			co_await (eraseLogData(tr, config.getUidAsKey(), destUidValue) &&
 			          fileBackup::clearBackupStartID(tr, config.getUid()));
 
@@ -8093,7 +8090,7 @@ public:
 			co_await ryw_tr->onError(err);
 		}
 
-		co_await success(waitBackup(backupAgent, cx, tagName.toString(), StopWhenDone::True));
+		co_await waitBackup(backupAgent, cx, tagName.toString(), StopWhenDone::True);
 		TraceEvent("AS_BackupStopped").log();
 
 		ryw_tr->reset();
@@ -8150,25 +8147,25 @@ public:
 			}
 			if (!systemRestoreRange.empty()) {
 				// restore system keys
-				co_await success(restore(backupAgent,
-				                         cx,
-				                         cx,
-				                         "system_restore"_sr,
-				                         KeyRef(bc->getURL()),
-				                         bc->getProxy(),
-				                         systemRestoreRange,
-				                         {},
-				                         WaitForComplete::True,
-				                         ::invalidVersion,
-				                         Verbose::True,
-				                         addPrefix,
-				                         removePrefix,
-				                         LockDB::True,
-				                         UnlockDB::False,
-				                         OnlyApplyMutationLogs::False,
-				                         InconsistentSnapshotOnly::False,
-				                         {},
-				                         randomUid));
+				co_await restore(backupAgent,
+				                 cx,
+				                 cx,
+				                 "system_restore"_sr,
+				                 KeyRef(bc->getURL()),
+				                 bc->getProxy(),
+				                 systemRestoreRange,
+				                 {},
+				                 WaitForComplete::True,
+				                 ::invalidVersion,
+				                 Verbose::True,
+				                 addPrefix,
+				                 removePrefix,
+				                 LockDB::True,
+				                 UnlockDB::False,
+				                 OnlyApplyMutationLogs::False,
+				                 InconsistentSnapshotOnly::False,
+				                 {},
+				                 randomUid);
 				Reference<ReadYourWritesTransaction> rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
 				while (true) {

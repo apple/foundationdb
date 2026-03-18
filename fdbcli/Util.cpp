@@ -175,7 +175,7 @@ Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-			co_await success(safeThreadFutureToFuture(serverListF));
+			co_await safeThreadFutureToFuture(serverListF);
 			ASSERT(!serverListF.get().more);
 			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);
 			RangeResult serverList = serverListF.get();
