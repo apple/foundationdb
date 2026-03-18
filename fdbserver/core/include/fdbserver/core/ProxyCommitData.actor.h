@@ -339,7 +339,7 @@ struct ProxyCommitData {
 };
 struct RangeLock {
 public:
-	RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
+	explicit RangeLock(ProxyCommitData* const pProxyCommitData) : pProxyCommitData(pProxyCommitData) {
 		coreMap.insert(allKeys, RangeLockStateSet());
 	}
 

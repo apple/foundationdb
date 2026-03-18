@@ -106,7 +106,7 @@ using EventMap = std::map<std::string, TraceEventFields>;
 
 struct StorageServerStatusInfo : public StorageServerMetaInfo {
 	EventMap eventMap;
-	StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
+	explicit StorageServerStatusInfo(const StorageServerMetaInfo& info) : StorageServerMetaInfo(info, info.metadata) {}
 };
 
 ACTOR static Future<Optional<TraceEventFields>> latestEventOnWorker(WorkerInterface worker, std::string eventName) {
@@ -156,7 +156,7 @@ class StatusCounter {
 public:
 	StatusCounter() : hz(0), roughness(0), counter(0) {}
 	StatusCounter(double hz, double roughness, int64_t counter) : hz(hz), roughness(roughness), counter(counter) {}
-	StatusCounter(const std::string& parsableText) { parseText(parsableText); }
+	explicit(false) StatusCounter(const std::string& parsableText) { parseText(parsableText); }
 
 	StatusCounter& parseText(const std::string& parsableText) {
 		sscanf(parsableText.c_str(), "%lf %lf %" SCNd64 "", &hz, &roughness, &counter);

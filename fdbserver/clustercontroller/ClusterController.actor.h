@@ -105,7 +105,7 @@ struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitWorkersInfo(RecruitFromConfigurationRequest const& req) : req(req) {}
+	explicit RecruitWorkersInfo(RecruitFromConfigurationRequest const& req) : req(req) {}
 };
 
 struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
@@ -114,7 +114,7 @@ struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
+	explicit RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
 };
 
 struct ClusterRecoveryData;

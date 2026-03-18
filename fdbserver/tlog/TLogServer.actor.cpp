@@ -3875,7 +3875,7 @@ struct DequeAllocator : std::allocator<T> {
 	DequeAllocator() = default;
 
 	template <typename U>
-	DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
+	explicit(false) DequeAllocator(DequeAllocator<U> const& u) : std::allocator<T>(u) {}
 
 	T* allocate(std::size_t n) {
 		// Intentionally count allocated bytes for all allocator rebinds, including deque internals that use pointer

@@ -79,7 +79,7 @@ struct WorkerInterface {
 	Optional<NetworkAddress> grpcAddress() const { return clientInterface.grpcAddress; }
 
 	WorkerInterface() {}
-	WorkerInterface(const LocalityData& locality) : locality(locality) {}
+	explicit(false) WorkerInterface(const LocalityData& locality) : locality(locality) {}
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
@@ -517,7 +517,7 @@ struct GetEncryptionAtRestModeResponse {
 	uint32_t mode;
 
 	GetEncryptionAtRestModeResponse() : mode(EncryptionAtRestModeDeprecated::Mode::DISABLED) {}
-	GetEncryptionAtRestModeResponse(uint32_t m) : mode(m) {}
+	explicit(false) GetEncryptionAtRestModeResponse(uint32_t m) : mode(m) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -531,7 +531,7 @@ struct GetEncryptionAtRestModeRequest {
 	ReplyPromise<GetEncryptionAtRestModeResponse> reply;
 
 	GetEncryptionAtRestModeRequest() {}
-	GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
+	explicit(false) GetEncryptionAtRestModeRequest(UID tId) : tlogId(tId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -833,7 +833,7 @@ struct ExecuteRequest {
 	Arena arena;
 	StringRef execPayload;
 
-	ExecuteRequest(StringRef execPayload) : execPayload(execPayload) {}
+	explicit(false) ExecuteRequest(StringRef execPayload) : execPayload(execPayload) {}
 
 	ExecuteRequest() : execPayload() {}
 
@@ -954,7 +954,7 @@ struct DiskStoreRequest {
 	bool includePartialStores;
 	ReplyPromise<Standalone<VectorRef<UID>>> reply;
 
-	DiskStoreRequest(bool includePartialStores = false) : includePartialStores(includePartialStores) {}
+	explicit(false) DiskStoreRequest(bool includePartialStores = false) : includePartialStores(includePartialStores) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

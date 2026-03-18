@@ -61,7 +61,7 @@ struct WorkloadContext {
 	std::vector<KeyRange> rangesToCheck; // for urgent consistency checker
 
 	WorkloadContext();
-	WorkloadContext(const WorkloadContext&);
+	explicit(false) WorkloadContext(const WorkloadContext&);
 	~WorkloadContext();
 	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
@@ -111,7 +111,7 @@ struct TestWorkloadImpl : Workload {
 	static_assert(std::is_same_v<decltype(&TestWorkload::description), decltype(&Workload::description)>,
 	              "Workload must not override TestWorkload::description");
 
-	TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
+	explicit(false) TestWorkloadImpl(WorkloadContext const& wcx) : Workload(wcx) {}
 	template <bool E = isFailureInjectionWorkload>
 	TestWorkloadImpl(WorkloadContext const& wcx, std::enable_if_t<E, NoOptions> o) : Workload(wcx, o) {}
 
@@ -122,7 +122,7 @@ struct CompoundWorkload;
 class DeterministicRandom;
 
 struct FailureInjectionWorkload : TestWorkload {
-	FailureInjectionWorkload(WorkloadContext const&);
+	explicit(false) FailureInjectionWorkload(WorkloadContext const&);
 	virtual ~FailureInjectionWorkload() {}
 	virtual void initFailureInjectionMode(DeterministicRandom& random);
 	virtual bool shouldInject(DeterministicRandom& random, const WorkloadRequest& work, const unsigned count) const;
@@ -156,7 +156,7 @@ struct CompoundWorkload : TestWorkload {
 	std::vector<Reference<TestWorkload>> workloads;
 	std::vector<Reference<FailureInjectionWorkload>> failureInjection;
 
-	CompoundWorkload(WorkloadContext& wcx);
+	explicit(false) CompoundWorkload(WorkloadContext& wcx);
 	CompoundWorkload* add(Reference<TestWorkload>&& w);
 	void addFailureInjection(WorkloadRequest& work);
 	bool shouldInjectFailure(DeterministicRandom& random,
@@ -256,7 +256,7 @@ struct WorkloadFactory : IWorkloadFactory {
 	              "Each workload must have a Workload::NAME member");
 	using WorkloadType = TestWorkloadImpl<Workload>;
 	bool runInUntrustedClient;
-	WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
+	explicit(false) WorkloadFactory(UntrustedMode runInUntrustedClient = UntrustedMode::False)
 	  : runInUntrustedClient(runInUntrustedClient) {
 		auto& f = factories();
 		std::string name = WorkloadType::NAME;

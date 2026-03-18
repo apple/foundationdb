@@ -160,7 +160,7 @@ const char* getFlushReasonString(FlushReason flush_reason) {
 
 class RocksDBEventListener : public rocksdb::EventListener {
 public:
-	RocksDBEventListener(UID id)
+	explicit RocksDBEventListener(UID id)
 	  : logId(id), compactionReasons((int)CompactionReason::kNumOfReasons), flushReasons(ROCKSDB_NUM_FLUSH_REASONS),
 	    numRangeDeletionsInTableFile(Histogram::getHistogram(ROCKSDB_STATS_HISTOGRAM_GROUP,
 	                                                         "NumRangeDeletionsInTableFile"_sr,
@@ -380,7 +380,7 @@ public:
 	// A factory of a table property collector that marks a SST file as need-compaction when the number of range
 	// deletions exceeds the threshold.
 	// @param numRangeDeletionsAllowed,  triggers compaction range deletion count exceeds numRangeDeletionsAllowed.
-	CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
+	explicit(false) CompactOnRangeDeletionCollectorFactory(uint64_t numRangeDeletionsAllowed)
 	  : threshold(numRangeDeletionsAllowed), numFilesMarkedForCompaction(0) {}
 
 	~CompactOnRangeDeletionCollectorFactory() override = default;
@@ -2085,7 +2085,7 @@ struct LatencyMetrics {
 	                                                 Histogram::Unit::milliseconds)) {}
 
 	// Delete copy constructors.
-	LatencyMetrics(const LatencyMetrics&) = delete;
+	explicit(false) LatencyMetrics(const LatencyMetrics&) = delete;
 	LatencyMetrics& operator=(const LatencyMetrics&) = delete;
 };
 
@@ -2464,7 +2464,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			PhysicalShard* shard;
 			ThreadReturnPromise<Void> done;
 
-			AddShardAction(PhysicalShard* shard) : shard(shard) { ASSERT(shard); }
+			explicit AddShardAction(PhysicalShard* shard) : shard(shard) { ASSERT(shard); }
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
 
@@ -2528,7 +2528,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		struct DeleteVisitor : public rocksdb::WriteBatch::Handler {
 			std::vector<std::pair<uint32_t, KeyRange>>* deletes;
 
-			DeleteVisitor(std::vector<std::pair<uint32_t, KeyRange>>* deletes) : deletes(deletes) { ASSERT(deletes); }
+			explicit(false) DeleteVisitor(std::vector<std::pair<uint32_t, KeyRange>>* deletes) : deletes(deletes) {
+				ASSERT(deletes);
+			}
 
 			rocksdb::Status DeleteRangeCF(uint32_t column_family_id,
 			                              const rocksdb::Slice& begin,

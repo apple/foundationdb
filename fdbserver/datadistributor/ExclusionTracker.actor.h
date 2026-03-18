@@ -45,7 +45,7 @@ struct ExclusionTracker {
 	Future<Void> trackerFuture;
 
 	ExclusionTracker() {}
-	ExclusionTracker(Database db) : db(db) { trackerFuture = tracker(this); }
+	explicit ExclusionTracker(Database db) : db(db) { trackerFuture = tracker(this); }
 
 	bool isFailedOrExcluded(NetworkAddress addr) {
 		AddressExclusion addrExclusion(addr.ip, addr.port);
