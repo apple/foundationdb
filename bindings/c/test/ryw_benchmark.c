@@ -231,16 +231,16 @@ int interleavedSetsGets(FDBTransaction* tr, struct ResultSet* rs) {
 	int length;
 	int i;
 
-	char *k = "foo";
+	char* k = "foo";
 	char v[12];
 	int num = 1;
 
 	double start = getTime();
 	snprintf(v, sizeof(v), "%d", num);
-	fdb_transaction_set(tr, (uint8_t *)k, 3, (uint8_t *)v, strlen(v));
+	fdb_transaction_set(tr, (uint8_t*)k, 3, (uint8_t*)v, strlen(v));
 
 	for (i = 0; i < 10000; ++i) {
-	  FDBFuture* f = fdb_transaction_get(tr, (uint8_t *)k, 3, 0);
+		FDBFuture* f = fdb_transaction_get(tr, (uint8_t*)k, 3, 0);
 		if (getError(fdb_future_block_until_ready(f), "InterleavedSetsGets (block for get)", rs))
 			return -1;
 		if (getError(fdb_future_get_value(f, &present, &value, &length), "InterleavedSetsGets (get result)", rs))
@@ -248,7 +248,7 @@ int interleavedSetsGets(FDBTransaction* tr, struct ResultSet* rs) {
 		fdb_future_destroy(f);
 
 		snprintf(v, sizeof(v), "%d", ++num);
-		fdb_transaction_set(tr, (uint8_t *)k, 3, (uint8_t *)v, strlen(v));
+		fdb_transaction_set(tr, (uint8_t*)k, 3, (uint8_t*)v, strlen(v));
 	}
 	double end = getTime();
 
