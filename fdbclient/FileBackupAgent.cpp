@@ -7642,8 +7642,11 @@ public:
 						snapshotModeText = "both";
 						break;
 					default:
-						snapshotModeText = "unknown";
-						break;
+						TraceEvent(SevError, "BackupInvalidSnapshotMode")
+						    .detail("BackupUID", config.getUid())
+						    .detail("SnapshotModeValue", snapshotModeValue)
+						    .detail("ValidValues", "0=rangefile, 1=bulkdump, 2=both");
+						throw backup_error();
 					}
 					doc.setKey("SnapshotMode", snapshotModeText);
 
@@ -7802,8 +7805,11 @@ public:
 						snapshotModeText = "both";
 						break;
 					default:
-						snapshotModeText = "unknown";
-						break;
+						TraceEvent(SevError, "BackupInvalidSnapshotMode")
+						    .detail("BackupUID", config.getUid())
+						    .detail("SnapshotModeValue", snapshotModeValue)
+						    .detail("ValidValues", "0=rangefile, 1=bulkdump, 2=both");
+						throw backup_error();
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
