@@ -7322,8 +7322,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// in WaitPrevious phase (hasn't chosen a fetchVersion yet). What we are doing here is expensive
 					// and could get more expensive if we started having many more blocks per shard. May need
 					// optimization in the future.
-					auto u = updatesToSplit.begin();
-					for (; u != updatesToSplit.end(); ++u) {
+					for (auto u = updatesToSplit.begin(); u != updatesToSplit.end(); ++u) {
 						splitMutations(data, data->shards, *u);
 					}
 

@@ -2246,8 +2246,7 @@ struct BackupRangeTaskFunc : BackupTaskFuncBase {
 
 			// write kvData to file, update lastKey and key count
 			if (values.first.size() != 0) {
-				size_t i = 0;
-				for (; i < values.first.size(); ++i) {
+				for (size_t i = 0; i < values.first.size(); ++i) {
 					co_await rangeFile->writeKV(values.first[i].key, values.first[i].value);
 				}
 				lastKey = values.first.back().key;
@@ -3040,8 +3039,7 @@ struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 					RangeResultWithVersion r = co_await results.getFuture();
 					lock->release(r.first.expectedSize());
 
-					int i = 0;
-					for (; i < r.first.size(); ++i) {
+					for (int i = 0; i < r.first.size(); ++i) {
 						// Remove the backupLogPrefix + UID bytes from the key
 						co_await logFile.writeKV(r.first[i].key.substr(backupLogPrefixBytes + 16), r.first[i].value);
 						lastVersion = r.second;
@@ -5300,8 +5298,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 		bool atLeastOneIteratorHasNext = false;
 		std::vector<Version> minVs(iterators.size(), 0); // can be removed or leave for debugging
 
-		int k = 0;
-		for (; k < iterators.size(); k++) {
+		for (int k = 0; k < iterators.size(); k++) {
 			if (!iterators[k]->hasNext()) {
 				continue;
 			}
@@ -5368,8 +5365,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 	    Version minVersion) {
 		std::vector<Standalone<VectorRef<VersionedMutation>>> mutationsSingleVersion;
 
-		int k = 0;
-		for (; k < iterators.size(); k++) {
+		for (int k = 0; k < iterators.size(); k++) {
 			if (!iterators[k]->hasNext()) {
 				continue;
 			}
@@ -6287,9 +6283,7 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 		tags.push_back(makeRestoreTag(tagName.toString()));
 
 	std::string result;
-	int i = 0;
-
-	for (; i < tags.size(); ++i) {
+	for (int i = 0; i < tags.size(); ++i) {
 		UidAndAbortedFlagT u = co_await tags[i].getD(tr);
 		std::string s = co_await RestoreConfig(u.first).getFullStatus(tr);
 		result.append(s);

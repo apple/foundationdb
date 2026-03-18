@@ -1089,8 +1089,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	[[maybe_unused]] int startedHere = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
-	auto it = combined.begin();
-	for (; it != combined.end(); it++) {
+	for (auto it = combined.begin(); it != combined.end(); it++) {
 		RelocateData rd(*it);
 
 		// If having a bulk load task overlapping the rd range,
