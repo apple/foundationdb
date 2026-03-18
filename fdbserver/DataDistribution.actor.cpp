@@ -3268,34 +3268,29 @@ Future<Void> ddSnapCreate(
 		co_return;
 	}
 	try {
-		auto choice =
+		auto res =
 		    co_await race(dbInfoChange, ddSnapCreateCore(snapReq, db), delay(SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT));
-		if (choice.index() == 0) {
-
+		if (res.index() == 0) {
 			TraceEvent("SnapDDCreateDBInfoChanged")
 			    .detail("SnapPayload", snapReq.snapPayload)
 			    .detail("SnapUID", snapReq.snapUID);
 			ddSnapMap->at(snapReq.snapUID).reply.sendError(snap_with_recovery_unsupported());
 			ddSnapMap->erase(snapReq.snapUID);
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(snap_with_recovery_unsupported());
-		} else if (choice.index() == 1) {
-
+		} else if (res.index() == 1) {
 			TraceEvent("SnapDDCreateSuccess")
 			    .detail("SnapPayload", snapReq.snapPayload)
 			    .detail("SnapUID", snapReq.snapUID);
 			ddSnapMap->at(snapReq.snapUID).reply.send(Void());
 			ddSnapMap->erase(snapReq.snapUID);
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(Void());
-		} else if (choice.index() == 2) {
-
+		} else if (res.index() == 2) {
 			TraceEvent("SnapDDCreateTimedOut")
 			    .detail("SnapPayload", snapReq.snapPayload)
 			    .detail("SnapUID", snapReq.snapUID);
 			ddSnapMap->at(snapReq.snapUID).reply.sendError(timed_out());
 			ddSnapMap->erase(snapReq.snapUID);
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(timed_out());
-		} else {
-			UNREACHABLE();
 		}
 	} catch (Error& e) {
 		TraceEvent("SnapDDCreateError")
@@ -5088,35 +5083,26 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 
 	try {
 		loop {
-			auto choice = co_await race(distributor || collection,
-			                            di.haltDataDistributor.getFuture(),
-			                            di.dataDistributorMetrics.getFuture(),
-			                            di.distributorSnapReq.getFuture(),
-			                            di.distributorExclCheckReq.getFuture(),
-			                            di.storageWigglerState.getFuture(),
-			                            di.triggerAudit.getFuture());
-			bool breakFromChoose{ false };
-			bool continueFromChoose{ false };
-			if (choice.index() == 0) {
-
+			auto res = co_await race(distributor || collection,
+			                         di.haltDataDistributor.getFuture(),
+			                         di.dataDistributorMetrics.getFuture(),
+			                         di.distributorSnapReq.getFuture(),
+			                         di.distributorExclCheckReq.getFuture(),
+			                         di.storageWigglerState.getFuture(),
+			                         di.triggerAudit.getFuture());
+			if (res.index() == 0) {
 				ASSERT(false);
 				throw internal_error();
-			} else if (choice.index() == 1) {
-				HaltDataDistributorRequest req = std::get<1>(std::move(choice));
-				do {
-
-					req.reply.send(Void());
-					TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
-					breakFromChoose = true;
-					break;
-				} while (false);
-			} else if (choice.index() == 2) {
-				GetDataDistributorMetricsRequest req = std::get<2>(std::move(choice));
-
+			} else if (res.index() == 1) {
+				HaltDataDistributorRequest req = std::get<1>(std::move(res));
+				req.reply.send(Void());
+				TraceEvent("DataDistributorHalted", di.id()).detail("ReqID", req.requesterID);
+				co_return;
+			} else if (res.index() == 2) {
+				GetDataDistributorMetricsRequest req = std::get<2>(std::move(res));
 				actors.add(ddGetMetrics(req, getShardMetricsList));
-			} else if (choice.index() == 3) {
-				DistributorSnapRequest snapReq = std::get<3>(std::move(choice));
-
+			} else if (res.index() == 3) {
+				DistributorSnapRequest snapReq = std::get<3>(std::move(res));
 				auto& snapUID = snapReq.snapUID;
 				if (ddSnapReqResultMap.contains(snapUID)) {
 					CODE_PROBE(true,
@@ -5149,34 +5135,22 @@ Future<Void> dataDistributor_impl(DataDistributorInterface di, Reference<DataDis
 					                         &ddSnapReqResultMap),
 					            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
 				}
-			} else if (choice.index() == 4) {
-				DistributorExclusionSafetyCheckRequest exclCheckReq = std::get<4>(std::move(choice));
-
+			} else if (res.index() == 4) {
+				DistributorExclusionSafetyCheckRequest exclCheckReq = std::get<4>(std::move(res));
 				actors.add(ddExclusionSafetyCheck(exclCheckReq, self, cx));
-			} else if (choice.index() == 5) {
-				GetStorageWigglerStateRequest req = std::get<5>(std::move(choice));
-
+			} else if (res.index() == 5) {
+				GetStorageWigglerStateRequest req = std::get<5>(std::move(res));
 				req.reply.send(getStorageWigglerStates(self));
-			} else if (choice.index() == 6) {
-				TriggerAuditRequest req = std::get<6>(std::move(choice));
-				do {
-
-					if (req.cancel) {
-						ASSERT(req.id.isValid());
-						actors.add(cancelAuditStorage(self, req));
-						continueFromChoose = true;
-						break;
-					}
+			} else if (res.index() == 6) {
+				TriggerAuditRequest req = std::get<6>(std::move(res));
+				if (req.cancel) {
+					ASSERT(req.id.isValid());
+					actors.add(cancelAuditStorage(self, req));
+				} else {
 					actors.add(auditStorage(self, req));
-				} while (false);
+				}
 			} else {
 				UNREACHABLE();
-			}
-			if (continueFromChoose) {
-				continue;
-			}
-			if (breakFromChoose) {
-				break;
 			}
 		}
 	} catch (Error& err) {
