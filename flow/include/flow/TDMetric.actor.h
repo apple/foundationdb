@@ -176,7 +176,7 @@ struct MetricBatch {
 
 	MetricBatch() {}
 
-	MetricBatch(FDBScope* in) {
+	explicit MetricBatch(FDBScope* in) {
 		assert(in != nullptr);
 		scope.inserts = std::move(in->inserts);
 		scope.appends = std::move(in->appends);
@@ -707,7 +707,7 @@ struct EventField : public Descriptor {
 
 	void operator=(EventField&& r) noexcept { levels = std::move(r.levels); }
 
-	EventField(Descriptor d = Descriptor()) : Descriptor(d) {}
+	explicit EventField(Descriptor d = Descriptor()) : Descriptor(d) {}
 
 	static StringRef typeName() { return metricTypeName<T>(); }
 
@@ -761,7 +761,8 @@ struct TimeDescriptor {
 };
 
 struct BaseMetric {
-	BaseMetric(MetricNameRef const& name) : metricName(name), enabled(false), pCollection(nullptr), registered(false) {
+	explicit BaseMetric(MetricNameRef const& name)
+	  : metricName(name), enabled(false), pCollection(nullptr), registered(false) {
 		setConfig(false);
 	}
 	virtual ~BaseMetric() {}
@@ -820,7 +821,7 @@ struct BaseMetric {
 
 struct BaseEventMetric : BaseMetric {
 
-	BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
+	explicit BaseEventMetric(MetricNameRef const& name) : BaseMetric(name) {}
 
 	// Needed for MetricUtil
 	alignas(8) static const StringRef metricType;
@@ -967,7 +968,7 @@ private:
 
 // A field Descriptor compatible with EventField but with name set at runtime
 struct DynamicDescriptor {
-	DynamicDescriptor(const char* name) : _name(StringRef((uint8_t*)name, strlen(name))) {}
+	explicit DynamicDescriptor(const char* name) : _name(StringRef((uint8_t*)name, strlen(name))) {}
 	StringRef name() const { return _name; }
 
 private:
@@ -1016,7 +1017,7 @@ struct DynamicFieldBase {
 template <typename T>
 struct DynamicField final : public DynamicFieldBase, EventField<T, DynamicDescriptor> {
 	typedef EventField<T, DynamicDescriptor> EventFieldType;
-	DynamicField(const char* name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
+	explicit DynamicField(const char* name) : DynamicFieldBase(), EventFieldType(DynamicDescriptor(name)), value(T()) {}
 
 	StringRef fieldName() const override { return EventFieldType::name(); }
 
@@ -1096,7 +1097,7 @@ private:
 	}
 
 public:
-	DynamicEventMetric(MetricNameRef const& name, Void = Void());
+	explicit DynamicEventMetric(MetricNameRef const& name, Void = Void());
 	~DynamicEventMetric() override = default;
 
 	void addref() override { ReferenceCounted<DynamicEventMetric>::addref(); }
@@ -1395,9 +1396,9 @@ template <typename T>
 struct MetricHandle {
 	using ValueType = typename T::ValueType;
 
-	MetricHandle(StringRef const& name = StringRef(),
-	             StringRef const& id = StringRef(),
-	             ValueType const& initial = ValueType())
+	explicit MetricHandle(StringRef const& name = StringRef(),
+	                      StringRef const& id = StringRef(),
+	                      ValueType const& initial = ValueType())
 	  : ref(T::getOrCreateInstance(name, id, true, initial)) {}
 
 	// Initialize this handle to point to a new or existing metric with (name, id).  If a new metric is created then the
@@ -1456,7 +1457,7 @@ class IMetric {
 public:
 	const UID id;
 	const MetricsDataModel model;
-	IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
+	explicit IMetric(MetricsDataModel m) : id{ deterministicRandom()->randomUniqueID() }, model{ m } {
 		MetricCollection* metrics = MetricCollection::getMetricCollection();
 		if (metrics != nullptr) {
 			if (metrics->map.count(id) > 0) {

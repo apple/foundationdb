@@ -81,7 +81,7 @@ TEST_CASE("/flow/IThreadPool/NamedThread") {
 }
 
 struct ThreadSafePromiseStreamSender final : IThreadPoolReceiver {
-	ThreadSafePromiseStreamSender(ThreadReturnPromiseStream<std::string>* notifications)
+	explicit ThreadSafePromiseStreamSender(ThreadReturnPromiseStream<std::string>* notifications)
 	  : notifications(notifications) {}
 	void init() override {}
 

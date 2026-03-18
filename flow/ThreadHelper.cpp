@@ -40,7 +40,7 @@ struct ThreadFutureSendObj {
 
 // A simple thread object that cancels the threadFuture
 struct ThreadFutureCancelObj {
-	ThreadFutureCancelObj(ThreadFuture<Void> f) : f(f) {}
+	explicit ThreadFutureCancelObj(ThreadFuture<Void> f) : f(f) {}
 	void operator()() { f.cancel(); }
 	ThreadFuture<Void> f;
 };

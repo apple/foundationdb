@@ -56,7 +56,7 @@ struct SignalClosure {
 
 struct SyncFileForSim : ReferenceCounted<SyncFileForSim> {
 	FILE* f;
-	SyncFileForSim(std::string const& filename) { f = fopen(filename.c_str(), "wb"); }
+	explicit SyncFileForSim(std::string const& filename) { f = fopen(filename.c_str(), "wb"); }
 
 	bool isOpen() const { return f != nullptr; }
 

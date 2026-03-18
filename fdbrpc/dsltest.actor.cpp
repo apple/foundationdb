@@ -296,7 +296,7 @@ public:
 	const uint8_t* end() const { return data + length; }
 
 private:
-	TestBuffer(int length) noexcept : length(length) {}
+	explicit TestBuffer(int length) noexcept : length(length) {}
 	int length;
 	uint8_t data[1];
 };
@@ -979,7 +979,7 @@ ACTOR [[flow_allow_discard]] Future<int> introFirst(Future<int> a, Future<int> b
 struct AddReply {
 	int sum;
 	AddReply() = default;
-	AddReply(int x) : sum(x) {}
+	explicit(false) AddReply(int x) : sum(x) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

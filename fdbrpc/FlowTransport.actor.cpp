@@ -230,7 +230,7 @@ void EndpointMap::remove(Endpoint::Token const& token, NetworkMessageReceiver* r
 }
 
 struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
-	EndpointNotFoundReceiver(EndpointMap& endpoints) {
+	explicit EndpointNotFoundReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(
 		    this, Endpoint::wellKnownToken(WLTOKEN_ENDPOINT_NOT_FOUND), TaskPriority::DefaultEndpoint);
 	}
@@ -256,7 +256,7 @@ struct PingRequest {
 };
 
 struct PingReceiver final : NetworkMessageReceiver {
-	PingReceiver(EndpointMap& endpoints) {
+	explicit PingReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET), TaskPriority::ReadSocket);
 	}
 	void receive(ArenaObjectReader& reader) override {
@@ -271,7 +271,7 @@ struct PingReceiver final : NetworkMessageReceiver {
 };
 
 struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
-	UnauthorizedEndpointReceiver(EndpointMap& endpoints) {
+	explicit UnauthorizedEndpointReceiver(EndpointMap& endpoints) {
 		endpoints.insertWellKnown(
 		    this, Endpoint::wellKnownToken(WLTOKEN_UNAUTHORIZED_ENDPOINT), TaskPriority::ReadSocket);
 	}
@@ -294,7 +294,7 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 class NetworkAddressCachedString {
 public:
 	NetworkAddressCachedString() { setAddressList(NetworkAddressList()); }
-	NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
+	explicit NetworkAddressCachedString(NetworkAddressList const& list) { setAddressList(list); }
 	NetworkAddressList const& getAddressList() const { return addressList; }
 	void setAddressList(NetworkAddressList const& list) {
 		cachedStr = Standalone<StringRef>(StringRef(list.address.toString()));
@@ -387,7 +387,7 @@ struct ConnectionLogWriter : IThreadPoolReceiver {
 	std::string fileName;
 	std::fstream file;
 
-	ConnectionLogWriter(const std::string baseDir) : baseDir(baseDir) {}
+	explicit ConnectionLogWriter(const std::string baseDir) : baseDir(baseDir) {}
 
 	~ConnectionLogWriter() override {
 		if (file.is_open())
