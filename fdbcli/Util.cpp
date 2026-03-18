@@ -261,7 +261,7 @@ void printTaskBreakdown(int submittedTasks, int triggeredTasks, int runningTasks
 		if (completeTasks > 0)
 			fmt::println("   Complete: {}", completeTasks);
 		if (errorTasks > 0)
-			fmt::println("   Error: {} ⚠️", errorTasks);
+			fmt::println("   Error: {}", errorTasks);
 	}
 }
 
@@ -282,13 +282,13 @@ BulkHealthMetrics BulkHealthMetrics::analyze(double throughputMBps,
 
 	// Determine status
 	if (metrics.healthScore >= 90) {
-		metrics.healthStatus = "🚀 Excellent";
+		metrics.healthStatus = "Excellent";
 	} else if (metrics.healthScore >= 75) {
-		metrics.healthStatus = "✅ Good";
+		metrics.healthStatus = "Good";
 	} else if (metrics.healthScore >= 50) {
-		metrics.healthStatus = "⚠️ Fair";
+		metrics.healthStatus = "Fair";
 	} else {
-		metrics.healthStatus = "❌ Poor";
+		metrics.healthStatus = "Poor";
 	}
 
 	// Generate recommendations
@@ -314,9 +314,9 @@ void printBulkHealthAnalysis(const BulkHealthMetrics& health) {
 	fmt::println(" Overall Health: {:.1f}/100 ({})", health.healthScore, health.healthStatus);
 
 	if (!health.recommendations.empty()) {
-		fmt::println(" Recommendations:");
+		fmt::println(" Recommendations");
 		for (const auto& rec : health.recommendations) {
-			fmt::println("   • {}", rec);
+			fmt::println("   - {}", rec);
 		}
 	}
 }
@@ -348,7 +348,7 @@ BulkErrorAnalysis BulkErrorAnalysis::analyze(int errorTasks,
 void printErrorDiagnostics(const BulkErrorAnalysis& analysis) {
 	if (analysis.totalErrors > 0) {
 		fmt::println("");
-		fmt::println("🔍 Error Diagnostics:");
+		fmt::println("Error Diagnostics:");
 
 		if (!analysis.errorCategories.empty()) {
 			fmt::println(" Error Categories:");
@@ -383,10 +383,10 @@ BulkOptimizationRecommendations BulkOptimizationRecommendations::generate(double
 void printOptimizationRecommendations(const BulkOptimizationRecommendations& recs) {
 	if (!recs.performanceRecommendations.empty()) {
 		fmt::println("");
-		fmt::println("🎯 Optimization Recommendations:");
+		fmt::println("Optimization Recommendations:");
 		fmt::println(" Performance:");
 		for (const auto& rec : recs.performanceRecommendations) {
-			fmt::println("   • {}", rec);
+			fmt::println("   - {}", rec);
 		}
 	}
 }
