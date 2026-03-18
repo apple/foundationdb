@@ -291,7 +291,7 @@ Future<Void> persistCompleteBulkDumpRange(Database cx, BulkDumpState bulkDumpSta
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			rangeToPersist = Standalone(KeyRangeRef(beginKey, endKey));
-			co_await store(result, krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist));
+			result = co_await krmGetRanges(&tr, bulkDumpPrefix, rangeToPersist);
 			bool anyNew = false;
 			for (int i = 0; i < result.size() - 1; i++) {
 				if (result[i].value.empty()) { // has been cancelled

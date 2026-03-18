@@ -537,9 +537,9 @@ public:
 		ERestoreState status = co_await self->stateEnum().getD(tr);
 		Version version = -1;
 		if (status == ERestoreState::RUNNING) {
-			co_await store(version, self->getApplyBeginVersion(tr));
+			version = co_await self->getApplyBeginVersion(tr);
 		} else if (status == ERestoreState::COMPLETED) {
-			co_await store(version, self->restoreVersion().getD(tr));
+			version = co_await self->restoreVersion().getD(tr);
 		}
 		co_return version;
 	}
@@ -3516,7 +3516,7 @@ struct BackupSnapshotManifest : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				co_await taskBucket->keepRunning(tr, task);
-				co_await store(dbConfig, getDatabaseConfiguration(cx));
+				dbConfig = co_await getDatabaseConfiguration(cx);
 
 				if (!bc) {
 					// Backup container must be present if we're still here
@@ -5046,7 +5046,7 @@ struct RestoreLogDataTaskFunc : RestoreFileTaskFuncBase {
 				Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
 				bc = getBackupContainerWithProxy(_bc);
 
-				co_await store(ranges, restore.getRestoreRangesOrDefault(tr));
+				ranges = co_await restore.getRestoreRangesOrDefault(tr);
 
 				co_await checkTaskVersion(tr->getDatabase(), task, name, version);
 				co_await taskBucket->keepRunning(tr, task);
@@ -5472,7 +5472,7 @@ struct RestoreLogDataPartitionedTaskFunc : RestoreFileTaskFuncBase {
 				Reference<IBackupContainer> _bc = co_await restore.sourceContainer().getOrThrow(tr);
 				bc = getBackupContainerWithProxy(_bc);
 
-				co_await store(ranges, restore.getRestoreRangesOrDefault(tr));
+				ranges = co_await restore.getRestoreRangesOrDefault(tr);
 
 				co_await checkTaskVersion(tr->getDatabase(), task, name, version);
 				co_await taskBucket->keepRunning(tr, task);
@@ -6401,13 +6401,12 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				co_await checkTaskVersion(tr->getDatabase(), task, name, version);
-				co_await store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion));
+				beginVersion = co_await restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion);
 
-				co_await store(restoreVersion, restore.restoreVersion().getOrThrow(tr));
-				co_await store(ranges, restore.getRestoreRangesOrDefault(tr));
-				co_await store(logsOnly, restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false));
-				co_await store(inconsistentSnapshotOnly,
-				               restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false));
+				restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
+				ranges = co_await restore.getRestoreRangesOrDefault(tr);
+				logsOnly = co_await restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false);
+				inconsistentSnapshotOnly = co_await restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false);
 				co_await taskBucket->keepRunning(tr, task);
 
 				ERestoreState oldState = co_await restore.stateEnum().getD(tr);
@@ -6692,8 +6691,8 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		restore.setApplyEndVersion(tr, firstVersion);
 
 		// Apply range data using either BulkLoad or traditional range file restore
-		co_await store(transformPartitionedLog, restore.transformPartitionedLog().getD(tr, Snapshot::False, false));
-		co_await store(restoreVersion, restore.restoreVersion().getOrThrow(tr));
+		transformPartitionedLog = co_await restore.transformPartitionedLog().getD(tr, Snapshot::False, false);
+		restoreVersion = co_await restore.restoreVersion().getOrThrow(tr);
 
 		if (!useRangeFileRestore) {
 			// Use BulkLoad for range data restoration, then apply logs
@@ -7478,9 +7477,9 @@ public:
 	static Future<TimestampedVersion> getTimestampedVersion(Reference<ReadYourWritesTransaction> tr,
 	                                                        Future<Optional<Version>> f) {
 		TimestampedVersion tv;
-		co_await store(tv.version, f);
+		tv.version = co_await f;
 		if (tv.version.present()) {
-			co_await store(tv.epochs, timeKeeperEpochsFromVersion(tv.version.get(), tr));
+			tv.epochs = co_await timeKeeperEpochsFromVersion(tv.version.get(), tr);
 		}
 		co_return tv;
 	}
