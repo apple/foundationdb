@@ -465,8 +465,9 @@ struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 	}
 
 	if (totalOut != GET_RANGE_COUNT) {
-		char* msg = (char*)malloc((sizeof(char)) * 200);
-		sprintf(msg, "verifying out count (%d != %d)", totalOut, GET_RANGE_COUNT);
+		const size_t nbytes = 200;
+		char* msg = (char*)malloc(nbytes);
+		snprintf(msg, nbytes, "verifying out count (%d != %d)", totalOut, GET_RANGE_COUNT);
 		logError(4100, msg, rs);
 		free(msg);
 		fdb_future_destroy(f);

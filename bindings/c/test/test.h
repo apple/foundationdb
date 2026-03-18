@@ -43,7 +43,7 @@ double getTime() {
 
 void writeKey(uint8_t** dest, int key, int keySize) {
 	*dest = (uint8_t*)malloc((sizeof(uint8_t)) * keySize);
-	sprintf((char*)*dest, "%0*d", keySize, key);
+	snprintf((char*)*dest, keySize, "%0*d", keySize, key);
 }
 
 uint8_t** generateKeys(int numKeys, int keySize) {
@@ -130,7 +130,7 @@ void addError(struct ResultSet* rs, const char* message) {
 void writeResultSet(struct ResultSet* rs) {
 	uint64_t id = ((uint64_t)rand() << 32) + rand();
 	char name[100];
-	sprintf(name, "fdb-c_result-%" SCNu64 ".json", id);
+	snprintf(name, sizeof(name), "fdb-c_result-%" SCNu64 ".json", id);
 	FILE* fp = fopen(name, "w");
 	if (!fp) {
 		fprintf(stderr, "Could not open results file %s\n", name);
@@ -190,8 +190,9 @@ void freeResultSet(struct ResultSet* rs) {
 
 fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet* rs) {
 	if (err) {
-		char* msg = (char*)malloc(strlen(context) + 100);
-		sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
+		size_t nbytes = strlen(context) + 100;
+		char* msg = (char*)malloc(nbytes);
+		snprintf(msg, nbytes, "Error in %s: %s", context, fdb_get_error(err));
 		fprintf(stderr, "%s\n", msg);
 		if (rs != NULL) {
 			addError(rs, msg);
@@ -214,8 +215,9 @@ void checkError(fdb_error_t err, const char* context, struct ResultSet* rs) {
 }
 
 fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet* rs) {
-	char* msg = (char*)malloc(strlen(context) + 100);
-	sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
+	size_t nbytes = strlen(context) + 100;
+	char* msg = (char*)malloc(nbytes);
+	snprintf(msg, nbytes, "Error in %s: %s", context, fdb_get_error(err));
 	fprintf(stderr, "%s\n", msg);
 	if (rs != NULL) {
 		addError(rs, msg);
