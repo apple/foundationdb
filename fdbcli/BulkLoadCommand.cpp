@@ -110,7 +110,7 @@ Future<Void> printBulkLoadJobProgress(Database cx, BulkLoadJobState job) {
 			rangeResult.clear();
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd)));
+			rangeResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(readBegin, readEnd));
 			for (int i = 0; i < rangeResult.size() - 1; ++i) {
 				if (rangeResult[i].value.empty()) {
 					continue;

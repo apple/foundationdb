@@ -80,7 +80,7 @@ struct GcGenerationsWorkload : TestWorkload {
 		std::vector<NetworkAddress> coordinators;
 		if (csOptional.present()) {
 			ClusterConnectionString cs = csOptional.get();
-			co_await store(coordinators, cs.tryResolveHostnames());
+			coordinators = co_await cs.tryResolveHostnames();
 		}
 
 		auto isCoordinator = [](const std::vector<NetworkAddress>& coordinators, const IPAddress& ip) {

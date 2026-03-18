@@ -267,7 +267,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		try {
 			tr->reset();
 			tr->setVersion(version);
-			co_await store(res, tr->get(keyToRead));
+			res = co_await tr->get(keyToRead);
 			co_return res;
 		} catch (Error& e) {
 			TraceEvent(name).error(e);

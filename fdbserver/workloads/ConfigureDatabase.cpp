@@ -337,8 +337,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				std::vector<StorageServerInterface> storageServers = co_await getStorageServers(cx);
 
 				if (!aggressiveMigrationTriggered) {
-					co_await store(aggressiveMigrationTriggered,
-					               issueAggressiveMigrationIfNeeded(cx, conf, storageServers));
+					aggressiveMigrationTriggered = co_await issueAggressiveMigrationIfNeeded(cx, conf, storageServers);
 				}
 
 				for (i = 0; i < storageServers.size(); i++) {

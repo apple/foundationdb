@@ -306,7 +306,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		Reference<DatabaseContext> db = cx.getReference();
 		while (true) {
 			co_await delay(1.0);
-			co_await store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, ContainsRecommended::True));
+			tags = co_await ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, ContainsRecommended::True);
 			recordThrottledTags(tags);
 		}
 	}

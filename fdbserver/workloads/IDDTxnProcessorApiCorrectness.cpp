@@ -143,15 +143,14 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	static Future<Void> readRealInitialDataDistribution(IDDTxnProcessorApiWorkload* self) {
 		while (true) {
-			co_await store(self->ddContext.lock, ::readMoveKeysLock(self->real->context()));
+			self->ddContext.lock = co_await ::readMoveKeysLock(self->real->context());
 			// read real InitialDataDistribution
 			try {
-				co_await store(self->realInitDD,
-				               self->real->getInitialDataDistribution(self->ddContext.id(),
-				                                                      self->ddContext.lock,
-				                                                      {},
-				                                                      self->ddContext.ddEnabledState.get(),
-				                                                      SkipDDModeCheck::True));
+				self->realInitDD = co_await self->real->getInitialDataDistribution(self->ddContext.id(),
+				                                                                   self->ddContext.lock,
+				                                                                   {},
+				                                                                   self->ddContext.ddEnabledState.get(),
+				                                                                   SkipDDModeCheck::True);
 				std::cout << "Finish read real InitialDataDistribution: server size "
 				          << self->realInitDD->allServers.size() << ", shard size: " << self->realInitDD->shards.size()
 				          << std::endl;
@@ -221,7 +220,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 		self->real = std::make_shared<DDTxnProcessorTester>(cx);
 		// Get the database configuration so as to use proper team size
-		co_await store(self->ddContext.configuration, self->real->getDatabaseConfiguration());
+		self->ddContext.configuration = co_await self->real->getDatabaseConfiguration();
 		ASSERT(self->ddContext.configuration.storageTeamSize > 0);
 		// FIXME: add support for generating random teams across DCs
 		ASSERT_EQ(self->ddContext.usableRegions(), 1);
@@ -290,7 +289,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			realParams.dataMovementComplete.reset();
 			mockParams.dataMovementComplete.reset();
 
-			co_await store(realParams.lock, self->real->takeMoveKeysLock(UID()));
+			realParams.lock = co_await self->real->takeMoveKeysLock(UID());
 			Error err;
 			try {
 				// test start
@@ -399,7 +398,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		while (true) {
 			realParams.dataMovementComplete.reset();
 			mockParams.dataMovementComplete.reset();
-			co_await store(realParams.lock, self->real->takeMoveKeysLock(UID()));
+			realParams.lock = co_await self->real->takeMoveKeysLock(UID());
 			Error err;
 			try {
 				co_await self->mock->moveKeys(mockParams);

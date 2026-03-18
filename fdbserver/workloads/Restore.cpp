@@ -273,7 +273,7 @@ struct RestoreWorkload : TestWorkload {
 						co_await delay(5.0);
 
 						tr = makeReference<ReadYourWritesTransaction>(cx);
-						co_await store(taskCount, backupAgent.getTaskCount(tr));
+						taskCount = co_await backupAgent.getTaskCount(tr);
 					}
 
 					RangeResult agentValues =
