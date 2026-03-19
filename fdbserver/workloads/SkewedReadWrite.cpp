@@ -105,8 +105,8 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 				Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
-				co_await store(serverList, serverListF);
-				co_await store(range, rangeF);
+				serverList = co_await serverListF;
+				range = co_await rangeF;
 				break;
 			} catch (Error& e) {
 				err = e;

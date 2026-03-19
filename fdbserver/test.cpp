@@ -632,7 +632,7 @@ Future<Void> databaseWarmer(Database const& cx) {
 	Database cxCopy = cx;
 	while (true) {
 		Transaction tr(cxCopy);
-		co_await success(tr.getReadVersion());
+		co_await tr.getReadVersion();
 		co_await delay(0.25);
 	}
 	co_return; // Unreachable but required for coroutine
@@ -2875,7 +2875,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		try {
 			co_await timeoutError(changeConfiguration(cx, testers, startingConfiguration), 2000.0);
 			if (g_network->isSimulated() && enableDD) {
-				co_await success(setDDMode(cx, 1));
+				co_await setDDMode(cx, 1);
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
@@ -3033,7 +3033,7 @@ Future<Void> runTests7(Reference<AsyncVar<Optional<struct ClusterControllerFullI
 		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		TraceEvent("TestProgress").log("runTests7: starting test [%s]", tests[idx].title.toString().c_str());
 		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
-		co_await success(runTest(cx, testers, tests[idx], dbInfo, &consistencyScanState));
+		co_await runTest(cx, testers, tests[idx], dbInfo, &consistencyScanState);
 		knobProtectiveGroup.reset(nullptr);
 		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		TraceEvent("TestProgress").log("runTests7: done running test [%s]", tests[idx].title.toString().c_str());

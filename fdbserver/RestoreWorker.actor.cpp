@@ -37,7 +37,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
-#include "fdbserver/RestoreWorker.actor.h"
+#include "fdbserver/RestoreWorker.h"
 #include "fdbserver/RestoreController.actor.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 

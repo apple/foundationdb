@@ -347,8 +347,44 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	// Wait for a backup to become restorable, with retries
-	// This handles cases where cluster recoveries delay snapshot completion
+	static Future<Void> verifyBulkDumpObservability(Database cx, UID expectedBackupUID, std::string backupTag) {
+		double startTime = now();
+		double maxWaitTime = 30.0;
+
+		TraceEvent("BS3BCW_ObservabilityCheckStart")
+		    .detail("ExpectedBackupUID", expectedBackupUID)
+		    .detail("BackupTag", backupTag);
+
+		loop {
+			Optional<BulkDumpProgress> progressOpt = co_await getBulkDumpProgress(cx);
+
+			if (progressOpt.present()) {
+				BulkDumpProgress progress = progressOpt.get();
+
+				TraceEvent("BS3BCW_ObservabilityProgress")
+				    .detail("JobId", progress.jobId)
+				    .detail("TotalTasks", progress.totalTasks)
+				    .detail("CompleteTasks", progress.completeTasks)
+				    .detail("ProgressPercent", progress.progressPercent())
+				    .detail("TotalBytes", progress.totalBytes)
+				    .detail("CompletedBytes", progress.completedBytes);
+
+				Optional<BulkDumpOwnerInfo> ownerInfo = co_await getBulkDumpOwner(cx, progress.jobId);
+				if (ownerInfo.present() && ownerInfo.get().ownerUID == expectedBackupUID) {
+					TraceEvent("BS3BCW_ObservabilityVerified").detail("BackupUID", expectedBackupUID);
+					co_return;
+				}
+			}
+
+			if (now() - startTime > maxWaitTime) {
+				TraceEvent(SevWarn, "BS3BCW_ObservabilityTimeout");
+				co_return;
+			}
+
+			co_await delay(5.0);
+		}
+	}
+
 	static Future<Void> waitForRestorable(Reference<IBackupContainer> backupContainer, int maxAttempts) {
 		int restorabilityCheckAttempts = 0;
 		bool isRestorable = false;
@@ -494,6 +530,18 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		}
 
 		submitted.send(Void());
+
+		Future<Void> observabilityCheck = Void();
+		if (self->snapshotMode == 1 || self->snapshotMode == 2) {
+			KeyBackedTag keyBackedTag = makeBackupTag(tag.toString());
+			try {
+				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
+				UID backupUID = uidFlag.first;
+				observabilityCheck = verifyBulkDumpObservability(cx, backupUID, tag.toString());
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "BS3BCW_CouldNotGetBackupUID").error(e);
+			}
+		}
 
 		TraceEvent("BS3BCW_DoBackupWaitToDiscontinue", randomID)
 		    .detail("Tag", printable(tag))

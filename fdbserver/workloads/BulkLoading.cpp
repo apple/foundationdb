@@ -189,7 +189,10 @@ struct BulkLoading : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult res =
 				    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, Standalone(KeyRangeRef(beginKey, endKey)));
-				for (int i = 0; i < res.size() - 1; i++) {
+				if (res.empty()) {
+					break;
+				}
+				for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
 					if (!res[i].value.empty()) {
 						BulkLoadTaskState bulkLoadTaskState = decodeBulkLoadTaskState(res[i].value);
 						if (!bulkLoadTaskState.isValid()) {
@@ -247,9 +250,12 @@ struct BulkLoading : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult res = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
+				if (res.empty()) {
+					break;
+				}
 				int clearedCount = 0;
 				int nonEmptyCount = 0;
-				for (int i = 0; i < res.size() - 1; i++) {
+				for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
 					ASSERT(!self->initializeBulkLoadMetadata || !res[i].value.empty());
 					if (res[i].value.empty()) {
 						continue;
@@ -547,7 +553,7 @@ struct BulkLoading : TestWorkload {
 		}
 
 		TraceEvent("BulkLoadingWorkLoadSimpleTestIssuedTasks");
-		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 1));
+		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
 		for (const auto& errorTask : errorTasks) {
@@ -556,7 +562,7 @@ struct BulkLoading : TestWorkload {
 		TraceEvent("BulkLoadingWorkLoadSimpleTestAllComplete");
 
 		// Check data
-		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 0));
+		oldBulkLoadMode = co_await setBulkLoadMode(cx, 0);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 0);
 		std::vector<KeyValue> dbkvs = co_await self->getKvsFromDB(self, cx, errorRanges, taskRanges);
 		std::vector<KeyValue> kvs;
@@ -576,7 +582,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Check bulk load metadata
-		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 1));
+		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadSimpleTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		for (i = 0; i < bulkLoadTaskStates.size(); i++) {
 			co_await self->finalizeBulkLoadTask(
@@ -630,7 +636,7 @@ struct BulkLoading : TestWorkload {
 		std::vector<KeyRange> errorRanges;
 
 		// Run tasks
-		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 1));
+		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		for (; i < 3; i++) {
 			std::string folderPath = joinPath(simulationBulkLoadFolder, std::to_string(i));
@@ -645,12 +651,12 @@ struct BulkLoading : TestWorkload {
 				std::vector<BulkLoadTaskState> errorTasks = co_await self->waitUntilAllTaskCompleteOrError(self, cx);
 			}
 			if (deterministicRandom()->coinflip()) {
-				co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 0));
+				oldBulkLoadMode = co_await setBulkLoadMode(cx, 0);
 				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode")
 				    .detail("OldMode", oldBulkLoadMode)
 				    .detail("NewMode", 0);
 				co_await delay(deterministicRandom()->random01() * 5);
-				co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 1));
+				oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 				TraceEvent("BulkLoadingWorkLoadComplexTestSetMode")
 				    .detail("OldMode", oldBulkLoadMode)
 				    .detail("NewMode", 1);
@@ -664,7 +670,7 @@ struct BulkLoading : TestWorkload {
 		for (const auto& errorTask : errorTasks) {
 			errorRanges.push_back(errorTask.getRange()); // for any error range, do not check data
 		}
-		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 0)); // trigger DD restart
+		oldBulkLoadMode = co_await setBulkLoadMode(cx, 0); // trigger DD restart
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 0);
 
 		// Check correctness
@@ -711,7 +717,7 @@ struct BulkLoading : TestWorkload {
 		ASSERT(self->checkSame(self, kvs, dbkvs));
 
 		// Clear metadata
-		co_await store(oldBulkLoadMode, setBulkLoadMode(cx, 1));
+		oldBulkLoadMode = co_await setBulkLoadMode(cx, 1);
 		TraceEvent("BulkLoadingWorkLoadComplexTestSetMode").detail("OldMode", oldBulkLoadMode).detail("NewMode", 1);
 		for (i = 0; i < bulkLoadTaskStates.size(); i++) {
 			co_await self->finalizeBulkLoadTask(

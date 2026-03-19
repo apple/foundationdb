@@ -150,7 +150,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			Error err;
 			try {
 				shardLocationPairList.clear();
-				co_await store(shardLocationPairList, self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
+				shardLocationPairList = co_await self->getKeyLocationsForRangeList(cx, rangesToCheck, self);
 				break;
 			} catch (Error& e) {
 				err = e;

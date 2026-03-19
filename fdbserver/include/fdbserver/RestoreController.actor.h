@@ -37,7 +37,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.h"
-#include "fdbserver/RestoreWorker.actor.h"
+#include "fdbserver/RestoreWorker.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

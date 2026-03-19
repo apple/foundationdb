@@ -254,6 +254,24 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	Long getCommittedVersion();
 
 	/**
+	 * Gets the version number at which a successful commit modified the database,
+	 * as a primitive {@code long} to avoid the overhead of autoboxing.
+	 * This must be called only after the successful (non-error) completion of a call
+	 * to {@link #commit()} on this {@code Transaction}, or the behavior is undefined.
+	 * Read-only transactions do not modify the database when committed and will have
+	 * a committed version of -1. Keep in mind that a transaction which reads keys and
+	 * then sets them to their current values may be optimized to a read-only transaction.
+	 *
+	 * <p>This method is equivalent to {@link #getCommittedVersion()} but avoids the
+	 * allocation of a {@link Long} object on every call.</p>
+	 *
+	 * @return the database version at which the commit succeeded, as a primitive {@code long}
+	 */
+	default long getCommittedVersionAsPrimitive() {
+		return getCommittedVersion();
+	}
+
+	/**
 	 * Returns a future which will contain the versionstamp which was used by any versionstamp 
 	 * operations in this transaction. The future will be ready only after the successful 
 	 * completion of a call to {@link #commit()} on this {@code Transaction}. Read-only 

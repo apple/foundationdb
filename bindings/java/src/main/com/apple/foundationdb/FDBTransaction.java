@@ -640,6 +640,11 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 
 	@Override
 	public Long getCommittedVersion() {
+		return getCommittedVersionAsPrimitive();
+	}
+
+	@Override
+	public long getCommittedVersionAsPrimitive() {
 		if (eventKeeper != null) {
 			eventKeeper.increment(Events.JNI_CALL);
 		}

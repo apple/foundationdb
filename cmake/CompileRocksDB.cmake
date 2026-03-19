@@ -75,7 +75,14 @@ message(STATUS "Generated FDBRocksDBVersion.h with version ${FDB_ROCKSDB_MAJOR}.
 
 # Only try to find system RocksDB if not using a specific commit hash
 if(NOT ROCKSDB_GIT_HASH)
+  # Save the configured version - FindRocksDB.cmake may overwrite ROCKSDB_VERSION
+  # with the system version even when find_package fails
+  set(_FDB_ROCKSDB_VERSION_CONFIGURED ${ROCKSDB_VERSION})
   find_package(RocksDB ${ROCKSDB_VERSION})
+  if(NOT ROCKSDB_FOUND)
+    # Restore configured version since FindRocksDB overwrote it
+    set(ROCKSDB_VERSION ${_FDB_ROCKSDB_VERSION_CONFIGURED})
+  endif()
 endif()
 
 include(ExternalProject)

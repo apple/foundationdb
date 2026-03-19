@@ -117,10 +117,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		while (true) {
 			records.clear();
 			try {
-				co_await store(
-				    records,
-				    getCheckpointMetaData(
-				        cx, std::vector<KeyRange>(1, testRange), version, format, Optional<UID>(dataMoveId)));
+				records = co_await getCheckpointMetaData(
+				    cx, std::vector<KeyRange>(1, testRange), version, format, Optional<UID>(dataMoveId));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
@@ -182,7 +180,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				res = co_await tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY);
 				break;
 			} catch (Error& e) {
 				err = e;

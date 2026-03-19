@@ -49,7 +49,7 @@ if(NOT Jinja2_FOUND)
                           ${PROTOCOL_VERSION_VENV_DIR} OUTPUT_QUIET ERROR_QUIET)
   find_program(
     VENV_Python3_EXECUTABLE
-    NAMES python3 python3.exe
+    NAMES python3 python3.exe python.exe
     PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin
           REQUIRED
     NO_DEFAULT_PATH NO_CACHE
