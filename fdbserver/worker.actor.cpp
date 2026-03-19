@@ -1669,10 +1669,7 @@ ACTOR Future<Void> workerSnapCreate(
 	return Void();
 }
 
-// TODO: `issues` is right now only updated by `monitorTraceLogIssues` and thus is being `set` on every update.
-// It could be changed to `insert` and `trigger` later if we want to use it as a generic way for the caller of this
-// function to report issues to cluster controller.
-ACTOR Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string>>> issues) {
+ACTOR Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string>>> traceLogIssues) {
 	state bool pingTimeout = false;
 	loop {
 		wait(delay(SERVER_KNOBS->TRACE_LOG_FLUSH_FAILURE_CHECK_INTERVAL_SECONDS));
@@ -1693,7 +1690,56 @@ ACTOR Future<Void> monitorTraceLogIssues(Reference<AsyncVar<std::set<std::string
 			_issues.insert("trace_log_writer_thread_unresponsive");
 			pingTimeout = false;
 		}
-		issues->set(_issues);
+		traceLogIssues->set(_issues);
+	}
+}
+
+static const std::string excludeFromTLogRecruitmentLowDiskIssue = "exclude_from_tlog_recruitment_low_disk";
+
+ACTOR Future<Void> monitorTLogIssues(std::string folder,
+                                     Reference<AsyncVar<bool>> lowDiskTLogExclusion,
+                                     Reference<AsyncVar<std::set<std::string>>> tlogIssues) {
+	loop {
+		std::set<std::string> currentIssues;
+		if (lowDiskTLogExclusion->get()) {
+			int64_t free = 0;
+			int64_t total = 0;
+			g_network->getDiskBytes(folder, free, total);
+			const bool recovered = SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO <= 0.0 || total <= 0 ||
+			                       double(free) / total >= SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
+			if (recovered) {
+				lowDiskTLogExclusion->set(false);
+			} else {
+				currentIssues.insert(excludeFromTLogRecruitmentLowDiskIssue);
+			}
+		}
+
+		if (tlogIssues->get() != currentIssues) {
+			tlogIssues->set(currentIssues);
+		}
+
+		choose {
+			when(wait(lowDiskTLogExclusion->onChange())) {}
+			when(wait(lowDiskTLogExclusion->get() ? delay(1.0) : Never())) {}
+		}
+	}
+}
+
+ACTOR Future<Void> combineWorkerIssues(Reference<AsyncVar<std::set<std::string>> const> traceLogIssues,
+                                       Reference<AsyncVar<std::set<std::string>> const> tlogIssues,
+                                       Reference<AsyncVar<std::set<std::string>>> issues) {
+	loop {
+		std::set<std::string> mergedIssues = traceLogIssues->get();
+		const auto& currentTLogIssues = tlogIssues->get();
+		mergedIssues.insert(currentTLogIssues.begin(), currentTLogIssues.end());
+		if (issues->get() != mergedIssues) {
+			issues->set(mergedIssues);
+		}
+
+		choose {
+			when(wait(traceLogIssues->onChange())) {}
+			when(wait(tlogIssues->onChange())) {}
+		}
 	}
 }
 
@@ -1930,6 +1976,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Future<Void> metricsLogger;
 	state Future<Void> chaosMetricsActor;
 	state Reference<AsyncVar<bool>> degraded = FlowTransport::transport().getDegraded();
+	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
+	state Reference<AsyncVar<std::set<std::string>>> traceLogIssues(new AsyncVar<std::set<std::string>>());
+	state Reference<AsyncVar<std::set<std::string>>> tlogIssues(new AsyncVar<std::set<std::string>>());
+	state Reference<AsyncVar<bool>> lowDiskTLogExclusion(new AsyncVar<bool>(false));
 	// tLogFnForOptions() can return a function that doesn't correspond with the FDB version that the
 	// TLogVersion represents.  This can be done if the newer TLog doesn't support a requested option.
 	// As (store type, spill type) can map to the same TLogFn across multiple TLogVersions, we need to
@@ -1958,8 +2008,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::unordered_map<UID, StorageDiskCleaner> storageCleaners;
 
 	interf.initEndpoints();
-
-	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	state Future<Void> updateClusterIdFuture;
 
@@ -2005,7 +2053,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	                               "DegradedReset"));
 	errorForwarders.add(loadedPonger(interf.debugPing.getFuture()));
 	errorForwarders.add(waitFailureServer(interf.waitFailure.getFuture()));
-	errorForwarders.add(monitorTraceLogIssues(issues));
+	errorForwarders.add(monitorTraceLogIssues(traceLogIssues));
+	errorForwarders.add(monitorTLogIssues(folder, lowDiskTLogExclusion, tlogIssues));
+	errorForwarders.add(combineWorkerIssues(traceLogIssues, tlogIssues, issues));
 	errorForwarders.add(
 	    testerServerCore(interf.testerInterface,
 	                     connRecord,
@@ -2188,6 +2238,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                         recovery,
 				                         folder,
 				                         degraded,
+				                         lowDiskTLogExclusion,
 				                         activeSharedTLog,
 				                         enablePrimaryTxnSystemHealthCheck);
 				recoveries.push_back(recovery.getFuture());
@@ -2531,6 +2582,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               Promise<Void>(),
 					                               folder,
 					                               degraded,
+					                               lowDiskTLogExclusion,
 					                               activeSharedTLog,
 					                               enablePrimaryTxnSystemHealthCheck);
 					tLogCore = handleIOErrors(tLogCore, data, logId);

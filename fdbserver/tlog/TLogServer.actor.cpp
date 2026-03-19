@@ -350,6 +350,7 @@ struct TLogData : NonCopyable {
 	// End of fields used by snapshot based backup and restore
 
 	Reference<AsyncVar<bool>> degraded;
+	Reference<AsyncVar<bool>> lowDiskTLogExclusion;
 	std::vector<TagsAndMessage> tempTagMessages;
 
 	// Distribution of end-to-end server latency of tlog commit requests.
@@ -378,6 +379,7 @@ struct TLogData : NonCopyable {
 	         IDiskQueue* persistentQueue,
 	         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
 	         Reference<AsyncVar<bool>> degraded,
+	         Reference<AsyncVar<bool>> lowDiskTLogExclusion,
 	         std::string folder,
 	         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck)
 	  : dbgid(dbgid), workerID(workerID), persistentData(persistentData), rawPersistentQueue(persistentQueue),
@@ -387,7 +389,7 @@ struct TLogData : NonCopyable {
 	    targetVolatileBytes(SERVER_KNOBS->TLOG_SPILL_THRESHOLD), overheadBytesInput(0), overheadBytesDurable(0),
 	    peekMemoryLimiter(SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_PEEK_MEMORY_BYTES),
 	    concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS), ignorePopDeadline(0), dataFolder(folder),
-	    degraded(degraded),
+	    degraded(degraded), lowDiskTLogExclusion(lowDiskTLogExclusion),
 	    commitLatencyDist(Histogram::getHistogram("tLog"_sr, "commit"_sr, Histogram::Unit::milliseconds)),
 	    queueWaitLatencyDist(Histogram::getHistogram("tLog"_sr, "QueueWait"_sr, Histogram::Unit::milliseconds)),
 	    timeUntilDurableDist(Histogram::getHistogram("tLog"_sr, "TimeUntilDurable"_sr, Histogram::Unit::milliseconds)),
@@ -2942,7 +2944,9 @@ ACTOR static Future<Void> failLowDiskTLogRecovery(TLogData* self,
                                                   Version ver,
                                                   StorageBytes kvStoreBytes,
                                                   StorageBytes queueBytes) {
-	self->degraded->set(true);
+	if (!self->lowDiskTLogExclusion->get()) {
+		self->lowDiskTLogExclusion->set(true);
+	}
 	TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
 	    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
 	    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
@@ -2964,7 +2968,7 @@ Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logD
 		return Void();
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
-	// Degrade this worker and fail recovery so the next recruitment avoids reusing this TLog.
+	// Fail recovery and temporarily exclude this worker from TLog recruitment until disk space recovers.
 	return failLowDiskTLogRecovery(self, logData, ver, kvStoreBytes, queueBytes);
 }
 
@@ -3834,10 +3838,18 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<bool>> lowDiskTLogExclusion,
                         Reference<AsyncVar<UID>> activeSharedTLog,
                         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
-	state TLogData self(
-	    tlogId, workerID, persistentData, persistentQueue, db, degraded, folder, enablePrimaryTxnSystemHealthCheck);
+	state TLogData self(tlogId,
+	                    workerID,
+	                    persistentData,
+	                    persistentQueue,
+	                    db,
+	                    degraded,
+	                    lowDiskTLogExclusion,
+	                    folder,
+	                    enablePrimaryTxnSystemHealthCheck);
 	state Future<Void> error = actorCollection(self.sharedActors.getFuture());
 
 	TraceEvent("SharedTLog", tlogId);
