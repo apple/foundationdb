@@ -1,11 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
 
-if(${COROUTINE_IMPL} STREQUAL libcoro)
-  list(APPEND FDBSERVER_SRCS coroimpl/CoroFlowCoro.actor.cpp)
-else()
-  list(APPEND FDBSERVER_SRCS coroimpl/CoroFlow.actor.cpp)
-endif()
-
 function(configure_fdbserver_common_includes target_name)
   target_include_directories(${target_name} PRIVATE
     ${CMAKE_SOURCE_DIR}/bindings/c
@@ -20,8 +14,13 @@ function(configure_fdbserver_target_includes target_name)
   )
 endfunction()
 
-add_subdirectory(core)
-add_subdirectory(ratekeeper)
+function(add_fdbserver_link_test target_name)
+  set(link_libs ${ARGN})
+  list(GET link_libs 0 primary_lib)
+  list(REMOVE_AT link_libs 0)
+  add_flow_target(LINK_TEST NAME ${target_name} SRCS ../fdbclient/LinkTest.cpp)
+  target_link_libraries(${target_name} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${primary_lib}>" ${link_libs} rapidxml)
+endfunction()
 
 if(WITH_ROCKSDB)
   find_package(LZ4 REQUIRED)
@@ -30,6 +29,112 @@ if(WITH_ROCKSDB)
     find_package(uring REQUIRED)
   endif()
 endif()
+
+add_subdirectory(core)
+add_subdirectory(logsystem)
+add_subdirectory(kvstore)
+add_subdirectory(mocks3)
+add_subdirectory(restoreworker)
+add_subdirectory(clustercontroller)
+add_subdirectory(backupworker)
+add_subdirectory(commitproxy)
+add_subdirectory(coordinator)
+add_subdirectory(datadistributor)
+add_subdirectory(consistencyscan)
+add_subdirectory(grvproxy)
+add_subdirectory(logrouter)
+add_subdirectory(ratekeeper)
+add_subdirectory(resolver)
+add_subdirectory(sequencer)
+add_subdirectory(storageserver)
+add_subdirectory(tester)
+add_subdirectory(tlog)
+
+add_fdbserver_link_test(fdbserver_corelinktest
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_logsystemlinktest
+  fdbserver_logsystem
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_kvstorelinktest
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_backupworkerlinktest
+  fdbserver_backupworker
+  fdbserver_logsystem
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_restoreworkerlinktest
+  fdbserver_restoreworker
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
+  fdbserver_clustercontroller
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_commitproxylinktest
+  fdbserver_commitproxy
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_consistencyscanlinktest
+  fdbserver_consistencyscan
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_coordinatorlinktest
+  fdbserver_coordinator
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_datadistributorlinktest
+  fdbserver_datadistributor
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_grvproxylinktest
+  fdbserver_grvproxy
+  fdbserver_logsystem
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_logrouterlinktest
+  fdbserver_logrouter
+  fdbserver_logsystem
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_ratekeeperlinktest
+  fdbserver_ratekeeper
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_resolverlinktest
+  fdbserver_resolver
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_sequencerlinktest
+  fdbserver_sequencer
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_storageserverlinktest
+  fdbserver_storageserver
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_testerlinktest
+  fdbserver_tester
+  fdbserver_core
+  fdbclient)
+add_fdbserver_link_test(fdbserver_tloglinktest
+  fdbserver_tlog
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
@@ -42,7 +147,7 @@ if (WITH_SWIFT)
   add_definitions(-DWITH_SWIFT)
 
   add_library(fdbserver_swift STATIC
-          masterserver.swift
+          sequencer/masterserver.swift
           swift_fdbserver_cxx_swift_value_conformance.swift
           swift_fdbserver_collections.swift
           swift_fdbserver_stream_support.swift
@@ -61,6 +166,8 @@ if (WITH_SWIFT)
       "${CMAKE_BINARY_DIR}/fdbclient"
       "${CMAKE_BINARY_DIR}/fdbclient/include"
       "${CMAKE_BINARY_DIR}/fdbserver/include"
+      "${CMAKE_SOURCE_DIR}/fdbserver/sequencer/include"
+      "${CMAKE_BINARY_DIR}/fdbserver/sequencer/include"
       "${CMAKE_SOURCE_DIR}/fdbrpc/include"
       "${CMAKE_BINARY_DIR}/fdbrpc/include"
       "${CMAKE_SOURCE_DIR}/contrib/md5/include"
@@ -111,6 +218,7 @@ if (WITH_SWIFT)
   add_dependencies(fdbserver_swift flow_actors)
   add_dependencies(fdbserver_swift fdbclient_swift)
   add_dependencies(fdbserver_swift fdbserver_actors)
+  add_dependencies(fdbserver_sequencer fdbserver_swift_header)
   # This does not work! (see rdar://99107402)
   # target_link_libraries(flow PRIVATE flow_swift)
   add_dependencies(fdbserver fdbserver_swift)
@@ -136,7 +244,12 @@ if (WITH_SWIFT)
   # Generate the module map for FDBServer.
   include(GenerateModulemap)
   set(FDBSERVER_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbserver")
+  get_target_property(FDBSERVER_MODULE_HEADERS fdbserver HEADER_FILES)
+  if(NOT FDBSERVER_MODULE_HEADERS)
+    set(FDBSERVER_MODULE_HEADERS "")
+  endif()
   generate_modulemap("${CMAKE_BINARY_DIR}/fdbserver/include" "FDBServer" fdbserver
+     HEADERS ${FDBSERVER_MODULE_HEADERS}
      OMIT
      ArtMutationBuffer.h # actually a textual include
      art_impl.h # actually a textual include
@@ -144,7 +257,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_ratekeeper fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_mocks3 fdbserver_backupworker fdbserver_restoreworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_kvstore fdbserver_logrouter fdbserver_logsystem fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tester fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)

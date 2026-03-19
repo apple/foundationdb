@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/ratekeeper/ServerThroughputTracker.h"
+#include "ServerThroughputTracker.h"
 
 namespace {
 

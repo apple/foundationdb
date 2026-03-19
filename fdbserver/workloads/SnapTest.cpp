@@ -25,11 +25,10 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/Status.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct SnapTestWorkload : TestWorkload {
 	static constexpr auto NAME = "SnapTest";

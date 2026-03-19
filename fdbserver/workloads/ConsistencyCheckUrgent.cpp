@@ -26,7 +26,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
@@ -150,7 +150,7 @@ struct ConsistencyCheckUrgentWorkload : TestWorkload {
 			Error err;
 			try {
 				shardLocationPairList.clear();
-				co_await store(shardLocationPairList, self->getKeyLocationsForRangeList(cx, rangesToCheck, self));
+				shardLocationPairList = co_await self->getKeyLocationsForRangeList(cx, rangesToCheck, self);
 				break;
 			} catch (Error& e) {
 				err = e;

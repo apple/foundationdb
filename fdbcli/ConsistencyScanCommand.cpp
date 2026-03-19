@@ -46,7 +46,7 @@ Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> con
 	std::list<StringRef> args(tokens.begin() + 1, tokens.end());
 
 	ConsistencyScanState cs = ConsistencyScanState();
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	bool error = false;
 
 	while (true) {

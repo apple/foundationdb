@@ -14,8 +14,8 @@ To test this, run the following commands from the root of the FoundationDB repos
 
 ```bash
 mkdir -p website
-docker build -t foundationdb/fdb-kubernetes-monitor:7.1.5 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.5 --build-arg FDB_LIBRARY_VERSIONS="7.1.5 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
-docker build -t foundationdb/fdb-kubernetes-monitor:7.1.6 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.6 --build-arg FDB_LIBRARY_VERSIONS="7.1.6 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
+docker build -t foundationdb/fdb-kubernetes-monitor:7.3.73 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.3.73 -f packaging/docker/Dockerfile .
+docker build -t foundationdb/fdb-kubernetes-monitor:7.3.75 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.3.75 -f packaging/docker/Dockerfile .
 kubectl apply -f packaging/docker/kubernetes/test_config.yaml
 # Wait for the pods to become ready
 kubectl rollout status sts/fdb-kubernetes-example
@@ -55,7 +55,7 @@ The following steps assume that you already have a [local development](https://g
 ```bash
 mkdir -p website
 # Change this version if you want to create a cluster with a different version
-docker build -t foundationdb/fdb-kubernetes-monitor:7.1.11 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.1.11 --build-arg FDB_LIBRARY_VERSIONS="7.1.11 6.3.24 6.2.30" -f packaging/docker/Dockerfile .
+docker build -t foundationdb/fdb-kubernetes-monitor:7.3.73 --target fdb-kubernetes-monitor --build-arg FDB_VERSION=7.3.73 -f packaging/docker/Dockerfile .
 ```
 
 Depending on the Kubernetes setup you use you might have to push the newly build image to a local registry.

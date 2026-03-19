@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/DDSharedContext.h"
-#include "fdbserver/DDTxnProcessor.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/SimulatorProcessInfo.h"

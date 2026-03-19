@@ -20,7 +20,7 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"

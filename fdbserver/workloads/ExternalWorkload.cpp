@@ -22,7 +22,7 @@
 #include "flow/Platform.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "foundationdb/CppWorkload.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 extern void flushTraceFileVoid();
 
@@ -47,7 +47,7 @@ struct FDBPromiseImpl : FDBPromise {
 template <class F, class T>
 Future<Void> keepAlive(F until, T db) {
 	try {
-		co_await success(until);
+		co_await until;
 	} catch (...) {
 	}
 }
