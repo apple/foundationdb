@@ -26,6 +26,8 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+#include "flow/flow.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 CommonStorageCounters::CommonStorageCounters(const std::string& name,
                                              const std::string& id,
