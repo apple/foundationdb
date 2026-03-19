@@ -1178,6 +1178,7 @@ public:
 
 	Reference<ILogSystem> logSystem;
 	Reference<ILogSystem::IPeekCursor> logCursor;
+	PromiseStream<Void> updateCursorInvalidated;
 
 	// The version the cluster starts on. This value is not persisted and may
 	// not be valid after a recovery.
@@ -9531,10 +9532,11 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
-ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
+ACTOR Future<Void> update(StorageServer* data) {
 	state double updateStart = g_network->timer();
 	state double decryptionTime = 0;
 	state double start;
+	state Future<Void> cursorInvalidated = data->updateCursorInvalidated.getFuture();
 	state bool enableClearRangeEagerReads =
 	    (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
 	     data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
@@ -9609,7 +9611,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		state double beforeTLogCursorReads = now();
 		loop {
-			wait(cursor->getMore());
+			choose {
+				when(wait(cursor->getMore())) {}
+				when(wait(cursorInvalidated)) {
+					return Void();
+				}
+			}
 			if (!cursor->isExhausted()) {
 				break;
 			}
@@ -9628,9 +9635,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			data->knownCommittedVersion.set(cursor->getMinKnownCommittedVersion());
 		}
 		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
-
-		ASSERT(*pReceivedUpdate == false);
-		*pReceivedUpdate = true;
 
 		start = now();
 		wait(data->durableVersionLock.take(TaskPriority::TLogPeekReply, 1));
@@ -9990,6 +9994,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
+		if (cursor != data->logCursor) {
+			return Void();
+		}
 		data->logCursor->advanceTo(cloneCursor2->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
 			if (data->behind) {
@@ -11891,8 +11898,6 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
-	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
-	                                   // received an update from the tlog
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
@@ -11956,13 +11961,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						}
 						self->logCursor = self->logSystem->peekSingle(
 						    self->thisServerID, self->version.get() + 1, self->tag, self->history);
+						self->updateCursorInvalidated.send(Void());
 						self->popVersion(self->storageMinRecoverVersion + 1, true);
-					}
-					// If update() is waiting for results from the tlog, it might never get them, so needs to be
-					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys
-					// that already committed to transitioning to waiting state)
-					if (!updateReceived) {
-						doUpdate = Void();
 					}
 				}
 
@@ -11997,11 +11997,10 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				reply.send(self->storage.getKeyValueStoreType());
 			}
 			when(wait(doUpdate)) {
-				updateReceived = false;
 				if (!self->logSystem)
 					doUpdate = Never();
 				else
-					doUpdate = update(self, &updateReceived);
+					doUpdate = update(self);
 			}
 			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
 				self->actors.add(getCheckpointQ(self, req));
