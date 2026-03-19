@@ -2278,7 +2278,7 @@ template <class F>
 THREAD_HANDLE startThreadF(F&& func) {
 	struct Thing {
 		F f;
-		Thing(F&& f) : f(std::move(f)) {}
+		explicit Thing(F&& f) : f(std::move(f)) {}
 		THREAD_FUNC start(void* p) {
 			auto* self = (Thing*)p;
 			self->f();

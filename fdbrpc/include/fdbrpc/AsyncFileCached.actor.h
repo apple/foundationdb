@@ -48,7 +48,7 @@ struct EvictablePage {
 	virtual bool evict() = 0; // true if page was evicted, false if it isn't immediately evictable (but will be evicted
 	                          // regardless if possible)
 
-	EvictablePage(Reference<EvictablePageCache> pageCache) : data(0), index(-1), pageCache(pageCache) {}
+	explicit EvictablePage(Reference<EvictablePageCache> pageCache) : data(0), index(-1), pageCache(pageCache) {}
 	virtual ~EvictablePage();
 };
 
@@ -138,6 +138,8 @@ struct AFCPage;
 
 class AsyncFileCached final : public IAsyncFile, public ReferenceCounted<AsyncFileCached> {
 	friend struct AFCPage;
+	template <class P, class... Args>
+	friend Reference<P> makeReference(Args&&... args);
 
 public:
 	virtual StringRef getClassName() override { return "AsyncFileCached"_sr; }
@@ -345,7 +347,7 @@ private:
 			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait(f->size());
 			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
-			return Reference<AsyncFileCached>(new AsyncFileCached(f, filename, l, pageCache)).castTo<IAsyncFile>();
+			return makeReference<AsyncFileCached>(f, filename, l, pageCache).castTo<IAsyncFile>();
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				openFiles.erase(filename);

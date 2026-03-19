@@ -300,7 +300,7 @@ private:
 SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
-	Sim2Conn(ISimulator::ProcessInfo* process)
+	explicit Sim2Conn(ISimulator::ProcessInfo* process)
 	  : opened(false), closedByCaller(false), stableConnection(false), trustedPeer(true), process(process),
 	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
@@ -2513,7 +2513,7 @@ public:
 		return registerSimHTTPServerActor(this, hostname, service, requestHandler);
 	}
 
-	Sim2(bool printSimTime)
+	explicit Sim2(bool printSimTime)
 	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), yielded(false), yield_limit(0),
 	    printSimTime(printSimTime) {
 		// Not letting currentProcess be nullptr eliminates some annoying special cases
