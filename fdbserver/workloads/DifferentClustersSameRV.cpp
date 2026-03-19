@@ -22,7 +22,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/ApiVersion.h"
 #include "flow/genericactors.actor.h"
 
@@ -267,7 +267,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		try {
 			tr->reset();
 			tr->setVersion(version);
-			co_await store(res, tr->get(keyToRead));
+			res = co_await tr->get(keyToRead);
 			co_return res;
 		} catch (Error& e) {
 			TraceEvent(name).error(e);

@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 class TransactionCostWorkload : public TestWorkload {
 	int iterations{ 1000 };
@@ -277,7 +277,7 @@ class TransactionCostWorkload : public TestWorkload {
 
 	Future<Void> runTest(Database cx, ITest* test) {
 		co_await test->setup(*this, cx);
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		if (debugTransactions) {
 			test->debugTransaction(*tr);
 		}

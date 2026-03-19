@@ -22,7 +22,7 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct FastTriggeredWatchesWorkload : TestWorkload {
 	static constexpr auto NAME = "FastTriggeredWatches";

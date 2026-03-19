@@ -81,8 +81,7 @@ int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*),
             const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
-	int i = 0;
-	for (; i < numRuns; ++i) {
+	for (int i = 0; i < numRuns; ++i) {
 		struct RunResult res = run(rs, db, testFxn);
 		if (res.e) {
 			logError(res.e, kpiName, rs);
@@ -110,8 +109,7 @@ int runTestDb(struct RunResult (*testFxn)(struct ResultSet*, FDBDatabase*),
               const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
-	int i = 0;
-	for (; i < numRuns; ++i) {
+	for (int i = 0; i < numRuns; ++i) {
 		struct RunResult res = testFxn(rs, db);
 		if (res.e) {
 			logError(res.e, kpiName, rs);

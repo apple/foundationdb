@@ -498,7 +498,7 @@ Reference<PTree<T>> append(const Reference<PTree<T>>& left, const Reference<PTre
 	if (!right)
 		return left;
 
-	Reference<PTree<T>> r = makeReference<PTree<T>>(lastNode(left, at)->data, at);
+	auto r = makeReference<PTree<T>>(lastNode(left, at)->data, at);
 	if (EXPENSIVE_VALIDATION) {
 		ASSERT(r->data < firstNode(right, at)->data);
 	}

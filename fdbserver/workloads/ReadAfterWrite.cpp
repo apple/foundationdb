@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/genericactors.actor.h"
 
 // If the log->storage propagation delay is longer than 1 second, then it's likely that our read

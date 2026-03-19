@@ -20,17 +20,10 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTERINTERFACE_ACTOR_G_H)
-#define FDBSERVER_TESTERINTERFACE_ACTOR_G_H
-#include "fdbserver/core/TesterInterface.actor.g.h"
-#elif !defined(FDBSERVER_TESTERINTERFACE_ACTOR_H)
-#define FDBSERVER_TESTERINTERFACE_ACTOR_H
-
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/PerfMetric.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // has to be last include
+
 struct CheckReply {
 	constexpr static FileIdentifier file_identifier = 11;
 
@@ -118,30 +111,3 @@ struct TesterInterface {
 		serializer(ar, recruitments);
 	}
 };
-
-ACTOR Future<Void> testerServerCore(TesterInterface interf,
-                                    Reference<IClusterConnectionRecord> ccr,
-                                    Reference<AsyncVar<struct ServerDBInfo> const> serverDBInfo,
-                                    LocalityData locality,
-                                    Optional<std::string> expectedWorkLoad = Optional<std::string>());
-
-enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
-enum test_type_t {
-	TEST_TYPE_FROM_FILE,
-	TEST_TYPE_CONSISTENCY_CHECK,
-	TEST_TYPE_UNIT_TESTS,
-	TEST_TYPE_CONSISTENCY_CHECK_URGENT
-};
-
-ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
-                            test_type_t whatToRun,
-                            test_location_t whereToRun,
-                            int minTestersExpected,
-                            std::string fileName = std::string(),
-                            StringRef startingConfiguration = StringRef(),
-                            LocalityData locality = LocalityData(),
-                            UnitTestParameters testOptions = UnitTestParameters(),
-                            bool restartingTest = false);
-
-#include "flow/unactorcompiler.h"
-#endif

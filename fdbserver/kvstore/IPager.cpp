@@ -1,0 +1,51 @@
+/*
+ * IPager.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2026 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "IPager.h"
+
+#include "flow/EncryptUtils.h"
+#include "flow/IRandom.h"
+#include "flow/UnitTest.h"
+#include <limits>
+
+TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
+	EncodingType encodingType = EncodingType::XXHash64;
+	// TODO: it should not be necessary to define this constant here.  ArenaPage or something
+	// should export one.
+	constexpr int _PAGE_SIZE = 8 * 1024;
+	auto page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
+	page->init(encodingType, PageType::BTreeNode, 1);
+	deterministicRandom()->randomBytes(page->mutateData(), page->dataSize());
+	PhysicalPageID pageID = deterministicRandom()->randomUInt32();
+	page->setWriteInfo(pageID, 1 /*version*/);
+	page->preWrite(pageID);
+
+	uint8_t* byte = page->mutateData() + deterministicRandom()->randomInt(0, page->dataSize());
+	*byte = ~(*byte);
+	page->postReadHeader(pageID);
+	try {
+		page->postReadPayload(pageID);
+		UNREACHABLE();
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_page_decoding_failed);
+	}
+	return Void();
+}
+
+void forceLinkIPagerTests() {}

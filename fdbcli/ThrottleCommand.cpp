@@ -74,11 +74,11 @@ Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef
 
 		std::vector<TagThrottleInfo> tags;
 		if (reportThrottled && reportRecommended) {
-			co_await store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, ContainsRecommended::True));
+			tags = co_await ThrottleApi::getThrottledTags(db, throttleListLimit, ContainsRecommended::True);
 		} else if (reportThrottled) {
-			co_await store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit));
+			tags = co_await ThrottleApi::getThrottledTags(db, throttleListLimit);
 		} else if (reportRecommended) {
-			co_await store(tags, ThrottleApi::getRecommendedTags(db, throttleListLimit));
+			tags = co_await ThrottleApi::getRecommendedTags(db, throttleListLimit);
 		}
 
 		bool anyLogged = false;
