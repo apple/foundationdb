@@ -3063,6 +3063,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 					}
 
 					wait(waitUntilTLogAcceptsNewData(self, logData, ver));
+					// The log may have been stopped while waiting for disk space.
 					if (logData->stopped()) {
 						return Void();
 					}
@@ -3109,6 +3110,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						}
 
 						wait(waitUntilTLogAcceptsNewData(self, logData, ver));
+						// The log may have been stopped while waiting for disk space.
 						if (logData->stopped()) {
 							return Void();
 						}
