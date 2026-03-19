@@ -6347,7 +6347,7 @@ Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key 
 }
 
 Future<ERestoreState> abortRestore(Database cx, Key tagName) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	while (true) {
 		Error err;
@@ -8148,7 +8148,7 @@ public:
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     UsePartitionedLog fastRestore) {
-		Reference<ReadYourWritesTransaction> ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
@@ -8305,7 +8305,7 @@ public:
 				                 InconsistentSnapshotOnly::False,
 				                 {},
 				                 randomUid);
-				Reference<ReadYourWritesTransaction> rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
+				auto rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
 				while (true) {
 					Error err;

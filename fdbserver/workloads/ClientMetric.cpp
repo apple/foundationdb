@@ -96,7 +96,7 @@ struct ClientMetricWorkload : TestWorkload {
 	Future<RangeResult> latencyRangeQuery(Database cx, int keysLimit, bool reverse) {
 		KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
 		KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		RangeResult txInfoEntries;
 		// wait to make sure client metrics are updated
 		co_await delay(CLIENT_KNOBS->CSI_STATUS_DELAY);

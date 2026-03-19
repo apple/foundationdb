@@ -69,7 +69,7 @@ Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 
 	while (begin < allKeys.end && numShards < n) {
 		// RYW to optimize re-reading the same key ranges
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
@@ -118,7 +118,7 @@ Future<Void> printPhysicalShardCount(Database cx) {
 
 	while (begin < allKeys.end) {
 		// RYW to optimize re-reading the same key ranges
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
@@ -163,7 +163,7 @@ Future<Void> printServerShards(Database cx, UID serverId) {
 
 	while (begin < allKeys.end) {
 		// RYW to optimize re-reading the same key ranges
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
@@ -204,7 +204,7 @@ Future<Void> resolveRange(Database cx, KeyRange range) {
 
 	while (begin < range.end) {
 		// RYW to optimize re-reading the same key ranges
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		while (true) {
 			Error err;
