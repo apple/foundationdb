@@ -2104,7 +2104,7 @@ Future<Void> startMockS3ServerReal_impl(NetworkAddress listenAddress, std::strin
 		co_await loadMockS3PersistedStateFuture();
 	}
 
-	Reference<HTTP::SimServerContext> server = makeReference<HTTP::SimServerContext>();
+	auto server = makeReference<HTTP::SimServerContext>();
 	server->registerNewServer(listenAddress, makeReference<MockS3RequestHandler>());
 
 	TraceEvent("MockS3ServerRealStarted")

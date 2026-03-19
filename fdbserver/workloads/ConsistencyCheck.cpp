@@ -1072,7 +1072,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (!g_network->isSimulated()) {
 			co_return true;
 		}
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		ConsistencyScanState cs;
 		while (true) {
 			Error err;

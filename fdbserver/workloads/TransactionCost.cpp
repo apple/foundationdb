@@ -277,7 +277,7 @@ class TransactionCostWorkload : public TestWorkload {
 
 	Future<Void> runTest(Database cx, ITest* test) {
 		co_await test->setup(*this, cx);
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		if (debugTransactions) {
 			test->debugTransaction(*tr);
 		}

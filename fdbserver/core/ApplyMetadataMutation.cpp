@@ -309,7 +309,7 @@ private:
 			if (storageCache) {
 				auto cacheItr = storageCache->find(id);
 				if (cacheItr == storageCache->end()) {
-					Reference<StorageInfo> storageInfo = makeReference<StorageInfo>();
+					auto storageInfo = makeReference<StorageInfo>();
 					storageInfo->tag = tag;
 					Optional<Key> interfKey = txnStateStore->readValue(serverListKeyFor(id)).get();
 					if (interfKey.present()) {
@@ -366,7 +366,7 @@ private:
 
 				auto cacheItr = storageCache->find(id);
 				if (cacheItr == storageCache->end()) {
-					Reference<StorageInfo> storageInfo = makeReference<StorageInfo>();
+					auto storageInfo = makeReference<StorageInfo>();
 					storageInfo->interf = interf;
 					Optional<Key> tagKey = txnStateStore->readValue(serverTagKeyFor(id)).get();
 					if (tagKey.present()) {

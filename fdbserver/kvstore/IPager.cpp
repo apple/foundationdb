@@ -29,7 +29,7 @@ TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
 	// TODO: it should not be necessary to define this constant here.  ArenaPage or something
 	// should export one.
 	constexpr int _PAGE_SIZE = 8 * 1024;
-	Reference<ArenaPage> page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
+	auto page = makeReference<ArenaPage>(_PAGE_SIZE, _PAGE_SIZE);
 	page->init(encodingType, PageType::BTreeNode, 1);
 	deterministicRandom()->randomBytes(page->mutateData(), page->dataSize());
 	PhysicalPageID pageID = deterministicRandom()->randomUInt32();
