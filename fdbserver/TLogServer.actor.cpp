@@ -2864,22 +2864,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			if (logData->stopped()) {
 				req.reply.sendError(tlog_stopped());
 			} else {
-				StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-				StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
-				if (!self->shouldAcceptNewData(
-				        kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
-					TraceEvent te(SevWarn, "TLogCommitRejectedLowDiskSpace", logData->logId);
-					te.suppressFor(1.0)
-					    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
-					    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-					    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-					    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-					    .detail("QueueDiskBytesAvailable", queueBytes.available)
-					    .detail("QueueDiskBytesTotal", queueBytes.total);
-					req.reply.sendError(tlog_stopped());
-				} else {
-					logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
-				}
+				logData->addActor.send(tLogCommit(self, req, logData, warningCollectorInput));
 			}
 		}
 		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
@@ -2972,6 +2957,7 @@ ACTOR static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Refere
 		}
 		wait(delayJittered(.005, TaskPriority::TLogCommit));
 	}
+	CODE_PROBE(logData->stopped(), "pullAsyncData stopped while blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	return Void();
 }
 
@@ -2982,6 +2968,7 @@ Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logD
 		// Avoid the overhead of spawning the polling coroutine on the happy path.
 		return Void();
 	}
+	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
 }
 
