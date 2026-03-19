@@ -27,7 +27,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/core/ShardMetrics.h"
 #include "fdbserver/core/ShardSizing.h"

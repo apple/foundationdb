@@ -54,7 +54,7 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "flow/Platform.h"
 
 #include "flow/Trace.h"

@@ -1,5 +1,5 @@
 /*
- * MoveKeys.actor.h
+ * MoveKeys.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,12 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_CORE_MOVEKEYS_H
+#define FDBSERVER_CORE_MOVEKEYS_H
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_MOVEKEYS_ACTOR_G_H)
-#define FDBSERVER_CORE_MOVEKEYS_ACTOR_G_H
-#include "fdbserver/core/MoveKeys.actor.g.h"
-#elif !defined(FDBSERVER_CORE_MOVEKEYS_ACTOR_H)
-#define FDBSERVER_CORE_MOVEKEYS_ACTOR_H
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -31,7 +28,6 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "flow/BooleanParam.h"
-#include "flow/actorcompiler.h"
 
 FDB_BOOLEAN_PARAM(CancelConflictingDataMoves);
 
@@ -135,12 +131,12 @@ struct MoveKeysParams {
 };
 
 // read the lock value in system keyspace but do not change anything
-ACTOR Future<MoveKeysLock> readMoveKeysLock(Database cx);
+Future<MoveKeysLock> readMoveKeysLock(Database cx);
 
 // Calling moveKeys, etc with the return value of this actor ensures that no movekeys, etc
 // has been executed by a different locker since takeMoveKeysLock(), as calling
 // takeMoveKeysLock() updates "moveKeysLockOwnerKey" to a random UID.
-ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
+Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 
 // Checks that the a moveKeysLock has not changed since having taken it
 // This does not modify the moveKeysLock
@@ -160,10 +156,10 @@ Future<Void> rawFinishMovement(Database occ,
 // for restarting the remainder, and for not otherwise cancelling it before
 // it returns (since it needs to execute the finishMoveKeys transaction).
 // When dataMoveId.isValid(), the keyrange will be moved to a shard designated as dataMoveId.
-ACTOR Future<Void> moveKeys(Database occ, MoveKeysParams params);
+Future<Void> moveKeys(Database occ, MoveKeysParams params);
 
 // Cancels a data move designated by dataMoveId.
-ACTOR Future<Void> cleanUpDataMove(
+Future<Void> cleanUpDataMove(
     Database occ,
     UID dataMoveId,
     MoveKeysLock lock,
@@ -172,28 +168,28 @@ ACTOR Future<Void> cleanUpDataMove(
     const DDEnabledState* ddEnabledState,
     Optional<PromiseStream<Future<Void>>> addCleanUpDataMoveActor = Optional<PromiseStream<Future<Void>>>());
 
-ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
+Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServerInterface server);
 // Adds a newly recruited storage server to a database (e.g. adding it to FF/serverList)
 // Returns a Version in which the storage server is in the database
 // This doesn't need to be called for the "seed" storage servers (see seedShardServers above)
 
-ACTOR Future<Void> removeStorageServer(Database cx,
-                                       UID serverID,
-                                       Optional<UID> tssPairID, // if serverID is a tss, set to its ss pair id
-                                       MoveKeysLock lock,
-                                       const DDEnabledState* ddEnabledState);
+Future<Void> removeStorageServer(Database cx,
+                                 UID serverID,
+                                 Optional<UID> tssPairID, // if serverID is a tss, set to its ss pair id
+                                 MoveKeysLock lock,
+                                 const DDEnabledState* ddEnabledState);
 // Removes the given storage server permanently from the database.  It must already
 // have no shards assigned to it.  The storage server MUST NOT be added again after this
 // (though a new storage server with a new unique ID may be recruited from the same fdbserver).
 
-ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> tr, UID serverID);
+Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> tr, UID serverID);
 // Returns true if the given storage server has no keys assigned to it and may be safely removed
 // Obviously that could change later!
-ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
-                                              UID serverID,
-                                              std::vector<UID> teamForDroppedRange,
-                                              MoveKeysLock lock,
-                                              const DDEnabledState* ddEnabledState);
+Future<Void> removeKeysFromFailedServer(Database cx,
+                                        UID serverID,
+                                        std::vector<UID> teamForDroppedRange,
+                                        MoveKeysLock lock,
+                                        const DDEnabledState* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
 
@@ -202,5 +198,4 @@ Future<Void> checkMoveKeysLock(Transaction* tr,
                                const DDEnabledState* ddEnabledState,
                                bool isWrite = true);
 
-#include "flow/unactorcompiler.h"
 #endif

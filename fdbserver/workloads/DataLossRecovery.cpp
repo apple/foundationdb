@@ -23,7 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbrpc/simulator.h"
