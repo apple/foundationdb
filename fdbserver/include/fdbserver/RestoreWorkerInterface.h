@@ -1,5 +1,5 @@
 /*
- * RestoreWorkerInterface.actor.h
+ * RestoreWorkerInterface.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,11 +22,6 @@
 // which are RestoreController, RestoreLoader, and RestoreApplier
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-#include "fdbserver/RestoreWorkerInterface.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
 #include <string>
@@ -39,7 +34,6 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/RestoreUtil.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class RestoreConfigFR;
 
@@ -111,7 +105,7 @@ struct RestoreRoleInterface {
 
 	RestoreRoleInterface() { role = RestoreRole::Invalid; }
 
-	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role) {};
+	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role){};
 
 	UID id() const { return nodeID; }
 
@@ -482,8 +476,7 @@ struct RestoreSysInfoRequest : TimedRequest {
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << "RestoreSysInfoRequest "
-		   << "rangeVersions.size:" << rangeVersions.size();
+		ss << "RestoreSysInfoRequest " << "rangeVersions.size:" << rangeVersions.size();
 		return ss.str();
 	}
 };
@@ -543,7 +536,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param) {};
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
 
 	bool operator<(RestoreLoadFileRequest const& rhs) const { return batchIndex > rhs.batchIndex; }
 
@@ -732,6 +725,3 @@ RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
 const Key restoreStatusKeyFor(StringRef statusType);
 const Value restoreStatusValue(double val);
 Value restoreRequestDoneVersionValue(Version readVersion);
-
-#include "flow/unactorcompiler.h"
-#endif

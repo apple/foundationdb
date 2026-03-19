@@ -38,7 +38,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/RestoreUtil.h"
 #include "fdbserver/RestoreRoleCommon.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/RestoreWorkerInterface.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 

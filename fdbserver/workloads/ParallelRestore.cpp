@@ -22,7 +22,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/RestoreWorkerInterface.h"
 
 // A workload which test the correctness of backup and restore process
 struct RunRestoreWorkerWorkload : TestWorkload {
