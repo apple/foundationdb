@@ -2951,7 +2951,7 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	}
 }
 
-ACTOR Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+ACTOR static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Reference<LogData> logData, Version ver) {
 	state double lowDiskWarningStart = now();
 	while (!logData->stopped()) {
 		StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
@@ -2973,6 +2973,16 @@ ACTOR Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData
 		wait(delayJittered(.005, TaskPriority::TLogCommit));
 	}
 	return Void();
+}
+
+Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
+		// Avoid the overhead of spawning the polling coroutine on the happy path.
+		return Void();
+	}
+	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
 }
 
 // remote tLog pull data from log routers
