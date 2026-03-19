@@ -105,7 +105,7 @@ struct RestoreRoleInterface {
 
 	RestoreRoleInterface() { role = RestoreRole::Invalid; }
 
-	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role){};
+	explicit RestoreRoleInterface(RestoreRoleInterface const& interf) : nodeID(interf.nodeID), role(interf.role) {};
 
 	UID id() const { return nodeID; }
 
@@ -536,7 +536,7 @@ struct RestoreLoadFileRequest : TimedRequest {
 	ReplyPromise<RestoreLoadFileReply> reply;
 
 	RestoreLoadFileRequest() = default;
-	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param){};
+	explicit RestoreLoadFileRequest(int batchIndex, LoadingParam& param) : batchIndex(batchIndex), param(param) {};
 
 	bool operator<(RestoreLoadFileRequest const& rhs) const { return batchIndex > rhs.batchIndex; }
 
