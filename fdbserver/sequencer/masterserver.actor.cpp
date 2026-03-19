@@ -40,6 +40,9 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template class ReplyPromise<MasterInterface>;
+template struct NetSAV<MasterInterface>;
+
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req);
 
 Version figureVersionCxx(Version current,

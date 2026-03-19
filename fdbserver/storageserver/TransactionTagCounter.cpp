@@ -1,5 +1,5 @@
 /*
- * TransactionTagCounter.actor.cpp
+ * TransactionTagCounter.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,8 +21,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "TransactionTagCounter.h"
+#include "flow/Coroutines.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h"
 
 class TransactionTagCounterImpl {
 	UID thisServerID;
@@ -145,41 +145,37 @@ TagSet getTagSet(TransactionTagRef tag) {
 } // namespace
 
 TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
-	state TransactionTagCounter counter(UID(),
-	                                    /*maxTagsTracked=*/2,
-	                                    /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
-	                                        CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	TransactionTagCounter counter(UID(),
+	                              /*maxTagsTracked=*/2,
+	                              /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
+	                                  CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	counter.startNewInterval();
 	ASSERT_EQ(counter.getBusiestTags().size(), 0);
-	{
-		wait(delay(1.0));
-		counter.addRequest(getTagSet("tagA"_sr), 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
-		counter.addRequest(getTagSet("tagA"_sr), 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
-		counter.addRequest(getTagSet("tagB"_sr), 15 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
-		counter.addRequest(getTagSet("tagC"_sr), 20 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
-		counter.startNewInterval();
-		auto const busiestTags = counter.getBusiestTags();
-		ASSERT_EQ(busiestTags.size(), 2);
-		ASSERT(containsTag(busiestTags, "tagA"_sr));
-		ASSERT(!containsTag(busiestTags, "tagB"_sr));
-		ASSERT(containsTag(busiestTags, "tagC"_sr));
-	}
-	return Void();
+	co_await delay(1.0);
+	counter.addRequest(getTagSet("tagA"_sr), 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.addRequest(getTagSet("tagA"_sr), 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.addRequest(getTagSet("tagB"_sr), 15 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.addRequest(getTagSet("tagC"_sr), 20 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.startNewInterval();
+	auto const busiestTags = counter.getBusiestTags();
+	ASSERT_EQ(busiestTags.size(), 2);
+	ASSERT(containsTag(busiestTags, "tagA"_sr));
+	ASSERT(!containsTag(busiestTags, "tagB"_sr));
+	ASSERT(containsTag(busiestTags, "tagC"_sr));
+	co_return;
 }
 
 TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBelowMinRate") {
-	state TransactionTagCounter counter(UID(),
-	                                    /*maxTagsTracked=*/2,
-	                                    /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
-	                                        CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	TransactionTagCounter counter(UID(),
+	                              /*maxTagsTracked=*/2,
+	                              /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
+	                                  CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	counter.startNewInterval();
 	ASSERT_EQ(counter.getBusiestTags().size(), 0);
-	{
-		wait(delay(1.0));
-		counter.addRequest(getTagSet("tagA"_sr), 5 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
-		counter.startNewInterval();
-		auto const busiestTags = counter.getBusiestTags();
-		ASSERT_EQ(busiestTags.size(), 0);
-	}
-	return Void();
+	co_await delay(1.0);
+	counter.addRequest(getTagSet("tagA"_sr), 5 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.startNewInterval();
+	auto const busiestTags = counter.getBusiestTags();
+	ASSERT_EQ(busiestTags.size(), 0);
+	co_return;
 }

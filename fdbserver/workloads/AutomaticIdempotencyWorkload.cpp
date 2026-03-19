@@ -340,7 +340,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		actors->add(cleaner);
 		while (true) {
 			// Oldest created time of a transaction from the workload which still has an idempotency id
-			co_await store(oldestCreatedTime, getOldestCreatedTime(db));
+			oldestCreatedTime = co_await getOldestCreatedTime(db);
 			if (oldestCreatedTime == -1) {
 				co_return true; // Test can't make meaningful progress anymore
 			}

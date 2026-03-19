@@ -170,7 +170,7 @@ struct SidebandSingleWorkload : TestWorkload {
 						while (true) {
 							Error err;
 							try {
-								co_await store(val2, tr2.get(messageKey));
+								val2 = co_await tr2.get(messageKey);
 								break;
 							} catch (Error& e) {
 								err = e;

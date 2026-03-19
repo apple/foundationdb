@@ -58,7 +58,7 @@ Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 	const CheckpointFormat format = initialState.getFormat();
 	ASSERT(format != RocksDBKeyValues);
 	if (format == DataMoveRocksCF || format == RocksDB) {
-		co_await store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
+		result = co_await fetchRocksDBCheckpoint(cx, initialState, dir, cFun);
 	} else {
 		throw not_implemented();
 	}
@@ -90,7 +90,7 @@ Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 		    ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion()));
 	}
 
-	co_await store(result, fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
+	result = co_await fetchRocksDBCheckpoint(cx, initialState, dir, cFun);
 
 	TraceEvent(SevDebug, "FetchCheckpointRangesEnd", initialState.checkpointID)
 	    .detail("CheckpointMetaData", result.toString())

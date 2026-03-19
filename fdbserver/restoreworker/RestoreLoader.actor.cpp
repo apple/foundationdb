@@ -1554,8 +1554,7 @@ TEST_CASE("/FastRestore/RestoreLoader/splitMutation") {
 	ASSERT(mvector2.size() == nodeIDs2.size());
 
 	ASSERT(mvector.size() == mvector2.size());
-	int splitMutationIndex = 0;
-	for (; splitMutationIndex < mvector.size(); splitMutationIndex++) {
+	for (int splitMutationIndex = 0; splitMutationIndex < mvector.size(); splitMutationIndex++) {
 		MutationRef result = mvector[splitMutationIndex];
 		MutationRef result2 = mvector2[splitMutationIndex];
 		UID applierID = nodeIDs[splitMutationIndex];

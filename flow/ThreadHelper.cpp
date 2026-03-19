@@ -1,5 +1,5 @@
 /*
- * ThreadHelper.actor.cpp
+ * ThreadHelper.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,9 +24,9 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Coroutines.h"
 #include "flow/Error.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 ThreadCallback* ThreadCallback::addCallback(ThreadCallback* cb) {
 	return (new ThreadMultiCallback())->addCallback(this)->addCallback(cb);
@@ -49,29 +49,27 @@ struct ThreadFutureCancelObj {
 TEST_CASE("/flow/safeThreadFutureToFuture/Send") {
 	// std::thread is not working in simulation at present, disable this in simulation
 	if (g_network->isSimulated())
-		return Void();
+		co_return;
 	auto* tsav = new ThreadSingleAssignmentVar<Void>;
-	state std::thread thread = std::thread{ ThreadFutureSendObj{ tsav } };
+	std::thread thread = std::thread{ ThreadFutureSendObj{ tsav } };
 	ThreadFuture<Void> f(tsav);
 	// change this to unsafeThreadFutureToFuture will get a data-race failure
-	wait(safeThreadFutureToFuture(f));
+	co_await safeThreadFutureToFuture(f);
 	thread.join();
-	return Void();
 }
 
 // Test the case where the underlying threadFuture is cancelled
 TEST_CASE("/flow/safeThreadFutureToFuture/Cancel") {
 	// std::thread is not working in simulation at present, disable this in simulation
 	if (g_network->isSimulated())
-		return Void();
+		co_return;
 	ThreadFuture<Void> f = onMainThread([]() -> Future<Void> { return Never(); });
-	state std::thread thread = std::thread{ ThreadFutureCancelObj(f) };
+	std::thread thread = std::thread{ ThreadFutureCancelObj(f) };
 	try {
-		wait(safeThreadFutureToFuture(f)); // this actor should get actor_cancelled
+		co_await safeThreadFutureToFuture(f); // this actor should get actor_cancelled
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_actor_cancelled);
 	}
 	thread.join();
-	return Void();
 }

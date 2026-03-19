@@ -19,23 +19,21 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTOREWORKER_G_H)
-#define FDBSERVER_RESTOREWORKER_G_H
-#include "RestoreWorker.actor.g.h"
-#elif !defined(FDBSERVER_RESTOREWORKER_H)
-#define FDBSERVER_RESTOREWORKER_H
 
 #include "fdbclient/Tuple.h"
-#include "flow/flow.h"
-#include "fdbrpc/fdbrpc.h"
-#include "flow/IAsyncFile.h"
-#include "fdbrpc/Stats.h"
 #include <cstdint>
 #include <cstdarg>
 
+#include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Stats.h"
+#include "flow/flow.h"
+#include "flow/IAsyncFile.h"
+#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "RestoreRoleCommon.h"
+#include "RestoreLoader.actor.h"
+#include "RestoreApplier.actor.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
-
-#include "flow/actorcompiler.h" // must be last include
 
 // Each restore worker (a process) is assigned for a role.
 // MAYBE Later: We will support multiple restore roles on a worker
@@ -64,6 +62,3 @@ struct RestoreWorkerData : NonCopyable, public ReferenceCounted<RestoreWorkerDat
 		return ss.str();
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_RESTOREWORKER_H

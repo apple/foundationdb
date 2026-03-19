@@ -60,7 +60,7 @@ RUN curl -Ls "https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TA
 
 WORKDIR /
 
-FROM golang:1.24.9-bookworm AS go-build
+FROM golang:1.25.8-bookworm AS go-build
 COPY fdbkubernetesmonitor/ /fdbkubernetesmonitor
 WORKDIR /fdbkubernetesmonitor
 RUN go build -o /fdb-kubernetes-monitor *.go

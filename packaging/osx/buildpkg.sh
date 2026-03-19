@@ -17,10 +17,10 @@ fi
 #
 BUILDDIR="$1"
 SRCDIR="$2"
-
+HOST_ARCH="$(uname -m)"
 VERSION="$(cat "$BUILDDIR/version.txt")"
 
-PKGFILE="$BUILDDIR/packages/FoundationDB-$VERSION.pkg"
+PKGFILE="$BUILDDIR/packages/FoundationDB-$HOST_ARCH-$VERSION.pkg"
 
 CLIENTSDIR=$( mktemp -d -t fdb-clients-pkg )
 SERVERDIR=$( mktemp -d -t fdb-server-pkg )
@@ -67,6 +67,8 @@ install -m 0644 "$SRCDIR"/packaging/osx/com.foundationdb.fdbmonitor.plist $SERVE
 pkgbuild --root $SERVERDIR --identifier FoundationDB-server --version "$VERSION" --scripts "$SRCDIR"/packaging/osx/scripts-server FoundationDB-server.pkg
 
 rm -rf $SERVERDIR
+
+sed -i '' "s|<options |<options hostArchitectures=\"$HOST_ARCH\" |" "$SRCDIR"/packaging/osx/Distribution.xml
 
 productbuild --distribution "$SRCDIR"/packaging/osx/Distribution.xml --resources "$SRCDIR"/packaging/osx/resources --package-path . "$PKGFILE"
 

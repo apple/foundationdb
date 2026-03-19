@@ -210,8 +210,7 @@ public:
 
 		void traceAll(const UID& debugId = UID()) const {
 			auto it = counter.cbegin();
-			int count = 0;
-			for (; count < SERVER_KNOBS->DD_QUEUE_COUNTER_MAX_LOG && it != counter.cend(); ++count, ++it) {
+			for (int count = 0; count < SERVER_KNOBS->DD_QUEUE_COUNTER_MAX_LOG && it != counter.cend(); ++count, ++it) {
 				TraceEvent event("DDQueueServerCounter", debugId);
 				event.detail("ServerId", it->first);
 				traceReasonItem(&event, it->second);

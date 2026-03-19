@@ -47,7 +47,7 @@ struct FDBPromiseImpl : FDBPromise {
 template <class F, class T>
 Future<Void> keepAlive(F until, T db) {
 	try {
-		co_await success(until);
+		co_await until;
 	} catch (...) {
 	}
 }

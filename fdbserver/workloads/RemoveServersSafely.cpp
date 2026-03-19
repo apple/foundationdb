@@ -582,7 +582,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			std::vector<NetworkAddress> coordinators;
 			if (csOptional.present()) {
 				ClusterConnectionString cs = csOptional.get();
-				co_await store(coordinators, cs.tryResolveHostnames());
+				coordinators = co_await cs.tryResolveHostnames();
 			}
 			if (coordinators.size() > 2) {
 				auto randomCoordinator = deterministicRandom()->randomChoice(coordinators);

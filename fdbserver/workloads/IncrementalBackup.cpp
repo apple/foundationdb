@@ -105,7 +105,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			while (true) {
 				Error err;
 				try {
-					co_await store(v, tr.getReadVersion());
+					v = co_await tr.getReadVersion();
 					break;
 				} catch (Error& e) {
 					err = e;
