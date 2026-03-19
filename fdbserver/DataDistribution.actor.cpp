@@ -1300,8 +1300,11 @@ ACTOR Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 			wait(store(
 			    result,
 			    krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE)));
+			if (result.empty()) {
+				break;
+			}
 			i = 0;
-			for (; i < result.size() - 1; i++) {
+			for (; i < static_cast<int>(result.size()) - 1; i++) {
 				if (result[i].value.empty()) {
 					continue;
 				}
@@ -1969,7 +1972,10 @@ ACTOR Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> s
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			BulkLoadJobState checkJobState = wait(getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange()));
 			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead)));
-			for (int i = 0; i < bulkLoadTaskResult.size() - 1; i++) {
+			if (bulkLoadTaskResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
 				ASSERT(!bulkLoadTaskResult[i].value.empty());
 				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
 				if (!existTask.isValid()) {
@@ -2032,8 +2038,11 @@ ACTOR Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 			BulkLoadJobState currentJobState = wait(getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange()));
 			hasError = hasError && (currentJobState.getPhase() == BulkLoadJobPhase::Error);
 			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey))));
+			if (bulkLoadTaskResult.empty()) {
+				break;
+			}
 			i = 0;
-			for (; i < bulkLoadTaskResult.size() - 1; i++) {
+			for (; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
 				ASSERT(!bulkLoadTaskResult[i].value.empty());
 				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
 				if (!existTask.isValid()) {
@@ -2276,10 +2285,13 @@ ACTOR Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
 			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
+			if (bulkDumpResult.empty()) {
+				break;
+			}
 			// We rely on random assignment of shards for the load balancing. Also, there is a flow lock to prevent SS
 			// from being overloaded.
 			bulkDumpResultIndex = 0;
-			for (; bulkDumpResultIndex < bulkDumpResult.size() - 1; bulkDumpResultIndex++) {
+			for (; bulkDumpResultIndex < static_cast<int>(bulkDumpResult.size()) - 1; bulkDumpResultIndex++) {
 				if (bulkDumpResult[bulkDumpResultIndex].value.empty()) {
 					beginKey = bulkDumpResult[bulkDumpResultIndex + 1].key;
 					continue;
@@ -2369,7 +2381,10 @@ ACTOR Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
 			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
-			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+			if (bulkDumpResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(bulkDumpResult.size()) - 1; i++) {
 				ASSERT(!bulkDumpResult[i].value.empty());
 				bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
 				if (!bulkDumpState.isValid() || bulkDumpState.getJobId() != jobId) {
@@ -2472,7 +2487,10 @@ ACTOR Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
 			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
-			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+			if (bulkDumpResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(bulkDumpResult.size()) - 1; i++) {
 				ASSERT(!bulkDumpResult[i].value.empty());
 				BulkDumpState bulkDumpState = decodeBulkDumpState(bulkDumpResult[i].value);
 				if (bulkDumpState.getJobId() != jobId) {

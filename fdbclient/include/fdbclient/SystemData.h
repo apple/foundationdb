@@ -515,6 +515,17 @@ extern const KeyRef bulkDumpPrefix;
 Value bulkDumpStateValue(const BulkDumpState& bulkDumpState);
 BulkDumpState decodeBulkDumpState(const ValueRef& value);
 
+// BulkDump owner tracking - stored separately for backward compatibility
+// "\xff/bulkDumpOwner/[[jobId]]" := "[[BulkDumpOwnerInfo]]"
+extern const KeyRangeRef bulkDumpOwnerKeys;
+extern const KeyRef bulkDumpOwnerPrefix;
+
+// "\xff/bulkLoadOwner/[[jobId]]" := "[[BulkDumpOwnerInfo]]" (reuses same struct)
+extern const KeyRangeRef bulkLoadOwnerKeys;
+extern const KeyRef bulkLoadOwnerPrefix;
+const Key bulkDumpOwnerKeyFor(const UID& jobId);
+const Key bulkLoadOwnerKeyFor(const UID& jobId);
+
 extern const std::string rangeLockNameForBulkLoad;
 extern const KeyRangeRef rangeLockKeys;
 extern const KeyRef rangeLockPrefix;
