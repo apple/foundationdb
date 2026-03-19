@@ -349,7 +349,7 @@ Future<bool> doCheckAll(Database cx, KeyRange inputRange, Optional<StringRef> dc
 				int round = 0;
 				Version version{ 0 };
 				while (hasMore) {
-					co_await store(version, getVersion(cx));
+					version = co_await getVersion(cx);
 					replies.clear();
 					fmt::println("Round {}: {} - {}", round, toHex(beginKeyToCheck), toHex(rangeToCheck.end));
 					for (const auto& s : keyServers[i].second) { // for each storage server

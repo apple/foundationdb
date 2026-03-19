@@ -23,7 +23,7 @@
 #include "fdbclient/Tuple.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct SayHelloTaskFunc : TaskFuncBase {
 	static StringRef name;

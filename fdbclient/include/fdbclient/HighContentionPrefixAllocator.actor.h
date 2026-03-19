@@ -37,7 +37,7 @@
 
 class HighContentionPrefixAllocator {
 public:
-	HighContentionPrefixAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
+	explicit HighContentionPrefixAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
 
 	template <class TransactionT>
 	Future<Standalone<StringRef>> allocate(Reference<TransactionT> tr) {

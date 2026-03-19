@@ -283,7 +283,7 @@ Future<grpc::Status> exclude(Reference<IDatabase> db, const ExcludeRequest* req,
 		Future<bool> future_workers = utils::getWorkersProcessData(db, &workers);
 		Future<Void> future_server_interfaces = utils::getStorageServerInterfaces(db, &server_interfaces);
 
-		co_await success(future_workers);
+		co_await future_workers;
 		co_await future_server_interfaces;
 
 		bool force = req->force();

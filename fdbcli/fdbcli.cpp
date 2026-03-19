@@ -1331,7 +1331,7 @@ Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterConnecti
 				}
 
 				if (tokencmp(tokens[0], "triggerddteaminfolog")) {
-					co_await success(makeInterruptable(triggerddteaminfologCommandActor(db)));
+					co_await makeInterruptable(triggerddteaminfologCommandActor(db));
 					continue;
 				}
 

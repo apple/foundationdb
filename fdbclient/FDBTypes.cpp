@@ -75,8 +75,7 @@ Key randomKeyBetween(const KeyRangeRef& keys) {
 	ASSERT_LT(pos, end.size()); // otherwise, begin >= end
 
 	// find the lowest char in range begin[pos+1, begin.size()) that is not \xff (255)
-	int lowest = begin.size() - 1;
-	for (; lowest > pos; lowest--) {
+	for (int lowest = begin.size() - 1; lowest > pos; lowest--) {
 		if (begin[lowest] < 255) {
 			Key res = begin;
 			uint8_t* ptr = mutateString(res);

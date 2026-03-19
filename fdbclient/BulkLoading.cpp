@@ -119,7 +119,13 @@ std::string getPath(const std::string& path) {
 	// We want boost::url to parse out the path but it cannot digest credentials. Strip them out
 	// before passing to boost::url.
 	try {
-		return boost::urls::parse_uri(matches[1].str() + matches[3].str()).value().path();
+		std::string result = boost::urls::parse_uri(matches[1].str() + matches[3].str()).value().path();
+		// Remove leading slash if present - S3 object keys don't have leading slashes,
+		// and BackupContainer's dataPath() expects paths without them
+		if (!result.empty() && result[0] == '/') {
+			result = result.substr(1);
+		}
+		return result;
 	} catch (std::system_error& e) {
 		TraceEvent(SevError, "BulkLoadGetPathError")
 		    .detail("Path", path)

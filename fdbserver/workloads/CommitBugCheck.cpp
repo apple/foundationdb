@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload {

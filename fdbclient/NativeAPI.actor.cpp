@@ -2856,7 +2856,7 @@ struct TSSDuplicateStreamData {
 	// empty constructor for optional?
 	TSSDuplicateStreamData() = default;
 
-	TSSDuplicateStreamData(PromiseStream<StreamReply> stream) : stream(stream) {}
+	explicit TSSDuplicateStreamData(PromiseStream<StreamReply> stream) : stream(stream) {}
 
 	bool done() { return tssComparisonDone.getFuture().isReady(); }
 
@@ -4067,8 +4067,8 @@ public:
 	ValueRef setValue;
 
 	MutationBlock() : mutated(false) {}
-	MutationBlock(bool _cleared) : mutated(true), cleared(_cleared) {}
-	MutationBlock(ValueRef value) : mutated(true), cleared(false), setValue(value) {}
+	explicit MutationBlock(bool _cleared) : mutated(true), cleared(_cleared) {}
+	explicit MutationBlock(ValueRef value) : mutated(true), cleared(false), setValue(value) {}
 };
 
 bool compareBegin(KeyRangeRef lhs, KeyRangeRef rhs) {

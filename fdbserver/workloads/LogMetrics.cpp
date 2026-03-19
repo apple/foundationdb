@@ -21,7 +21,7 @@
 #include "flow/SystemMonitor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbclient/SystemData.h"

@@ -26,12 +26,12 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/IRateControl.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/StorageMetrics.actor.h"
-#include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/core/StorageMetrics.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/TSSMappingUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -1072,7 +1072,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		if (!g_network->isSimulated()) {
 			co_return true;
 		}
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto tr = makeReference<ReadYourWritesTransaction>(cx);
 		ConsistencyScanState cs;
 		while (true) {
 			Error err;

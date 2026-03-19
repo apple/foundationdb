@@ -117,7 +117,7 @@ public:
 		std::unordered_map<uint32_t, AsyncFileWriteChecker::WriteInfo> pageContents;
 
 	public:
-		LRU(std::string _fileName) {
+		explicit LRU(std::string _fileName) {
 			step = 0;
 			fileName = _fileName;
 		}
@@ -188,7 +188,7 @@ public:
 		}
 	};
 
-	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f), lru(f->getFilename()) {
+	explicit AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f), lru(f->getFilename()) {
 		// Initialize the static history budget the first time (and only the first time) a file is opened.
 		if (!checksumHistoryBudget.present()) {
 			checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;

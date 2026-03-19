@@ -41,7 +41,8 @@
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RestoreValidationWorkload : TestWorkload {
 	static constexpr auto NAME = "RestoreValidation";

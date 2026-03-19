@@ -39,7 +39,7 @@ private:
 			page = _page;
 			writeInfo = _writeInfo;
 			next = nullptr;
-			prev = NULL;
+			prev = nullptr;
 		}
 	};
 

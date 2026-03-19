@@ -23,7 +23,7 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 struct ReadHotDetectionWorkload : TestWorkload {
 	static constexpr auto NAME = "ReadHotDetection";
