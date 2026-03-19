@@ -2951,6 +2951,30 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	}
 }
 
+ACTOR Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+	state double lowDiskWarningStart = now();
+	while (!logData->stopped()) {
+		StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
+		StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
+		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
+			break;
+		}
+		if (now() - lowDiskWarningStart >= 1.0) {
+			TraceEvent(SevWarn, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+			    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
+			    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+			    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+			    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+			    .detail("QueueDiskBytesAvailable", queueBytes.available)
+			    .detail("QueueDiskBytesTotal", queueBytes.total)
+			    .detail("Version", ver);
+			lowDiskWarningStart = now();
+		}
+		wait(delayJittered(.005, TaskPriority::TLogCommit));
+	}
+	return Void();
+}
+
 // remote tLog pull data from log routers
 ACTOR Future<Void> pullAsyncData(TLogData* self,
                                  Reference<LogData> logData,
@@ -3028,27 +3052,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
-					state double lowDiskWarningStart = now();
-					while (!logData->stopped()) {
-						StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-						StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
-						if (self->shouldAcceptNewData(
-						        kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
-							break;
-						}
-						if (now() - lowDiskWarningStart >= 1.0) {
-							TraceEvent(SevWarn, "TLogPullAsyncDataLowDiskSpace", logData->logId)
-							    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
-							    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-							    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-							    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-							    .detail("QueueDiskBytesAvailable", queueBytes.available)
-							    .detail("QueueDiskBytesTotal", queueBytes.total)
-							    .detail("Version", ver);
-							lowDiskWarningStart = now();
-						}
-						wait(delayJittered(.005, TaskPriority::TLogCommit));
-					}
+					wait(waitUntilTLogAcceptsNewData(self, logData, ver));
 					if (logData->stopped()) {
 						return Void();
 					}
@@ -3094,27 +3098,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 						}
 
-						state double emptyCommitLowDiskWarningStart = now();
-						while (!logData->stopped()) {
-							StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-							StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
-							if (self->shouldAcceptNewData(
-							        kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
-								break;
-							}
-							if (now() - emptyCommitLowDiskWarningStart >= 1.0) {
-								TraceEvent(SevWarn, "TLogPullAsyncDataLowDiskSpace", logData->logId)
-								    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
-								    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-								    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-								    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-								    .detail("QueueDiskBytesAvailable", queueBytes.available)
-								    .detail("QueueDiskBytesTotal", queueBytes.total)
-								    .detail("Version", ver);
-								emptyCommitLowDiskWarningStart = now();
-							}
-							wait(delayJittered(.005, TaskPriority::TLogCommit));
-						}
+						wait(waitUntilTLogAcceptsNewData(self, logData, ver));
 						if (logData->stopped()) {
 							return Void();
 						}
