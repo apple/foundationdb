@@ -1,5 +1,5 @@
 /*
- * MoveKeys.actor.cpp
+ * MoveKeys.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,7 +30,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/TSSMappingUtil.h"

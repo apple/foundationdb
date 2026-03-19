@@ -1,5 +1,5 @@
 /*
- * MoveKeys.actor.h
+ * MoveKeys.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,12 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBSERVER_CORE_MOVEKEYS_H
+#define FDBSERVER_CORE_MOVEKEYS_H
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_MOVEKEYS_ACTOR_G_H)
-#define FDBSERVER_CORE_MOVEKEYS_ACTOR_G_H
-#include "fdbserver/core/MoveKeys.actor.g.h"
-#elif !defined(FDBSERVER_CORE_MOVEKEYS_ACTOR_H)
-#define FDBSERVER_CORE_MOVEKEYS_ACTOR_H
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -31,7 +28,6 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/SeedShardServers.h"
 #include "flow/BooleanParam.h"
-#include "flow/actorcompiler.h"
 
 FDB_BOOLEAN_PARAM(CancelConflictingDataMoves);
 
@@ -202,5 +198,4 @@ Future<Void> checkMoveKeysLock(Transaction* tr,
                                const DDEnabledState* ddEnabledState,
                                bool isWrite = true);
 
-#include "flow/unactorcompiler.h"
 #endif

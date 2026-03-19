@@ -60,7 +60,7 @@
 #include "fdbserver/datadistributor/DataDistribution.actor.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"

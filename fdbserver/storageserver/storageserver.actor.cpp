@@ -47,7 +47,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LatencyBandConfig.h"
 #include "fdbserver/core/LogProtocolMessage.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/OTELSpanContextMessage.h"
 #include "ReadLatencySamples.h"

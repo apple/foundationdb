@@ -63,7 +63,7 @@
 #include "fdbserver/core/ApplyMetadataMutation.h"
 #include "fdbserver/core/BackupProgress.actor.h"
 #include "fdbserver/core/DBCoreState.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
