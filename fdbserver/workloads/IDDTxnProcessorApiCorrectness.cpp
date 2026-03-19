@@ -20,11 +20,11 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbserver/DDSharedContext.h"
-#include "fdbserver/DDTxnProcessor.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/datadistributor/DDSharedContext.h"
+#include "fdbserver/datadistributor/DDTxnProcessor.h"
+#include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/VersionedMap.h"
 

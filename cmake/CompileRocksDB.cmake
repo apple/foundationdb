@@ -64,12 +64,12 @@ else()
   set(FDB_ROCKSDB_GIT_HASH "")
 endif()
 
-# Generate FDBRocksDBVersion.h from template into build directory
+# Generate FDBRocksDBVersion.h from template into the core build include tree
 # This file is NOT source-controlled - it's regenerated at cmake configure time
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/fdbserver/include/fdbserver)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/fdbserver/core/include/fdbserver/core)
 configure_file(
   ${CMAKE_CURRENT_LIST_DIR}/FDBRocksDBVersion.h.in
-  ${CMAKE_BINARY_DIR}/fdbserver/include/fdbserver/FDBRocksDBVersion.h
+  ${CMAKE_BINARY_DIR}/fdbserver/core/include/fdbserver/core/FDBRocksDBVersion.h
   @ONLY)
 message(STATUS "Generated FDBRocksDBVersion.h with version ${FDB_ROCKSDB_MAJOR}.${FDB_ROCKSDB_MINOR}.${FDB_ROCKSDB_PATCH}")
 

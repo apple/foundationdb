@@ -22,48 +22,11 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/ratekeeper/Ratekeeper.h"
-#include "fdbserver/ratekeeper/TagThrottler.h"
+#include "Ratekeeper.h"
+#include "TagThrottler.h"
 #include "flow/OwningResource.h"
 
 #include "flow/actorcompiler.h" // must be last include
-
-const char* limitReasonName[] = {
-	"workload",
-	"storage_server_write_queue_size",
-	"storage_server_write_bandwidth_mvcc",
-	"storage_server_readable_behind",
-	"log_server_mvcc_write_bandwidth",
-	"log_server_write_queue",
-	"storage_server_min_free_space",
-	"storage_server_min_free_space_ratio",
-	"log_server_min_free_space",
-	"log_server_min_free_space_ratio",
-	"storage_server_durability_lag",
-	"storage_server_list_fetch_failed",
-};
-static_assert(sizeof(limitReasonName) / sizeof(limitReasonName[0]) == limitReason_t_end, "limitReasonDesc table size");
-
-int limitReasonEnd = limitReason_t_end;
-
-// NOTE: This has a corresponding table in Script.cs (see RatekeeperReason graph)
-// IF UPDATING THIS ARRAY, UPDATE SCRIPT.CS!
-const char* limitReasonDesc[] = {
-	"Workload or read performance.",
-	"Storage server performance (storage queue).",
-	"Storage server MVCC memory.",
-	"Storage server version falling behind.",
-	"Log server MVCC memory.",
-	"Storage server performance (log queue).",
-	"Storage server running out of space (approaching 100MB limit).",
-	"Storage server running out of space (approaching 5% limit).",
-	"Log server running out of space (approaching 100MB limit).",
-	"Log server running out of space (approaching 5% limit).",
-	"Storage server durable version falling behind.",
-	"Unable to fetch storage server list.",
-};
-
-static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReason_t_end, "limitReasonDesc table size");
 
 ACTOR static Future<Void> splitError(Future<Void> in, Promise<Void> errOut) {
 	try {
@@ -1331,24 +1294,3 @@ void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoot
 		smoothTotalSpace.setTotal(reply.storageBytes.total);
 	}
 }
-
-RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
-                                   std::string context,
-                                   int64_t storageTargetBytes,
-                                   int64_t storageSpringBytes,
-                                   int64_t logTargetBytes,
-                                   int64_t logSpringBytes,
-                                   double maxVersionDifference,
-                                   int64_t durabilityLagTargetVersions,
-                                   double bwLagTarget)
-  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
-    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
-    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
-    maxVersionDifference(maxVersionDifference),
-    durabilityLagTargetVersions(durabilityLagTargetVersions +
-                                SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions
-                                                                                   // are expected to not
-    // be durable on the storage servers
-    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), bwLagTarget(bwLagTarget),
-    priority(priority), context(context),
-    rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}

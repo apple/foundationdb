@@ -19,9 +19,9 @@
  */
 
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
-#include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
+#include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TagThrottle.actor.h"
 

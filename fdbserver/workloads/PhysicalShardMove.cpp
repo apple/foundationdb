@@ -21,12 +21,12 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/ServerCheckpoint.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/ServerCheckpoint.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
@@ -600,7 +600,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
-				for (int i = 0; i < dataMoves.size(); ++i) {
+				int i = 0;
+				for (; i < dataMoves.size(); ++i) {
 					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
 					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);

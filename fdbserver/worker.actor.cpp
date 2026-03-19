@@ -51,14 +51,14 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/TesterInterface.actor.h" // for poisson()
-#include "fdbserver/IDiskQueue.h"
+#include "fdbserver/tester/tester.h"
+#include "fdbserver/core/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/core/DataDistributorInterface.h"
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/core/FDBExecHelper.actor.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
 #include "flow/Profiler.h"
@@ -89,6 +89,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #endif
+#include "fdbserver/core/TesterInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #if CENABLED(0, NOT_IN_CLEAN)
@@ -100,95 +101,8 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
 
-template class RequestStream<RecruitMasterRequest, false>;
-template struct NetNotifiedQueue<RecruitMasterRequest, false>;
-
-template class RequestStream<InitializeCommitProxyRequest, false>;
-template struct NetNotifiedQueue<InitializeCommitProxyRequest, false>;
-
-template class RequestStream<InitializeGrvProxyRequest, false>;
-template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
-
-template class RequestStream<GetServerDBInfoRequest, false>;
-template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
-
 namespace {
 RoleLineageCollector roleLineageCollector;
-}
-
-ACTOR Future<std::vector<Endpoint>> tryDBInfoBroadcast(RequestStream<UpdateServerDBInfoRequest> stream,
-                                                       UpdateServerDBInfoRequest req) {
-	ErrorOr<std::vector<Endpoint>> rep =
-	    wait(stream.getReplyUnlessFailedFor(req, SERVER_KNOBS->DBINFO_FAILED_DELAY, 0));
-	if (rep.present()) {
-		return rep.get();
-	}
-	req.broadcastInfo.push_back(stream.getEndpoint());
-	return req.broadcastInfo;
-}
-
-ACTOR Future<std::vector<Endpoint>> broadcastDBInfoRequest(UpdateServerDBInfoRequest req,
-                                                           int sendAmount,
-                                                           Optional<Endpoint> sender,
-                                                           bool sendReply) {
-	state std::vector<Future<std::vector<Endpoint>>> replies;
-	state ReplyPromise<std::vector<Endpoint>> reply = req.reply;
-	resetReply(req);
-	int currentStream = 0;
-	std::vector<Endpoint> broadcastEndpoints = req.broadcastInfo;
-	for (int i = 0; i < sendAmount && currentStream < broadcastEndpoints.size(); i++) {
-		std::vector<Endpoint> endpoints;
-		RequestStream<UpdateServerDBInfoRequest> cur(broadcastEndpoints[currentStream++]);
-		while (currentStream < broadcastEndpoints.size() * (i + 1) / sendAmount) {
-			endpoints.push_back(broadcastEndpoints[currentStream++]);
-		}
-		req.broadcastInfo = endpoints;
-		replies.push_back(tryDBInfoBroadcast(cur, req));
-		resetReply(req);
-	}
-	wait(waitForAll(replies));
-	std::vector<Endpoint> notUpdated;
-	if (sender.present()) {
-		notUpdated.push_back(sender.get());
-	}
-	for (auto& it : replies) {
-		notUpdated.insert(notUpdated.end(), it.get().begin(), it.get().end());
-	}
-	if (sendReply) {
-		reply.send(notUpdated);
-	}
-	return notUpdated;
-}
-
-ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
-                                            Reference<AsyncVar<ClientDBInfo>> info) {
-	state std::vector<UID> lastCommitProxyUIDs;
-	state std::vector<CommitProxyInterface> lastCommitProxies;
-	state std::vector<UID> lastGrvProxyUIDs;
-	state std::vector<GrvProxyInterface> lastGrvProxies;
-	loop {
-		ClientDBInfo ni = db->get().client;
-		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
-		info->setUnconditional(ni);
-		wait(db->onChange());
-	}
-}
-
-Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
-                        TaskPriority taskID,
-                        LockAware lockAware,
-                        EnableLocalityLoadBalance enableLocalityLoadBalance) {
-	auto info = makeReference<AsyncVar<ClientDBInfo>>();
-	auto cx = DatabaseContext::create(info,
-	                                  extractClientInfo(db, info),
-	                                  enableLocalityLoadBalance ? db->get().myLocality : LocalityData(),
-	                                  enableLocalityLoadBalance,
-	                                  taskID,
-	                                  lockAware);
-	cx->globalConfig->init(db, std::addressof(db->get().client));
-	cx->globalConfig->trigger(samplingFrequency, samplingProfilerUpdateFrequency);
-	cx->globalConfig->trigger(samplingWindow, samplingProfilerUpdateWindow);
-	return cx;
 }
 
 struct ErrorInfo {
@@ -863,22 +777,6 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 } // namespace
 
-// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
-// satellite DC.
-bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	for (const auto& logSet : dbInfo->get().logSystemConfig.tLogs) {
-		if (logSet.isLocal && logSet.locality == tagLocalitySatellite) {
-			for (const auto& tlog : logSet.tLogs) {
-				if (tlog.present() && tlog.interf().addresses().contains(address)) {
-					return true;
-				}
-			}
-		}
-	}
-
-	return false;
-}
-
 bool addressesInDbAndPrimarySatelliteDc(const NetworkAddressList& addresses,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return addressInDbAndPrimarySatelliteDc(addresses.address, dbInfo) ||
@@ -938,36 +836,6 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
 }
 
 } // namespace
-
-bool addressInDbAndRemoteDc(const NetworkAddress& address,
-                            Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                            Optional<std::vector<NetworkAddress>> storageServers) {
-	const auto& dbi = dbInfo->get();
-
-	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
-			continue;
-		}
-		for (const auto& tlog : logSet.tLogs) {
-			if (tlog.present() && tlog.interf().addresses().contains(address)) {
-				return true;
-			}
-		}
-
-		for (const auto& logRouter : logSet.logRouters) {
-			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
-				return true;
-			}
-		}
-	}
-
-	if (storageServers.present() &&
-	    (std::find(storageServers.get().begin(), storageServers.get().end(), address) != storageServers.get().end())) {
-		return true;
-	}
-
-	return false;
-}
 
 bool addressesInDbAndRemoteDc(
     const NetworkAddressList& addresses,
@@ -1759,91 +1627,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
 		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
-	}
-}
-
-// FIXME:  This will not work correctly in simulation as all workers would share the same roles map
-std::set<std::pair<std::string, std::string>> g_roles;
-
-Standalone<StringRef> roleString(std::set<std::pair<std::string, std::string>> roles, bool with_ids) {
-	std::string result;
-	for (auto& r : roles) {
-		if (!result.empty())
-			result.append(",");
-		result.append(r.first);
-		if (with_ids) {
-			result.append(":");
-			result.append(r.second);
-		}
-	}
-	return StringRef(result);
-}
-
-void startRole(const Role& role,
-               UID roleId,
-               UID workerId,
-               const std::map<std::string, std::string>& details,
-               const std::string& origination) {
-	if (role.includeInTraceRoles) {
-		addTraceRole(role.abbreviation);
-	}
-
-	TraceEvent ev("Role", roleId);
-	ev.detail("As", role.roleName)
-	    .detail("Transition", "Begin")
-	    .detail("Origination", origination)
-	    .detail("OnWorker", workerId);
-	for (auto it = details.begin(); it != details.end(); it++)
-		ev.detail(it->first.c_str(), it->second);
-
-	ev.trackLatest(roleId.shortString() + ".Role");
-
-	// Update roles map, log Roles metrics
-	g_roles.insert({ role.roleName, roleId.shortString() });
-	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
-	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
-	if (g_network->isSimulated())
-		g_simulator->addRole(g_network->getLocalAddress(), role.roleName);
-}
-
-void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
-	{
-		TraceEvent ev("Role", id);
-		if (e.code() != invalid_error_code)
-			ev.errorUnsuppressed(e);
-		ev.detail("Transition", "End").detail("As", role.roleName).detail("Reason", reason);
-
-		ev.trackLatest(id.shortString() + ".Role");
-	}
-
-	if (!ok) {
-		std::string type = role.roleName + "Failed";
-
-		TraceEvent err(SevError, type.c_str(), id);
-		if (e.code() != invalid_error_code) {
-			err.errorUnsuppressed(e);
-		}
-		err.detail("Reason", reason);
-	}
-
-	latestEventCache.clear(id.shortString());
-
-	// Update roles map, log Roles metrics
-	g_roles.erase({ role.roleName, id.shortString() });
-	StringMetricHandle("Roles"_sr) = roleString(g_roles, false);
-	StringMetricHandle("RolesWithIDs"_sr) = roleString(g_roles, true);
-	if (g_network->isSimulated())
-		g_simulator->removeRole(g_network->getLocalAddress(), role.roleName);
-
-	if (role.includeInTraceRoles) {
-		removeTraceRole(role.abbreviation);
-	}
-}
-
-ACTOR Future<Void> traceRole(Role role, UID roleId) {
-	loop {
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
-		TraceEvent("Role", roleId).detail("Transition", "Refresh").detail("As", role.roleName);
 	}
 }
 
@@ -3146,18 +2929,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	}
 }
 
-ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
-                                           Reference<AsyncVar<Optional<ClusterInterface>>> out) {
-	loop {
-		if (in->get().present()) {
-			out->set(in->get().get().clientInterface);
-		} else {
-			out->set(Optional<ClusterInterface>());
-		}
-		wait(in->onChange());
-	}
-}
-
 static std::set<int> const& normalWorkerErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -3980,22 +3751,3 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		throw err;
 	}
 }
-
-const Role Role::WORKER("Worker", "WK", false);
-const Role Role::STORAGE_SERVER("StorageServer", "SS");
-const Role Role::TESTING_STORAGE_SERVER("TestingStorageServer", "ST");
-const Role Role::TRANSACTION_LOG("TLog", "TL");
-const Role Role::SHARED_TRANSACTION_LOG("SharedTLog", "SL", false);
-const Role Role::COMMIT_PROXY("CommitProxyServer", "CP");
-const Role Role::GRV_PROXY("GrvProxyServer", "GP");
-const Role Role::MASTER("MasterServer", "MS");
-const Role Role::RESOLVER("Resolver", "RV");
-const Role Role::CLUSTER_CONTROLLER("ClusterController", "CC");
-const Role Role::TESTER("Tester", "TS");
-const Role Role::LOG_ROUTER("LogRouter", "LR");
-const Role Role::DATA_DISTRIBUTOR("DataDistributor", "DD");
-const Role Role::RATEKEEPER("Ratekeeper", "RK");
-const Role Role::COORDINATOR("Coordinator", "CD");
-const Role Role::BACKUP("Backup", "BK");
-const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
-const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

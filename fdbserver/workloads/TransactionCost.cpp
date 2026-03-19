@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 
 class TransactionCostWorkload : public TestWorkload {
 	int iterations{ 1000 };
