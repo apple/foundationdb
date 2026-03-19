@@ -249,8 +249,11 @@ struct BulkDumping : TestWorkload {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				rangeResult.clear();
-				rangeResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
-				for (int i = 0; i < rangeResult.size() - 1; ++i) {
+				co_await store(rangeResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+				if (rangeResult.empty()) {
+					break;
+				}
+				for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
 					if (rangeResult[i].value.empty()) {
 						continue;
 					}

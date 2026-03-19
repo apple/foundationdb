@@ -26,6 +26,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.actor.h"
+#include "flow/Util.h"
 
 namespace fdb_cli {
 
@@ -137,7 +138,7 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_DUMP_CANCEL_USAGE);
 			co_return UID();
 		}
-		UID jobId = UID::fromString(tokens[2].toString());
+		UID jobId = validateBulkJobId(tokens[2], BULK_DUMP_CANCEL_USAGE);
 		co_await cancelBulkDumpJob(cx, jobId);
 		fmt::println("Job {} has been cancelled. No new tasks will be spawned.", jobId.toString());
 		co_return UID();
@@ -147,12 +148,57 @@ Future<UID> bulkDumpCommandActor(Database cx, std::vector<StringRef> tokens) {
 			fmt::println("{}", BULK_DUMP_STATUS_USAGE);
 			co_return UID();
 		}
-		bool anyJob = co_await getOngoingBulkDumpJob(cx);
-		if (!anyJob) {
+
+		// Get aggregated progress
+		Optional<BulkDumpProgress> progressOpt = co_await getBulkDumpProgress(cx);
+		if (!progressOpt.present()) {
+			fmt::println("No bulk dumping job is running");
 			co_return UID();
 		}
-		KeyRange range = Standalone(KeyRangeRef(normalKeys.begin, normalKeys.end));
-		co_await getBulkDumpCompleteRanges(cx, range);
+
+		BulkDumpProgress progress = progressOpt.get();
+
+		// ctest is dependent on this output; don't change it.
+		fmt::println("Running bulk dumping job: {}", progress.jobId.toString());
+
+		// Check if this bulkdump is owned by another operation
+		Transaction tr(cx);
+		Optional<BulkDumpState> jobState;
+		while (true) {
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
+				jobState = job;
+				break;
+			} catch (Error& e) {
+				err = e;
+			}
+			co_await tr.onError(err);
+		}
+
+		std::string ownerSuffix = co_await getBulkOwnerSuffix(cx, progress.jobId, true);
+
+		fmt::println(" Range: {}{}", progress.jobRange.toString(), ownerSuffix);
+		fmt::println("");
+		fmt::println("Progress:");
+		fmt::println(" Tasks completed - {} / {} ({:.1f}%)",
+		             progress.completeTasks,
+		             progress.totalTasks,
+		             progress.progressPercent());
+
+		fmt::println(" Bytes completed - {}", formatBytesProgress(progress.completedBytes, progress.totalBytes));
+
+		printProgressMetrics(progress.avgBytesPerSecond(), progress.etaSeconds(), progress.elapsedSeconds);
+
+		printBulkAnalysis(progress.avgBytesPerSecond(),
+		                  progress.elapsedSeconds,
+		                  progress.completeTasks,
+		                  progress.totalTasks,
+		                  progress.errorTasks,
+		                  progress.stalledTasks);
+
 		co_return UID();
 
 	} else {

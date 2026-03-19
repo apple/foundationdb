@@ -142,7 +142,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	}
 
 	Future<Void> worker() {
-		Reference<AsyncFileBuffer> buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
+		auto buffer = makeReference<AsyncFileBuffer>(_PAGE_SIZE, true);
 		int logfp = (int)ceil(log2(filePages));
 		while (true) {
 			int block = intHash(std::min<int>(

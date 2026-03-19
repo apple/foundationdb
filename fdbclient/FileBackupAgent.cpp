@@ -46,6 +46,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "flow/network.h"
 #include "flow/Trace.h"
+#include "flow/Util.h"
 
 #include <cinttypes>
 #include <cstdint>
@@ -642,15 +643,15 @@ Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restore, Ref
 	                    restoreVersion.get());
 
 	// Add enhanced status fields for BulkLoad integration
-	// useRangeFileRestore is Future<Optional<bool>>, after wait() we call .get() to get Optional<bool>
 	bool usingBulkLoad = useRangeFileRestore.get().present() && !useRangeFileRestore.get().get();
 	std::string snapshotMethod = usingBulkLoad ? "bulkload" : "rangefile";
 	returnStr += format("  Snapshot Method: %s", snapshotMethod.c_str());
 
 	// Add phase status information
 	ERestoreState currentState = restoreState.get();
+	bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
+
 	if (currentState == ERestoreState::RUNNING) {
-		bool bulkLoadDone = bulkLoadComplete.get().present() && bulkLoadComplete.get().get();
 		if (usingBulkLoad) {
 			std::string snapshotPhase = bulkLoadDone ? "complete" : "in_progress";
 			returnStr += format("  Snapshot Phase: %s", snapshotPhase.c_str());
@@ -3798,6 +3799,11 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 
 					// Submit the BulkDump job
 					co_await submitBulkDumpJob(cx, bulkDumpJob);
+
+					// Set ownership so bulkdump status shows it belongs to this backup
+					std::string backupTag = co_await config.tag().getOrThrow(cx.getReference());
+					BulkDumpOwnerInfo ownerInfo(config.getUid(), "backup", backupTag, now());
+					co_await setBulkDumpOwner(cx, bulkDumpJob.getJobId(), ownerInfo);
 				}
 
 				// Store job ID for monitoring
@@ -3833,6 +3839,16 @@ struct BulkDumpTaskFunc : BackupTaskFuncBase {
 				// Write the keyspace snapshot file to mark the backup as complete
 				// This is essential for the restore process to find the snapshot
 				if (completed) {
+					// Verify that BulkDump data was actually written before writing snapshot
+					bool datasetComplete =
+					    co_await verifyBulkDumpDatasetCompleteness(bc, bulkDumpJob.getJobId().toString());
+					if (!datasetComplete) {
+						TraceEvent(SevError, "BulkDumpTaskDatasetIncomplete")
+						    .detail("BackupUID", config.getUid())
+						    .detail("BulkDumpJobId", bulkDumpJob.getJobId());
+						throw backup_error();
+					}
+
 					// Build beginEndKeys from backup ranges
 					std::vector<std::pair<Key, Key>> beginEndKeys;
 					for (const auto& range : backupRanges) {
@@ -6282,6 +6298,13 @@ Future<std::string> restoreStatus(Reference<ReadYourWritesTransaction> tr, Key t
 	} else
 		tags.push_back(makeRestoreTag(tagName.toString()));
 
+	// If no tags found, return helpful message
+	if (tags.empty()) {
+		co_return "No restores found.\n\n"
+		          "To start a restore:\n"
+		          "  fdbrestore start -r <BACKUP_URL> [-t <TAG>]\n";
+	}
+
 	std::string result;
 	for (int i = 0; i < tags.size(); ++i) {
 		UidAndAbortedFlagT u = co_await tags[i].getD(tr);
@@ -6324,7 +6347,7 @@ Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key 
 }
 
 Future<ERestoreState> abortRestore(Database cx, Key tagName) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	auto tr = makeReference<ReadYourWritesTransaction>(cx);
 
 	while (true) {
 		Error err;
@@ -7604,6 +7627,74 @@ public:
 						doc.setKey("CurrentSnapshot", snapshot);
 					}
 
+					// Add snapshot mode information
+					Optional<int> snapshotModeOpt = co_await config.snapshotMode().get(tr);
+					int snapshotModeValue = snapshotModeOpt.present() ? snapshotModeOpt.get() : 0;
+					std::string snapshotModeText;
+					switch (snapshotModeValue) {
+					case 0:
+						snapshotModeText = "rangefile";
+						break;
+					case 1:
+						snapshotModeText = "bulkdump";
+						break;
+					case 2:
+						snapshotModeText = "both";
+						break;
+					default:
+						TraceEvent(SevError, "BackupInvalidSnapshotMode")
+						    .detail("BackupUID", config.getUid())
+						    .detail("SnapshotModeValue", snapshotModeValue)
+						    .detail("ValidValues", "0=rangefile, 1=bulkdump, 2=both");
+						throw backup_error();
+					}
+					doc.setKey("SnapshotMode", snapshotModeText);
+
+					// Check if backup is BulkLoad compatible
+					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
+					doc.setKey("BulkLoadCompatible", bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty());
+
+					// If using bulkdump mode, get bulkdump progress
+					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
+						Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
+						if (bulkDumpProgressOpt.present()) {
+							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
+							JsonBuilderObject bdDoc;
+							bdDoc.setKey("JobId", bdProgress.jobId.toString());
+							bdDoc.setKey("TotalTasks", bdProgress.totalTasks);
+							bdDoc.setKey("CompleteTasks", bdProgress.completeTasks);
+							bdDoc.setKey("RunningTasks", bdProgress.runningTasks);
+							bdDoc.setKey("ErrorTasks", bdProgress.errorTasks);
+							bdDoc.setKey("ProgressPercent", bdProgress.progressPercent());
+							bdDoc.setKey("TotalBytes", bdProgress.totalBytes);
+							bdDoc.setKey("CompletedBytes", bdProgress.completedBytes);
+							bdDoc.setKey("AvgBytesPerSecond", bdProgress.avgBytesPerSecond());
+							if (bdProgress.etaSeconds().present()) {
+								bdDoc.setKey("EstimatedSecondsRemaining", bdProgress.etaSeconds().get());
+							}
+							bdDoc.setKey("ElapsedSeconds", bdProgress.elapsedSeconds);
+
+							// Add stalled tasks if any
+							if (!bdProgress.stalledTasks.empty()) {
+								JsonBuilderArray stalledArray;
+								for (const auto& stalled : bdProgress.stalledTasks) {
+									JsonBuilderObject stalledDoc;
+									stalledDoc.setKey("TaskId", stalled.taskId.toString());
+									stalledDoc.setKey("Range", stalled.range.toString());
+									stalledDoc.setKey("StalledSeconds", stalled.stalledSeconds);
+									stalledDoc.setKey("RestartCount", stalled.restartCount);
+									if (!stalled.lastError.empty()) {
+										stalledDoc.setKey("LastError", stalled.lastError);
+									}
+									stalledArray.push_back(stalledDoc);
+								}
+								bdDoc.setKey("StalledTasks", stalledArray);
+							}
+
+							doc.setKey("BulkDumpProgress", bdDoc);
+						}
+					}
+
 					KeyBackedMap<int64_t, std::pair<std::string, Version>>::RangeResultType errors =
 					    co_await config.lastErrorPerType().getRange(
 					        tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY);
@@ -7657,7 +7748,8 @@ public:
 				}
 
 				if (!uidAndAbortedFlag.present() || backupState == EBackupState::STATE_NEVERRAN) {
-					statusText += "No previous backups found.\n";
+					statusText += "No previous backups found on tag '" + tagName + "'.\n";
+					statusText += "Use 'fdbbackup tags' to list all backup tags.\n";
 				} else {
 					std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					Reference<IBackupContainer> bc;
@@ -7713,8 +7805,11 @@ public:
 						snapshotModeText = "both";
 						break;
 					default:
-						snapshotModeText = "unknown";
-						break;
+						TraceEvent(SevError, "BackupInvalidSnapshotMode")
+						    .detail("BackupUID", config.getUid())
+						    .detail("SnapshotModeValue", snapshotModeValue)
+						    .detail("ValidValues", "0=rangefile, 1=bulkdump, 2=both");
+						throw backup_error();
 					}
 					statusText += format("Snapshot Mode: %s\n", snapshotModeText.c_str());
 
@@ -7722,6 +7817,56 @@ public:
 					Optional<std::string> bulkDumpJobIdOpt = co_await config.bulkDumpJobId().get(tr);
 					bool bulkLoadCompatible = bulkDumpJobIdOpt.present() && !bulkDumpJobIdOpt.get().empty();
 					statusText += format("BulkLoad Compatible: %s\n", bulkLoadCompatible ? "yes" : "no");
+
+					// If using bulkdump mode, show bulkdump progress
+					if (snapshotModeValue == 1 || snapshotModeValue == 2) {
+						Optional<BulkDumpProgress> bulkDumpProgressOpt = co_await getBulkDumpProgress(cx);
+						if (bulkDumpProgressOpt.present()) {
+							BulkDumpProgress bdProgress = bulkDumpProgressOpt.get();
+							statusText += "\nBulkDump progress:\n";
+							statusText += format(" Tasks completed - %d / %d (%.1f%%)\n",
+							                     bdProgress.completeTasks,
+							                     bdProgress.totalTasks,
+							                     bdProgress.progressPercent());
+
+							statusText +=
+							    format(" Bytes completed - %s\n",
+							           formatBytesProgress(bdProgress.completedBytes, bdProgress.totalBytes).c_str());
+
+							double throughput = bdProgress.avgBytesPerSecond();
+							if (throughput > 0) {
+								statusText += format(" Throughput - %.1f MB/s\n", throughput / 1048576.0);
+							}
+
+							if (bdProgress.etaSeconds().present()) {
+								statusText +=
+								    format(" Estimated time remaining - %s\n",
+								           formatDurationHumanReadable((int)bdProgress.etaSeconds().get()).c_str());
+							}
+
+							if (bdProgress.elapsedSeconds > 0) {
+								statusText +=
+								    format(" Elapsed time - %s\n",
+								           formatDurationHumanReadable((int)bdProgress.elapsedSeconds).c_str());
+							}
+
+							// Show stalled tasks as warnings
+							if (!bdProgress.stalledTasks.empty()) {
+								statusText += format("\nWARNING: %zu stalled tasks (no progress > 60s):\n",
+								                     bdProgress.stalledTasks.size());
+								for (const auto& stalled : bdProgress.stalledTasks) {
+									statusText += format(" Task %s: %s, stalled %.0fs, %d restarts\n",
+									                     stalled.taskId.shortString().c_str(),
+									                     stalled.range.toString().c_str(),
+									                     stalled.stalledSeconds,
+									                     stalled.restartCount);
+									if (!stalled.lastError.empty()) {
+										statusText += format("           Last error: %s\n", stalled.lastError.c_str());
+									}
+								}
+							}
+						}
+					}
 
 					if (snapshotProgress) {
 						int64_t snapshotInterval{ 0 };
@@ -8003,7 +8148,7 @@ public:
 	                                     Key addPrefix,
 	                                     Key removePrefix,
 	                                     UsePartitionedLog fastRestore) {
-		Reference<ReadYourWritesTransaction> ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
+		auto ryw_tr = makeReference<ReadYourWritesTransaction>(cx);
 		BackupConfig backupConfig;
 		DatabaseConfiguration config = co_await getDatabaseConfiguration(cx);
 		while (true) {
@@ -8160,7 +8305,7 @@ public:
 				                 InconsistentSnapshotOnly::False,
 				                 {},
 				                 randomUid);
-				Reference<ReadYourWritesTransaction> rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
+				auto rywTransaction = makeReference<ReadYourWritesTransaction>(cx);
 				// clear old restore config associated with system keys
 				while (true) {
 					Error err;
