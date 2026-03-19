@@ -2936,29 +2936,23 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	}
 }
 
-ACTOR static Future<Void> waitUntilTLogAcceptsNewDataImpl(TLogData* self, Reference<LogData> logData, Version ver) {
-	state double lowDiskWarningStart = now();
-	while (!logData->stopped()) {
-		StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
-		StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
-		if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
-			break;
-		}
-		if (now() - lowDiskWarningStart >= 1.0) {
-			TraceEvent(SevWarn, "TLogPullAsyncDataLowDiskSpace", logData->logId)
-			    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
-			    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
-			    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
-			    .detail("KvstoreBytesTotal", kvStoreBytes.total)
-			    .detail("QueueDiskBytesAvailable", queueBytes.available)
-			    .detail("QueueDiskBytesTotal", queueBytes.total)
-			    .detail("Version", ver);
-			lowDiskWarningStart = now();
-		}
-		wait(delayJittered(.005, TaskPriority::TLogCommit));
-	}
-	CODE_PROBE(logData->stopped(), "pullAsyncData stopped while blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
-	return Void();
+ACTOR static Future<Void> failLowDiskTLogRecovery(TLogData* self,
+                                                  Reference<LogData> logData,
+                                                  Version ver,
+                                                  StorageBytes kvStoreBytes,
+                                                  StorageBytes queueBytes) {
+	self->degraded->set(true);
+	TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
+	    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
+	    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
+	    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
+	    .detail("KvstoreBytesTotal", kvStoreBytes.total)
+	    .detail("QueueDiskBytesAvailable", queueBytes.available)
+	    .detail("QueueDiskBytesTotal", queueBytes.total)
+	    .detail("Version", ver)
+	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
+	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
+	throw worker_removed();
 }
 
 Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logData, Version ver) {
@@ -2969,7 +2963,8 @@ Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logD
 		return Void();
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
-	return waitUntilTLogAcceptsNewDataImpl(self, logData, ver);
+	// Degrade this worker and fail recovery so the next recruitment avoids reusing this TLog.
+	return failLowDiskTLogRecovery(self, logData, ver, kvStoreBytes, queueBytes);
 }
 
 // remote tLog pull data from log routers
