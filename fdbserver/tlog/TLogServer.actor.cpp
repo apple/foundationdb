@@ -2938,11 +2938,11 @@ void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerI
 	}
 }
 
-ACTOR static Future<Void> failLowDiskTLogRecovery(TLogData* self,
-                                                  Reference<LogData> logData,
-                                                  Version ver,
-                                                  StorageBytes kvStoreBytes,
-                                                  StorageBytes queueBytes) {
+static void throwLowDiskTLogRecoveryFailed(TLogData* self,
+                                           Reference<LogData> logData,
+                                           Version ver,
+                                           StorageBytes kvStoreBytes,
+                                           StorageBytes queueBytes) {
 	if (!self->lowDiskTLogExclusion->get()) {
 		self->lowDiskTLogExclusion->set(true);
 	}
@@ -2959,16 +2959,15 @@ ACTOR static Future<Void> failLowDiskTLogRecovery(TLogData* self,
 	throw recruitment_failed();
 }
 
-Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logData, Version ver) {
+static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver) {
 	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
 	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
 	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
-		// Avoid the overhead of spawning the polling coroutine on the happy path.
-		return Void();
+		return;
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
 	// Fail recovery and temporarily exclude this worker from TLog recruitment until disk space recovers.
-	return failLowDiskTLogRecovery(self, logData, ver, kvStoreBytes, queueBytes);
+	throwLowDiskTLogRecoveryFailed(self, logData, ver, kvStoreBytes, queueBytes);
 }
 
 // remote tLog pull data from log routers
@@ -3048,8 +3047,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 						    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 					}
 
-					wait(waitUntilTLogAcceptsNewData(self, logData, ver));
-					// The log may have been stopped while waiting for disk space.
+					failIfTLogCannotAcceptNewData(self, logData, ver);
 					if (logData->stopped()) {
 						return Void();
 					}
@@ -3095,8 +3093,7 @@ ACTOR Future<Void> pullAsyncData(TLogData* self,
 							    std::max(logData->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 						}
 
-						wait(waitUntilTLogAcceptsNewData(self, logData, ver));
-						// The log may have been stopped while waiting for disk space.
+						failIfTLogCannotAcceptNewData(self, logData, ver);
 						if (logData->stopped()) {
 							return Void();
 						}
