@@ -29,6 +29,7 @@
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WaitFailure.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
@@ -124,10 +125,10 @@ struct BackupRangePartitionedData {
 	}
 };
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
-                                LogEpoch recoveryCount,
-                                BackupRangePartitionedData* self) {
-	loop {
+Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
+                          LogEpoch recoveryCount,
+                          BackupRangePartitionedData* self) {
+	while (true) {
 		bool isDisplaced =
 		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
 		if (isDisplaced) {
@@ -136,7 +137,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
 		}
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 }
 
@@ -254,11 +255,11 @@ ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self,
 	}
 }
 
-ACTOR Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
-	state std::vector<Future<Void>> fileFutures;
-	state std::unordered_map<UID, BackupRangePartitionedData::PerBackupInfo>::iterator it = self->backups.begin();
+Future<Void> uploadPartitionList(BackupRangePartitionedData* self, PartitionMap partitionMap) {
+	std::vector<Future<Void>> fileFutures;
+	auto it = self->backups.begin();
 
-	state std::string jsonContent = serializePartitionListJSON(partitionMap);
+	std::string jsonContent = serializePartitionListJSON(partitionMap);
 
 	for (; it != self->backups.end();) {
 		if (it->second.stopped || !it->second.container.get().present()) {
@@ -266,17 +267,16 @@ ACTOR Future<Void> uploadPartitionList(BackupRangePartitionedData* self, Partiti
 			it = self->backups.erase(it);
 			continue;
 		}
-		state Reference<IBackupContainer> container = it->second.container.get().get();
+		Reference<IBackupContainer> container = it->second.container.get().get();
 		fileFutures.push_back(container->writePartitionListFile(self->logFolderBaseVersion, jsonContent));
 		it++;
 	}
 	if (fileFutures.empty()) {
 		TraceEvent("BWRangePartitionedNoContainers", self->myId);
-		return Void();
+		co_return;
 	}
 
-	wait(waitForAll(fileFutures));
-	return Void();
+	co_await waitForAll(fileFutures);
 }
 
 // TODO akanksha -> Need to figure out if
@@ -284,13 +284,13 @@ ACTOR Future<Void> uploadPartitionList(BackupRangePartitionedData* self, Partiti
 // 2. For older epochs with different containers is PartitionMap specific to container or same for all.
 // Right now assumption is that PartitionMap will be passed by TLOG with the first message after start version for both
 // older epochs and newer epochs.
-ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
+Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	TraceEvent("BWRangeParitionedWaitingForPartitionMap", self->myId)
 	    .detail("Tag", self->tag.toString())
 	    .detail("StartVersion", self->startVersion);
-	state PartitionMap partitionMap;
+	PartitionMap partitionMap;
 
-	state Version partitionMapVersion = wait(pullPartitionMapFromTLog(self, &partitionMap));
+	Version partitionMapVersion = co_await pullPartitionMapFromTLog(self, &partitionMap);
 	self->logFolderBaseVersion = partitionMapVersion + 1;
 
 	ASSERT(partitionMap.find(self->tag) != partitionMap.end());
@@ -306,52 +306,63 @@ ACTOR Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) 
 		self->keyRangeToPartitionId.insert(partition.ranges, partition.partitionId);
 	}
 
-	state Key doneKey = backupRangePartitionedMapUploadedKeyFor(partitionMapVersion);
-	state ReadYourWritesTransaction tr(self->cx);
+	Key doneKey = backupRangePartitionedMapUploadedKeyFor(partitionMapVersion);
+	ReadYourWritesTransaction tr(self->cx);
 
 	// TODO akanksha: Check what will be the tag id once tags are implemented for backup workers and update the
 	// condition accordingly.
 	// Also add background actor to clean up the done key at regular
 	if (self->tag.id == 0) {
-		wait(uploadPartitionList(self, partitionMap));
+		co_await uploadPartitionList(self, partitionMap);
 		TraceEvent("BWRangePartitionedPartitionMapUploaded", self->myId)
 		    .detail("Version", partitionMapVersion)
 		    .detail("NumBackups", self->backups.size());
-		loop {
+		while (true) {
+			Error err;
+			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.set(doneKey, "1"_sr);
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	} else {
 		// All other backup workers waits for done key to be set by the worker with tag id 0, then start pulling
 		// mutations. This is to make sure partition map is uploaded before any worker starts pulling mutations.
-		loop {
+		while (true) {
+			Error err;
+			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE); // More efficient for reads
-				Optional<Value> v = wait(tr.get(doneKey));
+				Optional<Value> v = co_await tr.get(doneKey);
 				if (v.present()) {
 					break;
 				}
-				state Future<Void> watchFuture = tr.watch(doneKey);
-				wait(tr.commit());
-				wait(watchFuture);
+				Future<Void> watchFuture = tr.watch(doneKey);
+				co_await tr.commit();
+				co_await watchFuture;
 				tr.reset();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
 	self->pulledVersion.set(partitionMapVersion);
 	self->savedVersion = partitionMapVersion;
 	self->pop();
-	return Void();
 }
 
 // Pulls mutations from TLog servers.
