@@ -5,6 +5,5 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_tester SRCS ${FDBSERVER_TESTER_SRC
 configure_fdbserver_common_includes(fdbserver_tester)
 target_include_directories(fdbserver_tester
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(fdbserver_tester PRIVATE fdbclient fdbserver_core)
