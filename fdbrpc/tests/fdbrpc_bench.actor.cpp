@@ -72,7 +72,7 @@ struct EchoRequest {
 // where each entry counts the number of hits each second.
 class StatCounter {
 public:
-	StatCounter(int size = 10) : vals(size) {}
+	explicit StatCounter(int size = 10) : vals(size) {}
 
 	// Returns the average number of hits per seconds over last `size` seconds.
 	int avg() {

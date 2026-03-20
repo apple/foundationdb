@@ -37,11 +37,11 @@
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -58,9 +58,9 @@
 #include "flow/TypeTraits.h"
 #include "flow/FaultInjection.h"
 #include "flow/CodeProbeUtils.h"
-#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IConnection.h"
-#include "fdbserver/MockGlobalState.h"
+#include "fdbserver/datadistributor/MockGlobalState.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -70,10 +70,6 @@ extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
 
 using namespace std::literals;
-
-bool isSimulatorProcessUnreliable() {
-	return g_network->isSimulated() && !g_simulator->getCurrentProcess()->isReliable();
-}
 
 namespace {
 
@@ -1261,6 +1257,7 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 }
 
 #include "fdbclient/MonitorLeader.h"
+#include "fdbserver/core/TesterInterface.actor.h"
 
 // Configures the system according to the given specifications in order to run
 // simulation, but with the additional consideration that it is meant to act
@@ -2879,9 +2876,4 @@ int getMaxSatelliteLogs() {
 
 	// Cap at 6 (the original max) and ensure at least 1
 	return std::max(1, std::min(6, minSatelliteMachines));
-}
-
-BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
-	TestConfig config(testConfig);
-	return SimulationConfig(config);
 }

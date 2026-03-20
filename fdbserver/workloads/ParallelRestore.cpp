@@ -20,9 +20,9 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 
 // A workload which test the correctness of backup and restore process
 struct RunRestoreWorkerWorkload : TestWorkload {

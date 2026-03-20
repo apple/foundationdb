@@ -22,7 +22,7 @@
 #include "fdbserver/core/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/CoroUtils.h"
 
 namespace {

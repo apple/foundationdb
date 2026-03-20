@@ -29,7 +29,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/IRandom.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {

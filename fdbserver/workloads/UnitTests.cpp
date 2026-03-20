@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/UnitTest.h"
 
 void forceLinkIndexedSetTests();
@@ -48,6 +48,9 @@ void forceLinkActorFuzzUnitTests();
 void forceLinkGrpcTests();
 void forceLinkGrpcTests2();
 void forceLinkSimpleCounterTests();
+void forceLinkTagPartitionedLogSystemRecoveryTests();
+void forceLinkIPagerTests();
+void forceLinkMockS3ServerTests();
 
 struct UnitTestWorkload : TestWorkload {
 	static constexpr auto NAME = "UnitTests";
@@ -115,6 +118,9 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkRandomKeyValueUtilsTests();
 		forceLinkActorFuzzUnitTests();
 		forceLinkSimpleCounterTests();
+		forceLinkTagPartitionedLogSystemRecoveryTests();
+		forceLinkIPagerTests();
+		forceLinkMockS3ServerTests();
 
 #ifdef FLOW_GRPC_ENABLED
 		forceLinkGrpcTests();

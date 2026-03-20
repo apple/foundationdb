@@ -26,11 +26,11 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IRandom.h"
 
 static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 storage_migration_type=aggressive",

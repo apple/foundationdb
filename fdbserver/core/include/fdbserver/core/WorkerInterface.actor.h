@@ -1048,9 +1048,8 @@ class Database openDBOnServer(Reference<AsyncVar<ServerDBInfo> const> const& db,
                               TaskPriority taskID = TaskPriority::DefaultEndpoint,
                               LockAware = LockAware::False,
                               EnableLocalityLoadBalance = EnableLocalityLoadBalance::True);
-ACTOR Future<Void> extractClusterInterface(
-    Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
-    Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
+Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>> const> in,
+                                     Reference<AsyncVar<Optional<struct ClusterInterface>>> out);
 
 ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
                         LocalityData localities,

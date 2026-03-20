@@ -55,26 +55,23 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FlowGrpc.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/ConflictSet.h"
-#include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/core/FDBExecHelper.actor.h"
+#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/NetworkTest.h"
-#include "fdbserver/RestoreWorkerInterface.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbserver/SimulatedCluster.h"
-#include "fdbserver/Status.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/datadistributor/SimulatedCluster.h"
+#include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
-#include "fdbserver/OnDemandStore.h"
-#include "fdbserver/MockS3Server.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/mocks3/MockS3Server.h"
+#include "fdbserver/core/workloads.actor.h"
 #ifdef WITH_ROCKSDB
-#include "fdbserver/FDBRocksDBVersion.h"
+#include "fdbserver/core/FDBRocksDBVersion.h"
 #endif
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
@@ -472,67 +469,6 @@ void testSerializationSpeed() {
 	printf("  Deallocate: %0.1f MB/sec\n", bytes / 1e6 / deallocate);
 	printf("  Bytes: %0.1f MB\n", bytes / 1e6);
 	printf("\n");
-}
-
-std::string toHTML(const StringRef& binaryString) {
-	std::string s;
-
-	for (int i = 0; i < binaryString.size(); i++) {
-		uint8_t c = binaryString[i];
-		if (c == '<')
-			s += "&lt;";
-		else if (c == '>')
-			s += "&gt;";
-		else if (c == '&')
-			s += "&amp;";
-		else if (c == '"')
-			s += "&quot;";
-		else if (c == ' ')
-			s += "&nbsp;";
-		else if (c > 32 && c < 127)
-			s += c;
-		else
-			s += format("<span class=\"binary\">[%02x]</span>", c);
-	}
-
-	return s;
-}
-
-ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRange range = allKeys) {
-	try {
-		state Transaction tr(cx);
-		loop {
-			state FILE* output = fopen(outputFilename.c_str(), "wt");
-			try {
-				state KeySelectorRef iter = firstGreaterOrEqual(range.begin);
-				state Arena arena;
-				fprintf(output, "<html><head><style type=\"text/css\">.binary {color:red}</style></head><body>\n");
-				Version ver = wait(tr.getReadVersion());
-				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
-
-				loop {
-					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
-					for (int r = 0; r < results.size(); r++) {
-						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
-						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
-					}
-					if (results.size() < 1000)
-						break;
-					iter = firstGreaterThan(KeyRef(arena, results[results.size() - 1].key));
-				}
-				fprintf(output, "</body></html>");
-				fclose(output);
-				TraceEvent("DatabaseDumped").detail("Filename", outputFilename);
-				return Void();
-			} catch (Error& e) {
-				fclose(output);
-				wait(tr.onError(e));
-			}
-		}
-	} catch (Error& e) {
-		TraceEvent(SevError, "DumpDatabaseError").error(e).detail("Filename", outputFilename);
-		throw;
-	}
 }
 
 void memoryTest();
