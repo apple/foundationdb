@@ -1267,7 +1267,6 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 	KeyRange rangeToRead;
 	Database cx = self->txnProcessor->context();
 	Transaction tr(cx);
-	int i = 0;
 	BulkLoadTaskState bulkLoadTaskState;
 	RangeResult result;
 	std::vector<Future<Void>> bulkLoadActors;
@@ -1283,8 +1282,7 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 			if (result.empty()) {
 				break;
 			}
-			i = 0;
-			for (; i < static_cast<int>(result.size()) - 1; i++) {
+			for (int i = 0; i < static_cast<int>(result.size()) - 1; i++) {
 				if (result[i].value.empty()) {
 					continue;
 				}
@@ -1864,8 +1862,7 @@ Future<Void> scheduleBulkLoadJob(Reference<DataDistributor> self, Promise<Void> 
 		try {
 			RangeResult res =
 			    co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, jobState.getJobRange().end));
-			int i = 0;
-			for (; i < res.size() - 1; i++) {
+			for (int i = 0; i < res.size() - 1; i++) {
 				// Proceeding the beginKey for submitted/completed tasks.
 				// Bypass completed tasks.
 				// Start monitoring for submitted tasks.
@@ -2030,7 +2027,6 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 	RangeResult bulkLoadTaskResult;
 	KeyRange jobCompleteRange;
 	bool hasError = false;
-	int i = 0;
 	bool allFinish = false;
 	while (beginKey < endKey) {
 		Error err;
@@ -2044,8 +2040,7 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 			if (bulkLoadTaskResult.empty()) {
 				break;
 			}
-			i = 0;
-			for (; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
+			for (int i = 0; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
 				ASSERT(!bulkLoadTaskResult[i].value.empty());
 				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
 				if (!existTask.isValid()) {
@@ -3398,11 +3393,10 @@ Future<bool> checkAuditProgressCompleteForSSShard(Database cx, std::shared_ptr<D
 	    std::make_shared<AsyncVar<int>>(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 	UID serverId;
 	bool allFinish = true;
-	int i = 0;
 	TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardStart")
 	    .detail("TotalSS", interfs.size())
 	    .detail("InitBudget", remainingBudget->get());
-	for (; i < interfs.size(); i++) {
+	for (int i = 0; i < interfs.size(); i++) {
 		serverId = interfs[i].uniqueID;
 		if (audit->serversFinishedSSShardAudit.contains(serverId)) {
 			TraceEvent(SevDebug, "CheckAuditProgressCompleteForSSShardSkipCheck").detail("ServerId", serverId);
@@ -3994,8 +3988,7 @@ Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self,
 			    .detail("AuditType", auditType)
 			    .detail("NextBegin", begin)
 			    .detail("RangeEnd", range.end);
-			int i = 0;
-			for (; i < auditStates.size(); i++) {
+			for (int i = 0; i < auditStates.size(); i++) {
 				AuditPhase phase = auditStates[i].getPhase();
 				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
 				if (phase == AuditPhase::Complete) {
@@ -4050,8 +4043,7 @@ Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, st
 	    .detail("AuditType", auditType);
 	try {
 		std::vector<StorageServerInterface> interfs = co_await getStorageServers(self->txnProcessor->context());
-		int i = 0;
-		for (; i < interfs.size(); ++i) {
+		for (int i = 0; i < interfs.size(); ++i) {
 			StorageServerInterface targetServer = interfs[i];
 			// Currently, Tss server may not follow the auit consistency rule
 			// Thus, skip if the server is tss
@@ -4115,8 +4107,7 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 			    .detail("AuditType", auditType)
 			    .detail("NextBegin", begin)
 			    .detail("RangeEnd", allKeys.end);
-			int i = 0;
-			for (; i < auditStates.size(); i++) {
+			for (int i = 0; i < auditStates.size(); i++) {
 				AuditPhase phase = auditStates[i].getPhase();
 				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
 				if (phase == AuditPhase::Complete) {
@@ -4217,8 +4208,7 @@ Future<Void> dispatchAuditStorage(Reference<DataDistributor> self, std::shared_p
 			    .detail("AuditType", auditType)
 			    .detail("NextBegin", begin)
 			    .detail("NumAuditStates", auditStates.size());
-			int i = 0;
-			for (; i < auditStates.size(); i++) {
+			for (int i = 0; i < auditStates.size(); i++) {
 				AuditPhase phase = auditStates[i].getPhase();
 				// Skip Running/Failed states during retries (they will be updated on retry)
 				if (phase == AuditPhase::Running || phase == AuditPhase::Failed) {
