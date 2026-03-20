@@ -70,12 +70,21 @@ Future<Void> handlerTerminateWorkerRequest(RestoreSimpleRequest req,
                                            Reference<RestoreWorkerData> self,
                                            RestoreWorkerInterface workerInterf,
                                            Database cx) {
-	co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr->clear(restoreWorkerKeyFor(workerInterf.id()));
-		return Void();
-	});
+	ReadYourWritesTransaction tr(cx);
+	while (true) {
+		Error err;
+		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.clear(restoreWorkerKeyFor(workerInterf.id()));
+			co_await tr.commit();
+			break;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
 
 	TraceEvent("FastRestoreWorker").detail("HandleTerminateWorkerReq", self->id());
 }
