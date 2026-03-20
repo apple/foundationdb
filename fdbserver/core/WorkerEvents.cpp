@@ -1,5 +1,5 @@
 /*
- * WorkerEvents.actor.cpp
+ * WorkerEvents.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/WorkerEvents.actor.h"
+#include "fdbserver/core/WorkerEvents.h"
 
 Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,

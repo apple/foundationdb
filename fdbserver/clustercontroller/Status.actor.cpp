@@ -31,7 +31,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/core/WorkerEvents.actor.h"
+#include "fdbserver/core/WorkerEvents.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include <time.h>
 #include "ClusterRecovery.actor.h"
