@@ -3201,7 +3201,7 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 		wait(error);
 		throw internal_error();
 	} catch (Error& e) {
-		if (e.code() != error_code_worker_removed)
+		if (e.code() != error_code_worker_removed && e.code() != error_code_recruitment_failed)
 			throw;
 
 		removeLog(self, logData, e.code() != error_code_recruitment_failed);
@@ -3794,7 +3794,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 		wait(delay(0.0)); // if multiple recruitment requests were already in the promise stream make sure they are all
 		                  // started before any are removed
 
-		removeLog(self, logData);
+		removeLog(self, logData, e.code() != error_code_recruitment_failed);
 		return Void();
 	}
 
