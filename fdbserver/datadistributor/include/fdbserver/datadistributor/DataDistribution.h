@@ -1,5 +1,5 @@
 /*
- * DataDistribution.actor.h
+ * DataDistribution.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,8 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_G_H)
-#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_G_H
-#include "fdbserver/datadistributor/DataDistribution.actor.g.h"
-#elif !defined(FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_H)
-#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_H
+#ifndef FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
+#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -40,8 +37,6 @@
 #include "fdbclient/DataDistributionConfig.actor.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 /////////////////////////////// Data //////////////////////////////////////
 #ifndef __INTEL_COMPILER
 #pragma region Data
@@ -769,7 +764,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	State wiggleState = State::INVALID;
 	double lastStateChangeTs = 0.0; // timestamp describes when did the state change
 
-	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true) {};
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), stopWiggleSignal(true){};
 	// wiggle related actors will quit when this signal is set to true
 	void setStopSignal(bool value) { stopWiggleSignal.set(value); }
 	bool isStopped() const { return stopWiggleSignal.get(); }
@@ -828,5 +823,4 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 #pragma endregion
 #endif
 
-#include "flow/unactorcompiler.h"
 #endif

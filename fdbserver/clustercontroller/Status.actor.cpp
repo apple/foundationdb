@@ -36,7 +36,7 @@
 #include <time.h>
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/core/QuietDatabase.actor.h"

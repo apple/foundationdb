@@ -20,7 +20,7 @@
 
 #include "fdbserver/datadistributor/MockGlobalState.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h"
 
