@@ -22,6 +22,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/ratekeeper/Ratekeeper.actor.h"
 #include "Ratekeeper.h"
 #include "TagThrottler.h"
 #include "flow/OwningResource.h"

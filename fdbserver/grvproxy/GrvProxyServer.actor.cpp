@@ -27,6 +27,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbserver/grvproxy/GrvProxyServer.actor.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
 #include "fdbserver/core/LogSystem.h"
