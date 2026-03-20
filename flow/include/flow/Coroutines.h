@@ -52,10 +52,10 @@ struct AsyncResultCallback;
 template <class T, bool IsCancellable>
 struct AsyncResultPromise;
 
-template <class promise_type, class U>
+template <class PromiseType, class ValueType>
 struct AwaitableAsyncResult;
 
-template <class U>
+template <class ValueType>
 struct AsyncResultAwaiter;
 
 template <class Parent, int Idx, class ValueType>
@@ -114,9 +114,9 @@ private:
 
 	template <class U, bool IsCancellable>
 	friend struct coro::AsyncResultPromise;
-	template <class promise_type, class U>
+	template <class PromiseType, class ValueType>
 	friend struct coro::AwaitableAsyncResult;
-	template <class U>
+	template <class ValueType>
 	friend struct coro::AsyncResultAwaiter;
 	template <class Parent, int Idx, class ValueType>
 	friend struct coro::ActorAsyncResultCallback;

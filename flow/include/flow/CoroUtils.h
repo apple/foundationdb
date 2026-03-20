@@ -25,6 +25,8 @@
 
 namespace coro {
 
+// Adapts `AsyncResult<T>` callbacks to the same callback interface used by
+// `choose()` and `race()` over Future/FutureStream inputs.
 template <class Parent, int Idx, class ValueType>
 struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
 	AsyncResultState<ValueType>* state = nullptr;
@@ -60,25 +62,26 @@ struct ActorAsyncResultCallback : AsyncResultCallback<ValueType> {
 	}
 };
 
-template <class Parent, int Idx, class F>
+template <class Parent, int Idx, class AwaitableType>
 using ConditionalActorCallback =
-    std::conditional_t<GetFutureTypeV<F> == FutureType::Future,
-                       ActorCallback<Parent, Idx, FutureReturnTypeT<F>>,
-                       std::conditional_t<GetFutureTypeV<F> == FutureType::FutureStream,
-                                          ActorSingleCallback<Parent, Idx, FutureReturnTypeT<F>>,
-                                          ActorAsyncResultCallback<Parent, Idx, FutureReturnTypeT<F>>>>;
+    std::conditional_t<GetFutureTypeV<AwaitableType> == FutureType::Future,
+                       ActorCallback<Parent, Idx, FutureReturnTypeT<AwaitableType>>,
+                       std::conditional_t<GetFutureTypeV<AwaitableType> == FutureType::FutureStream,
+                                          ActorSingleCallback<Parent, Idx, FutureReturnTypeT<AwaitableType>>,
+                                          ActorAsyncResultCallback<Parent, Idx, FutureReturnTypeT<AwaitableType>>>>;
 
 template <class Parent, int Idx, class... Args>
 struct ChooseImplCallback;
 
-template <class Parent, int Idx, class F, class... Args>
-struct ChooseImplCallback<Parent, Idx, F, Args...>
-  : ConditionalActorCallback<ChooseImplCallback<Parent, Idx, F, Args...>, Idx, F>,
+template <class Parent, int Idx, class AwaitableType, class... Args>
+struct ChooseImplCallback<Parent, Idx, AwaitableType, Args...>
+  : ConditionalActorCallback<ChooseImplCallback<Parent, Idx, AwaitableType, Args...>, Idx, AwaitableType>,
     ChooseImplCallback<Parent, Idx + 1, Args...> {
 
-	using ThisCallback = ConditionalActorCallback<ChooseImplCallback<Parent, Idx, F, Args...>, Idx, F>;
-	using ValueType = FutureReturnTypeT<F>;
-	static constexpr FutureType futureType = GetFutureTypeV<F>;
+	using ThisCallback =
+	    ConditionalActorCallback<ChooseImplCallback<Parent, Idx, AwaitableType, Args...>, Idx, AwaitableType>;
+	using ValueType = FutureReturnTypeT<AwaitableType>;
+	static constexpr FutureType futureType = GetFutureTypeV<AwaitableType>;
 
 	[[nodiscard]] Parent* getParent() { return static_cast<Parent*>(this); }
 
@@ -253,18 +256,18 @@ public:
 template <class... Futures>
 using RaceResult = std::variant<FutureReturnTypeT<std::decay_t<Futures>>...>;
 
-template <std::size_t Idx, class Result, class F>
-Future<Result> raceReadyResult(F&& future) {
+template <std::size_t Idx, class Result, class AwaitableType>
+Future<Result> raceReadyResult(AwaitableType&& future) {
 	if (future.isError()) {
 		return future.getError();
 	}
-	if constexpr (GetFutureTypeV<std::remove_cvref_t<F>> == FutureType::Future) {
+	if constexpr (GetFutureTypeV<std::remove_cvref_t<AwaitableType>> == FutureType::Future) {
 		return Result(std::in_place_index<Idx>, future.get());
-	} else if constexpr (GetFutureTypeV<std::remove_cvref_t<F>> == FutureType::FutureStream) {
+	} else if constexpr (GetFutureTypeV<std::remove_cvref_t<AwaitableType>> == FutureType::FutureStream) {
 		auto fs = future;
 		return Result(std::in_place_index<Idx>, fs.pop());
 	} else {
-		return Result(std::in_place_index<Idx>, std::forward<F>(future).get());
+		return Result(std::in_place_index<Idx>, std::forward<AwaitableType>(future).get());
 	}
 }
 
@@ -282,13 +285,14 @@ Future<Result> raceReady(First&& first, Rest&&... rest) {
 template <class Parent, int Idx, class... Futures>
 struct RaceImplCallback;
 
-template <class Parent, int Idx, class F, class... Futures>
-struct RaceImplCallback<Parent, Idx, F, Futures...>
-  : ConditionalActorCallback<RaceImplCallback<Parent, Idx, F, Futures...>, Idx, F>,
+template <class Parent, int Idx, class AwaitableType, class... Futures>
+struct RaceImplCallback<Parent, Idx, AwaitableType, Futures...>
+  : ConditionalActorCallback<RaceImplCallback<Parent, Idx, AwaitableType, Futures...>, Idx, AwaitableType>,
     RaceImplCallback<Parent, Idx + 1, Futures...> {
-	using ThisCallback = ConditionalActorCallback<RaceImplCallback<Parent, Idx, F, Futures...>, Idx, F>;
-	using ValueType = FutureReturnTypeT<F>;
-	static constexpr FutureType futureType = GetFutureTypeV<F>;
+	using ThisCallback =
+	    ConditionalActorCallback<RaceImplCallback<Parent, Idx, AwaitableType, Futures...>, Idx, AwaitableType>;
+	using ValueType = FutureReturnTypeT<AwaitableType>;
+	static constexpr FutureType futureType = GetFutureTypeV<AwaitableType>;
 
 	[[nodiscard]] Parent* getParent() { return static_cast<Parent*>(this); }
 

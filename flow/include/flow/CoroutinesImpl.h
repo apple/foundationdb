@@ -315,14 +315,20 @@ struct AwaitableFutureStore {
 	}
 };
 
-template <class F, class U>
+// Awaiter adapter for `AsyncResult<T>` inside coroutine promises.
+//
+// `PromiseType` is the coroutine promise object that owns the wait-state and
+// coroutine handle bookkeeping for the suspended actor.
+// `ValueType` is the logical `AsyncResult<T>` payload type being awaited; for
+// `AsyncResult<void>` the stored state still uses `Void` internally.
+template <class PromiseType, class ValueType>
 struct AwaitableAsyncResult {
-	using StateType = typename AsyncResult<U>::StoredT;
+	using StateType = typename AsyncResult<ValueType>::StoredT;
 
-	AsyncResult<U> result;
-	F* pt = nullptr;
+	AsyncResult<ValueType> result;
+	PromiseType* pt = nullptr;
 
-	AwaitableAsyncResult(AsyncResult<U>&& result, F* pt) : result(std::move(result)), pt(pt) {}
+	AwaitableAsyncResult(AsyncResult<ValueType>&& result, PromiseType* pt) : result(std::move(result)), pt(pt) {}
 
 	[[nodiscard]] bool await_ready() const {
 		ASSERT(result.state);
@@ -359,7 +365,7 @@ struct AwaitableAsyncResult {
 	}
 
 	void await_resume()
-	    requires(std::is_void_v<U>)
+	    requires(std::is_void_v<ValueType>)
 	{
 		resumeImpl();
 		if (result.state->isError()) {
@@ -367,8 +373,8 @@ struct AwaitableAsyncResult {
 		}
 	}
 
-	U await_resume()
-	    requires(!std::is_void_v<U>)
+	ValueType await_resume()
+	    requires(!std::is_void_v<ValueType>)
 	{
 		resumeImpl();
 		if (result.state->isError()) {
@@ -381,13 +387,13 @@ struct AwaitableAsyncResult {
 template <class T>
 using ToFutureVal = std::conditional_t<std::is_void_v<T>, Void, T>;
 
-template <class F, class U, bool IsStream>
+template <class Awaiter, class ValueType, bool IsStream>
 struct AwaitableResume;
 
-template <class F>
-struct AwaitableResume<F, Void, false> {
+template <class Awaiter>
+struct AwaitableResume<Awaiter, Void, false> {
 	[[maybe_unused]] void await_resume() {
-		auto self = static_cast<F*>(this);
+		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
 		if (self->future.isError()) {
 			throw self->future.getError();
@@ -395,10 +401,10 @@ struct AwaitableResume<F, Void, false> {
 	}
 };
 
-template <class F, class T>
-struct AwaitableResume<F, T, false> {
-	T const& await_resume() {
-		auto self = static_cast<F*>(this);
+template <class Awaiter, class ValueType>
+struct AwaitableResume<Awaiter, ValueType, false> {
+	ValueType const& await_resume() {
+		auto self = static_cast<Awaiter*>(this);
 		self->resumeImpl();
 		if (self->future.isError()) {
 			throw self->future.getError();
@@ -407,10 +413,10 @@ struct AwaitableResume<F, T, false> {
 	}
 };
 
-template <class F, class T>
-struct AwaitableResume<F, T, true> {
-	T await_resume() {
-		auto self = static_cast<F*>(this);
+template <class Awaiter, class ValueType>
+struct AwaitableResume<Awaiter, ValueType, true> {
+	ValueType await_resume() {
+		auto self = static_cast<Awaiter*>(this);
 		if (self->resumeImpl()) {
 			if (self->future.isError()) {
 				throw self->future.getError();
@@ -421,19 +427,22 @@ struct AwaitableResume<F, T, true> {
 	}
 };
 
-template <class promise_type, class U, bool IsStream>
-struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal<U>>, Callback<ToFutureVal<U>>>,
-                         AwaitableResume<AwaitableFuture<promise_type, U, IsStream>, U, IsStream> {
-	using FutureValue = ToFutureVal<U>;
+// Awaiter for `Future<T>` and `FutureStream<T>` values transformed through a
+// coroutine promise.
+template <class PromiseType, class ValueType, bool IsStream>
+struct AwaitableFuture
+  : std::conditional_t<IsStream, SingleCallback<ToFutureVal<ValueType>>, Callback<ToFutureVal<ValueType>>>,
+    AwaitableResume<AwaitableFuture<PromiseType, ValueType, IsStream>, ValueType, IsStream> {
+	using FutureValue = ToFutureVal<ValueType>;
 	using FutureType = std::conditional_t<IsStream, FutureStream<FutureValue>, Future<FutureValue> const&>;
 	FutureType future;
-	promise_type* pt = nullptr;
+	PromiseType* pt = nullptr;
 
 	// Store is only needed for streams — non-stream values are already in the SAV after fire()
 	struct Empty {};
 	[[no_unique_address]] std::conditional_t<IsStream, AwaitableFutureStore<FutureValue>, Empty> store;
 
-	AwaitableFuture(const FutureType& f, promise_type* pt) : future(f), pt(pt) {}
+	AwaitableFuture(const FutureType& f, PromiseType* pt) : future(f), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
 		if constexpr (IsStream) {
@@ -502,16 +511,17 @@ struct AwaitableFuture : std::conditional_t<IsStream, SingleCallback<ToFutureVal
 };
 
 // TODO: This can be merged with AwaitableFutureStream by passing more template arguments.
-template <class promise_type, class U>
-struct ThreadAwaitableFutureStream : SingleCallback<ToFutureVal<U>>,
-                                     AwaitableResume<ThreadAwaitableFutureStream<promise_type, U>, U, true> {
-	using FutureValue = ToFutureVal<U>;
+template <class PromiseType, class ValueType>
+struct ThreadAwaitableFutureStream
+  : SingleCallback<ToFutureVal<ValueType>>,
+    AwaitableResume<ThreadAwaitableFutureStream<PromiseType, ValueType>, ValueType, true> {
+	using FutureValue = ToFutureVal<ValueType>;
 	using FutureType = ThreadFutureStream<FutureValue>;
 	FutureType future;
-	promise_type* pt = nullptr;
+	PromiseType* pt = nullptr;
 	AwaitableFutureStore<FutureValue> store;
 
-	ThreadAwaitableFutureStream(const FutureType& f, promise_type* pt) : future(f), pt(pt) {}
+	ThreadAwaitableFutureStream(const FutureType& f, PromiseType* pt) : future(f), pt(pt) {}
 
 	void fire(FutureValue const& value) override {
 		store.set(value);
@@ -888,9 +898,11 @@ struct AsyncGeneratorPromise {
 	int8_t mWaitState = 0;
 };
 
-template <class U>
+// Awaiter used by plain C++ coroutines that directly `co_await AsyncResult<T>`
+// without an actor-style promise.
+template <class ValueType>
 struct AsyncResultAwaiter {
-	AsyncResult<U> result;
+	AsyncResult<ValueType> result;
 
 	[[nodiscard]] bool await_ready() const {
 		ASSERT(result.state);
@@ -903,15 +915,15 @@ struct AsyncResultAwaiter {
 	}
 
 	void await_resume()
-	    requires(std::is_void_v<U>)
+	    requires(std::is_void_v<ValueType>)
 	{
 		if (result.state->isError()) {
 			throw result.state->getError();
 		}
 	}
 
-	U await_resume()
-	    requires(!std::is_void_v<U>)
+	ValueType await_resume()
+	    requires(!std::is_void_v<ValueType>)
 	{
 		if (result.state->isError()) {
 			throw result.state->getError();
