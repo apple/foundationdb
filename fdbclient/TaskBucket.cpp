@@ -200,8 +200,7 @@ public:
 		std::vector<Future<Optional<Key>>> taskKeyFutures(CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY + 1);
 
 		// Start looking for a task at each priority, highest first
-		int pri{ 0 };
-		for (pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri)
+		for (int pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri)
 			taskKeyFutures[pri] = getTaskKey(tr, taskBucket, pri);
 
 		// Task key and subspace it is located in.
@@ -610,8 +609,7 @@ public:
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then the taskbucket is not empty so return false
-		int i{ 0 };
-		for (i = 0; i < resultFutures.size(); ++i) {
+		for (int i = 0; i < resultFutures.size(); ++i) {
 			RangeResult results = co_await resultFutures[i];
 			if (results.size() > 0)
 				co_return false;
@@ -633,8 +631,7 @@ public:
 			resultFutures.push_back(tr->getRange(taskBucket->getAvailableSpace(pri).range(), 1));
 
 		// If any priority levels have any keys then return true as the level is 'busy'
-		int i{ 0 };
-		for (i = 0; i < resultFutures.size(); ++i) {
+		for (int i = 0; i < resultFutures.size(); ++i) {
 			RangeResult results = co_await resultFutures[i];
 			if (results.size() > 0)
 				co_return true;
