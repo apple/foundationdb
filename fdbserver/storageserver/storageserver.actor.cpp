@@ -9536,7 +9536,7 @@ ACTOR Future<Void> update(StorageServer* data) {
 	state double updateStart = g_network->timer();
 	state double decryptionTime = 0;
 	state double start;
-	state Future<Void> cursorInvalidated = data->updateCursorInvalidated.getFuture();
+	state FutureStream<Void> cursorInvalidated = data->updateCursorInvalidated.getFuture();
 	state bool enableClearRangeEagerReads =
 	    (data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_ROCKSDB_V1 ||
 	     data->storage.getKeyValueStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
@@ -9613,7 +9613,7 @@ ACTOR Future<Void> update(StorageServer* data) {
 		loop {
 			choose {
 				when(wait(cursor->getMore())) {}
-				when(wait(cursorInvalidated)) {
+				when(waitNext(cursorInvalidated)) {
 					return Void();
 				}
 			}
