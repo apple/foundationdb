@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#ifndef FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
+#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -821,4 +823,6 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 #ifndef __INTEL_COMPILER
 #pragma endregion
+#endif
+
 #endif
