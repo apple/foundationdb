@@ -38,7 +38,6 @@
 #include "flow/IRandom.h"
 #include "fdbclient/Tracing.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
 
@@ -173,7 +172,6 @@ struct BackupData {
 
 			while (true) {
 				Error err;
-				bool hasErr = false;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -230,6 +228,7 @@ struct BackupData {
 						}
 						co_await watchFuture;
 						tr->reset();
+						continue;
 					} else {
 						ASSERT(workers.present() && workers.get().size() > 0);
 						config.startedBackupWorkers().set(tr, workers.get());
@@ -238,12 +237,9 @@ struct BackupData {
 					}
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 					allUpdated = false;
 				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+				co_await tr->onError(err);
 			}
 			TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", uid).detail("TagId", self->tag.id);
 		}
@@ -455,7 +451,6 @@ static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 		ReadYourWritesTransaction tr(self->cx);
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -484,11 +479,8 @@ static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -499,7 +491,6 @@ static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
 		ReadYourWritesTransaction tr(self->cx);
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -522,11 +513,8 @@ static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -537,7 +525,6 @@ Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVers
 
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -580,11 +567,8 @@ Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVers
 			co_return;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr->onError(err);
-		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -636,7 +620,6 @@ Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			// It's critical to save progress immediately so that after a master
 			// recovery, the new master can know the progress so far.
@@ -658,11 +641,8 @@ Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			co_return;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -710,7 +690,6 @@ static Future<Void> updateLogBytesWritten(BackupData* self,
 	ASSERT(backupUids.size() == logFiles.size());
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -724,11 +703,8 @@ static Future<Void> updateLogBytesWritten(BackupData* self,
 			co_return;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr->onError(err);
-		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -1041,7 +1017,6 @@ static Future<Void> monitorWorkerPause(BackupData* self) {
 
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1058,25 +1033,24 @@ static Future<Void> monitorWorkerPause(BackupData* self) {
 			co_await tr->commit();
 			co_await watch;
 			tr->reset();
+			continue;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr->onError(err);
-		}
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR Future<Void> backupWorker(BackupInterface interf,
-                                InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db) {
-	state BackupData self(interf.id(), db, req);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection(addActor.getFuture());
-	state Future<Void> dbInfoChange = Void();
-	state Future<Void> pull;
-	state Future<Void> done;
+Future<Void> backupWorker(BackupInterface interf,
+                          InitializeBackupRequest req,
+                          Reference<AsyncVar<ServerDBInfo> const> db) {
+	BackupData self(interf.id(), db, req);
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error = actorCollection(addActor.getFuture());
+	Future<Void> dbInfoChange = Void();
+	Future<Void> pull;
+	Future<Void> done;
+	Error err;
 
 	TraceEvent("BackupWorkerStart", self.myId)
 	    .detail("Tag", req.routerTag.toString())
@@ -1094,17 +1068,19 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		addActor.send(monitorWorkerPause(&self));
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
-		bool exitEarly = wait(shouldBackupWorkerExitEarly(&self));
+		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
 		TraceEvent("BackupWorkerExitEarly", self.myId).detail("ExitEarly", exitEarly);
-		if (!exitEarly)
+		if (!exitEarly) {
 			addActor.send(monitorBackupStartedKeyChanges(&self));
+		}
 
 		pull = exitEarly ? Void() : pullAsyncData(&self);
 		addActor.send(pull);
 		done = exitEarly ? Void() : uploadData(&self);
 
-		loop choose {
-			when(wait(dbInfoChange)) {
+		while (true) {
+			auto res = co_await race(dbInfoChange, done, error);
+			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
 				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
@@ -1116,32 +1092,31 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 				    .detail("HasBackupLocality", hasPseudoLocality)
 				    .detail("OldestBackupEpoch", self.oldestBackupEpoch)
 				    .detail("Tag", self.tag.toString());
-			}
-			when(wait(done)) {
+			} else if (res.index() == 1) {
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
-				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
-				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
+				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
+				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
 			}
-			when(wait(error)) {}
 		}
+		co_return;
 	} catch (Error& e) {
-		state Error err = e;
-		if (e.code() == error_code_worker_removed) {
-			pull = Void(); // cancels pulling
-			self.stop();
-			try {
-				wait(done);
-			} catch (Error& e) {
-				TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(e);
-			}
-		}
-		TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
-		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
-			throw err;
+		err = e;
+	}
+
+	if (err.code() == error_code_worker_removed) {
+		pull = Void(); // cancels pulling
+		self.stop();
+		try {
+			co_await done;
+		} catch (Error& shutdownErr) {
+			TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 		}
 	}
-	return Void();
+	    TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
+		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
+			throw err;
+	    }
 }

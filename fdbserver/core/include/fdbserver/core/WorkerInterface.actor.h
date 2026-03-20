@@ -1129,9 +1129,7 @@ Future<Void> dataDistributor(DataDistributorInterface ddi,
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
-ACTOR Future<Void> backupWorker(BackupInterface bi,
-                                InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
 
