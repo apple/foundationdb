@@ -77,6 +77,16 @@ static Future<Void> notifyLoadersVersionBatchFinished(std::map<UID, RestoreLoade
                                                       int batchIndex);
 static Future<Void> notifyRestoreCompleted(Reference<RestoreControllerData> self, bool terminate);
 static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData> self, Database cx);
+
+static Future<Void> clearRestoreRange(Database cx, KeyRange range) {
+	return runRYWTransaction(cx, [range = std::move(range)](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->clear(range);
+		return Void();
+	});
+}
+
 // TODO: Support [[maybe_unused]] attribute for actors
 // ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self);
 static Future<Void> checkRolesLiveness(Reference<RestoreControllerData> self);
@@ -261,12 +271,7 @@ Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, 
 			self->resetPerRestoreRequest();
 
 			// clear the key range that will be restored
-			co_await runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr->clear(range);
-				return Void();
-			});
+			co_await clearRestoreRange(cx, range);
 
 			co_await success(processRestoreRequest(self, cx, request));
 			co_await notifyRestoreCompleted(self, false);
