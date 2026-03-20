@@ -85,7 +85,7 @@ Future<bool> excludeServersAndLocalities(Reference<IDatabase> db,
 	}
 }
 
-Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
+AsyncResult<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
@@ -110,7 +110,7 @@ Future<std::vector<std::string>> getExcludedServers(Reference<IDatabase> db) {
 }
 
 // Get the list of excluded localities by reading the keys.
-Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
+AsyncResult<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
@@ -133,7 +133,7 @@ Future<std::vector<std::string>> getExcludedLocalities(Reference<IDatabase> db) 
 	}
 }
 
-Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
+AsyncResult<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
@@ -157,7 +157,7 @@ Future<std::vector<std::string>> getFailedServers(Reference<IDatabase> db) {
 }
 
 // Get the list of failed localities by reading the keys.
-Future<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
+AsyncResult<std::vector<std::string>> getFailedLocalities(Reference<IDatabase> db) {
 	Reference<ITransaction> tr = db->createTransaction();
 	while (true) {
 		Error err;
