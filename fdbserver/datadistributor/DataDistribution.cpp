@@ -1276,9 +1276,8 @@ Future<Void> scheduleBulkLoadTasks(Reference<DataDistributor> self) {
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			result.clear();
-			co_await store(
-			    result,
-			    krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE));
+			result = co_await krmGetRanges(
+			    &tr, bulkLoadTaskPrefix, rangeToRead, SERVER_KNOBS->DD_BULKLOAD_TASK_METADATA_READ_SIZE);
 			if (result.empty()) {
 				break;
 			}
@@ -1381,7 +1380,7 @@ Future<BulkLoadJobState> getBulkLoadJob(Transaction* tr, UID jobId, KeyRange job
 	RangeResult rangeResult;
 	std::string errorMessage;
 	try {
-		co_await store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, jobRange));
+		rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, jobRange);
 		if (rangeResult.size() != 2 && rangeResult.size() != 3) {
 			// In the middle of finalizing a bulk load job, the size is 3
 			errorMessage = fmt::format("Expected 2 or 3 results for bulk load job {} in range {}, but got {} results",
@@ -1570,9 +1569,8 @@ Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 	ASSERT(!manifestEntries.empty());
 	try {
 		// Step 1: Get manifest metadata by downloading the manifest file
-		co_await store(manifests,
-		               getBulkLoadManifestMetadataFromEntry(
-		                   manifestEntries, manifestLocalTempFolder, jobTransportMethod, jobRoot, self->ddId));
+		manifests = co_await getBulkLoadManifestMetadataFromEntry(
+		    manifestEntries, manifestLocalTempFolder, jobTransportMethod, jobRoot, self->ddId);
 		taskRange = generateBulkLoadTaskRange(manifests, jobRange);
 
 		// Step 2: Check if the task has been created
@@ -1595,7 +1593,7 @@ Future<Void> bulkLoadJobNewTask(Reference<DataDistributor> self,
 		// the manifests can contain more data outside the task range.
 		// The task range is the source of truth for the data that the task will cover.
 		// The task range is used to filter out data outside the task range when the SS loading the data.
-		co_await store(bulkLoadTask, bulkLoadJobSubmitTask(self, jobId, manifests, taskRange));
+		bulkLoadTask = co_await bulkLoadJobSubmitTask(self, jobId, manifests, taskRange);
 
 		TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadJobExecutorTask", self->ddId)
 		    .detail("Phase", "Task submitted")
@@ -1704,7 +1702,7 @@ Future<Void> persistBulkLoadJobTaskCount(Reference<DataDistributor> self) {
 	while (true) {
 		Error err;
 		try {
-			co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
+			currentJobState = co_await getBulkLoadJob(&tr, jobId, jobRange);
 			if (currentJobState.getTaskCount().present()) {
 				if (currentJobState.getTaskCount().get() != taskCount) {
 					TraceEvent(SevError, "DDBulkLoadJobManagerFindTaskCountMismatch", self->ddId)
@@ -1747,7 +1745,7 @@ Future<Void> moveErrorBulkLoadJobToHistory(Reference<DataDistributor> self, std:
 		Error err;
 		try {
 			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-			co_await store(currentJobState, getBulkLoadJob(&tr, jobId, jobRange));
+			currentJobState = co_await getBulkLoadJob(&tr, jobId, jobRange);
 			co_await krmSetRange(
 			    &tr, bulkLoadJobPrefix, currentJobState.getJobRange(), bulkLoadJobValue(BulkLoadJobState()));
 			currentJobState.setErrorPhase(errorMessage);
@@ -1794,12 +1792,11 @@ Future<Void> fetchBulkLoadTaskManifestEntryMap(Reference<DataDistributor> self,
 		// At this point, we have the global job manifest file stored locally at localJobManifestFilePath.
 		// This job manifest file stores all remote manifest filepath per range.
 		// Here, we want to get all manifest entries of the file with in the range specified by jobRange.
-		co_await store(manifestMapRange,
-		               getBulkLoadJobFileManifestEntryFromJobManifestFile(
-		                   localJobManifestFilePath,
-		                   jobRange,
-		                   self->ddId,
-		                   /*output=*/self->bulkLoadJobManager.get().manifestEntryMap));
+		manifestMapRange = co_await getBulkLoadJobFileManifestEntryFromJobManifestFile(
+		    localJobManifestFilePath,
+		    jobRange,
+		    self->ddId,
+		    /*output=*/self->bulkLoadJobManager.get().manifestEntryMap);
 		// It is possible that the bulkload job is using a data set that does not entirely contain the bulkload job
 		// range. In this case, we give up the bulkload job immediately without loading any range..
 		if (self->bulkLoadJobManager.get().jobState.getJobRange() != manifestMapRange) {
@@ -1967,7 +1964,7 @@ Future<bool> checkBulkLoadTaskCompleteOrError(Reference<DataDistributor> self) {
 			bulkLoadTaskResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			BulkLoadJobState checkJobState = co_await getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange());
-			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead));
+			bulkLoadTaskResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, rangeToRead);
 			if (bulkLoadTaskResult.empty()) {
 				break;
 			}
@@ -2036,7 +2033,7 @@ Future<Void> finalizeBulkLoadJob(Reference<DataDistributor> self) {
 			BulkLoadJobState currentJobState =
 			    co_await getBulkLoadJob(&tr, jobState.getJobId(), jobState.getJobRange());
 			hasError = hasError && (currentJobState.getPhase() == BulkLoadJobPhase::Error);
-			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+			bulkLoadTaskResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
 			if (bulkLoadTaskResult.empty()) {
 				break;
 			}
@@ -2283,7 +2280,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
-			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			bulkDumpResult = co_await krmGetRanges(&tr, bulkDumpPrefix, rangeToRead);
 			if (bulkDumpResult.empty()) {
 				break;
 			}
@@ -2319,7 +2316,7 @@ Future<Void> scheduleBulkDumpJob(Reference<DataDistributor> self) {
 				}
 				ASSERT(bulkDumpState.getPhase() == BulkDumpPhase::Submitted);
 				// Partition the job in the unit of shard
-				co_await store(rangeLocations, self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange));
+				rangeLocations = co_await self->txnProcessor->getSourceServerInterfacesForRange(bulkDumpRange);
 				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkDumpJobScheduleJobPartition", self->ddId)
 				    .detail("JobId", jobId)
 				    .detail("NumShard", rangeLocations.size())
@@ -2381,7 +2378,7 @@ Future<bool> checkBulkDumpJobComplete(Reference<DataDistributor> self) {
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
-			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			bulkDumpResult = co_await krmGetRanges(&tr, bulkDumpPrefix, rangeToRead);
 			if (bulkDumpResult.empty()) {
 				break;
 			}
@@ -2488,7 +2485,7 @@ Future<Void> getBulkLoadJobManifestData(Reference<DataDistributor> self) {
 		try {
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			bulkDumpResult.clear();
-			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			bulkDumpResult = co_await krmGetRanges(&tr, bulkDumpPrefix, rangeToRead);
 			if (bulkDumpResult.empty()) {
 				break;
 			}
@@ -2529,7 +2526,7 @@ Future<Optional<BulkDumpState>> getAliveBulkDumpJob(Database cx) {
 	while (true) {
 		Error err;
 		try {
-			co_await store(res, getSubmittedBulkDumpJob(&tr));
+			res = co_await getSubmittedBulkDumpJob(&tr);
 			break;
 		} catch (Error& e) {
 			err = e;
@@ -2541,8 +2538,7 @@ Future<Optional<BulkDumpState>> getAliveBulkDumpJob(Database cx) {
 
 Future<Void> bulkDumpManager(Reference<DataDistributor> self) {
 	Database cx = self->txnProcessor->context();
-	Optional<BulkDumpState> job;
-	co_await store(job, getAliveBulkDumpJob(cx));
+	Optional<BulkDumpState> job = co_await getAliveBulkDumpJob(cx);
 	if (!job.present()) {
 		co_return;
 	}
@@ -3977,9 +3973,8 @@ Future<Void> dispatchAuditLocationMetadata(Reference<DataDistributor> self,
 	try {
 		while (begin < range.end) {
 			currentRange = KeyRangeRef(begin, range.end);
-			co_await store(
-			    auditStates,
-			    getAuditStateByRange(self->txnProcessor->context(), auditType, audit->coreState.id, currentRange));
+			auditStates = co_await getAuditStateByRange(
+			    self->txnProcessor->context(), auditType, audit->coreState.id, currentRange);
 			ASSERT(!auditStates.empty());
 			begin = auditStates.back().range.end;
 			TraceEvent(SevInfo, "DDdispatchAuditLocationMetadataDispatch", self->ddId)
@@ -4095,9 +4090,8 @@ Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
 	try {
 		while (begin < allKeys.end) {
 			currentRange = KeyRangeRef(begin, allKeys.end);
-			co_await store(auditStates,
-			               getAuditStateByServer(
-			                   self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange));
+			auditStates = co_await getAuditStateByServer(
+			    self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange);
 			ASSERT(!auditStates.empty());
 			begin = auditStates.back().range.end;
 			TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerDispatch", self->ddId)
@@ -4808,7 +4802,7 @@ Future<Void> doAuditLocationMetadata(Reference<DataDistributor> self,
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Read KeyServers
-				co_await store(keyServerRes, getShardMapFromKeyServers(self->ddId, &tr, rangeToRead));
+				keyServerRes = co_await getShardMapFromKeyServers(self->ddId, &tr, rangeToRead);
 				completeRangeByKeyServer = keyServerRes.completeRange;
 				readAtVersion = keyServerRes.readAtVersion;
 				mapFromKeyServersRaw = keyServerRes.rangeOwnershipMap;
