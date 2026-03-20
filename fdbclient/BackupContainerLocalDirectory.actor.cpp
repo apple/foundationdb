@@ -26,7 +26,6 @@
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -73,17 +72,15 @@ public:
 		return r;
 	}
 
-	ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
-		wait(f->flush(f->m_buffer.size()));
-		wait(f->m_file->truncate(f->size())); // Some IAsyncFile implementations extend in whole block sizes.
-		wait(f->m_file->sync());
+	static Future<Void> finish_impl(Reference<BackupFile> f) {
+		co_await f->flush(f->m_buffer.size());
+		co_await f->m_file->truncate(f->size()); // Some IAsyncFile implementations extend in whole block sizes.
+		co_await f->m_file->sync();
 		std::string name = f->m_file->getFilename();
 		f->m_file.clear();
-		wait(IAsyncFileSystem::filesystem()->renameFile(name, f->m_finalFullPath));
+		co_await IAsyncFileSystem::filesystem()->renameFile(name, f->m_finalFullPath);
 
 		INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::finish");
-
-		return Void();
 	}
 
 	int64_t size() const override { return m_buffer.size() + m_writeOffset; }
@@ -101,9 +98,9 @@ private:
 	int m_blockSize;
 };
 
-ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
-	state std::vector<std::string> files;
-	wait(platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files));
+static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(std::string path, std::string m_path) {
+	std::vector<std::string> files;
+	co_await platform::findFilesRecursivelyAsync(joinPath(m_path, path), &files);
 
 	BackupContainerFileSystem::FilesAndSizesT results;
 
@@ -124,7 +121,7 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 
 	INJECT_BLOB_FAULT(http_request_failed, "BackupContainerLocalDirectory::listFiles");
 
-	return results;
+	co_return results;
 }
 
 } // namespace
