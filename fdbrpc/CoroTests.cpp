@@ -1133,6 +1133,17 @@ struct Tracker {
 	}
 };
 
+struct LifetimeTracked {
+	inline static int liveCount = 0;
+
+	LifetimeTracked() { ++liveCount; }
+	LifetimeTracked(const LifetimeTracked&) { ++liveCount; }
+	LifetimeTracked(LifetimeTracked&&) noexcept { ++liveCount; }
+	LifetimeTracked& operator=(const LifetimeTracked&) = default;
+	LifetimeTracked& operator=(LifetimeTracked&&) noexcept = default;
+	~LifetimeTracked() { --liveCount; }
+};
+
 AsyncResult<Tracker> immediateAsyncResultTracker() {
 	co_return Tracker{};
 }
@@ -1154,6 +1165,10 @@ AsyncResult<int> delayedAsyncResultInt(Future<Void> signal, int value) {
 AsyncResult<int> failingAsyncResultInt(Future<Void> signal) {
 	co_await signal;
 	throw io_error();
+}
+
+AsyncResult<LifetimeTracked> immediateAsyncResultLifetimeTracked() {
+	co_return LifetimeTracked{};
 }
 
 } // namespace
@@ -1240,6 +1255,22 @@ TEST_CASE("/flow/coro/AsyncResult/move") {
 		ASSERT(!tracker.moved);
 		ASSERT(tracker.copied == 0);
 	}
+}
+
+TEST_CASE("/flow/coro/AsyncResult/releaseDestroysState") {
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	{
+		AsyncResult<LifetimeTracked> result = immediateAsyncResultLifetimeTracked();
+		ASSERT_GT(LifetimeTracked::liveCount, 0);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
+
+	{
+		LifetimeTracked value = co_await immediateAsyncResultLifetimeTracked();
+		ASSERT_GT(LifetimeTracked::liveCount, 0);
+	}
+	ASSERT_EQ(LifetimeTracked::liveCount, 0);
 }
 
 namespace {
