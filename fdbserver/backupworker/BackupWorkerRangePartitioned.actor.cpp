@@ -30,7 +30,6 @@
 #include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "flow/CoroUtils.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define SevDebugMemory SevVerbose
 
@@ -141,14 +140,15 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 	}
 }
 
-ACTOR Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
-                                                InitializeBackupRequest req,
-                                                Reference<AsyncVar<ServerDBInfo> const> db) {
-	state BackupRangePartitionedData self(interf.id(), db, req);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection(addActor.getFuture());
-	state Future<Void> dbInfoChange = Void();
-	state Future<Void> done;
+Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
+                                          InitializeBackupRequest req,
+                                          Reference<AsyncVar<ServerDBInfo> const> db) {
+	BackupRangePartitionedData self(interf.id(), db, req);
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error = actorCollection(addActor.getFuture());
+	Future<Void> dbInfoChange = Void();
+	Future<Void> done;
+	Error err;
 
 	TraceEvent("BWRangePartitionedStart", self.myId)
 	    .detail("Tag", req.routerTag.toString())
@@ -162,65 +162,69 @@ ACTOR Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
 
-		loop choose {
-			when(wait(dbInfoChange)) {
+		while (true) {
+			auto res = co_await race(dbInfoChange, done, error);
+			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
-				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
-			}
-			when(wait(done)) {
+				[[maybe_unused]] Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+			} else if (res.index() == 1) {
 				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
-				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
-				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
+				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
+				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
+			} else if (res.index() != 2) {
+				UNREACHABLE();
 			}
-			when(wait(error)) {}
 		}
+		co_return;
 	} catch (Error& e) {
-		state Error err = e;
-		if (e.code() == error_code_worker_removed) {
+		err = e;
+	}
+
+	    if (err.code() == error_code_worker_removed) {
 			try {
-				wait(done);
-			} catch (Error& e) {
-				TraceEvent("BWRangePartitionedShutdownError", self.myId).errorUnsuppressed(e);
+				co_await done;
+			} catch (Error& shutdownErr) {
+				TraceEvent("BWRangePartitionedShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 			}
 		}
 		TraceEvent("BWRangePartitionedTerminated", self.myId).errorUnsuppressed(err);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
 			throw err;
-		}
-	}
-	return Void();
+	    }
 }
 
-ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
-	state Reference<ILogSystem::IPeekCursor> cursor;
-	state Version partitionMapVersion = invalidVersion;
-	state Future<Void> logSystemChange = Void();
+Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
+	Reference<ILogSystem::IPeekCursor> cursor;
+	Version partitionMapVersion = invalidVersion;
+	Future<Void> logSystemChange = Void();
 
-	loop {
-		loop choose {
-			when(wait(cursor ? cursor->getMore() : Never())) {
+	while (true) {
+		while (true) {
+			auto res = co_await race(cursor ? cursor->getMore() : Never(), logSystemChange);
+			if (res.index() == 0) {
 				break;
-			}
-			when(wait(logSystemChange)) {
+			} else if (res.index() == 1) {
 				if (self->logSystem.get()) {
 					cursor = self->logSystem.get()->peekSingle(self->myId, self->startVersion, self->tag);
 				} else {
 					cursor = Reference<ILogSystem::IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
+			} else {
+				UNREACHABLE();
 			}
 		}
-		wait(cursor->getMore());
+		co_await cursor->getMore();
 		if (!cursor->hasMessage()) {
 			continue;
 		}
 		for (; cursor->hasMessage(); cursor->nextMessage()) {
-			state Version msgVersion = cursor->version().version;
-			state StringRef message = cursor->getMessage();
-			state Arena arena = cursor->arena();
+			Version msgVersion = cursor->version().version;
+			StringRef message = cursor->getMessage();
+			Arena arena = cursor->arena();
 			ArenaReader reader(arena, message, AssumeVersion(g_network->protocolVersion()));
 			if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
 				cursor->nextMessage();
@@ -250,7 +254,7 @@ ACTOR Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self,
 			*outPartitionMap  = pmMsg.partitionMap;
 			*/
 			partitionMapVersion = msgVersion;
-			return partitionMapVersion;
+			co_return partitionMapVersion;
 		}
 	}
 }
@@ -319,7 +323,6 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 		    .detail("NumBackups", self->backups.size());
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -328,18 +331,14 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	} else {
 		// All other backup workers waits for done key to be set by the worker with tag id 0, then start pulling
 		// mutations. This is to make sure partition map is uploaded before any worker starts pulling mutations.
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE); // More efficient for reads
@@ -351,13 +350,11 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 				co_await tr.commit();
 				co_await watchFuture;
 				tr.reset();
+				continue;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 	self->pulledVersion.set(partitionMapVersion);
@@ -366,11 +363,11 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 }
 
 // Pulls mutations from TLog servers.
-ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
-	state Future<Void> logSystemChange = Void();
-	state Reference<ILogSystem::IPeekCursor> cursor;
+Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
+	Future<Void> logSystemChange = Void();
+	Reference<ILogSystem::IPeekCursor> cursor;
 
-	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
+	Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 
 	TraceEvent("BWRangePartitionedPull", self->myId)
 	    .detail("Tag", self->tag)
@@ -378,19 +375,19 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 	    .detail("StartVersion", self->startVersion)
 	    .detail("SavedVersion", self->savedVersion);
 
-	loop {
+	while (true) {
 		while (self->paused.get()) {
-			wait(self->paused.onChange());
+			co_await self->paused.onChange();
 		}
 
-		loop choose {
-			when(wait(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never())) {
+		while (true) {
+			auto res = co_await race(cursor ? cursor->getMore(TaskPriority::TLogCommit) : Never(), logSystemChange);
+			if (res.index() == 0) {
 				DisabledTraceEvent("BWRangePartitionedGotMore", self->myId)
 				    .detail("Tag", self->tag)
 				    .detail("CursorVersion", cursor->version().version);
 				break;
-			}
-			when(wait(logSystemChange)) {
+			} else if (res.index() == 1) {
 				if (self->logSystem.get()) {
 					// TODO akanksha: Use peekSingle as of now instead of peekLogRouter and later confirm if it works as
 					// expected.
@@ -399,6 +396,8 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 					cursor = Reference<ILogSystem::IPeekCursor>();
 				}
 				logSystemChange = self->logSystem.onChange();
+			} else {
+				UNREACHABLE();
 			}
 		}
 
@@ -411,12 +410,12 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 
 		self->minKnownCommittedVersion =
 		    std::max(self->minKnownCommittedVersion, cursor->getMinKnownCommittedVersion());
-		state int64_t peekedBytes = 0;
+		int64_t peekedBytes = 0;
 
 		// Hold messages until we know how many we can take, self->messages always
 		// contains messages that we have reserved memory for. Therefore, lock->release()
 		// will always encounter message with reserved memory.
-		state std::vector<RangePartitionedVersionedMessage> tmpMessages;
+		std::vector<RangePartitionedVersionedMessage> tmpMessages;
 
 		// Messages may be prefetched in peek here, but uncommitted messages should not be uploaded in uploadData().
 		while (cursor->hasMessage()) {
@@ -431,7 +430,7 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 			TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", self->myId)
 			    .detail("Take", peekedBytes)
 			    .detail("Current", self->lock->activePermits());
-			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			co_await self->lock->take(TaskPriority::DefaultYield, peekedBytes);
 			self->messages.insert(self->messages.end(),
 			                      std::make_move_iterator(tmpMessages.begin()),
 			                      std::make_move_iterator(tmpMessages.end()));
@@ -451,8 +450,8 @@ ACTOR Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 			    .detail("EndVersion", self->endVersion.get())
 			    .detail("LogEpoch", self->recruitedEpoch)
 			    .detail("BackupEpoch", self->backupEpoch);
-			return Void();
+			co_return;
 		}
-		wait(yield());
+		co_await yield();
 	}
 }
