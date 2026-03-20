@@ -2102,13 +2102,14 @@ Future<Void> testBackupContainer(std::string url,
 }
 
 TEST_CASE("/backup/containers/localdir/unencrypted") {
-	co_await testBackupContainer(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {});
+	co_await testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                             Optional<std::string>(),
+	                             Optional<std::string>());
 }
 
 TEST_CASE("/backup/containers/localdir/encrypted") {
 	co_await testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
-	                             {},
+	                             Optional<std::string>(),
 	                             format("%s/test_encryption_key", params.getDataDir().c_str()));
 }
 
@@ -2116,7 +2117,7 @@ TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		co_await testBackupContainer(url, {}, {});
+		co_await testBackupContainer(url, Optional<std::string>(), Optional<std::string>());
 	}
 }
 
@@ -2516,7 +2517,7 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 
 TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
 	co_await testBackupContainerWithMissingLogRanges(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {});
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), Optional<std::string>());
 }
 
 Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string> proxy) {
@@ -2619,7 +2620,7 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 
 TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
 	co_await testBackupContinuousLogEndVer(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {});
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), Optional<std::string>());
 }
 
 } // namespace backup_test
