@@ -930,30 +930,33 @@ Future<Void> uploadData(BackupData* self) {
 }
 
 // Pulls data from TLog servers using LogRouter tag.
-ACTOR Future<Void> pullAsyncData(BackupData* self) {
-	state Future<Void> logSystemChange = Void();
-	state Reference<ILogSystem::IPeekCursor> r;
+Future<Void> pullAsyncData(BackupData* self) {
+	Future<Void> logSystemChange = Void();
+	Reference<ILogSystem::IPeekCursor> r;
 
-	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
+	Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 
 	TraceEvent("BackupWorkerPull", self->myId)
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
 	    .detail("StartVersion", self->startVersion)
 	    .detail("SavedVersion", self->savedVersion);
-	loop {
+	while (true) {
 		while (self->paused.get()) {
-			wait(self->paused.onChange());
+			co_await self->paused.onChange();
 		}
 
-		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+		while (true) {
+			Future<Void> getMoreFuture = r ? r->getMore(TaskPriority::TLogCommit) : Never();
+			auto const res = co_await race(getMoreFuture, logSystemChange);
+			if (res.index() == 0) {
+				// getMoreFuture finished
 				DisabledTraceEvent("BackupWorkerGotMore", self->myId)
 				    .detail("Tag", self->tag)
 				    .detail("CursorVersion", r->version().version);
 				break;
-			}
-			when(wait(logSystemChange)) {
+			} else {
+				// logSystemChange detected
 				if (self->logSystem.get()) {
 					r = self->logSystem.get()->peekLogRouter(
 					    self->myId, tagAt, self->tag, SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED);
@@ -978,11 +981,11 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
-		state int64_t peekedBytes = 0;
+		int64_t peekedBytes = 0;
 		// Hold messages until we know how many we can take, self->messages always
 		// contains messages that we have reserved memory for. Therefore, lock->release()
 		// will always encounter message with reserved memory.
-		state std::vector<VersionedMessage> tmpMessages;
+		std::vector<VersionedMessage> tmpMessages;
 		while (r->hasMessage()) {
 			tmpMessages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
 			peekedBytes += tmpMessages.back().getEstimatedSize();
@@ -992,7 +995,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 			    .detail("Take", peekedBytes)
 			    .detail("Current", self->lock->activePermits());
-			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			co_await self->lock->take(TaskPriority::DefaultYield, peekedBytes);
 			self->messages.insert(self->messages.end(),
 			                      std::make_move_iterator(tmpMessages.begin()),
 			                      std::make_move_iterator(tmpMessages.end()));
@@ -1009,9 +1012,9 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			    .detail("VersionGot", tagAt)
 			    .detail("EndVersion", self->endVersion.get())
 			    .detail("MsgQ", self->messages.size());
-			return Void();
+			co_return;
 		}
-		wait(yield());
+		co_await yield();
 	}
 }
 
