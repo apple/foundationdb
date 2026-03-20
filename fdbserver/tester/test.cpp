@@ -45,7 +45,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/DataDistributionConfig.actor.h"
+#include "fdbclient/DataDistributionConfig.h"
 #include "fdbserver/core/KnobProtectiveGroups.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
@@ -59,7 +59,7 @@
 
 #include "flow/Trace.h"
 #include "flow/CoroUtils.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 
 WorkloadContext::WorkloadContext() = default;
 

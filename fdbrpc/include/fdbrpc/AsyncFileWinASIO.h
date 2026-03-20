@@ -1,5 +1,5 @@
 /*
- * AsyncFileWinASIO.actor.h
+ * AsyncFileWinASIO.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,14 +23,6 @@
 #ifdef WIN32
 
 #define Net2AsyncFile AsyncFileWinASIO
-
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILEWINASIO_ACTOR_G_H)
-#define FLOW_ASYNCFILEWINASIO_ACTOR_G_H
-#include "fdbrpc/AsyncFileWinASIO.actor.g.h"
-#elif !defined(FLOW_ASYNCFILEWINASIO_ACTOR_H)
-#define FLOW_ASYNCFILEWINASIO_ACTOR_H
 
 #include <Windows.h>
 #include <boost/bind/bind.hpp>
@@ -213,5 +205,4 @@ private:
 	  : file(ios, h), flags(flags), filename(filename) {}
 };
 
-#endif
 #endif

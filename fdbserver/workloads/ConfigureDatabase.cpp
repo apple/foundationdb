@@ -22,7 +22,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbserver/core/Knobs.h"

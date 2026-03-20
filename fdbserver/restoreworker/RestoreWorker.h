@@ -1,5 +1,5 @@
 /*
- * RestoreWorker.actor.h
+ * RestoreWorker.h
  *
  * This source file is part of the FoundationDB open source project
  *

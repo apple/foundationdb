@@ -28,7 +28,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

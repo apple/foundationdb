@@ -37,10 +37,10 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
-#include "RestoreWorker.actor.h"
+#include "RestoreWorker.h"
 #include "RestoreLoader.actor.h"
 #include "RestoreApplier.actor.h"
-#include "RestoreController.actor.h"
+#include "RestoreController.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/CoroUtils.h"

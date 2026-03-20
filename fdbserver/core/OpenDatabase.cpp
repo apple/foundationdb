@@ -1,5 +1,5 @@
 /*
- * OpenDatabase.actor.cpp
+ * OpenDatabase.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,19 +24,17 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
-                                            Reference<AsyncVar<ClientDBInfo>> info) {
-	state std::vector<UID> lastCommitProxyUIDs;
-	state std::vector<CommitProxyInterface> lastCommitProxies;
-	state std::vector<UID> lastGrvProxyUIDs;
-	state std::vector<GrvProxyInterface> lastGrvProxies;
-	loop {
+static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> const> db,
+                                      Reference<AsyncVar<ClientDBInfo>> info) {
+	std::vector<UID> lastCommitProxyUIDs;
+	std::vector<CommitProxyInterface> lastCommitProxies;
+	std::vector<UID> lastGrvProxyUIDs;
+	std::vector<GrvProxyInterface> lastGrvProxies;
+	while (true) {
 		ClientDBInfo ni = db->get().client;
 		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
 		info->setUnconditional(ni);
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 }
 

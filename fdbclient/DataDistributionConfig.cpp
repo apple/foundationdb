@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/DataDistributionConfig.actor.h"
+#include "fdbclient/DataDistributionConfig.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 
 json_spirit::mValue DDConfiguration::toJSON(RangeConfigMapSnapshot const& config, bool includeDefaultRanges) {

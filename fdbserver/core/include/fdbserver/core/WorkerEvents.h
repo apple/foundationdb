@@ -1,5 +1,5 @@
 /*
- * WorkerEvents.actor.h
+ * WorkerEvents.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_WORKEREVENTS_ACTOR_G_H)
-#define FDBSERVER_CORE_WORKEREVENTS_ACTOR_G_H
-#include "fdbserver/core/WorkerEvents.actor.g.h"
-#elif !defined(FDBSERVER_CORE_WORKEREVENTS_ACTOR_H)
-#define FDBSERVER_CORE_WORKEREVENTS_ACTOR_H
 
 #include <map>
 #include <set>
@@ -31,14 +26,9 @@
 
 #include "flow/ITrace.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};
 
-ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
     std::string eventName);
-
-#include "flow/unactorcompiler.h"
-
-#endif

@@ -7,7 +7,7 @@ target_include_directories(fdbbackup PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/includ
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
 set(FDBCONVERT_SRCS
-	FileConverter.actor.cpp)
+	FileConverter.cpp)
 add_flow_target(EXECUTABLE NAME fdbconvert SRCS ${FDBCONVERT_SRCS})
 target_include_directories(fdbconvert PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
 target_link_libraries(fdbconvert PRIVATE fdbclient)

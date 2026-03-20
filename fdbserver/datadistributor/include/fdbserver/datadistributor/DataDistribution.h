@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#pragma once
 #ifndef FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 #define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
@@ -34,9 +35,10 @@
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/TCInfo.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
-#include "fdbclient/DataDistributionConfig.actor.h"
+#include "fdbclient/DataDistributionConfig.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
+
 /////////////////////////////// Data //////////////////////////////////////
 #ifndef __INTEL_COMPILER
 #pragma region Data

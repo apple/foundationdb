@@ -26,13 +26,13 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
-#include "ResolutionBalancer.actor.h"
+#include "ResolutionBalancer.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
-#include "MasterData.actor.h"
+#include "MasterData.h"
 
 #ifdef WITH_SWIFT
 #include "SwiftModules/FDBServer"
