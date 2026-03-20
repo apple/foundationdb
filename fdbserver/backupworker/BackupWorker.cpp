@@ -1,5 +1,5 @@
 /*
- * BackupWorker.actor.cpp
+ * BackupWorker.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -1115,8 +1115,8 @@ Future<Void> backupWorker(BackupInterface interf,
 			TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 		}
 	}
-	    TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
-		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
-			throw err;
-	    }
+	TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
+	if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
+		throw err;
+	}
 }
