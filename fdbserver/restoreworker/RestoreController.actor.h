@@ -460,7 +460,7 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 	}
 };
 
-ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx);
+Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx);
 
 #include "flow/unactorcompiler.h"
 #endif
