@@ -2910,7 +2910,7 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 	}
 }
 
-void removeLog(TLogData* self, Reference<LogData> logData) {
+void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerIfEmpty = true) {
 	TraceEvent("TLogRemoved", self->dbgid)
 	    .detail("LogId", logData->logId)
 	    .detail("Input", logData->bytesInput.getValue())
@@ -2928,14 +2928,13 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	while (self->popOrder.size() && !self->id_data.contains(self->popOrder.front())) {
 		self->popOrder.pop_front();
 	}
-
-	if (self->id_data.size() == 0) {
-		throw worker_removed();
-	}
 	if (logData->queueCommittingVersion == 0) {
 		// If the removed tlog never attempted a queue commit, the update storage loop could become stuck waiting for
 		// queueCommittedVersion to advance.
 		logData->queueCommittedVersion.set(std::numeric_limits<Version>::max());
+	}
+	if (self->id_data.size() == 0 && terminateWorkerIfEmpty) {
+		throw worker_removed();
 	}
 }
 
@@ -2957,7 +2956,7 @@ ACTOR static Future<Void> failLowDiskTLogRecovery(TLogData* self,
 	    .detail("Version", ver)
 	    .detail("Action", "FailRecoveryAndRecruitNewTLogs");
 	CODE_PROBE(true, "pullAsyncData failed recovery due to TLOG_MIN_AVAILABLE_SPACE_RATIO");
-	throw worker_removed();
+	throw recruitment_failed();
 }
 
 Future<Void> waitUntilTLogAcceptsNewData(TLogData* self, Reference<LogData> logData, Version ver) {
@@ -3205,7 +3204,7 @@ ACTOR Future<Void> tLogCore(TLogData* self,
 		if (e.code() != error_code_worker_removed)
 			throw;
 
-		removeLog(self, logData);
+		removeLog(self, logData, e.code() != error_code_recruitment_failed);
 		return Void();
 	}
 }
@@ -3788,7 +3787,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	} catch (Error& e) {
 		req.reply.sendError(recruitment_failed());
 
-		if (e.code() != error_code_worker_removed) {
+		if (e.code() != error_code_worker_removed && e.code() != error_code_recruitment_failed) {
 			throw;
 		}
 
