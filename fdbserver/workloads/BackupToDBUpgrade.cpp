@@ -22,7 +22,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/ApiVersion.h"
@@ -190,7 +190,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 					co_await delay(20.0);
 					tr = makeReference<ReadYourWritesTransaction>(cx);
-					co_await store(taskCount, backupAgent->getTaskCount(tr));
+					taskCount = co_await backupAgent->getTaskCount(tr);
 				}
 
 				RangeResult agentValues =

@@ -24,7 +24,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "flow/ApiVersion.h"
 
@@ -485,7 +485,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 					co_await delay(5.0);
 					tr = makeReference<ReadYourWritesTransaction>(cx);
-					co_await store(taskCount, backupAgent->getTaskCount(tr));
+					taskCount = co_await backupAgent->getTaskCount(tr);
 				}
 
 				RangeResult agentValues =

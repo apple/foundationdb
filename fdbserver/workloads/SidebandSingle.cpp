@@ -21,7 +21,8 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 /*
  * This workload is modelled off the Sideband workload, except it uses a single
@@ -169,7 +170,7 @@ struct SidebandSingleWorkload : TestWorkload {
 						while (true) {
 							Error err;
 							try {
-								co_await store(val2, tr2.get(messageKey));
+								val2 = co_await tr2.get(messageKey);
 								break;
 							} catch (Error& e) {
 								err = e;

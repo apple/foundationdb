@@ -184,7 +184,7 @@ struct TransactionOptions {
 
 	// update clear function if you add a new field
 
-	TransactionOptions(Database const& cx);
+	explicit TransactionOptions(Database const& cx);
 	TransactionOptions();
 
 	void reset(Database const& cx);
@@ -199,7 +199,7 @@ struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopy
 	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
 
 	TransactionLogInfo() : logLocation(DONT_LOG), maxFieldLength(0) {}
-	TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
+	explicit TransactionLogInfo(LoggingLocation location) : logLocation(location), maxFieldLength(0) {}
 	TransactionLogInfo(std::string id, LoggingLocation location)
 	  : logLocation(location), maxFieldLength(0), identifier(id) {}
 
@@ -245,7 +245,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	Optional<ReadOptions> readOptions;
 
 	Watch() : valuePresent(false), setPresent(false), watchFuture(Never()) {}
-	Watch(Key key) : key(key), valuePresent(false), setPresent(false), watchFuture(Never()) {}
+	explicit Watch(Key key) : key(key), valuePresent(false), setPresent(false), watchFuture(Never()) {}
 	Watch(Key key, Optional<Value> val)
 	  : key(key), value(val), valuePresent(true), setPresent(false), watchFuture(Never()) {}
 

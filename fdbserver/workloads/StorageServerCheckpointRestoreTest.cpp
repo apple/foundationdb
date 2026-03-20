@@ -21,12 +21,12 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
-#include "fdbserver/MoveKeys.actor.h"
+#include "fdbserver/core/ServerCheckpoint.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
@@ -117,10 +117,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		while (true) {
 			records.clear();
 			try {
-				co_await store(
-				    records,
-				    getCheckpointMetaData(
-				        cx, std::vector<KeyRange>(1, testRange), version, format, Optional<UID>(dataMoveId)));
+				records = co_await getCheckpointMetaData(
+				    cx, std::vector<KeyRange>(1, testRange), version, format, Optional<UID>(dataMoveId));
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
@@ -142,7 +140,8 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint.
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		for (auto it = records.begin(); it != records.end(); ++it) {
+		auto it = records.begin();
+		for (; it != records.end(); ++it) {
 			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				Error err;
@@ -182,7 +181,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				co_await store(res, tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+				res = co_await tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY);
 				break;
 			} catch (Error& e) {
 				err = e;

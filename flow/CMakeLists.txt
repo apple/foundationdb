@@ -49,7 +49,7 @@ if(NOT Jinja2_FOUND)
                           ${PROTOCOL_VERSION_VENV_DIR} OUTPUT_QUIET ERROR_QUIET)
   find_program(
     VENV_Python3_EXECUTABLE
-    NAMES python3 python3.exe
+    NAMES python3 python3.exe python.exe
     PATHS ${PROTOCOL_VERSION_VENV_DIR}/Scripts ${PROTOCOL_VERSION_VENV_DIR}/bin
           REQUIRED
     NO_DEFAULT_PATH NO_CACHE
@@ -116,7 +116,7 @@ endif()
 # executable so the linker will throw errors if it can't find the declaration of
 # a symbol.
 add_flow_target(LINK_TEST NAME flowlinktest SRCS LinkTest.cpp)
-target_link_libraries(flowlinktest PRIVATE flow stacktrace)
+target_link_libraries(flowlinktest PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,flow>" stacktrace)
 
 set(IS_ARM_MAC NO)
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")

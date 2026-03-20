@@ -81,8 +81,7 @@ int runTest(struct RunResult (*testFxn)(struct ResultSet*, FDBTransaction*),
             const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
-	int i = 0;
-	for (; i < numRuns; ++i) {
+	for (int i = 0; i < numRuns; ++i) {
 		struct RunResult res = run(rs, db, testFxn);
 		if (res.e) {
 			logError(res.e, kpiName, rs);
@@ -110,8 +109,7 @@ int runTestDb(struct RunResult (*testFxn)(struct ResultSet*, FDBDatabase*),
               const char* kpiName) {
 	int numRuns = 25;
 	int* results = malloc(sizeof(int) * numRuns);
-	int i = 0;
-	for (; i < numRuns; ++i) {
+	for (int i = 0; i < numRuns; ++i) {
 		struct RunResult res = testFxn(rs, db);
 		if (res.e) {
 			logError(res.e, kpiName, rs);
@@ -465,8 +463,9 @@ struct RunResult getRange(struct ResultSet* rs, FDBTransaction* tr) {
 	}
 
 	if (totalOut != GET_RANGE_COUNT) {
-		char* msg = (char*)malloc((sizeof(char)) * 200);
-		sprintf(msg, "verifying out count (%d != %d)", totalOut, GET_RANGE_COUNT);
+		const size_t nbytes = 200;
+		char* msg = (char*)malloc(nbytes);
+		snprintf(msg, nbytes, "verifying out count (%d != %d)", totalOut, GET_RANGE_COUNT);
 		logError(4100, msg, rs);
 		free(msg);
 		fdb_future_destroy(f);

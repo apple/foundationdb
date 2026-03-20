@@ -123,14 +123,14 @@ Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<S
 		result = false;
 	} else {
 		if (tokencmp(tokens[1], "on")) {
-			co_await success(setDDMode(db, 1));
+			co_await setDDMode(db, 1);
 			printf("Data distribution is turned on.\n");
 		} else if (tokencmp(tokens[1], "off")) {
-			co_await success(setDDMode(db, 0));
+			co_await setDDMode(db, 0);
 			printf("Data distribution is turned off.\n");
 		} else if (tokencmp(tokens[1], "disable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
-				co_await success((setHealthyZone(db, "IgnoreSSFailures"_sr, 0)));
+				co_await (setHealthyZone(db, "IgnoreSSFailures"_sr, 0));
 				printf("Data distribution is disabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
 				co_await setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ);
@@ -147,7 +147,7 @@ Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<S
 			}
 		} else if (tokencmp(tokens[1], "enable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
-				co_await success((clearHealthyZone(db, false, true)));
+				co_await (clearHealthyZone(db, false, true));
 				printf("Data distribution is enabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
 				co_await setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ);

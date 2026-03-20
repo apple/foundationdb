@@ -21,9 +21,10 @@
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PingWorkloadInterface {
 	RequestStream<LoadedPingRequest> payloadPing;

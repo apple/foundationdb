@@ -2768,7 +2768,10 @@ ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr
 	state RangeResult rangeResult;
 	// At most one job at a time, so looking at the first returned range is sufficient
 	wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys)));
-	for (int i = 0; i < rangeResult.size() - 1; ++i) {
+	if (rangeResult.empty()) {
+		return Optional<BulkLoadJobState>();
+	}
+	for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
 		if (rangeResult[i].value.empty()) {
 			continue;
 		}
@@ -2818,6 +2821,8 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			aliveJob.get().setCancelledPhase();
 			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
 			wait(releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad));
+			// Clean up BulkLoad owner info when clearing job metadata
+			tr.clear(bulkLoadOwnerKeyFor(jobId));
 			wait(tr.commit());
 			break;
 		} catch (Error& e) {
@@ -2916,7 +2921,10 @@ ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool
 			}
 			rangeResult.clear();
 			wait(store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey))));
-			for (int i = 0; i < rangeResult.size() - 1; i++) {
+			if (rangeResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; i++) {
 				if (rangeResult[i].value.empty()) {
 					continue;
 				}
@@ -2949,8 +2957,11 @@ ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyR
 			tr.reset();
 			bulkLoadTaskResult.clear();
 			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey))));
+			if (bulkLoadTaskResult.empty()) {
+				break;
+			}
 			i = 0;
-			for (; i < bulkLoadTaskResult.size() - 1; i++) {
+			for (; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
 				if (bulkLoadTaskResult[i].value.empty()) {
 					lastKey = bulkLoadTaskResult[i + 1].key;
 					continue;
@@ -3060,7 +3071,10 @@ ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
 			// krmGetRanges splits the result into batches.
 			// Check first batch is enough since we only check if any task exists
-			for (int i = 0; i < rangeResult.size() - 1; ++i) {
+			if (rangeResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
 				if (rangeResult[i].value.empty()) {
 					continue;
 				}
@@ -3146,7 +3160,10 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			bulkDumpResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
 			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
-			for (int i = 0; i < bulkDumpResult.size() - 1; i++) {
+			if (bulkDumpResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(bulkDumpResult.size()) - 1; i++) {
 				if (bulkDumpResult[i].value.empty()) {
 					continue;
 				}
@@ -3167,6 +3184,8 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			}
 			wait(krmSetRangeCoalescing(
 			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState())));
+			// Clean up owner info when clearing job metadata
+			tr.clear(bulkDumpOwnerKeyFor(jobId));
 			wait(tr.commit());
 			tr.reset();
 
@@ -3176,6 +3195,65 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 		}
 	}
 	return Void();
+}
+
+// Generic owner tracking implementation for bulk operations
+ACTOR Future<Void> setBulkOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo, bool isBulkDump) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Key ownerKey = isBulkDump ? bulkDumpOwnerKeyFor(jobId) : bulkLoadOwnerKeyFor(jobId);
+			tr.set(ownerKey, ObjectWriter::toValue(ownerInfo, IncludeVersion()));
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool isBulkDump) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Key ownerKey = isBulkDump ? bulkDumpOwnerKeyFor(jobId) : bulkLoadOwnerKeyFor(jobId);
+			Optional<Value> value = wait(tr.get(ownerKey));
+			if (!value.present()) {
+				return Optional<BulkDumpOwnerInfo>();
+			}
+			BulkDumpOwnerInfo info;
+			ObjectReader reader(value.get().begin(), IncludeVersion());
+			reader.deserialize(info);
+			return info;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+// Public API wrappers for backward compatibility
+ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	wait(setBulkOwner(cx, jobId, ownerInfo, true));
+	return Void();
+}
+
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
+	Optional<BulkDumpOwnerInfo> result = wait(getBulkOwner(cx, jobId, true));
+	return result;
+}
+
+ACTOR Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	wait(setBulkOwner(cx, jobId, ownerInfo, false));
+	return Void();
+}
+
+ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
+	Optional<BulkDumpOwnerInfo> result = wait(getBulkOwner(cx, jobId, false));
+	return result;
 }
 
 ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
@@ -3206,7 +3284,11 @@ ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToR
 				retryCount++;
 			}
 		}
-		for (int i = 0; i < rangeResult.size() - 1; ++i) {
+		// Guard against empty results (can happen during cluster instability)
+		if (rangeResult.empty()) {
+			break;
+		}
+		for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
 			if (rangeResult[i].value.empty()) {
 				continue;
 			}
@@ -3218,6 +3300,195 @@ ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToR
 		readBegin = rangeResult.back().key;
 	}
 	return completeTaskCount;
+}
+
+ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
+	state Transaction tr(cx);
+	state BulkDumpProgress progress;
+	state double currentTime = now();
+
+	state Optional<BulkDumpState> submittedJob;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<BulkDumpState> job = wait(getSubmittedBulkDumpJob(&tr));
+			submittedJob = job;
+			if (!submittedJob.present()) {
+				return Optional<BulkDumpProgress>();
+			}
+			progress.jobId = submittedJob.get().getJobId();
+			progress.jobRange = submittedJob.get().getJobRange();
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	// Get start time from owner info (stored separately from BulkDumpState)
+	Optional<BulkDumpOwnerInfo> ownerInfo = wait(getBulkDumpOwner(cx, progress.jobId));
+	if (ownerInfo.present()) {
+		progress.startTime = ownerInfo.get().submitTime;
+	} else {
+		// Fallback if no owner info (standalone bulkdump): use current time (elapsed will be ~0)
+		progress.startTime = currentTime;
+	}
+
+	state Key readBegin = progress.jobRange.begin;
+	state Key readEnd = progress.jobRange.end;
+	state RangeResult rangeResult;
+
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkDumpPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+
+		// Guard against empty results (can happen during cluster instability)
+		if (rangeResult.empty()) {
+			break;
+		}
+		for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkDumpState taskState = decodeBulkDumpState(rangeResult[i].value);
+			progress.totalTasks++;
+
+			if (taskState.getPhase() == BulkDumpPhase::Complete) {
+				progress.completeTasks++;
+				progress.completedBytes += taskState.getManifest().getTotalBytes();
+			} else if (taskState.getPhase() == BulkDumpPhase::Submitted) {
+				progress.runningTasks++;
+			}
+
+			progress.totalBytes += taskState.getManifest().getTotalBytes();
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	progress.elapsedSeconds = currentTime - progress.startTime;
+
+	return progress;
+}
+
+ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
+	state Transaction tr(cx);
+	state BulkLoadProgress progress;
+	state double currentTime = now();
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<BulkLoadJobState> runningJob = wait(getRunningBulkLoadJob(cx));
+			if (!runningJob.present()) {
+				return Optional<BulkLoadProgress>();
+			}
+			progress.jobId = runningJob.get().getJobId();
+			progress.jobRange = runningJob.get().getJobRange();
+			Optional<uint64_t> taskCount = runningJob.get().getTaskCount();
+			progress.totalTasks = taskCount.present() ? (int)taskCount.get() : 0;
+			progress.startTime = runningJob.get().getSubmitTime();
+			progress.elapsedSeconds = currentTime - progress.startTime;
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	state Key readBegin = progress.jobRange.begin;
+	state Key readEnd = progress.jobRange.end;
+	state RangeResult rangeResult;
+
+	while (readBegin < readEnd) {
+		state int retryCount = 0;
+		loop {
+			try {
+				rangeResult.clear();
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				wait(store(rangeResult,
+				           krmGetRanges(&tr,
+				                        bulkLoadTaskPrefix,
+				                        KeyRangeRef(readBegin, readEnd),
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				break;
+			} catch (Error& e) {
+				if (retryCount > 30) {
+					throw timed_out();
+				}
+				wait(tr.onError(e));
+				retryCount++;
+			}
+		}
+
+		// Guard against empty results (can happen during cluster instability)
+		if (rangeResult.empty()) {
+			break;
+		}
+		for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
+			if (rangeResult[i].value.empty()) {
+				continue;
+			}
+			BulkLoadTaskState taskState = decodeBulkLoadTaskState(rangeResult[i].value);
+
+			switch (taskState.phase) {
+			case BulkLoadPhase::Submitted:
+				progress.submittedTasks++;
+				break;
+			case BulkLoadPhase::Triggered:
+				progress.triggeredTasks++;
+				break;
+			case BulkLoadPhase::Running:
+				progress.runningTasks++;
+				if (taskState.startTime > 0 &&
+				    (currentTime - taskState.startTime) > BULK_TASK_STALL_THRESHOLD_SECONDS) {
+					BulkLoadStalledTask stalledTask;
+					stalledTask.taskId = taskState.getTaskId();
+					stalledTask.range = taskState.getRange();
+					stalledTask.stalledSeconds = currentTime - taskState.startTime;
+					stalledTask.restartCount = taskState.restartCount;
+					// TODO: Get storage server ID and last error when available
+					progress.stalledTasks.push_back(stalledTask);
+				}
+				break;
+			case BulkLoadPhase::Complete:
+			case BulkLoadPhase::Acknowledged:
+				progress.completeTasks++;
+				progress.completedBytes += taskState.getTotalBytes();
+				break;
+			case BulkLoadPhase::Error:
+				progress.errorTasks++;
+				break;
+			default:
+				break;
+			}
+
+			progress.totalBytes += taskState.getTotalBytes();
+		}
+		readBegin = rangeResult.back().key;
+	}
+
+	return progress;
 }
 
 // Persist a new owner if input ownerUniqueID is not existing; Update description if input ownerUniqueID exists
@@ -3337,7 +3608,10 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
-			for (int i = 0; i < result.size() - 1; i++) {
+			if (result.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(result.size()) - 1; i++) {
 				if (result[i].value.empty()) {
 					continue;
 				}
@@ -3390,7 +3664,10 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 	while (beginKey < endKey) {
 		rangeToRead = KeyRangeRef(beginKey, endKey);
 		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
-		for (int i = 0; i < res.size() - 1; i++) {
+		if (res.empty()) {
+			break;
+		}
+		for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
 			if (res[i].value.empty()) {
 				continue;
 			}
@@ -3409,7 +3686,7 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 				throw range_lock_reject(); // Has been locked
 			}
 		}
-		beginKey = res[res.size() - 1].key;
+		beginKey = res.back().key;
 	}
 	return Void();
 }
@@ -3443,7 +3720,10 @@ ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
 	while (beginKey < endKey) {
 		rangeToRead = KeyRangeRef(beginKey, endKey);
 		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
-		for (int i = 0; i < res.size() - 1; i++) {
+		if (res.empty()) {
+			break;
+		}
+		for (int i = 0; i < static_cast<int>(res.size()) - 1; i++) {
 			if (res[i].value.empty()) {
 				continue;
 			}
@@ -3461,7 +3741,7 @@ ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
 				throw range_unlock_reject();
 			}
 		}
-		beginKey = res[res.size() - 1].key;
+		beginKey = res.back().key;
 	}
 	return Void();
 }
@@ -3515,10 +3795,13 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			result.clear();
 			wait(store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead)));
+			if (result.empty()) {
+				break;
+			}
 			i = 0;
 			beginKeyToClear = result[0].key;
 			endKeyToClear = result[0].key; // Expanding when currentRange is valid to clear
-			for (; i < result.size() - 1; i++) {
+			for (; i < static_cast<int>(result.size()) - 1; i++) {
 				currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
 				if (result[i].value.empty()) {
 					endKeyToClear = currentRange.end;

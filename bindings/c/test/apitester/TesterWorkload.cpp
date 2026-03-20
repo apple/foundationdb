@@ -265,7 +265,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 	// Open in binary mode and read char-by-char to avoid
 	// any kind of buffering
 	FILE* f = fopen(pipeName.c_str(), "rb");
-	setbuf(f, NULL);
+	setbuf(f, nullptr);
 	std::string line;
 	while (true) {
 		int ch = fgetc(f);

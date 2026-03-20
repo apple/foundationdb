@@ -87,7 +87,7 @@ struct HaltConsistencyScanRequest {
 //
 // The class trigger will only be fired by changes to Config or RangeConfig
 struct ConsistencyScanState : public KeyBackedClass {
-	ConsistencyScanState(Key prefix = SystemKey("\xff/consistencyScanState"_sr)) : KeyBackedClass(prefix) {}
+	explicit ConsistencyScanState(Key prefix = SystemKey("\xff/consistencyScanState"_sr)) : KeyBackedClass(prefix) {}
 
 	struct Config {
 		constexpr static FileIdentifier file_identifier = 23123;
