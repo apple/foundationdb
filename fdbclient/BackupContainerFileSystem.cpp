@@ -1,5 +1,5 @@
 /*
- * BackupContainerFileSystem.actor.cpp
+ * BackupContainerFileSystem.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -2102,37 +2102,34 @@ Future<Void> testBackupContainer(std::string url,
 }
 
 TEST_CASE("/backup/containers/localdir/unencrypted") {
-	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}));
-	return Void();
+	co_await testBackupContainer(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {});
 }
 
 TEST_CASE("/backup/containers/localdir/encrypted") {
-	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
-	                         {},
-	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
-	return Void();
+	co_await testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                             {},
+	                             format("%s/test_encryption_key", params.getDataDir().c_str()));
 }
 
 TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		wait(testBackupContainer(url, {}, {}));
+		co_await testBackupContainer(url, {}, {});
 	}
-	return Void();
 }
 
 TEST_CASE("/backup/containers_list") {
 	if (!g_network->isSimulated()) {
-		state const char* url = getenv("FDB_TEST_BACKUP_URL");
+		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
 		printf("Listing %s\n", url);
-		std::vector<std::string> urls = wait(IBackupContainer::listContainers(url, {}));
+		std::vector<std::string> urls = co_await IBackupContainer::listContainers(url, {});
 		for (auto& u : urls) {
 			printf("%s\n", u.c_str());
 		}
 	}
-	return Void();
 }
 
 TEST_CASE("/backup/time") {
@@ -2518,9 +2515,8 @@ Future<Void> testBackupContainerWithMissingLogRanges(std::string url, Optional<s
 }
 
 TEST_CASE("/backup/containers/localdir/missingLogRangesRestorability") {
-	wait(testBackupContainerWithMissingLogRanges(
-	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
-	return Void();
+	co_await testBackupContainerWithMissingLogRanges(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {});
 }
 
 Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string> proxy) {
@@ -2622,9 +2618,8 @@ Future<Void> testBackupContinuousLogEndVer(std::string url, Optional<std::string
 }
 
 TEST_CASE("/backup/containers/localdir/continuousLogEndVersion") {
-	wait(testBackupContinuousLogEndVer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
-	                                   {}));
-	return Void();
+	co_await testBackupContinuousLogEndVer(
+	    format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {});
 }
 
 } // namespace backup_test
