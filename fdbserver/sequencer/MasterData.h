@@ -1,5 +1,5 @@
 /*
- * MasterData.actor.h
+ * MasterData.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,7 @@
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MasterInterface.h"
-#include "ResolutionBalancer.actor.h"
+#include "ResolutionBalancer.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
@@ -42,15 +42,6 @@ struct MasterData;
 #include "SwiftModules/FDBServer"
 #endif
 #endif // WITH_SWIFT
-
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_G_H)
-#define FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_G_H
-#include "MasterData.actor.g.h"
-#elif !defined(FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_H)
-#define FDBSERVER_SEQUENCER_MASTERDATA_ACTOR_H
-#include "flow/actorcompiler.h" // This must be the last #include
 
 // FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
 #define SWIFT_CXX_REF_MASTERDATA                                                                                       \
@@ -181,6 +172,3 @@ using StdVectorOfUIDs = std::vector<UID>;
 
 // FIXME: Workaround for linker issue (rdar://101092732).
 void swift_workaround_setLatestRequestNumber(NotifiedVersion& latestRequestNum, Version v);
-
-#include "flow/unactorcompiler.h"
-#endif

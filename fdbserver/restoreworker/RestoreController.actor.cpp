@@ -28,10 +28,10 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "RestoreWorker.actor.h"
+#include "RestoreWorker.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
 #include "RestoreRoleCommon.h"
-#include "RestoreController.actor.h"
+#include "RestoreController.h"
 #include "RestoreApplier.actor.h"
 #include "RestoreLoader.actor.h"
 

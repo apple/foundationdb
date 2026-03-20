@@ -27,7 +27,7 @@
 #include "RestoreRoleCommon.h"
 #include "RestoreLoader.actor.h"
 #include "RestoreApplier.actor.h"
-#include "RestoreController.actor.h"
+#include "RestoreController.h"
 
 class Database;
 struct RestoreWorkerData;

@@ -1,5 +1,5 @@
 /*
- * RestoreController.actor.h
+ * RestoreController.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,11 +21,6 @@
 // This file declear RestoreController interface and actors
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_CONTROLLER_G_H)
-#define FDBSERVER_RESTORE_CONTROLLER_G_H
-#include "RestoreController.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_CONTROLLER_H)
-#define FDBSERVER_RESTORE_CONTROLLER_H
 
 #include <sstream>
 #include "flow/Platform.h"
@@ -41,8 +36,6 @@
 
 struct RestoreWorkerData;
 
-#include "flow/actorcompiler.h" // has to be last include
-
 struct VersionBatch {
 	Version beginVersion; // Inclusive
 	Version endVersion; // exclusive
@@ -51,7 +44,7 @@ struct VersionBatch {
 	double size; // size of data in range and log files
 	int batchIndex; // Never reset
 
-	VersionBatch() : beginVersion(0), endVersion(0), size(0) {};
+	VersionBatch() : beginVersion(0), endVersion(0), size(0){};
 
 	bool operator<(const VersionBatch& rhs) const {
 		return std::tie(batchIndex, beginVersion, endVersion, logFiles, rangeFiles, size) <
@@ -461,6 +454,3 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 };
 
 Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx);
-
-#include "flow/unactorcompiler.h"
-#endif

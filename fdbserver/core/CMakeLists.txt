@@ -20,7 +20,7 @@ list(REMOVE_ITEM FDBSERVER_CORE_LOCAL_SRCS ${FDBSERVER_CORE_TO_KVSTORE_SRCS})
 
 set(FDBSERVER_CORE_TO_LOGSYSTEM_SRCS
   LogSystemDiskQueueAdapter.cpp
-  LogSystemFactory.actor.cpp
+  LogSystemFactory.cpp
   LogSystemPeekCursor.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystemRecoveryTests.cpp)

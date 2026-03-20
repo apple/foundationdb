@@ -24,7 +24,7 @@
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
-#include "BackupPartitionMap.actor.h"
+#include "BackupPartitionMap.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"

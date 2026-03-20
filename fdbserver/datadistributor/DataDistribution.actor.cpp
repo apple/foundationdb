@@ -34,7 +34,7 @@
 #include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
-#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
 #include "DDRelocationQueue.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/Knobs.h"

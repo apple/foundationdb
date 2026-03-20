@@ -89,7 +89,7 @@
 #include <unistd.h>
 #include <execinfo.h>
 #endif
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #if CENABLED(0, NOT_IN_CLEAN)

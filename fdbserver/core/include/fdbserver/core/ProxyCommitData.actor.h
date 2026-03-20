@@ -34,7 +34,6 @@
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
 #include "flow/IRandom.h"
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 DESCR struct SingleKeyMutation {
