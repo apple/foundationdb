@@ -1,5 +1,5 @@
 /*
- * ResolutionBalancer.actor.h
+ * ResolutionBalancer.h
  *
  * This source file is part of the FoundationDB open source project
  *

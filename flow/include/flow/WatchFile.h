@@ -1,5 +1,5 @@
 /*
- * WatchFile.actor.h
+ * WatchFile.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,33 +20,24 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated
-// version of this file.  In intellisense use the source version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_WATCH_FILE_ACTOR_G_H)
-#define FLOW_WATCH_FILE_ACTOR_G_H
-#include "flow/WatchFile.actor.g.h"
-#elif !defined(FLOW_WATCH_FILE_ACTOR_H)
-#define FLOW_WATCH_FILE_ACTOR_H
-
 #include <ctime>
 #include <string>
 #include "flow/IAsyncFile.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h"
 
-ACTOR static Future<Void> watchFileForChanges(std::string filename,
-                                              AsyncTrigger* fileChanged,
-                                              const int* intervalSeconds,
-                                              const char* errorType) {
-	if (filename == "") {
-		return Never();
+static Future<Void> watchFileForChanges(std::string filename,
+                                        AsyncTrigger* fileChanged,
+                                        const int* intervalSeconds,
+                                        const char* errorType) {
+	if (filename.empty()) {
+		co_await Future<Void>(Never());
 	}
-	state bool firstRun = true;
-	state bool statError = false;
-	state std::time_t lastModTime = 0;
-	loop {
+	bool firstRun = true;
+	bool statError = false;
+	std::time_t lastModTime = 0;
+	while (true) {
 		try {
-			std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
+			std::time_t modtime = co_await IAsyncFileSystem::filesystem()->lastWriteTime(filename);
 			if (firstRun) {
 				lastModTime = modtime;
 				firstRun = false;
@@ -68,10 +59,6 @@ ACTOR static Future<Void> watchFileForChanges(std::string filename,
 				throw;
 			}
 		}
-		wait(delay(*intervalSeconds));
+		co_await delay(*intervalSeconds);
 	}
 }
-
-#include "flow/unactorcompiler.h"
-
-#endif // FLOW_WATCH_FILE_ACTOR_H

@@ -51,7 +51,7 @@
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/UnitTest.h"
-#include "flow/WatchFile.actor.h"
+#include "flow/WatchFile.h"
 #include "flow/IConnection.h"
 #define XXH_INLINE_ALL
 #include "flow/xxhash.h"
