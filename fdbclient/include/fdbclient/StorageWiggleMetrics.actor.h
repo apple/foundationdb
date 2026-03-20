@@ -159,7 +159,7 @@ protected:
 
 public:
 	struct DataForDc : public KeyBackedClass {
-		DataForDc(StringRef prefix) : KeyBackedClass(prefix) {}
+		explicit DataForDc(StringRef prefix) : KeyBackedClass(prefix) {}
 
 		auto storageWiggleDelay() const {
 			auto key = subspace.pack("storageWiggleDelay"_sr);

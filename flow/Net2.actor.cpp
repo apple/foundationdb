@@ -58,7 +58,7 @@
 #include "flow/ProtocolVersion.h"
 #include "flow/SendBufferIterator.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/WatchFile.actor.h"
+#include "flow/WatchFile.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Util.h"
 #include "flow/UnitTest.h"
@@ -2278,7 +2278,7 @@ template <class F>
 THREAD_HANDLE startThreadF(F&& func) {
 	struct Thing {
 		F f;
-		Thing(F&& f) : f(std::move(f)) {}
+		explicit Thing(F&& f) : f(std::move(f)) {}
 		THREAD_FUNC start(void* p) {
 			auto* self = (Thing*)p;
 			self->f();

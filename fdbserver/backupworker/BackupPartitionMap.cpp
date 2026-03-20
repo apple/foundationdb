@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "BackupPartitionMap.actor.h"
+#include "BackupPartitionMap.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"

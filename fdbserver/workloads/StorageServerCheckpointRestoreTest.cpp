@@ -24,7 +24,7 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerCheckpoint.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "flow/Error.h"
@@ -140,8 +140,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint.
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		auto it = records.begin();
-		for (; it != records.end(); ++it) {
+		for (auto it = records.begin(); it != records.end(); ++it) {
 			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				Error err;

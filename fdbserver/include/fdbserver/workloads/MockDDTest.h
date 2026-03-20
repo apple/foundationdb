@@ -23,7 +23,7 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbclient/StorageServerInterface.h"
 
 // other Mock DD workload can derive from this class to use the common settings

@@ -1,5 +1,5 @@
 /*
- * DataDistributionConfig.actor.h
+ * DataDistributionConfig.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,7 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_DATA_DISTRIBUTION_CONFIG_ACTOR_G_H)
-#define FDBCLIENT_DATA_DISTRIBUTION_CONFIG_ACTOR_G_H
-#include "fdbclient/DataDistributionConfig.actor.g.h"
-#elif !defined(FDBCLIENT_DATA_DISTRIBUTION_CONFIG_ACTOR_H)
-#define FDBCLIENT_DATA_DISTRIBUTION_CONFIG_ACTOR_H
+#pragma once
 
 #include "flow/serialize.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -34,7 +30,6 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // DD Configuration for a key range range.
 // There are many properties here, all Optional, because for a given key range range a property
@@ -42,7 +37,7 @@
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;
 
-	DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
+	explicit(false) DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
 	  : replicationFactor(replicationFactor), teamID(teamID) {}
 
 	Optional<int> replicationFactor;
@@ -93,7 +88,7 @@ template <>
 struct fmt::formatter<DDRangeConfig> : FormatUsingTraceable<DDRangeConfig> {};
 
 struct DDConfiguration : public KeyBackedClass {
-	DDConfiguration(KeyRef prefix = SystemKey("\xff\x02/ddconfig/"_sr)) : KeyBackedClass(prefix) {}
+	explicit DDConfiguration(KeyRef prefix = SystemKey("\xff\x02/ddconfig/"_sr)) : KeyBackedClass(prefix) {}
 
 	// RangeConfigMap is a  KeyBackedRangeMap of DDRangeConfig values describing various option overrides for key ranges
 	typedef KeyBackedRangeMap<Key,
@@ -109,6 +104,3 @@ struct DDConfiguration : public KeyBackedClass {
 
 	static json_spirit::mValue toJSON(RangeConfigMapSnapshot const& snapshot, bool includeDefaultRanges = false);
 };
-
-#include "flow/unactorcompiler.h"
-#endif

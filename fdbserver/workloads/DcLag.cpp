@@ -25,7 +25,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"

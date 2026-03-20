@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/workloads.actor.h"
 
 // Regression tests for 2 commit related bugs

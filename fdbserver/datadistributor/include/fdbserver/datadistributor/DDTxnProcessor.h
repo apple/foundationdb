@@ -22,7 +22,7 @@
 #define FOUNDATIONDB_DDTXNPROCESSOR_H
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "flow/FastRef.h"
 #include "fdbserver/datadistributor/MockGlobalState.h"
 

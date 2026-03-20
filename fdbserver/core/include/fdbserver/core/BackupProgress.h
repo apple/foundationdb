@@ -1,5 +1,5 @@
 /*
- * BackupProgress.actor.h
+ * BackupProgress.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,11 +18,7 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_BACKUPPROGRESS_ACTOR_G_H)
-#define FDBSERVER_CORE_BACKUPPROGRESS_ACTOR_G_H
-#include "fdbserver/core/BackupProgress.actor.g.h"
-#elif !defined(FDBSERVER_CORE_BACKUPPROGRESS_ACTOR_H)
-#define FDBSERVER_CORE_BACKUPPROGRESS_ACTOR_H
+#pragma once
 
 #include <map>
 #include <tuple>
@@ -31,7 +27,6 @@
 #include "fdbserver/core/LogSystem.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class BackupProgress : NonCopyable, ReferenceCounted<BackupProgress> {
 public:
@@ -105,6 +100,3 @@ private:
 };
 
 Future<Void> getBackupProgress(Database cx, UID dbgid, Reference<BackupProgress> bStatus, bool logging);
-
-#include "flow/unactorcompiler.h"
-#endif

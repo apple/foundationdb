@@ -187,7 +187,7 @@ public:
 		READWRITE // The underlying special key range can be called with get, getRange, set, clear
 	};
 
-	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
+	explicit SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
 
 	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
 

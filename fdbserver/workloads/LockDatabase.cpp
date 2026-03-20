@@ -20,7 +20,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.actor.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 

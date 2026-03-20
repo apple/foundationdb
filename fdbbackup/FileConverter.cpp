@@ -1,5 +1,5 @@
 /*
- * FileConverter.actor.cpp
+ * FileConverter.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -32,7 +32,6 @@
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "fdbclient/BuildFlags.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace file_converter {
 
@@ -277,15 +276,15 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	// The caller must hold on the the arena associated with the mutation.
 	Future<VersionedData> getNextMutation() { return getMutationImpl(this); }
 
-	ACTOR static Future<VersionedData> getMutationImpl(MutationFilesReadProgress* self) {
+	static Future<VersionedData> getMutationImpl(MutationFilesReadProgress* self) {
 		ASSERT(!self->fileProgress.empty() && !self->fileProgress[0]->mutations.empty());
 
-		state Reference<FileProgress> fp = self->fileProgress[0];
-		state VersionedData data = fp->mutations[0];
+		Reference<FileProgress> fp = self->fileProgress[0];
+		VersionedData data = fp->mutations[0];
 		fp->mutations.erase(fp->mutations.begin());
 		if (fp->mutations.empty()) {
 			// decode one more block
-			wait(decodeToVersion(fp, /*version=*/0, self->endVersion, self->getLogFile(fp->idx)));
+			co_await decodeToVersion(fp, /*version=*/0, self->endVersion, self->getLogFile(fp->idx));
 		}
 
 		if (fp->empty()) {
@@ -299,7 +298,7 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 				std::swap(self->fileProgress[i - 1], self->fileProgress[i]);
 			}
 		}
-		return data;
+		co_return data;
 	}
 
 	LogFile& getLogFile(int index) { return files[index]; }
@@ -307,13 +306,12 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 	Future<Void> openLogFiles(Reference<IBackupContainer> container) { return openLogFilesImpl(this, container); }
 
 	// Opens log files in the progress and starts decoding until the beginVersion is seen.
-	ACTOR static Future<Void> openLogFilesImpl(MutationFilesReadProgress* progress,
-	                                           Reference<IBackupContainer> container) {
-		state std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
+	static Future<Void> openLogFilesImpl(MutationFilesReadProgress* progress, Reference<IBackupContainer> container) {
+		std::vector<Future<Reference<IAsyncFile>>> asyncFiles;
 		for (const auto& file : progress->files) {
 			asyncFiles.push_back(container->readFile(file.fileName));
 		}
-		wait(waitForAll(asyncFiles)); // open all files
+		co_await waitForAll(asyncFiles); // open all files
 
 		// Attempt decode the first few blocks of log files until beginVersion is consumed
 		std::vector<Future<Void>> fileDecodes;
@@ -324,37 +322,37 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 			    decodeToVersion(fp, progress->beginVersion, progress->endVersion, progress->getLogFile(i)));
 		}
 
-		wait(waitForAll(fileDecodes));
+		co_await waitForAll(fileDecodes);
 
 		progress->sortAndRemoveEmpty();
-
-		return Void();
 	}
 
 	// Decodes the file until EOF or an mutation >= minVersion and saves these mutations.
 	// Skip mutations >= maxVersion.
-	ACTOR static Future<Void> decodeToVersion(Reference<FileProgress> fp,
-	                                          Version minVersion,
-	                                          Version maxVersion,
-	                                          LogFile file) {
-		if (fp->empty())
-			return Void();
+	static Future<Void> decodeToVersion(Reference<FileProgress> fp,
+	                                    Version minVersion,
+	                                    Version maxVersion,
+	                                    LogFile file) {
+		if (fp->empty()) {
+			co_return;
+		}
 
-		if (!fp->mutations.empty() && fp->mutations.back().version.version >= minVersion)
-			return Void();
+		if (!fp->mutations.empty() && fp->mutations.back().version.version >= minVersion) {
+			co_return;
+		}
 
-		state int64_t len;
+		int64_t len = 0;
 		try {
 			// Read block by block until we see the minVersion
-			loop {
+			while (true) {
 				len = std::min<int64_t>(file.blockSize, file.fileSize - fp->offset);
 				if (len == 0) {
 					fp->eof = true;
-					return Void();
+					co_return;
 				}
 
-				state Standalone<StringRef> buf = makeString(len);
-				int rLen = wait(fp->fd->read(mutateString(buf), len, fp->offset));
+				Standalone<StringRef> buf = makeString(len);
+				int rLen = co_await fp->fd->read(mutateString(buf), len, fp->offset);
 				if (len != rLen)
 					throw restore_bad_read();
 
@@ -365,7 +363,6 @@ struct MutationFilesReadProgress : public ReferenceCounted<MutationFilesReadProg
 				if (fp->decodeBlock(buf, rLen, minVersion, maxVersion))
 					break;
 			}
-			return Void();
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "CorruptedLogFileBlock")
 			    .error(e)
@@ -400,50 +397,47 @@ struct LogFileWriter {
 	}
 
 	// Start a new block if needed, then write the key and value
-	ACTOR static Future<Void> writeKV_impl(LogFileWriter* self, Key k, Value v) {
+	static Future<Void> writeKV_impl(LogFileWriter* self, Key k, Value v) {
 		// If key and value do not fit in this block, end it and start a new one
 		int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 		if (self->file->size() + toWrite > self->blockEnd) {
 			// Write padding if needed
 			int bytesLeft = self->blockEnd - self->file->size();
 			if (bytesLeft > 0) {
-				state Value paddingFFs = fileBackup::makePadding(bytesLeft);
-				wait(self->file->append(paddingFFs.begin(), bytesLeft));
+				Value paddingFFs = fileBackup::makePadding(bytesLeft);
+				co_await self->file->append(paddingFFs.begin(), bytesLeft);
 			}
 
 			// Set new blockEnd
 			self->blockEnd += self->blockSize;
 
 			// write Header
-			wait(self->file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION)));
+			co_await self->file->append((uint8_t*)&BACKUP_AGENT_MLOG_VERSION, sizeof(BACKUP_AGENT_MLOG_VERSION));
 		}
 
-		wait(self->file->appendStringRefWithLen(k));
-		wait(self->file->appendStringRefWithLen(v));
+		co_await self->file->appendStringRefWithLen(k);
+		co_await self->file->appendStringRefWithLen(v);
 
 		// At this point we should be in whatever the current block is or the block size is too small
 		if (self->file->size() > self->blockEnd)
 			throw backup_bad_block_size();
-
-		return Void();
 	}
 
 	Future<Void> writeKV(Key k, Value v) { return writeKV_impl(this, k, v); }
 
 	// Adds a new mutation to an internal buffer and writes out when encountering
 	// a new commitVersion or exceeding the block size.
-	ACTOR static Future<Void> addMutation(LogFileWriter* self, Version commitVersion, MutationListRef mutations) {
-		state Standalone<StringRef> value = BinaryWriter::toValue(mutations, IncludeVersion());
+	static Future<Void> addMutation(LogFileWriter* self, Version commitVersion, MutationListRef mutations) {
+		Standalone<StringRef> value = BinaryWriter::toValue(mutations, IncludeVersion());
 
-		state int part = 0;
+		int part = 0;
 		for (; part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE < value.size(); part++) {
 			StringRef partBuf = value.substr(
 			    part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE,
 			    std::min(value.size() - part * CLIENT_KNOBS->MUTATION_BLOCK_SIZE, CLIENT_KNOBS->MUTATION_BLOCK_SIZE));
 			Standalone<StringRef> key = getBlockKey(commitVersion, part);
-			wait(writeKV_impl(self, key, partBuf));
+			co_await writeKV_impl(self, key, partBuf);
 		}
-		return Void();
 	}
 
 private:
@@ -452,13 +446,12 @@ private:
 	int64_t blockEnd = 0;
 };
 
-ACTOR Future<Void> convert(ConvertParams params) {
-	state Reference<IBackupContainer> container =
-	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
-	state BackupFileList listing = wait(container->dumpFileList());
+Future<Void> convert(ConvertParams params) {
+	Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url, params.proxy, {});
+	BackupFileList listing = co_await container->dumpFileList();
 	std::sort(listing.logs.begin(), listing.logs.end());
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
-	state BackupDescription desc = wait(container->describeBackup());
+	BackupDescription desc = co_await container->describeBackup();
 	std::cout << "\n" << desc.toString() << "\n";
 
 	// std::cout << "Using Protocol Version: 0x" << std::hex << g_network->protocolVersion().version() << std::dec <<
@@ -467,24 +460,24 @@ ACTOR Future<Void> convert(ConvertParams params) {
 	std::vector<LogFile> logs = getRelevantLogFiles(listing.logs, params.begin, params.end);
 	printLogFiles("Range has", logs);
 
-	state Reference<MutationFilesReadProgress> progress(new MutationFilesReadProgress(logs, params.begin, params.end));
+	Reference<MutationFilesReadProgress> progress(new MutationFilesReadProgress(logs, params.begin, params.end));
 
-	wait(progress->openLogFiles(container));
+	co_await progress->openLogFiles(container);
 
-	state int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
-	state Reference<IBackupFile> outFile = wait(container->writeLogFile(params.begin, params.end, blockSize));
-	state LogFileWriter logFile(outFile, blockSize);
+	int blockSize = CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE;
+	Reference<IBackupFile> outFile = co_await container->writeLogFile(params.begin, params.end, blockSize);
+	LogFileWriter logFile(outFile, blockSize);
 	std::cout << "Output file: " << outFile->getFileName() << "\n";
 
-	state MutationList list;
-	state Arena arena;
-	state Version version = invalidVersion;
+	MutationList list;
+	Arena arena;
+	Version version = invalidVersion;
 	while (progress->hasMutations()) {
-		state VersionedData data = wait(progress->getNextMutation());
+		VersionedData data = co_await progress->getNextMutation();
 
 		// emit a mutation batch to file when encounter a new version
 		if (list.totalSize() > 0 && version != data.version.version) {
-			wait(LogFileWriter::addMutation(&logFile, version, list));
+			co_await LogFileWriter::addMutation(&logFile, version, list);
 			list = MutationList();
 			arena = Arena();
 		}
@@ -499,12 +492,10 @@ ACTOR Future<Void> convert(ConvertParams params) {
 		version = data.version.version;
 	}
 	if (list.totalSize() > 0) {
-		wait(LogFileWriter::addMutation(&logFile, version, list));
+		co_await LogFileWriter::addMutation(&logFile, version, list);
 	}
 
-	wait(outFile->finish());
-
-	return Void();
+	co_await outFile->finish();
 }
 
 int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {

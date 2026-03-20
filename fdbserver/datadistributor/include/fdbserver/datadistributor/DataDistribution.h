@@ -1,5 +1,5 @@
 /*
- * DataDistribution.actor.h
+ * DataDistribution.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,16 +18,14 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_G_H)
-#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_G_H
-#include "fdbserver/datadistributor/DataDistribution.actor.g.h"
-#elif !defined(FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_H)
-#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_ACTOR_H
+#pragma once
+#ifndef FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
+#define FDBSERVER_DATADISTRIBUTOR_DATA_DISTRIBUTION_H
 
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/MoveKeys.actor.h"
+#include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/core/ShardMetrics.h"
 #include "fdbserver/core/ShardSizing.h"
@@ -37,10 +35,9 @@
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/TCInfo.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
-#include "fdbclient/DataDistributionConfig.actor.h"
+#include "fdbclient/DataDistributionConfig.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 /////////////////////////////// Data //////////////////////////////////////
 #ifndef __INTEL_COMPILER
@@ -828,5 +825,4 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 #pragma endregion
 #endif
 
-#include "flow/unactorcompiler.h"
 #endif

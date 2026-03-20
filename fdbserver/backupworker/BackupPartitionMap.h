@@ -1,5 +1,5 @@
 /*
- * BackupPartitionMap.actor.h
+ * BackupPartitionMap.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_BACKUPPARTITIONMAP_ACTOR_H
-#define FDBSERVER_BACKUPPARTITIONMAP_ACTOR_H
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -44,5 +42,3 @@ typedef std::vector<Partition> PartitionList;
 typedef std::unordered_map<Tag, PartitionList> PartitionMap;
 
 std::string serializePartitionListJSON(PartitionMap const& PartitionMap);
-
-#endif

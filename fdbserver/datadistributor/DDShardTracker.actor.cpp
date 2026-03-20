@@ -22,7 +22,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/datadistributor/DataDistribution.actor.h"
+#include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ShardSizing.h"

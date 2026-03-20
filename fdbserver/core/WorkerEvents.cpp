@@ -1,5 +1,5 @@
 /*
- * WorkerEvents.actor.cpp
+ * WorkerEvents.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,21 +18,20 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/WorkerEvents.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "fdbserver/core/WorkerEvents.h"
 
-ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
+Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEventOnWorkers(
     std::vector<WorkerDetails> workers,
     std::string eventName) {
 	try {
-		state std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
+		std::vector<Future<ErrorOr<TraceEventFields>>> eventTraces;
 		for (int c = 0; c < workers.size(); c++) {
 			EventLogRequest req =
 			    eventName.size() > 0 ? EventLogRequest(Standalone<StringRef>(eventName)) : EventLogRequest();
 			eventTraces.push_back(errorOr(timeoutError(workers[c].interf.eventLogRequest.getReply(req), 2.0)));
 		}
 
-		wait(waitForAll(eventTraces));
+		co_await waitForAll(eventTraces);
 
 		std::set<std::string> failed;
 		WorkerEvents results;
@@ -47,11 +46,7 @@ ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEve
 			}
 		}
 
-		std::pair<WorkerEvents, std::set<std::string>> val;
-		val.first = results;
-		val.second = failed;
-
-		return val;
+		co_return std::make_pair(std::move(results), std::move(failed));
 	} catch (Error& e) {
 		ASSERT(e.code() ==
 		       error_code_actor_cancelled); // All errors should be filtering through the errorOr actor above
