@@ -21,11 +21,6 @@
 #pragma once
 
 #include "flow/Arena.h"
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_SIMENCRYPTKMSPROXY_ACTOR_G_H)
-#define FDBSERVER_SIMENCRYPTKMSPROXY_ACTOR_G_H
-#include "fdbserver/SimEncryptKmsProxy.actor.g.h"
-#elif !defined(FDBSERVER_SIMENCRYPTKMSPROXY_ACTOR_H)
-#define FDBSERVER_SIMENCRYPTVAULTPROXY_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
@@ -34,7 +29,6 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 using SimEncryptKey = std::string;
 
@@ -146,7 +140,4 @@ struct SimGetEncryptKeysByDomainIdsRequest {
 	}
 };
 
-ACTOR Future<Void> simEncryptKmsProxyCore(struct SimKmsProxyInterface interf);
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_SIMENCRYPTVAULTPROXY_ACTOR_H
+Future<Void> simEncryptKmsProxyCore(struct SimKmsProxyInterface interf);
