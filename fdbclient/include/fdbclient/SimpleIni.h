@@ -1862,9 +1862,9 @@ SI_Error CSimpleIniTempl<SI_CHAR, SI_STRLESS, SI_CONVERTER>::SetLongValue(const 
 	// convert to an ASCII string
 	char szInput[64];
 #if __STDC_WANT_SECURE_LIB__ && !_WIN32_WCE
-	sprintf_s(szInput, a_bUseHex ? "0x%lx" : "%ld", a_nValue);
+	snprintf_s(szInput, sizeof(szInput), a_bUseHex ? "0x%lx" : "%ld", a_nValue);
 #else // !__STDC_WANT_SECURE_LIB__
-	sprintf(szInput, a_bUseHex ? "0x%lx" : "%ld", a_nValue);
+	snprintf(szInput, sizeof(szInput), a_bUseHex ? "0x%lx" : "%ld", a_nValue);
 #endif // __STDC_WANT_SECURE_LIB__
 
 	// convert to output text
@@ -1914,13 +1914,8 @@ SI_Error CSimpleIniTempl<SI_CHAR, SI_STRLESS, SI_CONVERTER>::SetDoubleValue(cons
 	if (!a_pSection || !a_pKey)
 		return SI_FAIL;
 
-	// convert to an ASCII string
 	char szInput[64];
-#if __STDC_WANT_SECURE_LIB__ && !_WIN32_WCE
-	sprintf_s(szInput, "%f", a_nValue);
-#else // !__STDC_WANT_SECURE_LIB__
-	sprintf(szInput, "%f", a_nValue);
-#endif // __STDC_WANT_SECURE_LIB__
+	snprintf(szInput, sizeof(szInput), "%f", a_nValue);
 
 	// convert to output text
 	SI_CHAR szOutput[64];

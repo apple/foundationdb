@@ -29,7 +29,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
@@ -105,7 +105,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			while (true) {
 				Error err;
 				try {
-					co_await store(v, tr.getReadVersion());
+					v = co_await tr.getReadVersion();
 					break;
 				} catch (Error& e) {
 					err = e;

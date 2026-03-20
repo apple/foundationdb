@@ -22,14 +22,14 @@ jobs:
       
       - name: Install Boost via vcpkg
         run: |
-          vcpkg install boost-filesystem:x64-windows boost-iostreams:x64-windows boost-serialization:x64-windows boost-system:x64-windows boost-program-options:x64-windows boost-url:x64-windows boost-context:x64-windows
+          vcpkg install boost-filesystem:x64-windows boost-iostreams:x64-windows boost-serialization:x64-windows boost-system:x64-windows boost-program-options:x64-windows boost-url:x64-windows boost-context:x64-windows lz4:x64-windows
         shell: cmd
-      
+        
       - name: Configure and Build FoundationDB (without Swift)
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DWITH_SWIFT=OFF -DBUILD_TESTING=OFF
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=%VCPKG_INSTALLATION_ROOT%\scripts\buildsystems\vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -DWITH_SWIFT=OFF -DBUILD_TESTING=OFF -DBUILD_DOCUMENTATION=OFF -DWITH_CSHARP=OFF
         shell: cmd
       
       - name: Verify Build Success

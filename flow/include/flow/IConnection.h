@@ -55,8 +55,8 @@ public:
 	// returns when write() can write at least one byte (or may throw an error if the connection dies)
 	virtual Future<Void> onWritable() = 0;
 
-	// Precondition: read() has been called and last returned 0
 	// returns when read() can read at least one byte (or may throw an error if the connection dies)
+	// Typically called after read() has returned 0, but may also be called on a newly accepted connection.
 	virtual Future<Void> onReadable() = 0;
 
 	// Reads as many bytes as possible from the read buffer into [begin,end) and returns the number of bytes read (might

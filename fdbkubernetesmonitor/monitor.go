@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -514,6 +515,35 @@ func (monitor *monitor) updateProcessID(processNumber int, pid int) {
 	monitor.processIDs[processNumber] = pid
 }
 
+// addWatcher adds a watch for the provided file. If an error is returned it will be retried for a maximum of 10 retries.
+// The delay between the retries increases with each retry and the maximum delay is 1 second.
+func addWatcher(fileName string, watcher *fsnotify.Watcher) error {
+	var retryCnt int
+	maxRetryCnt := 10
+
+	baseDelay := 100 * time.Millisecond
+	maxDelay := 1 * time.Second
+
+	var err error
+	for retryCnt < maxRetryCnt {
+		err = watcher.Add(fileName)
+		if err != nil {
+			return nil
+		}
+
+		retryCnt++
+
+		// Double the delay each attempt (100ms → 200ms → 400ms → …)
+		delay := min(baseDelay*(1<<retryCnt), maxDelay)
+		// Add jitter to avoid thundering herd
+		delay += time.Duration(rand.Int64N(int64(delay) / 2))
+
+		time.Sleep(delay)
+	}
+
+	return err
+}
+
 // watchConfiguration detects changes to the monitor configuration file.
 func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
 	for {
@@ -527,7 +557,7 @@ func (monitor *monitor) watchConfiguration(watcher *fsnotify.Watcher) {
 			if event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create {
 				monitor.handleFileChange(event.Name)
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
-				err := watcher.Add(event.Name)
+				err := addWatcher(event.Name, watcher)
 				if err != nil {
 					panic(err)
 				}

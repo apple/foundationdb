@@ -27,7 +27,11 @@ project(foundationdb
   VERSION 8.0.0
   DESCRIPTION "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions."
   HOMEPAGE_URL "http://www.foundationdb.org/"
-  LANGUAGES C CXX ASM Swift)
+  LANGUAGES C CXX ASM)
+
+if(WITH_SWIFT)
+  enable_language(Swift)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 

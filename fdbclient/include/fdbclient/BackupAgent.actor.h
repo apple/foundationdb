@@ -665,7 +665,7 @@ class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 	                                                     Snapshot snapshot);
 
 public:
-	TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
+	explicit TagUidMap(const StringRef& prefix) : TagMap("tag->uid/"_sr.withPrefix(prefix)), prefix(prefix) {}
 
 	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr,
 	                                         Snapshot snapshot = Snapshot::False) {
@@ -685,7 +685,7 @@ public:
 		static TaskParam<UID> uid() { return __FUNCTION__sr; }
 	} TaskParams;
 
-	KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
+	explicit KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
 	  : KeyBackedClass(prefix), uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
 
 	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task)
@@ -811,8 +811,8 @@ inline Reference<IBackupContainer> TupleCodec<Reference<IBackupContainer>>::unpa
 
 class BackupConfig : public KeyBackedTaskConfig {
 public:
-	BackupConfig(UID uid = UID()) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, uid) {}
-	BackupConfig(Reference<Task> task) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, task) {}
+	explicit BackupConfig(UID uid = UID()) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, uid) {}
+	explicit BackupConfig(Reference<Task> task) : KeyBackedTaskConfig(fileBackupPrefixRange.begin, task) {}
 
 	// rangeFileMap maps a keyrange file's End to its Begin and Filename
 	struct RangeSlice {
@@ -1012,7 +1012,8 @@ public:
 
 // Helper class for reading restore data from a buffer and throwing the right errors.
 struct StringRefReader {
-	StringRefReader(StringRef s = StringRef(), Error e = Error()) : rptr(s.begin()), end(s.end()), failure_error(e) {}
+	explicit StringRefReader(StringRef s = StringRef(), Error e = Error())
+	  : rptr(s.begin()), end(s.end()), failure_error(e) {}
 
 	// Return remainder of data as a StringRef
 	StringRef remainder() { return StringRef(rptr, end - rptr); }

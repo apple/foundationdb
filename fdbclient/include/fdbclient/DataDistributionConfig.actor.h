@@ -42,7 +42,7 @@
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;
 
-	DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
+	explicit(false) DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
 	  : replicationFactor(replicationFactor), teamID(teamID) {}
 
 	Optional<int> replicationFactor;
@@ -93,7 +93,7 @@ template <>
 struct fmt::formatter<DDRangeConfig> : FormatUsingTraceable<DDRangeConfig> {};
 
 struct DDConfiguration : public KeyBackedClass {
-	DDConfiguration(KeyRef prefix = SystemKey("\xff\x02/ddconfig/"_sr)) : KeyBackedClass(prefix) {}
+	explicit DDConfiguration(KeyRef prefix = SystemKey("\xff\x02/ddconfig/"_sr)) : KeyBackedClass(prefix) {}
 
 	// RangeConfigMap is a  KeyBackedRangeMap of DDRangeConfig values describing various option overrides for key ranges
 	typedef KeyBackedRangeMap<Key,

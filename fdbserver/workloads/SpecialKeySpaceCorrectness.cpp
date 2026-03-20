@@ -29,7 +29,7 @@
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.actor.h"
-#include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/core/workloads.actor.h"
 #include "flow/IRandom.h"
 
 struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
@@ -332,8 +332,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				}
 				defaultTx1->addReadConflictRange(singleKeyRange("testKeylll"_sr));
 				defaultTx1->addWriteConflictRange(singleKeyRange("testKeylll"_sr));
-				co_await store(readresult1, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
-				co_await store(writeResult1, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+				readresult1 = co_await defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
+				writeResult1 = co_await defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
 				co_await defaultTx1->commit();
 				CODE_PROBE(true, "conflict range commit succeeded");
 			} catch (Error& e) {
@@ -341,8 +341,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					throw;
 				CODE_PROBE(true, "conflict range commit error thrown");
 			}
-			co_await store(readresult2, defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
-			co_await store(writeResult2, defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
+			readresult2 = co_await defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
+			writeResult2 = co_await defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(readresult1 == readresult2);
 			ASSERT(writeResult1 == writeResult2);
 			defaultTx1->reset();

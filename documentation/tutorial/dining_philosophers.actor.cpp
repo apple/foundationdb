@@ -102,7 +102,7 @@ struct GetForkRequest {
 	ForkState forkState;
 	ReplyPromise<ForkState> reply;
 
-	GetForkRequest(ForkState fork_state) : forkState(fork_state) {}
+	explicit GetForkRequest(ForkState fork_state) : forkState(fork_state) {}
 	GetForkRequest() = default;
 
 	template <class Ar>
@@ -116,7 +116,7 @@ struct ReleaseForkRequest {
 	ForkState forkState;
 	ReplyPromise<ForkState> reply;
 
-	ReleaseForkRequest(ForkState fork_state) : forkState(fork_state) {}
+	explicit ReleaseForkRequest(ForkState fork_state) : forkState(fork_state) {}
 	ReleaseForkRequest() = default;
 
 	template <class Ar>

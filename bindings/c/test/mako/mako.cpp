@@ -1145,59 +1145,62 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		static struct option long_options[] = {
 			/* name, has_arg, flag, val */
 			/* options requiring an argument */
-			{ "api_version", required_argument, NULL, 'a' },
-			{ "cluster", required_argument, NULL, 'c' },
-			{ "num_databases", required_argument, NULL, 'd' },
-			{ "procs", required_argument, NULL, 'p' },
-			{ "threads", required_argument, NULL, 't' },
-			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
-			{ "rows", required_argument, NULL, 'r' },
-			{ "load_factor", required_argument, NULL, 'l' },
-			{ "seconds", required_argument, NULL, 's' },
-			{ "iteration", required_argument, NULL, 'i' },
-			{ "keylen", required_argument, NULL, ARG_KEYLEN },
-			{ "vallen", required_argument, NULL, ARG_VALLEN },
-			{ "transaction", required_argument, NULL, 'x' },
-			{ "tps", required_argument, NULL, ARG_TPS },
-			{ "tpsmax", required_argument, NULL, ARG_TPSMAX },
-			{ "tpsmin", required_argument, NULL, ARG_TPSMIN },
-			{ "tpsinterval", required_argument, NULL, ARG_TPSINTERVAL },
-			{ "tpschange", required_argument, NULL, ARG_TPSCHANGE },
-			{ "sampling", required_argument, NULL, ARG_SAMPLING },
-			{ "verbose", required_argument, NULL, 'v' },
-			{ "mode", required_argument, NULL, 'm' },
-			{ "knobs", required_argument, NULL, ARG_KNOBS },
-			{ "loggroup", required_argument, NULL, ARG_LOGGROUP },
-			{ "tracepath", required_argument, NULL, ARG_TRACEPATH },
-			{ "trace_format", required_argument, NULL, ARG_TRACEFORMAT },
-			{ "streaming", required_argument, NULL, ARG_STREAMING_MODE },
-			{ "txntrace", required_argument, NULL, ARG_TXNTRACE },
-			{ "txntagging", required_argument, NULL, ARG_TXNTAGGING },
-			{ "txntagging_prefix", required_argument, NULL, ARG_TXNTAGGINGPREFIX },
-			{ "client_threads_per_version", required_argument, NULL, ARG_CLIENT_THREADS_PER_VERSION },
-			{ "bg_file_path", required_argument, NULL, ARG_BG_FILE_PATH },
-			{ "distributed_tracer_client", required_argument, NULL, ARG_DISTRIBUTED_TRACER_CLIENT },
-			{ "tls_certificate_file", required_argument, NULL, ARG_TLS_CERTIFICATE_FILE },
-			{ "tls_key_file", required_argument, NULL, ARG_TLS_KEY_FILE },
-			{ "tls_ca_file", required_argument, NULL, ARG_TLS_CA_FILE },
-			{ "authorization_keypair_id", required_argument, NULL, ARG_AUTHORIZATION_KEYPAIR_ID },
-			{ "authorization_private_key_pem_file", required_argument, NULL, ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE },
-			{ "transaction_timeout_tx", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_TX },
-			{ "transaction_timeout_db", required_argument, NULL, ARG_TRANSACTION_TIMEOUT_DB },
+			{ "api_version", required_argument, nullptr, 'a' },
+			{ "cluster", required_argument, nullptr, 'c' },
+			{ "num_databases", required_argument, nullptr, 'd' },
+			{ "procs", required_argument, nullptr, 'p' },
+			{ "threads", required_argument, nullptr, 't' },
+			{ "async_xacts", required_argument, nullptr, ARG_ASYNC },
+			{ "rows", required_argument, nullptr, 'r' },
+			{ "load_factor", required_argument, nullptr, 'l' },
+			{ "seconds", required_argument, nullptr, 's' },
+			{ "iteration", required_argument, nullptr, 'i' },
+			{ "keylen", required_argument, nullptr, ARG_KEYLEN },
+			{ "vallen", required_argument, nullptr, ARG_VALLEN },
+			{ "transaction", required_argument, nullptr, 'x' },
+			{ "tps", required_argument, nullptr, ARG_TPS },
+			{ "tpsmax", required_argument, nullptr, ARG_TPSMAX },
+			{ "tpsmin", required_argument, nullptr, ARG_TPSMIN },
+			{ "tpsinterval", required_argument, nullptr, ARG_TPSINTERVAL },
+			{ "tpschange", required_argument, nullptr, ARG_TPSCHANGE },
+			{ "sampling", required_argument, nullptr, ARG_SAMPLING },
+			{ "verbose", required_argument, nullptr, 'v' },
+			{ "mode", required_argument, nullptr, 'm' },
+			{ "knobs", required_argument, nullptr, ARG_KNOBS },
+			{ "loggroup", required_argument, nullptr, ARG_LOGGROUP },
+			{ "tracepath", required_argument, nullptr, ARG_TRACEPATH },
+			{ "trace_format", required_argument, nullptr, ARG_TRACEFORMAT },
+			{ "streaming", required_argument, nullptr, ARG_STREAMING_MODE },
+			{ "txntrace", required_argument, nullptr, ARG_TXNTRACE },
+			{ "txntagging", required_argument, nullptr, ARG_TXNTAGGING },
+			{ "txntagging_prefix", required_argument, nullptr, ARG_TXNTAGGINGPREFIX },
+			{ "client_threads_per_version", required_argument, nullptr, ARG_CLIENT_THREADS_PER_VERSION },
+			{ "bg_file_path", required_argument, nullptr, ARG_BG_FILE_PATH },
+			{ "distributed_tracer_client", required_argument, nullptr, ARG_DISTRIBUTED_TRACER_CLIENT },
+			{ "tls_certificate_file", required_argument, nullptr, ARG_TLS_CERTIFICATE_FILE },
+			{ "tls_key_file", required_argument, nullptr, ARG_TLS_KEY_FILE },
+			{ "tls_ca_file", required_argument, nullptr, ARG_TLS_CA_FILE },
+			{ "authorization_keypair_id", required_argument, nullptr, ARG_AUTHORIZATION_KEYPAIR_ID },
+			{ "authorization_private_key_pem_file",
+			  required_argument,
+			  nullptr,
+			  ARG_AUTHORIZATION_PRIVATE_KEY_PEM_FILE },
+			{ "transaction_timeout_tx", required_argument, nullptr, ARG_TRANSACTION_TIMEOUT_TX },
+			{ "transaction_timeout_db", required_argument, nullptr, ARG_TRANSACTION_TIMEOUT_DB },
 			/* options which may or may not have an argument */
-			{ "json_report", optional_argument, NULL, ARG_JSON_REPORT },
-			{ "stats_export_path", optional_argument, NULL, ARG_EXPORT_PATH },
+			{ "json_report", optional_argument, nullptr, ARG_JSON_REPORT },
+			{ "stats_export_path", optional_argument, nullptr, ARG_EXPORT_PATH },
 			/* options without an argument */
-			{ "help", no_argument, NULL, 'h' },
-			{ "zipf", no_argument, NULL, 'z' },
-			{ "commitget", no_argument, NULL, ARG_COMMITGET },
-			{ "flatbuffers", no_argument, NULL, ARG_FLATBUFFERS },
-			{ "prefix_padding", no_argument, NULL, ARG_PREFIXPADDING },
-			{ "trace", no_argument, NULL, ARG_TRACE },
-			{ "version", no_argument, NULL, ARG_VERSION },
-			{ "disable_client_bypass", no_argument, NULL, ARG_DISABLE_CLIENT_BYPASS },
-			{ "disable_ryw", no_argument, NULL, ARG_DISABLE_RYW },
-			{ NULL, 0, NULL, 0 }
+			{ "help", no_argument, nullptr, 'h' },
+			{ "zipf", no_argument, nullptr, 'z' },
+			{ "commitget", no_argument, nullptr, ARG_COMMITGET },
+			{ "flatbuffers", no_argument, nullptr, ARG_FLATBUFFERS },
+			{ "prefix_padding", no_argument, nullptr, ARG_PREFIXPADDING },
+			{ "trace", no_argument, nullptr, ARG_TRACE },
+			{ "version", no_argument, nullptr, ARG_VERSION },
+			{ "disable_client_bypass", no_argument, nullptr, ARG_DISABLE_CLIENT_BYPASS },
+			{ "disable_ryw", no_argument, nullptr, ARG_DISABLE_RYW },
+			{ nullptr, 0, nullptr, 0 }
 		};
 
 /* For optional arguments, optarg is only set when the argument is passed as "--option=[ARGUMENT]" but not as
@@ -1226,9 +1229,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 		case 'c': {
 			const char delim[] = ",";
 			char* cluster_file = strtok(optarg, delim);
-			while (cluster_file != NULL) {
+			while (cluster_file != nullptr) {
 				strcpy(args.cluster_files[args.num_fdb_clusters++], cluster_file);
-				cluster_file = strtok(NULL, delim);
+				cluster_file = strtok(nullptr, delim);
 			}
 			break;
 		}
@@ -1274,8 +1277,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.mode = MODE_RUN;
 			} else if (strcmp(optarg, "report") == 0) {
 				args.mode = MODE_REPORT;
-				int i = optind;
-				for (; i < argc; i++) {
+				for (int i = optind; i < argc; i++) {
 					if (argv[i][0] != '-') {
 						const std::string report_file = argv[i];
 						strncpy(args.report_files[args.num_report_files], report_file.c_str(), report_file.size());
@@ -2183,7 +2185,7 @@ int statsProcessMain(Arguments const& args,
 	if (args.verbose >= VERBOSE_DEFAULT)
 		printStatsHeader(args, false, true, false);
 
-	FILE* fp = NULL;
+	FILE* fp = nullptr;
 	if (args.json_output_path[0] != '\0') {
 		fp = fopen(args.json_output_path, "w");
 		fmt::fprintf(fp, "{\"makoArgs\": {");
@@ -2358,7 +2360,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.mode == MODE_REPORT) {
 		WorkflowStatistics stats = mergeSketchReport(args);
-		printWorkerStats(stats, args, NULL, true);
+		printWorkerStats(stats, args, nullptr, true);
 		return 0;
 	}
 
@@ -2389,7 +2391,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* map it */
-	shm = mmap(NULL, shmsize, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0);
+	shm = mmap(nullptr, shmsize, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0);
 	if (shm == MAP_FAILED) {
 		logr.error("mmap (fd:{} size:{}) failed", shmfd, shmsize);
 		return -1;

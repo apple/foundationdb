@@ -40,14 +40,14 @@ namespace HTTP {
 std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
 	std::string o;
 	o.reserve(s.size() * 3);
-	char buf[4];
+	char buf[32];
 	for (auto c : s) {
 		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
 			o.append(&c, 1);
 		else if (c == '/')
 			o.append(encodeSlash ? "%2F" : "/");
 		else {
-			sprintf(buf, "%%%.02X", c);
+			snprintf(buf, sizeof(buf), "%%%.02X", c);
 			o.append(buf);
 		}
 	}
@@ -57,12 +57,12 @@ std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
 std::string urlEncode(const std::string& s) {
 	std::string o;
 	o.reserve(s.size() * 3);
-	char buf[4];
+	char buf[32];
 	for (auto c : s)
 		if (std::isalnum(c) || c == '?' || c == '/' || c == '-' || c == '_' || c == '.' || c == ',' || c == ':')
 			o.append(&c, 1);
 		else {
-			sprintf(buf, "%%%.02X", c);
+			snprintf(buf, sizeof(buf), "%%%.02X", c);
 			o.append(buf);
 		}
 	return o;

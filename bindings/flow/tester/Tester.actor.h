@@ -135,9 +135,9 @@ struct DirectoryOrSubspace {
 	Optional<FDB::Subspace*> subspace;
 
 	DirectoryOrSubspace() {}
-	DirectoryOrSubspace(Reference<FDB::IDirectory> directory) : directory(directory) {}
-	DirectoryOrSubspace(FDB::Subspace* subspace) : subspace(subspace) {}
-	DirectoryOrSubspace(Reference<FDB::DirectorySubspace> dirSubspace)
+	explicit DirectoryOrSubspace(Reference<FDB::IDirectory> directory) : directory(directory) {}
+	explicit DirectoryOrSubspace(FDB::Subspace* subspace) : subspace(subspace) {}
+	explicit DirectoryOrSubspace(Reference<FDB::DirectorySubspace> dirSubspace)
 	  : directory(dirSubspace), subspace(dirSubspace.getPtr()) {}
 
 	bool valid() { return directory.present() || subspace.present(); }
@@ -173,7 +173,7 @@ struct DirectoryTesterData {
 	}
 
 	DirectoryTesterData() : directoryListIndex(0), directoryErrorIndex(0) {
-		directoryList.push_back(Reference<FDB::IDirectory>(new FDB::DirectoryLayer()));
+		directoryList.push_back(DirectoryOrSubspace(Reference<FDB::IDirectory>(new FDB::DirectoryLayer())));
 	}
 
 	template <class T>
@@ -204,7 +204,7 @@ struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
 		    instruction->instruction.toString(), Reference<FlowTesterData>::addRef(this), instruction);
 	}
 
-	FlowTesterData(FDB::API* api) { this->api = api; }
+	explicit FlowTesterData(FDB::API* api) { this->api = api; }
 };
 
 std::string tupleToString(FDB::Tuple const& tuple);
