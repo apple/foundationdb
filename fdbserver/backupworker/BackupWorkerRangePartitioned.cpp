@@ -1,5 +1,5 @@
 /*
- * BackupWorkerRangePartitioned.actor.cpp
+ * BackupWorkerRangePartitioned.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -183,17 +183,17 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 		err = e;
 	}
 
-	    if (err.code() == error_code_worker_removed) {
-			try {
-				co_await done;
-			} catch (Error& shutdownErr) {
-				TraceEvent("BWRangePartitionedShutdownError", self.myId).errorUnsuppressed(shutdownErr);
-			}
+	if (err.code() == error_code_worker_removed) {
+		try {
+			co_await done;
+		} catch (Error& shutdownErr) {
+			TraceEvent("BWRangePartitionedShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 		}
-		TraceEvent("BWRangePartitionedTerminated", self.myId).errorUnsuppressed(err);
-		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
-			throw err;
-	    }
+	}
+	TraceEvent("BWRangePartitionedTerminated", self.myId).errorUnsuppressed(err);
+	if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
+		throw err;
+	}
 }
 
 Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
