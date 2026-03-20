@@ -600,8 +600,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
-				int i = 0;
-				for (; i < dataMoves.size(); ++i) {
+				for (int i = 0; i < dataMoves.size(); ++i) {
 					UID dataMoveId = decodeDataMoveKey(dataMoves[i].key);
 					DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);
