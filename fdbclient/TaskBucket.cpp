@@ -209,7 +209,7 @@ public:
 
 		// In priority order from highest to lowest, wait for fetch to finish and if it found a task then cancel the
 		// rest.
-		for (pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri) {
+		for (int pri = CLIENT_KNOBS->TASKBUCKET_MAX_PRIORITY; pri >= 0; --pri) {
 			// If we already have a task key then cancel this fetch
 			if (taskKey.present())
 				taskKeyFutures[pri].cancel();
