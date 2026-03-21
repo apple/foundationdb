@@ -1,5 +1,5 @@
 /*
- * SpecialKeySpace.actor.h
+ * SpecialKeySpace.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,18 +20,11 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_SPECIALKEYSPACE_ACTOR_G_H)
-#define FDBCLIENT_SPECIALKEYSPACE_ACTOR_G_H
-#include "fdbclient/SpecialKeySpace.actor.g.h"
-#elif !defined(FDBCLIENT_SPECIALKEYSPACE_ACTOR_H)
-#define FDBCLIENT_SPECIALKEYSPACE_ACTOR_H
-
 #include "flow/flow.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class SpecialKeyRangeReadImpl {
 public:
@@ -131,11 +124,11 @@ public:
 
 	bool isAsync() const override { return true; }
 
-	ACTOR static Future<RangeResult> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
-	                                                    ReadYourWritesTransaction* ryw,
-	                                                    KeyRangeRef kr,
-	                                                    GetRangeLimits limits,
-	                                                    KeyRangeMap<Optional<RangeResult>>* cache) {
+	static Future<RangeResult> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
+	                                              ReadYourWritesTransaction* ryw,
+	                                              KeyRangeRef kr,
+	                                              GetRangeLimits limits,
+	                                              KeyRangeMap<Optional<RangeResult>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		ASSERT(cache != nullptr);
 		ASSERT(cache->rangeContaining(kr.begin) == cache->rangeContainingKeyBefore(kr.end));
@@ -143,7 +136,7 @@ public:
 			// For simplicity, every time we need to cache, we read the whole range
 			// Although sometimes the range can be narrowed,
 			// there is not a general way to do it in complicated scenarios
-			RangeResult result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange(), limits));
+			RangeResult result_ = co_await skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange(), limits);
 			cache->insert(skrAyncImpl->getKeyRange(), result_);
 		}
 		const auto& allResults = (*cache)[kr.begin].get();
@@ -155,9 +148,9 @@ public:
 		if (start < end) {
 			RangeResult result = RangeResultRef(allResults.slice(start, end), false);
 			result.arena().dependsOn(allResults.arena());
-			return result;
-		} else
-			return RangeResult();
+			co_return result;
+		}
+		co_return RangeResult();
 	}
 };
 
@@ -235,20 +228,20 @@ public:
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
 
 private:
-	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
+	static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
-	                                               ReadYourWritesTransaction* ryw,
-	                                               KeySelector begin,
-	                                               KeySelector end,
-	                                               GetRangeLimits limits,
-	                                               Reverse reverse);
-	ACTOR static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
-	                                                          ReadYourWritesTransaction* ryw,
-	                                                          KeySelector begin,
-	                                                          KeySelector end,
-	                                                          GetRangeLimits limits,
-	                                                          Reverse reverse);
+	static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
+	                                         ReadYourWritesTransaction* ryw,
+	                                         KeySelector begin,
+	                                         KeySelector end,
+	                                         GetRangeLimits limits,
+	                                         Reverse reverse);
+	static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
+	                                                    ReadYourWritesTransaction* ryw,
+	                                                    KeySelector begin,
+	                                                    KeySelector end,
+	                                                    GetRangeLimits limits,
+	                                                    Reverse reverse);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
@@ -568,12 +561,9 @@ public:
 // If the underlying set of key-value pairs of a key space is not changing, then we expect repeating a read to give the
 // same result. Additionally, we can generate the expected result of any read if that read is reading a subrange. This
 // actor performs a read of an arbitrary subrange of [begin, end) and validates the results.
-ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
-                                               KeySelector begin,
-                                               KeySelector end,
-                                               GetRangeLimits limits,
-                                               Reverse reverse,
-                                               RangeResult result);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                         KeySelector begin,
+                                         KeySelector end,
+                                         GetRangeLimits limits,
+                                         Reverse reverse,
+                                         RangeResult result);
