@@ -235,20 +235,20 @@ public:
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
 
 private:
-	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
+	static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
-	                                               ReadYourWritesTransaction* ryw,
-	                                               KeySelector begin,
-	                                               KeySelector end,
-	                                               GetRangeLimits limits,
-	                                               Reverse reverse);
-	ACTOR static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
-	                                                          ReadYourWritesTransaction* ryw,
-	                                                          KeySelector begin,
-	                                                          KeySelector end,
-	                                                          GetRangeLimits limits,
-	                                                          Reverse reverse);
+	static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
+	                                         ReadYourWritesTransaction* ryw,
+	                                         KeySelector begin,
+	                                         KeySelector end,
+	                                         GetRangeLimits limits,
+	                                         Reverse reverse);
+	static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
+	                                                    ReadYourWritesTransaction* ryw,
+	                                                    KeySelector begin,
+	                                                    KeySelector end,
+	                                                    GetRangeLimits limits,
+	                                                    Reverse reverse);
 
 	KeyRangeMap<SpecialKeyRangeReadImpl*> readImpls;
 	KeyRangeMap<SpecialKeySpace::MODULE> modules;
@@ -568,12 +568,12 @@ public:
 // If the underlying set of key-value pairs of a key space is not changing, then we expect repeating a read to give the
 // same result. Additionally, we can generate the expected result of any read if that read is reading a subrange. This
 // actor performs a read of an arbitrary subrange of [begin, end) and validates the results.
-ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
-                                               KeySelector begin,
-                                               KeySelector end,
-                                               GetRangeLimits limits,
-                                               Reverse reverse,
-                                               RangeResult result);
+Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                         KeySelector begin,
+                                         KeySelector end,
+                                         GetRangeLimits limits,
+                                         Reverse reverse,
+                                         RangeResult result);
 
 #include "flow/unactorcompiler.h"
 #endif
