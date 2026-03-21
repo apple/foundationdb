@@ -33,7 +33,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ProcessInterface.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
