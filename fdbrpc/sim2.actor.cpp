@@ -464,20 +464,20 @@ private:
 		peer.clear();
 	}
 
-	ACTOR static Future<Void> sender(Sim2Conn* self) {
+	static Future<Void> sender(Sim2Conn* self) {
 		loop {
-			wait(self->writtenBytes.onChange()); // takes place on peer!
+			co_await self->writtenBytes.onChange(); // takes place on peer!
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
-			wait(delay(.002 * deterministicRandom()->random01()));
+			co_await delay(.002 * deterministicRandom()->random01());
 			self->sentBytes.set(self->writtenBytes.get()); // or possibly just some sometimes...
 		}
 	}
-	ACTOR static Future<Void> receiver(Sim2Conn* self) {
+	static Future<Void> receiver(Sim2Conn* self) {
 		loop {
 			if (self->sentBytes.get() != self->receivedBytes.get())
-				wait(g_simulator->onProcess(self->peerProcess));
+				co_await g_simulator->onProcess(self->peerProcess);
 			while (self->sentBytes.get() == self->receivedBytes.get())
-				wait(self->sentBytes.onChange());
+				co_await self->sentBytes.onChange();
 			ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 
 			// Simulated network disconnection. Make sure to only throw connection_failed() on the sender process.
@@ -489,33 +489,33 @@ private:
 				throw connection_failed();
 			}
 
-			state int64_t pos =
+			int64_t pos =
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			wait(delay(g_clogging.getSendDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection())));
-			wait(g_simulator->onProcess(self->process));
+			co_await delay(g_clogging.getSendDelay(
+			    self->peerProcess->address, self->process->address, self->isStableConnection()));
+			co_await g_simulator->onProcess(self->process);
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
-			wait(delay(g_clogging.getRecvDelay(
-			    self->peerProcess->address, self->process->address, self->isStableConnection())));
+			co_await delay(g_clogging.getRecvDelay(
+			    self->peerProcess->address, self->process->address, self->isStableConnection()));
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
-				wait(Future<Void>(Never()));
+				co_await Future<Void>(Never());
 			}
 			self->receivedBytes.set(pos);
-			wait(Future<Void>(Void())); // Prior notification can delete self and cancel this actor
+			co_await Future<Void>(Void()); // Prior notification can delete self and cancel this actor
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
 		}
 	}
-	ACTOR static Future<Void> whenReadable(Sim2Conn* self) {
+	static Future<Void> whenReadable(Sim2Conn* self) {
 		try {
 			loop {
 				if (self->readBytes.get() != self->receivedBytes.get()) {
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
-					return Void();
+					co_return;
 				}
-				wait(self->receivedBytes.onChange());
+				co_await self->receivedBytes.onChange();
 				self->rollRandomClose();
 			}
 		} catch (Error& e) {
@@ -523,23 +523,23 @@ private:
 			throw;
 		}
 	}
-	ACTOR static Future<Void> whenWritable(Sim2Conn* self) {
+	static Future<Void> whenWritable(Sim2Conn* self) {
 		try {
 			loop {
 				if (!self->peer)
-					return Void();
+					co_return;
 				if (self->peer->availableSendBufferForPeer() > 0) {
 					ASSERT(g_simulator->getCurrentProcess() == self->process);
-					return Void();
+					co_return;
 				}
 				try {
-					wait(self->peer->receivedBytes.onChange());
+					co_await self->peer->receivedBytes.onChange();
 					ASSERT(g_simulator->getCurrentProcess() == self->peerProcess);
 				} catch (Error& e) {
 					if (e.code() != error_code_broken_promise)
 						throw;
 				}
-				wait(g_simulator->onProcess(self->process));
+				co_await g_simulator->onProcess(self->process);
 			}
 		} catch (Error& e) {
 			ASSERT(g_simulator->getCurrentProcess() == self->process);
@@ -573,18 +573,19 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> trackLeakedConnection(Sim2Conn* self) {
+	static Future<Void> trackLeakedConnection(Sim2Conn* self) {
 		// FIXME: we could also just implement connection idle closing for sim http server instead
 		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
-			return Void();
+			co_return;
 		}
-		wait(g_simulator->onProcess(self->process));
+		co_await g_simulator->onProcess(self->process);
 
 		if (self->process->address.isPublic()) {
-			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
-			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+			co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT *
+			                   1.5 +
+			               FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT);
 		} else {
-			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5));
+			co_await delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5);
 		}
 		TraceEvent(SevError, "LeakedConnection", self->dbgid)
 		    .error(connection_leaked())
@@ -594,7 +595,7 @@ private:
 		    .detail("PeerAddress", self->peerEndpoint)
 		    .detail("PeerId", self->peerId)
 		    .detail("Opened", self->opened);
-		return Void();
+		co_return;
 	}
 };
 
@@ -633,14 +634,14 @@ public:
 
 	static bool should_poll() { return false; }
 
-	ACTOR static Future<Reference<IAsyncFile>> open(
+	static Future<Reference<IAsyncFile>> open(
 	    std::string filename,
 	    int flags,
 	    int mode,
 	    Reference<DiskParameters> diskParameters = makeReference<DiskParameters>(25000, 150000000),
 	    bool delayOnWrite = true) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-		state TaskPriority currentTaskID = g_network->getCurrentTask();
+		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
+		TaskPriority currentTaskID = g_network->getCurrentTask();
 
 		if (++openFileCount >= 6000) {
 			TraceEvent(SevError, "TooManyFiles").log();
@@ -655,10 +656,11 @@ public:
 		// filename.  We add ".part" below, so we need to stay under 250.
 		ASSERT(basename(filename).size() < 250);
 
-		wait(g_simulator->onMachine(currentProcess));
+		co_await g_simulator->onMachine(currentProcess);
+		Error err;
 		try {
-			wait(delay(FLOW_KNOBS->MIN_OPEN_TIME +
-			           deterministicRandom()->random01() * (FLOW_KNOBS->MAX_OPEN_TIME - FLOW_KNOBS->MIN_OPEN_TIME)));
+			co_await delay(FLOW_KNOBS->MIN_OPEN_TIME +
+			               deterministicRandom()->random01() * (FLOW_KNOBS->MAX_OPEN_TIME - FLOW_KNOBS->MIN_OPEN_TIME));
 
 			std::string open_filename = filename;
 			if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
@@ -680,14 +682,14 @@ public:
 
 			platform::makeTemporary(open_filename.c_str());
 			SimpleFile* simpleFile = new SimpleFile(h, diskParameters, delayOnWrite, filename, open_filename, flags);
-			state Reference<IAsyncFile> file = Reference<IAsyncFile>(simpleFile);
-			wait(g_simulator->onProcess(currentProcess, currentTaskID));
-			return file;
+			Reference<IAsyncFile> file = Reference<IAsyncFile>(simpleFile);
+			co_await g_simulator->onProcess(currentProcess, currentTaskID);
+			co_return file;
 		} catch (Error& e) {
-			state Error err = e;
-			wait(g_simulator->onProcess(currentProcess, currentTaskID));
-			throw err;
+			err = e;
 		}
+		co_await g_simulator->onProcess(currentProcess, currentTaskID);
+		throw err;
 	}
 
 	void addref() override { ReferenceCounted<SimpleFile>::addref(); }
@@ -753,10 +755,10 @@ private:
 		return outFlags;
 	}
 
-	ACTOR static Future<int> read_impl(SimpleFile* self, void* data, int length, int64_t offset) {
+	static Future<int> read_impl(SimpleFile* self, void* data, int length, int64_t offset) {
 		ASSERT((self->flags & IAsyncFile::OPEN_NO_AIO) != 0 ||
 		       ((uintptr_t)data % 4096 == 0 && length % 4096 == 0 && offset % 4096 == 0)); // Required by KAIO.
-		state UID opId = deterministicRandom()->randomUniqueID();
+		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fmt::print(randLog,
 			           "SFR1 {0} {1} {2} {3} {4}\n",
@@ -766,7 +768,7 @@ private:
 			           length,
 			           offset);
 
-		wait(waitUntilDiskReady(self->diskParameters, length));
+		co_await waitUntilDiskReady(self->diskParameters, length);
 
 		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 1);
@@ -795,11 +797,11 @@ private:
 		INJECT_FAULT(io_timeout, "SimpleFile::read"); // SimpleFile::read io_timeout injected
 		INJECT_FAULT(io_error, "SimpleFile::read"); // SimpleFile::read io_error injected
 
-		return read_bytes;
+		co_return read_bytes;
 	}
 
-	ACTOR static Future<Void> write_impl(SimpleFile* self, StringRef data, int64_t offset) {
-		state UID opId = deterministicRandom()->randomUniqueID();
+	static Future<Void> write_impl(SimpleFile* self, StringRef data, int64_t offset) {
+		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog) {
 			uint32_t a = crc32c_append(0, data.begin(), data.size());
 			fmt::print(randLog,
@@ -813,7 +815,7 @@ private:
 		}
 
 		if (self->delayOnWrite)
-			wait(waitUntilDiskReady(self->diskParameters, data.size()));
+			co_await waitUntilDiskReady(self->diskParameters, data.size());
 
 		if (_lseeki64(self->h, offset, SEEK_SET) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError").detail("Location", 3);
@@ -844,11 +846,11 @@ private:
 		INJECT_FAULT(io_timeout, "SimpleFile::write"); // SimpleFile::write inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::write"); // SimpleFile::write inject io_error
 
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
-		state UID opId = deterministicRandom()->randomUniqueID();
+	static Future<Void> truncate_impl(SimpleFile* self, int64_t size) {
+		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fmt::print(
 			    randLog, "SFT1 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), size);
@@ -859,7 +861,7 @@ private:
 		}
 
 		if (self->delayOnWrite)
-			wait(waitUntilDiskReady(self->diskParameters, 0));
+			co_await waitUntilDiskReady(self->diskParameters, 0);
 
 		if (_chsize(self->h, (long)size) == -1) {
 			TraceEvent(SevWarn, "SimpleFileIOError")
@@ -881,12 +883,12 @@ private:
 		INJECT_FAULT(io_timeout, "SimpleFile::truncate"); // SimpleFile::truncate inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::truncate"); // SimpleFile::truncate inject io_error
 
-		return Void();
+		co_return;
 	}
 
 	// Simulated sync does not actually do anything besides wait a random amount of time
-	ACTOR static Future<Void> sync_impl(SimpleFile* self) {
-		state UID opId = deterministicRandom()->randomUniqueID();
+	static Future<Void> sync_impl(SimpleFile* self) {
+		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog,
 			        "SFC1 %s %s %s\n",
@@ -895,7 +897,7 @@ private:
 			        opId.shortString().c_str());
 
 		if (self->delayOnWrite)
-			wait(waitUntilDiskReady(self->diskParameters, 0, true));
+			co_await waitUntilDiskReady(self->diskParameters, 0, true);
 
 		if (self->flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			self->flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -940,11 +942,11 @@ private:
 		INJECT_FAULT(io_timeout, "SimpleFile::sync"); // SimpleFile::sync inject io_timeout
 		INJECT_FAULT(io_error, "SimpleFile::sync"); // SimpleFile::sync inject io_errot
 
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<int64_t> size_impl(SimpleFile const* self) {
-		state UID opId = deterministicRandom()->randomUniqueID();
+	static Future<int64_t> size_impl(SimpleFile const* self) {
+		UID opId = deterministicRandom()->randomUniqueID();
 		if (randLog)
 			fprintf(randLog,
 			        "SFS1 %s %s %s\n",
@@ -952,7 +954,7 @@ private:
 			        self->filename.c_str(),
 			        opId.shortString().c_str());
 
-		wait(waitUntilDiskReady(self->diskParameters, 0));
+		co_await waitUntilDiskReady(self->diskParameters, 0);
 
 		int64_t pos = _lseeki64(self->h, 0L, SEEK_END);
 		if (pos == -1) {
@@ -965,7 +967,7 @@ private:
 			    randLog, "SFS2 {0} {1} {2} {3}\n", self->dbgId.shortString(), self->filename, opId.shortString(), pos);
 		INJECT_FAULT(io_error, "SimpleFile::size"); // SimpleFile::size inject io_error
 
-		return pos;
+		co_return pos;
 	}
 };
 
@@ -975,7 +977,7 @@ struct SimDiskSpace {
 	double lastUpdate;
 };
 
-void doReboot(ISimulator::ProcessInfo* const& p, ISimulator::KillType const& kt);
+Future<Void> doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt);
 
 struct Sim2Listener final : IListener, ReferenceCounted<Sim2Listener> {
 	explicit Sim2Listener(ISimulator::ProcessInfo* process, const NetworkAddress& listenAddr)
@@ -996,20 +998,20 @@ private:
 	ISimulator::ProcessInfo* process;
 	PromiseStream<Reference<IConnection>> nextConnection;
 
-	ACTOR static void incoming(Reference<Sim2Listener> self, double seconds, Reference<IConnection> conn) {
-		wait(g_simulator->onProcess(self->process));
-		wait(delay(seconds));
+	static Future<Void> incoming(Reference<Sim2Listener> self, double seconds, Reference<IConnection> conn) {
+		co_await g_simulator->onProcess(self->process);
+		co_await delay(seconds);
 		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && deterministicRandom()->random01() < 0.5)
-			return;
+			co_return;
 		TraceEvent("Sim2IncomingConn", conn->getDebugID())
 		    .detail("ListenAddress", self->getListenAddress())
 		    .detail("PeerAddress", conn->getPeerAddress());
 		self->nextConnection.send(conn);
 	}
-	ACTOR static Future<Reference<IConnection>> popOne(FutureStream<Reference<IConnection>> conns) {
-		Reference<IConnection> c = waitNext(conns);
+	static Future<Reference<IConnection>> popOne(FutureStream<Reference<IConnection>> conns) {
+		Reference<IConnection> c = co_await conns;
 		((Sim2Conn*)c.getPtr())->opened = true;
-		return c;
+		co_return c;
 	}
 
 	NetworkAddress address;
@@ -1074,10 +1076,10 @@ public:
 		}
 		return t->promise.getFuture();
 	}
-	ACTOR static Future<Void> checkShutdown(Sim2* self, TaskPriority taskID) {
-		wait(success(self->getCurrentProcess()->shutdownSignal.getFuture()));
+	static Future<Void> checkShutdown(Sim2* self, TaskPriority taskID) {
+		co_await success(self->getCurrentProcess()->shutdownSignal.getFuture());
 		self->setCurrentTask(taskID);
-		return Void();
+		co_return;
 	}
 	Future<class Void> yield(TaskPriority taskID) override {
 		if (taskID == TaskPriority::DefaultYield)
@@ -1204,32 +1206,31 @@ public:
 		}
 		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}
-	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
-		wait(ready);
+	static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
+		co_await ready;
 		if (conn->isPeerGone()) {
 			conn.clear();
 			if (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 1 ||
 			    (FLOW_KNOBS->SIM_CONNECT_ERROR_MODE == 2 && deterministicRandom()->random01() > 0.5)) {
 				throw connection_failed();
 			}
-			wait(Never());
+			co_await Future<Void>(Never());
 		}
 		conn->opened = true;
-		return conn;
+		co_return conn;
 	}
 	Reference<IListener> listen(NetworkAddress localAddr) override {
 		Reference<IListener> listener(getCurrentProcess()->getListener(localAddr));
 		ASSERT(listener);
 		return listener;
 	}
-	ACTOR static Future<Reference<IConnection>> waitForProcessAndConnect(NetworkAddress toAddr,
-	                                                                     INetworkConnections* self) {
+	static Future<Reference<IConnection>> waitForProcessAndConnect(NetworkAddress toAddr, INetworkConnections* self) {
 		// We have to be able to connect to processes that don't yet exist, so we do some silly polling
 		loop {
-			wait(::delay(0.1 * deterministicRandom()->random01()));
+			co_await ::delay(0.1 * deterministicRandom()->random01());
 			if (g_sim2.addressMap.count(toAddr)) {
-				Reference<IConnection> c = wait(self->connect(toAddr));
-				return c;
+				Reference<IConnection> c = co_await self->connect(toAddr);
+				co_return c;
 			}
 		}
 	}
@@ -1326,7 +1327,7 @@ public:
 		return addr.ip == getCurrentProcess()->address.ip;
 	}
 
-	ACTOR static Future<Void> deleteFileImpl(Sim2* self, std::string filename, bool mustBeDurable) {
+	static Future<Void> deleteFileImpl(Sim2* self, std::string filename, bool mustBeDurable) {
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of
 		// rebooting during a durable one.  It isn't perfect: for example, on real filesystems testing
 		// for the existence of a non-durably deleted file BEFORE a reboot will show that it apparently doesn't exist.
@@ -1335,34 +1336,35 @@ public:
 			g_simulator->getCurrentProcess()->machine->deletingOrClosingFiles.insert(filename);
 		}
 		if (mustBeDurable || deterministicRandom()->random01() < 0.5) {
-			state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-			state TaskPriority currentTaskID = g_network->getCurrentTask();
+			ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
+			TaskPriority currentTaskID = g_network->getCurrentTask();
 			TraceEvent(SevDebug, "Sim2DeleteFileImpl")
 			    .detail("CurrentProcess", currentProcess->toString())
 			    .detail("Filename", filename)
 			    .detail("Durable", mustBeDurable);
-			wait(g_simulator->onMachine(currentProcess));
+			co_await g_simulator->onMachine(currentProcess);
+			Error err;
 			try {
-				wait(::delay(0.05 * deterministicRandom()->random01()));
+				co_await ::delay(0.05 * deterministicRandom()->random01());
 				if (!currentProcess->rebooting) {
 					auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
 					ASSERT(f.isReady());
-					wait(::delay(0.05 * deterministicRandom()->random01()));
+					co_await ::delay(0.05 * deterministicRandom()->random01());
 					CODE_PROBE(true, "Simulated durable delete", probe::context::sim2, probe::assert::simOnly);
 				}
-				wait(g_simulator->onProcess(currentProcess, currentTaskID));
-				return Void();
+				co_await g_simulator->onProcess(currentProcess, currentTaskID);
+				co_return;
 			} catch (Error& e) {
-				state Error err = e;
-				wait(g_simulator->onProcess(currentProcess, currentTaskID));
-				throw err;
+				err = e;
 			}
+			co_await g_simulator->onProcess(currentProcess, currentTaskID);
+			throw err;
 		} else {
 			TraceEvent(SevDebug, "Sim2DeleteFileImplNonDurable")
 			    .detail("Filename", filename)
 			    .detail("Durable", mustBeDurable);
 			CODE_PROBE(true, "Simulated non-durable delete", probe::context::sim2, probe::assert::simOnly);
-			return Void();
+			co_return;
 		}
 	}
 
@@ -2475,35 +2477,34 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> registerSimHTTPServerActor(Sim2* self,
-	                                                     std::string hostname,
-	                                                     std::string service,
-	                                                     Reference<HTTP::IRequestHandler> requestHandler) {
+	static Future<Void> registerSimHTTPServerActor(Sim2* self,
+	                                               std::string hostname,
+	                                               std::string service,
+	                                               Reference<HTTP::IRequestHandler> requestHandler) {
 		std::string id = hostname + ":" + service;
 		ASSERT(!self->httpHandlers.count(id));
 
 		// check not too many servers
 		ASSERT(self->httpHandlers.size() < 1000);
-		state Reference<HTTP::SimRegisteredHandlerContext> handlerContext =
+		Reference<HTTP::SimRegisteredHandlerContext> handlerContext =
 		    makeReference<HTTP::SimRegisteredHandlerContext>(hostname, service, self->nextHTTPPort++, requestHandler);
 		self->httpHandlers.insert({ id, handlerContext });
 
 		// start process on all running HTTP servers
-		state ProcessInfo* callingProcess = self->getCurrentProcess();
-		state int i = 0;
+		ProcessInfo* callingProcess = self->getCurrentProcess();
+		int i = 0;
 
 		// copy the processes before waits just to ensure no races with addSimHTTPProcess
-		state std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> procsCopy =
-		    self->httpServerProcesses;
+		std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> procsCopy = self->httpServerProcesses;
 		for (; i < procsCopy.size(); i++) {
-			state ProcessInfo* serverProcess = procsCopy[i].first;
-			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
+			ProcessInfo* serverProcess = procsCopy[i].first;
+			co_await self->onProcess(serverProcess, TaskPriority::DefaultYield);
 			self->startRequestHandlerOnProcess(serverProcess, procsCopy[i].second, handlerContext);
 		}
 
-		wait(self->onProcess(callingProcess, TaskPriority::DefaultYield));
+		co_await self->onProcess(callingProcess, TaskPriority::DefaultYield);
 
-		return Void();
+		co_return;
 	}
 
 	// starts a numAddresses http servers with the dns alias hostname:service with the provided server callback
@@ -2647,29 +2648,29 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 	bool isClosed() const { return closed.getFuture().isReady(); }
 	Future<Void> onClosed() const { return closed.getFuture(); }
 
-	ACTOR static Future<Void> cleanupPeerSocket(UDPSimSocket* self) {
-		wait(self->peerSocket.get()->onClosed());
+	static Future<Void> cleanupPeerSocket(UDPSimSocket* self) {
+		co_await self->peerSocket.get()->onClosed();
 		self->peerSocket.reset();
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> send(UDPSimSocket* self,
-	                               Reference<UDPSimSocket> peerSocket,
-	                               uint8_t const* begin,
-	                               uint8_t const* end) {
-		state Packet packet(std::make_shared<std::vector<uint8_t>>());
+	static Future<Void> send(UDPSimSocket* self,
+	                         Reference<UDPSimSocket> peerSocket,
+	                         uint8_t const* begin,
+	                         uint8_t const* end) {
+		Packet packet(std::make_shared<std::vector<uint8_t>>());
 		packet->resize(end - begin);
 		std::copy(begin, end, packet->begin());
-		wait(delay(.002 * deterministicRandom()->random01()));
+		co_await delay(.002 * deterministicRandom()->random01());
 		peerSocket->recvBuffer.emplace_back(self->_localAddress, std::move(packet));
 		peerSocket->writtenPackets.set(peerSocket->writtenPackets.get() + 1);
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<int> receiveFrom(UDPSimSocket* self, uint8_t* begin, uint8_t* end, NetworkAddress* sender) {
-		state TaskPriority currentTaskID = g_sim2.getCurrentTask();
-		wait(self->writtenPackets.onChange());
-		wait(g_sim2.onProcess(self->process, currentTaskID));
+	static Future<int> receiveFrom(UDPSimSocket* self, uint8_t* begin, uint8_t* end, NetworkAddress* sender) {
+		TaskPriority currentTaskID = g_sim2.getCurrentTask();
+		co_await self->writtenPackets.onChange();
+		co_await g_sim2.onProcess(self->process, currentTaskID);
 		auto packet = self->recvBuffer.front().second;
 		int sz = packet->size();
 		ASSERT(sz <= end - begin);
@@ -2678,7 +2679,7 @@ class UDPSimSocket : public IUDPSocket, ReferenceCounted<UDPSimSocket> {
 		}
 		std::copy(packet->begin(), packet->end(), begin);
 		self->recvBuffer.pop_front();
-		return sz;
+		co_return sz;
 	}
 
 public:
@@ -2833,7 +2834,7 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
-ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
+Future<Void> doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	TraceEvent("RebootingProcessAttempt")
 	    .detail("ZoneId", p->locality.zoneId())
 	    .detail("KillType", kt)
@@ -2845,7 +2846,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	    .detail("Rebooting", p->rebooting)
 	    .detail("TaskPriorityDefaultDelay", TaskPriority::DefaultDelay);
 
-	wait(g_sim2.delay(0, TaskPriority::DefaultDelay, p)); // Switch to the machine in question
+	co_await g_sim2.delay(0, TaskPriority::DefaultDelay, p); // Switch to the machine in question
 
 	try {
 		ASSERT(kt == ISimulator::KillType::RebootProcess || kt == ISimulator::KillType::Reboot ||
@@ -2877,13 +2878,13 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 			TraceEvent(SevDebug, "DoRebootFailed")
 			    .detail("Rebooting", p->rebooting)
 			    .detail("Reliable", p->isReliable());
-			return;
+			co_return;
 		} else if (p->isSpawnedKVProcess()) {
 			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
-			return;
+			co_return;
 		} else if (p->getChilds().size()) {
 			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
-			return;
+			co_return;
 		}
 
 		TraceEvent("RebootingProcess")
@@ -3065,8 +3066,8 @@ Future<Void> Sim2FileSystem::deleteFile(const std::string& filename, bool mustBe
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
-ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
-	wait(delay(0.5 * deterministicRandom()->random01()));
+Future<Void> renameFileImpl(std::string from, std::string to) {
+	co_await delay(0.5 * deterministicRandom()->random01());
 	// rename all keys in the corrupted list
 	// first we have to delete all corruption of the destination, since this file will be unlinked if it exists
 	TraceEvent("RenamingFile").detail("From", from).detail("To", to).log();
@@ -3084,8 +3085,8 @@ ACTOR Future<Void> renameFileImpl(std::string from, std::string to) {
 	g_simulator->corruptedBlocks.erase(begin, end);
 	// do the rename
 	::renameFile(from, to);
-	wait(delay(0.5 * deterministicRandom()->random01()));
-	return Void();
+	co_await delay(0.5 * deterministicRandom()->random01());
+	co_return;
 }
 
 Future<Void> Sim2FileSystem::renameFile(std::string const& from, std::string const& to) {
