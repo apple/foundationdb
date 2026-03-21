@@ -2495,11 +2495,10 @@ public:
 
 		// start process on all running HTTP servers
 		ProcessInfo* callingProcess = self->getCurrentProcess();
-		int i = 0;
 
 		// copy the processes before waits just to ensure no races with addSimHTTPProcess
 		std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> procsCopy = self->httpServerProcesses;
-		for (; i < procsCopy.size(); i++) {
+		for (int i = 0; i < procsCopy.size(); i++) {
 			ProcessInfo* serverProcess = procsCopy[i].first;
 			co_await self->onProcess(serverProcess, TaskPriority::DefaultYield);
 			self->startRequestHandlerOnProcess(serverProcess, procsCopy[i].second, handlerContext);
