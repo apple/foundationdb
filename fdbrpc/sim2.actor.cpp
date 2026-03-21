@@ -977,14 +977,14 @@ struct SimDiskSpace {
 	double lastUpdate;
 };
 
-Future<Void> doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt);
+Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::KillType kt);
 
 struct Sim2Listener final : IListener, ReferenceCounted<Sim2Listener> {
 	explicit Sim2Listener(ISimulator::ProcessInfo* process, const NetworkAddress& listenAddr)
 	  : process(process), address(listenAddr) {}
 
 	void incomingConnection(double seconds, Reference<IConnection> conn) { // Called by another process!
-		incoming(Reference<Sim2Listener>::addRef(this), seconds, conn);
+		incoming(Uncancellable(), Reference<Sim2Listener>::addRef(this), seconds, conn);
 	}
 
 	void addref() override { ReferenceCounted<Sim2Listener>::addref(); }
@@ -998,7 +998,10 @@ private:
 	ISimulator::ProcessInfo* process;
 	PromiseStream<Reference<IConnection>> nextConnection;
 
-	static Future<Void> incoming(Reference<Sim2Listener> self, double seconds, Reference<IConnection> conn) {
+	static Future<Void> incoming(Uncancellable,
+	                             Reference<Sim2Listener> self,
+	                             double seconds,
+	                             Reference<IConnection> conn) {
 		co_await g_simulator->onProcess(self->process);
 		co_await delay(seconds);
 		if (((Sim2Conn*)conn.getPtr())->isPeerGone() && deterministicRandom()->random01() < 0.5)
@@ -1870,14 +1873,14 @@ public:
 			    .detail("Reason", "Protected process");
 			kt = KillType::RebootProcess;
 		}
-		doReboot(process, kt);
+		doReboot(Uncancellable(), process, kt);
 	}
 	void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) override {
 		if (allProcesses) {
 			auto processes = getAllProcesses();
 			for (int i = 0; i < processes.size(); i++)
 				if (processes[i]->locality.zoneId() == zoneId && !processes[i]->rebooting)
-					doReboot(processes[i], KillType::RebootProcess);
+					doReboot(Uncancellable(), processes[i], KillType::RebootProcess);
 		} else {
 			auto processes = getAllProcesses();
 			for (int i = 0; i < processes.size(); i++) {
@@ -1886,7 +1889,7 @@ public:
 				}
 			}
 			if (processes.size())
-				doReboot(deterministicRandom()->randomChoice(processes), KillType::RebootProcess);
+				doReboot(Uncancellable(), deterministicRandom()->randomChoice(processes), KillType::RebootProcess);
 		}
 	}
 	void killProcess(ProcessInfo* machine, KillType kt) override {
@@ -2169,7 +2172,7 @@ public:
 				    .detail("Cleared", process->cleared)
 				    .detail("Rebooting", process->rebooting);
 				if (process->startingClass != ProcessClass::TesterClass)
-					doReboot(process, kt);
+					doReboot(Uncancellable(), process, kt);
 			}
 		}
 
@@ -2834,7 +2837,7 @@ void startNewSimulator(bool printSimTime) {
 	    deterministicRandom()->coinflip() ? 0 : DISABLE_CONNECTION_FAILURE_FOREVER;
 }
 
-Future<Void> doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
+Future<Void> doReboot(Uncancellable, ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 	TraceEvent("RebootingProcessAttempt")
 	    .detail("ZoneId", p->locality.zoneId())
 	    .detail("KillType", kt)
