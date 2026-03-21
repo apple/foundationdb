@@ -21,14 +21,14 @@
 #include "fdb_flow.h"
 
 #include <cstdint>
-#include <stdio.h>
 #include <cinttypes>
+#include <stdio.h>
+#include <type_traits>
 
 #include "fmt/format.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace FDB;
 
@@ -37,20 +37,20 @@ THREAD_FUNC networkThread(void* fdb) {
 	THREAD_RETURN;
 }
 
-ACTOR Future<Void> _test() {
+Future<Void> _test() {
 	API* fdb = FDB::API::selectAPIVersion(FDB_API_VERSION);
 	auto db = fdb->createDatabase();
-	state Reference<Transaction> tr = db->createTransaction();
+	Reference<Transaction> tr = db->createTransaction();
 
 	// tr->setVersion(1);
 
-	Version ver = wait(tr->getReadVersion());
+	Version ver = co_await tr->getReadVersion();
 	fmt::print("{}\n", ver);
 
-	state std::vector<Future<Version>> versions;
+	std::vector<Future<Version>> versions;
 
-	state double starttime = timer_monotonic();
-	state int i;
+	double starttime = timer_monotonic();
+	int i{ 0 };
 	// for (i = 0; i < 100000; i++) {
 	// 	Version v = wait( tr->getReadVersion() );
 	// }
@@ -58,26 +58,26 @@ ACTOR Future<Void> _test() {
 		versions.push_back(tr->getReadVersion());
 	}
 	for (i = 0; i < 100000; i++) {
-		Version v = wait(versions[i]);
+		co_await versions[i];
 	}
 	// wait( waitForAllReady( versions ) );
 	printf("Elapsed: %lf\n", timer_monotonic() - starttime);
 
 	tr->set("foo"_sr, "bar"_sr);
 
-	Optional<FDBStandalone<ValueRef>> v = wait(tr->get("foo"_sr));
+	Optional<FDBStandalone<ValueRef>> v = co_await tr->get("foo"_sr);
 	if (v.present()) {
 		printf("%s\n", v.get().toString().c_str());
 	}
 
-	FDBStandalone<RangeResultRef> r = wait(tr->getRange(KeyRangeRef("a"_sr, "z"_sr), 100));
+	FDBStandalone<RangeResultRef> r = co_await tr->getRange(KeyRangeRef("a"_sr, "z"_sr), 100);
 
 	for (auto kv : r) {
 		printf("%s is %s\n", kv.key.toString().c_str(), kv.value.toString().c_str());
 	}
 
 	g_network->stop();
-	return Void();
+	co_return;
 }
 
 void fdb_flow_test() {
@@ -201,17 +201,22 @@ void backToFutureCallback(FDBFuture* f, void* data) {
 // Takes an FDBFuture (from the alien client world, with callbacks potentially firing on an alien thread)
 //   and converts it into a Future<T> (with callbacks working on this thread, cancellation etc).
 // You must pass as the second parameter a function which takes a ready FDBFuture* and returns a value of Type
-ACTOR template <class T, class Function>
+template <class T, class Function>
 static Future<T> backToFuture(FDBFuture* _f, Function convertValue) {
-	state Reference<CFuture> f(new CFuture(_f));
+	Reference<CFuture> f(new CFuture(_f));
 
 	Promise<Void> ready;
 	Future<Void> onReady = ready.getFuture();
 
 	throw_on_error(fdb_future_set_callback(f->f, backToFutureCallback, ready.extractRawPointer()));
-	wait(onReady);
+	co_await onReady;
 
-	return convertValue(f);
+	if constexpr (std::is_same_v<T, Void>) {
+		convertValue(f);
+		co_return;
+	} else {
+		co_return convertValue(f);
+	}
 }
 
 void API::setNetworkOption(FDBNetworkOption option, Optional<StringRef> value) {

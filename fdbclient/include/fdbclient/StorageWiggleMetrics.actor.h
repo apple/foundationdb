@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_G_H)
-#define FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_G_H
-#include "fdbclient/StorageWiggleMetrics.actor.g.h"
-#elif !defined(FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_H)
-#define FDBCLIENT_STORAGEWIGGLEMETRICS_ACTOR_H
 
 #include "fdbrpc/Smoother.h"
 #include "flow/ObjectSerializer.h"
@@ -31,7 +26,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
-#include "flow/actorcompiler.h"
 
 FDB_BOOLEAN_PARAM(PrimaryRegion);
 
@@ -118,22 +112,22 @@ struct StorageWiggleDelay {
 
 namespace {
 // Persistent the total delay time to the database, and return accumulated delay time.
-ACTOR template <class TrType>
+template <class TrType>
 Future<double> addPerpetualWiggleDelay_impl(
     TrType tr,
     KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())> delayProperty,
     double secDelta) {
 
-	state StorageWiggleDelay delayObj = wait(delayProperty.getD(tr, Snapshot::False));
+	StorageWiggleDelay delayObj = co_await delayProperty.getD(tr, Snapshot::False);
 	delayObj.delaySeconds += secDelta;
 	delayProperty.set(tr, delayObj);
 
-	return delayObj.delaySeconds;
+	co_return delayObj.delaySeconds;
 }
 
 // set all fields except for smoothed durations to default values. If the metrics is not given, load from system key
 // space
-ACTOR template <class TrType>
+template <class TrType>
 Future<Void> resetStorageWiggleMetrics_impl(
     TrType tr,
     KeyBackedObjectProperty<StorageWiggleMetrics, decltype(IncludeVersion())> metricsProperty,
@@ -141,14 +135,14 @@ Future<Void> resetStorageWiggleMetrics_impl(
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	if (!metrics.present()) {
-		wait(store(metrics, metricsProperty.get(tr)));
+		co_await store(metrics, metricsProperty.get(tr));
 	}
 
 	if (metrics.present()) {
 		metrics.get().reset();
 		metricsProperty.set(tr, metrics.get());
 	}
-	return Void();
+	co_return;
 }
 } // namespace
 
@@ -216,7 +210,7 @@ public:
 		return resetStorageWiggleMetrics_impl(tr, storageWiggleMetrics(primary), metrics);
 	}
 
-	ACTOR template <typename TrType>
+	template <typename TrType>
 	static Future<Void> updateStorageWiggleMetrics_impl(
 	    KeyBackedProperty<Value, NullCodec> wiggleSpeed,
 	    KeyBackedObjectProperty<StorageWiggleMetrics, decltype(IncludeVersion())> storageMetrics,
@@ -225,13 +219,13 @@ public:
 	    PrimaryRegion primary) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		Optional<Value> v = wait(wiggleSpeed.get(tr));
+		Optional<Value> v = co_await wiggleSpeed.get(tr);
 		if (v.present() && v == "1"_sr) {
 			storageMetrics.set(tr, metrics);
 		} else {
 			CODE_PROBE(true, "Intend to update StorageWiggleMetrics after PW disabled");
 		}
-		return Void();
+		co_return;
 	}
 
 	// update the serialized metrics when the perpetual wiggle is enabled
@@ -241,6 +235,3 @@ public:
 		    perpetualWiggleSpeed(), storageWiggleMetrics(primary), tr, metrics, primary);
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif

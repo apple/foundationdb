@@ -20,20 +20,14 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RUNRYWTRANSACTION_ACTOR_G_H)
-#define FDBCLIENT_RUNRYWTRANSACTION_ACTOR_G_H
-#include "fdbclient/RunRYWTransaction.actor.g.h"
-#elif !defined(FDBCLIENT_RUNRYWTRANSACTION_ACTOR_H)
-#define FDBCLIENT_RUNRYWTRANSACTION_ACTOR_H
-
 #include <utility>
 
 #include "flow/flow.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+
+template <class Function>
+using RunRYWTransactionResult = decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue());
 
 // Runs a RYW transaction in a retry loop on the given Database.
 //
@@ -43,42 +37,56 @@
 //
 // The supplied function should be idempotent. Otherwise, outcome of this function will depend on how many times the
 // transaction is retried.
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransaction(
-    Database cx,
-    Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+template <class Function>
+Future<RunRYWTransactionResult<Function>> runRYWTransaction(Database cx, Function func) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
 		try {
-			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
-			    wait(func(tr));
-			wait(tr->commit());
-			return result;
+			if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
+				co_await func(tr);
+				co_await tr->commit();
+				co_return;
+			} else {
+				RunRYWTransactionResult<Function> result = co_await func(tr);
+				co_await tr->commit();
+				co_return result;
+			}
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
 // Debug version of runRYWTransaction. It logs the function name and the committed version of the transaction.
 // Note the function name is required, e.g., taskFunc->getName() for TaskFuncBase.
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
-runRYWTransactionDebug(Database cx, StringRef name, Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+template <class Function>
+Future<RunRYWTransactionResult<Function>> runRYWTransactionDebug(Database cx, StringRef name, Function func) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
 		try {
 			// func should be idempodent; otherwise, retry will get undefined result
-			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
-			    wait(func(tr));
-			wait(tr->commit());
-			TraceEvent("DebugRunRYWTransaction")
-			    .detail("Function", name)
-			    .detail("CommitVersion", tr->getCommittedVersion());
-			return result;
+			if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
+				co_await func(tr);
+				co_await tr->commit();
+				TraceEvent("DebugRunRYWTransaction")
+				    .detail("Function", name)
+				    .detail("CommitVersion", tr->getCommittedVersion());
+				co_return;
+			} else {
+				RunRYWTransactionResult<Function> result = co_await func(tr);
+				co_await tr->commit();
+				TraceEvent("DebugRunRYWTransaction")
+				    .detail("Function", name)
+				    .detail("CommitVersion", tr->getCommittedVersion());
+				co_return result;
+			}
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -89,47 +97,56 @@ runRYWTransactionDebug(Database cx, StringRef name, Function func) {
 //
 // The supplied function should be idempotent. Otherwise, outcome of this function will depend on how many times the
 // transaction is retried.
-ACTOR template <class Function>
+template <class Function>
 Future<Void> runRYWTransactionVoid(Database cx, Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
 		try {
-			wait(func(tr));
-			wait(tr->commit());
-			return Void();
+			co_await func(tr);
+			co_await tr->commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
-runRYWTransactionFailIfLocked(Database cx, Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+template <class Function>
+Future<RunRYWTransactionResult<Function>> runRYWTransactionFailIfLocked(Database cx, Function func) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
 		try {
-			state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result =
-			    wait(func(tr));
-			wait(tr->commit());
-			return result;
+			if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
+				co_await func(tr);
+				co_await tr->commit();
+				co_return;
+			} else {
+				RunRYWTransactionResult<Function> result = co_await func(tr);
+				co_await tr->commit();
+				co_return result;
+			}
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked)
-				throw;
-			wait(tr->onError(e));
+			err = e;
 		}
+		if (err.code() == error_code_database_locked)
+			throw err;
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR template <class Function>
-Future<decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue())> runRYWTransactionNoRetry(
-    Database cx,
-    Function func) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
-	wait(tr->commit());
-	return result;
+template <class Function>
+Future<RunRYWTransactionResult<Function>> runRYWTransactionNoRetry(Database cx, Function func) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	if constexpr (std::is_same_v<RunRYWTransactionResult<Function>, Void>) {
+		co_await func(tr);
+		co_await tr->commit();
+		co_return;
+	} else {
+		RunRYWTransactionResult<Function> result = co_await func(tr);
+		co_await tr->commit();
+		co_return result;
+	}
 }
-
-#include "flow/unactorcompiler.h"
-#endif

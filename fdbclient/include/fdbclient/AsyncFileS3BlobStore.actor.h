@@ -20,14 +20,6 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBRPC_ASYNCFILEBLOBSTORE_ACTOR_G_H)
-#define FDBRPC_ASYNCFILEBLOBSTORE_ACTOR_G_H
-#include "fdbclient/AsyncFileS3BlobStore.actor.g.h"
-#elif !defined(FDBRPC_ASYNCFILES3BLOBSTORE_ACTOR_H)
-#define FDBRPC_ASYNCFILES3BLOBSTORE_ACTOR_H
-
 #include <sstream>
 #include <time.h>
 
@@ -39,13 +31,12 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include <openssl/sha.h>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR template <typename T>
+template <typename T>
 static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 	try {
-		wait(success(f) || p.getFuture());
-		return f.get();
+		co_await (success(f) || p.getFuture());
+		co_return f.get();
 	} catch (Error& e) {
 		if (p.canBeSet())
 			p.sendError(e);
@@ -120,8 +111,8 @@ public:
 
 	Future<int> read(void* data, int length, int64_t offset) override { throw file_not_readable(); }
 
-	ACTOR static Future<Void> write_impl(Reference<AsyncFileS3BlobStoreWrite> f, const uint8_t* data, int length) {
-		state Part* p = f->m_parts.back().getPtr();
+	static Future<Void> write_impl(Reference<AsyncFileS3BlobStoreWrite> f, const uint8_t* data, int length) {
+		Part* p = f->m_parts.back().getPtr();
 		// If this write will cause the part to cross the min part size boundary then write to the boundary and start a
 		// new part.
 		while (p->length + length >= f->m_bstore->knobs.multipart_min_part_size) {
@@ -134,12 +125,12 @@ public:
 			data = (const uint8_t*)data + finishlen;
 
 			// End current part (and start new one)
-			wait(f->endCurrentPart(f.getPtr(), true));
+			co_await f->endCurrentPart(f.getPtr(), true);
 			p = f->m_parts.back().getPtr();
 		}
 
 		p->write((const uint8_t*)data, length);
-		return Void();
+		co_return;
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
@@ -157,34 +148,34 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<std::string> doPartUpload(AsyncFileS3BlobStoreWrite* f, Part* p) {
+	static Future<std::string> doPartUpload(AsyncFileS3BlobStoreWrite* f, Part* p) {
 		p->finalizeChecksum();
-		std::string upload_id = wait(f->getUploadID());
-		std::string etag = wait(f->m_bstore->uploadPart(
-		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->checksumString));
-		return etag;
+		std::string upload_id = co_await f->getUploadID();
+		std::string etag = co_await f->m_bstore->uploadPart(
+		    f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->checksumString);
+		co_return etag;
 	}
 
-	ACTOR static Future<Void> doFinishUpload(AsyncFileS3BlobStoreWrite* f) {
+	static Future<Void> doFinishUpload(AsyncFileS3BlobStoreWrite* f) {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if (f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
 			part->finalizeChecksum();
-			wait(f->m_bstore->writeEntireFileFromBuffer(
-			    f->m_bucket, f->m_object, &part->content, part->length, part->checksumString));
-			return Void();
+			co_await f->m_bstore->writeEntireFileFromBuffer(
+			    f->m_bucket, f->m_object, &part->content, part->length, part->checksumString);
+			co_return;
 		}
 
 		// There are at least 2 parts.  End the last part (which could be empty)
-		wait(f->endCurrentPart(f));
+		co_await f->endCurrentPart(f);
 
-		state S3BlobStoreEndpoint::MultiPartSetT partSet;
-		state std::vector<Reference<Part>>::iterator p;
+		S3BlobStoreEndpoint::MultiPartSetT partSet;
+		std::vector<Reference<Part>>::iterator p;
 
 		// Wait for all the parts to be done to get their ETags, populate the partSet required to finish the object
 		// upload.
 		for (p = f->m_parts.begin(); p != f->m_parts.end(); ++p) {
-			std::string tag = wait((*p)->etag);
+			std::string tag = co_await (*p)->etag;
 			if ((*p)->length > 0) { // The last part might be empty and has to be omitted.
 				partSet[(*p)->number] = S3BlobStoreEndpoint::PartInfo(tag, (*p)->checksumString);
 			}
@@ -193,7 +184,7 @@ public:
 		// No need to wait for the upload ID here because the above loop waited for all the parts and each part required
 		// the upload ID so it is ready
 		Optional<std::string> checksumSHA256 =
-		    wait(f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet));
+		    co_await f->m_bstore->finishMultiPartUpload(f->m_bucket, f->m_object, f->m_upload_id.get(), partSet);
 
 		// Log the checksum if present - this is just a hash of the multipart structure, not the object content
 		if (checksumSHA256.present()) {
@@ -204,7 +195,7 @@ public:
 			    .detail("Note", "This is a hash of the multipart structure, not object content");
 		}
 
-		return Void();
+		co_return;
 	}
 
 	// Ready once all data has been sent AND acknowledged from the remote side
@@ -259,12 +250,12 @@ private:
 	FlowLock m_concurrentUploads;
 
 	// End the current part and start uploading it, but also wait for a part to finish if too many are in transit.
-	ACTOR static Future<Void> endCurrentPart(AsyncFileS3BlobStoreWrite* f, bool startNew = false) {
+	static Future<Void> endCurrentPart(AsyncFileS3BlobStoreWrite* f, bool startNew = false) {
 		if (f->m_parts.back()->length == 0)
-			return Void();
+			co_return;
 
 		// Wait for an upload slot to be available
-		wait(f->m_concurrentUploads.take());
+		co_await f->m_concurrentUploads.take();
 
 		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to
 		// m_error Also, hold a releaser for the concurrent upload slot while all that is going on.
@@ -278,7 +269,7 @@ private:
 			                                         f->m_bstore->knobs.multipart_min_part_size,
 			                                         f->m_bstore->knobs.enable_object_integrity_check));
 
-		return Void();
+		co_return;
 	}
 
 	Future<std::string> getUploadID() {
@@ -369,6 +360,3 @@ public:
 	AsyncFileS3BlobStoreRead(Reference<S3BlobStoreEndpoint> bstore, std::string bucket, std::string object)
 	  : m_bstore(bstore), m_bucket(bucket), m_object(object) {}
 };
-
-#include "flow/unactorcompiler.h"
-#endif

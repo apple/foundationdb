@@ -24,27 +24,27 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 #include <iostream>
-#include "flow/actorcompiler.h" // has to be last include
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 IAsyncFile::~IAsyncFile() = default;
 
 const static unsigned int ONE_MEGABYTE = 1 << 20;
 const static unsigned int FOUR_KILOBYTES = 4 << 10;
 
-ACTOR static Future<Void> zeroRangeHelper(Reference<IAsyncFile> f, int64_t offset, int64_t length, int fixedbyte) {
-	state int64_t pos = offset;
-	state void* zeros = aligned_alloc(ONE_MEGABYTE, ONE_MEGABYTE);
+static Future<Void> zeroRangeHelper(Reference<IAsyncFile> f, int64_t offset, int64_t length, int fixedbyte) {
+	int64_t pos = offset;
+	void* zeros = aligned_alloc(ONE_MEGABYTE, ONE_MEGABYTE);
 	memset(zeros, fixedbyte, ONE_MEGABYTE);
 
 	while (pos < offset + length) {
-		state int len = std::min<int64_t>(ONE_MEGABYTE, offset + length - pos);
-		wait(f->write(zeros, len, pos));
+		int len = std::min<int64_t>(ONE_MEGABYTE, offset + length - pos);
+		co_await f->write(zeros, len, pos);
 		pos += len;
-		wait(yield());
+		co_await yield();
 	}
 
 	aligned_free(zeros);
-	return Void();
+	co_return;
 }
 
 Future<Void> IAsyncFile::zeroRange(int64_t offset, int64_t length) {
@@ -79,34 +79,34 @@ TEST_CASE("/fileio/zero") {
 	return Void();
 }
 
-ACTOR static Future<Void> incrementalDeleteHelper(std::string filename,
-                                                  bool mustBeDurable,
-                                                  int64_t truncateAmt,
-                                                  double interval) {
-	state Reference<IAsyncFile> file;
-	state int64_t remainingFileSize;
-	state bool exists = fileExists(filename);
+static Future<Void> incrementalDeleteHelper(std::string filename,
+                                            bool mustBeDurable,
+                                            int64_t truncateAmt,
+                                            double interval) {
+	Reference<IAsyncFile> file;
+	int64_t remainingFileSize{ 0 };
+	bool exists = fileExists(filename);
 
 	if (exists) {
-		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-		    filename, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, 0));
+		Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
+		    filename, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, 0);
 		file = f;
 
-		int64_t fileSize = wait(file->size());
+		int64_t fileSize = co_await file->size();
 		remainingFileSize = fileSize;
 	}
 
-	wait(IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable));
+	co_await IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable);
 
 	if (exists) {
 		for (; remainingFileSize > 0; remainingFileSize -= truncateAmt) {
-			wait(file->truncate(remainingFileSize));
-			wait(file->sync());
-			wait(delay(interval));
+			co_await file->truncate(remainingFileSize);
+			co_await file->sync();
+			co_await delay(interval);
 		}
 	}
 
-	return Void();
+	co_return;
 }
 
 Future<Void> IAsyncFileSystem::incrementalDeleteFile(const std::string& filename, bool mustBeDurable) {

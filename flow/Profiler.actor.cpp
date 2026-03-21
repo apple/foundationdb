@@ -31,7 +31,6 @@
 #include <link.h>
 
 #include "flow/Platform.h"
-#include "flow/actorcompiler.h" // This must be the last include.
 
 extern volatile thread_local int flowProfilingEnabled;
 
@@ -180,12 +179,12 @@ struct Profiler {
 		return 0;
 	}
 
-	ACTOR static Future<Void> profile(Profiler* self, int period, std::string outfn) {
+	static Future<Void> profile(Profiler* self, int period, std::string outfn) {
 		// Open and truncate output file
-		state Reference<SyncFileForSim> outFile = makeReference<SyncFileForSim>(outfn);
+		Reference<SyncFileForSim> outFile = makeReference<SyncFileForSim>(outfn);
 		if (!outFile->isOpen()) {
 			TraceEvent(SevWarn, "FailedToOpenProfilingOutputFile").detail("Filename", outfn).GetLastError();
-			return Void();
+			co_return;
 		}
 
 		// According to folk wisdom, calling this once before setting up the signal handler makes
@@ -202,7 +201,7 @@ struct Profiler {
 			self->environmentInfoWriter << uint8_t(0);
 
 		self->output_buffer = new OutputBuffer;
-		state OutputBuffer* otherBuffer = new OutputBuffer;
+		OutputBuffer* otherBuffer = new OutputBuffer;
 
 		// The profilingSignals signal set will be used by enableSignal
 		sigemptyset(&self->profilingSignals);
@@ -230,29 +229,30 @@ struct Profiler {
 		sev._sigev_un._tid = sys_gettid();
 		if (timer_create(CLOCK_THREAD_CPUTIME_ID, &sev, &self->periodicTimer) != 0) {
 			TraceEvent(SevWarn, "FailedToCreateProfilingTimer").GetLastError();
-			return Void();
+			co_return;
 		}
 		self->timerInitialized = true;
 		if (timer_settime(self->periodicTimer, 0, &tv, nullptr) != 0) {
 			TraceEvent(SevWarn, "FailedToSetProfilingTimer").GetLastError();
-			return Void();
+			co_return;
 		}
 
-		state int64_t outOffset = 0;
-		wait(outFile->truncate(outOffset));
+		int64_t outOffset = 0;
+		co_await outFile->truncate(outOffset);
 
-		wait(outFile->write(self->environmentInfoWriter.getData(), self->environmentInfoWriter.getLength(), outOffset));
+		co_await outFile->write(
+		    self->environmentInfoWriter.getData(), self->environmentInfoWriter.getLength(), outOffset);
 		outOffset += self->environmentInfoWriter.getLength();
 
-		loop {
-			wait(self->network->delay(1.0, TaskPriority::Min) || self->network->delay(2.0, TaskPriority::Max));
+		while (true) {
+			co_await (self->network->delay(1.0, TaskPriority::Min) || self->network->delay(2.0, TaskPriority::Max));
 
 			self->enableSignal(false);
 			std::swap(self->output_buffer, otherBuffer);
 			self->enableSignal(true);
 
-			wait(otherBuffer->writeTo(outFile, outOffset));
-			wait(outFile->flush());
+			co_await otherBuffer->writeTo(outFile, outOffset);
+			co_await outFile->flush();
 			otherBuffer->clear();
 		}
 	}

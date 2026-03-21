@@ -45,16 +45,16 @@ static io_service ios;
 
 class SimExternalConnectionImpl {
 public:
-	ACTOR static Future<Void> onReadable(SimExternalConnection* self) {
-		wait(delayJittered(0.1));
+	static Future<Void> onReadable(SimExternalConnection* self) {
+		co_await delayJittered(0.1);
 		if (self->readBuffer.empty()) {
-			wait(self->onReadableTrigger.onTrigger());
+			co_await self->onReadableTrigger.onTrigger();
 		}
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Reference<IConnection>> connect(NetworkAddress toAddr) {
-		wait(delayJittered(0.1));
+	static Future<Reference<IConnection>> connect(NetworkAddress toAddr) {
+		co_await delayJittered(0.1);
 		ip::tcp::socket socket(ios);
 		auto ip = toAddr.ip;
 		ip::address address;
@@ -66,9 +66,9 @@ public:
 		boost::system::error_code err;
 		socket.connect(ip::tcp::endpoint(address, toAddr.port), err);
 		if (err) {
-			return Reference<IConnection>();
+			co_return Reference<IConnection>();
 		} else {
-			return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
+			co_return Reference<IConnection>(new SimExternalConnection(std::move(socket)));
 		}
 	}
 };
@@ -171,11 +171,11 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
 	}
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host,
-                                                                        std::string service,
-                                                                        DNSCache* dnsCache) {
-	wait(delayJittered(0.1));
-	return SimExternalConnection::resolveTCPEndpointBlocking(host, service, dnsCache);
+static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host,
+                                                                  std::string service,
+                                                                  DNSCache* dnsCache) {
+	co_await delayJittered(0.1);
+	co_return SimExternalConnection::resolveTCPEndpointBlocking(host, service, dnsCache);
 }
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,

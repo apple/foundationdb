@@ -18,14 +18,6 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_IDEMPOTENCY_ID_ACTOR_G_H)
-#define FDBCLIENT_IDEMPOTENCY_ID_ACTOR_G_H
-#include "fdbclient/IdempotencyId.actor.g.h"
-#elif !defined(FDBCLIENT_IDEMPOTENCY_ID_ACTOR_H)
-#define FDBCLIENT_IDEMPOTENCY_ID_ACTOR_H
-
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -34,7 +26,6 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
-#include "flow/actorcompiler.h" // this has to be the last include
 
 struct CommitResult {
 	Version commitVersion;
@@ -189,14 +180,11 @@ KeyRangeRef makeIdempotencySingleKeyRange(Arena& arena, Version version, uint8_t
 
 void decodeIdempotencyKey(KeyRef key, Version& commitVersion, uint8_t& highOrderBatchIndex);
 
-ACTOR Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
+Future<JsonBuilderObject> getIdmpKeyStatus(Database db);
 
 // Delete zero or more idempotency ids older than minAgeSeconds
 //
 // Normally idempotency ids are deleted as part of the normal commit process, so this only needs to clean ids that
 // leaked during a failure scenario. The rate of leaked idempotency ids should be low. The rate is zero during normal
 // operation, and proportional to the number of in-flight transactions during a failure scenario.
-ACTOR Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds);

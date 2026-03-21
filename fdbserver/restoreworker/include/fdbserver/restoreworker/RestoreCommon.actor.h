@@ -23,11 +23,6 @@
 // the old restore and the new performant restore systems
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORECOMMON_ACTOR_G_H)
-#define FDBSERVER_RESTORECOMMON_ACTOR_G_H
-#include "fdbserver/restoreworker/RestoreCommon.actor.g.h"
-#elif !defined(FDBSERVER_RESTORECOMMON_ACTOR_H)
-#define FDBSERVER_RESTORECOMMON_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
@@ -36,8 +31,6 @@
 #include "flow/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/core/Knobs.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 // RestoreConfig copied from FileBackupAgent.cpp
 // We copy RestoreConfig instead of using (and potentially changing) it in place
@@ -97,8 +90,8 @@ public:
 	KeyBackedBinaryValue<int64_t> fileBlockCount();
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr);
-	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfigFR* self,
-	                                                                          Reference<ReadYourWritesTransaction> tr);
+	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfigFR* self,
+	                                                                    Reference<ReadYourWritesTransaction> tr);
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 	// incrementally advancing through the map, saving the version and path of the next starting point.
@@ -138,7 +131,7 @@ public:
 
 	Key applyMutationsMapPrefix();
 
-	ACTOR Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid);
+	Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid);
 
 	Future<int64_t> getApplyVersionLag(Reference<ReadYourWritesTransaction> tr);
 
@@ -152,12 +145,12 @@ public:
 
 	Future<Version> getApplyEndVersion(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getProgress_impl(Reference<RestoreConfigFR> restore,
-	                                                  Reference<ReadYourWritesTransaction> tr);
+	static Future<std::string> getProgress_impl(Reference<RestoreConfigFR> restore,
+	                                            Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getFullStatus_impl(Reference<RestoreConfigFR> restore,
-	                                                    Reference<ReadYourWritesTransaction> tr);
+	static Future<std::string> getFullStatus_impl(Reference<RestoreConfigFR> restore,
+	                                              Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr);
 
 	std::string toString(); // Added by Meng
@@ -238,40 +231,38 @@ struct RestoreFileFR {
 };
 
 namespace parallelFileRestore {
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,
-                                                                    int64_t offset,
-                                                                    int len);
+Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len);
 } // namespace parallelFileRestore
 
 // Send each request in requests via channel of the request's interface.
 // Save replies to replies if replies != nullptr
 // The UID in a request is the UID of the interface to handle the request
-ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
+template <class Interface, class Request>
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
                              std::map<UID, Interface> interfaces,
                              std::vector<std::pair<UID, Request>> requests,
                              std::vector<REPLY_TYPE(Request)>* replies,
                              TaskPriority taskID = TaskPriority::Low,
                              bool trackRequestLatency = true) {
 	if (requests.empty()) {
-		return Void();
+		co_return;
 	}
 
-	state double start = now();
-	state int oustandingReplies = requests.size();
-	loop {
+	double start = now();
+	int oustandingReplies = requests.size();
+	while (true) {
 		try {
-			state std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			state std::vector<std::tuple<UID, Request, double>> replyDurations; // double is end time of the request
+			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
+			std::vector<std::tuple<UID, Request, double>> replyDurations; // double is end time of the request
 			for (auto& [requestId, request] : requests) {
 				RequestStream<Request> const* stream = &(interfaces[requestId].*channel);
 				cmdReplies.push_back(stream->getReply(request, taskID));
 				replyDurations.emplace_back(requestId, request, 0);
 			}
 
-			state std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
-			state std::vector<int> ongoingRepliesIndex;
-			loop {
+			std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
+			std::vector<int> ongoingRepliesIndex;
+			while (true) {
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
@@ -295,7 +286,7 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(
+					co_await (
 					    quorum(ongoingReplies,
 					           std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL, (int)ongoingReplies.size())));
 				}
@@ -372,20 +363,17 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 		}
 	}
 
-	return Void();
+	co_return;
 }
 
 // Similar to getBatchReplies except that the caller does not expect to process the reply info.
-ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::* channel,
+template <class Interface, class Request>
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel,
                                std::map<UID, Interface> interfaces,
                                std::vector<std::pair<UID, Request>> requests,
                                TaskPriority taskID = TaskPriority::Low,
                                bool trackRequestLatency = true) {
-	wait(getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency));
+	co_await getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency);
 
-	return Void();
+	co_return;
 }
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_RESTORECOMMON_ACTOR_H

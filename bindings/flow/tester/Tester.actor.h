@@ -18,16 +18,9 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDB_FLOW_TESTER_TESTER_ACTOR_G_H)
-#define FDB_FLOW_TESTER_TESTER_ACTOR_G_H
-#include "tester/Tester.actor.g.h"
-#elif !defined(FDB_FLOW_TESTER_TESTER_ACTOR_H)
-#define FDB_FLOW_TESTER_TESTER_ACTOR_H
-
 #pragma once
 
+#include <type_traits>
 #include <utility>
 
 #include "flow/IDispatched.h"
@@ -35,7 +28,6 @@
 #include "bindings/flow/IDirectory.h"
 #include "bindings/flow/Subspace.h"
 #include "bindings/flow/DirectoryLayer.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 constexpr bool LOG_ALL = false;
 constexpr bool LOG_INSTRUCTIONS = LOG_ALL || false;
@@ -209,24 +201,40 @@ struct FlowTesterData : public ReferenceCounted<FlowTesterData> {
 
 std::string tupleToString(FDB::Tuple const& tuple);
 
-ACTOR template <class F>
-Future<decltype(std::declval<F>()().getValue())> executeMutation(Reference<InstructionData> instruction, F func) {
-	loop {
-		try {
-			state decltype(std::declval<F>()().getValue()) result = wait(func());
-			if (instruction->isDatabase) {
-				wait(instruction->tr->commit());
+template <class F>
+using ExecuteMutationResult = decltype(std::declval<F>()().getValue());
+
+template <class F>
+Future<ExecuteMutationResult<F>> executeMutation(Reference<InstructionData> instruction, F func) {
+	while (true) {
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				if constexpr (std::is_same_v<ExecuteMutationResult<F>, Void>) {
+					co_await func();
+					if (instruction->isDatabase) {
+						co_await instruction->tr->commit();
+					}
+					co_return;
+				} else {
+					ExecuteMutationResult<F> result = co_await func();
+					if (instruction->isDatabase) {
+						co_await instruction->tr->commit();
+					}
+					co_return result;
+				}
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return result;
-		} catch (Error& e) {
-			if (instruction->isDatabase) {
-				wait(instruction->tr->onError(e));
-			} else {
-				throw;
+			if (hasErr) {
+				if (instruction->isDatabase) {
+					co_await instruction->tr->onError(err);
+				} else {
+					throw err;
+				}
 			}
 		}
 	}
 }
-
-#include "flow/unactorcompiler.h"
-#endif

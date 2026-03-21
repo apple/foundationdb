@@ -20,17 +20,8 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_CLUSTERCONNECTIONKEY_ACTOR_G_H)
-#define FDBCLIENT_CLUSTERCONNECTIONKEY_ACTOR_G_H
-#include "fdbclient/ClusterConnectionKey.actor.g.h"
-#elif !defined(FDBCLIENT_CLUSTERCONNECTIONKEY_ACTOR_H)
-#define FDBCLIENT_CLUSTERCONNECTIONKEY_ACTOR_H
-
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // An implementation of IClusterConnectionRecord backed by a key in a FoundationDB database.
 class ClusterConnectionKey : public IClusterConnectionRecord, ReferenceCounted<ClusterConnectionKey>, NonCopyable {
@@ -45,7 +36,7 @@ public:
 
 	// Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
 	// format is invalid.
-	ACTOR static Future<Reference<ClusterConnectionKey>> loadClusterConnectionKey(Database db, Key connectionStringKey);
+	static Future<Reference<ClusterConnectionKey>> loadClusterConnectionKey(Database db, Key connectionStringKey);
 
 	// Sets the connections string held by this object and persists it.
 	Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) override;
@@ -76,10 +67,9 @@ protected:
 	Future<bool> persist() override;
 
 private:
-	ACTOR static Future<ClusterConnectionString> getStoredConnectionStringImpl(Reference<ClusterConnectionKey> self);
-	ACTOR static Future<bool> upToDateImpl(Reference<ClusterConnectionKey> self,
-	                                       ClusterConnectionString* connectionString);
-	ACTOR static Future<bool> persistImpl(Reference<ClusterConnectionKey> self);
+	static Future<ClusterConnectionString> getStoredConnectionStringImpl(Reference<ClusterConnectionKey> self);
+	static Future<bool> upToDateImpl(Reference<ClusterConnectionKey> self, ClusterConnectionString* connectionString);
+	static Future<bool> persistImpl(Reference<ClusterConnectionKey> self);
 
 	// The database where the connection key is stored. Note that this does not need to be the same database as the one
 	// that the connection string would connect to.
@@ -87,6 +77,3 @@ private:
 	Key connectionStringKey;
 	Optional<Value> lastPersistedConnectionString;
 };
-
-#include "flow/unactorcompiler.h"
-#endif

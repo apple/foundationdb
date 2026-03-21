@@ -20,18 +20,11 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_MUTATION_LOG_READER_ACTOR_G_H)
-#define FDBCLIENT_MUTATION_LOG_READER_ACTOR_G_H
-#include "fdbclient/MutationLogReader.actor.g.h"
-#elif !defined(FDBCLIENT_MUTATION_LOG_READER_ACTOR_H)
-#define FDBCLIENT_MUTATION_LOG_READER_ACTOR_H
-
 #include <deque>
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace mutation_log_reader {
 
@@ -68,7 +61,7 @@ public:
 
 	void startReading(Database cx);
 	Future<Void> getNext(Database cx);
-	ACTOR static Future<Void> getNext_impl(PipelinedReader* self, Database cx);
+	static Future<Void> getNext_impl(PipelinedReader* self, Database cx);
 
 	void release() { readerLimit.release(); }
 
@@ -109,22 +102,22 @@ public:
 		}
 	}
 
-	ACTOR static Future<Reference<MutationLogReader>> Create(Database cx,
-	                                                         Version bv,
-	                                                         Version ev,
-	                                                         Key uid,
-	                                                         Key beginKey,
-	                                                         unsigned pd) {
-		state Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pd));
-		wait(self->initializePQ(self.getPtr()));
-		return self;
+	static Future<Reference<MutationLogReader>> Create(Database cx,
+	                                                   Version bv,
+	                                                   Version ev,
+	                                                   Key uid,
+	                                                   Key beginKey,
+	                                                   unsigned pd) {
+		Reference<MutationLogReader> self(new MutationLogReader(cx, bv, ev, uid, beginKey, pd));
+		co_await self->initializePQ(self.getPtr());
+		co_return self;
 	}
 
 	Future<Standalone<RangeResultRef>> getNext();
 
 private:
-	ACTOR static Future<Void> initializePQ(MutationLogReader* self);
-	ACTOR static Future<Standalone<RangeResultRef>> getNext_impl(MutationLogReader* self);
+	static Future<Void> initializePQ(MutationLogReader* self);
+	static Future<Standalone<RangeResultRef>> getNext_impl(MutationLogReader* self);
 
 	std::vector<std::unique_ptr<mutation_log_reader::PipelinedReader>> pipelinedReaders;
 	std::priority_queue<mutation_log_reader::RangeResultBlock> priorityQueue;
@@ -133,6 +126,3 @@ private:
 	unsigned pipelineDepth;
 	unsigned finished;
 };
-
-#include "flow/unactorcompiler.h"
-#endif

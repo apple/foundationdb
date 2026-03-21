@@ -20,20 +20,11 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_VERSIONEDMAP_ACTOR_G_H)
-#define FDBCLIENT_VERSIONEDMAP_ACTOR_G_H
-#include "fdbclient/VersionedMap.actor.g.h"
-#elif !defined(FDBCLIENT_VERSIONEDMAP_ACTOR_H)
-#define FDBCLIENT_VERSIONEDMAP_ACTOR_H
-
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR template <class Tree>
+template <class Tree>
 Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID = TaskPriority::DefaultYield) {
-	state int freeCount = 0;
+	int freeCount = 0;
 	while (!toFree.empty()) {
 		Tree a = std::move(toFree.back());
 		toFree.pop_back();
@@ -44,11 +35,8 @@ Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID 
 		}
 
 		if (++freeCount % 100 == 0)
-			wait(yield(taskID));
+			co_await yield(taskID);
 	}
 
-	return Void();
+	co_return;
 }
-
-#include "flow/unactorcompiler.h"
-#endif

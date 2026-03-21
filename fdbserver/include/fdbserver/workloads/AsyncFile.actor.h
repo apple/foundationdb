@@ -20,17 +20,8 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(WORKLOADS_ASYNCFILE_ACTOR_G_H)
-#define WORKLOADS_ASYNCFILE_ACTOR_G_H
-#include "fdbserver/workloads/AsyncFile.actor.g.h"
-#elif !defined(WORKLOADS_ASYNCFILE_ACTOR_H)
-#define WORKLOADS_ASYNCFILE_ACTOR_H
-
 #include "fdbserver/core/workloads.actor.h"
 #include "flow/IAsyncFile.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class RandomByteGenerator {
 private:
@@ -85,19 +76,15 @@ struct AsyncFileWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override;
 
 	// Opens a file for AsyncFile operations.  If the path is empty, then creates a file and fills it with random data
-	ACTOR Future<Void> openFile(AsyncFileWorkload* self,
-	                            int64_t flags,
-	                            int64_t mode,
-	                            uint64_t size,
-	                            bool fillFile = false) {
-		state RandomByteGenerator rbg;
+	Future<Void> openFile(AsyncFileWorkload* self, int64_t flags, int64_t mode, uint64_t size, bool fillFile = false) {
+		RandomByteGenerator rbg;
 
 		if (self->fileHandle.getPtr() != nullptr) {
 			self->fileHandle->file = Reference<IAsyncFile>(nullptr);
-			wait(delay(0.1));
+			co_await delay(0.1);
 		}
 
-		state bool fileCreated = self->path.length() == 0;
+		bool fileCreated = self->path.length() == 0;
 		if (fileCreated) {
 			self->path = "asyncfile." + deterministicRandom()->randomUniqueID().toString();
 			flags &= ~IAsyncFile::OPEN_READONLY;
@@ -113,23 +100,23 @@ struct AsyncFileWorkload : TestWorkload {
 			flags |= IAsyncFile::OPEN_UNCACHED;
 
 		try {
-			state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(self->path, flags, 0666));
+			Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(self->path, flags, 0666);
 			if (self->fileHandle.getPtr() == nullptr)
 				self->fileHandle = makeReference<AsyncFileHandle>(file, self->path, fileCreated);
 			else
 				self->fileHandle->file = file;
 
 			if (fileCreated || fillFile) {
-				state int64_t oldSize = wait(file->size());
-				state int64_t newSize = (size + _PAGE_SIZE - 1) & ~(int64_t(_PAGE_SIZE - 1)); // align size up
+				int64_t oldSize = co_await file->size();
+				int64_t newSize = (size + _PAGE_SIZE - 1) & ~(int64_t(_PAGE_SIZE - 1)); // align size up
 
 				if (!fileCreated)
-					wait(file->truncate(newSize));
+					co_await file->truncate(newSize);
 
-				state int chunkSize = 4 << 16;
-				state Reference<AsyncFileBuffer> data = self->allocateBuffer(chunkSize);
-				state int64_t i;
-				state Future<Void> lastWrite = Void();
+				int chunkSize = 4 << 16;
+				Reference<AsyncFileBuffer> data = self->allocateBuffer(chunkSize);
+				int64_t i{ 0 };
+				Future<Void> lastWrite = Void();
 				for (i = oldSize & ~(chunkSize - 1); i < newSize; i += chunkSize) {
 					if (i >> 30 != (i + (chunkSize)) >> 30) // each GB
 						printf("Building test file: %d GB\n", int((i + (chunkSize)) >> 30));
@@ -137,18 +124,15 @@ struct AsyncFileWorkload : TestWorkload {
 						rbg.writeRandomBytesToBuffer(data->buffer, chunkSize);
 					auto w = lastWrite;
 					lastWrite = file->write(data->buffer, chunkSize, i);
-					wait(w);
+					co_await w;
 				}
-				wait(lastWrite);
+				co_await lastWrite;
 			}
 		} catch (Error& error) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Could not open file");
 			throw;
 		}
 
-		return Void();
+		co_return;
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif

@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/ClusterConnectionKey.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // Creates a cluster connection record with a given connection string and saves it to the specified key. Needs to be
 // persisted should be set to true unless this ClusterConnectionKey is being created with the value read from the
@@ -37,21 +36,29 @@ ClusterConnectionKey::ClusterConnectionKey(Database db,
 
 // Loads and parses the connection string at the specified key, throwing errors if the file cannot be read or the
 // format is invalid.
-ACTOR Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterConnectionKey(Database db,
-                                                                                             Key connectionStringKey) {
-	state Transaction tr(db);
-	loop {
-		try {
-			Optional<Value> v = wait(tr.get(connectionStringKey));
-			if (!v.present()) {
-				throw connection_string_invalid();
+Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterConnectionKey(Database db,
+                                                                                       Key connectionStringKey) {
+	Transaction tr(db);
+	while (true) {
+		{
+			Error err;
+			bool hasErr = false;
+			try {
+				Optional<Value> v = co_await tr.get(connectionStringKey);
+				if (!v.present()) {
+					throw connection_string_invalid();
+				}
+				co_return makeReference<ClusterConnectionKey>(db,
+				                                              connectionStringKey,
+				                                              ClusterConnectionString(v.get().toString()),
+				                                              ConnectionStringNeedsPersisted::False);
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
 			}
-			return makeReference<ClusterConnectionKey>(db,
-			                                           connectionStringKey,
-			                                           ClusterConnectionString(v.get().toString()),
-			                                           ConnectionStringNeedsPersisted::False);
-		} catch (Error& e) {
-			wait(tr.onError(e));
+			if (hasErr) {
+				co_await tr.onError(err);
+			}
 		}
 	}
 }
@@ -63,31 +70,31 @@ Future<Void> ClusterConnectionKey::setAndPersistConnectionString(ClusterConnecti
 }
 
 // Get the connection string stored in the database.
-ACTOR Future<ClusterConnectionString> ClusterConnectionKey::getStoredConnectionStringImpl(
+Future<ClusterConnectionString> ClusterConnectionKey::getStoredConnectionStringImpl(
     Reference<ClusterConnectionKey> self) {
 	Reference<ClusterConnectionKey> cck =
-	    wait(ClusterConnectionKey::loadClusterConnectionKey(self->db, self->connectionStringKey));
-	return cck->cs;
+	    co_await ClusterConnectionKey::loadClusterConnectionKey(self->db, self->connectionStringKey);
+	co_return cck->cs;
 }
 
 Future<ClusterConnectionString> ClusterConnectionKey::getStoredConnectionString() {
 	return getStoredConnectionStringImpl(Reference<ClusterConnectionKey>::addRef(this));
 }
 
-ACTOR Future<bool> ClusterConnectionKey::upToDateImpl(Reference<ClusterConnectionKey> self,
-                                                      ClusterConnectionString* connectionString) {
+Future<bool> ClusterConnectionKey::upToDateImpl(Reference<ClusterConnectionKey> self,
+                                                ClusterConnectionString* connectionString) {
 	try {
 		// the cluster file hasn't been created yet so there's nothing to check
 		if (self->needsToBePersisted())
-			return true;
+			co_return true;
 
 		Reference<ClusterConnectionKey> temp =
-		    wait(ClusterConnectionKey::loadClusterConnectionKey(self->db, self->connectionStringKey));
+		    co_await ClusterConnectionKey::loadClusterConnectionKey(self->db, self->connectionStringKey);
 		*connectionString = temp->getConnectionString();
-		return connectionString->toString() == self->cs.toString();
+		co_return connectionString->toString() == self->cs.toString();
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "ClusterKeyError").error(e).detail("Key", self->connectionStringKey);
-		return false; // Swallow the error and report that the file is out of date
+		co_return false; // Swallow the error and report that the file is out of date
 	}
 }
 
@@ -114,41 +121,49 @@ std::string ClusterConnectionKey::toString() const {
 	return "fdbkey://" + printable(connectionStringKey);
 }
 
-ACTOR Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> self) {
+Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> self) {
 	self->setPersisted();
-	state Value newConnectionString = ValueRef(self->cs.toString());
+	Value newConnectionString = ValueRef(self->cs.toString());
 
 	try {
-		state Transaction tr(self->db);
-		loop {
-			try {
-				Optional<Value> existingConnectionString = wait(tr.get(self->connectionStringKey));
-				// Someone has already updated the connection string to what we want
-				if (existingConnectionString.present() && existingConnectionString.get() == newConnectionString) {
-					self->lastPersistedConnectionString = newConnectionString;
-					return true;
-				}
-				// Someone has updated the connection string to something we didn't expect, in which case we leave it
-				// alone. It's possible this could result in the stored string getting stuck if the connection string
-				// changes twice and only the first change is recorded. If the process that wrote the first change dies
-				// and no other process attempts to write the intermediate state, then only a newly opened connection
-				// key would be able to update the state.
-				else if (existingConnectionString.present() &&
-				         existingConnectionString != self->lastPersistedConnectionString) {
-					TraceEvent(SevWarnAlways, "UnableToChangeConnectionKeyDueToMismatch")
-					    .detail("ConnectionKey", self->connectionStringKey)
-					    .detail("NewConnectionString", newConnectionString)
-					    .detail("ExpectedStoredConnectionString", self->lastPersistedConnectionString)
-					    .detail("ActualStoredConnectionString", existingConnectionString);
-					return false;
-				}
-				tr.set(self->connectionStringKey, newConnectionString);
-				wait(tr.commit());
+		Transaction tr(self->db);
+		while (true) {
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					Optional<Value> existingConnectionString = co_await tr.get(self->connectionStringKey);
+					// Someone has already updated the connection string to what we want
+					if (existingConnectionString.present() && existingConnectionString.get() == newConnectionString) {
+						self->lastPersistedConnectionString = newConnectionString;
+						co_return true;
+					}
+					// Someone has updated the connection string to something we didn't expect, in which case we leave
+					// it alone. It's possible this could result in the stored string getting stuck if the connection
+					// string changes twice and only the first change is recorded. If the process that wrote the first
+					// change dies and no other process attempts to write the intermediate state, then only a newly
+					// opened connection key would be able to update the state.
+					else if (existingConnectionString.present() &&
+					         existingConnectionString != self->lastPersistedConnectionString) {
+						TraceEvent(SevWarnAlways, "UnableToChangeConnectionKeyDueToMismatch")
+						    .detail("ConnectionKey", self->connectionStringKey)
+						    .detail("NewConnectionString", newConnectionString)
+						    .detail("ExpectedStoredConnectionString", self->lastPersistedConnectionString)
+						    .detail("ActualStoredConnectionString", existingConnectionString);
+						co_return false;
+					}
+					tr.set(self->connectionStringKey, newConnectionString);
+					co_await tr.commit();
 
-				self->lastPersistedConnectionString = newConnectionString;
-				return true;
-			} catch (Error& e) {
-				wait(tr.onError(e));
+					self->lastPersistedConnectionString = newConnectionString;
+					co_return true;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					co_await tr.onError(err);
+				}
 			}
 		}
 	} catch (Error& e) {
@@ -158,7 +173,7 @@ ACTOR Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnection
 		    .detail("ConnectionString", self->cs.toString());
 	}
 
-	return false;
+	co_return false;
 };
 
 // Writes the connection string to the database

@@ -21,19 +21,19 @@
 #include "HighContentionAllocator.h"
 
 namespace FDB {
-ACTOR Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspace counters, Subspace recent) {
-	state int64_t start = 0;
-	state int64_t window = 0;
+Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspace counters, Subspace recent) {
+	int64_t start = 0;
+	int64_t window = 0;
 
-	loop {
-		FDBStandalone<RangeResultRef> range = wait(tr->getRange(counters.range(), 1, true, true));
+	while (true) {
+		FDBStandalone<RangeResultRef> range = co_await tr->getRange(counters.range(), 1, true, true);
 
 		if (range.size() > 0) {
 			start = counters.unpack(range[0].key).getInt(0);
 		}
 
-		state bool windowAdvanced = false;
-		loop {
+		bool windowAdvanced = false;
+		while (true) {
 			// if thread safety is needed, this should be locked {
 			if (windowAdvanced) {
 				tr->clear(KeyRangeRef(counters.key(), counters.get(start).key()));
@@ -46,7 +46,7 @@ ACTOR Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspac
 			Future<Optional<FDBStandalone<ValueRef>>> countFuture = tr->get(counters.get(start).key(), true);
 			// }
 
-			Optional<FDBStandalone<ValueRef>> countValue = wait(countFuture);
+			Optional<FDBStandalone<ValueRef>> countValue = co_await countFuture;
 
 			int64_t count = 0;
 			if (countValue.present()) {
@@ -65,17 +65,17 @@ ACTOR Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspac
 			windowAdvanced = true;
 		}
 
-		loop {
-			state int64_t candidate = deterministicRandom()->randomInt(start, start + window);
+		while (true) {
+			int64_t candidate = deterministicRandom()->randomInt(start, start + window);
 
 			// if thread safety is needed, this should be locked {
-			state Future<FDBStandalone<RangeResultRef>> latestCounter = tr->getRange(counters.range(), 1, true, true);
-			state Future<Optional<FDBStandalone<ValueRef>>> candidateValue = tr->get(recent.get(candidate).key());
+			Future<FDBStandalone<RangeResultRef>> latestCounter = tr->getRange(counters.range(), 1, true, true);
+			Future<Optional<FDBStandalone<ValueRef>>> candidateValue = tr->get(recent.get(candidate).key());
 			tr->setOption(FDBTransactionOption::FDB_TR_OPTION_NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 			tr->set(recent.get(candidate).key(), ValueRef());
 			// }
 
-			wait(success(latestCounter) && success(candidateValue));
+			co_await (success(latestCounter) && success(candidateValue));
 			int64_t currentWindowStart = 0;
 			if (latestCounter.get().size() > 0) {
 				currentWindowStart = counters.unpack(latestCounter.get()[0].key).getInt(0);
@@ -87,7 +87,7 @@ ACTOR Future<Standalone<StringRef>> _allocate(Reference<Transaction> tr, Subspac
 
 			if (!candidateValue.get().present()) {
 				tr->addWriteConflictKey(recent.get(candidate).key());
-				return Tuple().append(candidate).pack();
+				co_return Tuple().append(candidate).pack();
 			}
 		}
 	}

@@ -22,7 +22,7 @@
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 #include "flow/xxhash.h"
-#include "flow/actorcompiler.h" // must be last include
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class AsyncFileEncryptedImpl {
 public:
@@ -45,44 +45,43 @@ public:
 	}
 
 	// Read a single block of size ENCRYPTION_BLOCK_SIZE bytes, and decrypt.
-	ACTOR static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
-		state Arena arena;
-		state unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
-		int bytes = wait(uncancellable(holdWhile(arena,
-		                                         self->file->read(encrypted,
-		                                                          FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE,
-		                                                          FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block))));
+	static Future<Standalone<StringRef>> readBlock(AsyncFileEncrypted* self, uint32_t block) {
+		Arena arena;
+		unsigned char* encrypted = new (arena) unsigned char[FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE];
+		int bytes = co_await uncancellable(holdWhile(
+		    arena,
+		    self->file->read(encrypted, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * block)));
 		StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		DecryptionStreamCipher decryptor(cipherKey, self->getIV(block));
 		auto decrypted = decryptor.decrypt(encrypted, bytes, arena);
-		return Standalone<StringRef>(decrypted, arena);
+		co_return Standalone<StringRef>(decrypted, arena);
 	}
 
-	ACTOR static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
+	static Future<int> read(Reference<AsyncFileEncrypted> self, void* data, int length, int64_t offset) {
 		if (self->fileSize == -1) {
-			state int64_t fileSize = wait(self->file->size());
+			int64_t fileSize = co_await self->file->size();
 			self->fileSize = fileSize;
 		}
 		if (offset >= self->fileSize) {
-			return 0;
+			co_return 0;
 		}
 		if (offset + length > self->fileSize) {
 			length = self->fileSize - offset;
 		}
-		state uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
-		state uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
-		state uint32_t block;
-		state unsigned char* output = reinterpret_cast<unsigned char*>(data);
-		state int bytesRead = 0;
+		uint32_t firstBlock = offset / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
+		uint32_t lastBlock = (offset + length - 1) / FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE;
+		uint32_t block{ 0 };
+		unsigned char* output = reinterpret_cast<unsigned char*>(data);
+		int bytesRead = 0;
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::READ_ONLY);
 		for (block = firstBlock; block <= lastBlock; ++block) {
-			state Standalone<StringRef> plaintext;
+			Standalone<StringRef> plaintext;
 
 			auto cachedBlock = self->readBuffers.get(block);
 			if (cachedBlock.present()) {
 				plaintext = cachedBlock.get();
 			} else {
-				wait(store(plaintext, readBlock(self.getPtr(), block)));
+				co_await store(plaintext, readBlock(self.getPtr(), block));
 				self->readBuffers.insert(block, plaintext);
 			}
 			auto start = (block == firstBlock) ? plaintext.begin() + (offset % FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE)
@@ -105,14 +104,14 @@ public:
 			output += (end - start);
 			bytesRead += (end - start);
 		}
-		return bytesRead;
+		co_return bytesRead;
 	}
 
-	ACTOR static Future<Void> write(Reference<AsyncFileEncrypted> self, void const* data, int length, int64_t offset) {
+	static Future<Void> write(Reference<AsyncFileEncrypted> self, void const* data, int length, int64_t offset) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// All writes must append to the end of the file:
 		ASSERT_EQ(offset, self->currentBlock * FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE + self->offsetInBlock);
-		state unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
+		unsigned char const* input = reinterpret_cast<unsigned char const*>(data);
 		while (length > 0) {
 			const auto chunkSize = std::min(length, FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE - self->offsetInBlock);
 			Arena arena;
@@ -123,7 +122,7 @@ public:
 			length -= chunkSize;
 			input += chunkSize;
 			if (self->offsetInBlock == FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE) {
-				wait(self->writeLastBlockToFile());
+				co_await self->writeLastBlockToFile();
 				self->offsetInBlock = 0;
 				ASSERT_LT(self->currentBlock, std::numeric_limits<uint32_t>::max());
 				++self->currentBlock;
@@ -131,24 +130,24 @@ public:
 				                                                           self->getIV(self->currentBlock));
 			}
 		}
-		return Void();
+		co_return;
 	}
 
-	ACTOR static Future<Void> sync(Reference<AsyncFileEncrypted> self) {
+	static Future<Void> sync(Reference<AsyncFileEncrypted> self) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
-		wait(self->writeLastBlockToFile());
-		wait(self->file->sync());
-		return Void();
+		co_await self->writeLastBlockToFile();
+		co_await self->file->sync();
+		co_return;
 	}
 
-	ACTOR static Future<Void> zeroRange(AsyncFileEncrypted* self, int64_t offset, int64_t length) {
+	static Future<Void> zeroRange(AsyncFileEncrypted* self, int64_t offset, int64_t length) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		// TODO: Could optimize this
 		Arena arena;
 		auto zeroes = new (arena) unsigned char[length];
 		memset(zeroes, 0, length);
-		wait(uncancellable(holdWhile(arena, self->write(zeroes, length, offset))));
-		return Void();
+		co_await uncancellable(holdWhile(arena, self->write(zeroes, length, offset)));
+		co_return;
 	}
 };
 

@@ -22,7 +22,6 @@
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -63,56 +62,64 @@ Future<Void> PipelinedReader::getNext(Database cx) {
 	return getNext_impl(this, cx);
 }
 
-ACTOR Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database cx) {
-	state Transaction tr(cx);
+Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database cx) {
+	Transaction tr(cx);
 
-	state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-	                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
-	                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
-	                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+	GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+	                      (g_network->isSimulated() && !g_simulator->speedUpSimulation)
+	                          ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+	                          : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
-	state Key begin = versionToKey(self->currentBeginVersion, self->prefix);
-	state Key end = versionToKey(self->endVersion, self->prefix);
+	Key begin = versionToKey(self->currentBeginVersion, self->prefix);
+	Key end = versionToKey(self->endVersion, self->prefix);
 
-	loop {
+	while (true) {
 		// Get the lock
-		wait(self->readerLimit.take());
+		co_await self->readerLimit.take();
 
 		// Read begin to end forever until successful
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		while (true) {
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				RangeResult kvs = wait(tr.getRange(KeyRangeRef(begin, end), limits));
+					RangeResult kvs = co_await tr.getRange(KeyRangeRef(begin, end), limits);
 
-				// No more results, send end of stream
-				if (!kvs.empty()) {
-					// Send results to the reads stream
-					self->reads.send(
-					    RangeResultBlock{ .result = kvs,
-					                      .firstVersion = keyRefToVersion(kvs.front().key, self->prefix.size()),
-					                      .lastVersion = keyRefToVersion(kvs.back().key, self->prefix.size()),
-					                      .hash = self->hash,
-					                      .prefixLen = self->prefix.size(),
-					                      .indexToRead = 0 });
+					// No more results, send end of stream
+					if (!kvs.empty()) {
+						// Send results to the reads stream
+						self->reads.send(
+						    RangeResultBlock{ .result = kvs,
+						                      .firstVersion = keyRefToVersion(kvs.front().key, self->prefix.size()),
+						                      .lastVersion = keyRefToVersion(kvs.back().key, self->prefix.size()),
+						                      .hash = self->hash,
+						                      .prefixLen = self->prefix.size(),
+						                      .indexToRead = 0 });
+					}
+
+					if (!kvs.more) {
+						self->reads.sendError(end_of_stream());
+						co_return;
+					}
+
+					begin = kvs.getReadThrough();
+
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
 				}
-
-				if (!kvs.more) {
-					self->reads.sendError(end_of_stream());
-					return Void();
-				}
-
-				begin = kvs.getReadThrough();
-
-				break;
-			} catch (Error& e) {
-				if (e.code() == error_code_transaction_too_old) {
-					// We are using this transaction until it's too old and then resetting to a fresh one,
-					// so we don't need to delay.
-					tr.fullReset();
-				} else {
-					wait(tr.onError(e));
+				if (hasErr) {
+					if (err.code() == error_code_transaction_too_old) {
+						// We are using this transaction until it's too old and then resetting to a fresh one,
+						// so we don't need to delay.
+						tr.fullReset();
+					} else {
+						co_await tr.onError(err);
+					}
 				}
 			}
 		}
@@ -121,11 +128,11 @@ ACTOR Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database
 
 } // namespace mutation_log_reader
 
-ACTOR Future<Void> MutationLogReader::initializePQ(MutationLogReader* self) {
-	state int h;
+Future<Void> MutationLogReader::initializePQ(MutationLogReader* self) {
+	int h{ 0 };
 	for (h = 0; h < 256; ++h) {
 		try {
-			mutation_log_reader::RangeResultBlock front = waitNext(self->pipelinedReaders[h]->reads.getFuture());
+			mutation_log_reader::RangeResultBlock front = co_await self->pipelinedReaders[h]->reads.getFuture();
 			self->priorityQueue.push(front);
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream) {
@@ -134,31 +141,31 @@ ACTOR Future<Void> MutationLogReader::initializePQ(MutationLogReader* self) {
 			++self->finished;
 		}
 	}
-	return Void();
+	co_return;
 }
 
 Future<Standalone<RangeResultRef>> MutationLogReader::getNext() {
 	return getNext_impl(this);
 }
 
-ACTOR Future<Standalone<RangeResultRef>> MutationLogReader::getNext_impl(MutationLogReader* self) {
-	loop {
+Future<Standalone<RangeResultRef>> MutationLogReader::getNext_impl(MutationLogReader* self) {
+	while (true) {
 		if (self->finished == 256) {
-			state int i;
+			int i{ 0 };
 			for (i = 0; i < self->pipelinedReaders.size(); ++i) {
-				wait(self->pipelinedReaders[i]->done());
+				co_await self->pipelinedReaders[i]->done();
 			}
 			throw end_of_stream();
 		}
 		mutation_log_reader::RangeResultBlock top = self->priorityQueue.top();
 		self->priorityQueue.pop();
 		uint8_t hash = top.hash;
-		state Standalone<RangeResultRef> ret = top.consume();
+		Standalone<RangeResultRef> ret = top.consume();
 		if (top.empty()) {
 			self->pipelinedReaders[(int)hash]->release();
 			try {
 				mutation_log_reader::RangeResultBlock next =
-				    waitNext(self->pipelinedReaders[(int)hash]->reads.getFuture());
+				    co_await self->pipelinedReaders[(int)hash]->reads.getFuture();
 				self->priorityQueue.push(next);
 			} catch (Error& e) {
 				if (e.code() == error_code_end_of_stream) {
@@ -171,7 +178,7 @@ ACTOR Future<Standalone<RangeResultRef>> MutationLogReader::getNext_impl(Mutatio
 			self->priorityQueue.push(top);
 		}
 		if (ret.size() != 0) {
-			return ret;
+			co_return ret;
 		}
 	}
 }

@@ -53,8 +53,6 @@
 #include "flow/TLSConfig.actor.h"
 #include "SimpleOpt/SimpleOpt.h"
 
-#include "flow/actorcompiler.h" // has to be last include
-
 // CLI for S3Client.
 
 extern const char* getSourceVersion();
@@ -326,51 +324,51 @@ static int parseCommandLine(Reference<Params> param, CSimpleOpt* args) {
 }
 
 // Method called by main. Figures which of copy_up or copy_down to call.
-ACTOR Future<Void> run(Reference<Params> params) {
+Future<Void> run(Reference<Params> params) {
 	if (params->command == "cp") {
 		if (params->whichIsBlobstoreURL == 1) {
 			if (std::filesystem::is_directory(params->src)) {
-				wait(copyUpDirectory(params->src, params->tgt));
+				co_await copyUpDirectory(params->src, params->tgt);
 			} else {
-				wait(copyUpFile(params->src, params->tgt));
+				co_await copyUpFile(params->src, params->tgt);
 			}
 		} else {
 			if (std::filesystem::is_directory(params->tgt)) {
-				wait(copyDownDirectory(params->src, params->tgt));
+				co_await copyDownDirectory(params->src, params->tgt);
 			} else {
-				wait(copyDownFile(params->src, params->tgt));
+				co_await copyDownFile(params->src, params->tgt);
 			}
 		}
 	} else if (params->command == "rm") {
-		wait(deleteResource(params->src));
+		co_await deleteResource(params->src);
 	} else if (params->command == "ls") {
 		if (params->ls_recursive) {
-			wait(listFiles(params->src, std::numeric_limits<int>::max()));
+			co_await listFiles(params->src, std::numeric_limits<int>::max());
 		} else {
-			wait(listFiles(params->src, 1));
+			co_await listFiles(params->src, 1);
 		}
 	}
-	return Void();
+	co_return;
 }
 
-ACTOR Future<Void> deleteResource(std::string src) {
+Future<Void> deleteResource(std::string src) {
 	try {
-		wait(::deleteResource(src));
+		co_await ::deleteResource(src);
 	} catch (Error& e) {
 		// Rethrow the error to ensure it's handled by the main error handler
 		throw;
 	}
-	return Void();
+	co_return;
 }
 
-ACTOR Future<Void> listFiles(std::string src, int maxDepth) {
+Future<Void> listFiles(std::string src, int maxDepth) {
 	try {
-		wait(::listFiles(src, maxDepth));
+		co_await ::listFiles(src, maxDepth);
 	} catch (Error& e) {
 		// Rethrow the error to ensure it's handled by the main error handler
 		throw;
 	}
-	return Void();
+	co_return;
 }
 } // namespace s3client_cli
 

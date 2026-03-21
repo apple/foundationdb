@@ -38,8 +38,6 @@
 #include <memory>
 #include <unordered_map>
 
-#include "flow/actorcompiler.h" // always the last include
-
 #define TRACE_REST_OP(opName, url)                                                                                     \
 	do {                                                                                                               \
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {                                                    \
@@ -94,14 +92,14 @@ bool isErrorRetryable(const Error& e) {
 	return e.code() != error_code_timed_out && e.code() != error_code_connection_failed;
 }
 
-ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> client,
-                                                               std::string verb,
-                                                               HTTP::Headers headers,
-                                                               RESTUrl url,
-                                                               std::set<unsigned int> successCodes) {
+Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> client,
+                                                         std::string verb,
+                                                         HTTP::Headers headers,
+                                                         RESTUrl url,
+                                                         std::set<unsigned int> successCodes) {
 
-	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
-	state UnsentPacketQueue content;
+	Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	UnsentPacketQueue content;
 	req->data.content = &content;
 	req->data.contentLen = url.body.size();
 	req->data.headers = headers;
@@ -124,21 +122,21 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		client->statsMap.emplace(statsKey, std::make_unique<RESTClient::Stats>(statsKey));
 	}
 
-	state int maxTries = std::min(client->knobs.request_tries, client->knobs.connect_tries);
-	state int thisTry = 1;
-	state double nextRetryDelay = 2.0;
-	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-	state double reqTimeout = (client->knobs.request_timeout_secs * 1.0);
-	state RESTConnectionPoolKey connectPoolKey = RESTConnectionPool::getConnectionPoolKey(url.host, url.service);
-	state RESTClient::Stats* statsPtr = client->statsMap[statsKey].get();
+	int maxTries = std::min(client->knobs.request_tries, client->knobs.connect_tries);
+	int thisTry = 1;
+	double nextRetryDelay = 2.0;
+	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	double reqTimeout = (client->knobs.request_timeout_secs * 1.0);
+	RESTConnectionPoolKey connectPoolKey = RESTConnectionPool::getConnectionPoolKey(url.host, url.service);
+	RESTClient::Stats* statsPtr = client->statsMap[statsKey].get();
 
-	loop {
-		state Optional<Error> err;
-		state Optional<NetworkAddress> remoteAddress;
-		state bool connectionEstablished = false;
+	while (true) {
+		Optional<Error> err;
+		Optional<NetworkAddress> remoteAddress;
+		bool connectionEstablished = false;
 
-		state Reference<HTTP::IncomingResponse> r;
-		state RESTConnectionPool::ReusableConnection rconn;
+		Reference<HTTP::IncomingResponse> r;
+		RESTConnectionPool::ReusableConnection rconn;
 
 		try {
 			// Start connecting
@@ -146,14 +144,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			wait(store(rconn, timeoutError(frconn, client->knobs.connect_timeout)));
+			co_await store(rconn, timeoutError(frconn, client->knobs.connect_timeout));
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
-			wait(store(
+			co_await store(
 			    r,
 			    timeoutError(HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate),
-			                 reqTimeout)));
+			                 reqTimeout));
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
@@ -180,7 +178,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		// If r->code is in successCodes then record the successful request and return r.
 		if (!err.present() && successCodes.count(r->code) != 0) {
 			statsPtr->requests_successful++;
-			return r;
+			co_return r;
 		}
 
 		// Otherwise, this request is considered failed.  Update failure count.
@@ -249,7 +247,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 
 			// Log the delay then wait.
 			event.detail("RetryDelay", delay);
-			wait(::delay(delay));
+			co_await ::delay(delay);
 		} else {
 			// We can't retry, so throw something.
 

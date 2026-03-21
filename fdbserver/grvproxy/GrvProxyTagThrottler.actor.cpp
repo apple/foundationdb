@@ -22,7 +22,7 @@
 #include "GrvProxyTagThrottler.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // must be last include
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 uint64_t GrvProxyTagThrottler::DelayedRequest::lastSequenceNumber = 0;
 
@@ -245,37 +245,37 @@ uint32_t GrvProxyTagThrottler::size() const {
 	return queues.size();
 }
 
-ACTOR static Future<Void> mockClient(GrvProxyTagThrottler* throttler,
-                                     TransactionPriority priority,
-                                     TagSet tagSet,
-                                     int batchSize,
-                                     double desiredRate,
-                                     TransactionTagMap<uint32_t>* counters) {
-	state Future<Void> timer;
-	state TransactionTagMap<uint32_t> tags;
+static Future<Void> mockClient(GrvProxyTagThrottler* throttler,
+                               TransactionPriority priority,
+                               TagSet tagSet,
+                               int batchSize,
+                               double desiredRate,
+                               TransactionTagMap<uint32_t>* counters) {
+	Future<Void> timer;
+	TransactionTagMap<uint32_t> tags;
 	for (const auto& tag : tagSet) {
 		tags[tag] = batchSize;
 	}
-	loop {
+	while (true) {
 		timer = delayJittered(static_cast<double>(batchSize) / desiredRate);
 		GetReadVersionRequest req;
 		req.tags = tags;
 		req.priority = priority;
 		throttler->addRequest(req);
-		wait(success(req.reply.getFuture()) && timer);
+		co_await (success(req.reply.getFuture()) && timer);
 		for (auto& [tag, _] : tags) {
 			(*counters)[tag] += batchSize;
 		}
 	}
 }
 
-ACTOR static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
-	state TransactionTagMap<uint32_t> tagSet1;
-	state TransactionTagMap<uint32_t> tagSet2;
-	state std::vector<GetReadVersionRequest> reqs;
-	state int i = 0;
+static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
+	TransactionTagMap<uint32_t> tagSet1;
+	TransactionTagMap<uint32_t> tagSet2;
+	std::vector<GetReadVersionRequest> reqs;
+	int i = 0;
 	// Used to track the order in which replies are received
-	state std::vector<int> replyIndices;
+	std::vector<int> replyIndices;
 
 	// Tag half of requests with one tag, half with another, then randomly shuffle
 	tagSet1["sampleTag1"_sr] = 1;
@@ -295,7 +295,7 @@ ACTOR static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
 	for (const auto& req : reqs) {
 		throttler->addRequest(req);
 	}
-	state std::vector<Future<Void>> futures;
+	std::vector<Future<Void>> futures;
 	for (int j = 0; j < 2000; ++j) {
 		// Flow hack to capture replyIndices
 		auto* _replyIndices = &replyIndices;
@@ -304,19 +304,19 @@ ACTOR static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
 			return Void();
 		}));
 	}
-	wait(waitForAll(futures));
+	co_await waitForAll(futures);
 	for (i = 0; i < 2000; ++i) {
 		ASSERT_EQ(replyIndices[i], i);
 	}
-	return Void();
+	co_return;
 }
 
-ACTOR static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {
-	state Deque<GetReadVersionRequest> outBatchPriority;
-	state Deque<GetReadVersionRequest> outDefaultPriority;
-	loop {
-		state double elapsed = (0.009 + 0.002 * deterministicRandom()->random01());
-		wait(delay(elapsed));
+static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {
+	Deque<GetReadVersionRequest> outBatchPriority;
+	Deque<GetReadVersionRequest> outDefaultPriority;
+	while (true) {
+		double elapsed = (0.009 + 0.002 * deterministicRandom()->random01());
+		co_await delay(elapsed);
 		throttler->releaseTransactions(elapsed, outBatchPriority, outDefaultPriority);
 		while (!outBatchPriority.empty()) {
 			outBatchPriority.front().reply.send(GetReadVersionReply{});

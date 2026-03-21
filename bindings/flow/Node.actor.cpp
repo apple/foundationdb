@@ -31,18 +31,18 @@ bool DirectoryLayer::Node::exists() const {
 	return subspace.present();
 }
 
-ACTOR Future<DirectoryLayer::Node> loadMetadata(DirectoryLayer::Node* n, Reference<Transaction> tr) {
+Future<DirectoryLayer::Node> loadMetadata(DirectoryLayer::Node* n, Reference<Transaction> tr) {
 	if (!n->exists()) {
 		n->loadedMetadata = true;
-		return *n;
+		co_return *n;
 	}
 
-	Optional<FDBStandalone<ValueRef>> layer = wait(tr->get(n->subspace.get().pack(DirectoryLayer::LAYER_KEY)));
+	Optional<FDBStandalone<ValueRef>> layer = co_await tr->get(n->subspace.get().pack(DirectoryLayer::LAYER_KEY));
 
 	n->layer = layer.present() ? layer.get() : Standalone<StringRef>();
 	n->loadedMetadata = true;
 
-	return *n;
+	co_return *n;
 }
 
 // Calls to loadMetadata must keep the Node alive while the future is outstanding

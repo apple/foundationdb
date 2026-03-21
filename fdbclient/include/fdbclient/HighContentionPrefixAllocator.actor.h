@@ -20,20 +20,11 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_G_H)
-#define FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_G_H
-#include "fdbclient/HighContentionPrefixAllocator.actor.g.h"
-#elif !defined(FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_H)
-#define FDBCLIENT_HIGHCONTENTIONPREFIXALLOCATOR_ACTOR_H
-
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Subspace.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class HighContentionPrefixAllocator {
 public:
@@ -59,22 +50,22 @@ private:
 	Subspace counters;
 	Subspace recent;
 
-	ACTOR template <class TransactionT>
+	template <class TransactionT>
 	Future<Standalone<StringRef>> allocate(HighContentionPrefixAllocator* self, Reference<TransactionT> tr) {
-		state int64_t start = 0;
-		state int64_t window = 0;
+		int64_t start = 0;
+		int64_t window = 0;
 
-		loop {
-			state typename TransactionT::template FutureT<RangeResult> rangeFuture =
+		while (true) {
+			typename TransactionT::template FutureT<RangeResult> rangeFuture =
 			    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
-			RangeResult range = wait(safeThreadFutureToFuture(rangeFuture));
+			RangeResult range = co_await safeThreadFutureToFuture(rangeFuture);
 
 			if (range.size() > 0) {
 				start = self->counters.unpack(range[0].key).getInt(0);
 			}
 
-			state bool windowAdvanced = false;
-			loop {
+			bool windowAdvanced = false;
+			while (true) {
 				// if thread safety is needed, this should be locked {
 				if (windowAdvanced) {
 					tr->clear(KeyRangeRef(self->counters.key(), self->counters.get(start).key()));
@@ -85,11 +76,11 @@ private:
 				int64_t inc = 1;
 				tr->atomicOp(self->counters.get(start).key(), StringRef((uint8_t*)&inc, 8), MutationRef::AddValue);
 
-				state typename TransactionT::template FutureT<Optional<Value>> countFuture =
+				typename TransactionT::template FutureT<Optional<Value>> countFuture =
 				    tr->get(self->counters.get(start).key(), Snapshot::True);
 				// }
 
-				Optional<Value> countValue = wait(safeThreadFutureToFuture(countFuture));
+				Optional<Value> countValue = co_await safeThreadFutureToFuture(countFuture);
 
 				int64_t count = 0;
 				if (countValue.present()) {
@@ -108,20 +99,20 @@ private:
 				windowAdvanced = true;
 			}
 
-			loop {
-				state int64_t candidate = deterministicRandom()->randomInt(start, start + window);
+			while (true) {
+				int64_t candidate = deterministicRandom()->randomInt(start, start + window);
 
 				// if thread safety is needed, this should be locked {
-				state typename TransactionT::template FutureT<RangeResult> latestCounterFuture =
+				typename TransactionT::template FutureT<RangeResult> latestCounterFuture =
 				    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
-				state typename TransactionT::template FutureT<Optional<Value>> candidateValueFuture =
+				typename TransactionT::template FutureT<Optional<Value>> candidateValueFuture =
 				    tr->get(self->recent.get(candidate).key());
 				tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 				tr->set(self->recent.get(candidate).key(), ValueRef());
 				// }
 
-				wait(success(safeThreadFutureToFuture(latestCounterFuture)) &&
-				     success(safeThreadFutureToFuture(candidateValueFuture)));
+				co_await (success(safeThreadFutureToFuture(latestCounterFuture)) &&
+				          success(safeThreadFutureToFuture(candidateValueFuture)));
 
 				int64_t currentWindowStart = 0;
 				if (latestCounterFuture.get().size() > 0) {
@@ -134,12 +125,9 @@ private:
 
 				if (!candidateValueFuture.get().present()) {
 					tr->addWriteConflictRange(singleKeyRange(self->recent.get(candidate).key()));
-					return Tuple::makeTuple(candidate).pack();
+					co_return Tuple::makeTuple(candidate).pack();
 				}
 			}
 		}
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif

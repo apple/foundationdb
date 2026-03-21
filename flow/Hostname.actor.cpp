@@ -24,8 +24,7 @@
 
 #include "flow/IConnection.h"
 #include "flow/UnitTest.h"
-
-#include "flow/actorcompiler.h" // has to be last include
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -60,31 +59,31 @@ Hostname Hostname::parse(const std::string& s) {
 	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
 }
 
-ACTOR Future<Optional<NetworkAddress>> resolveImpl(const Hostname* self) {
+Future<Optional<NetworkAddress>> resolveImpl(const Hostname* self) {
 	try {
 		std::vector<NetworkAddress> addresses =
-		    wait(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service));
+		    co_await INetworkConnections::net()->resolveTCPEndpointWithDNSCache(self->host, self->service);
 		NetworkAddress address = INetworkConnections::pickOneAddress(addresses);
 		address.flags = 0; // Reset the parsed address to public
 		address.fromHostname = NetworkAddressFromHostname::True;
 		if (self->isTLS) {
 			address.flags |= NetworkAddress::FLAG_TLS;
 		}
-		return address;
+		co_return address;
 	} catch (...) {
-		return Optional<NetworkAddress>();
+		co_return Optional<NetworkAddress>();
 	}
 }
 
-ACTOR Future<NetworkAddress> resolveWithRetryImpl(const Hostname* self) {
-	state double resolveInterval = FLOW_KNOBS->HOSTNAME_RESOLVE_INIT_INTERVAL;
-	loop {
+Future<NetworkAddress> resolveWithRetryImpl(const Hostname* self) {
+	double resolveInterval = FLOW_KNOBS->HOSTNAME_RESOLVE_INIT_INTERVAL;
+	while (true) {
 		try {
-			Optional<NetworkAddress> address = wait(resolveImpl(self));
+			Optional<NetworkAddress> address = co_await resolveImpl(self);
 			if (address.present()) {
-				return address.get();
+				co_return address.get();
 			}
-			wait(delay(resolveInterval));
+			co_await delay(resolveInterval);
 			resolveInterval = std::min(2 * resolveInterval, FLOW_KNOBS->HOSTNAME_RESOLVE_MAX_INTERVAL);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_actor_cancelled);

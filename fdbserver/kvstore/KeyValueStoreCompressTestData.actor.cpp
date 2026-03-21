@@ -19,7 +19,6 @@
  */
 
 #include "fdbserver/core/IKeyValueStore.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 // KeyValueStoreCompressTestData wraps an existing IKeyValueStore and
 // implements the following rudimentary compression scheme:
@@ -78,37 +77,37 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	}
 
 private:
-	ACTOR static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<ReadOptions> options) {
-		Optional<Value> v = wait(store->readValue(key, options));
+	static Future<Optional<Value>> doReadValue(IKeyValueStore* store, Key key, Optional<ReadOptions> options) {
+		Optional<Value> v = co_await store->readValue(key, options);
 		if (!v.present())
-			return v;
-		return unpack(v.get());
+			co_return v;
+		co_return unpack(v.get());
 	}
 
-	ACTOR static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
-	                                                       Key key,
-	                                                       int maxLength,
-	                                                       Optional<ReadOptions> options) {
-		Optional<Value> v = wait(doReadValue(store, key, options));
+	static Future<Optional<Value>> doReadValuePrefix(IKeyValueStore* store,
+	                                                 Key key,
+	                                                 int maxLength,
+	                                                 Optional<ReadOptions> options) {
+		Optional<Value> v = co_await doReadValue(store, key, options);
 		if (!v.present())
-			return v;
+			co_return v;
 		if (maxLength < v.get().size()) {
-			return v.get().substr(0, maxLength);
+			co_return v.get().substr(0, maxLength);
 		} else {
-			return v;
+			co_return v;
 		}
 	}
-	ACTOR Future<RangeResult> doReadRange(IKeyValueStore* store,
-	                                      KeyRangeRef keys,
-	                                      int rowLimit,
-	                                      int byteLimit,
-	                                      Optional<ReadOptions> options) {
-		RangeResult _vs = wait(store->readRange(keys, rowLimit, byteLimit, options));
+	Future<RangeResult> doReadRange(IKeyValueStore* store,
+	                                KeyRangeRef keys,
+	                                int rowLimit,
+	                                int byteLimit,
+	                                Optional<ReadOptions> options) {
+		RangeResult _vs = co_await store->readRange(keys, rowLimit, byteLimit, options);
 		RangeResult vs = _vs; // Get rid of implicit const& from wait statement
 		Arena& a = vs.arena();
 		for (int i = 0; i < vs.size(); i++)
 			vs[i].value = ValueRef(a, (ValueRef const&)unpack(vs[i].value));
-		return vs;
+		co_return vs;
 	}
 
 	// These implement the actual "compression" scheme

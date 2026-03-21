@@ -27,7 +27,6 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include <string>
-#include "flow/actorcompiler.h" // has to be last include
 
 Counter::Counter(std::string const& name, CounterCollection& collection, bool skipTraceOnSilentInterval)
   : name(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
@@ -128,25 +127,25 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) {
 
 class CounterCollectionImpl {
 public:
-	ACTOR static Future<Void> traceCounters(CounterCollection* counters,
-	                                        std::string traceEventName,
-	                                        UID traceEventID,
-	                                        double interval,
-	                                        std::string trackLatestName,
-	                                        std::function<void(TraceEvent&)> decorator) {
-		wait(delay(0)); // Give an opportunity for all members used in special counters to be initialized
+	static Future<Void> traceCounters(CounterCollection* counters,
+	                                  std::string traceEventName,
+	                                  UID traceEventID,
+	                                  double interval,
+	                                  std::string trackLatestName,
+	                                  std::function<void(TraceEvent&)> decorator) {
+		co_await delay(0); // Give an opportunity for all members used in special counters to be initialized
 
 		for (ICounter* c : counters->counters)
 			c->resetInterval();
 
-		state Reference<EventCacheHolder> traceEventHolder;
+		Reference<EventCacheHolder> traceEventHolder;
 		if (!trackLatestName.empty()) {
 			traceEventHolder = makeReference<EventCacheHolder>(trackLatestName);
 		}
 
-		state double last_interval = now();
+		double last_interval = now();
 
-		loop {
+		while (true) {
 			TraceEvent te(traceEventName.c_str(), traceEventID);
 			te.detail("Elapsed", now() - last_interval);
 
@@ -158,7 +157,7 @@ public:
 			}
 
 			last_interval = now();
-			wait(delay(interval, TaskPriority::FlushTrace));
+			co_await delay(interval, TaskPriority::FlushTrace);
 		}
 	}
 };

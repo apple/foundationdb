@@ -22,19 +22,19 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/FDBTypes.h"
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 class MockGlobalStateImpl {
 public:
-	ACTOR static Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(MockGlobalState* mgs,
-	                                                                                 KeyRange keys,
-	                                                                                 StorageMetrics min,
-	                                                                                 StorageMetrics max,
-	                                                                                 StorageMetrics permittedError,
-	                                                                                 int shardLimit,
-	                                                                                 int expectedShardCount) {
-		state Version version = 0;
-		loop {
+	static Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(MockGlobalState* mgs,
+	                                                                           KeyRange keys,
+	                                                                           StorageMetrics min,
+	                                                                           StorageMetrics max,
+	                                                                           StorageMetrics permittedError,
+	                                                                           int shardLimit,
+	                                                                           int expectedShardCount) {
+		Version version = 0;
+		while (true) {
 			auto locations = mgs->getKeyRangeLocations(keys,
 			                                           shardLimit,
 			                                           Reverse::False,
@@ -55,42 +55,51 @@ public:
 			           "Some shard is in the same location.",
 			           probe::decoration::rare);
 
-			try {
-				Optional<StorageMetrics> res =
-				    wait(::waitStorageMetricsWithLocation(version, keys, locations, min, max, permittedError));
+			{
+				Error err;
+				bool hasErr = false;
+				try {
+					Optional<StorageMetrics> res =
+					    co_await ::waitStorageMetricsWithLocation(version, keys, locations, min, max, permittedError);
 
-				TraceEvent(SevDebug, "MGSWaitStorageMetrics")
-				    .detail("Phase", "GetStorageMetrics")
-				    .detail("KeyRange", keys.toString())
-				    .detail("Present", res.present());
+					TraceEvent(SevDebug, "MGSWaitStorageMetrics")
+					    .detail("Phase", "GetStorageMetrics")
+					    .detail("KeyRange", keys.toString())
+					    .detail("Present", res.present());
 
-				if (res.present()) {
-					return std::make_pair(res, -1);
+					if (res.present()) {
+						co_return std::make_pair(res, -1);
+					}
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
 				}
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "MGSWaitStorageMetricsHandleError").error(e);
-				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-				} else if (e.code() == error_code_future_version) {
-					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
-				} else {
-					TraceEvent(SevError, "MGSWaitStorageMetricsError").error(e);
-					throw;
+				if (hasErr) {
+					TraceEvent(SevDebug, "MGSWaitStorageMetricsHandleError").error(err);
+					if (err.code() == error_code_wrong_shard_server ||
+					    err.code() == error_code_all_alternatives_failed) {
+						co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution);
+					} else if (err.code() == error_code_future_version) {
+						co_await delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution);
+					} else {
+						TraceEvent(SevError, "MGSWaitStorageMetricsError").error(err);
+						throw err;
+					}
 				}
 			}
 			// Avoid busy spin
-			wait(delay(0.1, TaskPriority::DataDistribution));
+			co_await delay(0.1, TaskPriority::DataDistribution);
 		}
 	}
 
 	// SOMEDAY: reuse the NativeAPI implementation
-	ACTOR static Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(MockGlobalState* mgs,
-	                                                                       KeyRange keys,
-	                                                                       StorageMetrics limit,
-	                                                                       StorageMetrics estimated,
-	                                                                       Optional<int> minSplitBytes) {
-		loop {
-			state std::vector<KeyRangeLocationInfo> locations =
+	static Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(MockGlobalState* mgs,
+	                                                                 KeyRange keys,
+	                                                                 StorageMetrics limit,
+	                                                                 StorageMetrics estimated,
+	                                                                 Optional<int> minSplitBytes) {
+		while (true) {
+			std::vector<KeyRangeLocationInfo> locations =
 			    mgs->getKeyRangeLocations(keys,
 			                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
 			                              Reverse::False,
@@ -102,50 +111,50 @@ public:
 
 			// Same solution to NativeAPI::splitStorageMetrics, wait some merge finished
 			if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
-				wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
+				co_await delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution);
 			}
 
 			Optional<Standalone<VectorRef<KeyRef>>> results =
-			    wait(splitStorageMetricsWithLocations(locations, keys, limit, estimated, minSplitBytes));
+			    co_await splitStorageMetricsWithLocations(locations, keys, limit, estimated, minSplitBytes);
 
 			if (results.present()) {
-				return results.get();
+				co_return results.get();
 			}
 
-			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			co_await delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution);
 		}
 	}
 };
 
 class MockStorageServerImpl {
 public:
-	ACTOR static Future<Void> waitMetricsForReal(MockStorageServer* self, WaitMetricsRequest req) {
+	static Future<Void> waitMetricsForReal(MockStorageServer* self, WaitMetricsRequest req) {
 		if (!self->isReadable(req.keys)) {
 			self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 		} else {
-			wait(self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT)));
+			co_await self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
 		}
-		return Void();
+		co_return;
 	}
 
 	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
 	// Once the fetchKeys return, the shard status will become FETCHED.
-	ACTOR static Future<Void> waitFetchKeysFinish(MockStorageServer* self, MockStorageServer::FetchKeysParams params) {
-		state TraceInterval interval("MockFetchKeys");
+	static Future<Void> waitFetchKeysFinish(MockStorageServer* self, MockStorageServer::FetchKeysParams params) {
+		TraceInterval interval("MockFetchKeys");
 		// between each chunk delay for random time, and finally set the fetchComplete signal.
 		ASSERT(params.totalRangeBytes > 0);
-		state int chunkCount = std::ceil(params.totalRangeBytes * 1.0 / SERVER_KNOBS->FETCH_BLOCK_BYTES);
-		state int64_t currentTotal = 0;
-		state Key lastKey = params.keys.begin;
+		int chunkCount = std::ceil(params.totalRangeBytes * 1.0 / SERVER_KNOBS->FETCH_BLOCK_BYTES);
+		int64_t currentTotal = 0;
+		Key lastKey = params.keys.begin;
 
 		TraceEvent(SevDebug, interval.begin(), self->id)
 		    .detail("Range", params.keys)
 		    .detail("ChunkCount", chunkCount)
 		    .detail("TotalBytes", params.totalRangeBytes);
 
-		state int i = 0;
+		int i = 0;
 		for (; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
-			wait(delayJittered(0.1, TaskPriority::FetchKeys));
+			co_await delayJittered(0.1, TaskPriority::FetchKeys);
 
 			int remainedBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
 
@@ -191,7 +200,7 @@ public:
 
 		self->setShardStatus(params.keys, MockShardStatus::FETCHED);
 		TraceEvent(SevDebug, interval.end(), self->id).log();
-		return Void();
+		co_return;
 	}
 };
 

@@ -28,8 +28,6 @@
 #include <boost/algorithm/string.hpp>
 #include <queue>
 
-#include "flow/actorcompiler.h" // always the last include
-
 // RESTConnectionPool destructor implementation
 RESTConnectionPool::~RESTConnectionPool() {
 	// In simulation, explicitly close all pooled connections before destruction.
@@ -125,10 +123,10 @@ std::unordered_map<std::string, int> RESTClientKnobs::get() const {
 	return details;
 }
 
-ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<RESTConnectionPool> connectionPool,
-                                                                  RESTConnectionPoolKey connectKey,
-                                                                  bool isSecure,
-                                                                  int maxConnLife) {
+Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<RESTConnectionPool> connectionPool,
+                                                            RESTConnectionPoolKey connectKey,
+                                                            bool isSecure,
+                                                            int maxConnLife) {
 
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
 		TraceEvent("RESTUtilConnectStart")
@@ -152,16 +150,16 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 				    .detail("ExpireIn", rconn.expirationTime - now())
 				    .detail("NumConnsInPool", poolItr->second.size());
 			}
-			return rconn;
+			co_return rconn;
 		}
 	}
 
 	ASSERT(poolItr == connectionPool->connectionPoolMap.end() || poolItr->second.empty());
 
 	// No valid connection exists, create a new one
-	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
-	wait(conn->connectHandshake());
+	Reference<IConnection> conn =
+	    co_await INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure);
+	co_await conn->connectHandshake();
 
 	TraceEvent("RESTTUilCreateNewConn")
 	    .suppressFor(60)
@@ -170,7 +168,7 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ConnPoolSize", connectionPool->connectionPoolMap.size());
 
-	return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
+	co_return RESTConnectionPool::ReusableConnection({ conn, now() + maxConnLife });
 }
 
 Future<RESTConnectionPool::ReusableConnection> RESTConnectionPool::connect(RESTConnectionPoolKey connectKey,

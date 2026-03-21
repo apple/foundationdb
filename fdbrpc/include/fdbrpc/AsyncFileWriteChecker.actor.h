@@ -17,11 +17,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(NO_INTELLISENSE) && !defined(ASYNC_FILE_WRITE_CHECKER_ACTOR_G_H)
-#define ASYNC_FILE_WRITE_CHECKER_ACTOR_G_H
-#include "fdbrpc/AsyncFileWriteChecker.actor.g.h"
-#elif !defined(ASYNC_FILE_WRITE_CHECKER_ACTOR_H)
-#define ASYNC_FILE_WRITE_CHECKER_ACTOR_H
 
 #include "flow/IAsyncFile.h"
 #include "crc32/crc32c.h"
@@ -30,7 +25,6 @@
 #include <memcheck.h>
 #endif
 
-#include "flow/actorcompiler.h"
 static double millisecondsPerSecond = 1000;
 
 // this class does checksum for the wrapped IAsyncFile in read and writes opertions.
@@ -221,26 +215,26 @@ private:
 	static Optional<int> checksumHistoryBudget;
 	static int checksumHistoryPageSize;
 
-	ACTOR Future<Void> sweep(AsyncFileWriteChecker* self) {
-		loop {
+	Future<Void> sweep(AsyncFileWriteChecker* self) {
+		while (true) {
 			// for each page, read and do checksum
 			// scan from the least recently used, thus it is safe to quit if data has not been synced
-			state uint32_t page = self->lru.leastRecentlyUsedPage();
+			uint32_t page = self->lru.leastRecentlyUsedPage();
 			while (self->writing.find(page) != self->writing.end() || page == 0) {
 				// avoid concurrent ops
-				wait(delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY));
+				co_await delay(FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_CHECKING_DELAY);
 				continue;
 			}
 			int64_t offset = page * checksumHistoryPageSize;
 			// perform a read to verify checksum, it will remove the entry upon success
-			wait(success(self->read(self->pageBuffer, checksumHistoryPageSize, offset)));
+			co_await success(self->read(self->pageBuffer, checksumHistoryPageSize, offset));
 		}
 	}
 
-	ACTOR Future<Void> runChecksumLogger(AsyncFileWriteChecker* self) {
-		state double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
-		loop {
-			wait(delay(delayDuration));
+	Future<Void> runChecksumLogger(AsyncFileWriteChecker* self) {
+		double delayDuration = FLOW_KNOBS->ASYNC_FILE_WRITE_CHEKCER_LOGGING_INTERVAL;
+		while (true) {
+			co_await delay(delayDuration);
 			// TODO: add more stats, such as total checked, current entries, budget
 			TraceEvent("AsyncFileWriteChecker")
 			    .detail("Delay", delayDuration)
@@ -338,6 +332,3 @@ private:
 		return pages;
 	}
 };
-
-#include "flow/unactorcompiler.h"
-#endif

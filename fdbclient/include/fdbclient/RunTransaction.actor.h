@@ -20,19 +20,10 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_G_H)
-#define FDBCLIENT_RUNTRANSACTION_ACTOR_G_H
-#include "fdbclient/RunTransaction.actor.g.h"
-#elif !defined(FDBCLIENT_RUNTRANSACTION_ACTOR_H)
-#define FDBCLIENT_RUNTRANSACTION_ACTOR_H
-
 #include <utility>
 
 #include "flow/flow.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 template <typename, typename = void>
 struct transaction_option_setter : std::false_type {};
@@ -43,43 +34,53 @@ struct transaction_option_setter<Reference<T>> : transaction_option_setter<T> {}
 template <typename T>
 constexpr bool can_set_transaction_options = transaction_option_setter<T>::value;
 
-ACTOR template <class Function, class DB>
-Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue())> runTransaction(
-    Reference<DB> db,
-    Function func) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	loop {
+template <class Function, class DB>
+using RunTransactionResult = decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue());
+
+template <class Function, class DB>
+Future<RunTransactionResult<Function, DB>> runTransaction(Reference<DB> db, Function func) {
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
+	while (true) {
 		if constexpr (can_set_transaction_options<DB>) {
 			db->setOptions(tr);
 		}
 
+		Error err;
 		try {
 			// func should be idempotent; otherwise, retry will get undefined result
-			state decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue()) result =
-			    wait(func(tr));
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return result;
+			if constexpr (std::is_same_v<RunTransactionResult<Function, DB>, Void>) {
+				co_await func(tr);
+				co_await safeThreadFutureToFuture(tr->commit());
+				co_return;
+			} else {
+				RunTransactionResult<Function, DB> result = co_await func(tr);
+				co_await safeThreadFutureToFuture(tr->commit());
+				co_return result;
+			}
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
-ACTOR template <class Function, class DB>
+template <class Function, class DB>
 Future<Void> runTransactionVoid(Reference<DB> db, Function func) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	loop {
+	Reference<typename DB::TransactionT> tr = db->createTransaction();
+	while (true) {
 		if constexpr (can_set_transaction_options<DB>) {
 			db->setOptions(tr);
 		}
+		Error err;
 		try {
 			// func should be idempotent; otherwise, retry will get undefined result
-			wait(func(tr));
-			wait(safeThreadFutureToFuture(tr->commit()));
-			return Void();
+			co_await func(tr);
+			co_await safeThreadFutureToFuture(tr->commit());
+			co_return;
 		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
+			err = e;
 		}
+		co_await safeThreadFutureToFuture(tr->onError(err));
 	}
 }
 
@@ -131,6 +132,3 @@ template <typename DB>
 auto SystemDBWriteLockedNow(Reference<DB> db) {
 	return makeReference<SystemTransactionGenerator<DB>>(db, true, true, true);
 }
-
-#include "flow/unactorcompiler.h"
-#endif
