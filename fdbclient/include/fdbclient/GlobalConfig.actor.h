@@ -78,7 +78,7 @@ public:
 	// database.
 	template <class T>
 	void init(Reference<AsyncVar<T> const> db, const ClientDBInfo* dbInfo) {
-		_updater = updater(this, dbInfo);
+		_updater = updater(dbInfo);
 		// Bind changes in `db` to the `dbInfoChanged` AsyncTrigger.
 		// TODO: Change AsyncTrigger to a Reference
 		_forward = forward(db, std::addressof(dbInfoChanged));
@@ -141,7 +141,7 @@ public:
 
 	// Calls \ref fn when the value associated with \ref key is changed. \ref
 	// key should be one of the string literals defined at the top of
-	// GlobalConfig.actor.cpp, to ensure memory validity. \ref fn is passed the
+	// GlobalConfig.cpp, to ensure memory validity. \ref fn is passed the
 	// updated value for the key, or an empty optional if the key has been
 	// cleared. If the value is an allocated object, its memory remains in the
 	// control of global configuration.
@@ -166,8 +166,8 @@ private:
 	// Updates local copy of global configuration by reading the entire key-range
 	// from storage (proxied through the GrvProxies). Returns the version of the
 	// refreshed data.
-	ACTOR static Future<Version> refresh(GlobalConfig* self, Version lastKnown, Version largestSeen);
-	ACTOR static Future<Void> updater(GlobalConfig* self, const ClientDBInfo* dbInfo);
+	Future<Version> refresh(Version lastKnown, Version largestSeen);
+	Future<Void> updater(const ClientDBInfo* dbInfo);
 
 	DatabaseContext* cx;
 	AsyncTrigger dbInfoChanged;
