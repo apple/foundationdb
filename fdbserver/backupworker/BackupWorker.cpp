@@ -32,6 +32,7 @@
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 

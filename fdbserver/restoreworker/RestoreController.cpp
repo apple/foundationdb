@@ -127,8 +127,7 @@ Future<Void> sampleBackups(Reference<RestoreControllerData> self, RestoreControl
 Future<Void> startRestoreController(Reference<RestoreWorkerData> controllerWorker, Database cx) {
 	ASSERT(controllerWorker.isValid());
 	ASSERT(controllerWorker->controllerInterf.present());
-	Reference<RestoreControllerData> self =
-	    makeReference<RestoreControllerData>(controllerWorker->controllerInterf.get().id());
+	auto self = makeReference<RestoreControllerData>(controllerWorker->controllerInterf.get().id());
 	Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	try {
@@ -273,7 +272,7 @@ Future<Void> startProcessRestoreRequests(Reference<RestoreControllerData> self, 
 			// clear the key range that will be restored
 			co_await clearRestoreRange(cx, range);
 
-			co_await success(processRestoreRequest(self, cx, request));
+			co_await processRestoreRequest(self, cx, request);
 			co_await notifyRestoreCompleted(self, false);
 		}
 	} catch (Error& e) {

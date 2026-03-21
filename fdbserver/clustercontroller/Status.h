@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbrpc/fdbrpc.h"
+#include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbclient/ClusterInterface.h"

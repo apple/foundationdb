@@ -140,8 +140,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		// Fetch checkpoint.
 		std::vector<CheckpointMetaData> fetchedCheckpoints;
-		auto it = records.begin();
-		for (; it != records.end(); ++it) {
+		for (auto it = records.begin(); it != records.end(); ++it) {
 			while (true) {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", it->second.toString());
 				Error err;

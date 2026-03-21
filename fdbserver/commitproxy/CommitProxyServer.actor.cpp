@@ -56,6 +56,7 @@
 #include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/commitproxy/CommitProxyServer.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/CodeProbe.h"

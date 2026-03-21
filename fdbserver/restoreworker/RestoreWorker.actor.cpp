@@ -367,9 +367,9 @@ Future<Void> monitorleader(Reference<AsyncVar<RestoreWorkerInterface>> leader,
 
 Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	Future<Void> myWork = Never();
-	Reference<AsyncVar<RestoreWorkerInterface>> leader = makeReference<AsyncVar<RestoreWorkerInterface>>();
+	auto leader = makeReference<AsyncVar<RestoreWorkerInterface>>();
 	RestoreWorkerInterface myWorkerInterf;
-	Reference<RestoreWorkerData> self = makeReference<RestoreWorkerData>();
+	auto self = makeReference<RestoreWorkerData>();
 
 	myWorkerInterf.initEndpoints();
 	self->workerID = myWorkerInterf.id();
