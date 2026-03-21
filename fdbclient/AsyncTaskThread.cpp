@@ -1,5 +1,5 @@
 /*
- * AsyncTaskThread.actor.cpp
+ * AsyncTaskThread.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 
 #include "fdbclient/AsyncTaskThread.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -32,20 +31,19 @@ public:
 	bool isTerminate() const override { return true; }
 };
 
-ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread,
-                                         std::atomic<int>* sum,
-                                         int count,
-                                         int clientId,
-                                         double meanSleep) {
-	state int i = 0;
-	state double randomSleep = 0.0;
-	for (; i < count; ++i) {
+Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread,
+                                   std::atomic<int>* sum,
+                                   int count,
+                                   int clientId,
+                                   double meanSleep) {
+	double randomSleep = 0.0;
+	for (int i = 0; i < count; ++i) {
 		randomSleep = deterministicRandom()->random01() * 2 * meanSleep;
-		wait(delay(randomSleep));
-		wait(asyncTaskThread->execAsync([sum = sum] {
+		co_await delay(randomSleep);
+		co_await asyncTaskThread->execAsync([sum] {
 			sum->fetch_add(1);
 			return Void();
-		}));
+		});
 		TraceEvent("AsyncTaskThreadIncrementedSum")
 		    .detail("Index", i)
 		    .detail("Sum", sum->load())
@@ -53,7 +51,6 @@ ACTOR Future<Void> asyncTaskThreadClient(AsyncTaskThread* asyncTaskThread,
 		    .detail("RandomSleep", randomSleep)
 		    .detail("MeanSleep", meanSleep);
 	}
-	return Void();
 }
 
 } // namespace
@@ -90,31 +87,29 @@ void AsyncTaskThread::run(AsyncTaskThread* self) {
 }
 
 TEST_CASE("/asynctaskthread/add") {
-	state std::atomic<int> sum = 0;
-	state AsyncTaskThread asyncTaskThread;
-	state int numClients = 10;
-	state int incrementsPerClient = 100;
+	std::atomic<int> sum = 0;
+	AsyncTaskThread asyncTaskThread;
+	int numClients = 10;
+	int incrementsPerClient = 100;
 	std::vector<Future<Void>> clients;
 	clients.reserve(numClients);
 	for (int clientId = 0; clientId < numClients; ++clientId) {
 		clients.push_back(asyncTaskThreadClient(
 		    &asyncTaskThread, &sum, incrementsPerClient, clientId, deterministicRandom()->random01() * 0.01));
 	}
-	wait(waitForAll(clients));
+	co_await waitForAll(clients);
 	ASSERT_EQ(sum.load(), numClients * incrementsPerClient);
-	return Void();
 }
 
 TEST_CASE("/asynctaskthread/error") {
-	state AsyncTaskThread asyncTaskThread;
+	AsyncTaskThread asyncTaskThread;
 	try {
-		wait(asyncTaskThread.execAsync([] {
+		co_await asyncTaskThread.execAsync([] {
 			throw operation_failed();
 			return Void();
-		}));
+		});
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_operation_failed);
 	}
-	return Void();
 }
