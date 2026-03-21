@@ -29,6 +29,7 @@
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TLogInterface.h"
+#include "fdbserver/tlog/TLogServer.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/logsystem/LogSystemFactory.h"

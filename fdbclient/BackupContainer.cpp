@@ -273,7 +273,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 	// when containers are cached globally and accessed by different simulated processes, the connection
 	// pools are shared across processes. This violates Sim2Conn's requirement that connections stay on
 	// their originating process, leading to assertion failures:
-	//   "g_simulator->getCurrentProcess() == self->peerProcess" at sim2.actor.cpp:500
+	//   "g_simulator->getCurrentProcess() == self->peerProcess" at sim2.cpp:500
 	//
 	// Fix: Disable caching for blobstore:// URLs in simulation so each process creates its own
 	// container with its own connection pool. File-based backups don't have this issue because they
