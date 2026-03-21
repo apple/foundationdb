@@ -34,7 +34,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/GlobalConfig.actor.h"
-#include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/SpecialKeySpace.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
