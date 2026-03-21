@@ -3665,6 +3665,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
+	state bool removePersistentState = false;
 	try {
 		if (logData->removed.isReady()) {
 			throw logData->removed.getError();
@@ -3788,10 +3789,11 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			throw;
 		}
 
+		removePersistentState = e.code() != error_code_recruitment_failed;
 		wait(delay(0.0)); // if multiple recruitment requests were already in the promise stream make sure they are all
 		                  // started before any are removed
 
-		removeLog(self, logData, e.code() != error_code_recruitment_failed);
+		removeLog(self, logData, removePersistentState);
 		return Void();
 	}
 
