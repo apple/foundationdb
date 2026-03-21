@@ -1,5 +1,5 @@
 /*
- * sim2.actor.cpp
+ * sim2.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
