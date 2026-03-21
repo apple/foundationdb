@@ -51,15 +51,13 @@
 #include <algorithm>
 #include <cinttypes>
 #include <time.h>
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace IBackupFile_impl {
 
-ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
-	state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
-	wait(file->append(&lenBuf, sizeof(lenBuf)));
-	wait(file->append(s.begin(), s.size()));
-	return Void();
+Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
+	uint32_t lenBuf = bigEndian32((uint32_t)s.size());
+	co_await file->append(&lenBuf, sizeof(lenBuf));
+	co_await file->append(s.begin(), s.size());
 }
 
 } // namespace IBackupFile_impl
@@ -387,12 +385,12 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 // Get a list of URLS to backup containers based on some a shorter URL.  This function knows about some set of supported
 // URL types which support this sort of backup discovery.
-ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Optional<std::string> proxy) {
+Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Optional<std::string> proxy) {
 	try {
 		StringRef u(baseURL);
 		if (u.startsWith("file://"_sr)) {
-			std::vector<std::string> results = wait(BackupContainerLocalDirectory::listURLs(baseURL));
-			return results;
+			std::vector<std::string> results = co_await BackupContainerLocalDirectory::listURLs(baseURL);
+			co_return results;
 		} else if (u.startsWith("blobstore://"_sr)) {
 			std::string resource;
 
@@ -410,8 +408,8 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL, 
 			// Create a dummy container to parse the backup-specific parameters from the URL and get a final bucket name
 			BackupContainerS3BlobStore dummy(bstore, "dummy", backupParams, {}, true);
 
-			std::vector<std::string> results = wait(BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket()));
-			return results;
+			std::vector<std::string> results = co_await BackupContainerS3BlobStore::listURLs(bstore, dummy.getBucket());
+			co_return results;
 		}
 		// TODO: Enable this when Azure backups are ready
 		/*
@@ -445,27 +443,28 @@ Future<std::vector<std::string>> IBackupContainer::listContainers(const std::str
 	return listContainers_impl(baseURL, proxy);
 }
 
-ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
+	KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 
-	state int64_t time = BackupAgentBase::parseTime(datetime);
+	int64_t time = BackupAgentBase::parseTime(datetime);
 	if (time < 0) {
 		fprintf(
 		    stderr, "ERROR: Incorrect date/time or format.  Format is %s.\n", BackupAgentBase::timeFormat().c_str());
 		throw backup_error();
 	}
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
-			    wait(versionMap.getRange(tr, 0, time, 1, Snapshot::False, Reverse::True));
+			KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
+			    co_await versionMap.getRange(tr, 0, time, 1, Snapshot::False, Reverse::True);
 			if (rangeResult.results.size() != 1) {
 				// No key less than time was found in the database
 				// Look for a key >= time.
-				wait(store(rangeResult, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1)));
+				co_await store(rangeResult, versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1));
 
 				if (rangeResult.results.size() != 1) {
 					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
@@ -475,42 +474,43 @@ ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Databa
 
 			// Adjust version found by the delta between time and the time found and min with 0.
 			auto& result = rangeResult.results[0];
-			return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-
+			co_return std::max<Version>(0,
+			                            result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
+	KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
 	// Binary search to find the closest date with a version <= v
-	state int64_t min = 0;
-	state int64_t max = (int64_t)now();
-	state int64_t mid;
-	state std::pair<int64_t, Version> found;
+	int64_t min = 0;
+	int64_t max = (int64_t)now();
+	int64_t mid{ 0 };
+	std::pair<int64_t, Version> found;
 
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	loop {
+	while (true) {
 		mid = (min + max + 1) / 2; // ceiling
 
 		// Find the highest time < mid
-		state KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
-		    wait(versionMap.getRange(tr, min, mid, 1, Snapshot::False, Reverse::True));
+		KeyBackedRangeResult<std::pair<int64_t, Version>> rangeResult =
+		    co_await versionMap.getRange(tr, min, mid, 1, Snapshot::False, Reverse::True);
 
 		if (rangeResult.results.size() != 1) {
 			if (mid == min) {
 				// There aren't any records having a version < v, so just look for any record having a time < now
 				// and base a result on it
-				wait(store(rangeResult, versionMap.getRange(tr, 0, (int64_t)now(), 1)));
+				co_await store(rangeResult, versionMap.getRange(tr, 0, (int64_t)now(), 1));
 
 				if (rangeResult.results.size() != 1) {
 					// There aren't any timekeeper records to base a result on so return nothing
-					return Optional<int64_t>();
+					co_return Optional<int64_t>();
 				}
 
 				found = rangeResult.results[0];
@@ -533,5 +533,5 @@ ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference
 		}
 	}
 
-	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	co_return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 }
