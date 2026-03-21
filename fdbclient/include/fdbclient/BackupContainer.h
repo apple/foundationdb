@@ -33,8 +33,8 @@ FDB_BOOLEAN_PARAM(IncludeKeyRangeMap);
 
 class ReadYourWritesTransaction;
 
-Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const& v, Reference<ReadYourWritesTransaction> const& tr);
-Future<Version> timeKeeperVersionFromDatetime(std::string const& datetime, Database const& db);
+Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadYourWritesTransaction> tr);
+Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db);
 
 // Helper function to check if a URL is a blobstore:// URL
 bool isBlobstoreUrl(const std::string& url);

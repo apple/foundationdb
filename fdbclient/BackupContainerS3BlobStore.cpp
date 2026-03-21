@@ -1,5 +1,5 @@
 /*
- * BackupContainerS3BlobStore.actor.cpp
+ * BackupContainerS3BlobStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,6 @@
 #include "fdbrpc/AsyncFileEncrypted.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "fdbrpc/HTTP.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class BackupContainerS3BlobStoreImpl {
 public:
@@ -34,9 +33,9 @@ public:
 	// number of slashes so the backup names are kept in a separate folder tree from their actual data.
 	static const std::string INDEXFOLDER;
 
-	ACTOR static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, std::string bucket) {
-		state std::string basePath = INDEXFOLDER + '/';
-		S3BlobStoreEndpoint::ListResult contents = wait(bstore->listObjects(bucket, basePath));
+	static Future<std::vector<std::string>> listURLs(Reference<S3BlobStoreEndpoint> bstore, std::string bucket) {
+		std::string basePath = INDEXFOLDER + '/';
+		S3BlobStoreEndpoint::ListResult contents = co_await bstore->listObjects(bucket, basePath);
 		std::vector<std::string> results;
 		for (const auto& f : contents.objects) {
 			// URL decode the object name since S3 XML responses contain URL-encoded names
@@ -44,7 +43,7 @@ public:
 			results.push_back(
 			    bstore->getResourceURL(decodedName.substr(basePath.size()), format("bucket=%s", bucket.c_str())));
 		}
-		return results;
+		co_return results;
 	}
 
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
@@ -76,21 +75,21 @@ public:
 		int64_t m_offset;
 	};
 
-	ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles(
+	static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles(
 	    Reference<BackupContainerS3BlobStore> bc,
 	    std::string path,
 	    std::function<bool(std::string const&)> pathFilter) {
 		// pathFilter expects container based paths, so create a wrapper which converts a raw path
 		// to a container path by removing the known backup name prefix.
-		state int prefixTrim = bc->dataPath("").size();
+		int prefixTrim = bc->dataPath("").size();
 		std::function<bool(std::string const&)> rawPathFilter = [=](const std::string& folderPath) {
 			ASSERT(folderPath.size() >= prefixTrim);
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
 		// Use flat listing for backup files to ensure all files are found regardless of directory structure
-		state S3BlobStoreEndpoint::ListResult result =
-		    wait(bc->m_bstore->listObjects(bc->m_bucket, bc->dataPath(path), Optional<char>(), 0, rawPathFilter));
+		S3BlobStoreEndpoint::ListResult result =
+		    co_await bc->m_bstore->listObjects(bc->m_bucket, bc->dataPath(path), Optional<char>(), 0, rawPathFilter);
 		BackupContainerFileSystem::FilesAndSizesT files;
 		for (const auto& o : result.objects) {
 			ASSERT(o.name.size() >= prefixTrim);
@@ -98,39 +97,35 @@ public:
 			std::string decodedName = HTTP::urlDecode(o.name);
 			files.push_back({ decodedName.substr(prefixTrim), o.size });
 		}
-		return files;
+		co_return files;
 	}
 
-	ACTOR static Future<Void> create(Reference<BackupContainerS3BlobStore> bc) {
-		wait(bc->m_bstore->createBucket(bc->m_bucket));
+	static Future<Void> create(Reference<BackupContainerS3BlobStore> bc) {
+		co_await bc->m_bstore->createBucket(bc->m_bucket);
 
 		// Check/create the index entry
-		bool exists = wait(bc->m_bstore->objectExists(bc->m_bucket, bc->indexEntry()));
+		bool exists = co_await bc->m_bstore->objectExists(bc->m_bucket, bc->indexEntry());
 		if (!exists) {
-			wait(bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), ""));
+			co_await bc->m_bstore->writeEntireFile(bc->m_bucket, bc->indexEntry(), "");
 		}
 
 		if (bc->usesEncryption()) {
-			wait(bc->encryptionSetupComplete());
+			co_await bc->encryptionSetupComplete();
 		}
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> deleteContainer(Reference<BackupContainerS3BlobStore> bc, int* pNumDeleted) {
-		bool e = wait(bc->exists());
+	static Future<Void> deleteContainer(Reference<BackupContainerS3BlobStore> bc, int* pNumDeleted) {
+		bool e = co_await bc->exists();
 		if (!e) {
 			TraceEvent(SevWarnAlways, "BackupContainerDoesNotExist").detail("URL", bc->getURL());
 			throw backup_does_not_exist();
 		}
 
 		// First delete everything under the data prefix in the bucket
-		wait(bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted));
+		co_await bc->m_bstore->deleteRecursively(bc->m_bucket, bc->dataPath(""), pNumDeleted);
 
 		// Now that all files are deleted, delete the index entry
-		wait(bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry()));
-
-		return Void();
+		co_await bc->m_bstore->deleteObject(bc->m_bucket, bc->indexEntry());
 	}
 };
 
