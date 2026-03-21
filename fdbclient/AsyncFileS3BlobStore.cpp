@@ -1,5 +1,5 @@
 /*
- * AsyncFileS3BlobStore.actor.cpp
+ * AsyncFileS3BlobStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "flow/UnitTest.h"
 #include "flow/IConnection.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 Future<int64_t> AsyncFileS3BlobStoreRead::size() const {
 	if (!m_size.isValid())
@@ -34,34 +33,32 @@ Future<int> AsyncFileS3BlobStoreRead::read(void* data, int length, int64_t offse
 	return m_bstore->readObject(m_bucket, m_object, data, length, offset);
 }
 
-ACTOR Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
+Future<Void> sendStuff(int id, Reference<IRateControl> t, int bytes) {
 	printf("Starting fake sender %d which will send send %d bytes.\n", id, bytes);
-	state double ts = timer();
-	state int total = 0;
+	double ts = timer();
+	int total = 0;
 	while (total < bytes) {
-		state int r = std::min<int>(deterministicRandom()->randomInt(0, 1000), bytes - total);
-		wait(t->getAllowance(r));
+		int r = std::min<int>(deterministicRandom()->randomInt(0, 1000), bytes - total);
+		co_await t->getAllowance(r);
 		total += r;
 	}
 	double dur = timer() - ts;
 	printf("Sender %d: Sent %d in %fs, %f/s\n", id, total, dur, total / dur);
-	return Void();
 }
 
 TEST_CASE("/backup/throttling") {
 	// Test will not work in simulation.
 	if (g_network->isSimulated())
-		return Void();
+		co_return;
 
-	state int limit = 100000;
-	state Reference<IRateControl> t(new SpeedLimit(limit, 1));
+	int limit = 100000;
+	Reference<IRateControl> t(new SpeedLimit(limit, 1));
 
-	state int id = 1;
+	int id = 1;
 	std::vector<Future<Void>> f;
-	state double ts = timer();
-	state int total = 0;
-	int s;
-	s = 500000;
+	double ts = timer();
+	int total = 0;
+	int s = 500000;
 	f.push_back(sendStuff(id++, t, s));
 	total += s;
 	f.push_back(sendStuff(id++, t, s));
@@ -75,11 +72,9 @@ TEST_CASE("/backup/throttling") {
 	f.push_back(sendStuff(id++, t, s));
 	total += s;
 
-	wait(waitForAll(f));
+	co_await waitForAll(f);
 	double dur = timer() - ts;
 	int speed = int(total / dur);
 	printf("Speed limit was %d, measured speed was %d\n", limit, speed);
 	ASSERT(abs(speed - limit) / limit < .01);
-
-	return Void();
 }
