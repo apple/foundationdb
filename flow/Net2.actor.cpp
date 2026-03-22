@@ -1587,6 +1587,10 @@ ActorLineageSet& Net2::getActorLineageSet() {
 }
 #endif
 
+// TIP: ways to test this code:
+//
+// fdbserver -r test -f tests/noSim/RandomUnitTests.toml
+// fdbserver -r unittests -f noSim
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
@@ -2429,63 +2433,3 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	}
 	return Void();
 }
-
-void net2_test() {
-	/*
-	g_network = newNet2();  // for promise serialization below
-
-	Endpoint destination;
-
-	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
-
-	char junk[100];
-
-	double before = timer();
-
-	std::vector<TestGVR> reqs;
-	reqs.reserve( 10000 );
-
-	int totalBytes = 0;
-	for(int j=0; j<1000; j++) {
-	    UnsentPacketQueue unsent;
-	    ReliablePacketList reliable;
-
-	    reqs.resize(10000);
-	    for(int i=0; i<10000; i++) {
-	        TestGVR &req = reqs[i];
-	        req.key = "Foobar"_sr;
-
-	        SerializeSource<TestGVR> what(req);
-
-	        SendBuffer* pb = unsent.getWriteBuffer();
-	        ReliablePacket* rp = new ReliablePacket;  // 0
-
-	        PacketWriter wr(pb,rp,AssumeVersion(g_network->protocolVersion()));
-	        //BinaryWriter wr;
-	        SplitBuffer packetLen;
-	        uint32_t len = 0;
-	        wr.writeAhead(sizeof(len), &packetLen);
-	        wr << destination.token;
-	        //req.reply.getEndpoint();
-	        what.serializePacketWriter(wr);
-	        //wr.serializeBytes(junk, 43);
-
-	        unsent.setWriteBuffer(wr.finish());
-	        len = wr.size() - sizeof(len);
-	        packetLen.write(&len, sizeof(len));
-
-	        //totalBytes += wr.getLength();
-	        totalBytes += wr.size();
-
-	        if (rp) reliable.insert(rp);
-	    }
-	    reqs.clear();
-	    unsent.discardAll();
-	    reliable.discardAll();
-	}
-
-	printf("SimSend x 1Kx10K: %0.2f sec\n", timer()-before);
-	printf("  Bytes: %d\n", totalBytes);
-	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
-	*/
-};
