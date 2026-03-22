@@ -80,7 +80,6 @@ Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database cx) {
 		// Read begin to end forever until successful
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -109,17 +108,14 @@ Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database cx) {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				if (err.code() == error_code_transaction_too_old) {
+			    if (err.code() == error_code_transaction_too_old) {
 					// We are using this transaction until it's too old and then resetting to a fresh one,
 					// so we don't need to delay.
 					tr.fullReset();
 				} else {
 					co_await tr.onError(err);
-				}
-			}
+			    }
 		}
 	}
 }
