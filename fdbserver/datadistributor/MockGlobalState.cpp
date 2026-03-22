@@ -147,8 +147,7 @@ public:
 		    .detail("ChunkCount", chunkCount)
 		    .detail("TotalBytes", params.totalRangeBytes);
 
-		int i = 0;
-		for (; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
+		for (int i = 0; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
 			co_await delayJittered(0.1, TaskPriority::FetchKeys);
 
 			int remainedBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
