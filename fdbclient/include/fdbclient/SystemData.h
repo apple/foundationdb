@@ -701,6 +701,11 @@ extern const KeyRef snapshotEndVersionKey;
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
 
+// Hard shard boundaries for critical system metadata ranges.
+// These prevent DD from merging critical keys (serverList, serverTag, etc.)
+// onto the same shard as potentially hot non-critical data.
+std::vector<Key> getSystemMetadataSplitPoints();
+
 #pragma clang diagnostic pop
 
 #endif

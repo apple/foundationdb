@@ -1697,3 +1697,21 @@ TEST_CASE("noSim/SystemData/DataMoveId") {
 
 	return Void();
 }
+
+// Hard shard boundaries around critical system metadata ranges.
+// DD must never merge shards across these keys, so that critical metadata
+// (e.g. serverList) is never co-located with hot non-critical data.
+std::vector<Key> getSystemMetadataSplitPoints() {
+	std::vector<Key> points;
+	points.push_back(keyServersKeys.begin);
+	points.push_back(keyServersKeys.end);
+	points.push_back(serverTagKeys.begin);
+	points.push_back(serverTagKeys.end);
+	points.push_back(serverListKeys.begin);
+	points.push_back(serverListKeys.end);
+	points.push_back(configKeys.begin);
+	points.push_back(configKeys.end);
+	std::sort(points.begin(), points.end());
+	points.erase(std::unique(points.begin(), points.end()), points.end());
+	return points;
+}

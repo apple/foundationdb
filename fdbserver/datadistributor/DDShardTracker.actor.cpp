@@ -572,12 +572,28 @@ ACTOR Future<Void> brokenPromiseToReady(Future<Void> f) {
 	return Void();
 }
 
+// True if [begin, end) spans across a critical system metadata shard boundary.
+static bool crossesCriticalSystemBoundary(KeyRef begin, KeyRef end) {
+	static const std::vector<Key> boundaries = getSystemMetadataSplitPoints();
+	for (const auto& b : boundaries) {
+		if (b > begin && b < end) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
 	if (keys.end == allKeys.end) {
 		return false;
 	}
 
 	if (self->userRangeConfig->rangeContaining(keys.begin)->range().end < nextRange.end) {
+		return false;
+	}
+
+	// Don't merge across critical system metadata boundaries
+	if (crossesCriticalSystemBoundary(keys.begin, nextRange.end)) {
 		return false;
 	}
 
@@ -598,6 +614,11 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 	}
 
 	if (self->userRangeConfig->rangeContaining(keys.begin)->range().begin > prevRange.begin) {
+		return false;
+	}
+
+	// Don't merge across critical system metadata boundaries
+	if (crossesCriticalSystemBoundary(prevRange.begin, keys.end)) {
 		return false;
 	}
 
@@ -1033,9 +1054,16 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
 	state std::vector<Key> customBoundaries;
+
+	// Inject hard boundaries for critical system metadata ranges
+	std::vector<Key> criticalBoundaries = getSystemMetadataSplitPoints();
+	customBoundaries.insert(customBoundaries.end(), criticalBoundaries.begin(), criticalBoundaries.end());
+
 	for (auto it : self->userRangeConfig->ranges()) {
 		customBoundaries.push_back(it->range().begin);
 	}
+	std::sort(customBoundaries.begin(), customBoundaries.end());
+	customBoundaries.erase(std::unique(customBoundaries.begin(), customBoundaries.end()), customBoundaries.end());
 
 	state int s;
 	state int customBoundary = 0;
