@@ -427,18 +427,11 @@ void logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std:
 	tr->set(keyErrors, message);
 }
 
-struct BackupAgentLogErrorAction {
-	Key keyErrors;
-	std::string message;
-
-	Future<Void> operator()(Reference<ReadYourWritesTransaction> tr) const {
+Future<Void> logError(Database cx, Key keyErrors, const std::string& message) {
+	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 		logErrorWorker(tr, keyErrors, message);
 		return Future<Void>(Void());
-	}
-};
-
-Future<Void> logError(Database cx, Key keyErrors, const std::string& message) {
-	return runRYWTransaction(cx, BackupAgentLogErrorAction{ keyErrors, message });
+	});
 }
 
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message) {
