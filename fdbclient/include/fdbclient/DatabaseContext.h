@@ -36,7 +36,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/SpecialKeySpace.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"

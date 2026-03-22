@@ -1,5 +1,5 @@
 /*
- * BackupWorker.actor.cpp
+ * BackupWorker.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -32,13 +32,13 @@
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/backupworker/BackupWorker.actor.h"
+#include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"
 #include "fdbclient/Tracing.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 #define SevDebugMemory SevVerbose
 
@@ -152,9 +152,8 @@ struct BackupData {
 			return _waitReady(this);
 		}
 
-		ACTOR static Future<Void> _waitReady(PerBackupInfo* info) {
-			wait(success(info->container) && success(info->ranges));
-			return Void();
+		static Future<Void> _waitReady(PerBackupInfo* info) {
+			co_await (success(info->container) && success(info->ranges));
 		}
 
 		// Update the number of backup workers in the BackupConfig. Each worker
@@ -163,24 +162,23 @@ struct BackupData {
 		// (i.e., the "submitBackup" call is successful). Worker 0 then sets
 		// the "allWorkerStarted" flag, which in turn unblocks
 		// StartFullBackupTaskFunc::_execute.
-		ACTOR static Future<Void> _updateStartedWorkers(PerBackupInfo* info, BackupData* self, UID uid) {
-			state BackupConfig config(uid);
-			state Future<Void> watchFuture;
-			state bool updated = false;
-			state bool firstWorker = info->self->tag.id == 0;
-			state bool allUpdated = false;
-			state Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
-			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+		static Future<Void> _updateStartedWorkers(PerBackupInfo* info, BackupData* self, UID uid) {
+			BackupConfig config(uid);
+			Future<Void> watchFuture;
+			bool updated = false;
+			const bool firstWorker = info->self->tag.id == 0;
+			bool allUpdated = false;
+			Optional<std::vector<std::pair<int64_t, int64_t>>> workers;
+			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 
-			loop {
+			while (true) {
+				Error err;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					Optional<std::vector<std::pair<int64_t, int64_t>>> tmp =
-					    wait(config.startedBackupWorkers().get(tr));
-					workers = tmp;
+					workers = co_await config.startedBackupWorkers().get(tr);
 					if (!updated) {
 						if (workers.present()) {
 							workers.get().emplace_back(self->recruitedEpoch, (int64_t)self->tag.id);
@@ -189,13 +187,14 @@ struct BackupData {
 							workers = Optional<std::vector<std::pair<int64_t, int64_t>>>(v);
 						}
 					}
+
 					if (firstWorker) {
 						if (!workers.present()) {
 							TraceEvent("BackupWorkerDetectAbortedJob", self->myId).detail("BackupID", uid);
-							return Void();
+							co_return;
 						}
 						ASSERT(workers.present() && workers.get().size() > 0);
-						std::vector<std::pair<int64_t, int64_t>>& v = workers.get();
+						auto& v = workers.get();
 						v.erase(std::remove_if(v.begin(),
 						                       v.end(),
 						                       [epoch = self->recruitedEpoch](const std::pair<int64_t, int64_t>& p) {
@@ -203,7 +202,7 @@ struct BackupData {
 						                       }),
 						        v.end());
 						std::set<int64_t> tags;
-						for (auto p : v) {
+						for (const auto& p : v) {
 							tags.insert(p.second);
 						}
 						if (self->totalTags == tags.size()) {
@@ -217,32 +216,33 @@ struct BackupData {
 						if (!updated) {
 							config.startedBackupWorkers().set(tr, workers.get());
 						}
-						for (auto p : workers.get()) {
+						for (const auto& p : workers.get()) {
 							TraceEvent("BackupWorkerDebugTag", self->myId)
 							    .detail("Epoch", p.first)
 							    .detail("TagID", p.second);
 						}
-						wait(tr->commit());
+						co_await tr->commit();
 
 						updated = true; // Only set to true after commit.
 						if (allUpdated) {
 							break;
 						}
-						wait(watchFuture);
+						co_await watchFuture;
 						tr->reset();
+						continue;
 					} else {
 						ASSERT(workers.present() && workers.get().size() > 0);
 						config.startedBackupWorkers().set(tr, workers.get());
-						wait(tr->commit());
+						co_await tr->commit();
 						break;
 					}
 				} catch (Error& e) {
-					wait(tr->onError(e));
+					err = e;
 					allUpdated = false;
 				}
+				co_await tr->onError(err);
 			}
 			TraceEvent("BackupWorkerSetReady", self->myId).detail("BackupID", uid).detail("TagId", self->tag.id);
-			return Void();
 		}
 
 		BackupData* self = nullptr;
@@ -419,7 +419,7 @@ struct BackupData {
 			changedTrigger.trigger();
 	}
 
-	ACTOR static Future<Void> _waitAllInfoReady(BackupData* self) {
+	static Future<Void> _waitAllInfoReady(BackupData* self) {
 		std::vector<Future<Void>> all;
 		for (auto it = self->backups.begin(); it != self->backups.end();) {
 			if (it->second.stopped) {
@@ -431,8 +431,7 @@ struct BackupData {
 			all.push_back(it->second.waitReady());
 			it++;
 		}
-		wait(waitForAll(all));
-		return Void();
+		co_await waitForAll(all);
 	}
 
 	Future<Void> waitAllInfoReady() { return _waitAllInfoReady(this); }
@@ -448,14 +447,15 @@ struct BackupData {
 
 // If the worker is on an old epoch and all backups starts a version >= the endVersion
 // it will exit early.
-ACTOR static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
-	loop {
-		state ReadYourWritesTransaction tr(self->cx);
-		loop {
+static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
+	while (true) {
+		ReadYourWritesTransaction tr(self->cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> value = wait(tr.get(backupStartedKey));
+				Optional<Value> value = co_await tr.get(backupStartedKey);
 				std::vector<std::pair<UID, Version>> uidVersions;
 				if (value.present()) {
 					bool shouldExit = self->endVersion.present();
@@ -470,32 +470,32 @@ ACTOR static Future<bool> shouldBackupWorkerExitEarly(BackupData* self) {
 						}
 					}
 					self->onBackupChanges(uidVersions);
-					return shouldExit;
-
-				} else {
-					TraceEvent("BackupWorkerEmptyStartKey", self->myId);
-					state Future<Void> watchFuture = tr.watch(backupStartedKey);
-					wait(tr.commit());
-					wait(watchFuture);
-					break;
+					co_return shouldExit;
 				}
+
+				TraceEvent("BackupWorkerEmptyStartKey", self->myId);
+				Future<Void> watchFuture = tr.watch(backupStartedKey);
+				co_await tr.commit();
+				co_await watchFuture;
+				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 }
 
 // Monitors "backupStartedKey".
-ACTOR static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
-	loop {
-		state ReadYourWritesTransaction tr(self->cx);
-
-		loop {
+static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
+	while (true) {
+		ReadYourWritesTransaction tr(self->cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> value = wait(tr.get(backupStartedKey));
+				Optional<Value> value = co_await tr.get(backupStartedKey);
 				std::vector<std::pair<UID, Version>> uidVersions;
 				if (value.present()) {
 					uidVersions = decodeBackupStartedValue(value.get());
@@ -508,41 +508,44 @@ ACTOR static Future<Void> monitorBackupStartedKeyChanges(BackupData* self) {
 				}
 
 				self->onBackupChanges(uidVersions);
-				state Future<Void> watchFuture = tr.watch(backupStartedKey);
-				wait(tr.commit());
-				wait(watchFuture);
+				Future<Void> watchFuture = tr.watch(backupStartedKey);
+				co_await tr.commit();
+				co_await watchFuture;
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 }
 
 // Set "latestBackupWorkerSavedVersion" key for backups
-ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state std::vector<Future<Optional<Version>>> prevVersions;
-			state std::vector<BackupConfig> versionConfigs;
-			state std::vector<Future<Optional<bool>>> allWorkersReady;
+			std::vector<Future<Optional<Version>>> prevVersions;
+			std::vector<BackupConfig> versionConfigs;
+			std::vector<Future<Optional<bool>>> allWorkersReady;
 			for (const auto& [uid, version] : savedLogVersions) {
 				versionConfigs.emplace_back(uid);
 				prevVersions.push_back(versionConfigs.back().latestBackupWorkerSavedVersion().get(tr));
 				allWorkersReady.push_back(versionConfigs.back().allWorkerStarted().get(tr));
 			}
 
-			wait(waitForAll(prevVersions) && waitForAll(allWorkersReady));
+			co_await (waitForAll(prevVersions) && waitForAll(allWorkersReady));
 
 			for (int i = 0; i < prevVersions.size(); i++) {
-				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get())
+				if (!allWorkersReady[i].get().present() || !allWorkersReady[i].get().get()) {
 					continue;
+				}
 
 				const Version current = savedLogVersions[versionConfigs[i].getUid()];
 				if (prevVersions[i].get().present()) {
@@ -561,11 +564,12 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 					versionConfigs[i].latestBackupWorkerSavedVersion().set(tr, current);
 				}
 			}
-			wait(tr->commit());
-			return Void();
+			co_await tr->commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -573,23 +577,23 @@ ACTOR Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedL
 // version key is set by one process, which is stored in each BackupConfig in
 // the system space. The client can know if a backup is restorable by checking
 // log saved version > snapshot version.
-ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
-	state Future<Void> interval;
+Future<Void> monitorBackupProgress(BackupData* self) {
+	Future<Void> interval;
 
-	loop {
+	while (true) {
 		interval = delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0);
 		while (self->backups.empty() || !self->logSystem.get()) {
-			wait(self->changedTrigger.onTrigger() || self->logSystem.onChange());
+			co_await (self->changedTrigger.onTrigger() || self->logSystem.onChange());
 		}
 
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
-		state Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
-		wait(getBackupProgress(self->cx, self->myId, progress, /*logging=*/false));
-		state std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
-		state std::map<UID, Version> savedLogVersions;
+		Reference<BackupProgress> progress(new BackupProgress(self->myId, {}));
+		co_await getBackupProgress(self->cx, self->myId, progress, /*logging=*/false);
+		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
+		std::map<UID, Version> savedLogVersions;
 		if (tagVersions.size() != self->totalTags) {
-			wait(interval);
+			co_await interval;
 			continue;
 		}
 
@@ -607,15 +611,16 @@ ACTOR Future<Void> monitorBackupProgress(BackupData* self) {
 		}
 		Future<Void> setKeys = savedLogVersions.empty() ? Void() : setBackupKeys(self, savedLogVersions);
 
-		wait(interval && setKeys);
+		co_await (interval && setKeys);
 	}
 }
 
-ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
-	state Transaction tr(self->cx);
-	state Key key = backupProgressKeyFor(self->myId);
+Future<Void> saveProgress(BackupData* self, Version backupVersion) {
+	Transaction tr(self->cx);
+	Key key = backupProgressKeyFor(self->myId);
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			// It's critical to save progress immediately so that after a master
 			// recovery, the new master can know the progress so far.
@@ -624,32 +629,33 @@ ACTOR Future<Void> saveProgress(BackupData* self, Version backupVersion) {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			// CHECK: Don't save progress if backup workers are disabled
-			Optional<Value> backupWorkerEnabled = wait(tr.get(backupWorkerEnabledKey));
+			Optional<Value> backupWorkerEnabled = co_await tr.get(backupWorkerEnabledKey);
 			if (!backupWorkerEnabled.present() || backupWorkerEnabled.get() == "0"_sr) {
 				TraceEvent("BackupWorkerProgressSkipped", self->myId).detail("Reason", "BackupWorkersDisabled");
-				return Void();
+				co_return;
 			}
 
 			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
 			tr.set(key, backupProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
 // Write a mutation to a log file. Note the mutation can be different from
 // message.message for clear mutations.
-ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
-                               VersionedMessage message,
-                               StringRef mutation,
-                               int64_t* blockEnd,
-                               int blockSize) {
+Future<Void> addMutation(Reference<IBackupFile> logFile,
+                         VersionedMessage message,
+                         StringRef mutation,
+                         int64_t* blockEnd,
+                         int blockSize) {
 	// format: version, subversion, messageSize, message
-	state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
+	int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
 
 	// Convert to big Endianness for version.version, version.sub, and msgSize
 	// The decoder assumes 0xFF is the end, so little endian can easily be
@@ -657,34 +663,34 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	// the first byte is not 0xFF (should always be 0x00).
 	BinaryWriter wr(Unversioned());
 	wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
-	state Standalone<StringRef> header = wr.toValue();
+	Standalone<StringRef> header = wr.toValue();
 
 	// Start a new block if needed
 	if (logFile->size() + bytes > *blockEnd) {
 		// Write padding if needed
 		const int bytesLeft = *blockEnd - logFile->size();
 		if (bytesLeft > 0) {
-			state Value paddingFFs = fileBackup::makePadding(bytesLeft);
-			wait(logFile->append(paddingFFs.begin(), bytesLeft));
+			Value paddingFFs = fileBackup::makePadding(bytesLeft);
+			co_await logFile->append(paddingFFs.begin(), bytesLeft);
 		}
 
 		*blockEnd += blockSize;
 		// write block Header
-		wait(logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION)));
+		co_await logFile->append((uint8_t*)&PARTITIONED_MLOG_VERSION, sizeof(PARTITIONED_MLOG_VERSION));
 	}
 
-	wait(logFile->append((void*)header.begin(), header.size()));
-	wait(logFile->append(mutation.begin(), mutation.size()));
-	return Void();
+	co_await logFile->append((void*)header.begin(), header.size());
+	co_await logFile->append(mutation.begin(), mutation.size());
 }
 
-ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
-                                                std::vector<UID> backupUids,
-                                                std::vector<Reference<IBackupFile>> logFiles) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+static Future<Void> updateLogBytesWritten(BackupData* self,
+                                          std::vector<UID> backupUids,
+                                          std::vector<Reference<IBackupFile>> logFiles) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
 
 	ASSERT(backupUids.size() == logFiles.size());
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -694,31 +700,32 @@ ACTOR static Future<Void> updateLogBytesWritten(BackupData* self,
 				BackupConfig config(backupUids[i]);
 				config.logBytesWritten().atomicOp(tr, logFiles[i]->size(), MutationRef::AddValue);
 			}
-			wait(tr->commit());
-			return Void();
+			co_await tr->commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
 // Saves messages in the range of [0, numMsg) to a file and then remove these
 // messages. The file content format is a sequence of (Version, sub#, msgSize, message).
 // Note only ready backups are saved.
-ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
-	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
-	state std::vector<Future<Reference<IBackupFile>>> logFileFutures;
-	state std::vector<Reference<IBackupFile>> logFiles;
-	state std::vector<int64_t> blockEnds;
-	state std::vector<UID> activeUids; // active Backups' UIDs
-	state std::vector<Version> beginVersions; // logFiles' begin versions
-	state KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
-	state std::vector<Standalone<StringRef>> mutations;
-	state int idx;
+Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int numMsg) {
+	int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	std::vector<Future<Reference<IBackupFile>>> logFileFutures;
+	std::vector<Reference<IBackupFile>> logFiles;
+	std::vector<int64_t> blockEnds;
+	std::vector<UID> activeUids; // active Backups' UIDs
+	std::vector<Version> beginVersions; // logFiles' begin versions
+	KeyRangeMap<std::set<int>> keyRangeMap; // range to index in logFileFutures, logFiles, & blockEnds
+	std::vector<Standalone<StringRef>> mutations;
+	int idx{ 0 };
 
 	// Make sure all backups are ready, otherwise mutations will be lost.
 	while (!self->isAllInfoReady()) {
-		wait(self->waitAllInfoReady());
+		co_await self->waitAllInfoReady();
 	}
 
 	for (auto it = self->backups.begin(); it != self->backups.end();) {
@@ -750,7 +757,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 	}
 
 	keyRangeMap.coalesce(allKeys);
-	wait(waitForAll(logFileFutures));
+	co_await waitForAll(logFileFutures);
 
 	std::transform(logFileFutures.begin(),
 	               logFileFutures.end(),
@@ -805,7 +812,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 				}
 			}
 		}
-		wait(waitForAll(adds));
+		co_await waitForAll(adds);
 		mutations.clear();
 	}
 
@@ -814,7 +821,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		return f->finish();
 	});
 
-	wait(waitForAll(finished));
+	co_await waitForAll(finished);
 
 	for (const auto& file : logFiles) {
 		TraceEvent("CloseMutationFile", self->myId)
@@ -826,19 +833,18 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 		self->backups[uid].lastSavedVersion = popVersion + 1;
 	}
 
-	wait(updateLogBytesWritten(self, activeUids, logFiles));
-	return Void();
+	co_await updateLogBytesWritten(self, activeUids, logFiles);
 }
 
 // Uploads self->messages to cloud storage and updates savedVersion.
-ACTOR Future<Void> uploadData(BackupData* self) {
-	state Version popVersion = invalidVersion;
+Future<Void> uploadData(BackupData* self) {
+	Version popVersion = invalidVersion;
 
-	loop {
+	while (true) {
 		// Too large uploadDelay will delay popping tLog data for too long.
-		state Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
+		Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
 
-		state int numMsg = 0;
+		int numMsg = 0;
 		Version lastPopVersion = popVersion;
 		// index of last version's end position in self->messages
 		int lastVersionIndex = 0;
@@ -876,12 +882,12 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
-			wait(saveMutationsToFile(self, popVersion, numMsg));
+			co_await saveMutationsToFile(self, popVersion, numMsg);
 			self->eraseMessages(numMsg);
 		}
 
 		if (popVersion > self->savedVersion) {
-			wait(saveProgress(self, popVersion));
+			co_await saveProgress(self, popVersion);
 			TraceEvent("BackupWorkerSavedProgress", self->myId)
 			    .detail("Tag", self->tag.toString())
 			    .detail("Version", popVersion)
@@ -891,40 +897,43 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 		}
 
 		if (self->allMessageSaved()) {
-			return Void();
+			co_return;
 		}
 
 		if (!self->pullFinished()) {
-			wait(uploadDelay || self->doneTrigger.onTrigger());
+			co_await (uploadDelay || self->doneTrigger.onTrigger());
 		}
 	}
 }
 
 // Pulls data from TLog servers using LogRouter tag.
-ACTOR Future<Void> pullAsyncData(BackupData* self) {
-	state Future<Void> logSystemChange = Void();
-	state Reference<ILogSystem::IPeekCursor> r;
+Future<Void> pullAsyncData(BackupData* self) {
+	Future<Void> logSystemChange = Void();
+	Reference<ILogSystem::IPeekCursor> r;
 
-	state Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
+	Version tagAt = std::max({ self->pulledVersion.get(), self->startVersion, self->savedVersion });
 
 	TraceEvent("BackupWorkerPull", self->myId)
 	    .detail("Tag", self->tag)
 	    .detail("Version", tagAt)
 	    .detail("StartVersion", self->startVersion)
 	    .detail("SavedVersion", self->savedVersion);
-	loop {
+	while (true) {
 		while (self->paused.get()) {
-			wait(self->paused.onChange());
+			co_await self->paused.onChange();
 		}
 
-		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+		while (true) {
+			Future<Void> getMoreFuture = r ? r->getMore(TaskPriority::TLogCommit) : Never();
+			auto const res = co_await race(getMoreFuture, logSystemChange);
+			if (res.index() == 0) {
+				// getMoreFuture finished
 				DisabledTraceEvent("BackupWorkerGotMore", self->myId)
 				    .detail("Tag", self->tag)
 				    .detail("CursorVersion", r->version().version);
 				break;
-			}
-			when(wait(logSystemChange)) {
+			} else {
+				// logSystemChange detected
 				if (self->logSystem.get()) {
 					r = self->logSystem.get()->peekLogRouter(
 					    self->myId, tagAt, self->tag, SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED);
@@ -949,11 +958,11 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
-		state int64_t peekedBytes = 0;
+		int64_t peekedBytes = 0;
 		// Hold messages until we know how many we can take, self->messages always
 		// contains messages that we have reserved memory for. Therefore, lock->release()
 		// will always encounter message with reserved memory.
-		state std::vector<VersionedMessage> tmpMessages;
+		std::vector<VersionedMessage> tmpMessages;
 		while (r->hasMessage()) {
 			tmpMessages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
 			peekedBytes += tmpMessages.back().getEstimatedSize();
@@ -963,7 +972,7 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 			    .detail("Take", peekedBytes)
 			    .detail("Current", self->lock->activePermits());
-			wait(self->lock->take(TaskPriority::DefaultYield, peekedBytes));
+			co_await self->lock->take(TaskPriority::DefaultYield, peekedBytes);
 			self->messages.insert(self->messages.end(),
 			                      std::make_move_iterator(tmpMessages.begin()),
 			                      std::make_move_iterator(tmpMessages.end()));
@@ -980,14 +989,14 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 			    .detail("VersionGot", tagAt)
 			    .detail("EndVersion", self->endVersion.get())
 			    .detail("MsgQ", self->messages.size());
-			return Void();
+			co_return;
 		}
-		wait(yield());
+		co_await yield();
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch recoveryCount, BackupData* self) {
-	loop {
+Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogEpoch recoveryCount, BackupData* self) {
+	while (true) {
 		bool isDisplaced =
 		    db->get().recoveryCount > recoveryCount && db->get().recoveryState != RecoveryState::UNINITIALIZED;
 		if (isDisplaced) {
@@ -999,21 +1008,22 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db, LogE
 			    .detail("RecoveryState", (int)db->get().recoveryState);
 			throw worker_removed();
 		}
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 }
 
-ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-	state Future<Void> watch;
+static Future<Void> monitorWorkerPause(BackupData* self) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	Future<Void> watch;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> value = wait(tr->get(backupPausedKey));
+			Optional<Value> value = co_await tr->get(backupPausedKey);
 			bool paused = value.present() && value.get() == "1"_sr;
 			if (self->paused.get() != paused) {
 				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
@@ -1021,24 +1031,27 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			}
 
 			watch = tr->watch(backupPausedKey);
-			wait(tr->commit());
-			wait(watch);
+			co_await tr->commit();
+			co_await watch;
 			tr->reset();
+			continue;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR Future<Void> backupWorker(BackupInterface interf,
-                                InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db) {
-	state BackupData self(interf.id(), db, req);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection(addActor.getFuture());
-	state Future<Void> dbInfoChange = Void();
-	state Future<Void> pull;
-	state Future<Void> done;
+Future<Void> backupWorker(BackupInterface interf,
+                          InitializeBackupRequest req,
+                          Reference<AsyncVar<ServerDBInfo> const> db) {
+	BackupData self(interf.id(), db, req);
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error = actorCollection(addActor.getFuture());
+	Future<Void> dbInfoChange = Void();
+	Future<Void> pull;
+	Future<Void> done;
+	Error err;
 
 	TraceEvent("BackupWorkerStart", self.myId)
 	    .detail("Tag", req.routerTag.toString())
@@ -1056,17 +1069,19 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 		addActor.send(monitorWorkerPause(&self));
 
 		// If the worker is on an old epoch and all backups starts a version >= the endVersion
-		bool exitEarly = wait(shouldBackupWorkerExitEarly(&self));
+		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
 		TraceEvent("BackupWorkerExitEarly", self.myId).detail("ExitEarly", exitEarly);
-		if (!exitEarly)
+		if (!exitEarly) {
 			addActor.send(monitorBackupStartedKeyChanges(&self));
+		}
 
 		pull = exitEarly ? Void() : pullAsyncData(&self);
 		addActor.send(pull);
 		done = exitEarly ? Void() : uploadData(&self);
 
-		loop choose {
-			when(wait(dbInfoChange)) {
+		while (true) {
+			auto res = co_await race(dbInfoChange, done, error);
+			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
 				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
 				bool hasPseudoLocality = ls.isValid() && ls->hasPseudoLocality(tagLocalityBackup);
@@ -1078,32 +1093,31 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 				    .detail("HasBackupLocality", hasPseudoLocality)
 				    .detail("OldestBackupEpoch", self.oldestBackupEpoch)
 				    .detail("Tag", self.tag.toString());
-			}
-			when(wait(done)) {
+			} else if (res.index() == 1) {
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
-				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
-				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
+				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
+				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
 				break;
 			}
-			when(wait(error)) {}
 		}
+		co_return;
 	} catch (Error& e) {
-		state Error err = e;
-		if (e.code() == error_code_worker_removed) {
-			pull = Void(); // cancels pulling
-			self.stop();
-			try {
-				wait(done);
-			} catch (Error& e) {
-				TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(e);
-			}
-		}
-		TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
-		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
-			throw err;
+		err = e;
+	}
+
+	if (err.code() == error_code_worker_removed) {
+		pull = Void(); // cancels pulling
+		self.stop();
+		try {
+			co_await done;
+		} catch (Error& shutdownErr) {
+			TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(shutdownErr);
 		}
 	}
-	return Void();
+	TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
+	if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
+		throw err;
+	}
 }

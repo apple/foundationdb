@@ -1,5 +1,5 @@
 /*
- * BackupWorker.actor.h
+ * BackupWorker.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,22 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_BACKUPWORKER_ACTOR_G_H)
-#define FDBSERVER_BACKUPWORKER_ACTOR_G_H
-#include "fdbserver/backupworker/BackupWorker.actor.g.h"
-#elif !defined(FDBSERVER_BACKUPWORKER_ACTOR_H)
-#define FDBSERVER_BACKUPWORKER_ACTOR_H
 
 #include "fdbserver/core/BackupInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct InitializeBackupRequest;
 struct ServerDBInfo;
 
-ACTOR Future<Void> backupWorker(BackupInterface bi,
-                                InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> backupWorker(BackupInterface bi, InitializeBackupRequest req, Reference<AsyncVar<ServerDBInfo> const> db);

@@ -1,5 +1,5 @@
 /*
- * SpecialKeySpace.actor.cpp
+ * SpecialKeySpace.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -34,11 +34,12 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/SpecialKeySpace.h"
 #include "flow/Arena.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StatusClient.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -122,19 +123,19 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 // The cache object is used to cache the first read result from the rpc call during the key resolution,
 // then when we need to do key resolution or result filtering,
 // we, instead of rpc call, read from this cache object have consistent results
-ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* skrImpl,
-                                                 ReadYourWritesTransaction* ryw,
-                                                 KeySelector* ks,
-                                                 KeyRangeMap<Optional<RangeResult>>* cache) {
+Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* skrImpl,
+                                           ReadYourWritesTransaction* ryw,
+                                           KeySelector* ks,
+                                           KeyRangeMap<Optional<RangeResult>>* cache) {
 	// should be removed before calling
 	ASSERT(!ks->orEqual);
 
 	// never being called if KeySelector is already normalized
 	ASSERT(ks->offset != 1);
 
-	state Key startKey(skrImpl->getKeyRange().begin);
-	state Key endKey(skrImpl->getKeyRange().end);
-	state RangeResult result;
+	Key startKey(skrImpl->getKeyRange().begin);
+	Key endKey(skrImpl->getKeyRange().end);
+	RangeResult result;
 
 	if (ks->offset < 1) {
 		// less than the given key
@@ -159,16 +160,16 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 
 	if (skrImpl->isAsync()) {
 		auto* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(skrImpl);
-		RangeResult result_ = wait(ptr->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint, cache));
+		RangeResult result_ = co_await ptr->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint, cache);
 		result = result_;
 	} else {
-		RangeResult result_ = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint));
+		RangeResult result_ = co_await skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint);
 		result = result_;
 	}
 
 	if (result.size() == 0) {
 		TraceEvent(SevDebug, "ZeroElementsIntheRange").detail("Start", startKey).detail("End", endKey);
-		return Void();
+		co_return;
 	}
 	// Note : KeySelector::setKey has byte limit according to the knobs, customize it if needed
 	if (ks->offset < 1) {
@@ -194,7 +195,6 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	    .detail("NormalizedOffset", ks->offset)
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
 	    .detail("SpecialKeyRangeEnd", skrImpl->getKeyRange().end);
-	return Void();
 }
 
 // This function will normalize the given KeySelector to a standard KeySelector:
@@ -205,24 +205,24 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 // to maintain; Thus, separate each part to make the code easy to understand and more compact
 // Boundary is the range of the legal key space, which, by default is the range of the module
 // And (\xff\xff, \xff\xff\xff) if SPECIAL_KEY_SPACE_RELAXED is turned on
-ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
-                                             ReadYourWritesTransaction* ryw,
-                                             KeySelector* ks,
-                                             KeyRangeRef boundary,
-                                             int* actualOffset,
-                                             RangeResult* result,
-                                             KeyRangeMap<Optional<RangeResult>>* cache) {
+Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
+                                       ReadYourWritesTransaction* ryw,
+                                       KeySelector* ks,
+                                       KeyRangeRef boundary,
+                                       int* actualOffset,
+                                       RangeResult* result,
+                                       KeyRangeMap<Optional<RangeResult>>* cache) {
 	// If offset < 1, where we need to move left, iter points to the range containing at least one smaller key
 	// (It's a wasting of time to walk through the range whose begin key is same as ks->key)
 	// (rangeContainingKeyBefore itself handles the case where ks->key == Key())
 	// Otherwise, we only need to move right if offset > 1, iter points to the range containing the key
 	// Since boundary.end is always a key in the RangeMap, it is always safe to move right
-	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter =
+	RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter =
 	    ks->offset < 1 ? sks->getReadImpls().rangeContainingKeyBefore(ks->getKey())
 	                   : sks->getReadImpls().rangeContaining(ks->getKey());
 	while ((ks->offset < 1 && iter->begin() >= boundary.begin) || (ks->offset > 1 && iter->begin() < boundary.end)) {
 		if (iter->value() != nullptr) {
-			wait(moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache));
+			co_await moveKeySelectorOverRangeActor(iter->value(), ryw, ks, cache);
 		}
 		// Check if we can still move the iterator left
 		if (ks->offset < 1) {
@@ -253,7 +253,6 @@ ACTOR Future<Void> normalizeKeySelectorActor(SpecialKeySpace* sks,
 		}
 		ks->offset = 1;
 	}
-	return Void();
 }
 
 SpecialKeySpace::SpecialKeySpace(KeyRef spaceStartKey, KeyRef spaceEndKey, bool testOnly)
@@ -284,41 +283,41 @@ void SpecialKeySpace::modulesBoundaryInit() {
 	}
 }
 
-ACTOR Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
-                                                         ReadYourWritesTransaction* ryw,
-                                                         KeySelector begin,
-                                                         KeySelector end,
-                                                         GetRangeLimits limits,
-                                                         Reverse reverse) {
+Future<RangeResult> SpecialKeySpace::checkRYWValid(SpecialKeySpace* sks,
+                                                   ReadYourWritesTransaction* ryw,
+                                                   KeySelector begin,
+                                                   KeySelector end,
+                                                   GetRangeLimits limits,
+                                                   Reverse reverse) {
 	ASSERT(ryw);
-	choose {
-		when(RangeResult result =
-		         wait(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse))) {
-			return result;
-		}
-		when(wait(ryw->resetFuture())) {
-			throw internal_error();
-		}
+	auto choice = co_await race(SpecialKeySpace::getRangeAggregationActor(sks, ryw, begin, end, limits, reverse),
+	                            ryw->resetFuture());
+	if (choice.index() == 0) {
+		co_return std::get<0>(std::move(choice));
 	}
+	if (choice.index() == 1) {
+		throw internal_error();
+	}
+	UNREACHABLE();
 }
 
-ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks,
-                                                                    ReadYourWritesTransaction* ryw,
-                                                                    KeySelector begin,
-                                                                    KeySelector end,
-                                                                    GetRangeLimits limits,
-                                                                    Reverse reverse) {
+Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySpace* sks,
+                                                              ReadYourWritesTransaction* ryw,
+                                                              KeySelector begin,
+                                                              KeySelector end,
+                                                              GetRangeLimits limits,
+                                                              Reverse reverse) {
 	// This function handles ranges which cover more than one keyrange and aggregates all results
 	// KeySelector, GetRangeLimits and reverse are all handled here
-	state RangeResult result;
-	state RangeResult pairs;
-	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter;
-	state int actualBeginOffset;
-	state int actualEndOffset;
-	state KeyRangeRef moduleBoundary;
+	RangeResult result;
+	RangeResult pairs;
+	RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::iterator iter;
+	int actualBeginOffset{ 0 };
+	int actualEndOffset{ 0 };
+	KeyRangeRef moduleBoundary;
 	// used to cache results from potential first async read
 	// the current implementation will read the whole range result to save in the cache
-	state KeyRangeMap<Optional<RangeResult>> cache(Optional<RangeResult>(), specialKeys.end);
+	KeyRangeMap<Optional<RangeResult>> cache(Optional<RangeResult>(), specialKeys.end);
 
 	if (ryw->specialKeySpaceRelaxed()) {
 		moduleBoundary = sks->range;
@@ -339,20 +338,20 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 		}
 	}
 
-	wait(normalizeKeySelectorActor(sks, ryw, &begin, moduleBoundary, &actualBeginOffset, &result, &cache));
-	wait(normalizeKeySelectorActor(sks, ryw, &end, moduleBoundary, &actualEndOffset, &result, &cache));
+	co_await normalizeKeySelectorActor(sks, ryw, &begin, moduleBoundary, &actualBeginOffset, &result, &cache);
+	co_await normalizeKeySelectorActor(sks, ryw, &end, moduleBoundary, &actualEndOffset, &result, &cache);
 	// Handle all corner cases like what RYW does
 	// return if range inverted
 	if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 		CODE_PROBE(true, "inverted range");
-		return RangeResultRef(false, false);
+		co_return RangeResultRef(false, false);
 	}
 	// If touches begin or end, return with readToBegin and readThroughEnd flags
 	if (begin.getKey() == moduleBoundary.end || end.getKey() == moduleBoundary.begin) {
 		CODE_PROBE(true, "query touches begin or end");
-		return result;
+		co_return result;
 	}
-	state RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
+	RangeMap<Key, SpecialKeyRangeReadImpl*, KeyRangeRef>::Ranges ranges =
 	    sks->getReadImpls().intersectingRanges(KeyRangeRef(begin.getKey(), end.getKey()));
 
 	// TODO : workaround to write this two together to make the code compact
@@ -368,10 +367,10 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				auto* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
-				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
+				RangeResult pairs_ = co_await ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache);
 				pairs = pairs_;
 			} else {
-				RangeResult pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits));
+				RangeResult pairs_ = co_await iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits);
 				pairs = pairs_;
 			}
 			result.arena().dependsOn(pairs.arena());
@@ -386,7 +385,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				if (limits.isReached()) {
 					result.more = true;
 					result.readToBegin = false;
-					return result;
+					co_return result;
 				};
 			}
 		}
@@ -399,10 +398,10 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			if (iter->value()->isAsync() && cache.rangeContaining(keyStart).value().present()) {
 				auto* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
-				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
+				RangeResult pairs_ = co_await ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache);
 				pairs = pairs_;
 			} else {
-				RangeResult pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits));
+				RangeResult pairs_ = co_await iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits);
 				pairs = pairs_;
 			}
 			result.arena().dependsOn(pairs.arena());
@@ -417,12 +416,12 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				if (limits.isReached()) {
 					result.more = true;
 					result.readThroughEnd = false;
-					return result;
+					co_return result;
 				};
 			}
 		}
 	}
-	return result;
+	co_return result;
 }
 
 Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
@@ -449,20 +448,18 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	return checkRYWValid(this, ryw, begin, end, limits, reverse);
 }
 
-ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
-                                                        ReadYourWritesTransaction* ryw,
-                                                        KeyRef key) {
+Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key) {
 	// use getRange to workaround this
-	RangeResult result = wait(sks->getRange(ryw,
-	                                        KeySelector(firstGreaterOrEqual(key)),
-	                                        KeySelector(firstGreaterOrEqual(keyAfter(key))),
-	                                        GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                        Reverse::False));
+	RangeResult result = co_await sks->getRange(ryw,
+	                                            KeySelector(firstGreaterOrEqual(key)),
+	                                            KeySelector(firstGreaterOrEqual(keyAfter(key))),
+	                                            GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
+	                                            Reverse::False);
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
-		return Optional<Value>(result[0].value);
+		co_return Optional<Value>(result[0].value);
 	} else {
-		return Optional<Value>();
+		co_return Optional<Value>();
 	}
 }
 
@@ -575,11 +572,11 @@ KeyRange SpecialKeySpace::decode(const KeyRangeRef& kr) {
 	return KeyRangeRef(begin->value()->decode(kr.begin), begin->value()->decode(kr.end));
 }
 
-ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw) {
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
-	state std::vector<SpecialKeyRangeRWImpl*> writeModulePtrs;
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	std::vector<SpecialKeyRangeRWImpl*> writeModulePtrs;
 	std::unordered_set<SpecialKeyRangeRWImpl*> deduplicate;
 	while (iter != ranges.end()) {
 		std::pair<bool, Optional<Value>> entry = iter->value();
@@ -593,9 +590,9 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		++iter;
 	}
 
-	state std::vector<SpecialKeyRangeRWImpl*>::const_iterator it;
+	std::vector<SpecialKeyRangeRWImpl*>::const_iterator it;
 	for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
-		Optional<std::string> msg = wait((*it)->commit(ryw));
+		Optional<std::string> msg = co_await (*it)->commit(ryw);
 		if (msg.present()) {
 			ryw->setSpecialKeySpaceErrorMsg(msg.get());
 			TraceEvent(SevDebug, "SpecialKeySpaceManagementAPIError")
@@ -604,7 +601,6 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 			throw special_keys_api_failure();
 		}
 	}
-	return Void();
 }
 
 Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
@@ -647,9 +643,9 @@ Future<RangeResult> SKSCTestAsyncReadImpl::getRange(ReadYourWritesTransaction* r
 
 ReadConflictRangeImpl::ReadConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-ACTOR static Future<RangeResult> getReadConflictRangeImpl(ReadYourWritesTransaction* ryw, KeyRange kr) {
-	wait(ryw->pendingReads());
-	return ryw->getReadConflictRangeIntersecting(kr);
+static Future<RangeResult> getReadConflictRangeImpl(ReadYourWritesTransaction* ryw, KeyRange kr) {
+	co_await ryw->pendingReads();
+	co_return ryw->getReadConflictRangeIntersecting(kr);
 }
 
 Future<RangeResult> ReadConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw,
@@ -688,12 +684,13 @@ Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw
 	return result;
 }
 
-ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	loop {
+Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	while (true) {
+		Error err;
 		try {
 			auto keys = kr.removePrefix(ddStatsRange.begin);
 			Standalone<VectorRef<DDMetricsRef>> resultWithoutPrefix =
-			    wait(waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->TOO_MANY));
+			    co_await waitDataDistributionMetricsList(ryw->getDatabase(), keys, CLIENT_KNOBS->TOO_MANY);
 			RangeResult result;
 			for (const auto& ddMetricsRef : resultWithoutPrefix) {
 				// each begin key is the previous end key, thus we only encode the begin key in the result
@@ -707,17 +704,17 @@ ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
 				ValueRef bytes(result.arena(), statsString);
 				result.push_back(result.arena(), KeyValueRef(beginKey, bytes));
 			}
-			return result;
+			co_return result;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_dd_not_found) {
-				TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
-				    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
-				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
-				continue;
-			}
-			throw err;
+			err = e;
 		}
+		if (err.code() == error_code_dd_not_found) {
+			TraceEvent(SevWarnAlways, "DataDistributorNotPresent")
+			    .detail("Operation", "DDMetricsReqestThroughSpecialKeys");
+			co_await delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY);
+			continue;
+		}
+		throw err;
 	}
 }
 
@@ -833,16 +830,16 @@ RangeResult rywGetRange(ReadYourWritesTransaction* ryw, const KeyRangeRef& kr, c
 }
 
 // read from those readwrite modules in which special keys have one-to-one mapping with real persisted keys
-ACTOR Future<RangeResult> rwModuleWithMappingGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                           const SpecialKeyRangeRWImpl* impl,
-                                                           KeyRangeRef kr) {
-	RangeResult resultWithoutPrefix =
-	    wait(ryw->getTransaction().getRange(ryw->getDatabase()->specialKeySpace->decode(kr), CLIENT_KNOBS->TOO_MANY));
+Future<RangeResult> rwModuleWithMappingGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                     const SpecialKeyRangeRWImpl* impl,
+                                                     KeyRangeRef kr) {
+	RangeResult resultWithoutPrefix = co_await ryw->getTransaction().getRange(
+	    ryw->getDatabase()->specialKeySpace->decode(kr), CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!resultWithoutPrefix.more && resultWithoutPrefix.size() < CLIENT_KNOBS->TOO_MANY);
 	RangeResult result;
 	for (const KeyValueRef& kv : resultWithoutPrefix)
 		result.push_back_deep(result.arena(), KeyValueRef(impl->encode(kv.key), kv.value));
-	return rywGetRange(ryw, kr, result);
+	co_return rywGetRange(ryw, kr, result);
 }
 
 ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -904,14 +901,14 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw,
 	return true;
 }
 
-ACTOR Future<bool> checkExclusion(Database db,
-                                  std::vector<AddressExclusion> addresses,
-                                  std::set<AddressExclusion> exclusions,
-                                  std::unordered_set<std::string> localities,
-                                  bool markFailed,
-                                  Optional<std::string>* msg) {
-	StatusObject status = wait(StatusClient::statusFetcher(db));
-	state std::string errorString =
+Future<bool> checkExclusion(Database db,
+                            std::vector<AddressExclusion> addresses,
+                            std::set<AddressExclusion> exclusions,
+                            std::unordered_set<std::string> localities,
+                            bool markFailed,
+                            Optional<std::string>* msg) {
+	StatusObject status = co_await StatusClient::statusFetcher(db);
+	std::string errorString =
 	    "ERROR: Could not calculate the impact of this exclude on the total available space in the cluster.\n"
 	    "Please try the exclude again in 30 seconds.\n"
 	    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without checking available "
@@ -923,26 +920,26 @@ ACTOR Future<bool> checkExclusion(Database db,
 	if (!statusObj.get("cluster", statusObjCluster)) {
 		*msg = ManagementAPIError::toJsonString(
 		    false, markFailed ? "exclude failed" : "exclude", errorString + "Field 'cluster' missing.\n");
-		return false;
+		co_return false;
 	}
 
 	StatusObjectReader processesMap;
 	if (!statusObjCluster.get("processes", processesMap)) {
 		*msg = ManagementAPIError::toJsonString(
 		    false, markFailed ? "exclude failed" : "exclude", errorString + "Field 'processes' missing.\n");
-		return false;
+		co_return false;
 	}
 
-	state int ssTotalCount = 0;
-	state int ssExcludedCount = 0;
+	int ssTotalCount = 0;
+	int ssExcludedCount = 0;
 
-	state std::unordered_set<std::string> diskLocalities;
-	state int64_t totalKvStoreFreeBytes = 0;
-	state int64_t totalKvStoreFreeBytesNotExcluded = 0;
-	state int64_t totalKvStoreUsedBytes = 0;
-	state int64_t totalKvStoreUsedBytesNotExcluded = 0;
-	state int64_t totalKvStoreAvailableBytes = 0;
-	state std::map<std::string, std::vector<std::string>> parsedLocalities;
+	std::unordered_set<std::string> diskLocalities;
+	int64_t totalKvStoreFreeBytes = 0;
+	int64_t totalKvStoreFreeBytesNotExcluded = 0;
+	int64_t totalKvStoreUsedBytes = 0;
+	int64_t totalKvStoreUsedBytesNotExcluded = 0;
+	int64_t totalKvStoreAvailableBytes = 0;
+	std::map<std::string, std::vector<std::string>> parsedLocalities;
 	// Convert the passed localities into a map of vectors to make it easier to check if a process
 	// is excluded by locality.
 	for (const auto& locality : localities) {
@@ -962,7 +959,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	// be empty and if the addresses are not empty, we are not using the locality based exclusion. So this
 	// step is a safeguard for future changes where the provided addresses are not empty and locality based
 	// exclusions are used.
-	state std::vector<AddressExclusion> excludedAddresses;
+	std::vector<AddressExclusion> excludedAddresses;
 	if (markFailed && !addresses.empty()) {
 		excludedAddresses = addresses;
 	}
@@ -982,7 +979,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 				if (!process.get("address", addrStr)) {
 					*msg =
 					    ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
-					return false;
+					co_return false;
 				}
 				NetworkAddress addr = NetworkAddress::parse(addrStr);
 				excluded = addressExcluded(exclusions, addr);
@@ -1037,7 +1034,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 						    false,
 						    markFailed ? "exclude failed" : "exclude",
 						    errorString + "Field 'kvstore_used_bytes' missing for storage role.\n");
-						return false;
+						co_return false;
 					}
 
 					int64_t free_bytes;
@@ -1046,7 +1043,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 						    false,
 						    markFailed ? "exclude failed" : "exclude",
 						    errorString + "Field 'kvstore_free_bytes' missing for storage role.\n");
-						return false;
+						co_return false;
 					}
 
 					int64_t available_bytes;
@@ -1055,7 +1052,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 						    false,
 						    markFailed ? "exclude failed" : "exclude",
 						    errorString + "Field 'kvstore_available_bytes' missing for storage role.\n");
-						return false;
+						co_return false;
 					}
 
 					totalKvStoreUsedBytes += used_bytes;
@@ -1082,7 +1079,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	catch (...) {
 		*msg = ManagementAPIError::toJsonString(
 		    false, markFailed ? "exclude failed" : "exclude", errorString + "General exception raised.\n");
-		return false;
+		co_return false;
 	}
 
 	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
@@ -1112,14 +1109,14 @@ ACTOR Future<bool> checkExclusion(Database db,
 			    "Call set(\"0xff0xff/management/options/exclude/force\", ...) first to exclude without "
 			    "checking available space.\n";
 			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
-			return false;
+			co_return false;
 		}
 	}
 
 	if (markFailed) {
-		state bool safe;
+		bool safe{ false };
 		try {
-			bool _safe = wait(checkSafeExclusions(db, addresses));
+			bool _safe = co_await checkSafeExclusions(db, addresses);
 			safe = _safe;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -1135,11 +1132,11 @@ ACTOR Future<bool> checkExclusion(Database db,
 			                   "Call set(\"0xff0xff/management/failed/<ADDRESS...>\", ...) to exclude without "
 			                   "performing safety checks.\n";
 			*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", temp);
-			return false;
+			co_return false;
 		}
 	}
 
-	return true;
+	co_return true;
 }
 
 void includeServers(ReadYourWritesTransaction* ryw) {
@@ -1179,28 +1176,28 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 	}
 }
 
-ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
+Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
 	// parse network addresses
-	state Optional<std::string> result;
-	state std::vector<AddressExclusion> addresses;
-	state std::set<AddressExclusion> exclusions;
-	state std::unordered_set<std::string> localities;
+	Optional<std::string> result;
+	std::vector<AddressExclusion> addresses;
+	std::set<AddressExclusion> exclusions;
+	std::unordered_set<std::string> localities;
 
 	if (!parseNetWorkAddrFromKeys(ryw, failed, addresses, exclusions, result))
-		return result;
+		co_return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed" : "excluded", "force")];
 	// Only do safety check when we have servers to be excluded and the force option key is not set
 	if (addresses.size() && !(force.first && force.second.present())) {
-		bool safe = wait(checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result));
+		bool safe = co_await checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result);
 		if (!safe)
-			return result;
+			co_return result;
 	}
-	wait(excludeServers(&(ryw->getTransaction()), addresses, failed));
+	co_await excludeServers(&(ryw->getTransaction()), addresses, failed);
 	includeServers(ryw);
 
-	return result;
+	co_return result;
 }
 
 Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -1235,32 +1232,32 @@ Future<Optional<std::string>> FailedServersRangeImpl::commit(ReadYourWritesTrans
 	return excludeCommitActor(ryw, true);
 }
 
-ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
-	state RangeResult result;
-	state Transaction& tr = ryw->getTransaction();
+Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	RangeResult result;
+	Transaction& tr = ryw->getTransaction();
 	tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<std::vector<AddressExclusion>> fExclusions = getAllExcludedServers(&tr);
-	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(&tr);
-	state Future<RangeResult> fServerList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<Optional<Standalone<StringRef>>> fLogsKey = tr.get(logsKey);
-	wait(success(fExclusions) && success(fExcludedLocalities) && success(fServerList));
+	Future<std::vector<AddressExclusion>> fExclusions = getAllExcludedServers(&tr);
+	Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(&tr);
+	Future<RangeResult> fServerList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+	Future<Optional<Standalone<StringRef>>> fLogsKey = tr.get(logsKey);
+	co_await (success(fExclusions) && success(fExcludedLocalities) && success(fServerList));
 
-	state std::vector<AddressExclusion> excl = fExclusions.get();
-	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
-	state std::set<NetworkAddress> inProgressExclusion;
+	std::vector<AddressExclusion> excl = fExclusions.get();
+	std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
+	std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
 	// recovery Check that there aren't any storage servers with addresses violating the exclusions
-	state RangeResult serverList = fServerList.get();
+	RangeResult serverList = fServerList.get();
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	// We have to make use of the localities here to verify if a server is still in the server list,
 	// even if it might be missing in the workers as the server is not running anymore.
-	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+	std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
 	// Decode the excluded localities to check if any server is excluded by locality.
-	state std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
+	std::vector<std::pair<std::string, std::string>> decodedExcludedLocalities;
 	for (auto& excludedLocality : excludedLocalities) {
 		decodedExcludedLocalities.push_back(decodeLocality(excludedLocality));
 	}
@@ -1293,7 +1290,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 		}
 	}
 
-	wait(success(fLogsKey));
+	co_await success(fLogsKey);
 	Optional<Standalone<StringRef>> value = fLogsKey.get();
 	ASSERT(value.present());
 	// TODO(jscheuermann): The logs key range doesn't hold any information about localities. This is a limitation
@@ -1325,7 +1322,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 		}
 	}
 
-	return result;
+	co_return result;
 }
 
 ExclusionInProgressRangeImpl::ExclusionInProgressRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
@@ -1336,9 +1333,9 @@ Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransac
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
 }
 
-ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
+	std::vector<ProcessData> _workers = co_await getWorkers(&ryw->getTransaction());
 	auto workers = _workers; // strip const
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
@@ -1359,17 +1356,17 @@ ACTOR Future<RangeResult> getProcessClassActor(ReadYourWritesTransaction* ryw, K
 			result.push_back(result.arena(), KeyValueRef(k, v));
 		}
 	}
-	return rywGetRange(ryw, kr, result);
+	co_return rywGetRange(ryw, kr, result);
 }
 
-ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef range) {
+Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef range) {
 	// enable related options
 	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	ryw->setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> workers = wait(
-	    getWorkers(&ryw->getTransaction())); // make sure we use the Transaction object to avoid used_during_commit()
+	std::vector<ProcessData> workers = co_await getWorkers(
+	    &ryw->getTransaction()); // make sure we use the Transaction object to avoid used_during_commit()
 
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	auto iter = ranges.begin();
@@ -1400,7 +1397,7 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 		}
 		++iter;
 	}
-	return Optional<std::string>();
+	co_return Optional<std::string>();
 }
 
 ProcessClassRangeImpl::ProcessClassRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -1459,9 +1456,9 @@ void ProcessClassRangeImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& 
 	    ryw, "setclass", "Clear range operation is meaningless thus forbidden for setclass");
 }
 
-ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
-	std::vector<ProcessData> _workers = wait(getWorkers(&ryw->getTransaction()));
+	std::vector<ProcessData> _workers = co_await getWorkers(&ryw->getTransaction());
 	auto workers = _workers; // strip const
 	// Note : the sort by string is anti intuition, ex. 1.1.1.1:11 < 1.1.1.1:5
 	std::sort(workers.begin(), workers.end(), [](const ProcessData& lhs, const ProcessData& rhs) {
@@ -1484,7 +1481,7 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 			result.arena().dependsOn(v.arena());
 		}
 	}
-	return result;
+	co_return result;
 }
 
 ProcessClassSourceRangeImpl::ProcessClassSourceRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -1495,16 +1492,16 @@ Future<RangeResult> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransact
 	return getProcessClassSourceActor(ryw, getKeyRange().begin, kr);
 }
 
-ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(databaseLockedKey);
 	RangeResult result;
 	if (val.present()) {
 		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
 		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, Value(uid.toString())));
 	}
-	return result;
+	co_return result;
 }
 
 LockDatabaseImpl::LockDatabaseImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -1527,11 +1524,11 @@ Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw,
 	}
 }
 
-ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw, UID uid) {
-	state Optional<std::string> msg;
+Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransaction* ryw, UID uid) {
+	Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(databaseLockedKey);
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
@@ -1546,17 +1543,17 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 		ryw->getTransaction().addWriteConflictRange(normalKeys);
 	}
 
-	return msg;
+	co_return msg;
 }
 
-ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
+Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(databaseLockedKey);
 	if (val.present()) {
 		ryw->getTransaction().clear(singleKeyRange(databaseLockedKey));
 	}
-	return Optional<std::string>();
+	co_return Optional<std::string>();
 }
 
 Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -1576,17 +1573,17 @@ Future<Optional<std::string>> LockDatabaseImpl::commit(ReadYourWritesTransaction
 	}
 }
 
-ACTOR Future<RangeResult> getConsistencyCheckKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+Future<RangeResult> getConsistencyCheckKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
+	Optional<Value> val = co_await ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended);
 	bool ccSuspendSetting = val.present() ? BinaryReader::fromStringRef<bool>(val.get(), Unversioned()) : false;
 	RangeResult result;
 	if (ccSuspendSetting) {
 		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, ValueRef()));
 	}
-	return result;
+	co_return result;
 }
 
 ConsistencyCheckImpl::ConsistencyCheckImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -1668,14 +1665,13 @@ void GlobalConfigImpl::set(ReadYourWritesTransaction* ryw, const KeyRef& key, co
 // Writes global configuration changes to durable memory. Also writes the
 // changes made in the transaction to a recent history set, and updates the
 // latest version which the global configuration was updated at.
-ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig,
-                                                            ReadYourWritesTransaction* ryw) {
-	state Transaction& tr = ryw->getTransaction();
+Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* globalConfig, ReadYourWritesTransaction* ryw) {
+	Transaction& tr = ryw->getTransaction();
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	// History should only contain three most recent updates. If it currently
 	// has three items, remove the oldest to make room for a new item.
-	RangeResult history = wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult history = co_await tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY);
 	constexpr int kGlobalConfigMaxHistorySize = 3;
 	if (history.size() > kGlobalConfigMaxHistorySize - 1) {
 		for (int i = 0; i < history.size() - (kGlobalConfigMaxHistorySize - 1); ++i) {
@@ -1689,9 +1685,9 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 	// Transform writes from the special-key-space (\xff\xff/global_config/) to
 	// the system key space (\xff/globalConfig/), and writes mutations to
 	// latest version history.
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(specialKeys);
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::iterator iter = ranges.begin();
 	while (iter != ranges.end()) {
 		std::pair<bool, Optional<Value>> entry = iter->value();
 		if (entry.first) {
@@ -1709,7 +1705,7 @@ ACTOR Future<Optional<std::string>> globalConfigCommitActor(GlobalConfigImpl* gl
 	}
 	GlobalConfig::applyChanges(tr, insertions, clears);
 
-	return Optional<std::string>();
+	co_return Optional<std::string>();
 }
 
 // Called when a transaction includes keys in the global configuration special-key-space range.
@@ -1792,9 +1788,9 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key
 
 CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
-	state ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
-	state std::vector<NetworkAddress> coordinator_processes = wait(cs.tryResolveHostnames());
+Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	ClusterConnectionString cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
+	std::vector<NetworkAddress> coordinator_processes = co_await cs.tryResolveHostnames();
 	RangeResult result;
 	Key cluster_description_key = prefix.withSuffix("cluster_description"_sr);
 	if (kr.contains(cluster_description_key)) {
@@ -1815,7 +1811,7 @@ ACTOR Future<RangeResult> coordinatorsGetRangeActor(ReadYourWritesTransaction* r
 	if (kr.contains(processes_key)) {
 		result.push_back_deep(result.arena(), KeyValueRef(processes_key, Value(processes_str)));
 	}
-	return rywGetRange(ryw, kr, result);
+	co_return rywGetRange(ryw, kr, result);
 }
 
 Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
@@ -1825,12 +1821,12 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
 	return coordinatorsGetRangeActor(ryw, prefix, kr);
 }
 
-ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state ClusterConnectionString conn; // We don't care about the Key here.
-	state std::vector<std::string> process_address_or_hostname_strs;
-	state Optional<std::string> msg;
-	state int index;
-	state bool parse_error = false;
+static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ClusterConnectionString conn; // We don't care about the Key here.
+	std::vector<std::string> process_address_or_hostname_strs;
+	Optional<std::string> msg;
+	int index{ 0 };
+	bool parse_error = false;
 
 	// check update for coordinators
 	Key processes_key = "processes"_sr.withPrefix(kr.begin);
@@ -1840,7 +1836,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		auto processesStr = processes_entry.second.get().toString();
 		boost::split(process_address_or_hostname_strs, processesStr, [](char c) { return c == ','; });
 		if (!process_address_or_hostname_strs.size()) {
-			return ManagementAPIError::toJsonString(
+			co_return ManagementAPIError::toJsonString(
 			    false,
 			    "coordinators",
 			    "New coordinators\' processes are empty, please specify new processes\' network addresses with format "
@@ -1866,7 +1862,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			if (parse_error) {
 				std::string error = "ERROR: \'" + process_address_or_hostname_strs[index] +
 				                    "\' is not a valid network endpoint address\n";
-				return ManagementAPIError::toJsonString(false, "coordinators", error);
+				co_return ManagementAPIError::toJsonString(false, "coordinators", error);
 			}
 		}
 	}
@@ -1882,7 +1878,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			newName = entry.second.get().toString();
 		} else {
 			// throw the error
-			return ManagementAPIError::toJsonString(
+			co_return ManagementAPIError::toJsonString(
 			    false, "coordinators", "Cluster description must match [A-Za-z0-9_]+");
 		}
 	}
@@ -1891,7 +1887,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	    .detail("NewConnectionString", conn.toString())
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), &conn, newName));
+	Optional<CoordinatorsResult> r = co_await changeQuorumChecker(&ryw->getTransaction(), &conn, newName);
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
@@ -1906,7 +1902,7 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 		msg = ManagementAPIError::toJsonString(retriable, "coordinators", ManagementAPI::generateErrorMessage(res));
 	}
-	return msg;
+	co_return msg;
 }
 
 Future<Optional<std::string>> CoordinatorsImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -1924,28 +1920,28 @@ void CoordinatorsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) 
 
 CoordinatorsAutoImpl::CoordinatorsAutoImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state RangeResult res;
-	state std::string autoCoordinatorsKey;
-	state Transaction& tr = ryw->getTransaction();
+static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	RangeResult res;
+	std::string autoCoordinatorsKey;
+	Transaction& tr = ryw->getTransaction();
 
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+	Optional<Value> currentKey = co_await tr.get(coordinatorsKey);
 
 	if (!currentKey.present()) {
 		ryw->setSpecialKeySpaceErrorMsg(
 		    ManagementAPIError::toJsonString(false, "auto_coordinators", "The coordinator key does not exist"));
 		throw special_keys_api_failure();
 	}
-	state ClusterConnectionString old(currentKey.get().toString());
-	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
+	ClusterConnectionString old(currentKey.get().toString());
+	CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 
-	std::vector<NetworkAddress> oldCoordinators = wait(old.tryResolveHostnames());
-	std::vector<NetworkAddress> _desiredCoordinators = wait(autoQuorumChange()->getDesiredCoordinators(
-	    &tr, oldCoordinators, makeReference<ClusterConnectionMemoryRecord>(old), result));
+	std::vector<NetworkAddress> oldCoordinators = co_await old.tryResolveHostnames();
+	std::vector<NetworkAddress> _desiredCoordinators = co_await autoQuorumChange()->getDesiredCoordinators(
+	    &tr, oldCoordinators, makeReference<ClusterConnectionMemoryRecord>(old), result);
 
 	if (result == CoordinatorsResult::NOT_ENOUGH_MACHINES) {
 		// we could get not_enough_machines if we happen to see the database while the cluster controller is updating
@@ -1973,7 +1969,7 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 		}
 	}
 	res.push_back_deep(res.arena(), KeyValueRef(kr.begin, Value(autoCoordinatorsKey)));
-	return res;
+	co_return res;
 }
 
 Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ryw,
@@ -1984,17 +1980,17 @@ Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ry
 	return CoordinatorsAutoImplActor(ryw, kr);
 }
 
-ACTOR static Future<RangeResult> getMinCommitVersionActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+static Future<RangeResult> getMinCommitVersionActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(minRequiredCommitVersionKey);
 	RangeResult result;
 	if (val.present()) {
 		Version minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
 		ValueRef version(result.arena(), boost::lexical_cast<std::string>(minRequiredCommitVersion));
 		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
 	}
-	return result;
+	co_return result;
 }
 
 AdvanceVersionImpl::AdvanceVersionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -2017,10 +2013,10 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 	}
 }
 
-ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
-	Optional<Standalone<StringRef>> versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
+static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	Optional<Standalone<StringRef>> versionEpochValue = co_await ryw->getTransaction().get(versionEpochKey);
 	if (versionEpochValue.present()) {
-		return ManagementAPIError::toJsonString(
+		co_return ManagementAPIError::toJsonString(
 		    false, "advanceversion", "Illegal to modify the version while the version epoch is enabled");
 	}
 
@@ -2033,19 +2029,19 @@ ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWri
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	TraceEvent(SevDebug, "AdvanceVersion").detail("MaxAllowedVersion", maxAllowedVerion);
 	if (v > maxAllowedVerion) {
-		return ManagementAPIError::toJsonString(
+		co_return ManagementAPIError::toJsonString(
 		    false,
 		    "advanceversion",
 		    "The given version is larger than the maximum allowed value(2**63-1-version_per_second*3600*24*365*1000)");
 	}
-	Version rv = wait(ryw->getTransaction().getReadVersion());
+	Version rv = co_await ryw->getTransaction().getReadVersion();
 	if (rv <= v) {
 		ryw->getTransaction().set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
 	} else {
-		return ManagementAPIError::toJsonString(
+		co_return ManagementAPIError::toJsonString(
 		    false, "advanceversion", "Current read version is larger than the given version");
 	}
-	return Optional<std::string>();
+	co_return Optional<std::string>();
 }
 
 Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -2067,17 +2063,17 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 	return Optional<std::string>();
 }
 
-ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(versionEpochKey);
 	RangeResult result;
 	if (val.present()) {
 		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
 		ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
 		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
 	}
-	return result;
+	co_return result;
 }
 
 VersionEpochImpl::VersionEpochImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -2309,23 +2305,21 @@ void parse(std::vector<StringRef>::iterator it, std::vector<StringRef>::iterator
 	}
 }
 
-ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                           KeyRef prefix,
-                                                           KeyRangeRef kr) {
-	state RangeResult result;
+static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	RangeResult result;
 
 	// Set default values for all fields. The default will be used if the field
 	// is missing in the key.
-	state NetworkAddress host;
-	state WaitState waitStateStart = WaitState{ 0 };
-	state WaitState waitStateEnd = WaitState{ 2 };
-	state time_t timeStart = 0;
-	state time_t timeEnd = std::numeric_limits<time_t>::max();
-	state int seqStart = 0;
-	state int seqEnd = std::numeric_limits<int>::max();
+	NetworkAddress host;
+	WaitState waitStateStart = WaitState{ 0 };
+	WaitState waitStateEnd = WaitState{ 2 };
+	time_t timeStart = 0;
+	time_t timeEnd = std::numeric_limits<time_t>::max();
+	int seqStart = 0;
+	int seqEnd = std::numeric_limits<int>::max();
 
-	state std::vector<StringRef> beginValues = kr.begin.removePrefix(prefix).splitAny("/"_sr);
-	state std::vector<StringRef> endValues = kr.end.removePrefix(prefix).splitAny("/"_sr);
+	std::vector<StringRef> beginValues = kr.begin.removePrefix(prefix).splitAny("/"_sr);
+	std::vector<StringRef> endValues = kr.end.removePrefix(prefix).splitAny("/"_sr);
 	// Require index (either "state" or "time") and address:port.
 	if (beginValues.size() < 2 || endValues.size() < 2) {
 		ryw->setSpecialKeySpaceErrorMsg(
@@ -2333,7 +2327,7 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 		throw special_keys_api_failure();
 	}
 
-	state NetworkAddress endRangeHost;
+	NetworkAddress endRangeHost;
 	try {
 		if (SpecialKeySpace::getActorLineageApiCommandRange("state").contains(kr)) {
 			// For the range \xff\xff/actor_lineage/state/ip:port/wait-state/time/seq
@@ -2372,9 +2366,9 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 
 	// Open endpoint to target process on each call. This can be optimized at
 	// some point...
-	state ProcessInterface process;
+	ProcessInterface process;
 	process.getInterface = RequestStream<GetProcessInterfaceRequest>(Endpoint::wellKnown({ host }, WLTOKEN_PROCESS));
-	ProcessInterface p = wait(retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{}));
+	ProcessInterface p = co_await retryBrokenPromise(process.getInterface, GetProcessInterfaceRequest{});
 	process = p;
 
 	ActorLineageRequest actorLineageRequest;
@@ -2382,7 +2376,7 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 	actorLineageRequest.waitStateEnd = waitStateEnd;
 	actorLineageRequest.timeStart = timeStart;
 	actorLineageRequest.timeEnd = timeEnd;
-	ActorLineageReply reply = wait(process.actorLineage.getReply(actorLineageRequest));
+	ActorLineageReply reply = co_await process.actorLineage.getReply(actorLineageRequest);
 
 	time_t dt = 0;
 	int seq = -1;
@@ -2441,7 +2435,7 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 		}
 	}
 
-	return result;
+	co_return result;
 }
 
 Future<RangeResult> ActorLineageImpl::getRange(ReadYourWritesTransaction* ryw,
@@ -2524,14 +2518,12 @@ MaintenanceImpl::MaintenanceImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 // we will calculate the remaining time(truncated to integer, the same as fdbcli) and return back as the value
 // If the zoneId is the special one `ignoreSSFailuresZoneString`,
 // value will be 0 (same as fdbcli)
-ACTOR static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                          KeyRef prefix,
-                                                          KeyRangeRef kr) {
-	state RangeResult result;
+static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransaction* ryw, KeyRef prefix, KeyRangeRef kr) {
+	RangeResult result;
 	// zoneId
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(healthyZoneKey);
 	if (val.present()) {
 		auto healthyZone = decodeHealthyZoneValue(val.get());
 		if ((healthyZone.first == ignoreSSFailuresZoneString) ||
@@ -2547,7 +2539,7 @@ ACTOR static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransact
 			}
 		}
 	}
-	return rywGetRange(ryw, kr, result);
+	co_return rywGetRange(ryw, kr, result);
 }
 
 Future<RangeResult> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw,
@@ -2561,16 +2553,16 @@ Future<RangeResult> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw,
 // In addition, if the zoneId now is 'ignoreSSFailuresZoneString',
 // which means the data distribution is disabled for storage failures.
 // Only clear this specific key is allowed, any other operations will throw error
-ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	// read
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
+	Optional<Value> val = co_await ryw->getTransaction().get(healthyZoneKey);
 	Optional<std::pair<Key, Version>> healthyZone =
 	    val.present() ? decodeHealthyZoneValue(val.get()) : Optional<std::pair<Key, Version>>();
 
-	state RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
+	RangeMap<Key, std::pair<bool, Optional<Value>>, KeyRangeRef>::Ranges ranges =
 	    ryw->getSpecialKeySpaceWriteMap().containedRanges(kr);
 	Key zoneId;
 	double seconds;
@@ -2583,7 +2575,7 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 			continue;
 		if (iter->value().second.present()) {
 			if (isSet)
-				return Optional<std::string>(ManagementAPIError::toJsonString(
+				co_return Optional<std::string>(ManagementAPIError::toJsonString(
 				    false, "maintenance", "Multiple zones given for maintenance, only one allowed at the same time"));
 			isSet = true;
 			zoneId = iter->begin().removePrefix(kr.begin);
@@ -2599,11 +2591,11 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 		if (healthyZone.present() && healthyZone.get().first == ignoreSSFailuresZoneString) {
 			std::string msg = "Maintenance mode cannot be used while data distribution is disabled for storage "
 			                  "server failures.";
-			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
+			co_return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else if (seconds < 0) {
 			std::string msg =
 			    "The specified maintenance time " + boost::lexical_cast<std::string>(seconds) + " is a negative value";
-			return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
+			co_return Optional<std::string>(ManagementAPIError::toJsonString(false, "maintenance", msg));
 		} else {
 			TraceEvent(SevDebug, "SKSMaintenanceSet").detail("ZoneId", zoneId.toString());
 			ryw->getTransaction().set(healthyZoneKey,
@@ -2612,7 +2604,7 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 			                                               (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
 		}
 	}
-	return Optional<std::string>();
+	co_return Optional<std::string>();
 }
 
 Future<Optional<std::string>> MaintenanceImpl::commit(ReadYourWritesTransaction* ryw) {
@@ -2622,19 +2614,19 @@ Future<Optional<std::string>> MaintenanceImpl::commit(ReadYourWritesTransaction*
 DataDistributionImpl::DataDistributionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 // Read the system keys dataDistributionModeKey and rebalanceDDIgnoreKey
-ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                               KeyRef prefix,
-                                                               KeyRangeRef kr) {
-	state RangeResult result;
+static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                         KeyRef prefix,
+                                                         KeyRangeRef kr) {
+	RangeResult result;
 	// dataDistributionModeKey
-	state Key modeKey = "mode"_sr.withPrefix(prefix);
+	Key modeKey = "mode"_sr.withPrefix(prefix);
 
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	if (kr.contains(modeKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[modeKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
-			Optional<Value> f = wait(ryw->getTransaction().get(dataDistributionModeKey));
+			Optional<Value> f = co_await ryw->getTransaction().get(dataDistributionModeKey);
 			int mode = -1;
 			if (f.present()) {
 				mode = BinaryReader::fromStringRef<int>(f.get(), Unversioned());
@@ -2643,17 +2635,17 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 		}
 	}
 	// rebalanceDDIgnoreKey
-	state Key rebalanceIgnoredKey = "rebalance_ignored"_sr.withPrefix(prefix);
+	Key rebalanceIgnoredKey = "rebalance_ignored"_sr.withPrefix(prefix);
 	if (kr.contains(rebalanceIgnoredKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[rebalanceIgnoredKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
-			Optional<Value> f = wait(ryw->getTransaction().get(rebalanceDDIgnoreKey));
+			Optional<Value> f = co_await ryw->getTransaction().get(rebalanceDDIgnoreKey);
 			if (f.present()) {
 				result.push_back_deep(result.arena(), KeyValueRef(rebalanceIgnoredKey, Value()));
 			}
 		}
 	}
-	return rywGetRange(ryw, kr, result);
+	co_return rywGetRange(ryw, kr, result);
 }
 
 Future<RangeResult> DataDistributionImpl::getRange(ReadYourWritesTransaction* ryw,
@@ -2806,11 +2798,11 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
 
 // On commit, parses the special exclusion keys and get the localities to be excluded, check for exclusions
 // and add them to the exclusion list. Also, clears the special management api keys with includeLocalities.
-ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
-	state Optional<std::string> result;
-	state std::unordered_set<std::string> localities;
-	state std::vector<AddressExclusion> addresses;
-	state std::set<AddressExclusion> exclusions;
+Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTransaction* ryw, bool failed) {
+	Optional<std::string> result;
+	std::unordered_set<std::string> localities;
+	std::vector<AddressExclusion> addresses;
+	std::set<AddressExclusion> exclusions;
 
 	ryw->setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2821,21 +2813,21 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 	// If we fetch the workers here and in the status, we are bascially fetching the same information twice
 	// which is fine under normal circumstances, but there is no need to do that.
 	if (!parseLocalitiesFromKeys(ryw, failed, localities, result))
-		return result;
+		co_return result;
 	// If force option is not set, we need to do safety check
 	auto force = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    failed ? "failed_locality" : "excluded_locality", "force")];
 	// only do safety check when we have localities to be excluded and the force option key is not set
 	if (localities.size() && !(force.first && force.second.present())) {
-		bool safe = wait(checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result));
+		bool safe = co_await checkExclusion(ryw->getDatabase(), addresses, exclusions, localities, failed, &result);
 		if (!safe)
-			return result;
+			co_return result;
 	}
 
-	wait(excludeLocalities(&ryw->getTransaction(), localities, failed));
+	co_await excludeLocalities(&ryw->getTransaction(), localities, failed);
 	includeLocalities(ryw);
 
-	return result;
+	co_return result;
 }
 
 ExcludedLocalitiesRangeImpl::ExcludedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
@@ -2897,25 +2889,25 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 }
 
 // Defined in ReadYourWrites.actor.cpp
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
+Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> const& clusterRecord);
 // Defined in NativeAPI.actor.cpp
-ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientWorkerInterface workerInterf);
+Future<bool> verifyInterfaceActor(Reference<FlowLock> const& connectLock, ClientWorkerInterface const& workerInterf);
 
-ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                                   KeyRef prefix,
-                                                                   KeyRangeRef kr) {
+static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWritesTransaction* ryw,
+                                                             KeyRef prefix,
+                                                             KeyRangeRef kr) {
 	if (!ryw->getDatabase().getPtr() || !ryw->getDatabase()->getConnectionRecord())
-		return RangeResult();
+		co_return RangeResult();
 
-	state RangeResult interfs = wait(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()));
+	RangeResult interfs = co_await getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord());
 	// for options' special keys, the boolean flag indicates if it's a SET operation
 	auto [verify, _] = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandOptionSpecialKey(
 	    "worker_interfaces", "verify")];
-	state RangeResult result;
+	RangeResult result;
 	if (verify) {
 		// if verify option is set, we try to talk to every worker and only returns those we can talk to
 		Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
-		state std::vector<Future<bool>> verifyInterfs;
+		std::vector<Future<bool>> verifyInterfs;
 		for (const auto& [k_, value] : interfs) {
 			auto k = k_.withPrefix(prefix);
 			if (kr.contains(k)) {
@@ -2925,7 +2917,7 @@ ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWrite
 				verifyInterfs.push_back(false);
 			}
 		}
-		wait(waitForAll(verifyInterfs));
+		co_await waitForAll(verifyInterfs);
 		// state int index;
 		for (int index = 0; index < interfs.size(); index++) {
 			if (verifyInterfs[index].get()) {
@@ -2942,7 +2934,7 @@ ACTOR static Future<RangeResult> workerInterfacesImplGetRangeActor(ReadYourWrite
 		}
 	}
 	std::sort(result.begin(), result.end(), KeyValueRef::OrderByKey{});
-	return result;
+	co_return result;
 }
 
 WorkerInterfacesSpecialKeyImpl::WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -2953,17 +2945,17 @@ Future<RangeResult> WorkerInterfacesSpecialKeyImpl::getRange(ReadYourWritesTrans
 	return workerInterfacesImplGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
-ACTOR Future<Optional<Value>> getJSON(Database db, std::string jsonField = "");
+Future<Optional<Value>> getJSON(Database const& db, std::string const& jsonField = "");
 
-ACTOR static Future<RangeResult> FaultToleranceMetricsImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
-	state RangeResult res;
+static Future<RangeResult> FaultToleranceMetricsImplActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	RangeResult res;
 	if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
-		Optional<Value> val = wait(getJSON(ryw->getDatabase(), "fault_tolerance"));
+		Optional<Value> val = co_await getJSON(ryw->getDatabase(), "fault_tolerance");
 		if (val.present()) {
 			res.push_back_deep(res.arena(), KeyValueRef(kr.begin, val.get()));
 		}
 	}
-	return res;
+	co_return res;
 }
 
 FaultToleranceMetricsImpl::FaultToleranceMetricsImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
@@ -2976,16 +2968,16 @@ Future<RangeResult> FaultToleranceMetricsImpl::getRange(ReadYourWritesTransactio
 	return FaultToleranceMetricsImplActor(ryw, kr);
 }
 
-ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
-                                               KeySelector begin,
-                                               KeySelector end,
-                                               GetRangeLimits limits,
-                                               Reverse reverse,
-                                               RangeResult result) {
+Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
+                                         KeySelector begin,
+                                         KeySelector end,
+                                         GetRangeLimits limits,
+                                         Reverse reverse,
+                                         RangeResult result) {
 	if (!result.size()) {
-		RangeResult testResult = wait(ryw->getRange(begin, end, limits, Snapshot::True, reverse));
+		RangeResult testResult = co_await ryw->getRange(begin, end, limits, Snapshot::True, reverse);
 		ASSERT(testResult == result);
-		return Void();
+		co_return;
 	}
 
 	if (reverse) {
@@ -3021,12 +3013,12 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	std::vector<Key> keys;
 	keys = { deterministicRandom()->randomChoice(candidateKeys), deterministicRandom()->randomChoice(candidateKeys) };
 	std::sort(keys.begin(), keys.end());
-	state KeySelector testBegin = firstGreaterOrEqual(keys[0]);
-	state KeySelector testEnd = firstGreaterOrEqual(keys[1]);
+	KeySelector testBegin = firstGreaterOrEqual(keys[0]);
+	KeySelector testEnd = firstGreaterOrEqual(keys[1]);
 
 	// Generate expected result. Linear time is ok here since we're in simulation, and there's a benefit to keeping this
 	// simple (as we're using it as an test oracle)
-	state RangeResult expectedResult;
+	RangeResult expectedResult;
 	// The reverse parameter should be the same as for the original read, so if
 	// reverse is true then the results are _already_ in reverse order.
 	for (const auto& kr : result) {
@@ -3036,7 +3028,7 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 	}
 
 	// Test
-	RangeResult testResult = wait(ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse));
+	RangeResult testResult = co_await ryw->getRange(testBegin, testEnd, limits, Snapshot::True, reverse);
 	if (testResult != expectedResult) {
 		fmt::print("Reverse: {}\n", static_cast<bool>(reverse));
 		fmt::print("Original range: [{}, {})\n", begin.toString(), end.toString());
@@ -3055,5 +3047,4 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
 		}
 		ASSERT(testResult == expectedResult);
 	}
-	return Void();
 }
