@@ -207,33 +207,31 @@ using ExecuteMutationResult = decltype(std::declval<F>()().getValue());
 template <class F>
 Future<ExecuteMutationResult<F>> executeMutation(Reference<InstructionData> instruction, F func) {
 	while (true) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				if constexpr (std::is_same_v<ExecuteMutationResult<F>, Void>) {
-					co_await func();
-					if (instruction->isDatabase) {
-						co_await instruction->tr->commit();
-					}
-					co_return;
-				} else {
-					ExecuteMutationResult<F> result = co_await func();
-					if (instruction->isDatabase) {
-						co_await instruction->tr->commit();
-					}
-					co_return result;
-				}
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
+		Error err;
+		bool hasErr = false;
+		try {
+			if constexpr (std::is_same_v<ExecuteMutationResult<F>, Void>) {
+				co_await func();
 				if (instruction->isDatabase) {
-					co_await instruction->tr->onError(err);
-				} else {
-					throw err;
+					co_await instruction->tr->commit();
 				}
+				co_return;
+			} else {
+				ExecuteMutationResult<F> result = co_await func();
+				if (instruction->isDatabase) {
+					co_await instruction->tr->commit();
+				}
+				co_return result;
+			}
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			if (instruction->isDatabase) {
+				co_await instruction->tr->onError(err);
+			} else {
+				throw err;
 			}
 		}
 	}

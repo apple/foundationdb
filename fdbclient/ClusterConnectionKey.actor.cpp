@@ -40,25 +40,23 @@ Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterConnect
                                                                                        Key connectionStringKey) {
 	Transaction tr(db);
 	while (true) {
-		{
-			Error err;
-			bool hasErr = false;
-			try {
-				Optional<Value> v = co_await tr.get(connectionStringKey);
-				if (!v.present()) {
-					throw connection_string_invalid();
-				}
-				co_return makeReference<ClusterConnectionKey>(db,
-				                                              connectionStringKey,
-				                                              ClusterConnectionString(v.get().toString()),
-				                                              ConnectionStringNeedsPersisted::False);
-			} catch (Error& e) {
-				err = e;
-				hasErr = true;
+		Error err;
+		bool hasErr = false;
+		try {
+			Optional<Value> v = co_await tr.get(connectionStringKey);
+			if (!v.present()) {
+				throw connection_string_invalid();
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_return makeReference<ClusterConnectionKey>(db,
+			                                              connectionStringKey,
+			                                              ClusterConnectionString(v.get().toString()),
+			                                              ConnectionStringNeedsPersisted::False);
+		} catch (Error& e) {
+			err = e;
+			hasErr = true;
+		}
+		if (hasErr) {
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -128,42 +126,40 @@ Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> s
 	try {
 		Transaction tr(self->db);
 		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					Optional<Value> existingConnectionString = co_await tr.get(self->connectionStringKey);
-					// Someone has already updated the connection string to what we want
-					if (existingConnectionString.present() && existingConnectionString.get() == newConnectionString) {
-						self->lastPersistedConnectionString = newConnectionString;
-						co_return true;
-					}
-					// Someone has updated the connection string to something we didn't expect, in which case we leave
-					// it alone. It's possible this could result in the stored string getting stuck if the connection
-					// string changes twice and only the first change is recorded. If the process that wrote the first
-					// change dies and no other process attempts to write the intermediate state, then only a newly
-					// opened connection key would be able to update the state.
-					else if (existingConnectionString.present() &&
-					         existingConnectionString != self->lastPersistedConnectionString) {
-						TraceEvent(SevWarnAlways, "UnableToChangeConnectionKeyDueToMismatch")
-						    .detail("ConnectionKey", self->connectionStringKey)
-						    .detail("NewConnectionString", newConnectionString)
-						    .detail("ExpectedStoredConnectionString", self->lastPersistedConnectionString)
-						    .detail("ActualStoredConnectionString", existingConnectionString);
-						co_return false;
-					}
-					tr.set(self->connectionStringKey, newConnectionString);
-					co_await tr.commit();
-
+			Error err;
+			bool hasErr = false;
+			try {
+				Optional<Value> existingConnectionString = co_await tr.get(self->connectionStringKey);
+				// Someone has already updated the connection string to what we want
+				if (existingConnectionString.present() && existingConnectionString.get() == newConnectionString) {
 					self->lastPersistedConnectionString = newConnectionString;
 					co_return true;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
+				// Someone has updated the connection string to something we didn't expect, in which case we leave
+				// it alone. It's possible this could result in the stored string getting stuck if the connection
+				// string changes twice and only the first change is recorded. If the process that wrote the first
+				// change dies and no other process attempts to write the intermediate state, then only a newly
+				// opened connection key would be able to update the state.
+				else if (existingConnectionString.present() &&
+				         existingConnectionString != self->lastPersistedConnectionString) {
+					TraceEvent(SevWarnAlways, "UnableToChangeConnectionKeyDueToMismatch")
+					    .detail("ConnectionKey", self->connectionStringKey)
+					    .detail("NewConnectionString", newConnectionString)
+					    .detail("ExpectedStoredConnectionString", self->lastPersistedConnectionString)
+					    .detail("ActualStoredConnectionString", existingConnectionString);
+					co_return false;
 				}
+				tr.set(self->connectionStringKey, newConnectionString);
+				co_await tr.commit();
+
+				self->lastPersistedConnectionString = newConnectionString;
+				co_return true;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	} catch (Error& e) {

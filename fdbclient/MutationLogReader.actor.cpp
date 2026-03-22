@@ -79,47 +79,45 @@ Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database cx) {
 
 		// Read begin to end forever until successful
 		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					RangeResult kvs = co_await tr.getRange(KeyRangeRef(begin, end), limits);
+				RangeResult kvs = co_await tr.getRange(KeyRangeRef(begin, end), limits);
 
-					// No more results, send end of stream
-					if (!kvs.empty()) {
-						// Send results to the reads stream
-						self->reads.send(
-						    RangeResultBlock{ .result = kvs,
-						                      .firstVersion = keyRefToVersion(kvs.front().key, self->prefix.size()),
-						                      .lastVersion = keyRefToVersion(kvs.back().key, self->prefix.size()),
-						                      .hash = self->hash,
-						                      .prefixLen = self->prefix.size(),
-						                      .indexToRead = 0 });
-					}
-
-					if (!kvs.more) {
-						self->reads.sendError(end_of_stream());
-						co_return;
-					}
-
-					begin = kvs.getReadThrough();
-
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+				// No more results, send end of stream
+				if (!kvs.empty()) {
+					// Send results to the reads stream
+					self->reads.send(
+					    RangeResultBlock{ .result = kvs,
+					                      .firstVersion = keyRefToVersion(kvs.front().key, self->prefix.size()),
+					                      .lastVersion = keyRefToVersion(kvs.back().key, self->prefix.size()),
+					                      .hash = self->hash,
+					                      .prefixLen = self->prefix.size(),
+					                      .indexToRead = 0 });
 				}
-				if (hasErr) {
-					if (err.code() == error_code_transaction_too_old) {
-						// We are using this transaction until it's too old and then resetting to a fresh one,
-						// so we don't need to delay.
-						tr.fullReset();
-					} else {
-						co_await tr.onError(err);
-					}
+
+				if (!kvs.more) {
+					self->reads.sendError(end_of_stream());
+					co_return;
+				}
+
+				begin = kvs.getReadThrough();
+
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				if (err.code() == error_code_transaction_too_old) {
+					// We are using this transaction until it's too old and then resetting to a fresh one,
+					// so we don't need to delay.
+					tr.fullReset();
+				} else {
+					co_await tr.onError(err);
 				}
 			}
 		}
