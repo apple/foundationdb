@@ -117,9 +117,8 @@ struct BackupRangePartitionedData {
 			return _waitReady(this);
 		}
 
-		ACTOR static Future<Void> _waitReady(PerBackupInfo* info) {
-			wait(success(info->container) && success(info->ranges));
-			return Void();
+		static Future<Void> _waitReady(PerBackupInfo* info) {
+			co_await (success(info->container) && success(info->ranges));
 		}
 	};
 
@@ -199,14 +198,13 @@ struct BackupRangePartitionedData {
 		logSystem.get()->pop(savedVersion, tag);
 	}
 
-	ACTOR static Future<Void> _waitAllInfoReady(BackupRangePartitionedData* self) {
+	static Future<Void> _waitAllInfoReady(BackupRangePartitionedData* self) {
 		std::vector<Future<Void>> all;
 		for (auto it = self->backups.begin(); it != self->backups.end();) {
 			all.push_back(it->second.waitReady());
 			it++;
 		}
-		wait(waitForAll(all));
-		return Void();
+		co_await waitForAll(all);
 	}
 
 	Future<Void> waitAllInfoReady() { return _waitAllInfoReady(this); }
@@ -219,11 +217,12 @@ struct BackupRangePartitionedData {
 		return true;
 	}
 };
-ACTOR static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
+
+static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
 	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
 
 	while (!self->isAllInfoReady()) {
-		wait(self->waitAllInfoReady());
+		co_await self->waitAllInfoReady();
 	}
 
 	for (auto& [uid, info] : self->backups) {
@@ -244,11 +243,10 @@ ACTOR static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartition
 		}
 	}
 	self->keyRangeToBackupAssignment.coalesce(allKeys);
-	return Void();
 }
 
-ACTOR static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
-                                          std::vector<std::pair<UID, Version>> uidVersions) {
+static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
+                                    std::vector<std::pair<UID, Version>> uidVersions) {
 	std::unordered_set<UID> activeUids;
 	for (const auto& [uid, version] : uidVersions) {
 		activeUids.insert(uid);
@@ -286,81 +284,8 @@ ACTOR static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
 	}
 	if (modified) {
 		self->changedTrigger.trigger();
-		wait(computeKeyRangeToBackupAssignment(self));
+		co_await computeKeyRangeToBackupAssignment(self);
 	}
-	return Void();
-}
-
-ACTOR static Future<Void> computeKeyRangeToBackupAssignment(BackupRangePartitionedData* self) {
-	self->keyRangeToBackupAssignment = KeyRangeMap<std::vector<std::pair<UID, int32_t>>>();
-
-	while (!self->isAllInfoReady()) {
-		wait(self->waitAllInfoReady());
-	}
-
-	for (auto& [uid, info] : self->backups) {
-		const auto& backupRanges = info.ranges.get().get();
-
-		for (auto iter : self->keyRangeToPartitionId.ranges()) {
-			int32_t partitionId = iter.value();
-			KeyRange partitionRange = iter.range();
-
-			Optional<KeyRange> intersection = self->getKeyRangeIntersection(backupRanges, partitionRange);
-			if (!intersection.present())
-				continue;
-
-			std::pair<UID, int32_t> bk{ uid, partitionId };
-			for (auto& range : self->keyRangeToBackupAssignment.modify(intersection.get())) {
-				range->value().push_back(bk);
-			}
-		}
-	}
-	self->keyRangeToBackupAssignment.coalesce(allKeys);
-	return Void();
-}
-
-ACTOR static Future<Void> onBackupChanges(BackupRangePartitionedData* self,
-                                          std::vector<std::pair<UID, Version>> uidVersions) {
-	std::unordered_set<UID> activeUids;
-	for (const auto& [uid, version] : uidVersions) {
-		activeUids.insert(uid);
-	}
-
-	bool modified = false;
-	bool hasNewBackup = false;
-	Version newBackupsMinVersion = std::numeric_limits<Version>::max();
-
-	// Add any new backups
-	for (const auto& [uid, version] : uidVersions) {
-		if (self->backups.find(uid) == self->backups.end()) {
-			self->backups.emplace(uid, BackupRangePartitionedData::PerBackupInfo(self, uid, version));
-			modified = true;
-			newBackupsMinVersion = std::min(newBackupsMinVersion, version);
-			hasNewBackup = true;
-		}
-	}
-
-	// Remove backups that are no longer active.
-	for (auto it = self->backups.begin(); it != self->backups.end(); it++) {
-		if (activeUids.find(it->first) == activeUids.end()) {
-			it->second.stopped = true;
-			it = self->backups.erase(it);
-			modified = true;
-		}
-	}
-
-	if (hasNewBackup && self->backupEpoch < self->recruitedEpoch && self->savedVersion + 1 == self->startVersion) {
-		// Advance savedVersion to minimize version ranges in case backupEpoch's progress is not saved. Master may set a
-		// very low startVersion that is already popped. Advance the version is safe because these versions are not
-		// popped -- if they are popped, their progress should be already recorded and Master would use a higher version
-		// than minVersion.
-		self->savedVersion = std::max(newBackupsMinVersion, self->savedVersion);
-	}
-	if (modified) {
-		self->changedTrigger.trigger();
-		wait(computeKeyRangeToBackupAssignment(self));
-	}
-	return Void();
 }
 
 Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
@@ -599,8 +524,7 @@ Future<Void> waitAndProcessPartitionMap(BackupRangePartitionedData* self) {
 	self->pulledVersion.set(partitionMapVersion);
 	self->savedVersion = partitionMapVersion;
 	self->pop();
-	wait(computeKeyRangeToBackupAssignment(self));
-	return Void();
+	co_await computeKeyRangeToBackupAssignment(self);
 }
 
 // Pulls mutations from TLog servers.
@@ -697,23 +621,22 @@ Future<Void> pullAsyncData(BackupRangePartitionedData* self) {
 	}
 }
 
-ACTOR Future<Void> writeFileHeader(Reference<IBackupFile> logFile, int32_t partitionId, KeyRange range) {
-	wait(logFile->append((uint8_t*)&RANGE_PARTITIONED_MLOG_VERSION, sizeof(RANGE_PARTITIONED_MLOG_VERSION)));
+Future<Void> writeFileHeader(Reference<IBackupFile> logFile, int32_t partitionId, KeyRange range) {
+	co_await logFile->append((uint8_t*)&RANGE_PARTITIONED_MLOG_VERSION, sizeof(RANGE_PARTITIONED_MLOG_VERSION));
 
 	BinaryWriter wr(Unversioned());
 	wr << partitionId << range.begin << range.end;
 	Standalone<StringRef> header = wr.toValue();
-	wait(logFile->append(header.begin(), header.size()));
-	return Void();
+	co_await logFile->append(header.begin(), header.size());
 }
 
-ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
-                               RangePartitionedVersionedMessage message,
-                               StringRef mutation,
-                               int64_t* blockEnd,
-                               int blockSize) {
+Future<Void> addMutation(Reference<IBackupFile> logFile,
+                         RangePartitionedVersionedMessage message,
+                         StringRef mutation,
+                         int64_t* blockEnd,
+                         int blockSize) {
 	// Format: version, subversion, messageSize, message
-	state int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
+	int bytes = sizeof(Version) + sizeof(uint32_t) + sizeof(int) + mutation.size();
 
 	// Convert to big Endianness for version.version, version.sub, and msgSize
 	// The decoder assumes 0xFF is the end, so little endian can easily be
@@ -721,38 +644,35 @@ ACTOR Future<Void> addMutation(Reference<IBackupFile> logFile,
 	// the first byte is not 0xFF (should always be 0x00).
 	BinaryWriter wr(Unversioned());
 	wr << bigEndian64(message.version.version) << bigEndian32(message.version.sub) << bigEndian32(mutation.size());
-	state Standalone<StringRef> mutationHeader = wr.toValue();
+	Standalone<StringRef> mutationHeader = wr.toValue();
 
 	// Start a new block if needed
 	if (logFile->size() + bytes > *blockEnd) {
 		const int bytesLeft = *blockEnd - logFile->size();
 		if (bytesLeft > 0) {
-			state Value paddingFFs = fileBackup::makePadding(bytesLeft);
-			wait(logFile->append(paddingFFs.begin(), bytesLeft));
+			Value paddingFFs = fileBackup::makePadding(bytesLeft);
+			co_await logFile->append(paddingFFs.begin(), bytesLeft);
 		}
 
 		*blockEnd += blockSize;
 		// Block header.
-		wait(logFile->append((uint8_t*)&RANGE_PARTITIONED_MLOG_VERSION, sizeof(RANGE_PARTITIONED_MLOG_VERSION)));
+		co_await logFile->append((uint8_t*)&RANGE_PARTITIONED_MLOG_VERSION, sizeof(RANGE_PARTITIONED_MLOG_VERSION));
 	}
-
-	wait(logFile->append((void*)mutationHeader.begin(), mutationHeader.size()));
-	wait(logFile->append(mutation.begin(), mutation.size()));
-
-	return Void();
+	co_await logFile->append((void*)mutationHeader.begin(), mutationHeader.size());
+	co_await logFile->append(mutation.begin(), mutation.size());
 }
 
-ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastVersionInFile, int numMsg) {
+Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastVersionInFile, int numMsg) {
 	// Make sure all backups are ready, otherwise mutations will be lost.
 	while (!self->isAllInfoReady()) {
-		wait(self->waitAllInfoReady());
+		co_await self->waitAllInfoReady();
 	}
 
-	state std::vector<RangePartitionedLogFileInfo> activeFiles;
+	std::vector<RangePartitionedLogFileInfo> activeFiles;
 	// Map of (backupUid, partitionId) -> index into activeFiles.
-	state std::map<std::pair<UID, int32_t>, int> fileIndexByBackupPartition;
-	state int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
-	state std::vector<Future<Reference<IBackupFile>>> fileFutures;
+	std::map<std::pair<UID, int32_t>, int> fileIndexByBackupPartition;
+	int blockSize = SERVER_KNOBS->BACKUP_FILE_BLOCK_BYTES;
+	std::vector<Future<Reference<IBackupFile>>> fileFutures;
 
 	for (auto entry = self->keyRangeToBackupAssignment.ranges().begin();
 	     entry != self->keyRangeToBackupAssignment.ranges().end();
@@ -772,11 +692,11 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 				continue;
 			}
 
-			state Version fileEndVersion = lastVersionInFile + 1;
+			Version fileEndVersion = lastVersionInFile + 1;
 			if (it->second.nextFileBeginVersion == invalidVersion) {
 				it->second.nextFileBeginVersion = self->savedVersion + 1;
 			}
-			state Version beginVersion = it->second.nextFileBeginVersion;
+			Version beginVersion = it->second.nextFileBeginVersion;
 
 			RangePartitionedLogFileInfo lf;
 			lf.backupUid = it->first;
@@ -793,25 +713,25 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 	}
 
 	if (fileFutures.empty()) {
-		return Void();
+		co_return;
 	}
-	wait(waitForAll(fileFutures));
+	co_await waitForAll(fileFutures);
 
-	state std::vector<Future<Void>> headerWrites;
-	state int i;
+	std::vector<Future<Void>> headerWrites;
+	int i;
 	for (i = 0; i < activeFiles.size(); i++) {
 		activeFiles[i].file = fileFutures[i].get();
 		headerWrites.push_back(
 		    writeFileHeader(activeFiles[i].file, activeFiles[i].partitionId, activeFiles[i].fileKeyRange));
 	}
-	wait(waitForAll(headerWrites));
+	co_await waitForAll(headerWrites);
 
 	if (activeFiles.empty()) {
-		return Void();
+		co_return;
 	}
 
 	// Process mutations
-	state int idx;
+	int idx;
 	for (idx = 0; idx < numMsg; idx++) {
 		auto& message = self->messages[idx];
 		MutationRef m;
@@ -858,7 +778,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 			}
 		}
 		if (!adds.empty()) {
-			wait(waitForAll(adds));
+			co_await waitForAll(adds);
 		}
 	}
 
@@ -868,10 +788,9 @@ ACTOR Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version
 	for (auto& lf : activeFiles) {
 		finished.push_back(lf.file->finish());
 	}
-	wait(waitForAll(finished));
+	co_await waitForAll(finished);
 
 	for (auto& lf : activeFiles) {
 		self->backups[lf.backupUid].nextFileBeginVersion = lastVersionInFile + 1;
 	}
-	return Void();
 }
