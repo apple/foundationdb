@@ -30,7 +30,7 @@
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ClusterInterface.h"

@@ -24,7 +24,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"

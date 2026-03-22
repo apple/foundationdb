@@ -20,7 +20,7 @@
 
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 
