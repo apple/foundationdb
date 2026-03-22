@@ -28,6 +28,10 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+//
+// TODO: IS THIS FILE NEEDED?  IS IT RUN ON A RECURRING BASIS?  IF NOT, DELETE IT.
+//
+
 void* allocateLargePages(int total);
 
 bool testFuzzActor(Future<int> (*actor)(FutureStream<int> const&, PromiseStream<int> const&, Future<Void> const&),
@@ -1188,17 +1192,12 @@ void asyncMapTest() {
 	printf("  onChange(present, set): %0.1fM/sec\n", 1.0 / (timer() - startt));
 }
 
-extern void net2_test();
-
 void dsltest() {
 	double startt, endt;
 
 	setThreadLocalDeterministicRandomSeed(40);
 
 	asyncMapTest();
-
-	net2_test();
-	// sleeptest();
 
 	Future<Void> ctf = cycleTime(1000, 1000);
 	ctf.get();
