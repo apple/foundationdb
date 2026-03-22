@@ -26,6 +26,11 @@
 #include "fdbclient/RunTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsubobject-linkage"
+#endif
+
 template <class Function>
 using RunRYWTransactionResult = decltype(std::declval<Function>()(Reference<ReadYourWritesTransaction>()).getValue());
 
@@ -150,3 +155,7 @@ Future<RunRYWTransactionResult<Function>> runRYWTransactionNoRetry(Database cx, 
 		co_return result;
 	}
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif

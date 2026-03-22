@@ -25,6 +25,11 @@
 #include "flow/flow.h"
 #include "fdbclient/FDBOptions.g.h"
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsubobject-linkage"
+#endif
+
 template <typename, typename = void>
 struct transaction_option_setter : std::false_type {};
 
@@ -132,3 +137,7 @@ template <typename DB>
 auto SystemDBWriteLockedNow(Reference<DB> db) {
 	return makeReference<SystemTransactionGenerator<DB>>(db, true, true, true);
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
