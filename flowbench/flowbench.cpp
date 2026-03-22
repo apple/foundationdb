@@ -24,12 +24,10 @@
 #include "flow/ThreadHelper.actor.h"
 #include <thread>
 
-template <class T>
-Future<T> stopNetworkAfter(Future<T> what) {
+Future<Void> stopNetworkAfter(Future<Void> what) {
 	try {
-		T t = co_await what;
+		co_await what;
 		g_network->stop();
-		co_return t;
 	} catch (...) {
 		g_network->stop();
 		throw;
