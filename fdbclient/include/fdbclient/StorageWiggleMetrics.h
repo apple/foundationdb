@@ -1,5 +1,5 @@
 /*
- * StorageWiggleMetrics.actor.h
+ * StorageWiggleMetrics.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,7 +25,7 @@
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 
 FDB_BOOLEAN_PARAM(PrimaryRegion);
 

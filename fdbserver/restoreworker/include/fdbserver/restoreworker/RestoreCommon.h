@@ -1,5 +1,5 @@
 /*
- * RestoreCommon.actor.h
+ * RestoreCommon.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -44,7 +44,7 @@ struct RestoreFileFR;
 
 // We copy RestoreConfig copied from FileBackupAgent.cpp instead of using (and potentially changing) it in place
 // to avoid conflict with the existing code Split RestoreConfig defined in FileBackupAgent.cpp to declaration in
-// Restore.actor.h and implementation in RestoreCommon.actor.cpp, so that we can use in both the existing restore and
+// Restore.actor.h and implementation in RestoreCommon.cpp, so that we can use in both the existing restore and
 // the new fast restore subsystems. We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
 // non-functional changes in RestoreConfig
 class RestoreConfigFR : public KeyBackedTaskConfig, public ReferenceCounted<RestoreConfigFR> {

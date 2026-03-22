@@ -1,5 +1,5 @@
 /*
- * RunRYWTransaction.actor.h
+ * RunRYWTransaction.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,7 @@
 #include <utility>
 
 #include "flow/flow.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 
 template <class Function>

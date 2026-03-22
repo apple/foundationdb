@@ -1,5 +1,5 @@
 /*
- * GenericManagementAPI.actor.h
+ * GenericManagementAPI.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,7 @@ the contents of the system key space.
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbclient/StorageWiggleMetrics.h"
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.

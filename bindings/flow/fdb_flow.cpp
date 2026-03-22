@@ -1,5 +1,5 @@
 /*
- * fdb_flow.actor.cpp
+ * fdb_flow.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

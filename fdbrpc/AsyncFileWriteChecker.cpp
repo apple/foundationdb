@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/AsyncFileWriteChecker.actor.h"
+#include "fdbrpc/AsyncFileWriteChecker.h"
 #include "flow/UnitTest.h"
 
 Optional<int> AsyncFileWriteChecker::checksumHistoryBudget = {};

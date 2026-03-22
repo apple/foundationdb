@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/HighContentionPrefixAllocator.actor.h"
+#include "fdbclient/HighContentionPrefixAllocator.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/workloads.actor.h"
 

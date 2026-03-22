@@ -26,7 +26,25 @@
 #include "flow/IndexedSet.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/IRandom.h"
-#include "fdbclient/VersionedMap.actor.h"
+
+template <class Tree>
+Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID = TaskPriority::DefaultYield) {
+	int freeCount = 0;
+	while (!toFree.empty()) {
+		Tree a = std::move(toFree.back());
+		toFree.pop_back();
+
+		for (int c = 0; c < 3; c++) {
+			if (a->pointer[c] && a->pointer[c]->isSoleOwner())
+				toFree.push_back(std::move(a->pointer[c]));
+		}
+
+		if (++freeCount % 100 == 0)
+			co_await yield(taskID);
+	}
+
+	co_return;
+}
 
 // PTree is a persistent balanced binary tree implementation. It is based on a treap as a way to guarantee O(1) space
 // for node insertion (rotating is asymptotically cheap), but the constant factors are very large.

@@ -23,7 +23,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 
 struct TriggerRecoveryLoopWorkload : TestWorkload {
 	static constexpr auto NAME = "TriggerRecoveryLoop";

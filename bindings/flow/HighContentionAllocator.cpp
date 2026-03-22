@@ -1,5 +1,5 @@
 /*
- * HighContentionAllocator.actor.cpp
+ * HighContentionAllocator.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

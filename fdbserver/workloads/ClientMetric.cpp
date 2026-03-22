@@ -22,7 +22,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 #include "fdbclient/Tuple.h"
 
 static const StringRef sampleTrInfoKey =

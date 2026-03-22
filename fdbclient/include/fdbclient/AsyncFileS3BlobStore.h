@@ -1,5 +1,5 @@
 /*
- * AsyncFileS3BlobStore.actor.h
+ * AsyncFileS3BlobStore.h
  *
  * This source file is part of the FoundationDB open source project
  *

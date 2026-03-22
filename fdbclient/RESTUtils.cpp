@@ -1,5 +1,5 @@
 /*
- * RESTUtils.actor.cpp
+ * RESTUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

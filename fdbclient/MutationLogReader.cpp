@@ -1,5 +1,5 @@
 /*
- * MutationLogReader.actor.cpp
+ * MutationLogReader.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/MutationLogReader.actor.h"
+#include "fdbclient/MutationLogReader.h"
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "flow/flow.h"

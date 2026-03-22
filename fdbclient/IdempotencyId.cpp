@@ -1,5 +1,5 @@
 /*
- * IdempotencyId.actor.cpp
+ * IdempotencyId.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IdempotencyId.actor.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
