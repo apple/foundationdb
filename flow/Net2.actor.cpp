@@ -1793,6 +1793,9 @@ void Net2::run() {
 		fn();
 	}
 
+	// Emit at least one batch of counters, for manual inspection.
+	simpleCounterReport();
+
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
