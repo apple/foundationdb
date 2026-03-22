@@ -109,13 +109,13 @@ Future<Void> PipelinedReader::getNext_impl(PipelinedReader* self, Database cx) {
 			} catch (Error& e) {
 				err = e;
 			}
-			    if (err.code() == error_code_transaction_too_old) {
-					// We are using this transaction until it's too old and then resetting to a fresh one,
-					// so we don't need to delay.
-					tr.fullReset();
-				} else {
-					co_await tr.onError(err);
-			    }
+			if (err.code() == error_code_transaction_too_old) {
+				// We are using this transaction until it's too old and then resetting to a fresh one,
+				// so we don't need to delay.
+				tr.fullReset();
+			} else {
+				co_await tr.onError(err);
+			}
 		}
 	}
 }

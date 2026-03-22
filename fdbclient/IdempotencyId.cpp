@@ -371,7 +371,7 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 		} catch (Error& e) {
 			err = e;
 		}
-		    TraceEvent("IdempotencyIdsCleanerError").error(err);
-		    co_await tr->onError(err);
+		TraceEvent("IdempotencyIdsCleanerError").error(err);
+		co_await tr->onError(err);
 	}
 }
