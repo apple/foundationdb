@@ -242,7 +242,6 @@ Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
 	int64_t oldestIdTime = 0;
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -267,11 +266,8 @@ Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
 			co_return result;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr->onError(err);
-		}
+		co_await tr->onError(err);
 	}
 }
 
@@ -294,7 +290,6 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 	tr = makeReference<ReadYourWritesTransaction>(db);
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -375,11 +370,8 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 			break;
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			TraceEvent("IdempotencyIdsCleanerError").error(err);
-			co_await tr->onError(err);
-		}
+		    TraceEvent("IdempotencyIdsCleanerError").error(err);
+		    co_await tr->onError(err);
 	}
 }

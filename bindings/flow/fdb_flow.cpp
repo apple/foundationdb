@@ -50,14 +50,13 @@ Future<Void> _test() {
 	std::vector<Future<Version>> versions;
 
 	double starttime = timer_monotonic();
-	int i{ 0 };
-	// for (i = 0; i < 100000; i++) {
+	// for (int i = 0; i < 100000; i++) {
 	// 	Version v = wait( tr->getReadVersion() );
 	// }
-	for (i = 0; i < 100000; i++) {
+	for (int i = 0; i < 100000; i++) {
 		versions.push_back(tr->getReadVersion());
 	}
-	for (i = 0; i < 100000; i++) {
+	for (int i = 0; i < 100000; i++) {
 		co_await versions[i];
 	}
 	// wait( waitForAllReady( versions ) );

@@ -41,7 +41,6 @@ Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterConnect
 	Transaction tr(db);
 	while (true) {
 		Error err;
-		bool hasErr = false;
 		try {
 			Optional<Value> v = co_await tr.get(connectionStringKey);
 			if (!v.present()) {
@@ -53,11 +52,8 @@ Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterConnect
 			                                              ConnectionStringNeedsPersisted::False);
 		} catch (Error& e) {
 			err = e;
-			hasErr = true;
 		}
-		if (hasErr) {
-			co_await tr.onError(err);
-		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -127,7 +123,6 @@ Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> s
 		Transaction tr(self->db);
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				Optional<Value> existingConnectionString = co_await tr.get(self->connectionStringKey);
 				// Someone has already updated the connection string to what we want
@@ -156,11 +151,8 @@ Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnectionKey> s
 				co_return true;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	} catch (Error& e) {
 		TraceEvent(SevWarnAlways, "UnableToChangeConnectionKey")
