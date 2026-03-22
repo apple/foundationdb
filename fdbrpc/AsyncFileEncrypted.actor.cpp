@@ -130,14 +130,12 @@ public:
 				                                                           self->getIV(self->currentBlock));
 			}
 		}
-		co_return;
 	}
 
 	static Future<Void> sync(Reference<AsyncFileEncrypted> self) {
 		ASSERT(self->mode == AsyncFileEncrypted::Mode::APPEND_ONLY);
 		co_await self->writeLastBlockToFile();
 		co_await self->file->sync();
-		co_return;
 	}
 
 	static Future<Void> zeroRange(AsyncFileEncrypted* self, int64_t offset, int64_t length) {
@@ -147,7 +145,6 @@ public:
 		auto zeroes = new (arena) unsigned char[length];
 		memset(zeroes, 0, length);
 		co_await uncancellable(holdWhile(arena, self->write(zeroes, length, offset)));
-		co_return;
 	}
 };
 

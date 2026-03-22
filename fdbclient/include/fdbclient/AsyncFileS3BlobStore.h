@@ -130,7 +130,6 @@ public:
 		}
 
 		p->write((const uint8_t*)data, length);
-		co_return;
 	}
 
 	Future<Void> write(void const* data, int length, int64_t offset) override {
@@ -194,8 +193,6 @@ public:
 			    .detail("ChecksumSHA256", checksumSHA256.get())
 			    .detail("Note", "This is a hash of the multipart structure, not object content");
 		}
-
-		co_return;
 	}
 
 	// Ready once all data has been sent AND acknowledged from the remote side
@@ -268,8 +265,6 @@ private:
 			f->m_parts.push_back(makeReference<Part>(f->m_parts.size() + 1,
 			                                         f->m_bstore->knobs.multipart_min_part_size,
 			                                         f->m_bstore->knobs.enable_object_integrity_check));
-
-		co_return;
 	}
 
 	Future<std::string> getUploadID() {

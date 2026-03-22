@@ -308,7 +308,6 @@ static Future<Void> mockFifoClient(GrvProxyTagThrottler* throttler) {
 	for (i = 0; i < 2000; ++i) {
 		ASSERT_EQ(replyIndices[i], i);
 	}
-	co_return;
 }
 
 static Future<Void> mockServer(GrvProxyTagThrottler* throttler) {

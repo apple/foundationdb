@@ -362,8 +362,6 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
 			}
 		}
 	}
-
-	co_return;
 }
 
 // Similar to getBatchReplies except that the caller does not expect to process the reply info.
@@ -374,6 +372,4 @@ Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel,
                                TaskPriority taskID = TaskPriority::Low,
                                bool trackRequestLatency = true) {
 	co_await getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency);
-
-	co_return;
 }

@@ -134,7 +134,6 @@ public:
 		} else {
 			co_await self->metrics.waitMetrics(req, delayJittered(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
 		}
-		co_return;
 	}
 
 	// Randomly generate keys and kv size between the fetch range, updating the byte sample.
@@ -200,7 +199,6 @@ public:
 
 		self->setShardStatus(params.keys, MockShardStatus::FETCHED);
 		TraceEvent(SevDebug, interval.end(), self->id).log();
-		co_return;
 	}
 };
 

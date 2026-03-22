@@ -132,7 +132,5 @@ struct AsyncFileWorkload : TestWorkload {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "Could not open file");
 			throw;
 		}
-
-		co_return;
 	}
 };

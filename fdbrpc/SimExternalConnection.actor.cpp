@@ -50,7 +50,6 @@ public:
 		if (self->readBuffer.empty()) {
 			co_await self->onReadableTrigger.onTrigger();
 		}
-		co_return;
 	}
 
 	static Future<Reference<IConnection>> connect(NetworkAddress toAddr) {

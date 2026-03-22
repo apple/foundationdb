@@ -348,7 +348,6 @@ Future<Void> run(Reference<Params> params) {
 			co_await listFiles(params->src, 1);
 		}
 	}
-	co_return;
 }
 
 Future<Void> deleteResource(std::string src) {
@@ -358,7 +357,6 @@ Future<Void> deleteResource(std::string src) {
 		// Rethrow the error to ensure it's handled by the main error handler
 		throw;
 	}
-	co_return;
 }
 
 Future<Void> listFiles(std::string src, int maxDepth) {
@@ -368,7 +366,6 @@ Future<Void> listFiles(std::string src, int maxDepth) {
 		// Rethrow the error to ensure it's handled by the main error handler
 		throw;
 	}
-	co_return;
 }
 } // namespace s3client_cli
 

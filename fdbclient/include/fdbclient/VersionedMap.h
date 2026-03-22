@@ -42,8 +42,6 @@ Future<Void> deferredCleanupActor(std::vector<Tree> toFree, TaskPriority taskID 
 		if (++freeCount % 100 == 0)
 			co_await yield(taskID);
 	}
-
-	co_return;
 }
 
 // PTree is a persistent balanced binary tree implementation. It is based on a treap as a way to guarantee O(1) space

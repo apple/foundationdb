@@ -382,5 +382,4 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 			co_await tr->onError(err);
 		}
 	}
-	co_return;
 }

@@ -44,7 +44,6 @@ static Future<Void> zeroRangeHelper(Reference<IAsyncFile> f, int64_t offset, int
 	}
 
 	aligned_free(zeros);
-	co_return;
 }
 
 Future<Void> IAsyncFile::zeroRange(int64_t offset, int64_t length) {
@@ -105,8 +104,6 @@ static Future<Void> incrementalDeleteHelper(std::string filename,
 			co_await delay(interval);
 		}
 	}
-
-	co_return;
 }
 
 Future<Void> IAsyncFileSystem::incrementalDeleteFile(const std::string& filename, bool mustBeDurable) {

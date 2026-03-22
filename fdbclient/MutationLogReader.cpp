@@ -139,7 +139,6 @@ Future<Void> MutationLogReader::initializePQ(MutationLogReader* self) {
 			++self->finished;
 		}
 	}
-	co_return;
 }
 
 Future<Standalone<RangeResultRef>> MutationLogReader::getNext() {

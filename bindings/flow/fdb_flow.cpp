@@ -77,7 +77,6 @@ Future<Void> _test() {
 	}
 
 	g_network->stop();
-	co_return;
 }
 
 void fdb_flow_test() {

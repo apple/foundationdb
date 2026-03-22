@@ -142,7 +142,6 @@ Future<Void> resetStorageWiggleMetrics_impl(
 		metrics.get().reset();
 		metricsProperty.set(tr, metrics.get());
 	}
-	co_return;
 }
 } // namespace
 
@@ -225,7 +224,6 @@ public:
 		} else {
 			CODE_PROBE(true, "Intend to update StorageWiggleMetrics after PW disabled");
 		}
-		co_return;
 	}
 
 	// update the serialized metrics when the perpetual wiggle is enabled
