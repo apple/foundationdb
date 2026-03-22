@@ -1,5 +1,5 @@
 /*
- * AsyncFileEncrypted.actor.cpp
+ * AsyncFileEncrypted.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
 #include "flow/xxhash.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class AsyncFileEncryptedImpl {
 public:
@@ -268,32 +267,33 @@ Optional<Standalone<StringRef>> AsyncFileEncrypted::RandomCache::get(uint32_t bl
 // then reads this data back from the file in random increments, then confirms that
 // the bytes read match the bytes written.
 TEST_CASE("fdbrpc/AsyncFileEncrypted") {
-	state const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
-	state std::vector<unsigned char> writeBuffer(bytes, 0);
-	deterministicRandom()->randomBytes(&writeBuffer.front(), bytes);
-	state std::vector<unsigned char> readBuffer(bytes, 0);
+	const int bytes = FLOW_KNOBS->ENCRYPTION_BLOCK_SIZE * deterministicRandom()->randomInt(0, 1000);
+	std::vector<unsigned char> writeBuffer(bytes, 0);
+	if (bytes > 0) {
+		deterministicRandom()->randomBytes(writeBuffer.data(), bytes);
+	}
+	std::vector<unsigned char> readBuffer(bytes, 0);
 	ASSERT(g_network->isSimulated());
 	StreamCipherKey::initializeGlobalRandomTestKey();
 	int flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE |
 	            IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_ENCRYPTED | IAsyncFile::OPEN_UNCACHED |
 	            IAsyncFile::OPEN_NO_AIO;
-	state Reference<IAsyncFile> file =
-	    wait(IAsyncFileSystem::filesystem()->open(joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600));
-	state int bytesWritten = 0;
-	state int chunkSize;
+	Reference<IAsyncFile> file = co_await IAsyncFileSystem::filesystem()->open(
+	    joinPath(params.getDataDir(), "test-encrypted-file"), flags, 0600);
+	int bytesWritten = 0;
+	int chunkSize;
 	while (bytesWritten < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesWritten);
-		wait(file->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten));
+		co_await file->write(&writeBuffer[bytesWritten], chunkSize, bytesWritten);
 		bytesWritten += chunkSize;
 	}
-	wait(file->sync());
-	state int bytesRead = 0;
+	co_await file->sync();
+	int bytesRead = 0;
 	while (bytesRead < bytes) {
 		chunkSize = std::min(deterministicRandom()->randomInt(0, 100), bytes - bytesRead);
-		int bytesReadInChunk = wait(file->read(&readBuffer[bytesRead], chunkSize, bytesRead));
+		int bytesReadInChunk = co_await file->read(&readBuffer[bytesRead], chunkSize, bytesRead);
 		ASSERT_EQ(bytesReadInChunk, chunkSize);
 		bytesRead += bytesReadInChunk;
 	}
 	ASSERT(writeBuffer == readBuffer);
-	return Void();
 }

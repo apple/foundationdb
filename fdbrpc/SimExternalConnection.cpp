@@ -1,5 +1,5 @@
 /*
- * SimExternalConnection.actor.cpp
+ * SimExternalConnection.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -37,7 +37,6 @@
 #include "flow/SendBufferIterator.h"
 #include "flow/UnitTest.h"
 #include "flow/IConnection.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 using namespace boost::asio;
 
@@ -198,7 +197,7 @@ static void testEchoServer() {
 	ip::tcp::acceptor acceptor(ios, ip::tcp::endpoint(ip::tcp::v4(), testEchoServerPort));
 	ip::tcp::socket socket(ios);
 	acceptor.accept(socket);
-	loop {
+	while (true) {
 		char readBuffer[readBufferSize];
 		boost::system::error_code err;
 		auto length = socket.read_some(mutable_buffers_1(readBuffer, readBufferSize), err);
@@ -211,56 +210,55 @@ static void testEchoServer() {
 }
 
 TEST_CASE("fdbrpc/SimExternalClient") {
-	state const size_t maxDataLength = 10000;
-	state std::thread serverThread([] { return testEchoServer(); });
-	state UnsentPacketQueue packetQueue;
-	state Reference<IConnection> externalConn;
-	loop {
-		Reference<IConnection> _externalConn =
-		    wait(INetworkConnections::net()->connect("localhost", std::to_string(testEchoServerPort)));
-		if (_externalConn.isValid()) {
-			externalConn = std::move(_externalConn);
+	const size_t maxDataLength = 10000;
+	std::thread serverThread([] { return testEchoServer(); });
+	UnsentPacketQueue packetQueue;
+	Reference<IConnection> externalConn;
+	while (true) {
+		Reference<IConnection> connected =
+		    co_await INetworkConnections::net()->connect("localhost", std::to_string(testEchoServerPort));
+		if (connected.isValid()) {
+			externalConn = std::move(connected);
 			break;
 		}
 		// Wait until server is ready
 		threadSleep(0.01);
 	}
-	state Standalone<StringRef> data(
+	Standalone<StringRef> data(
 	    deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, maxDataLength + 1)));
 	PacketWriter packetWriter(packetQueue.getWriteBuffer(data.size()), nullptr, Unversioned());
 	packetWriter.serializeBytes(data);
-	wait(externalConn->onWritable());
+	co_await externalConn->onWritable();
 	externalConn->write(packetQueue.getUnsent());
-	wait(externalConn->onReadable());
+	co_await externalConn->onReadable();
 	std::vector<uint8_t> vec(data.size());
-	externalConn->read(&vec[0], &vec[0] + vec.size());
+	if (!vec.empty()) {
+		externalConn->read(vec.data(), vec.data() + vec.size());
+	}
 	externalConn->close();
-	StringRef echo(&vec[0], vec.size());
+	StringRef echo(vec.empty() ? reinterpret_cast<const uint8_t*>("") : vec.data(), vec.size());
 	ASSERT(echo.toString() == data.toString());
 	serverThread.join();
-	return Void();
 }
 
 TEST_CASE("fdbrpc/MockDNS") {
-	state std::vector<NetworkAddress> networkAddresses;
-	state NetworkAddress address1(IPAddress(0x13131313), 1);
+	std::vector<NetworkAddress> networkAddresses;
+	NetworkAddress address1(IPAddress(0x13131313), 1);
 	networkAddresses.push_back(address1);
 	INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
-	state std::vector<NetworkAddress> resolvedNetworkAddresses =
-	    wait(INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1"));
+	std::vector<NetworkAddress> resolvedNetworkAddresses =
+	    co_await INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1");
 	ASSERT(resolvedNetworkAddresses.size() == 1);
 	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
 	       resolvedNetworkAddresses.end());
 	INetworkConnections::net()->removeMockTCPEndpoint("testhost1", "port1");
-	state NetworkAddress address2(IPAddress(0x14141414), 2);
+	NetworkAddress address2(IPAddress(0x14141414), 2);
 	networkAddresses.push_back(address2);
 	INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
-	wait(store(resolvedNetworkAddresses, INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1")));
+	resolvedNetworkAddresses = co_await INetworkConnections::net()->resolveTCPEndpoint("testhost1", "port1");
 	ASSERT(resolvedNetworkAddresses.size() == 2);
 	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
 	       resolvedNetworkAddresses.end());
-
-	return Void();
 }
 
 void forceLinkSimExternalConnectionTests() {}

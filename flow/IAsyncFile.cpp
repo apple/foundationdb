@@ -1,5 +1,5 @@
 /*
- * IAsyncFile.actor.cpp
+ * IAsyncFile.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,7 +24,6 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 #include <iostream>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 IAsyncFile::~IAsyncFile() = default;
 
@@ -51,21 +50,21 @@ Future<Void> IAsyncFile::zeroRange(int64_t offset, int64_t length) {
 }
 
 TEST_CASE("/fileio/zero") {
-	state std::string filename = "/tmp/__ZEROJUNK__";
-	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0));
+	std::string filename = "/tmp/__ZEROJUNK__";
+	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
+	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0);
 
 	// Verify that we can grow a file with zero().
-	wait(f->sync());
-	wait(f->zeroRange(0, ONE_MEGABYTE));
-	int64_t size = wait(f->size());
+	co_await f->sync();
+	co_await f->zeroRange(0, ONE_MEGABYTE);
+	int64_t size = co_await f->size();
 	ASSERT(ONE_MEGABYTE == size);
 
 	// Verify that zero() does, in fact, zero.
-	wait(zeroRangeHelper(f, 0, ONE_MEGABYTE, 0xff));
-	wait(f->zeroRange(0, ONE_MEGABYTE));
-	state uint8_t* page = (uint8_t*)malloc(FOUR_KILOBYTES);
-	int n = wait(f->read(page, FOUR_KILOBYTES, 0));
+	co_await zeroRangeHelper(f, 0, ONE_MEGABYTE, 0xff);
+	co_await f->zeroRange(0, ONE_MEGABYTE);
+	uint8_t* page = (uint8_t*)malloc(FOUR_KILOBYTES);
+	int n = co_await f->read(page, FOUR_KILOBYTES, 0);
 	ASSERT(n == FOUR_KILOBYTES);
 	for (int i = 0; i < FOUR_KILOBYTES; i++) {
 		ASSERT(page[i] == 0);
@@ -74,8 +73,7 @@ TEST_CASE("/fileio/zero") {
 
 	// Destruct our file and remove it.
 	f.clear();
-	wait(IAsyncFileSystem::filesystem()->deleteFile(filename, true));
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(filename, true);
 }
 
 static Future<Void> incrementalDeleteHelper(std::string filename,
@@ -115,46 +113,43 @@ Future<Void> IAsyncFileSystem::incrementalDeleteFile(const std::string& filename
 
 TEST_CASE("/fileio/incrementalDelete") {
 	// about 5GB
-	state int64_t fileSize = 5e9;
-	state std::string filename = "/tmp/__JUNK__";
-	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0));
-	wait(f->sync());
-	wait(f->truncate(fileSize));
+	int64_t fileSize = 5e9;
+	std::string filename = "/tmp/__JUNK__";
+	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
+	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0);
+	co_await f->sync();
+	co_await f->truncate(fileSize);
 	// close the file by deleting the reference
 	f.clear();
-	wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true));
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true);
 }
 
 TEST_CASE("/fileio/rename") {
 	// create a file
-	state int64_t fileSize = 100e6;
-	state std::string filename = "/tmp/__JUNK__." + deterministicRandom()->randomUniqueID().toString();
-	state std::string renamedFile = "/tmp/__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString();
-	state std::unique_ptr<char[]> data(new char[4096]);
-	state std::unique_ptr<char[]> readData(new char[4096]);
-	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
+	int64_t fileSize = 100e6;
+	std::string filename = "/tmp/__JUNK__." + deterministicRandom()->randomUniqueID().toString();
+	std::string renamedFile = "/tmp/__RENAMED_JUNK__." + deterministicRandom()->randomUniqueID().toString();
+	std::unique_ptr<char[]> data(new char[4096]);
+	std::unique_ptr<char[]> readData(new char[4096]);
+	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
 	    filename,
 	    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
-	    0644));
-	;
-	wait(f->sync());
-	wait(f->truncate(fileSize));
+	    0644);
+	co_await f->sync();
+	co_await f->truncate(fileSize);
 	memset(data.get(), 0, 4096);
 	// write a random string at the beginning of the file which we can verify after rename
 	for (int i = 0; i < 16; ++i) {
 		data[i] = deterministicRandom()->randomAlphaNumeric();
 	}
 	// write first and block
-	wait(f->write(data.get(), 4096, 0));
-	wait(f->write(data.get(), 4096, fileSize - 4096));
-	wait(f->sync());
+	co_await f->write(data.get(), 4096, 0);
+	co_await f->write(data.get(), 4096, fileSize - 4096);
+	co_await f->sync();
 	// close file
 	f.clear();
-	wait(IAsyncFileSystem::filesystem()->renameFile(filename, renamedFile));
-	Reference<IAsyncFile> _f = wait(IAsyncFileSystem::filesystem()->open(renamedFile, IAsyncFile::OPEN_READONLY, 0));
-	f = _f;
+	co_await IAsyncFileSystem::filesystem()->renameFile(filename, renamedFile);
+	f = co_await IAsyncFileSystem::filesystem()->open(renamedFile, IAsyncFile::OPEN_READONLY, 0);
 
 	// verify rename happened
 	bool renamedExists = false;
@@ -169,32 +164,30 @@ TEST_CASE("/fileio/rename") {
 	ASSERT(renamedExists);
 
 	// verify magic string at beginning of file
-	int length = wait(f->read(readData.get(), 4096, 0));
+	int length = co_await f->read(readData.get(), 4096, 0);
 	ASSERT(length == 4096);
 	ASSERT(memcmp(readData.get(), data.get(), 4096) == 0);
 	// close the file
 	f.clear();
 
 	// clean up
-	wait(IAsyncFileSystem::filesystem()->deleteFile(renamedFile, true));
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->deleteFile(renamedFile, true);
 }
 
 // Truncating to extend size should zero the new data
 TEST_CASE("/fileio/truncateAndRead") {
-	state std::string filename = "/tmp/__JUNK__";
-	state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
-	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0));
-	state std::array<char, 4096> data;
-	wait(f->sync());
-	wait(f->truncate(4096));
-	int length = wait(f->read(&data[0], 4096, 0));
+	std::string filename = "/tmp/__JUNK__";
+	Reference<IAsyncFile> f = co_await IAsyncFileSystem::filesystem()->open(
+	    filename, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0);
+	std::array<char, 4096> data;
+	co_await f->sync();
+	co_await f->truncate(4096);
+	int length = co_await f->read(&data[0], 4096, 0);
 	ASSERT(length == 4096);
 	for (auto c : data) {
 		ASSERT(c == '\0');
 	}
 	// close the file by deleting the reference
 	f.clear();
-	wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true));
-	return Void();
+	co_await IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true);
 }

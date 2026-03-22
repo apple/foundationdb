@@ -1,5 +1,5 @@
 /*
- * MockGlobalState.actor.cpp
+ * MockGlobalState.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,7 +22,6 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/FDBTypes.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class MockGlobalStateImpl {
 public:
@@ -1030,7 +1029,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	testConfig.logAntiQuorum = 0;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
@@ -1096,7 +1095,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/GetKeyLocations") {
 	testConfig.logAntiQuorum = 0;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 	// add one empty server
@@ -1163,7 +1162,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
@@ -1171,17 +1170,17 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 		server.second->metrics.byteSample.sample.insert("something"_sr, 500000);
 	});
 
-	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
+	auto allServerFutures = waitForAll(mgs->runAllMockServers());
+	(void)allServerFutures;
 
 	KeyRange testRange = allKeys;
 	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
 	std::pair<Optional<StorageMetrics>, int> res =
-	    wait(mgs->waitStorageMetrics(testRange, bounds.min, bounds.max, bounds.permittedError, 1, 1));
+	    co_await mgs->waitStorageMetrics(testRange, bounds.min, bounds.max, bounds.permittedError, 1, 1);
 	// std::cout << "get result " << res.second << "\n";
 	// std::cout << "get byte "<< res.first.get().bytes << "\n";
 	ASSERT_EQ(res.second, -1); // the valid result always return -1, strange contraction though.
 	ASSERT_EQ(res.first.get().bytes, 500000);
-	return Void();
 }
 
 TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
@@ -1192,11 +1191,12 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
-	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
+	auto allServerFutures = waitForAll(mgs->runAllMockServers());
+	(void)allServerFutures;
 
 	// insert
 	{
@@ -1208,8 +1208,8 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 			ASSERT_EQ(server.second->serverKeys[""_sr].shardSize, 3 + 6 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE);
 		}
 		ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
-		std::pair<Optional<StorageMetrics>, int> res = wait(
-		    mgs->waitStorageMetrics(KeyRangeRef("a"_sr, "bc"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1));
+		std::pair<Optional<StorageMetrics>, int> res = co_await mgs->waitStorageMetrics(
+		    KeyRangeRef("a"_sr, "bc"_sr), bounds.min, bounds.max, bounds.permittedError, 1, 1);
 
 		int64_t testSize = 2 + 3 * SERVER_KNOBS->BYTES_WRITTEN_UNITS_PER_SAMPLE;
 		// SOMEDAY: how to integrate with isKeyValueInSample() better?
@@ -1219,5 +1219,4 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 			ASSERT_GT(res.first.get().bytesWrittenPerKSecond, 0);
 		}
 	}
-	return Void();
 }

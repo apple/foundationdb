@@ -1,5 +1,5 @@
 /*
- * Hostname.actor.cpp
+ * Hostname.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,7 +24,6 @@
 
 #include "flow/IConnection.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
 
@@ -138,7 +137,7 @@ TEST_CASE("/flow/Hostname/hostname") {
 	ASSERT(hn1.service == "1234");
 	ASSERT(!hn1.isTLS);
 
-	state Hostname hn2 = Hostname::parse(hn2s);
+	Hostname hn2 = Hostname::parse(hn2s);
 	ASSERT(hn2.toString() == hn2s);
 	ASSERT(hn2.host == "host-name");
 	ASSERT(hn2.service == "1234");
@@ -166,25 +165,25 @@ TEST_CASE("/flow/Hostname/hostname") {
 	ASSERT(!Hostname::isHostname(hn12s));
 	ASSERT(!Hostname::isHostname(hn13s));
 
-	state Optional<NetworkAddress> optionalAddress = wait(hn2.resolve());
+	Optional<NetworkAddress> optionalAddress = co_await hn2.resolve();
 	ASSERT(!optionalAddress.present());
 
 	optionalAddress = hn2.resolveBlocking();
 	ASSERT(!optionalAddress.present());
 
-	state NetworkAddress address;
+	NetworkAddress address;
 	try {
-		wait(timeoutError(store(address, hn2.resolveWithRetry()), 1));
+		address = co_await timeoutError(hn2.resolveWithRetry(), 1);
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_timed_out);
 	}
 	ASSERT(address == NetworkAddress());
 
-	state NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
+	NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
 	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { addressSource });
 
 	// Test resolve.
-	wait(store(optionalAddress, hn2.resolve()));
+	optionalAddress = co_await hn2.resolve();
 	ASSERT(optionalAddress.present() && optionalAddress.get() == addressSource);
 	optionalAddress = Optional<NetworkAddress>();
 
@@ -194,8 +193,6 @@ TEST_CASE("/flow/Hostname/hostname") {
 	optionalAddress = Optional<NetworkAddress>();
 
 	// Test resolveWithRetry.
-	wait(store(address, hn2.resolveWithRetry()));
+	address = co_await hn2.resolveWithRetry();
 	ASSERT(address == addressSource);
-
-	return Void();
 }
