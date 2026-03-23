@@ -208,11 +208,9 @@ void printSimulatedTopology() {
 	}
 }
 
-Future<Void> databaseWarmer(Database const& cx) {
-	// C++20 coroutine safety: copy const& params to survive across suspend points
-	Database cxCopy = cx;
+Future<Void> databaseWarmer(Database cx) {
 	while (true) {
-		Transaction tr(cxCopy);
+		Transaction tr(cx);
 		co_await tr.getReadVersion();
 		co_await delay(0.25);
 	}
