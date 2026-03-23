@@ -28,7 +28,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreApplier.h"

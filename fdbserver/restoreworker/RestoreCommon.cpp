@@ -1,5 +1,5 @@
 /*
- * RestoreCommon.actor.cpp
+ * RestoreCommon.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-// This file implements the functions defined in RestoreCommon.actor.h
+// This file implements the functions defined in RestoreCommon.h
 // The functions in this file are copied from BackupAgent
 
-#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.h"
 
 // Backup agent header
 #include "fdbclient/BackupAgent.actor.h"
@@ -34,7 +34,7 @@
 #include "flow/CoroUtils.h"
 
 // Split RestoreConfigFR defined in FileBackupAgent.cpp to declaration in Restore.actor.h and implementation in
-// RestoreCommon.actor.cpp
+// RestoreCommon.cpp
 
 KeyBackedProperty<ERestoreState> RestoreConfigFR::stateEnum() {
 	return configSpace.pack(__FUNCTION__sr);

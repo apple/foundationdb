@@ -1,5 +1,5 @@
 /*
- * RestoreCommon.actor.h
+ * RestoreCommon.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,21 +23,15 @@
 // the old restore and the new performant restore systems
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORECOMMON_ACTOR_G_H)
-#define FDBSERVER_RESTORECOMMON_ACTOR_G_H
-#include "fdbserver/restoreworker/RestoreCommon.actor.g.h"
-#elif !defined(FDBSERVER_RESTORECOMMON_ACTOR_H)
-#define FDBSERVER_RESTORECOMMON_ACTOR_H
 
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
+#include "flow/CoroUtils.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IAsyncFile.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbserver/core/Knobs.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 // RestoreConfig copied from FileBackupAgent.cpp
 // We copy RestoreConfig instead of using (and potentially changing) it in place
@@ -51,7 +45,7 @@ struct RestoreFileFR;
 
 // We copy RestoreConfig copied from FileBackupAgent.cpp instead of using (and potentially changing) it in place
 // to avoid conflict with the existing code Split RestoreConfig defined in FileBackupAgent.cpp to declaration in
-// Restore.actor.h and implementation in RestoreCommon.actor.cpp, so that we can use in both the existing restore and
+// Restore.actor.h and implementation in RestoreCommon.cpp, so that we can use in both the existing restore and
 // the new fast restore subsystems. We use RestoreConfig as a Reference<RestoreConfig>, which leads to some
 // non-functional changes in RestoreConfig
 class RestoreConfigFR : public KeyBackedTaskConfig, public ReferenceCounted<RestoreConfigFR> {
@@ -244,32 +238,32 @@ Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFi
 // Send each request in requests via channel of the request's interface.
 // Save replies to replies if replies != nullptr
 // The UID in a request is the UID of the interface to handle the request
-ACTOR template <class Interface, class Request>
-Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
+template <class Interface, class Request>
+Future<Void> getBatchReplies(RequestStream<Request> Interface::*channel,
                              std::map<UID, Interface> interfaces,
                              std::vector<std::pair<UID, Request>> requests,
                              std::vector<REPLY_TYPE(Request)>* replies,
                              TaskPriority taskID = TaskPriority::Low,
                              bool trackRequestLatency = true) {
 	if (requests.empty()) {
-		return Void();
+		co_return;
 	}
 
-	state double start = now();
-	state int oustandingReplies = requests.size();
-	loop {
+	double start = now();
+	int oustandingReplies = requests.size();
+	while (true) {
 		try {
-			state std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
-			state std::vector<std::tuple<UID, Request, double>> replyDurations; // double is end time of the request
+			std::vector<Future<REPLY_TYPE(Request)>> cmdReplies;
+			std::vector<std::tuple<UID, Request, double>> replyDurations; // double is end time of the request
 			for (auto& [requestId, request] : requests) {
 				RequestStream<Request> const* stream = &(interfaces[requestId].*channel);
 				cmdReplies.push_back(stream->getReply(request, taskID));
 				replyDurations.emplace_back(requestId, request, 0);
 			}
 
-			state std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
-			state std::vector<int> ongoingRepliesIndex;
-			loop {
+			while (true) {
+				std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
+				std::vector<int> ongoingRepliesIndex;
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
@@ -293,9 +287,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					wait(
-					    quorum(ongoingReplies,
-					           std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL, (int)ongoingReplies.size())));
+					co_await quorum(
+					    ongoingReplies,
+					    std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL, (int)ongoingReplies.size()));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {
@@ -370,20 +364,15 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 		}
 	}
 
-	return Void();
+	co_return;
 }
 
 // Similar to getBatchReplies except that the caller does not expect to process the reply info.
-ACTOR template <class Interface, class Request>
-Future<Void> sendBatchRequests(RequestStream<Request> Interface::* channel,
+template <class Interface, class Request>
+Future<Void> sendBatchRequests(RequestStream<Request> Interface::*channel,
                                std::map<UID, Interface> interfaces,
                                std::vector<std::pair<UID, Request>> requests,
                                TaskPriority taskID = TaskPriority::Low,
                                bool trackRequestLatency = true) {
-	wait(getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency));
-
-	return Void();
+	co_await getBatchReplies(channel, interfaces, requests, nullptr, taskID, trackRequestLatency);
 }
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_RESTORECOMMON_ACTOR_H
