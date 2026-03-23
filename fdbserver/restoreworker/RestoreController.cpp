@@ -33,7 +33,7 @@
 #include "RestoreRoleCommon.h"
 #include "RestoreController.h"
 #include "RestoreApplier.h"
-#include "RestoreLoader.actor.h"
+#include "RestoreLoader.h"
 
 #include "flow/Platform.h"
 

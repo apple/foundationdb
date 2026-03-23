@@ -1,5 +1,5 @@
 /*
- * RestoreLoader.actor.cpp
+ * RestoreLoader.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/DatabaseContext.h"
-#include "RestoreLoader.actor.h"
+#include "RestoreLoader.h"
 #include "RestoreRoleCommon.h"
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/StorageMetrics.actor.h"

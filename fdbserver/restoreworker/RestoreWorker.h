@@ -31,7 +31,7 @@
 #include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
 #include "RestoreRoleCommon.h"
-#include "RestoreLoader.actor.h"
+#include "RestoreLoader.h"
 #include "RestoreApplier.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 
