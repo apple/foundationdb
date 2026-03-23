@@ -24,7 +24,7 @@
 #include "fdbserver/restoreworker/RestoreCommon.h"
 
 // Backup agent header
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"

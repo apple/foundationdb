@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
 #ifdef BUILD_AZURE_BACKUP
