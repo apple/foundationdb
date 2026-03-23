@@ -33,8 +33,6 @@
 #include "flow/DeterministicRandom.h"
 #include "flow/network.h"
 
-#include "flow/actorcompiler.h" // has to be last include
-
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
 	char buffer[30];
@@ -279,19 +277,19 @@ void _addResult(VectorRef<MutationRef>* result, int* mutationSize, Arena* arena,
  "result" vector.
  Each `value` is a param2
 */
-ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
-                                               VectorRef<MutationRef>* result,
-                                               int* mutationSize,
-                                               Standalone<StringRef> value,
-                                               Key addPrefix,
-                                               Key removePrefix,
-                                               Version version,
-                                               Reference<KeyRangeMap<Version>> key_version,
-                                               Database cx,
-                                               bool provisionalProxy,
-                                               std::shared_ptr<DatabaseConfiguration> dbConfig) {
+static Future<Void> decodeBackupLogValue(Arena* arena,
+                                         VectorRef<MutationRef>* result,
+                                         int* mutationSize,
+                                         Standalone<StringRef> value,
+                                         Key addPrefix,
+                                         Key removePrefix,
+                                         Version version,
+                                         Reference<KeyRangeMap<Version>> key_version,
+                                         Database cx,
+                                         bool provisionalProxy,
+                                         std::shared_ptr<DatabaseConfiguration> dbConfig) {
 	try {
-		state uint64_t offset(0);
+		uint64_t offset(0);
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
@@ -303,10 +301,10 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			throw incompatible_protocol_version();
 		}
 
-		state uint32_t totalBytes = 0;
+		uint32_t totalBytes = 0;
 		memcpy(&totalBytes, value.begin() + offset, sizeof(uint32_t));
 		offset += sizeof(uint32_t);
-		state uint32_t consumed = 0;
+		uint32_t consumed = 0;
 
 		if (totalBytes + offset > value.size()) {
 			TraceEvent(SevError, "OffsetOutOfBoundary")
@@ -317,25 +315,25 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 			throw restore_missing_data();
 		}
 
-		state int originalOffset = offset;
+		int originalOffset = offset;
 
 		while (consumed < totalBytes) {
 			uint32_t type = 0;
 			// encoding format: type|kLen|vLen|Key|Value
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
-			state uint32_t len1 = 0;
+			uint32_t len1 = 0;
 			memcpy(&len1, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
-			state uint32_t len2 = 0;
+			uint32_t len2 = 0;
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
 			// Construct MutationRef from StringRef
-			state MutationRef logValue;
-			state Arena tempArena;
+			MutationRef logValue;
+			Arena tempArena;
 			logValue.type = type;
 			logValue.param1 = value.substr(offset, len1);
 			offset += len1;
@@ -438,25 +436,26 @@ Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, co
 	return logError(tr->getDatabase(), keyErrors, message);
 }
 
-ACTOR Future<Void> readCommitted(Database cx,
-                                 PromiseStream<RangeResultWithVersion> results,
-                                 Reference<FlowLock> lock,
-                                 KeyRangeRef range,
-                                 Terminator terminator,
-                                 AccessSystemKeys systemAccess,
-                                 LockAware lockAware,
-                                 ReadLowPriority readLowPriority) {
-	state KeySelector begin = firstGreaterOrEqual(range.begin);
-	state KeySelector end = firstGreaterOrEqual(range.end);
-	state Transaction tr(cx);
-	state FlowLock::Releaser releaser;
+Future<Void> readCommitted(Database cx,
+                           PromiseStream<RangeResultWithVersion> results,
+                           Reference<FlowLock> lock,
+                           KeyRangeRef range,
+                           Terminator terminator,
+                           AccessSystemKeys systemAccess,
+                           LockAware lockAware,
+                           ReadLowPriority readLowPriority) {
+	KeySelector begin = firstGreaterOrEqual(range.begin);
+	KeySelector end = firstGreaterOrEqual(range.end);
+	Transaction tr(cx);
+	FlowLock::Releaser releaser;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
-			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
-			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
-			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                      (g_network->isSimulated() && !g_simulator->speedUpSimulation)
+			                          ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                          : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -474,12 +473,12 @@ ACTOR Future<Void> readCommitted(Database cx,
 
 			// add lock
 			releaser.release();
-			wait(lock->take(TaskPriority::DefaultYield,
-			                limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT));
+			co_await lock->take(TaskPriority::DefaultYield,
+			                    limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			releaser = FlowLock::Releaser(
 			    *lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state RangeResult values = wait(tr.getRange(begin, end, limits));
+			RangeResult values = co_await tr.getRange(begin, end, limits);
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -493,7 +492,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 				values.more = true;
 				// Half of the time wait for this tr to expire so that the next read is at a different version
 				if (deterministicRandom()->random01() < 0.5)
-					wait(delay(6.0));
+					co_await delay(6.0);
 			}
 
 			releaser.remaining -=
@@ -508,45 +507,48 @@ ACTOR Future<Void> readCommitted(Database cx,
 			if (!values.more && !limits.isReached()) {
 				if (terminator)
 					results.sendError(end_of_stream());
-				return Void();
+				co_return;
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_transaction_too_old) {
-				// We are using this transaction until it's too old and then resetting to a fresh one,
-				// so we don't need to delay.
-				tr.fullReset();
-			} else {
-				wait(tr.onError(e));
-			}
+			err = e;
+		}
+
+		if (err.code() == error_code_transaction_too_old) {
+			// We are using this transaction until it's too old and then resetting to a fresh one,
+			// so we don't need to delay.
+			tr.fullReset();
+		} else {
+			co_await tr.onError(err);
 		}
 	}
 }
 
 // read each version, potentially multiple part within the same version
-ACTOR Future<Void> readCommitted(Database cx,
-                                 PromiseStream<RCGroup> results,
-                                 Future<Void> active,
-                                 Reference<FlowLock> lock,
-                                 KeyRangeRef range,
-                                 std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 Terminator terminator,
-                                 AccessSystemKeys systemAccess,
-                                 LockAware lockAware,
-                                 ReadLowPriority readLowPriority) {
-	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
-	state KeySelector end = firstGreaterOrEqual(range.end);
+Future<Void> readCommitted(Database cx,
+                           PromiseStream<RCGroup> results,
+                           Future<Void> active,
+                           Reference<FlowLock> lock,
+                           KeyRangeRef range,
+                           std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
+                           Terminator terminator,
+                           AccessSystemKeys systemAccess,
+                           LockAware lockAware,
+                           ReadLowPriority readLowPriority) {
+	KeySelector nextKey = firstGreaterOrEqual(range.begin);
+	KeySelector end = firstGreaterOrEqual(range.end);
 
-	state RCGroup rcGroup = RCGroup();
-	state uint64_t skipGroup(ULLONG_MAX);
-	state Transaction tr(cx);
-	state FlowLock::Releaser releaser;
+	RCGroup rcGroup = RCGroup();
+	uint64_t skipGroup(ULLONG_MAX);
+	Transaction tr(cx);
+	FlowLock::Releaser releaser;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
-			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
-			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
-			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
+			                      (g_network->isSimulated() && !g_simulator->speedUpSimulation)
+			                          ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
+			                          : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -556,7 +558,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 				tr.setOption(FDBTransactionOptions::READ_PRIORITY_LOW);
 			}
 
-			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
+			RangeResult rangevalue = co_await tr.getRange(nextKey, end, limits);
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -570,13 +572,13 @@ ACTOR Future<Void> readCommitted(Database cx,
 				rangevalue.more = true;
 				// Some of the time wait for this tr to expire so that the next read is at a different version
 				if (deterministicRandom()->random01() < 0.01)
-					wait(delay(6.0));
+					co_await delay(6.0);
 			}
 
 			// add lock
-			wait(active);
+			co_await active;
 			releaser.release();
-			wait(lock->take(TaskPriority::DefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
+			co_await lock->take(TaskPriority::DefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize());
 			releaser = FlowLock::Releaser(*lock, rangevalue.expectedSize() + rcGroup.items.expectedSize());
 
 			// iterate on a version range, each key-value pair is (version, part)
@@ -632,18 +634,20 @@ ACTOR Future<Void> readCommitted(Database cx,
 
 				if (terminator)
 					results.sendError(end_of_stream());
-				return Void();
+				co_return;
 			}
 
 			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
 		} catch (Error& e) {
-			if (e.code() == error_code_transaction_too_old) {
-				// We are using this transaction until it's too old and then resetting to a fresh one,
-				// so we don't need to delay.
-				tr.fullReset();
-			} else {
-				wait(tr.onError(e));
-			}
+			err = e;
+		}
+
+		if (err.code() == error_code_transaction_too_old) {
+			// We are using this transaction until it's too old and then resetting to a fresh one,
+			// so we don't need to delay.
+			tr.fullReset();
+		} else {
+			co_await tr.onError(err);
 		}
 	}
 }
@@ -668,15 +672,15 @@ Future<Void> readCommitted(Database cx,
 
 // restore transaction has to be first in the batch, or it is the only txn in batch to make sure it never conflicts with
 // others.
-ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
-                                                Key uid,
-                                                Version newBeginVersion,
-                                                Key rangeBegin,
-                                                NotifiedVersion* committedVersion,
-                                                int* totalBytes,
-                                                int* mutationSize,
-                                                FlowLock* commitLock,
-                                                PublicRequestStream<CommitTransactionRequest> commit) {
+Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
+                                          Key uid,
+                                          Version newBeginVersion,
+                                          Key rangeBegin,
+                                          NotifiedVersion* committedVersion,
+                                          int* totalBytes,
+                                          int* mutationSize,
+                                          FlowLock* commitLock,
+                                          PublicRequestStream<CommitTransactionRequest> commit) {
 	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
@@ -694,7 +698,7 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
 	*totalBytes += *mutationSize;
-	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
+	co_await commitLock->take(TaskPriority::DefaultYield, *mutationSize);
 	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
 
 	// NOTE: tenant has been removed, so revisit the following comment and possibly
@@ -704,41 +708,40 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 	// Because we are bumping applyBegin version, we need to wait for the commit to be done.
 	// Otherwise, an update to the applyEnd key will trigger another applyMutation() which can
 	// have an overlapping range with the current applyMutation() and cause conflicts.
-	wait(commitAndUnlock);
-	return Void();
+	co_await commitAndUnlock;
 }
 
 // Decodes the backup mutation log and send the mutations to the CommitProxy.
 // The mutation logs are grouped by version and passed in as a stream of RCGroup from readCommitted().
 // The mutations are then decoded and sent to the CommitProxy in a batch.
-ACTOR Future<int> kvMutationLogToTransactions(Database cx,
-                                              PromiseStream<RCGroup> results,
-                                              Reference<FlowLock> lock,
-                                              Key uid,
-                                              Key addPrefix,
-                                              Key removePrefix,
-                                              PublicRequestStream<CommitTransactionRequest> commit,
-                                              NotifiedVersion* committedVersion,
-                                              Optional<Version> endVersion,
-                                              Key rangeBegin,
-                                              FlowLock* commitLock,
-                                              Reference<KeyRangeMap<Version>> keyVersion,
-                                              bool provisionalProxy,
-                                              std::shared_ptr<DatabaseConfiguration> dbConfig) {
-	state Version lastVersion = invalidVersion;
-	state bool endOfStream = false;
-	state int totalBytes = 0;
+Future<int> kvMutationLogToTransactions(Database cx,
+                                        PromiseStream<RCGroup> results,
+                                        Reference<FlowLock> lock,
+                                        Key uid,
+                                        Key addPrefix,
+                                        Key removePrefix,
+                                        PublicRequestStream<CommitTransactionRequest> commit,
+                                        NotifiedVersion* committedVersion,
+                                        Optional<Version> endVersion,
+                                        Key rangeBegin,
+                                        FlowLock* commitLock,
+                                        Reference<KeyRangeMap<Version>> keyVersion,
+                                        bool provisionalProxy,
+                                        std::shared_ptr<DatabaseConfiguration> dbConfig) {
+	Version lastVersion = invalidVersion;
+	bool endOfStream = false;
+	int totalBytes = 0;
 	// outer loop to batch multiple versions while inner loop for each version
-	loop {
-		state CommitTransactionRequest req;
-		state Version newBeginVersion = invalidVersion;
-		state int mutationSize = 0;
-		loop {
+	while (true) {
+		CommitTransactionRequest req;
+		Version newBeginVersion = invalidVersion;
+		int mutationSize = 0;
+		while (true) {
 			try {
-				state RCGroup group = waitNext(results.getFuture());
-				state CommitTransactionRequest curReq;
+				RCGroup group = co_await results.getFuture();
+				CommitTransactionRequest curReq;
 				lock->release(group.items.expectedSize());
-				state int curBatchMutationSize = 0;
+				int curBatchMutationSize = 0;
 
 				BinaryWriter bw(Unversioned());
 
@@ -749,17 +752,17 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 				}
 				// Parse a single transaction from the backup mutation log
 				Standalone<StringRef> value = bw.toValue();
-				wait(decodeBackupLogValue(&curReq.arena,
-				                          &curReq.transaction.mutations,
-				                          &curBatchMutationSize,
-				                          value,
-				                          addPrefix,
-				                          removePrefix,
-				                          group.groupKey,
-				                          keyVersion,
-				                          cx,
-				                          provisionalProxy,
-				                          dbConfig));
+				co_await decodeBackupLogValue(&curReq.arena,
+				                              &curReq.transaction.mutations,
+				                              &curBatchMutationSize,
+				                              value,
+				                              addPrefix,
+				                              removePrefix,
+				                              group.groupKey,
+				                              keyVersion,
+				                              cx,
+				                              provisionalProxy,
+				                              dbConfig);
 
 				for (int i = 0; i < curReq.transaction.mutations.size(); i++) {
 					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
@@ -772,7 +775,7 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 						newBeginVersion = endVersion.get();
 					}
 					if (newBeginVersion == invalidVersion)
-						return totalBytes;
+						co_return totalBytes;
 					endOfStream = true;
 					break;
 				}
@@ -780,25 +783,25 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 			}
 		}
 		// TraceEvent("MutationLogRestore").detail("BeginVersion", newBeginVersion);
-		wait(sendCommitTransactionRequest(
-		    req, uid, newBeginVersion, rangeBegin, committedVersion, &totalBytes, &mutationSize, commitLock, commit));
+		co_await sendCommitTransactionRequest(
+		    req, uid, newBeginVersion, rangeBegin, committedVersion, &totalBytes, &mutationSize, commitLock, commit);
 		if (endOfStream) {
-			return totalBytes;
+			co_return totalBytes;
 		}
 	}
 }
 
-ACTOR Future<Void> coalesceKeyVersionCache(Key uid,
-                                           Version endVersion,
-                                           Reference<KeyRangeMap<Version>> keyVersion,
-                                           PublicRequestStream<CommitTransactionRequest> commit,
-                                           NotifiedVersion* committedVersion,
-                                           PromiseStream<Future<Void>> addActor,
-                                           FlowLock* commitLock) {
+Future<Void> coalesceKeyVersionCache(Key uid,
+                                     Version endVersion,
+                                     Reference<KeyRangeMap<Version>> keyVersion,
+                                     PublicRequestStream<CommitTransactionRequest> commit,
+                                     NotifiedVersion* committedVersion,
+                                     PromiseStream<Future<Void>> addActor,
+                                     FlowLock* commitLock) {
 	Version lastVersion = -1000;
 	int64_t removed = 0;
-	state CommitTransactionRequest req;
-	state int64_t mutationSize = 0;
+	CommitTransactionRequest req;
+	int64_t mutationSize = 0;
 	Key mapPrefix = uid.withPrefix(applyMutationsKeyVersionMapRange.begin);
 
 	for (auto it : keyVersion->ranges()) {
@@ -834,58 +837,56 @@ ACTOR Future<Void> coalesceKeyVersionCache(Key uid,
 		req.transaction.read_snapshot = committedVersion->get();
 		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
-		wait(commitLock->take(TaskPriority::DefaultYield, mutationSize));
+		co_await commitLock->take(TaskPriority::DefaultYield, mutationSize);
 		addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), mutationSize));
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> applyMutations(Database cx,
-                                  Key uid,
-                                  Key addPrefix,
-                                  Key removePrefix,
-                                  Version beginVersion,
-                                  Version* endVersion,
-                                  PublicRequestStream<CommitTransactionRequest> commit,
-                                  NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion,
-                                  bool provisionalProxy) {
-	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection(addActor.getFuture());
-	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
-	state std::shared_ptr<DatabaseConfiguration> dbConfig = std::make_shared<DatabaseConfiguration>();
+Future<Void> applyMutations(Database cx,
+                            Key uid,
+                            Key addPrefix,
+                            Key removePrefix,
+                            Version beginVersion,
+                            Version* endVersion,
+                            PublicRequestStream<CommitTransactionRequest> commit,
+                            NotifiedVersion* committedVersion,
+                            Reference<KeyRangeMap<Version>> keyVersion,
+                            bool provisionalProxy) {
+	FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error = actorCollection(addActor.getFuture());
+	int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
+	std::shared_ptr<DatabaseConfiguration> dbConfig = std::make_shared<DatabaseConfiguration>();
 
 	keyVersion->insert(metadataVersionKey, 0);
 
 	try {
-		wait(store(*dbConfig, getDatabaseConfiguration(cx)));
+		co_await store(*dbConfig, getDatabaseConfiguration(cx));
 
-		loop {
+		while (true) {
 			if (beginVersion >= *endVersion) {
 				// Why do we need to take a lock here?
-				wait(commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+				co_await commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 				if (beginVersion >= *endVersion) {
-					return Void();
+					co_return;
 				}
 			}
 
 			int rangeCount = std::max(1, CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / maxBytes);
 			// newEndVersion can only be at most of size APPLY_BLOCK_SIZE
-			state Version newEndVersion = std::min(*endVersion,
-			                                       ((beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE) + rangeCount) *
-			                                           CLIENT_KNOBS->APPLY_BLOCK_SIZE);
+			Version newEndVersion = std::min(*endVersion,
+			                                 ((beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE) + rangeCount) *
+			                                     CLIENT_KNOBS->APPLY_BLOCK_SIZE);
 
 			// ranges each represent a partition of version, e.g. [100, 200], [201, 300], [301, 400]
 			// (64, 200) -> [(64, 128), (128, 192), (192, 200)] assuming block size is 64
 			// ranges have format: applyLogKeys.begin/uid/hash(uint8)/version(64bites)/part
-			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
-			state size_t idx;
-			state std::vector<PromiseStream<RCGroup>> results;
-			state std::vector<Future<Void>> rc;
-			state std::vector<Reference<FlowLock>> locks;
+			Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
+			size_t idx{ 0 };
+			std::vector<PromiseStream<RCGroup>> results;
+			std::vector<Future<Void>> rc;
+			std::vector<Reference<FlowLock>> locks;
 
 			// each RCGroup is for a single version, each results[i] is for a single range who can have multiple
 			// versions
@@ -900,30 +901,30 @@ ACTOR Future<Void> applyMutations(Database cx,
 			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
 			for (idx = 0; idx < ranges.size(); ++idx) {
 				int bytes =
-				    wait(kvMutationLogToTransactions(cx,
-				                                     results[idx],
-				                                     locks[idx],
-				                                     uid,
-				                                     addPrefix,
-				                                     removePrefix,
-				                                     commit,
-				                                     committedVersion,
-				                                     idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
-				                                     ranges[idx].begin,
-				                                     &commitLock,
-				                                     keyVersion,
-				                                     provisionalProxy,
-				                                     dbConfig));
+				    co_await kvMutationLogToTransactions(cx,
+				                                         results[idx],
+				                                         locks[idx],
+				                                         uid,
+				                                         addPrefix,
+				                                         removePrefix,
+				                                         commit,
+				                                         committedVersion,
+				                                         idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
+				                                         ranges[idx].begin,
+				                                         &commitLock,
+				                                         keyVersion,
+				                                         provisionalProxy,
+				                                         dbConfig);
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
 			}
 
-			wait(coalesceKeyVersionCache(
-			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
+			co_await coalesceKeyVersionCache(
+			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock);
 			beginVersion = newEndVersion;
 			if (BUGGIFY) {
-				wait(delay(2.0));
+				co_await delay(2.0);
 			}
 		}
 	} catch (Error& e) {
@@ -937,17 +938,17 @@ ACTOR Future<Void> applyMutations(Database cx,
 	}
 }
 
-ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
-                                        Key logUidValue,
-                                        Key destUidValue,
-                                        Optional<Version> endVersion,
-                                        CheckBackupUID checkBackupUid,
-                                        Version backupUid) {
-	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
-	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
+static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
+                                  Key logUidValue,
+                                  Key destUidValue,
+                                  Optional<Version> endVersion,
+                                  CheckBackupUID checkBackupUid,
+                                  Version backupUid) {
+	Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
+	Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
 
 	if (!destUidValue.size()) {
-		return Void();
+		co_return;
 	}
 
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -956,16 +957,16 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	if (checkBackupUid) {
 		Subspace sourceStates =
 		    Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
-		Optional<Value> v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
+		Optional<Value> v = co_await tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId));
 		if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > backupUid)
-			return Void();
+			co_return;
 	}
 
-	state RangeResult backupVersions = wait(
-	    tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
+	RangeResult backupVersions = co_await tr->getRange(
+	    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY);
 
 	// Make sure version history key does exist and lower the beginVersion if needed
-	state Version currBeginVersion = invalidVersion;
+	Version currBeginVersion = invalidVersion;
 	for (auto backupVersion : backupVersions) {
 		Key currLogUidValue = backupVersion.key.removePrefix(backupLatestVersionsPrefix).removePrefix(destUidValue);
 
@@ -977,15 +978,15 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 
 	// Do not clear anything if version history key cannot be found
 	if (currBeginVersion == invalidVersion) {
-		return Void();
+		co_return;
 	}
 
-	state Version currEndVersion = std::numeric_limits<Version>::max();
+	Version currEndVersion = std::numeric_limits<Version>::max();
 	if (endVersion.present()) {
 		currEndVersion = std::min(currEndVersion, endVersion.get());
 	}
 
-	state Version nextSmallestVersion = currEndVersion;
+	Version nextSmallestVersion = currEndVersion;
 	bool clearLogRangesRequired = true;
 
 	// More than one backup/DR with the same range
@@ -1053,16 +1054,14 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (!endVersion.present() && backupVersions.size() == 1) {
-		RangeResult existingDestUidValues =
-		    wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+		RangeResult existingDestUidValues = co_await tr->getRange(
+		    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
 		for (auto it : existingDestUidValues) {
 			if (it.value == destUidValue) {
 				tr->clear(it.key);
 			}
 		}
 	}
-
-	return Void();
 }
 
 Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
@@ -1074,30 +1073,30 @@ Future<Void> eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	return _eraseLogData(tr, logUidValue, destUidValue, endVersion, checkBackupUid, backupUid);
 }
 
-ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool deleteData) {
-	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
+Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool deleteData) {
+	Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Optional<Key> removingLogUid;
-	state std::set<Key> loggedLogUids;
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	Optional<Key> removingLogUid;
+	std::set<Key> loggedLogUids;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult backupVersions = wait(tr->getRange(
-			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
-			state Version readVer = tr->getReadVersion().get();
+			RangeResult backupVersions = co_await tr->getRange(
+			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY);
+			Version readVer = tr->getReadVersion().get();
 
-			state Version minVersion = std::numeric_limits<Version>::max();
-			state Key minVersionLogUid;
+			Version minVersion = std::numeric_limits<Version>::max();
+			Key minVersionLogUid;
 
-			state int backupIdx = 0;
-			for (; backupIdx < backupVersions.size(); backupIdx++) {
-				state Version currVersion =
+			for (int backupIdx = 0; backupIdx < backupVersions.size(); backupIdx++) {
+				Version currVersion =
 				    BinaryReader::fromStringRef<Version>(backupVersions[backupIdx].value, Unversioned());
-				state Key currLogUid =
+				Key currLogUid =
 				    backupVersions[backupIdx].key.removePrefix(backupLatestVersionsPrefix).removePrefix(destUidValue);
 				if (currVersion < minVersion) {
 					minVersionLogUid = currLogUid;
@@ -1105,14 +1104,14 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 				}
 
 				if (!loggedLogUids.count(currLogUid)) {
-					state Future<Optional<Value>> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin)
-					                                                       .get(BackupAgentBase::keySourceStates)
-					                                                       .get(currLogUid)
-					                                                       .pack(DatabaseBackupAgent::keyStateStatus));
-					state Future<Optional<Value>> foundBackupKey = tr->get(
+					Future<Optional<Value>> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin)
+					                                                 .get(BackupAgentBase::keySourceStates)
+					                                                 .get(currLogUid)
+					                                                 .pack(DatabaseBackupAgent::keyStateStatus));
+					Future<Optional<Value>> foundBackupKey = tr->get(
 					    Subspace(currLogUid.withPrefix("uid->config/"_sr).withPrefix(fileBackupPrefixRange.begin))
 					        .pack("stateEnum"_sr));
-					wait(success(foundDRKey) && success(foundBackupKey));
+					co_await (success(foundDRKey) && success(foundBackupKey));
 
 					if (foundDRKey.get().present() && foundBackupKey.get().present()) {
 						printf("WARNING: Found a tag that looks like both a backup and a DR. This tag is %.4f hours "
@@ -1136,8 +1135,8 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 				if (readVer - minVersion > CLIENT_KNOBS->MIN_CLEANUP_SECONDS * CLIENT_KNOBS->CORE_VERSIONSPERSECOND &&
 				    (!removingLogUid.present() || minVersionLogUid == removingLogUid.get())) {
 					removingLogUid = minVersionLogUid;
-					wait(eraseLogData(tr, minVersionLogUid, destUidValue));
-					wait(tr->commit());
+					co_await eraseLogData(tr, minVersionLogUid, destUidValue);
+					co_await tr->commit();
 					printf("\nSuccessfully removed the tag that was %.4f hours behind.\n\n",
 					       (readVer - minVersion) / (3600.0 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 				} else if (removingLogUid.present() && minVersionLogUid != removingLogUid.get()) {
@@ -1158,30 +1157,35 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 				       (readVer - minVersion) / (3600.0 * CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 			}
 
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+
+		co_await tr->onError(err);
 	}
 }
 
-ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	loop {
+Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult destUids = wait(
-			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
+			RangeResult destUids = co_await tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)),
+			                                             CLIENT_KNOBS->TOO_MANY);
 
 			for (auto destUid : destUids) {
-				wait(cleanupLogMutations(cx, destUid.value, deleteData));
+				co_await cleanupLogMutations(cx, destUid.value, deleteData);
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+
+		co_await tr->onError(err);
 	}
 }
 
