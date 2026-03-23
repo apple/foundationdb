@@ -25,7 +25,7 @@
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/datadistributor/DataDistributionTeam.h"
-#include "ExclusionTracker.actor.h"
+#include "ExclusionTracker.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/network.h"

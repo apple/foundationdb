@@ -1,5 +1,5 @@
 /*
- * DDTxnProcessor.actor.cpp
+ * DDTxnProcessor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
