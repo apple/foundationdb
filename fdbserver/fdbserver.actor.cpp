@@ -64,11 +64,11 @@
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/mocks3/MockS3Server.h"
-#include "fdbserver/core/workloads.actor.h"
 #ifdef WITH_ROCKSDB
 #include "fdbserver/core/FDBRocksDBVersion.h"
 #endif

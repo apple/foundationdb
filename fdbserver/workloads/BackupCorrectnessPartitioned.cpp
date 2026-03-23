@@ -27,6 +27,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "flow/IRandom.h"
 

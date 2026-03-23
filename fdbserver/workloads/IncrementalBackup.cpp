@@ -30,6 +30,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"

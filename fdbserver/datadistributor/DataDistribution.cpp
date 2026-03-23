@@ -42,7 +42,7 @@
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/TLogInterface.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/core/WorkloadKeys.h"
 #include "fdbserver/datadistributor/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"

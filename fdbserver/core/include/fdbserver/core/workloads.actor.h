@@ -18,39 +18,22 @@
  * limitations under the License.
  */
 
-#pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_WORKLOADS_ACTOR_G_H)
-#define FDBSERVER_CORE_WORKLOADS_ACTOR_G_H
-#include "fdbserver/core/workloads.actor.g.h"
-#elif !defined(FDBSERVER_CORE_WORKLOADS_ACTOR_H)
+#ifndef FDBSERVER_CORE_WORKLOADS_ACTOR_H
 #define FDBSERVER_CORE_WORKLOADS_ACTOR_H
+#pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/core/KnobProtectiveGroups.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbrpc/simulator.h"
+#include "fdbserver/core/WorkloadKeys.h"
 
+#include <algorithm>
 #include <functional>
-
-#include "flow/actorcompiler.h" // has to be last import
-
-/*
- * Gets an Value from a list of key/value pairs, using a default value if the key is not present.
- */
-Value getOption(VectorRef<KeyValueRef> options, Key key, Value defaultValue);
-int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue);
-uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValue);
-int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue);
-double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue);
-bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
-std::vector<std::string> getOption(VectorRef<KeyValueRef> options,
-                                   Key key,
-                                   std::vector<std::string> defaultValue); // comma-separated strings
-std::vector<int> getOption(VectorRef<KeyValueRef> options,
-                           Key key,
-                           std::vector<int> defaultValue = {}); // comma-separated integers
-bool hasOption(VectorRef<KeyValueRef> options, Key key);
+#include <map>
+#include <set>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 struct WorkloadContext {
 	Standalone<VectorRef<KeyValueRef>> options;
@@ -66,6 +49,19 @@ struct WorkloadContext {
 	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
 
+Value getOption(VectorRef<KeyValueRef> options, Key key, Value defaultValue);
+int getOption(VectorRef<KeyValueRef> options, Key key, int defaultValue);
+uint64_t getOption(VectorRef<KeyValueRef> options, Key key, uint64_t defaultValue);
+int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue);
+double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue);
+bool getOption(VectorRef<KeyValueRef> options, Key key, bool defaultValue);
+std::vector<std::string> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<std::string> defaultValue);
+std::vector<int> getOption(VectorRef<KeyValueRef> options, Key key, std::vector<int> defaultValue = {});
+bool hasOption(VectorRef<KeyValueRef> options, Key key);
+Future<Void> poisson(double* last, double meanInterval);
+Future<Void> uniform(double* last, double meanInterval);
+void emplaceIndex(uint8_t* data, int offset, int64_t index);
+
 struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkload> {
 	// Implementations of TestWorkload need to provide their name by defining a static member variable called name:
 	// static constexpr const char* name = "WorkloadName";
@@ -78,7 +74,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.
@@ -274,108 +270,6 @@ struct WorkloadFactory : IWorkloadFactory {
 
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory
 
-struct DistributedTestResults {
-	std::vector<PerfMetric> metrics;
-	int successes, failures;
-
-	DistributedTestResults() {}
-
-	DistributedTestResults(std::vector<PerfMetric> const& metrics, int successes, int failures)
-	  : metrics(metrics), successes(successes), failures(failures) {}
-
-	bool ok() const { return successes && !failures; }
-};
-
-class TestSpec {
-public:
-	TestSpec() {
-		title = StringRef();
-		dumpAfterTest = false;
-		clearAfterTest = g_network->isSimulated();
-		useDB = true;
-		startDelay = 30.0;
-		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
-		timeout = g_network->isSimulated() ? 15000 : 1500;
-		databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
-		runConsistencyCheck = g_network->isSimulated();
-		runConsistencyCheckOnCache = false;
-		runConsistencyCheckOnTSS = true;
-		waitForQuiescenceBegin = true;
-		waitForQuiescenceEnd = true;
-		simCheckRelocationDuration = false;
-		simConnectionFailuresDisableDuration = 0;
-		simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
-		simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
-		restorePerpetualWiggleSetting = true;
-	}
-	TestSpec(StringRef title,
-	         bool dump,
-	         bool clear,
-	         double startDelay = 30.0,
-	         bool useDB = true,
-	         double databasePingDelay = -1.0)
-	  : title(title), dumpAfterTest(dump), clearAfterTest(clear), useDB(useDB), startDelay(startDelay), timeout(600),
-	    databasePingDelay(databasePingDelay), runConsistencyCheck(g_network->isSimulated()),
-	    runConsistencyCheckOnCache(false), runConsistencyCheckOnTSS(false), waitForQuiescenceBegin(true),
-	    waitForQuiescenceEnd(true), restorePerpetualWiggleSetting(true), simCheckRelocationDuration(false),
-	    simConnectionFailuresDisableDuration(0), simBackupAgents(ISimulator::BackupAgentType::NoBackupAgents),
-	    simDrAgents(ISimulator::BackupAgentType::NoBackupAgents) {
-		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
-		if (databasePingDelay < 0)
-			databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
-	}
-
-	Standalone<StringRef> title;
-	bool dumpAfterTest;
-	bool clearAfterTest;
-	bool useDB;
-	bool runFailureWorkloads = true;
-	double startDelay;
-	int phases;
-	Standalone<VectorRef<VectorRef<KeyValueRef>>> options;
-	int timeout;
-	double databasePingDelay;
-	double maxDDRunTime = 0; // Maximum Data Distributor run time before considered stuck (0 = use default)
-	bool runConsistencyCheck;
-	bool runConsistencyCheckOnCache;
-	bool runConsistencyCheckOnTSS;
-	bool waitForQuiescenceBegin;
-	bool waitForQuiescenceEnd;
-	bool restorePerpetualWiggleSetting; // whether set perpetual_storage_wiggle as the value after run
-	                                    // QuietDatabase. QuietDatabase always disables perpetual storage wiggle on
-	                                    // purpose. If waitForQuiescenceBegin == true and we want to keep perpetual
-	                                    // storage wiggle the same setting as before during testing, this value should
-	                                    // be set true.
-
-	bool simCheckRelocationDuration; // If set to true, then long duration relocations generate SevWarnAlways messages.
-	                                 // Once any workload sets this to true, it will be true for the duration of the
-	                                 // program.  Can only be used in simulation.
-	double simConnectionFailuresDisableDuration;
-	ISimulator::BackupAgentType simBackupAgents; // If set to true, then the simulation runs backup agents on the
-	                                             // workers. Can only be used in simulation.
-	ISimulator::BackupAgentType simDrAgents;
-
-	KnobKeyValuePairs overrideKnobs;
-	std::vector<std::string> disabledFailureInjectionWorkloads;
-};
-
-Future<DistributedTestResults> runWorkload(Database const& cx,
-                                           std::vector<TesterInterface> const& testers,
-                                           TestSpec const& spec);
-
-void logMetrics(std::vector<PerfMetric> metrics);
-
-Future<Void> poisson(double* last, double meanInterval);
-Future<Void> uniform(double* last, double meanInterval);
-
-void emplaceIndex(uint8_t* data, int offset, int64_t index);
-Key doubleToTestKey(double p);
-double testKeyToDouble(const KeyRef& p);
-Key doubleToTestKey(double p, const KeyRef& prefix);
-double testKeyToDouble(const KeyRef& p, const KeyRef& prefix);
-
-ACTOR Future<Void> databaseWarmer(Database cx);
-
 Future<Void> quietDatabase(Database const& cx,
                            Reference<AsyncVar<struct ServerDBInfo> const> const&,
                            std::string phase,
@@ -386,27 +280,5 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxPoppedVersionLag = 30e6,
                            int64_t maxVersionOffset = 1e6,
                            double maxDDRunTime = 0);
-
-/**
- * A utility function for testing error situations. It succeeds if the given test
- * throws an error. If expectedError is provided, it additionally checks if the
- * error code is as expected.
- *
- * In case of a failure, logs an corresponding error in the trace with the given
- * description and details, sets the given success flag to false (optional)
- * and throws the given exception (optional). Note that in case of a successful
- * test execution, the success flag is kept unchanged.
- */
-Future<Void> testExpectedError(Future<Void> test,
-                               const char* testDescr,
-                               Optional<Error> expectedError = Optional<Error>(),
-                               Optional<bool*> successFlag = Optional<bool*>(),
-                               std::map<std::string, std::string> details = {},
-                               Optional<Error> throwOnError = Optional<Error>(),
-                               UID id = UID());
-
-std::string getTestEncryptionFileName();
-
-#include "flow/unactorcompiler.h"
 
 #endif
