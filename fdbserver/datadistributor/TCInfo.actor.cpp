@@ -21,6 +21,7 @@
 #include "fdbclient/ServerKnobs.h"
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/TCInfo.h"
+#include "flow/CoroUtils.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class TCServerInfoImpl {
@@ -114,20 +115,20 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {
-		wait(updateServerMetrics(server.getPtr()));
-		return Void();
+	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {
+		co_await updateServerMetrics(server.getPtr());
+		co_return;
 	}
 
-	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server, Reference<IDDTxnProcessor> txnProcessor) {
-		state double lastUpdate = now();
-		loop {
-			wait(server->updateServerMetrics() &&
-			     store(server->storageStats,
-			           txnProcessor->getStorageStats(server->getId(), SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE)));
-			wait(delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
-			                    SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
-			                TaskPriority::DataDistributionLaunch));
+	static Future<Void> serverMetricsPolling(TCServerInfo* server, Reference<IDDTxnProcessor> txnProcessor) {
+		double lastUpdate = now();
+		while (true) {
+			co_await (server->updateServerMetrics() &&
+			          store(server->storageStats,
+			                txnProcessor->getStorageStats(server->getId(), SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE)));
+			co_await delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
+			                        SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
+			                    TaskPriority::DataDistributionLaunch);
 			lastUpdate = now();
 		}
 	}
@@ -135,13 +136,13 @@ public:
 
 class TCTeamInfoImpl {
 public:
-	ACTOR static Future<Void> updateStorageMetrics(TCTeamInfo* self) {
+	static Future<Void> updateStorageMetrics(TCTeamInfo* self) {
 		std::vector<Future<Void>> updates;
 		updates.reserve(self->servers.size());
 		for (int i = 0; i < self->servers.size(); i++)
 			updates.push_back(TCServerInfo::updateServerMetrics(self->servers[i]));
-		wait(waitForAll(updates));
-		return Void();
+		co_await waitForAll(updates);
+		co_return;
 	}
 };
 
