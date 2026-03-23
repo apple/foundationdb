@@ -32,7 +32,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/core/CoordinationInterface.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbserver/core/RestoreUtil.h"
 
 struct RestoreRoleInterface;

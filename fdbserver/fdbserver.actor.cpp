@@ -62,7 +62,7 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/NetworkTest.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "fdbserver/tester/tester.h"

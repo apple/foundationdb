@@ -32,7 +32,7 @@
 #include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbclient/BackupContainer.h"
 
 class LoaderVersionBatchState : RoleVersionBatchState {

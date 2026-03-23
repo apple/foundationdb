@@ -33,7 +33,7 @@
 #include "RestoreRoleCommon.h"
 #include "RestoreLoader.h"
 #include "RestoreApplier.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 
 // Each restore worker (a process) is assigned for a role.
 // MAYBE Later: We will support multiple restore roles on a worker

@@ -33,7 +33,7 @@
 #include "fdbserver/core/MutationTracking.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type);
 
