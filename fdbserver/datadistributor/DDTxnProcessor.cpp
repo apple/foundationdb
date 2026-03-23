@@ -53,18 +53,14 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Error err;
-			bool hasErr = false;
 			try {
 				co_await store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr));
 				res.readVersion = tr.getReadVersion().get();
 				co_return res;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -82,7 +78,6 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Error err;
-			bool hasErr = false;
 			try {
 				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -118,11 +113,8 @@ class DDTxnProcessorImpl {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 
 		co_return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
@@ -139,7 +131,6 @@ class DDTxnProcessorImpl {
 		while (true) {
 			res.clear();
 			Error err;
-			bool hasErr = false;
 			try {
 				RangeResult shards = co_await krmGetRanges(&tr,
 				                                           keyServersPrefix,
@@ -179,14 +170,11 @@ class DDTxnProcessorImpl {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
 				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError")
 				    .errorUnsuppressed(err)
 				    .detail("Range", range);
-				co_await tr.onError(err);
 			}
+			co_await tr.onError(err);
 		}
 
 		co_return res;
@@ -200,7 +188,6 @@ class DDTxnProcessorImpl {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -224,11 +211,8 @@ class DDTxnProcessorImpl {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -239,7 +223,6 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			Error err;
-			bool hasErr = false;
 			try {
 				Optional<Value> val = co_await tr.get(datacenterReplicasKeyFor(dcId));
 				int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
@@ -255,11 +238,8 @@ class DDTxnProcessorImpl {
 				co_return oldReplicas;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -277,7 +257,6 @@ class DDTxnProcessorImpl {
 		int i = 0;
 		for (; i < maxRetries; i++) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -288,12 +267,9 @@ class DDTxnProcessorImpl {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
 				TraceEvent("ReadHealthyZone", distributorId).error(err);
-				co_await tr.onError(err);
 			}
+			co_await tr.onError(err);
 		}
 		if (healthyZoneRead) {
 			if (healthyZoneVal.present()) {
@@ -355,7 +331,6 @@ class DDTxnProcessorImpl {
 			team_cache.clear();
 			succeeded = false;
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -458,15 +433,11 @@ class DDTxnProcessorImpl {
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
-			}
-			if (hasErr) {
 				TraceEvent("GetInitialTeamsRetry", distributorId).error(err);
-				co_await tr.onError(err);
-
-				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
-				                    // loop
 			}
+			co_await tr.onError(err);
+			ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
+			                    // loop
 		}
 
 		// If keyServers is too large to read in a single transaction, then we will have to break this process up into
@@ -476,7 +447,6 @@ class DDTxnProcessorImpl {
 			while (true) {
 				succeeded = false;
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -562,15 +532,11 @@ class DDTxnProcessorImpl {
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
 					TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(err);
-
-					co_await tr.onError(err);
-					ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in
-					                    // this loop
 				}
+				co_await tr.onError(err);
+				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in
+				                    // this loop
 			}
 
 			tr.reset();
@@ -644,7 +610,6 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			Error err;
-			bool hasErr = false;
 			try {
 				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
 				if (!mode.present() && ddEnabledState->isEnabled())
@@ -678,11 +643,8 @@ class DDTxnProcessorImpl {
 				co_return false;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 
@@ -695,17 +657,13 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Error err;
-				bool hasErr = false;
 				try {
 					co_await checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState);
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -715,7 +673,6 @@ class DDTxnProcessorImpl {
 		while (true) {
 			{
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -725,11 +682,8 @@ class DDTxnProcessorImpl {
 					co_return res;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -738,7 +692,6 @@ class DDTxnProcessorImpl {
 		ReadYourWritesTransaction tr(cx);
 		while (true) {
 			Error err;
-			bool hasErr = false;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
@@ -747,11 +700,8 @@ class DDTxnProcessorImpl {
 				co_return;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr.onError(err);
-			}
+			co_await tr.onError(err);
 		}
 	}
 

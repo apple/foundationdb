@@ -2235,7 +2235,6 @@ public:
 		while (true) {
 			// write the next server id
 			Error err;
-			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				metadataMap.set(tr, nextId, value);
@@ -2243,11 +2242,8 @@ public:
 				break;
 			} catch (Error& e) {
 				err = e;
-				hasErr = true;
 			}
-			if (hasErr) {
-				co_await tr->onError(err);
-			}
+			co_await tr->onError(err);
 		}
 
 		self->nextWiggleInfo.send(value);
@@ -2522,7 +2518,6 @@ public:
 			ReadYourWritesTransaction tr(self->dbContext());
 			while (true) {
 				Error err;
-				bool hasErr = false;
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					Optional<Standalone<StringRef>> value = co_await tr.get(perpetualStorageWiggleKey);
@@ -2555,11 +2550,8 @@ public:
 					break;
 				} catch (Error& e) {
 					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				co_await tr.onError(err);
 			}
 		}
 	}
