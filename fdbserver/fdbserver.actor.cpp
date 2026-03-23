@@ -86,7 +86,7 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/SimpleCounter.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
