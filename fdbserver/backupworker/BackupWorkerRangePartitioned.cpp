@@ -902,8 +902,7 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 			    .detail("NumMsg", numMsg)
 			    .detail("MsgQ", self->messages.size());
 			// save an empty file for old epochs so that log file versions are continuous
-			// TODO akanksha: Remove this comment dependent PR is merged.
-			// co_await saveMutationsToFile(self, popVersion, numMsg);
+			co_await saveMutationsToFile(self, popVersion, numMsg);
 			self->eraseMessages(numMsg);
 		}
 
