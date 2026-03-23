@@ -24,7 +24,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"

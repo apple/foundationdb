@@ -44,7 +44,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/S3Client.actor.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "flow/Platform.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/FastRef.h"

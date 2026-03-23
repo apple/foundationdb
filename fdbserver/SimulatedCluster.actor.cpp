@@ -46,7 +46,7 @@
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/versions.h"
 #include "flow/IRandom.h"
 #include "flow/MkCert.h"

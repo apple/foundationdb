@@ -1,5 +1,5 @@
 /*
- * BackupAgent.actor.h
+ * BackupAgent.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_G_H)
-#define FDBCLIENT_BACKUP_AGENT_ACTOR_G_H
-#include "fdbclient/BackupAgent.actor.g.h"
-#elif !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_H)
-#define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
 #include <ctime>
 #include <climits>
@@ -35,7 +30,6 @@
 #include "flow/IAsyncFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 FDB_BOOLEAN_PARAM(LockDB);
 FDB_BOOLEAN_PARAM(UnlockDB);
@@ -1115,6 +1109,3 @@ bool isDefaultBackup(Container ranges) {
 
 // Returns a key-range used to denote that a shared mutation stream belongs to the default backup set.
 KeyRangeRef const& getDefaultBackupSharedRange();
-
-#include "flow/unactorcompiler.h"
-#endif

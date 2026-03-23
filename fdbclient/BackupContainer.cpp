@@ -26,7 +26,7 @@
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"

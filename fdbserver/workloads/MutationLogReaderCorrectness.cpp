@@ -22,7 +22,7 @@
 #include <limits>
 #include "fmt/format.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbserver/core/workloads.actor.h"

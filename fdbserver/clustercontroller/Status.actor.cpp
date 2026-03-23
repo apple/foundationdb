@@ -22,7 +22,7 @@
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/genericactors.actor.h"
 #include "fmt/format.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "Status.h"
 #include "flow/ITrace.h"

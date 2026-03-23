@@ -25,7 +25,7 @@
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 #include "fmt/format.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BulkDumping.h"

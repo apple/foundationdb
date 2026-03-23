@@ -34,7 +34,7 @@
 #include "fdbclient/Tuple.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IAsyncFile.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbserver/core/Knobs.h"
 
 #include "flow/actorcompiler.h" // has to be last include

@@ -1,5 +1,5 @@
 /*
- * BackupAgentBase.actor.cpp
+ * BackupAgentBase.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,7 +21,7 @@
 #include <iomanip>
 #include <time.h>
 
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
