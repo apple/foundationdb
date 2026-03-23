@@ -2234,21 +2234,19 @@ public:
 		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->dbContext()));
 		while (true) {
 			// write the next server id
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					metadataMap.set(tr, nextId, value);
-					co_await tr->commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				metadataMap.set(tr, nextId, value);
+				co_await tr->commit();
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 
@@ -2523,48 +2521,44 @@ public:
 		while (true) {
 			ReadYourWritesTransaction tr(self->dbContext());
 			while (true) {
-				{
-					Error err;
-					bool hasErr = false;
-					try {
-						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						Optional<Standalone<StringRef>> value = co_await tr.get(perpetualStorageWiggleKey);
+				Error err;
+				bool hasErr = false;
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					Optional<Standalone<StringRef>> value = co_await tr.get(perpetualStorageWiggleKey);
 
-						if (value.present()) {
-							speed = std::stoi(value.get().toString());
-						}
-						Future<Void> watchFuture = tr.watch(perpetualStorageWiggleKey);
-						co_await tr.commit();
+					if (value.present()) {
+						speed = std::stoi(value.get().toString());
+					}
+					Future<Void> watchFuture = tr.watch(perpetualStorageWiggleKey);
+					co_await tr.commit();
 
-						ASSERT(speed == 1 || speed == 0);
-						if (speed == 1 && self->storageWiggler->isStopped()) { // avoid duplicated start
-							self->storageWiggler->setStopSignal(false);
-							co_await self->storageWiggler->restoreStats();
-							collection.add(self->perpetualStorageWiggleIterator(self->storageWiggler->stopWiggleSignal,
-							                                                    finishStorageWiggleSignal.getFuture()));
-							collection.add(self->perpetualStorageWiggler(self->storageWiggler->stopWiggleSignal,
-							                                             finishStorageWiggleSignal));
-							TraceEvent("PerpetualStorageWiggleOpen", self->distributorId)
-							    .detail("Primary", self->primary);
-						} else if (speed == 0) {
-							if (!self->storageWiggler->isStopped()) {
-								self->storageWiggler->setStopSignal(true);
-								co_await collection.signalAndReset();
-								self->pauseWiggle->set(true);
-							}
-							co_await self->storageWiggler->resetStats();
-							TraceEvent("PerpetualStorageWiggleClose", self->distributorId)
-							    .detail("Primary", self->primary);
+					ASSERT(speed == 1 || speed == 0);
+					if (speed == 1 && self->storageWiggler->isStopped()) { // avoid duplicated start
+						self->storageWiggler->setStopSignal(false);
+						co_await self->storageWiggler->restoreStats();
+						collection.add(self->perpetualStorageWiggleIterator(self->storageWiggler->stopWiggleSignal,
+						                                                    finishStorageWiggleSignal.getFuture()));
+						collection.add(self->perpetualStorageWiggler(self->storageWiggler->stopWiggleSignal,
+						                                             finishStorageWiggleSignal));
+						TraceEvent("PerpetualStorageWiggleOpen", self->distributorId).detail("Primary", self->primary);
+					} else if (speed == 0) {
+						if (!self->storageWiggler->isStopped()) {
+							self->storageWiggler->setStopSignal(true);
+							co_await collection.signalAndReset();
+							self->pauseWiggle->set(true);
 						}
-						co_await watchFuture;
-						break;
-					} catch (Error& e) {
-						err = e;
-						hasErr = true;
+						co_await self->storageWiggler->resetStats();
+						TraceEvent("PerpetualStorageWiggleClose", self->distributorId).detail("Primary", self->primary);
 					}
-					if (hasErr) {
-						co_await tr.onError(err);
-					}
+					co_await watchFuture;
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -2573,60 +2567,56 @@ public:
 	static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		ReadYourWritesTransaction tr(self->dbContext());
 		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Optional<Value> val = co_await tr.get(healthyZoneKey);
-					Future<Void> healthyZoneTimeout = Never();
-					if (val.present()) {
-						auto p = decodeHealthyZoneValue(val.get());
-						if (p.first == ignoreSSFailuresZoneString) {
-							// healthyZone is now overloaded for DD disabling purpose, which does not timeout
-							TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId)
-							    .log();
-							healthyZoneTimeout = Never();
+			Error err;
+			bool hasErr = false;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> val = co_await tr.get(healthyZoneKey);
+				Future<Void> healthyZoneTimeout = Never();
+				if (val.present()) {
+					auto p = decodeHealthyZoneValue(val.get());
+					if (p.first == ignoreSSFailuresZoneString) {
+						// healthyZone is now overloaded for DD disabling purpose, which does not timeout
+						TraceEvent("DataDistributionDisabledForStorageServerFailuresStart", self->distributorId).log();
+						healthyZoneTimeout = Never();
+						self->healthyZone.set(p.first);
+					} else if (p.second > tr.getReadVersion().get()) {
+						double timeoutSeconds =
+						    (p.second - tr.getReadVersion().get()) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+						healthyZoneTimeout = delay(timeoutSeconds, TaskPriority::DataDistribution);
+						if (self->healthyZone.get() != p.first) {
+							TraceEvent("MaintenanceZoneStart", self->distributorId)
+							    .detail("ZoneID", printable(p.first))
+							    .detail("EndVersion", p.second)
+							    .detail("Duration", timeoutSeconds);
 							self->healthyZone.set(p.first);
-						} else if (p.second > tr.getReadVersion().get()) {
-							double timeoutSeconds =
-							    (p.second - tr.getReadVersion().get()) / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
-							healthyZoneTimeout = delay(timeoutSeconds, TaskPriority::DataDistribution);
-							if (self->healthyZone.get() != p.first) {
-								TraceEvent("MaintenanceZoneStart", self->distributorId)
-								    .detail("ZoneID", printable(p.first))
-								    .detail("EndVersion", p.second)
-								    .detail("Duration", timeoutSeconds);
-								self->healthyZone.set(p.first);
-							}
-						} else if (self->healthyZone.get().present()) {
-							// maintenance hits timeout
-							TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).log();
-							self->healthyZone.set(Optional<Key>());
 						}
 					} else if (self->healthyZone.get().present()) {
-						// `healthyZone` has been cleared
-						if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
-							TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId)
-							    .log();
-						} else {
-							TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).log();
-						}
+						// maintenance hits timeout
+						TraceEvent("MaintenanceZoneEndTimeout", self->distributorId).log();
 						self->healthyZone.set(Optional<Key>());
 					}
+				} else if (self->healthyZone.get().present()) {
+					// `healthyZone` has been cleared
+					if (self->healthyZone.get().get() == ignoreSSFailuresZoneString) {
+						TraceEvent("DataDistributionDisabledForStorageServerFailuresEnd", self->distributorId).log();
+					} else {
+						TraceEvent("MaintenanceZoneEndManualClear", self->distributorId).log();
+					}
+					self->healthyZone.set(Optional<Key>());
+				}
 
-					Future<Void> watchFuture = tr.watch(healthyZoneKey);
-					co_await tr.commit();
-					co_await (watchFuture || healthyZoneTimeout);
-					tr.reset();
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				Future<Void> watchFuture = tr.watch(healthyZoneKey);
+				co_await tr.commit();
+				co_await (watchFuture || healthyZoneTimeout);
+				tr.reset();
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}

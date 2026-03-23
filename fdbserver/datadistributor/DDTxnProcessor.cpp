@@ -52,20 +52,18 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					co_await store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr));
-					res.readVersion = tr.getReadVersion().get();
-					co_return res;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+			Error err;
+			bool hasErr = false;
+			try {
+				co_await store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr));
+				res.readVersion = tr.getReadVersion().get();
+				co_return res;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -83,49 +81,47 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					RangeResult keyServersEntries = co_await tr.getRange(lastLessOrEqual(keyServersKey(keys.begin)),
-					                                                     firstGreaterOrEqual(keyServersKey(keys.end)),
-					                                                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS);
+			Error err;
+			bool hasErr = false;
+			try {
+				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult keyServersEntries = co_await tr.getRange(lastLessOrEqual(keyServersKey(keys.begin)),
+				                                                     firstGreaterOrEqual(keyServersKey(keys.end)),
+				                                                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS);
 
-					if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
-						for (int shard = 0; shard < keyServersEntries.size(); shard++) {
-							std::vector<UID> src, dest;
-							decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
-							ASSERT(src.size());
-							updateServersAndCompleteSources(servers, completeSources, shard, src);
-						}
-
-						ASSERT(servers.size() > 0);
+				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
+					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
+						std::vector<UID> src, dest;
+						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
+						ASSERT(src.size());
+						updateServersAndCompleteSources(servers, completeSources, shard, src);
 					}
 
-					// If the size of keyServerEntries is large, then just assume we are using all storage servers
-					// Why the size can be large?
-					// When a shard is inflight and DD crashes, some destination servers may have already got the data.
-					// The new DD will treat the destination servers as source servers. So the size can be large.
-					else {
-						RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-						ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-						for (auto s = serverList.begin(); s != serverList.end(); ++s)
-							servers.insert(decodeServerListValue(s->value).id());
-
-						ASSERT(servers.size() > 0);
-					}
-
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+					ASSERT(servers.size() > 0);
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
+
+				// If the size of keyServerEntries is large, then just assume we are using all storage servers
+				// Why the size can be large?
+				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
+				// The new DD will treat the destination servers as source servers. So the size can be large.
+				else {
+					RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+					ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+					for (auto s = serverList.begin(); s != serverList.end(); ++s)
+						servers.insert(decodeServerListValue(s->value).id());
+
+					ASSERT(servers.size() > 0);
 				}
+
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 
@@ -142,56 +138,54 @@ class DDTxnProcessorImpl {
 
 		while (true) {
 			res.clear();
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					RangeResult shards = co_await krmGetRanges(&tr,
-					                                           keyServersPrefix,
-					                                           range,
-					                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-					                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
-					ASSERT(!shards.empty());
+			Error err;
+			bool hasErr = false;
+			try {
+				RangeResult shards = co_await krmGetRanges(&tr,
+				                                           keyServersPrefix,
+				                                           range,
+				                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
+				ASSERT(!shards.empty());
 
-					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-					int i = 0;
-					for (i = 0; i < shards.size() - 1; ++i) {
-						std::vector<UID> src;
-						std::vector<UID> dest;
-						UID srcId, destId;
-						decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+				int i = 0;
+				for (i = 0; i < shards.size() - 1; ++i) {
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId, destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-						std::vector<Future<Optional<Value>>> serverListEntries;
-						for (int j = 0; j < src.size(); ++j) {
-							serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
-						}
-						std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
-						IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
-						for (int j = 0; j < serverListValues.size(); ++j) {
-							if (!serverListValues[j].present()) {
-								TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
-								    .detail("StorageServer", src[j])
-								    .detail("Range", KeyRangeRef(shards[i].key, shards[i + 1].key));
-								continue;
-							}
-							StorageServerInterface ssi = decodeServerListValue(serverListValues[j].get());
-							current.servers[ssi.locality.describeDcId()].push_back(ssi);
-						}
-						res.push_back(current);
+					std::vector<Future<Optional<Value>>> serverListEntries;
+					for (int j = 0; j < src.size(); ++j) {
+						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
 					}
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+					std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
+					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
+					for (int j = 0; j < serverListValues.size(); ++j) {
+						if (!serverListValues[j].present()) {
+							TraceEvent(SevWarnAlways, "GetSourceServerInterfacesMissing")
+							    .detail("StorageServer", src[j])
+							    .detail("Range", KeyRangeRef(shards[i].key, shards[i + 1].key));
+							continue;
+						}
+						StorageServerInterface ssi = decodeServerListValue(serverListValues[j].get());
+						current.servers[ssi.locality.describeDcId()].push_back(ssi);
+					}
+					res.push_back(current);
 				}
-				if (hasErr) {
-					TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError")
-					    .errorUnsuppressed(err)
-					    .detail("Range", range);
-					co_await tr.onError(err);
-				}
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError")
+				    .errorUnsuppressed(err)
+				    .detail("Range", range);
+				co_await tr.onError(err);
 			}
 		}
 
@@ -205,37 +199,35 @@ class DDTxnProcessorImpl {
 	                                      DatabaseConfiguration configuration) {
 		Transaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Error err;
+			bool hasErr = false;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					RangeResult replicaKeys = co_await tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+				RangeResult replicaKeys = co_await tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 
-					for (auto& kv : replicaKeys) {
-						auto dcId = decodeDatacenterReplicasKey(kv.key);
-						auto replicas = decodeDatacenterReplicasValue(kv.value);
-						if ((primaryDcId.size() && primaryDcId.at(0) == dcId) ||
-						    (remoteDcIds.size() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
-							if (replicas > configuration.storageTeamSize) {
-								tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
-							}
-						} else {
-							tr.clear(kv.key);
+				for (auto& kv : replicaKeys) {
+					auto dcId = decodeDatacenterReplicasKey(kv.key);
+					auto replicas = decodeDatacenterReplicasValue(kv.value);
+					if ((primaryDcId.size() && primaryDcId.at(0) == dcId) ||
+					    (remoteDcIds.size() && remoteDcIds.at(0) == dcId && configuration.usableRegions > 1)) {
+						if (replicas > configuration.storageTeamSize) {
+							tr.set(kv.key, datacenterReplicasValue(configuration.storageTeamSize));
 						}
+					} else {
+						tr.clear(kv.key);
 					}
+				}
 
-					co_await tr.commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				co_await tr.commit();
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -246,29 +238,27 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					Optional<Value> val = co_await tr.get(datacenterReplicasKeyFor(dcId));
-					int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
-					if (oldReplicas == storageTeamSize) {
-						co_return oldReplicas;
-					}
-					if (oldReplicas < storageTeamSize) {
-						tr.set(rebootWhenDurableKey, StringRef());
-					}
-					tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
-					co_await tr.commit();
-
+			Error err;
+			bool hasErr = false;
+			try {
+				Optional<Value> val = co_await tr.get(datacenterReplicasKeyFor(dcId));
+				int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
+				if (oldReplicas == storageTeamSize) {
 					co_return oldReplicas;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
+				if (oldReplicas < storageTeamSize) {
+					tr.set(rebootWhenDurableKey, StringRef());
 				}
+				tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
+				co_await tr.commit();
+
+				co_return oldReplicas;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -286,25 +276,23 @@ class DDTxnProcessorImpl {
 		Optional<Value> healthyZoneVal;
 		int i = 0;
 		for (; i < maxRetries; i++) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					Optional<Value> _hz = co_await tr.get(healthyZoneKey);
-					healthyZoneVal = _hz;
-					healthyZoneRead = true;
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					TraceEvent("ReadHealthyZone", distributorId).error(err);
-					co_await tr.onError(err);
-				}
+			Error err;
+			bool hasErr = false;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				Optional<Value> _hz = co_await tr.get(healthyZoneKey);
+				healthyZoneVal = _hz;
+				healthyZoneRead = true;
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				TraceEvent("ReadHealthyZone", distributorId).error(err);
+				co_await tr.onError(err);
 			}
 		}
 		if (healthyZoneRead) {
@@ -366,120 +354,118 @@ class DDTxnProcessorImpl {
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					result->mode = 1;
-					Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
-					if (mode.present()) {
-						BinaryReader rd(mode.get(), Unversioned());
-						rd >> result->mode;
+			Error err;
+			bool hasErr = false;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				result->mode = 1;
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					rd >> result->mode;
+				}
+				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isEnabled()) {
+					// DD can be disabled persistently (result->mode = 0) or transiently (isEnabled() = 0)
+					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
+					co_return result;
+				}
+
+				result->bulkLoadMode = 0;
+				Optional<Value> bulkLoadMode = co_await tr.get(bulkLoadModeKey);
+				if (bulkLoadMode.present()) {
+					BinaryReader rd(bulkLoadMode.get(), Unversioned());
+					rd >> result->bulkLoadMode;
+				}
+				TraceEvent(SevInfo, "DDBulkLoadEngineInitMode").detail("Mode", result->bulkLoadMode);
+
+				result->bulkDumpMode = 0;
+				Optional<Value> bulkDumpMode = co_await tr.get(bulkDumpModeKey);
+				if (bulkDumpMode.present()) {
+					BinaryReader rd(bulkDumpMode.get(), Unversioned());
+					rd >> result->bulkDumpMode;
+				}
+				TraceEvent(SevInfo, "DDBulkDumpInitMode").detail("Mode", result->bulkDumpMode);
+
+				Future<std::vector<ProcessData>> workers = getWorkers(&tr);
+				Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				co_await (success(workers) && success(serverList));
+				ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
+
+				std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
+				for (int i = 0; i < workers.get().size(); i++)
+					id_data[workers.get()[i].locality.processId()] = workers.get()[i];
+
+				for (int i = 0; i < serverList.get().size(); i++) {
+					auto ssi = decodeServerListValue(serverList.get()[i].value);
+					if (!ssi.isTss()) {
+						result->allServers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+						server_dc[ssi.id()] = ssi.locality.dcId();
+					} else {
+						tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 					}
-					if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isEnabled()) {
-						// DD can be disabled persistently (result->mode = 0) or transiently (isEnabled() = 0)
-						TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
-						co_return result;
+				}
+
+				RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
+				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
+				// For each data move, find out the src or dst servers are in primary or remote DC.
+				for (int i = 0; i < dms.size(); ++i) {
+					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
+					const DataMoveMetaData& meta = dataMove->meta;
+					if (meta.ranges.empty()) {
+						// Any persisted datamove with an empty range must be an tombstone persisted by
+						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
+						// and this datamove must be in DataMoveMetaData::Deleting state
+						// A datamove without processed by a background cleanup must have a non-empty range
+						// For this case, we simply clear the range when dd init
+						ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
+						result->toCleanDataMoveTombstone.push_back(meta.id);
+						continue;
 					}
-
-					result->bulkLoadMode = 0;
-					Optional<Value> bulkLoadMode = co_await tr.get(bulkLoadModeKey);
-					if (bulkLoadMode.present()) {
-						BinaryReader rd(bulkLoadMode.get(), Unversioned());
-						rd >> result->bulkLoadMode;
-					}
-					TraceEvent(SevInfo, "DDBulkLoadEngineInitMode").detail("Mode", result->bulkLoadMode);
-
-					result->bulkDumpMode = 0;
-					Optional<Value> bulkDumpMode = co_await tr.get(bulkDumpModeKey);
-					if (bulkDumpMode.present()) {
-						BinaryReader rd(bulkDumpMode.get(), Unversioned());
-						rd >> result->bulkDumpMode;
-					}
-					TraceEvent(SevInfo, "DDBulkDumpInitMode").detail("Mode", result->bulkDumpMode);
-
-					Future<std::vector<ProcessData>> workers = getWorkers(&tr);
-					Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-					co_await (success(workers) && success(serverList));
-					ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
-
-					std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
-					for (int i = 0; i < workers.get().size(); i++)
-						id_data[workers.get()[i].locality.processId()] = workers.get()[i];
-
-					for (int i = 0; i < serverList.get().size(); i++) {
-						auto ssi = decodeServerListValue(serverList.get()[i].value);
-						if (!ssi.isTss()) {
-							result->allServers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
-							server_dc[ssi.id()] = ssi.locality.dcId();
+					ASSERT(!meta.ranges.empty());
+					for (const UID& id : meta.src) {
+						auto& dc = server_dc[id];
+						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+							dataMove->remoteSrc.push_back(id);
 						} else {
-							tss_servers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
+							dataMove->primarySrc.push_back(id);
 						}
 					}
-
-					RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
-					ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
-					// For each data move, find out the src or dst servers are in primary or remote DC.
-					for (int i = 0; i < dms.size(); ++i) {
-						auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
-						const DataMoveMetaData& meta = dataMove->meta;
-						if (meta.ranges.empty()) {
-							// Any persisted datamove with an empty range must be an tombstone persisted by
-							// a background cleanup (with retry_clean_up_datamove_tombstone_added),
-							// and this datamove must be in DataMoveMetaData::Deleting state
-							// A datamove without processed by a background cleanup must have a non-empty range
-							// For this case, we simply clear the range when dd init
-							ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
-							result->toCleanDataMoveTombstone.push_back(meta.id);
-							continue;
+					for (const UID& id : meta.dest) {
+						auto& dc = server_dc[id];
+						if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+							dataMove->remoteDest.push_back(id);
+						} else {
+							dataMove->primaryDest.push_back(id);
 						}
-						ASSERT(!meta.ranges.empty());
-						for (const UID& id : meta.src) {
-							auto& dc = server_dc[id];
-							if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
-								dataMove->remoteSrc.push_back(id);
-							} else {
-								dataMove->primarySrc.push_back(id);
-							}
-						}
-						for (const UID& id : meta.dest) {
-							auto& dc = server_dc[id];
-							if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
-								dataMove->remoteDest.push_back(id);
-							} else {
-								dataMove->primaryDest.push_back(id);
-							}
-						}
-						std::sort(dataMove->primarySrc.begin(), dataMove->primarySrc.end());
-						std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
-						std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
-						std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
-
-						auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
-						for (auto& r : ranges) {
-							ASSERT(!r.value()->valid);
-						}
-						result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
-						++numDataMoves;
 					}
+					std::sort(dataMove->primarySrc.begin(), dataMove->primarySrc.end());
+					std::sort(dataMove->remoteSrc.begin(), dataMove->remoteSrc.end());
+					std::sort(dataMove->primaryDest.begin(), dataMove->primaryDest.end());
+					std::sort(dataMove->remoteDest.begin(), dataMove->remoteDest.end());
 
-					succeeded = true;
-
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+					auto ranges = result->dataMoveMap.intersectingRanges(meta.ranges.front());
+					for (auto& r : ranges) {
+						ASSERT(!r.value()->valid);
+					}
+					result->dataMoveMap.insert(meta.ranges.front(), std::move(dataMove));
+					++numDataMoves;
 				}
-				if (hasErr) {
-					TraceEvent("GetInitialTeamsRetry", distributorId).error(err);
-					co_await tr.onError(err);
 
-					ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
-					                    // loop
-				}
+				succeeded = true;
+
+				break;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				TraceEvent("GetInitialTeamsRetry", distributorId).error(err);
+				co_await tr.onError(err);
+
+				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
+				                    // loop
 			}
 		}
 
@@ -489,104 +475,101 @@ class DDTxnProcessorImpl {
 			CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
 			while (true) {
 				succeeded = false;
-				{
-					Error err;
-					bool hasErr = false;
-					try {
-						tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						co_await checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState);
-						RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-						ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-						RangeResult keyServers = co_await krmGetRanges(&tr,
-						                                               keyServersPrefix,
-						                                               KeyRangeRef(beginKey, allKeys.end),
-						                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-						                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
-						succeeded = true;
+				Error err;
+				bool hasErr = false;
+				try {
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					co_await checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState);
+					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+					RangeResult keyServers = co_await krmGetRanges(&tr,
+					                                               keyServersPrefix,
+					                                               KeyRangeRef(beginKey, allKeys.end),
+					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
+					succeeded = true;
 
-						std::vector<UID> src, dest, last;
-						UID srcId, destId;
+					std::vector<UID> src, dest, last;
+					UID srcId, destId;
 
-						// for each range
-						for (int i = 0; i < keyServers.size() - 1; i++) {
-							decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
-							DDShardInfo info(keyServers[i].key, srcId, destId);
-							if (remoteDcIds.size()) {
-								auto srcIter = team_cache.find(src);
-								if (srcIter == team_cache.end()) {
-									for (auto& id : src) {
+					// for each range
+					for (int i = 0; i < keyServers.size() - 1; i++) {
+						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
+						DDShardInfo info(keyServers[i].key, srcId, destId);
+						if (remoteDcIds.size()) {
+							auto srcIter = team_cache.find(src);
+							if (srcIter == team_cache.end()) {
+								for (auto& id : src) {
+									auto& dc = server_dc[id];
+									if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+										info.remoteSrc.push_back(id);
+									} else {
+										info.primarySrc.push_back(id);
+									}
+								}
+								result->primaryTeams.insert(info.primarySrc);
+								result->remoteTeams.insert(info.remoteSrc);
+								team_cache[src] = std::make_pair(info.primarySrc, info.remoteSrc);
+							} else {
+								info.primarySrc = srcIter->second.first;
+								info.remoteSrc = srcIter->second.second;
+							}
+							if (dest.size()) {
+								info.hasDest = true;
+								auto destIter = team_cache.find(dest);
+								if (destIter == team_cache.end()) {
+									for (auto& id : dest) {
 										auto& dc = server_dc[id];
 										if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) !=
 										    remoteDcIds.end()) {
-											info.remoteSrc.push_back(id);
+											info.remoteDest.push_back(id);
 										} else {
-											info.primarySrc.push_back(id);
+											info.primaryDest.push_back(id);
 										}
 									}
-									result->primaryTeams.insert(info.primarySrc);
-									result->remoteTeams.insert(info.remoteSrc);
-									team_cache[src] = std::make_pair(info.primarySrc, info.remoteSrc);
+									result->primaryTeams.insert(info.primaryDest);
+									result->remoteTeams.insert(info.remoteDest);
+									team_cache[dest] = std::make_pair(info.primaryDest, info.remoteDest);
 								} else {
-									info.primarySrc = srcIter->second.first;
-									info.remoteSrc = srcIter->second.second;
-								}
-								if (dest.size()) {
-									info.hasDest = true;
-									auto destIter = team_cache.find(dest);
-									if (destIter == team_cache.end()) {
-										for (auto& id : dest) {
-											auto& dc = server_dc[id];
-											if (std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) !=
-											    remoteDcIds.end()) {
-												info.remoteDest.push_back(id);
-											} else {
-												info.primaryDest.push_back(id);
-											}
-										}
-										result->primaryTeams.insert(info.primaryDest);
-										result->remoteTeams.insert(info.remoteDest);
-										team_cache[dest] = std::make_pair(info.primaryDest, info.remoteDest);
-									} else {
-										info.primaryDest = destIter->second.first;
-										info.remoteDest = destIter->second.second;
-									}
-								}
-							} else {
-								info.primarySrc = src;
-								auto srcIter = team_cache.find(src);
-								if (srcIter == team_cache.end()) {
-									result->primaryTeams.insert(src);
-									team_cache[src] = std::pair<std::vector<UID>, std::vector<UID>>();
-								}
-								if (dest.size()) {
-									info.hasDest = true;
-									info.primaryDest = dest;
-									auto destIter = team_cache.find(dest);
-									if (destIter == team_cache.end()) {
-										result->primaryTeams.insert(dest);
-										team_cache[dest] = std::pair<std::vector<UID>, std::vector<UID>>();
-									}
+									info.primaryDest = destIter->second.first;
+									info.remoteDest = destIter->second.second;
 								}
 							}
-							result->shards.push_back(info);
+						} else {
+							info.primarySrc = src;
+							auto srcIter = team_cache.find(src);
+							if (srcIter == team_cache.end()) {
+								result->primaryTeams.insert(src);
+								team_cache[src] = std::pair<std::vector<UID>, std::vector<UID>>();
+							}
+							if (dest.size()) {
+								info.hasDest = true;
+								info.primaryDest = dest;
+								auto destIter = team_cache.find(dest);
+								if (destIter == team_cache.end()) {
+									result->primaryTeams.insert(dest);
+									team_cache[dest] = std::pair<std::vector<UID>, std::vector<UID>>();
+								}
+							}
 						}
-
-						ASSERT_GT(keyServers.size(), 0);
-						beginKey = keyServers.end()[-1].key;
-						break;
-					} catch (Error& e) {
-						err = e;
-						hasErr = true;
+						result->shards.push_back(info);
 					}
-					if (hasErr) {
-						TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(err);
 
-						co_await tr.onError(err);
-						ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in
-						                    // this loop
-					}
+					ASSERT_GT(keyServers.size(), 0);
+					beginKey = keyServers.end()[-1].key;
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(err);
+
+					co_await tr.onError(err);
+					ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in
+					                    // this loop
 				}
 			}
 
@@ -621,36 +604,34 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
-					if (!mode.present() && ddEnabledState->isEnabled()) {
+			Error err;
+			bool hasErr = false;
+			try {
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
+				if (!mode.present() && ddEnabledState->isEnabled()) {
+					TraceEvent("WaitForDDEnabledSucceeded").log();
+					co_return;
+				}
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					int m;
+					rd >> m;
+					TraceEvent(SevDebug, "WaitForDDEnabled")
+					    .detail("Mode", m)
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
 						co_return;
 					}
-					if (mode.present()) {
-						BinaryReader rd(mode.get(), Unversioned());
-						int m;
-						rd >> m;
-						TraceEvent(SevDebug, "WaitForDDEnabled")
-						    .detail("Mode", m)
-						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-						if (m && ddEnabledState->isEnabled()) {
-							TraceEvent("WaitForDDEnabledSucceeded").log();
-							co_return;
-						}
-					}
+				}
 
-					tr.reset();
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				tr.reset();
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -662,47 +643,45 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
-					if (!mode.present() && ddEnabledState->isEnabled())
-						co_return true;
-					if (mode.present()) {
-						BinaryReader rd(mode.get(), Unversioned());
-						int m;
-						rd >> m;
-						if (m && ddEnabledState->isEnabled()) {
-							TraceEvent(SevDebug, "IsDDEnabledSucceeded")
-							    .detail("Mode", m)
-							    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-							co_return true;
-						}
-					}
-					// SOMEDAY: Write a wrapper in MoveKeys.actor.h
-					Optional<Value> readVal = co_await tr.get(moveKeysLockOwnerKey);
-					UID currentOwner =
-					    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-					if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
+			Error err;
+			bool hasErr = false;
+			try {
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
+				if (!mode.present() && ddEnabledState->isEnabled())
+					co_return true;
+				if (mode.present()) {
+					BinaryReader rd(mode.get(), Unversioned());
+					int m;
+					rd >> m;
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
-						    .detail("CurrentOwner", currentOwner)
-						    .detail("DDModeLock", dataDistributionModeLock)
+						    .detail("Mode", m)
 						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 						co_return true;
 					}
-					TraceEvent(SevDebug, "IsDDEnabledFailed")
+				}
+				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
+				Optional<Value> readVal = co_await tr.get(moveKeysLockOwnerKey);
+				UID currentOwner =
+				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
+					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 					    .detail("CurrentOwner", currentOwner)
 					    .detail("DDModeLock", dataDistributionModeLock)
 					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-					co_return false;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+					co_return true;
 				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+				TraceEvent(SevDebug, "IsDDEnabledFailed")
+				    .detail("CurrentOwner", currentOwner)
+				    .detail("DDModeLock", dataDistributionModeLock)
+				    .detail("IsDDEnabled", ddEnabledState->isEnabled());
+				co_return false;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -715,19 +694,17 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				{
-					Error err;
-					bool hasErr = false;
-					try {
-						co_await checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState);
-						break;
-					} catch (Error& e) {
-						err = e;
-						hasErr = true;
-					}
-					if (hasErr) {
-						co_await tr.onError(err);
-					}
+				Error err;
+				bool hasErr = false;
+				try {
+					co_await checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState);
+					break;
+				} catch (Error& e) {
+					err = e;
+					hasErr = true;
+				}
+				if (hasErr) {
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -760,22 +737,20 @@ class DDTxnProcessorImpl {
 	static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
 		ReadYourWritesTransaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
-					co_await tr.commit();
-					co_await watchFuture;
-					co_return;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr.onError(err);
-				}
+			Error err;
+			bool hasErr = false;
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+				co_await tr.commit();
+				co_await watchFuture;
+				co_return;
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
@@ -786,39 +761,37 @@ class DDTxnProcessorImpl {
 	                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
 		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Version ver = co_await tr->getReadVersion();
+			Error err;
+			bool hasErr = false;
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Version ver = co_await tr->getReadVersion();
 
-					// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery
-					// could cause us to not store the mutations sent to the short lived storage server.
-					if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-						bool canRemove = co_await canRemoveStorageServer(tr, serverID);
-						auto shards = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
-						TraceEvent(SevVerbose, "WaitForAllDataRemoved")
-						    .detail("Server", serverID)
-						    .detail("CanRemove", canRemove)
-						    .detail("Shards", shards);
-						ASSERT_GE(shards, 0);
-						if (canRemove && shards == 0) {
-							co_return;
-						}
+				// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery
+				// could cause us to not store the mutations sent to the short lived storage server.
+				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+					bool canRemove = co_await canRemoveStorageServer(tr, serverID);
+					auto shards = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
+					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					    .detail("Server", serverID)
+					    .detail("CanRemove", canRemove)
+					    .detail("Shards", shards);
+					ASSERT_GE(shards, 0);
+					if (canRemove && shards == 0) {
+						co_return;
 					}
+				}
 
-					// Wait for any change to the serverKeys for this server
-					co_await delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution);
-					tr->reset();
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
-				}
-				if (hasErr) {
-					co_await tr->onError(err);
-				}
+				// Wait for any change to the serverKeys for this server
+				co_await delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution);
+				tr->reset();
+			} catch (Error& e) {
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 	}
