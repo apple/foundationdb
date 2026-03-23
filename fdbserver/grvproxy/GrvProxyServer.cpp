@@ -1,5 +1,5 @@
 /*
- * GrvProxyServer.actor.cpp
+ * GrvProxyServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -27,7 +27,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbserver/grvproxy/GrvProxyServer.actor.h"
+#include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "GrvProxyTagThrottler.h"
 #include "GrvTransactionRateInfo.h"
 #include "fdbserver/core/LogSystem.h"
@@ -40,7 +40,7 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
 
 struct GrvProxyStats {
@@ -263,17 +263,15 @@ struct GrvProxyData {
 	}
 };
 
-ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
-                                              GetHealthMetricsReply* healthMetricsReply,
-                                              GetHealthMetricsReply* detailedHealthMetricsReply) {
-	loop {
-		choose {
-			when(GetHealthMetricsRequest req = waitNext(grvProxy.getHealthMetrics.getFuture())) {
-				if (req.detailed)
-					req.reply.send(*detailedHealthMetricsReply);
-				else
-					req.reply.send(*healthMetricsReply);
-			}
+Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
+                                        GetHealthMetricsReply* healthMetricsReply,
+                                        GetHealthMetricsReply* detailedHealthMetricsReply) {
+	while (true) {
+		GetHealthMetricsRequest req = co_await grvProxy.getHealthMetrics.getFuture();
+		if (req.detailed) {
+			req.reply.send(*detailedHealthMetricsReply);
+		} else {
+			req.reply.send(*healthMetricsReply);
 		}
 	}
 }
@@ -281,24 +279,23 @@ ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
 // Older FDB versions used different keys for client profiling data. This
 // function performs a one-time migration of data in these keys to the new
 // global configuration key space.
-ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
-	state Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
+	Key migratedKey("\xff\x02/fdbClientInfo/migrated/"_sr);
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
 	try {
-		loop {
+		while (true) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
+			Error err;
 			try {
-				state Optional<Value> migrated = wait(tr->get(migratedKey));
+				Optional<Value> migrated = co_await tr->get(migratedKey);
 				if (migrated.present()) {
 					// Already performed migration.
 					break;
 				}
 
-				state Optional<Value> sampleRate =
-				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
-				state Optional<Value> sizeLimit =
-				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
+				Optional<Value> sampleRate = co_await tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr));
+				Optional<Value> sizeLimit = co_await tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr));
 
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// The value doesn't matter too much, as long as the key is set.
@@ -316,53 +313,55 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 					tr->set(GlobalConfig::prefixedKey(fdbClientInfoTxnSizeLimit), size.pack());
 				}
 
-				wait(tr->commit());
+				co_await tr->commit();
 				break;
 			} catch (Error& e) {
 				// Multiple GRV proxies may attempt this migration at the same
 				// time, sometimes resulting in aborts due to conflicts.
 				TraceEvent(SevInfo, "GlobalConfigRetryableMigrationError").errorUnsuppressed(e).suppressFor(1.0);
-				wait(tr->onError(e));
+				err = e;
 			}
+			co_await tr->onError(err);
 		}
 	} catch (Error& e) {
 		// Catch non-retryable errors (and do nothing).
 		TraceEvent(SevWarnAlways, "GlobalConfigMigrationError").error(e);
 	}
-	return Void();
 }
 
 // Periodically refresh local copy of global configuration.
-ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
-	loop {
+Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cachedVersion, RangeResult* cachedData) {
+	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(grvProxyData->cx);
+	while (true) {
+		Error err;
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
-			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
-			state Optional<Value> globalConfigVersion = wait(globalConfigVersionFuture);
-			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
+			Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
+			Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
+			Optional<Value> globalConfigVersion = co_await globalConfigVersionFuture;
+			RangeResult tmpCachedData = co_await tmpCachedDataFuture;
 			*cachedData = tmpCachedData;
 			if (globalConfigVersion.present()) {
 				Version parsedVersion;
 				memcpy(&parsedVersion, globalConfigVersion.get().begin(), sizeof(Version));
 				*cachedVersion = bigEndian64(parsedVersion);
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 }
 
 // Handle common GlobalConfig transactions on the server side, because not all
 // clients are allowed to read system keys. Eventually, this could become its
 // own role.
-ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
-	state ActorCollection actors(false);
-	state Future<Void> refreshFuture; // so there is only one running attempt
-	state Version cachedVersion = 0;
-	state RangeResult cachedData;
+Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInterface grvProxy) {
+	ActorCollection actors(false);
+	Future<Void> refreshFuture; // so there is only one running attempt
+	Version cachedVersion = 0;
+	RangeResult cachedData;
 
 	// Attempt to refresh the global configuration while the migration is
 	// ongoing. This is a small optimization to avoid waiting for the migration
@@ -373,59 +372,62 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
 
 	// Run one-time migration to support upgrades.
-	wait(success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT)));
+	co_await success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT));
 
-	loop {
-		choose {
-			when(GlobalConfigRefreshRequest refresh = waitNext(grvProxy.refreshGlobalConfig.getFuture())) {
-				// Must have an up to date copy of global configuration in
-				// order to serve it to the client (up to date from the clients
-				// point of view. The client learns the version through a
-				// ClientDBInfo update).
-				if (refresh.lastKnown <= cachedVersion) {
-					refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedVersion, cachedData });
-				} else {
-					refresh.reply.sendError(future_version());
-				}
+	while (true) {
+		auto res = co_await race(grvProxy.refreshGlobalConfig.getFuture(), refreshFuture, actors.getResult());
+		if (res.index() == 0) {
+			GlobalConfigRefreshRequest refresh = std::get<0>(std::move(res));
+
+			// Must have an up to date copy of global configuration in
+			// order to serve it to the client (up to date from the clients
+			// point of view. The client learns the version through a
+			// ClientDBInfo update).
+			if (refresh.lastKnown <= cachedVersion) {
+				refresh.reply.send(GlobalConfigRefreshReply{ cachedData.arena(), cachedVersion, cachedData });
+			} else {
+				refresh.reply.sendError(future_version());
 			}
-			when(wait(refreshFuture)) {
-				refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
-				                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
-				                        Void()) &&
-				                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
-			}
-			when(wait(actors.getResult())) {
-				ASSERT(false);
-			}
+		} else if (res.index() == 1) {
+			// refreshFuture fired
+			refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
+			                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
+			                        Void()) &&
+			                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
+		} else if (res.index() == 2) {
+			// actors.getResult() should never return
+			ASSERT(false);
 		}
 	}
 }
 
 // Get transaction rate info from RateKeeper.
-ACTOR Future<Void> getRate(UID myID,
-                           Reference<AsyncVar<ServerDBInfo> const> db,
-                           int64_t* inTransactionCount,
-                           int64_t* inBatchTransactionCount,
-                           GrvTransactionRateInfo* transactionRateInfo,
-                           GrvTransactionRateInfo* batchTransactionRateInfo,
-                           GetHealthMetricsReply* healthMetricsReply,
-                           GetHealthMetricsReply* detailedHealthMetricsReply,
-                           TransactionTagMap<uint64_t>* transactionTagCounter,
-                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
-                           GrvProxyStats* stats,
-                           GrvProxyData* proxyData) {
-	state Future<Void> nextRequestTimer = Never();
-	state Future<Void> leaseTimeout = Never();
-	state Future<GetRateInfoReply> reply = Never();
-	state double lastDetailedReply = 0.0; // request detailed metrics immediately
-	state bool expectingDetailedReply = false;
+Future<Void> getRate(UID myID,
+                     Reference<AsyncVar<ServerDBInfo> const> db,
+                     int64_t* inTransactionCount,
+                     int64_t* inBatchTransactionCount,
+                     GrvTransactionRateInfo* transactionRateInfo,
+                     GrvTransactionRateInfo* batchTransactionRateInfo,
+                     GetHealthMetricsReply* healthMetricsReply,
+                     GetHealthMetricsReply* detailedHealthMetricsReply,
+                     TransactionTagMap<uint64_t>* transactionTagCounter,
+                     PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
+                     GrvProxyStats* stats,
+                     GrvProxyData* proxyData) {
+	Future<Void> nextRequestTimer = Never();
+	Future<Void> leaseTimeout = Never();
+	Future<GetRateInfoReply> reply = Never();
+	double lastDetailedReply = 0.0; // request detailed metrics immediately
+	bool expectingDetailedReply = false;
 	// state int64_t lastTC = 0;
 
 	if (db->get().ratekeeper.present()) {
 		nextRequestTimer = Void();
 	}
-	loop choose {
-		when(wait(db->onChange())) {
+	while (true) {
+		auto res = co_await race(db->onChange(), nextRequestTimer, reply, leaseTimeout);
+		if (res.index() == 0) {
+
 			if (db->get().ratekeeper.present()) {
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
 				nextRequestTimer = Void(); // trigger GetRate request
@@ -434,8 +436,8 @@ ACTOR Future<Void> getRate(UID myID,
 				nextRequestTimer = Never();
 				reply = Never();
 			}
-		}
-		when(wait(nextRequestTimer)) {
+		} else if (res.index() == 1) {
+
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
@@ -448,8 +450,9 @@ ACTOR Future<Void> getRate(UID myID,
 			                                                                       detailed)));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
-		}
-		when(GetRateInfoReply rep = wait(reply)) {
+		} else if (res.index() == 2) {
+			GetRateInfoReply rep = std::get<2>(std::move(res));
+
 			reply = Never();
 
 			transactionRateInfo->setRate(rep.transactionRate);
@@ -475,14 +478,16 @@ ACTOR Future<Void> getRate(UID myID,
 			if (rep.proxyThrottledTags.present()) {
 				proxyData->tagThrottler.updateRates(rep.proxyThrottledTags.get());
 			}
-		}
-		when(wait(leaseTimeout)) {
+		} else if (res.index() == 3) {
+
 			transactionRateInfo->disable();
 			batchTransactionRateInfo->disable();
 			++stats->leaseTimeouts;
 			TraceEvent(SevWarn, "GrvProxyRateLeaseExpired", myID).suppressFor(5.0);
 			//TraceEvent("GrvProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 			leaseTimeout = Never();
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
@@ -511,22 +516,25 @@ void dropRequestFromQueue(Deque<GetReadVersionRequest>* queue, GrvProxyStats* st
 }
 
 // Put a GetReadVersion request into the queue corresponding to its priority.
-ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const> db,
-                                               Deque<GetReadVersionRequest>* systemQueue,
-                                               Deque<GetReadVersionRequest>* defaultQueue,
-                                               Deque<GetReadVersionRequest>* batchQueue,
-                                               FutureStream<GetReadVersionRequest> readVersionRequests,
-                                               PromiseStream<Void> GRVTimer,
-                                               double* lastGRVTime,
-                                               double* GRVBatchTime,
-                                               FutureStream<double> normalGRVLatency,
-                                               GrvProxyStats* stats,
-                                               GrvTransactionRateInfo* batchRateInfo,
-                                               GrvProxyTagThrottler* tagThrottler) {
+Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const> db,
+                                         Deque<GetReadVersionRequest>* systemQueue,
+                                         Deque<GetReadVersionRequest>* defaultQueue,
+                                         Deque<GetReadVersionRequest>* batchQueue,
+                                         FutureStream<GetReadVersionRequest> readVersionRequests,
+                                         PromiseStream<Void> GRVTimer,
+                                         double* lastGRVTime,
+                                         double* GRVBatchTime,
+                                         FutureStream<double> normalGRVLatency,
+                                         GrvProxyStats* stats,
+                                         GrvTransactionRateInfo* batchRateInfo,
+                                         GrvProxyTagThrottler* tagThrottler) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
-	loop choose {
-		when(GetReadVersionRequest req = waitNext(readVersionRequests)) {
+	while (true) {
+		auto res = co_await race(readVersionRequests, normalGRVLatency);
+		if (res.index() == 0) {
+			GetReadVersionRequest req = std::get<0>(std::move(res));
+
 			// auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
 			// getCurrentLineage()->modify(&TransactionLineage::txID) =
 			// WARNING: this code is run at a high priority, so it needs to do as little work as possible
@@ -613,36 +621,39 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 				}
 			}
 		}
-		// dynamic batching monitors reply latencies
-		when(double reply_latency = waitNext(normalGRVLatency)) {
+		// Dynamic batching monitors reply latencies.
+		else if (res.index() == 1) {
+			double reply_latency = std::get<1>(std::move(res));
+
 			double target_latency = reply_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
 			*GRVBatchTime = std::max(
 			    SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN,
 			    std::min(SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX,
 			             target_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 			                 *GRVBatchTime * (1 - SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
+		} else {
+			UNREACHABLE();
 		}
 	}
 }
 
-ACTOR Future<Void> updateLastCommit(GrvProxyData* self, Optional<UID> debugID = Optional<UID>()) {
-	state double confirmStart = now();
+Future<Void> updateLastCommit(GrvProxyData* self, Optional<UID> debugID = Optional<UID>()) {
+	double confirmStart = now();
 	self->lastStartCommit = confirmStart;
 	self->updateCommitRequests++;
-	wait(self->logSystem->confirmEpochLive(debugID));
+	co_await self->logSystem->confirmEpochLive(debugID);
 	self->updateCommitRequests--;
 	self->lastCommitLatency = now() - confirmStart;
 	self->lastCommitTime = std::max(self->lastCommitTime.get(), confirmStart);
-	return Void();
 }
 
-ACTOR Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Void>> addActor) {
-	loop {
+Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Void>> addActor) {
+	while (true) {
 		double interval = std::max(SERVER_KNOBS->MIN_CONFIRM_INTERVAL,
 		                           (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION - self->lastCommitLatency) / 2.0);
 		double elapsed = now() - self->lastStartCommit;
 		if (elapsed < interval) {
-			wait(delay(interval + 0.0001 - elapsed));
+			co_await delay(interval + 0.0001 - elapsed);
 		} else {
 			// May want to change the default value of MAX_COMMIT_UPDATES since we don't have
 			if (self->updateCommitRequests < SERVER_KNOBS->MAX_COMMIT_UPDATES) {
@@ -656,39 +667,39 @@ ACTOR Future<Void> lastCommitUpdater(GrvProxyData* self, PromiseStream<Future<Vo
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spanContexts,
-                                                          GrvProxyData* grvProxyData,
-                                                          uint32_t flags,
-                                                          Optional<UID> debugID,
-                                                          int transactionCount,
-                                                          int systemTransactionCount,
-                                                          int defaultPriTransactionCount,
-                                                          int batchPriTransactionCount) {
+Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContext> spanContexts,
+                                                    GrvProxyData* grvProxyData,
+                                                    uint32_t flags,
+                                                    Optional<UID> debugID,
+                                                    int transactionCount,
+                                                    int systemTransactionCount,
+                                                    int defaultPriTransactionCount,
+                                                    int batchPriTransactionCount) {
 	// Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit
 	// response) when this request was sent (1) The version returned is the committedVersion of some proxy at some point
 	// before the request returns, so it is committed. (2) No proxy on our list reported committed a higher version
 	// before this request was received, because then its committedVersion would have been higher,
 	//     and no other proxy could have already committed anything without first ending the epoch
-	state Span span("GP:getLiveCommittedVersion"_loc);
+	Span span("GP:getLiveCommittedVersion"_loc);
 	for (const SpanContext& spanContext : spanContexts) {
 		span.addLink(spanContext);
 	}
 	++grvProxyData->stats.txnStartBatch;
 
-	state double grvStart = now();
-	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
+	double grvStart = now();
+	Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
 	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
 	    TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
-		wait(transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed()));
+		co_await transformError(updateLastCommit(grvProxyData, debugID), broken_promise(), tlog_failed());
 	} else if (SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > 0 &&
 	           now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION > grvProxyData->lastCommitTime.get()) {
-		wait(grvProxyData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION));
+		co_await grvProxyData->lastCommitTime.whenAtLeast(now() - SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION);
 	}
 
-	state double grvConfirmEpochLive = now();
+	double grvConfirmEpochLive = now();
 	grvProxyData->stats.grvConfirmEpochLiveDist->sampleSeconds(grvConfirmEpochLive - grvStart);
 	if (debugID.present()) {
 		g_traceBatch.addEvent(
@@ -696,7 +707,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContex
 	}
 
 	GetRawCommittedVersionReply repFromMaster =
-	    wait(transformError(replyFromMasterFuture, broken_promise(), master_failed()));
+	    co_await transformError(replyFromMasterFuture, broken_promise(), master_failed());
 	grvProxyData->version = std::max(grvProxyData->version, repFromMaster.version);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
@@ -727,21 +738,20 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(std::vector<SpanContex
 	grvProxyData->stats.txnDefaultPriorityStartOut += defaultPriTransactionCount;
 	grvProxyData->stats.txnBatchPriorityStartOut += batchPriTransactionCount;
 
-	return rep;
+	co_return rep;
 }
 
 // Returns the current read version (or minimum known committed version if requested),
 // to each request in the provided list. Also check if the request should be throttled.
 // Update GRV statistics according to the request's priority.
-ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
-                                  std::vector<GetReadVersionRequest> requests,
-                                  GrvProxyData* grvProxyData,
-                                  GrvProxyStats* stats,
-                                  Version minKnownCommittedVersion,
-                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags,
-                                  int64_t midShardSize = 0) {
-	GetReadVersionReply _reply = wait(replyFuture);
-	GetReadVersionReply reply = _reply;
+Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
+                            std::vector<GetReadVersionRequest> requests,
+                            GrvProxyData* grvProxyData,
+                            GrvProxyStats* stats,
+                            Version minKnownCommittedVersion,
+                            PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags,
+                            int64_t midShardSize = 0) {
+	GetReadVersionReply reply = co_await replyFuture;
 	Version replyVersion = reply.version;
 
 	double end = g_network->timer();
@@ -814,45 +824,44 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Future<Void> nextRequestTimer = Never();
-	state Future<GetDataDistributorMetricsReply> nextReply = Never();
+Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<ServerDBInfo> const> db) {
+	Future<Void> nextRequestTimer = Never();
+	Future<GetDataDistributorMetricsReply> nextReply = Never();
 
 	if (db->get().distributor.present()) {
 		nextRequestTimer = Void();
 	}
-	loop {
+	while (true) {
 		try {
-			choose {
-				when(wait(db->onChange())) {
-					if (db->get().distributor.present()) {
-						TraceEvent("DataDistributorChanged", db->get().id)
-						    .detail("DDID", db->get().distributor.get().id());
-						nextRequestTimer = Void();
-					} else {
-						TraceEvent("DataDistributorDied", db->get().id);
-						nextRequestTimer = Never();
-					}
-					nextReply = Never();
-				}
-				when(wait(nextRequestTimer)) {
+			auto res = co_await race(db->onChange(), nextRequestTimer, nextReply);
+			if (res.index() == 0) {
+				if (db->get().distributor.present()) {
+					TraceEvent("DataDistributorChanged", db->get().id).detail("DDID", db->get().distributor.get().id());
+					nextRequestTimer = Void();
+				} else {
+					TraceEvent("DataDistributorDied", db->get().id);
 					nextRequestTimer = Never();
-					if (db->get().distributor.present()) {
-						nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
-						    GetDataDistributorMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
-					} else
-						nextReply = Never();
 				}
-				when(GetDataDistributorMetricsReply reply = wait(nextReply)) {
+				nextReply = Never();
+			} else if (res.index() == 1) {
+				nextRequestTimer = Never();
+				if (db->get().distributor.present()) {
+					nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
+					    GetDataDistributorMetricsRequest(normalKeys, CLIENT_KNOBS->TOO_MANY, true)));
+				} else {
 					nextReply = Never();
-					ASSERT(reply.midShardSize.present());
-					*midShardSize = reply.midShardSize.get();
-					nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
 				}
+			} else if (res.index() == 2) {
+				GetDataDistributorMetricsReply reply = std::get<2>(std::move(res));
+
+				nextReply = Never();
+				ASSERT(reply.midShardSize.present());
+				*midShardSize = reply.midShardSize.get();
+				nextRequestTimer = delay(CLIENT_KNOBS->MID_SHARD_SIZE_MAX_STALENESS);
+			} else {
+				UNREACHABLE();
 			}
 		} catch (Error& e) {
 			TraceEvent("DDMidShardSizeUpdateFail").error(e);
@@ -865,35 +874,35 @@ ACTOR Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<Asyn
 	}
 }
 
-ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
-                                             Reference<AsyncVar<ServerDBInfo> const> db,
-                                             PromiseStream<Future<Void>> addActor,
-                                             GrvProxyData* grvProxyData,
-                                             GetHealthMetricsReply* healthMetricsReply,
-                                             GetHealthMetricsReply* detailedHealthMetricsReply) {
-	state double lastGRVTime = 0;
-	state PromiseStream<Void> GRVTimer;
-	state double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
+static Future<Void> transactionStarter(GrvProxyInterface proxy,
+                                       Reference<AsyncVar<ServerDBInfo> const> db,
+                                       PromiseStream<Future<Void>> addActor,
+                                       GrvProxyData* grvProxyData,
+                                       GetHealthMetricsReply* healthMetricsReply,
+                                       GetHealthMetricsReply* detailedHealthMetricsReply) {
+	double lastGRVTime = 0;
+	PromiseStream<Void> GRVTimer;
+	double GRVBatchTime = SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MIN;
 
-	state int64_t transactionCount = 0;
-	state int64_t batchTransactionCount = 0;
-	state GrvTransactionRateInfo normalRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
-	                                            SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
-	                                            /*rate=*/10);
-	state GrvTransactionRateInfo batchRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
-	                                           SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
-	                                           /*rate=*/0);
+	int64_t transactionCount = 0;
+	int64_t batchTransactionCount = 0;
+	GrvTransactionRateInfo normalRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
+	                                      SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
+	                                      /*rate=*/10);
+	GrvTransactionRateInfo batchRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
+	                                     SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
+	                                     /*rate=*/0);
 
-	state Deque<GetReadVersionRequest> systemQueue;
-	state Deque<GetReadVersionRequest> defaultQueue;
-	state Deque<GetReadVersionRequest> batchQueue;
+	Deque<GetReadVersionRequest> systemQueue;
+	Deque<GetReadVersionRequest> defaultQueue;
+	Deque<GetReadVersionRequest> batchQueue;
 
-	state TransactionTagMap<uint64_t> transactionTagCounter;
-	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags;
+	TransactionTagMap<uint64_t> transactionTagCounter;
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags;
 
-	state PromiseStream<double> normalGRVLatency;
+	PromiseStream<double> normalGRVLatency;
 
-	state int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
+	int64_t midShardSize = SERVER_KNOBS->MIN_SHARD_BYTES;
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
@@ -925,15 +934,15 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
 	       db->get().client.grvProxies.end()) {
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 
 	ASSERT(db->get().recoveryState >=
 	       RecoveryState::ACCEPTING_COMMITS); // else potentially we could return uncommitted read versions from master.
 	TraceEvent("GrvProxyReadyForTxnStarts", proxy.id());
 
-	loop {
-		waitNext(GRVTimer.getFuture());
+	while (true) {
+		co_await GRVTimer.getFuture();
 		// Select zero or more transactions to start
 		double t = now();
 		double elapsed = now() - lastGRVTime;
@@ -1114,17 +1123,17 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	}
 }
 
-ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
-                                      MasterInterface master,
-                                      LifetimeToken masterLifetime,
-                                      Reference<AsyncVar<ServerDBInfo> const> db) {
-	state GrvProxyData grvProxyData(proxy.id(), master, proxy.getConsistentReadVersion, db);
+Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
+                                MasterInterface master,
+                                LifetimeToken masterLifetime,
+                                Reference<AsyncVar<ServerDBInfo> const> db) {
+	GrvProxyData grvProxyData(proxy.id(), master, proxy.getConsistentReadVersion, db);
 
-	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> onError = actorCollection(addActor.getFuture());
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> onError = actorCollection(addActor.getFuture());
 
-	state GetHealthMetricsReply healthMetricsReply;
-	state GetHealthMetricsReply detailedHealthMetricsReply;
+	GetHealthMetricsReply healthMetricsReply;
+	GetHealthMetricsReply detailedHealthMetricsReply;
 
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::GRV_PROXY, proxy.id()));
@@ -1137,10 +1146,10 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
 	         grvProxyData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS)) {
-		wait(grvProxyData.db->onChange());
+		co_await grvProxyData.db->onChange();
 	}
 	// Do we need to wait for any db info change? Yes. To update latency band.
-	state Future<Void> dbInfoChange = grvProxyData.db->onChange();
+	Future<Void> dbInfoChange = grvProxyData.db->onChange();
 	grvProxyData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
 
 	grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
@@ -1154,40 +1163,37 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 		addActor.send(lastCommitUpdater(&grvProxyData, addActor));
 	}
 
-	loop choose {
-		when(wait(dbInfoChange)) {
-			dbInfoChange = grvProxyData.db->onChange();
+	while (true) {
+		co_await waitOrError(dbInfoChange, onError);
+		dbInfoChange = grvProxyData.db->onChange();
 
-			if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
-			    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
-				grvProxyData.logSystem =
-				    makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
-			}
-			grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
+		if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
+		    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
+			grvProxyData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
 		}
-		when(wait(onError)) {}
+		grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
-                                uint64_t recoveryCount,
-                                GrvProxyInterface myInterface) {
-	loop {
+Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
+                          uint64_t recoveryCount,
+                          GrvProxyInterface myInterface) {
+	while (true) {
 		if (db->get().recoveryCount >= recoveryCount &&
 		    std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), myInterface) ==
 		        db->get().client.grvProxies.end()) {
 			throw worker_removed();
 		}
-		wait(db->onChange());
+		co_await db->onChange();
 	}
 }
 
-ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
-                                  InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo> const> db) {
+Future<Void> grvProxyServer(GrvProxyInterface proxy,
+                            InitializeGrvProxyRequest req,
+                            Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
-		state Future<Void> core = grvProxyServerCore(proxy, req.master, req.masterLifetime, db);
-		wait(core || checkRemoved(db, req.recoveryCount, proxy));
+		Future<Void> core = grvProxyServerCore(proxy, req.master, req.masterLifetime, db);
+		co_await (core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
 		TraceEvent("GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
 		ASSERT(e.code() !=
@@ -1201,5 +1207,4 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
 			throw;
 		}
 	}
-	return Void();
 }

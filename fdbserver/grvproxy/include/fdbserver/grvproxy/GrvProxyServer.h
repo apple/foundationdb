@@ -1,5 +1,5 @@
 /*
- * GrvProxyServer.actor.h
+ * GrvProxyServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,22 +19,13 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_GRVPROXYSERVER_ACTOR_G_H)
-#define FDBSERVER_GRVPROXYSERVER_ACTOR_G_H
-#include "fdbserver/grvproxy/GrvProxyServer.actor.g.h"
-#elif !defined(FDBSERVER_GRVPROXYSERVER_ACTOR_H)
-#define FDBSERVER_GRVPROXYSERVER_ACTOR_H
 
 #include "fdbclient/GrvProxyInterface.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct InitializeGrvProxyRequest;
 struct ServerDBInfo;
 
-ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
-                                  InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo> const> db);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> grvProxyServer(GrvProxyInterface proxy,
+                            InitializeGrvProxyRequest req,
+                            Reference<AsyncVar<ServerDBInfo> const> db);
