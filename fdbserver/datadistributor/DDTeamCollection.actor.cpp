@@ -2700,11 +2700,11 @@ public:
 		}
 	}
 
-	static Future<Void> initializeStorage(DDTeamCollection* self,
-	                                      RecruitStorageReply candidateWorker,
-	                                      const DDEnabledState* ddEnabledState,
-	                                      bool recruitTss,
-	                                      Reference<TSSPairState> tssState) {
+	ACTOR static Future<Void> initializeStorage(DDTeamCollection* self,
+	                                            RecruitStorageReply candidateWorker,
+	                                            const DDEnabledState* ddEnabledState,
+	                                            bool recruitTss,
+	                                            Reference<TSSPairState> tssState) {
 		// SOMEDAY: Cluster controller waits for availability, retry quickly if a server's Locality changes
 		self->recruitingStream.set(self->recruitingStream.get() + 1);
 
@@ -2716,14 +2716,14 @@ public:
 			// Only allow at most 2 storage servers on an address, because
 			// too many storage server on the same address (i.e., process) can cause OOM.
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
-			UID interfaceId = deterministicRandom()->randomUniqueID();
+			state UID interfaceId = deterministicRandom()->randomUniqueID();
 
 			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
 			// same storage
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
-			InitializeStorageRequest isr;
+			state InitializeStorageRequest isr;
 			isr.storeType = recruitTss ? self->configuration.testingStorageServerStoreType
 			                           : self->configuration.storageServerStoreType;
 
@@ -2747,7 +2747,7 @@ public:
 			isr.interfaceId = interfaceId;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
-			bool doRecruit = true;
+			state bool doRecruit = true;
 			if (recruitTss) {
 				TraceEvent("TSS_Recruit", self->distributorId)
 				    .detail("ReqID", isr.reqId)
@@ -2757,7 +2757,7 @@ public:
 				    .detail("TSSLocality", candidateWorker.worker.locality.toString())
 				    .detail("Primary", self->primary);
 
-				Optional<std::pair<UID, Version>> ssPairInfoResult = co_await tssState->waitOnSS();
+				Optional<std::pair<UID, Version>> ssPairInfoResult = wait(tssState->waitOnSS());
 				if (ssPairInfoResult.present()) {
 					isr.tssPairIDAndVersion = ssPairInfoResult.get();
 
@@ -2800,7 +2800,7 @@ public:
 			        ? candidateWorker.worker.storage.tryGetReply(isr, TaskPriority::DataDistribution)
 			        : Future<ErrorOr<InitializeStorageReply>>(ErrorOr<InitializeStorageReply>(recruitment_failed()));
 
-			ErrorOr<InitializeStorageReply> newServer = co_await fRecruit;
+			state ErrorOr<InitializeStorageReply> newServer = wait(fRecruit);
 
 			if (doRecruit && newServer.isError()) {
 				TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
@@ -2809,7 +2809,7 @@ public:
 					tssState->markComplete();
 					throw newServer.getError();
 				}
-				co_await delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution);
+				wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskPriority::DataDistribution));
 			}
 
 			if (!recruitTss && newServer.present() &&
@@ -2826,7 +2826,7 @@ public:
 
 				// wait for timeout, but eventually move on if no TSS pair recruited
 				Optional<bool> tssSuccessful =
-				    co_await timeout(tssState->waitOnTSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT);
+				    wait(timeout(tssState->waitOnTSS(), SERVER_KNOBS->TSS_RECRUITMENT_TIMEOUT));
 
 				if (tssSuccessful.present() && tssSuccessful.get()) {
 					TraceEvent("TSS_Recruit", self->distributorId)
@@ -2910,7 +2910,7 @@ public:
 		self->recruitingStream.set(self->recruitingStream.get() - 1);
 		self->restartRecruiting.trigger();
 
-		co_return;
+		return Void();
 	}
 
 	ACTOR static Future<Void> storageRecruiter(
@@ -3367,21 +3367,21 @@ public:
 		co_return;
 	}
 
-	static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
-		KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
-		                                                                                     IncludeVersion());
-		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
+	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
+		    serverMetadataKeys.begin, IncludeVersion());
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
-		bool isTss = server->getLastKnownInterface().isTss();
+		state bool isTss = server->getLastKnownInterface().isTss();
 		// Update server's storeType, especially when it was created
-		co_await server->updateStoreType();
+		wait(server->updateStoreType());
 		if (server->getStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 		    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->getDistributorId())
 			    .detail("StorageServer", server->getId());
 			throw internal_error();
 		}
-		StorageMetadataType data(
+		state StorageMetadataType data(
 		    StorageMetadataType::currentTime(),
 		    server->getStoreType(),
 		    !(server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
@@ -3390,41 +3390,30 @@ public:
 		                                              : self->configuration.storageServerStoreType))));
 
 		// read storage metadata
-		while (true) {
-			{
-				Error err;
-				bool hasErr = false;
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<Value> serverInterfaceValue = co_await tr->get(serverListKeyFor(server->getId()));
-					// The storage server is removed
-					if (!serverInterfaceValue.present()) {
-						TraceEvent("UpdateStorageMetadataNoOp", self->getDistributorId())
-						    .detail("Server", server->getId())
-						    .detail("IsTss", isTss)
-						    .detail("Reason", "Absent server list item");
-						{
-							co_await Future<Void>(Never());
-							co_return;
-						}
-					}
-					Optional<StorageMetadataType> metadata = co_await metadataMap.get(tr, server->getId());
-					// NOTE: in upgrade testing, there may not be any metadata
-					// TODO: change to ASSERT(metadata.present()) in a release version only supports upgrade from 71.3
-					if (metadata.present()) {
-						data.createdTime = metadata.get().createdTime;
-					}
-					metadataMap.set(tr, server->getId(), data);
-					tr->set(serverMetadataChangeKey, deterministicRandom()->randomUniqueID().toString());
-					co_await tr->commit();
-					break;
-				} catch (Error& e) {
-					err = e;
-					hasErr = true;
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> serverInterfaceValue = wait(tr->get(serverListKeyFor(server->getId())));
+				// The storage server is removed
+				if (!serverInterfaceValue.present()) {
+					TraceEvent("UpdateStorageMetadataNoOp", self->getDistributorId())
+					    .detail("Server", server->getId())
+					    .detail("IsTss", isTss)
+					    .detail("Reason", "Absent server list item");
+					return Never();
 				}
-				if (hasErr) {
-					co_await tr->onError(err);
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
+				// NOTE: in upgrade testing, there may not be any metadata
+				// TODO: change to ASSERT(metadata.present()) in a release version only supports upgrade from 71.3
+				if (metadata.present()) {
+					data.createdTime = metadata.get().createdTime;
 				}
+				metadataMap.set(tr, server->getId(), data);
+				tr->set(serverMetadataChangeKey, deterministicRandom()->randomUniqueID().toString());
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
 		}
 		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
@@ -3448,10 +3437,7 @@ public:
 			}
 		}
 
-		{
-			co_await Future<Void>(Never());
-			co_return;
-		}
+		return Never();
 	}
 
 	ACTOR static Future<Void> run(Reference<DDTeamCollection> teamCollection,
