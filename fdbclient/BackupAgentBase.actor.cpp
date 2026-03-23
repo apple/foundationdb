@@ -509,6 +509,8 @@ Future<Void> readCommitted(Database cx,
 					results.sendError(end_of_stream());
 				co_return;
 			}
+
+			continue;
 		} catch (Error& e) {
 			err = e;
 		}
@@ -638,6 +640,7 @@ Future<Void> readCommitted(Database cx,
 			}
 
 			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
+			continue;
 		} catch (Error& e) {
 			err = e;
 		}
