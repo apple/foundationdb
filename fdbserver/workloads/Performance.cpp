@@ -22,6 +22,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/tester/WorkloadUtils.h"
 #include "flow/CoroUtils.h"
 
 // TODO: explain purpose of this workload. Obviously simulation is aimed at correctness,

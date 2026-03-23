@@ -25,6 +25,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 #include "flow/IRandom.h"
 
 // A workload which only performs backup operations. A separate workload is used to perform restore operations.

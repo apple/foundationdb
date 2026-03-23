@@ -20,7 +20,7 @@
 
 #include <cstdint>
 
-#include "fdbserver/core/CoordinationInterface.h"
+#include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "OnDemandStore.h"
@@ -34,7 +34,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// This module implements coordinationServer() and the interfaces in CoordinationInterface.h
+// This module implements coordinationServer() plus the interfaces in CoordinationInterface.h
 
 namespace {
 

@@ -1,7 +1,7 @@
 #include <cstdio>
 #include <inttypes.h>
 
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/core/WorkloadKeys.h"
 #include "flow/flow.h"
 
 Key doubleToTestKey(double p) {
