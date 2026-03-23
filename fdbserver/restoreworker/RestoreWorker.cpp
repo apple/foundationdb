@@ -39,7 +39,7 @@
 #include "flow/ActorCollection.h"
 #include "RestoreWorker.h"
 #include "RestoreLoader.actor.h"
-#include "RestoreApplier.actor.h"
+#include "RestoreApplier.h"
 #include "RestoreController.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 

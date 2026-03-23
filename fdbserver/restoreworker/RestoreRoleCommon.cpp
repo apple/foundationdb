@@ -26,7 +26,7 @@
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreLoader.actor.h"
-#include "RestoreApplier.actor.h"
+#include "RestoreApplier.h"
 #include "RestoreController.h"
 
 class Database;

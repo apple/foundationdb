@@ -1,5 +1,5 @@
 /*
- * RestoreApplier.actor.cpp
+ * RestoreApplier.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -31,7 +31,7 @@
 #include "fdbserver/restoreworker/RestoreCommon.actor.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
-#include "RestoreApplier.actor.h"
+#include "RestoreApplier.h"
 
 #include "flow/network.h"
 

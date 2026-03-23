@@ -1,5 +1,5 @@
 /*
- * RestoreApplier.actor.h
+ * RestoreApplier.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,11 +21,6 @@
 // This file declears RestoreApplier interface and actors
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_APPLIER_G_H)
-#define FDBSERVER_RESTORE_APPLIER_G_H
-#include "RestoreApplier.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_APPLIER_H)
-#define FDBSERVER_RESTORE_APPLIER_H
 
 #include <sstream>
 #include "fdbclient/Atomic.h"
@@ -39,8 +34,6 @@
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreRoleCommon.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type);
 
@@ -412,6 +405,3 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 };
 
 Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx);
-
-#include "flow/unactorcompiler.h"
-#endif
