@@ -234,10 +234,10 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
-                                     int nodeIndex,
-                                     Database cx,
-                                     RestoreControllerInterface ci);
+Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
+                               int nodeIndex,
+                               Database cx,
+                               RestoreControllerInterface ci);
 
 #include "flow/unactorcompiler.h"
 #endif
