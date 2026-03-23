@@ -25,7 +25,7 @@
 
 #include "fdbclient/AccumulativeChecksum.h"
 #include "fdbclient/Atomic.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BuildIdempotencyIdMutations.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseContext.h"

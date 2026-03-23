@@ -1,5 +1,5 @@
 /*
- * BackupAgent.actor.h
+ * BackupAgent.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,11 +19,6 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_G_H)
-#define FDBCLIENT_BACKUP_AGENT_ACTOR_G_H
-#include "fdbclient/BackupAgent.actor.g.h"
-#elif !defined(FDBCLIENT_BACKUP_AGENT_ACTOR_H)
-#define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
 #include <ctime>
 #include <climits>
@@ -35,7 +30,6 @@
 #include "flow/IAsyncFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "flow/actorcompiler.h" // has to be last include
 
 FDB_BOOLEAN_PARAM(LockDB);
 FDB_BOOLEAN_PARAM(UnlockDB);
@@ -587,37 +581,37 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key);
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
-ACTOR Future<Void> readCommitted(Database cx,
-                                 PromiseStream<RangeResultWithVersion> results,
-                                 Reference<FlowLock> lock,
-                                 KeyRangeRef range,
-                                 Terminator terminator = Terminator::True,
-                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
-                                 LockAware lockAware = LockAware::False,
-                                 ReadLowPriority readLowPriority = ReadLowPriority::False);
-ACTOR Future<Void> readCommitted(Database cx,
-                                 PromiseStream<RCGroup> results,
-                                 Future<Void> active,
-                                 Reference<FlowLock> lock,
-                                 KeyRangeRef range,
-                                 std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
-                                 Terminator terminator = Terminator::True,
-                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
-                                 LockAware lockAware = LockAware::False,
-                                 ReadLowPriority readLowPriority = ReadLowPriority::False);
+Future<Void> readCommitted(Database cx,
+                           PromiseStream<RangeResultWithVersion> results,
+                           Reference<FlowLock> lock,
+                           KeyRangeRef range,
+                           Terminator terminator = Terminator::True,
+                           AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                           LockAware lockAware = LockAware::False,
+                           ReadLowPriority readLowPriority = ReadLowPriority::False);
+Future<Void> readCommitted(Database cx,
+                           PromiseStream<RCGroup> results,
+                           Future<Void> active,
+                           Reference<FlowLock> lock,
+                           KeyRangeRef range,
+                           std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
+                           Terminator terminator = Terminator::True,
+                           AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                           LockAware lockAware = LockAware::False,
+                           ReadLowPriority readLowPriority = ReadLowPriority::False);
 
 // Applies the mutations between the beginVersion and endVersion to the database during a restore.
-ACTOR Future<Void> applyMutations(Database cx,
-                                  Key uid,
-                                  Key addPrefix,
-                                  Key removePrefix,
-                                  Version beginVersion,
-                                  Version* endVersion,
-                                  PublicRequestStream<CommitTransactionRequest> commit,
-                                  NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion,
-                                  bool provisionalProxy);
-ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
+Future<Void> applyMutations(Database cx,
+                            Key uid,
+                            Key addPrefix,
+                            Key removePrefix,
+                            Version beginVersion,
+                            Version* endVersion,
+                            PublicRequestStream<CommitTransactionRequest> commit,
+                            NotifiedVersion* committedVersion,
+                            Reference<KeyRangeMap<Version>> keyVersion,
+                            bool provisionalProxy);
+Future<Void> cleanupBackup(Database cx, DeleteData deleteData);
 
 using EBackupState = BackupAgentBase::EnumState;
 template <>
@@ -1115,6 +1109,3 @@ bool isDefaultBackup(Container ranges) {
 
 // Returns a key-range used to denote that a shared mutation stream belongs to the default backup set.
 KeyRangeRef const& getDefaultBackupSharedRange();
-
-#include "flow/unactorcompiler.h"
-#endif

@@ -26,7 +26,7 @@
 #include <cstdio>
 #include <vector>
 
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/MutationList.h"
 #include "flow/flow.h"
