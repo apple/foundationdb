@@ -2526,49 +2526,12 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation) {
 			printf("Unseed: %d\n", unseed);
 			printf("Elapsed: %f simsec, %f real seconds\n", now() - startNow, timer() - start);
-		}
-
-		// IFailureMonitor::failureMonitor().address_info.clear();
-
-		// we should have shut down ALL actors associated with this machine; let's list all of the ones still live
-		/*{
-		    auto living = Actor::all;
-		    printf("%d surviving actors:\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %s %p\n", (*a)->creationIndex, (*a)->getName(), (*a));
-		}
-
-		{
-		    auto living = DatabaseContext::all;
-		    printf("%d surviving DatabaseContexts:\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
-		}
-
-		{
-		    auto living = TransactionData::all;
-		    printf("%d surviving TransactionData(s):\n", living.size());
-		    for(auto a = living.begin(); a != living.end(); ++a)
-		        printf("  #%lld %p\n", (*a)->creationIndex, (*a));
-		}*/
-
-		/*cout << Actor::allActors.size() << " surviving actors:" << std::endl;
-		std::map<std::string,int> actorCount;
-		for(int i=0; i<Actor::allActors.size(); i++)
-		    ++actorCount[Actor::allActors[i]->getName()];
-		for(auto i = actorCount.rbegin(); !(i == actorCount.rend()); ++i)
-		    std::cout << "  " << i->second << " " << i->first << std::endl;*/
-		//	std::cout << "  " << Actor::allActors[i]->getName() << std::endl;
-
-		if (role == ServerRole::Simulation) {
 			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
 			if (sevErrorEventsLogged > 0) {
 				printf("%lu SevError events logged\n", sevErrorEventsLogged);
 				rc = FDB_EXIT_ERROR;
 			}
 		}
-
-		// g_simulator->run();
 
 #ifdef ALLOC_INSTRUMENTATION
 		{
@@ -2620,23 +2583,19 @@ int main(int argc, char* argv[]) {
 			memSample_entered = true;
 		}
 #endif
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(rc);
 	} catch (Error& e) {
 		fprintf(stderr, "Error: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(e);
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (boost::system::system_error& e) {
 		ASSERT_WE_THINK(false); // boost errors shouldn't leak
 		fprintf(stderr, "boost::system::system_error: %s (%d)", e.what(), e.code().value());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
 		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
-		// printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 

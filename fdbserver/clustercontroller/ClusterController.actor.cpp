@@ -54,7 +54,7 @@
 #include "SingletonRoles.h"
 #include "Status.h"
 #include "fdbserver/core/LatencyBandConfig.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
