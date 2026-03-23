@@ -163,7 +163,8 @@ private:
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, MsgpackBuffer& buf) {
-		int size = vec.size();
+		// Each SpanContext produces 3 MsgPack elements: traceID.first, traceID.second, spanID
+		int size = vec.size() * 3;
 		if (size <= 15) {
 			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -185,7 +186,8 @@ private:
 	// Writes the given vector of linked SpanEventRef's to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, MsgpackBuffer& buf) {
-		int size = vec.size();
+		// Each SpanEventRef produces 3 MsgPack elements: name, time, attributes
+		int size = vec.size() * 3;
 		if (size <= 15) {
 			buf.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -607,7 +609,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[70] == 0xcc);
 	ASSERT(data[71] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
-	ASSERT(data[72] == 0b10010001);
+	ASSERT(data[72] == 0b10010011); // 3 elements: traceID.first, traceID.second, spanID
 	ASSERT(data[73] == 0xcf);
 	ASSERT(swapUint64BE(&data[74]) == 200);
 	ASSERT(data[82] == 0xcf);
@@ -646,7 +648,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[72] == 0xcc);
 	ASSERT(data[73] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
-	ASSERT(data[74] == 0b10010001);
+	ASSERT(data[74] == 0b10010011); // 3 elements: traceID.first, traceID.second, spanID
 	ASSERT(data[75] == 0xcf);
 	ASSERT(swapUint64BE(&data[76]) == 300);
 	ASSERT(data[84] == 0xcf);
@@ -654,7 +656,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[93] == 0xcf);
 	ASSERT(swapUint64BE(&data[94]) == 400);
 	// Events
-	ASSERT(data[102] == 0b10010001); // empty
+	ASSERT(data[102] == 0b10010011); // 3 elements: name, time, attributes
 	ASSERT(readMPString(&data[103]) == "event1");
 	ASSERT(data[110] == 0xcb);
 	ASSERT(swapDoubleBE(&data[111]) == 100.101);
