@@ -70,6 +70,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/core/FDBExecHelper.actor.h"
+#include "fdbserver/coordinator/CoordinationServer.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
