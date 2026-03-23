@@ -267,7 +267,7 @@ Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
                                         GetHealthMetricsReply* healthMetricsReply,
                                         GetHealthMetricsReply* detailedHealthMetricsReply) {
 	while (true) {
-		GetHealthMetricsResult req = co_await grvProxy.getHealthMetrics.getFuture();
+		GetHealthMetricsRequest req = co_await grvProxy.getHealthMetrics.getFuture();
 		if (req.detailed) {
 			req.reply.send(*detailedHealthMetricsReply);
 		} else {
