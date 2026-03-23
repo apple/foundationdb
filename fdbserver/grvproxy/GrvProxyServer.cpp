@@ -1170,8 +1170,8 @@ Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 		if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
 		    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 			grvProxyData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
-			}
-		    grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
+		}
+		grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 	}
 }
 
