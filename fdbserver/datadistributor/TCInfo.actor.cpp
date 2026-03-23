@@ -117,7 +117,6 @@ public:
 
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server) {
 		co_await updateServerMetrics(server.getPtr());
-		co_return;
 	}
 
 	static Future<Void> serverMetricsPolling(TCServerInfo* server, Reference<IDDTxnProcessor> txnProcessor) {
@@ -142,7 +141,6 @@ public:
 		for (int i = 0; i < self->servers.size(); i++)
 			updates.push_back(TCServerInfo::updateServerMetrics(self->servers[i]));
 		co_await waitForAll(updates);
-		co_return;
 	}
 };
 

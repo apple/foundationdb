@@ -557,7 +557,6 @@ Future<Void> getSourceServersForRange(DDQueue* self,
 	input.src = std::move(res.srcServers);
 	input.completeSources = std::move(res.completeSources);
 	output.send(input);
-	co_return;
 }
 
 DDQueue::DDQueue(DDQueueInitParams const& params)
@@ -1344,8 +1343,6 @@ Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabled
 	} catch (Error& e) {
 		throw e;
 	}
-
-	co_return;
 }
 
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {

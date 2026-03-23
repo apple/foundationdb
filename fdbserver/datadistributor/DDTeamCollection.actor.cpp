@@ -135,8 +135,6 @@ class DDTeamCollectionImpl {
 				TraceEvent("CheckAndRemoveInvalidLocalityAddrRetry", self->distributorId).detail("Error", e.what());
 			}
 		}
-
-		co_return;
 	}
 
 public:
@@ -149,8 +147,6 @@ public:
 			    .detail("State", "Active")
 			    .trackLatest(self->ddTrackerStartingEventHolder->trackingKey);
 		}
-
-		co_return;
 	}
 
 	ACTOR static Future<Void> interruptableBuildTeams(DDTeamCollection* self) {
@@ -179,8 +175,6 @@ public:
 			self->teamBuilder = self->interruptableBuildTeams();
 			co_await self->teamBuilder;
 		}
-
-		co_return;
 	}
 
 	// Find the team with the exact storage servers as req.src.
@@ -323,7 +317,6 @@ public:
 				    .detail("NotEligibileTeamCount", notEligibileTeamCount);
 			}
 			req.reply.send(std::make_pair(res, false));
-			co_return;
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled && req.reply.canBeSet())
 				req.reply.sendError(e);
@@ -701,8 +694,6 @@ public:
 			} else {
 				req.reply.send(std::make_pair(bestOption, foundSrc));
 			}
-
-			co_return;
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled && req.reply.canBeSet())
 				req.reply.sendError(e);
@@ -798,8 +789,6 @@ public:
 
 		// Trace and record the current number of teams for correctness test
 		self->traceTeamCollectionInfo();
-
-		co_return;
 	}
 
 	static Future<Void> init(DDTeamCollection* self,
@@ -835,8 +824,6 @@ public:
 			self->addTeam(teamIter->begin(), teamIter->end(), IsInitialTeam::True);
 			co_await yield();
 		}
-
-		co_return;
 	}
 
 	ACTOR static Future<Void> buildTeams(DDTeamCollection* self) {
@@ -1810,8 +1797,6 @@ public:
 				break;
 			}
 		}
-
-		co_return;
 	}
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
@@ -1859,7 +1844,6 @@ public:
 			it->tracker.cancel();
 		}
 		self->badTeams.clear();
-		co_return;
 	}
 
 	static Future<Void> zeroServerLeftLoggerActor(DDTeamCollection* self, Reference<TCTeamInfo> team) {
@@ -1887,8 +1871,6 @@ public:
 		TraceEvent(SevWarnAlways, "DDZeroServerLeftInTeam", self->distributorId)
 		    .detail("Team", team->getDesc())
 		    .detail("TotalBytesLost", bytesLost);
-
-		co_return;
 	}
 
 	ACTOR static Future<Void> storageServerFailureTracker(DDTeamCollection* self,
@@ -2274,8 +2256,6 @@ public:
 		TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", self->distributorId)
 		    .detail("Primary", self->primary)
 		    .detail("WriteID", nextId);
-
-		co_return;
 	}
 
 	static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
@@ -2367,7 +2347,6 @@ public:
 				    .detail("MigrationType", self->configuration.storageMigrationType.toString());
 			}
 		}
-		co_return;
 	}
 
 	ACTOR static Future<Void> perpetualStorageWiggleIterator(DDTeamCollection* teamCollection,
@@ -3201,7 +3180,6 @@ public:
 			    .detail("Replicas", self->configuration.storageTeamSize)
 			    .detail("OldReplicas", oldReplicas);
 		}
-		co_return;
 	}
 
 	static Future<Void> serverGetTeamRequests(DDTeamCollection* self, TeamCollectionInterface tci) {
@@ -3364,7 +3342,6 @@ public:
 				self->wigglingId = res.begin()->first;
 			}
 		}
-		co_return;
 	}
 
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
@@ -6338,8 +6315,6 @@ public:
 		collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 
 		ASSERT(collection->sanityCheckTeams() == true);
-
-		co_return;
 	}
 
 	static Future<Void> AddTeamsBestOf_NotUseMachineID() {
@@ -6362,8 +6337,6 @@ public:
 		collection->addBestMachineTeams(30); // Create machine teams to help debug
 		collection->addTeamsBestOf(30, desiredTeams, maxTeams);
 		collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
-
-		co_return;
 	}
 
 	static void AddAllTeams_isExhaustive() {
@@ -6416,8 +6389,6 @@ public:
 			ASSERT(teamCount >= 1);
 			// ASSERT(teamCount <= targetTeamsPerServer);
 		}
-
-		co_return;
 	}
 
 	// Due to the randomness in choosing the machine team and the server team from the machine team, it is possible that
@@ -6456,8 +6427,6 @@ public:
 
 		// If we find all available teams, result will be 8 because we prebuild 2 teams
 		ASSERT(result == 8);
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_NewServersNotNeeded() {
@@ -6510,8 +6479,6 @@ public:
 		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_HealthyCompleteSource() {
@@ -6566,7 +6533,6 @@ public:
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 
 		ASSERT(expectedServers == selectedServers);
-		co_return;
 	}
 
 	static Future<Void> GetTeam_TrueBestLeastUtilized() {
@@ -6618,8 +6584,6 @@ public:
 		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_TrueBestMostUtilized() {
@@ -6670,8 +6634,6 @@ public:
 		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_ServerUtilizationBelowCutoff() {
@@ -6720,8 +6682,6 @@ public:
 		const auto [resTeam, srcFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_ServerUtilizationNearCutoff() {
@@ -6779,8 +6739,6 @@ public:
 		const auto& [resTeam, srcTeamFound] = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.present());
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_TrueBestLeastReadBandwidth() {
@@ -6854,8 +6812,6 @@ public:
 		auto servers1 = resTeam1.get()->getServerIDs();
 		const std::set<UID> selectedServers1(servers1.begin(), servers1.end());
 		ASSERT(expectedServers1 == selectedServers1);
-
-		co_return;
 	}
 
 	static Future<Void> GetTeam_DeprioritizeWigglePausedTeam() {
@@ -6904,8 +6860,6 @@ public:
 		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
-
-		co_return;
 	}
 
 	// Cut off high Cpu teams
@@ -6995,7 +6949,6 @@ public:
 			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
 			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(4, 0) });
 		}
-		co_return;
 	}
 
 	static Future<Void> GetTeam_PreferShardsWithinLimit() {
@@ -7042,8 +6995,6 @@ public:
 		auto servers = resTeam.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
 		ASSERT(expectedServers == selectedServers);
-
-		co_return;
 	}
 };
 

@@ -172,7 +172,6 @@ Future<Void> shardUsableRegions(DataDistributionTracker::SafeAccessor self, KeyR
 		RelocateShard rs(keys, DataMovementReason::POPULATE_REGION, RelocateReason::OTHER);
 		self()->output.send(rs);
 	}
-	co_return;
 }
 
 Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
@@ -377,7 +376,6 @@ Future<Void> changeSizes(DataDistributionTracker* self,
 	if (keys.begin >= systemKeys.begin) {
 		self->systemSizeEstimate -= oldShardsEndingSize;
 	}
-	co_return;
 }
 
 struct HasBeenTrueFor : ReferenceCounted<HasBeenTrueFor> {
@@ -559,7 +557,6 @@ Future<Void> shardSplitter(DataDistributionTracker* self,
 		co_await delay(1.0, TaskPriority::DataDistribution); // In case the reason the split point was off was due to a
 		                                                     // discrepancy between storage servers
 	}
-	co_return;
 }
 
 Future<Void> brokenPromiseToReady(Future<Void> f) {
@@ -570,7 +567,6 @@ Future<Void> brokenPromiseToReady(Future<Void> f) {
 			throw;
 		}
 	}
-	co_return;
 }
 
 static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange const& keys, KeyRangeRef nextRange) {
@@ -933,7 +929,6 @@ Future<Void> shardEvaluator(DataDistributionTracker* self,
 	}
 
 	co_await onChange;
-	co_return;
 }
 
 Future<Void> shardTracker(DataDistributionTracker::SafeAccessor self,
@@ -1059,8 +1054,6 @@ Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<Initial
 	self->readyToStart.send(Void());
 	co_await initialSize;
 	self->maxShardSizeUpdater = updateMaxShardSize(self->dbSizeEstimate, self->maxShardSize);
-
-	co_return;
 }
 
 Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, GetTopKMetricsRequest req) {
