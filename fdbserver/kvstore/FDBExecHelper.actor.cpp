@@ -42,7 +42,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/core/FDBExecHelper.actor.h"
+#include "fdbserver/kvstore/FDBExecHelper.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

@@ -37,7 +37,6 @@
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "DDRelocationQueue.h"
-#include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/QuietDatabase.actor.h"

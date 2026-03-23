@@ -26,7 +26,6 @@
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/IDiskQueue.h"
 #include "fdbserver/core/Knobs.h"

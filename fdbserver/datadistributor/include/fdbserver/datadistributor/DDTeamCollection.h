@@ -32,7 +32,6 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbrpc/Replication.h"
-#include "fdbserver/core/FDBExecHelper.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
