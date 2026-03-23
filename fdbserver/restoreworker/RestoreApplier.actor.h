@@ -411,7 +411,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 	}
 };
 
-ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx);
+Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int nodeIndex, Database cx);
 
 #include "flow/unactorcompiler.h"
 #endif
