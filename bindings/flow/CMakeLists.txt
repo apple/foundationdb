@@ -5,15 +5,15 @@ set(SRCS
   DirectorySubspace.cpp
   DirectorySubspace.h
   FDBLoanerTypes.h
-  HighContentionAllocator.actor.cpp
+  HighContentionAllocator.cpp
   HighContentionAllocator.h
   IDirectory.h
-  Node.actor.cpp
+  Node.cpp
   Subspace.cpp
   Subspace.h
   Tuple.cpp
   Tuple.h
-  fdb_flow.actor.cpp
+  fdb_flow.cpp
   fdb_flow.h)
 
 add_flow_target(STATIC_LIBRARY NAME fdb_flow SRCS ${SRCS})

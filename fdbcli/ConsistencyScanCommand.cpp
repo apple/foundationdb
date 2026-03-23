@@ -23,7 +23,7 @@
 #include "fdbcli/fdbcli.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 
 namespace fdb_cli {

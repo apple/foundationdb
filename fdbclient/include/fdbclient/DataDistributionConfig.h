@@ -27,7 +27,7 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyBackedRangeMap.actor.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 
