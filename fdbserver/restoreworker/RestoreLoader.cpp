@@ -234,7 +234,6 @@ Future<Void> dispatchRequests(Reference<RestoreLoaderData> self, Database cx) {
 			throw e;
 		}
 	}
-	co_return;
 }
 
 Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
@@ -507,7 +506,6 @@ static Future<Void> _parsePartitionedLogFileOnLoader(KeyRangeMap<Version>* pRang
 		    .detail("BlockLen", asset.len);
 		throw;
 	}
-	co_return;
 }
 
 // wrapper of _parsePartitionedLogFileOnLoader to retry on blob error
@@ -621,8 +619,6 @@ Future<Void> _processLoadingParam(KeyRangeMap<Version>* pRangeVersions,
 	TraceEvent("FastRestoreLoaderProcessLoadingParamDone", loaderID)
 	    .detail("BatchIndex", param.asset.batchIndex)
 	    .detail("LoadingParam", param.toString());
-
-	co_return;
 }
 
 // A loader can process multiple RestoreLoadFileRequest in parallel.
@@ -707,8 +703,6 @@ Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<Restore
 	TraceEvent(printTrace ? SevInfo : SevFRDebugInfo, "FastRestoreLoaderPhaseLoadFileDone", self->id())
 	    .detail("BatchIndex", req.batchIndex)
 	    .detail("ProcessLoadParam", req.param.toString());
-
-	co_return;
 }
 
 // Send buffered mutations to appliers.
@@ -816,7 +810,6 @@ Future<Void> handleSendMutationsRequest(RestoreSendMutationsToAppliersRequest re
 	    .detail("UseRangeFile", req.useRangeFile)
 	    .detail("LoaderSendStatus", batchStatus->toString());
 	req.reply.send(RestoreCommonReply(self->id(), isDuplicated));
-	co_return;
 }
 
 void buildApplierRangeMap(KeyRangeMap<UID>* krMap, std::map<Key, UID>* pRangeToApplier) {
@@ -1021,8 +1014,6 @@ Future<Void> sendMutationsToApplier(std::priority_queue<RestoreLoaderSchedSendLo
 		    .detail("RestoreAsset", asset.toString())
 		    .detail("Mutations", kvCount);
 	}
-
-	co_return;
 }
 
 // Splits a clear range mutation for Appliers and puts results of split mutations and
@@ -1351,8 +1342,6 @@ static Future<Void> _parseRangeFileToMutationsOnLoader(
 			sampleMutations.push_back_deep(sampleMutations.arena(), SampledMutation(m.param1, sampleInfo.sampledSize));
 		}
 	}
-
-	co_return;
 }
 
 // Parse data blocks in a log file into a vector of <string, string> pairs.
@@ -1384,8 +1373,6 @@ static Future<Void> _parseLogFileToMutationsOnLoader(NotifiedVersion* pProcessed
 		}
 		pProcessedFileOffset->set(asset.offset + asset.len);
 	}
-
-	co_return;
 }
 
 // retry on _parseLogFileToMutationsOnLoader
@@ -1469,7 +1456,6 @@ Future<Void> handleFinishVersionBatchRequest(RestoreVersionBatchRequest req, Ref
 		self->checkMemory.trigger();
 	}
 	req.reply.send(RestoreCommonReply(self->id(), false));
-	co_return;
 }
 
 namespace {
