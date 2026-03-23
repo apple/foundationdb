@@ -33,10 +33,10 @@
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/Hash3.h"
-#include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/AsyncFileReadAhead.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
-#include "fdbclient/AsyncFileS3BlobStore.actor.h"
+#include "fdbclient/AsyncFileS3BlobStore.h"
 #ifdef BUILD_AZURE_BACKUP
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #endif
@@ -47,7 +47,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include <algorithm>
 #include <cinttypes>
 #include <time.h>

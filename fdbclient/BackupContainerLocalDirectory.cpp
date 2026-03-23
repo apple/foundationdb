@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupContainerLocalDirectory.h"
-#include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/IAsyncFile.h"
 #include "flow/FaultInjection.h"
 #include "flow/Platform.actor.h"

@@ -29,7 +29,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreWorker.h"
-#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreController.h"
 #include "RestoreApplier.actor.h"

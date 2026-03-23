@@ -19,7 +19,7 @@
  */
 
 #include <algorithm>
-#include "fdbclient/MutationLogReader.actor.h"
+#include "fdbclient/MutationLogReader.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Tuple.h"
 #include "fdbserver/workloads/ApiWorkload.h"

@@ -46,7 +46,7 @@
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
