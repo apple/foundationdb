@@ -31,8 +31,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 // Split RestoreConfigFR defined in FileBackupAgent.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.actor.cpp
@@ -96,15 +95,14 @@ Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault(Referen
 	return getRestoreRangesOrDefault_impl(this, tr);
 }
 
-ACTOR Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault_impl(
-    RestoreConfigFR* self,
-    Reference<ReadYourWritesTransaction> tr) {
-	state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
+Future<std::vector<KeyRange>> RestoreConfigFR::getRestoreRangesOrDefault_impl(RestoreConfigFR* self,
+                                                                              Reference<ReadYourWritesTransaction> tr) {
+	std::vector<KeyRange> ranges = co_await self->restoreRanges().getD(tr);
 	if (ranges.empty()) {
-		state KeyRange range = wait(self->restoreRange().getD(tr));
+		KeyRange range = co_await self->restoreRange().getD(tr);
 		ranges.push_back(range);
 	}
-	return ranges;
+	co_return ranges;
 }
 
 KeyBackedSet<RestoreConfigFR::RestoreFile> RestoreConfigFR::fileSet() {
@@ -139,18 +137,18 @@ Key RestoreConfigFR::applyMutationsMapPrefix() {
 	return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
 }
 
-ACTOR Future<int64_t> RestoreConfigFR::getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
+Future<int64_t> RestoreConfigFR::getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
 	// Both of these are snapshot reads
-	state Future<Optional<Value>> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::True);
-	state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::True);
-	wait(success(beginVal) && success(endVal));
+	Future<Optional<Value>> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::True);
+	Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::True);
+	co_await (success(beginVal) && success(endVal));
 
 	if (!beginVal.get().present() || !endVal.get().present())
-		return 0;
+		co_return 0;
 
 	Version beginVersion = BinaryReader::fromStringRef<Version>(beginVal.get().get(), Unversioned());
 	Version endVersion = BinaryReader::fromStringRef<Version>(endVal.get().get(), Unversioned());
-	return endVersion - beginVersion;
+	co_return endVersion - beginVersion;
 }
 
 Future<int64_t> RestoreConfigFR::getApplyVersionLag(Reference<ReadYourWritesTransaction> tr) {
@@ -210,26 +208,26 @@ Future<Version> RestoreConfigFR::getApplyEndVersion(Reference<ReadYourWritesTran
 
 // Meng: Change RestoreConfigFR to Reference<RestoreConfigFR> because FastRestore pass the Reference<RestoreConfigFR>
 // around
-ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreConfigFR> restore,
-                                                            Reference<ReadYourWritesTransaction> tr) {
+Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreConfigFR> restore,
+                                                      Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<int64_t> fileCount = restore->fileCount().getD(tr);
-	state Future<int64_t> fileBlockCount = restore->fileBlockCount().getD(tr);
-	state Future<int64_t> fileBlocksDispatched = restore->filesBlocksDispatched().getD(tr);
-	state Future<int64_t> fileBlocksFinished = restore->fileBlocksFinished().getD(tr);
-	state Future<int64_t> bytesWritten = restore->bytesWritten().getD(tr);
-	state Future<StringRef> status = restore->stateText(tr);
-	state Future<Version> lag = restore->getApplyVersionLag(tr);
-	state Future<std::string> tag = restore->tag().getD(tr);
-	state Future<std::pair<std::string, Version>> lastError = restore->lastError().getD(tr);
+	Future<int64_t> fileCount = restore->fileCount().getD(tr);
+	Future<int64_t> fileBlockCount = restore->fileBlockCount().getD(tr);
+	Future<int64_t> fileBlocksDispatched = restore->filesBlocksDispatched().getD(tr);
+	Future<int64_t> fileBlocksFinished = restore->fileBlocksFinished().getD(tr);
+	Future<int64_t> bytesWritten = restore->bytesWritten().getD(tr);
+	Future<StringRef> status = restore->stateText(tr);
+	Future<Version> lag = restore->getApplyVersionLag(tr);
+	Future<std::string> tag = restore->tag().getD(tr);
+	Future<std::pair<std::string, Version>> lastError = restore->lastError().getD(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	state UID uid = restore->getUid();
-	wait(success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
-	     success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(lag) && success(tag) &&
-	     success(lastError));
+	UID uid = restore->getUid();
+	co_await (success(fileCount) && success(fileBlockCount) && success(fileBlocksDispatched) &&
+	          success(fileBlocksFinished) && success(bytesWritten) && success(status) && success(lag) && success(tag) &&
+	          success(lastError));
 
 	std::string errstr = "None";
 	if (lastError.get().second != 0)
@@ -247,21 +245,21 @@ ACTOR Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreCon
 	    .detail("FileBlocksInProgress", fileBlocksDispatched.get() - fileBlocksFinished.get())
 	    .detail("BytesWritten", bytesWritten.get())
 	    .detail("ApplyLag", lag.get())
-	    .detail("TaskInstance", THIS_ADDR)
+	    .detail("TaskInstance", uintptr_t(restore.getPtr()))
 	    .backtrace();
 
-	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
-	              "%lld  ApplyVersionLag: %lld  LastError: %s",
-	              tag.get().c_str(),
-	              uid.toString().c_str(),
-	              status.get().toString().c_str(),
-	              fileBlocksFinished.get(),
-	              fileBlockCount.get(),
-	              fileBlocksDispatched.get() - fileBlocksFinished.get(),
-	              fileCount.get(),
-	              bytesWritten.get(),
-	              lag.get(),
-	              errstr.c_str());
+	co_return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  "
+	                 "BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
+	                 tag.get().c_str(),
+	                 uid.toString().c_str(),
+	                 status.get().toString().c_str(),
+	                 fileBlocksFinished.get(),
+	                 fileBlockCount.get(),
+	                 fileBlocksDispatched.get() - fileBlocksFinished.get(),
+	                 fileCount.get(),
+	                 bytesWritten.get(),
+	                 lag.get(),
+	                 errstr.c_str());
 }
 Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransaction> tr) {
 	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);
@@ -269,21 +267,21 @@ Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransac
 }
 
 // Meng: Change RestoreConfigFR to Reference<RestoreConfigFR>
-ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreConfigFR> restore,
-                                                              Reference<ReadYourWritesTransaction> tr) {
+Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreConfigFR> restore,
+                                                        Reference<ReadYourWritesTransaction> tr) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Future<std::vector<KeyRange>> ranges = restore->getRestoreRangesOrDefault(tr);
-	state Future<Key> addPrefix = restore->addPrefix().getD(tr);
-	state Future<Key> removePrefix = restore->removePrefix().getD(tr);
-	state Future<Key> url = restore->sourceContainerURL().getD(tr);
-	state Future<Version> restoreVersion = restore->restoreVersion().getD(tr);
-	state Future<std::string> progress = restore->getProgress(tr);
+	Future<std::vector<KeyRange>> ranges = restore->getRestoreRangesOrDefault(tr);
+	Future<Key> addPrefix = restore->addPrefix().getD(tr);
+	Future<Key> removePrefix = restore->removePrefix().getD(tr);
+	Future<Key> url = restore->sourceContainerURL().getD(tr);
+	Future<Version> restoreVersion = restore->restoreVersion().getD(tr);
+	Future<std::string> progress = restore->getProgress(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
-	wait(success(ranges) && success(addPrefix) && success(removePrefix) && success(url) && success(restoreVersion) &&
-	     success(progress));
+	co_await (success(ranges) && success(addPrefix) && success(removePrefix) && success(url) &&
+	          success(restoreVersion) && success(progress));
 
 	std::string returnStr;
 	returnStr = format("%s  URL: %s", progress.get().c_str(), url.get().toString().c_str());
@@ -294,7 +292,7 @@ ACTOR Future<std::string> RestoreConfigFR::getFullStatus_impl(Reference<RestoreC
 	                    printable(addPrefix.get()).c_str(),
 	                    printable(removePrefix.get()).c_str(),
 	                    restoreVersion.get());
-	return returnStr;
+	co_return returnStr;
 }
 Future<std::string> RestoreConfigFR::getFullStatus(Reference<ReadYourWritesTransaction> tr) {
 	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);
@@ -312,18 +310,16 @@ std::string RestoreConfigFR::toString() {
 // parallelFileRestore is copied from FileBackupAgent.cpp for the same reason as RestoreConfigFR is copied
 namespace parallelFileRestore {
 
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,
-                                                                    int64_t offset,
-                                                                    int len) {
-	state Standalone<StringRef> buf = makeString(len);
-	int rLen = wait(file->read(mutateString(buf), len, offset));
+Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len) {
+	Standalone<StringRef> buf = makeString(len);
+	int rLen = co_await file->read(mutateString(buf), len, offset);
 	if (rLen != len)
 		throw restore_bad_read();
 
 	simulateBlobFailure();
 
 	Standalone<VectorRef<KeyValueRef>> results({}, buf.arena());
-	state StringRefReader reader(buf, restore_corrupted_data());
+	StringRefReader reader(buf, restore_corrupted_data());
 
 	try {
 		// Read header, currently only decoding version BACKUP_AGENT_MLOG_VERSION
@@ -350,7 +346,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IA
 			if (b != 0xFF)
 				throw restore_corrupted_data_padding();
 
-		return results;
+		co_return results;
 
 	} catch (Error& e) {
 		TraceEvent(SevError, "FileRestoreCorruptLogFileBlock")

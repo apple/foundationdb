@@ -97,8 +97,8 @@ public:
 	KeyBackedBinaryValue<int64_t> fileBlockCount();
 
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr);
-	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfigFR* self,
-	                                                                          Reference<ReadYourWritesTransaction> tr);
+	static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfigFR* self,
+	                                                                    Reference<ReadYourWritesTransaction> tr);
 
 	// Describes a file to load blocks from during restore.  Ordered by version and then fileName to enable
 	// incrementally advancing through the map, saving the version and path of the next starting point.
@@ -138,7 +138,7 @@ public:
 
 	Key applyMutationsMapPrefix();
 
-	ACTOR Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid);
+	Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid);
 
 	Future<int64_t> getApplyVersionLag(Reference<ReadYourWritesTransaction> tr);
 
@@ -152,12 +152,12 @@ public:
 
 	Future<Version> getApplyEndVersion(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getProgress_impl(Reference<RestoreConfigFR> restore,
-	                                                  Reference<ReadYourWritesTransaction> tr);
+	static Future<std::string> getProgress_impl(Reference<RestoreConfigFR> restore,
+	                                            Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr);
 
-	ACTOR static Future<std::string> getFullStatus_impl(Reference<RestoreConfigFR> restore,
-	                                                    Reference<ReadYourWritesTransaction> tr);
+	static Future<std::string> getFullStatus_impl(Reference<RestoreConfigFR> restore,
+	                                              Reference<ReadYourWritesTransaction> tr);
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr);
 
 	std::string toString(); // Added by Meng
@@ -238,9 +238,7 @@ struct RestoreFileFR {
 };
 
 namespace parallelFileRestore {
-ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file,
-                                                                    int64_t offset,
-                                                                    int len);
+Future<Standalone<VectorRef<KeyValueRef>>> decodeLogFileBlock(Reference<IAsyncFile> file, int64_t offset, int len);
 } // namespace parallelFileRestore
 
 // Send each request in requests via channel of the request's interface.
