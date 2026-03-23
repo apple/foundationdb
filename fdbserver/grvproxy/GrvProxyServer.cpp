@@ -1,5 +1,5 @@
 /*
- * GrvProxyServer.actor.cpp
+ * GrvProxyServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -267,16 +267,11 @@ Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
                                         GetHealthMetricsReply* healthMetricsReply,
                                         GetHealthMetricsReply* detailedHealthMetricsReply) {
 	while (true) {
-		auto choice = co_await race(grvProxy.getHealthMetrics.getFuture());
-		if (choice.index() == 0) {
-			GetHealthMetricsRequest req = std::get<0>(std::move(choice));
-			if (req.detailed) {
-				req.reply.send(*detailedHealthMetricsReply);
-			} else {
-				req.reply.send(*healthMetricsReply);
-			}
+		GetHealthMetricsResult req = co_await grvProxy.getHealthMetrics.getFuture();
+		if (req.detailed) {
+			req.reply.send(*detailedHealthMetricsReply);
 		} else {
-			UNREACHABLE();
+			req.reply.send(*healthMetricsReply);
 		}
 	}
 }
@@ -380,9 +375,9 @@ Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInter
 	co_await success(timeout(globalConfigMigrate(grvProxyData), SERVER_KNOBS->GLOBAL_CONFIG_MIGRATE_TIMEOUT));
 
 	while (true) {
-		auto choice = co_await race(grvProxy.refreshGlobalConfig.getFuture(), refreshFuture, actors.getResult());
-		if (choice.index() == 0) {
-			GlobalConfigRefreshRequest refresh = std::get<0>(std::move(choice));
+		auto res = co_await race(grvProxy.refreshGlobalConfig.getFuture(), refreshFuture, actors.getResult());
+		if (res.index() == 0) {
+			GlobalConfigRefreshRequest refresh = std::get<0>(std::move(res));
 
 			// Must have an up to date copy of global configuration in
 			// order to serve it to the client (up to date from the clients
@@ -393,15 +388,15 @@ Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProxyInter
 			} else {
 				refresh.reply.sendError(future_version());
 			}
-		} else if (choice.index() == 1) {
+		} else if (res.index() == 1) {
+			// refreshFuture fired
 			refreshFuture = timeout(globalConfigRefresh(grvProxyData, &cachedVersion, &cachedData),
 			                        SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_TIMEOUT,
 			                        Void()) &&
 			                delay(SERVER_KNOBS->GLOBAL_CONFIG_REFRESH_INTERVAL);
-		} else if (choice.index() == 2) {
+		} else if (res.index() == 2) {
+			// actors.getResult() should never return
 			ASSERT(false);
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
@@ -430,8 +425,8 @@ Future<Void> getRate(UID myID,
 		nextRequestTimer = Void();
 	}
 	while (true) {
-		auto choice = co_await race(db->onChange(), nextRequestTimer, reply, leaseTimeout);
-		if (choice.index() == 0) {
+		auto res = co_await race(db->onChange(), nextRequestTimer, reply, leaseTimeout);
+		if (res.index() == 0) {
 
 			if (db->get().ratekeeper.present()) {
 				TraceEvent("ProxyRatekeeperChanged", myID).detail("RKID", db->get().ratekeeper.get().id());
@@ -441,8 +436,7 @@ Future<Void> getRate(UID myID,
 				nextRequestTimer = Never();
 				reply = Never();
 			}
-		}
-		else if (choice.index() == 1) {
+		} else if (res.index() == 1) {
 
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
@@ -456,9 +450,8 @@ Future<Void> getRate(UID myID,
 			                                                                       detailed)));
 			transactionTagCounter->clear();
 			expectingDetailedReply = detailed;
-		}
-		else if (choice.index() == 2) {
-			GetRateInfoReply rep = std::get<2>(std::move(choice));
+		} else if (res.index() == 2) {
+			GetRateInfoReply rep = std::get<2>(std::move(res));
 
 			reply = Never();
 
@@ -485,8 +478,7 @@ Future<Void> getRate(UID myID,
 			if (rep.proxyThrottledTags.present()) {
 				proxyData->tagThrottler.updateRates(rep.proxyThrottledTags.get());
 			}
-		}
-		else if (choice.index() == 3) {
+		} else if (res.index() == 3) {
 
 			transactionRateInfo->disable();
 			batchTransactionRateInfo->disable();
@@ -494,8 +486,7 @@ Future<Void> getRate(UID myID,
 			TraceEvent(SevWarn, "GrvProxyRateLeaseExpired", myID).suppressFor(5.0);
 			//TraceEvent("GrvProxyRate", myID).detail("Rate", 0.0).detail("BatchRate", 0.0).detail("Lease", 0);
 			leaseTimeout = Never();
-		}
-		else {
+		} else {
 			UNREACHABLE();
 		}
 	}
@@ -540,9 +531,9 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	while (true) {
-		auto choice = co_await race(readVersionRequests, normalGRVLatency);
-		if (choice.index() == 0) {
-			GetReadVersionRequest req = std::get<0>(std::move(choice));
+		auto res = co_await race(readVersionRequests, normalGRVLatency);
+		if (res.index() == 0) {
+			GetReadVersionRequest req = std::get<0>(std::move(res));
 
 			// auto lineage = make_scoped_lineage(&TransactionLineage::txID, req.spanContext.first());
 			// getCurrentLineage()->modify(&TransactionLineage::txID) =
@@ -631,8 +622,8 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 			}
 		}
 		// Dynamic batching monitors reply latencies.
-		else if (choice.index() == 1) {
-			double reply_latency = std::get<1>(std::move(choice));
+		else if (res.index() == 1) {
+			double reply_latency = std::get<1>(std::move(res));
 
 			double target_latency = reply_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION;
 			*GRVBatchTime = std::max(
@@ -640,8 +631,7 @@ Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> const>
 			    std::min(SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_MAX,
 			             target_latency * SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA +
 			                 *GRVBatchTime * (1 - SERVER_KNOBS->START_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA)));
-		}
-		else {
+		} else {
 			UNREACHABLE();
 		}
 	}
@@ -845,8 +835,8 @@ Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<S
 	}
 	while (true) {
 		try {
-			auto choice = co_await race(db->onChange(), nextRequestTimer, nextReply);
-			if (choice.index() == 0) {
+			auto res = co_await race(db->onChange(), nextRequestTimer, nextReply);
+			if (res.index() == 0) {
 				if (db->get().distributor.present()) {
 					TraceEvent("DataDistributorChanged", db->get().id).detail("DDID", db->get().distributor.get().id());
 					nextRequestTimer = Void();
@@ -855,7 +845,7 @@ Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<S
 					nextRequestTimer = Never();
 				}
 				nextReply = Never();
-			} else if (choice.index() == 1) {
+			} else if (res.index() == 1) {
 				nextRequestTimer = Never();
 				if (db->get().distributor.present()) {
 					nextReply = brokenPromiseToNever(db->get().distributor.get().dataDistributorMetrics.getReply(
@@ -863,8 +853,8 @@ Future<Void> monitorDDMetricsChanges(int64_t* midShardSize, Reference<AsyncVar<S
 				} else {
 					nextReply = Never();
 				}
-			} else if (choice.index() == 2) {
-				GetDataDistributorMetricsReply reply = std::get<2>(std::move(choice));
+			} else if (res.index() == 2) {
+				GetDataDistributorMetricsReply reply = std::get<2>(std::move(res));
 
 				nextReply = Never();
 				ASSERT(reply.midShardSize.present());
@@ -1174,23 +1164,14 @@ Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	}
 
 	while (true) {
-		auto choice = co_await race(dbInfoChange, onError);
-		if (choice.index() == 0) {
+		co_await waitOrError(dbInfoChange, onError);
+		dbInfoChange = grvProxyData.db->onChange();
 
-			dbInfoChange = grvProxyData.db->onChange();
-
-			if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
-			    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
-				grvProxyData.logSystem =
-				    makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
+		if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
+		    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
+			grvProxyData.logSystem = makeLogSystemFromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
 			}
-			grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
-		}
-		else if (choice.index() == 1) {
-		}
-		else {
-			UNREACHABLE();
-		}
+		    grvProxyData.updateLatencyBandConfig(grvProxyData.db->get().latencyBandConfig);
 	}
 }
 
