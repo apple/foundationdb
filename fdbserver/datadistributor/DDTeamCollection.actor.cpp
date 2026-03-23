@@ -3404,7 +3404,7 @@ public:
 						    .detail("IsTss", isTss)
 						    .detail("Reason", "Absent server list item");
 						{
-							co_await Never();
+							co_await Future<Void>(Never());
 							co_return;
 						}
 					}
@@ -3449,7 +3449,7 @@ public:
 		}
 
 		{
-			co_await Never();
+			co_await Future<Void>(Never());
 			co_return;
 		}
 	}

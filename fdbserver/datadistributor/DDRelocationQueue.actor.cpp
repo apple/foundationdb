@@ -2588,7 +2588,7 @@ Future<SrcDestTeamPair> getSrcDestTeams(DDQueue* self,
 			co_return std::make_pair(loadedTeam.first.get(), randomTeam.first.get());
 		}
 	}
-	co_return {};
+	co_return SrcDestTeamPair{};
 }
 
 Future<SrcDestTeamPair> DDQueue::getSrcDestTeams(const int& teamCollectionIndex,
