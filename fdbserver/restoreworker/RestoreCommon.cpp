@@ -248,18 +248,19 @@ Future<std::string> RestoreConfigFR::getProgress_impl(Reference<RestoreConfigFR>
 	    .detail("TaskInstance", uintptr_t(restore.getPtr()))
 	    .backtrace();
 
-	co_return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  "
-	                 "BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
-	                 tag.get().c_str(),
-	                 uid.toString().c_str(),
-	                 status.get().toString().c_str(),
-	                 fileBlocksFinished.get(),
-	                 fileBlockCount.get(),
-	                 fileBlocksDispatched.get() - fileBlocksFinished.get(),
-	                 fileCount.get(),
-	                 bytesWritten.get(),
-	                 lag.get(),
-	                 errstr.c_str());
+	co_return format(
+	    "Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: "
+	    "%lld  ApplyVersionLag: %lld  LastError: %s",
+	    tag.get().c_str(),
+	    uid.toString().c_str(),
+	    status.get().toString().c_str(),
+	    fileBlocksFinished.get(),
+	    fileBlockCount.get(),
+	    fileBlocksDispatched.get() - fileBlocksFinished.get(),
+	    fileCount.get(),
+	    bytesWritten.get(),
+	    lag.get(),
+	    errstr.c_str());
 }
 Future<std::string> RestoreConfigFR::getProgress(Reference<ReadYourWritesTransaction> tr) {
 	Reference<RestoreConfigFR> restore = Reference<RestoreConfigFR>(this);

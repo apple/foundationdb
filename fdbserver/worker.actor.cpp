@@ -53,7 +53,7 @@
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
 #include "fdbserver/consistencyscan/ConsistencyScan.actor.h"
 #include "fdbserver/datadistributor/DataDistributor.h"
-#include "fdbserver/grvproxy/GrvProxyServer.actor.h"
+#include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/RoleLineage.actor.h"

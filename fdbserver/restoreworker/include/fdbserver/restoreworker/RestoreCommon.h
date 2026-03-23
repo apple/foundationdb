@@ -261,9 +261,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				replyDurations.emplace_back(requestId, request, 0);
 			}
 
+			std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
+			std::vector<int> ongoingRepliesIndex;
 			while (true) {
-				std::vector<Future<REPLY_TYPE(Request)>> ongoingReplies;
-				std::vector<int> ongoingRepliesIndex;
 				ongoingReplies.clear();
 				ongoingRepliesIndex.clear();
 				for (int i = 0; i < cmdReplies.size(); ++i) {
@@ -287,9 +287,9 @@ Future<Void> getBatchReplies(RequestStream<Request> Interface::* channel,
 				if (ongoingReplies.empty()) {
 					break;
 				} else {
-					co_await quorum(
-					    ongoingReplies,
-					    std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL, (int)ongoingReplies.size()));
+					co_await (
+					    quorum(ongoingReplies,
+					           std::min((int)SERVER_KNOBS->FASTRESTORE_REQBATCH_PARALLEL, (int)ongoingReplies.size())));
 				}
 				// At least one reply is received; Calculate the reply duration
 				for (int j = 0; j < ongoingReplies.size(); ++j) {

@@ -24,7 +24,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"

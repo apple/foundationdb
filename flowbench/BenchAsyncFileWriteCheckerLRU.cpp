@@ -3,7 +3,7 @@
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
 #include "flowbench/GlobalData.h"
-#include "fdbrpc/AsyncFileWriteChecker.actor.h"
+#include "fdbrpc/AsyncFileWriteChecker.h"
 
 #include <stdint.h>
 

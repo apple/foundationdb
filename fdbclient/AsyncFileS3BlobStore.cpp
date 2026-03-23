@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileS3BlobStore.actor.h"
-#include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbclient/AsyncFileS3BlobStore.h"
+#include "fdbrpc/AsyncFileReadAhead.h"
 #include "flow/UnitTest.h"
 #include "flow/IConnection.h"
 
