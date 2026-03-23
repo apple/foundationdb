@@ -32,6 +32,7 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/tester/WorkloadUtils.h"
 #include "fdbrpc/simulator.h"
 
 template <class T>

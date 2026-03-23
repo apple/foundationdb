@@ -40,9 +40,10 @@
 #include "flow/network.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
+#include "fdbclient/IClosable.h"
 #include "fdbclient/versions.h"
 #include "fdbserver/CoroFlow.h"
-#include "fdbserver/core/FDBExecHelper.actor.h"
+#include "fdbserver/kvstore/FDBExecHelper.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -120,8 +121,7 @@ ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime,
-                               IClosable* parent) {
+                               double maxSimDelayTime) {
 	wait(delay(0.0));
 	return 0;
 }
@@ -170,8 +170,7 @@ ACTOR Future<int> spawnProcess(std::string path,
                                std::vector<std::string> args,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime,
-                               IClosable* parent) {
+                               double maxSimDelayTime) {
 	// for async calls in simulator, always delay by a deterministic amount of time and then
 	// do the call synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
@@ -277,7 +276,10 @@ ACTOR Future<int> spawnProcess(std::string path,
 }
 #endif
 
-ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
+ACTOR static Future<int> execHelperImpl(ExecCmdValueString* execArg,
+                                        UID snapUID,
+                                        std::string folder,
+                                        std::string role) {
 	state Standalone<StringRef> uidStr(snapUID.toString());
 	state int err = 0;
 	state Future<int> cmdErr;
@@ -329,6 +331,10 @@ ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::stri
 		}
 	}
 	return err;
+}
+
+Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
+	return execHelperImpl(execArg, snapUID, folder, role);
 }
 
 struct StorageVersionInfo {

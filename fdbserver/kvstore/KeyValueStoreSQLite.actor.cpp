@@ -23,6 +23,7 @@
 #include "fmt/format.h"
 #include "crc32/crc32c.h"
 #include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/kvstore/KVFileUtils.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/Hash3.h"
