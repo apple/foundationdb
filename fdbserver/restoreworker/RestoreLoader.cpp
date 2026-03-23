@@ -24,7 +24,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/DatabaseContext.h"
 #include "RestoreLoader.h"
 #include "RestoreRoleCommon.h"
