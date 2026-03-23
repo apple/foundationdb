@@ -29,7 +29,7 @@
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreLoader.actor.h"
 #include "RestoreApplier.actor.h"

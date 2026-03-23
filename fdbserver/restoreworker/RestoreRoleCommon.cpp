@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 
 #include "fdbserver/core/RestoreUtil.h"
 #include "RestoreRoleCommon.h"

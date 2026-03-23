@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AsyncFileS3BlobStore.actor.h"
+#include "fdbclient/AsyncFileS3BlobStore.h"
 #include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbrpc/AsyncFileEncrypted.h"
-#include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/AsyncFileReadAhead.h"
 #include "fdbrpc/HTTP.h"
 
 class BackupContainerS3BlobStoreImpl {

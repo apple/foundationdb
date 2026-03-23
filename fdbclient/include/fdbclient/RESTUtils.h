@@ -61,7 +61,7 @@ public:
 
 	RESTConnectionPool(const int maxConnsPerKey) : maxConnPerConnectKey(maxConnsPerKey) {}
 
-	// Destructor implementation in RESTUtils.actor.cpp
+	// Destructor implementation in RESTUtils.cpp
 	// In simulation, explicitly closes all pooled connections before destruction
 	~RESTConnectionPool();
 
