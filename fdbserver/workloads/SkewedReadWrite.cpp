@@ -31,7 +31,7 @@
 #include "fdbserver/workloads/ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {
 	static constexpr auto NAME = "SkewedReadWrite";

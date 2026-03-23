@@ -1,6 +1,6 @@
 fdb_find_sources(FDBCLIENT_SRCS)
 list(REMOVE_ITEM FDBCLIENT_SRCS LinkTest.cpp)
-list(REMOVE_ITEM FDBCLIENT_SRCS S3Client_cli.actor.cpp)
+list(REMOVE_ITEM FDBCLIENT_SRCS S3Client_cli.cpp)
 list(APPEND FDBCLIENT_SRCS sha1/SHA1.cpp)
 
 message(STATUS "FDB version is ${FDB_VERSION}")
@@ -97,7 +97,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/versions.h.cmake ${CMAKE_CURRENT_BINA
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack PRIVATE rapidxml)
 
-add_flow_target(EXECUTABLE NAME s3client SRCS S3Client_cli.actor.cpp)
+add_flow_target(EXECUTABLE NAME s3client SRCS S3Client_cli.cpp)
 target_include_directories(s3client PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/include"

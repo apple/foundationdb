@@ -34,7 +34,7 @@ standard API and some knowledge of the contents of the system key space.
 
 #include <string>
 #include <map>
-#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/ReadYourWrites.h"

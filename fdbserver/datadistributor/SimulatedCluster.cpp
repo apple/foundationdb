@@ -24,7 +24,7 @@
 #include <map>
 #include <string>
 
-#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/GenericManagementAPI.h"
 
 namespace {
 

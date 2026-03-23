@@ -5,7 +5,7 @@ set(FDBSERVER_CORE_TO_KVSTORE_SRCS
   FDBExecHelper.actor.cpp
   IKeyValueStore.cpp
   IPager.cpp
-  KeyValueStoreCompressTestData.actor.cpp
+  KeyValueStoreCompressTestData.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreShardedRocksDB.actor.cpp

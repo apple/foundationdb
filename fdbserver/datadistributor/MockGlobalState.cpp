@@ -151,8 +151,7 @@ public:
 		    .detail("ChunkCount", chunkCount)
 		    .detail("TotalBytes", params.totalRangeBytes);
 
-		int i = 0;
-		for (; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
+		for (int i = 0; i < chunkCount && currentTotal < params.totalRangeBytes; ++i) {
 			co_await delayJittered(0.1, TaskPriority::FetchKeys);
 
 			int remainedBytes = (chunkCount == 1 ? params.totalRangeBytes : SERVER_KNOBS->FETCH_BLOCK_BYTES);
@@ -1030,7 +1029,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	testConfig.logAntiQuorum = 0;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	auto mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
@@ -1096,7 +1095,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/GetKeyLocations") {
 	testConfig.logAntiQuorum = 0;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	auto mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 	// add one empty server
@@ -1163,7 +1162,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	auto mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
@@ -1171,7 +1170,8 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 		server.second->metrics.byteSample.sample.insert("something"_sr, 500000);
 	});
 
-	[[maybe_unused]] Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
+	auto allServerFutures = waitForAll(mgs->runAllMockServers());
+	(void)allServerFutures;
 
 	KeyRange testRange = allKeys;
 	ShardSizeBounds bounds = ShardSizeBounds::shardSizeBoundsBeforeTrack();
@@ -1191,11 +1191,12 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	auto mgs = std::make_shared<MockGlobalState>();
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
-	[[maybe_unused]] Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
+	auto allServerFutures = waitForAll(mgs->runAllMockServers());
+	(void)allServerFutures;
 
 	// insert
 	{

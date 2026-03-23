@@ -56,7 +56,7 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-#include "fdbrpc/AsyncFileWriteChecker.actor.h"
+#include "fdbrpc/AsyncFileWriteChecker.h"
 #include "fdbrpc/genericactors.actor.h"
 #include "fdbrpc/WellKnownEndpoints.h"
 #include "flow/FaultInjection.h"
