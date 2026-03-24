@@ -33,7 +33,7 @@
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/TSSMappingUtil.h"
+#include "fdbserver/core/TSSMappingUtil.h"
 
 template <typename... T>
 static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {

@@ -20,7 +20,7 @@
 
 #include <cinttypes>
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/pubsub.h"
+#include "fdbserver/workloads/pubsub.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 Value uInt64ToValue(uint64_t v) {

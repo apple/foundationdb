@@ -1,4 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
+list(FILTER FDBSERVER_SRCS EXCLUDE REGEX "^(workloads/|include/fdbserver/workloads/)")
 include(AddFdbServerLinkTest)
 
 function(configure_fdbserver_common_includes target_name)
@@ -43,6 +44,7 @@ add_subdirectory(storageserver)
 add_subdirectory(tester)
 add_subdirectory(tlog)
 add_subdirectory(worker)
+add_subdirectory(workloads)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
@@ -165,7 +167,28 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_mocks3 fdbserver_worker fdbserver_backupworker fdbserver_restoreworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_kvstore fdbserver_logrouter fdbserver_logsystem fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tester fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE
+  fdbserver_mocks3
+  "$<LINK_LIBRARY:WHOLE_ARCHIVE,fdbserver_workloads>"
+  fdbserver_worker
+  fdbserver_backupworker
+  fdbserver_restoreworker
+  fdbserver_clustercontroller
+  fdbserver_commitproxy
+  fdbserver_consistencyscan
+  fdbserver_coordinator
+  fdbserver_datadistributor
+  fdbserver_grvproxy
+  fdbserver_kvstore
+  fdbserver_logrouter
+  fdbserver_logsystem
+  fdbserver_ratekeeper
+  fdbserver_resolver
+  fdbserver_sequencer
+  fdbserver_storageserver
+  fdbserver_tester
+  fdbserver_tlog
+  fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
