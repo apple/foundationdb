@@ -3,7 +3,7 @@ set(FDBSERVER_KVSTORE_SRCS
   FDBExecHelper.actor.cpp
   IKeyValueStore.cpp
   IPager.cpp
-  KeyValueStoreCompressTestData.actor.cpp
+  KeyValueStoreCompressTestData.cpp
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreShardedRocksDB.actor.cpp
@@ -19,6 +19,8 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_kvstore SRCS ${FDBSERVER_KVSTORE_S
 
 configure_fdbserver_common_includes(fdbserver_kvstore)
 target_include_directories(fdbserver_kvstore
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/contrib/sqlite

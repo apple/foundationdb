@@ -19,7 +19,7 @@
  */
 
 #include "fdbcli/fdbcli.h"
-#include "fdbclient/IdempotencyId.actor.h"
+#include "fdbclient/IdempotencyId.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 namespace {

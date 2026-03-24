@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "flow/BooleanParam.h"
 #ifdef BUILD_AZURE_BACKUP
@@ -1439,6 +1439,16 @@ Future<Reference<IBackupFile>> BackupContainerFileSystem::writeTaggedLogFile(Ver
 	                        tagId,
 	                        totalTags,
 	                        blockSize));
+}
+
+Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangePartitionedLogFile(Version beginVersion,
+                                                                                       Version endVersion,
+                                                                                       Version baseVersion,
+                                                                                       int32_t partitionId,
+                                                                                       int blockSize) {
+	return writeFile(
+	    BackupContainerFileSystemImpl::logVersionFolderStringForRangePartitioned(beginVersion, baseVersion) +
+	    format("log,%lld,%lld,%d,%d", beginVersion, endVersion, partitionId, blockSize));
 }
 
 Future<Reference<IBackupFile>> BackupContainerFileSystem::writeRangeFile(Version snapshotBeginVersion,

@@ -29,11 +29,11 @@
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "fdbserver/restoreworker/RestoreCommon.actor.h"
+#include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
-#include "RestoreLoader.actor.h"
-#include "RestoreApplier.actor.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "RestoreLoader.h"
+#include "RestoreApplier.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 
 // Each restore worker (a process) is assigned for a role.
 // MAYBE Later: We will support multiple restore roles on a worker

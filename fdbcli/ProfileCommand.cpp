@@ -22,7 +22,7 @@
 
 #include "fdbcli/fdbcli.h"
 
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"

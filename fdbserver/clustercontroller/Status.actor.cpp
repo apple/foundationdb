@@ -22,7 +22,7 @@
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/genericactors.actor.h"
 #include "fmt/format.h"
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "Status.h"
 #include "flow/ITrace.h"
@@ -44,7 +44,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
-#include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbclient/StorageWiggleMetrics.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const char* RecoveryStatus::names[] = { "reading_coordinated_state",

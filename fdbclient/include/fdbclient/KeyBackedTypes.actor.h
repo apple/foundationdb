@@ -32,7 +32,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunTransaction.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"

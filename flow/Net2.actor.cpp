@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 #include "flow/Platform.h"
+#include "flow/SimpleCounter.h"
 #include "flow/Trace.h"
 #include "flow/swift.h"
 #include "flow/swift_concurrency_hooks.h"
@@ -1587,6 +1588,10 @@ ActorLineageSet& Net2::getActorLineageSet() {
 }
 #endif
 
+// TIP: ways to test this code:
+//
+// fdbserver -r test -f tests/noSim/RandomUnitTests.toml
+// fdbserver -r unittests -f noSim
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
@@ -1678,6 +1683,7 @@ void Net2::run() {
 		[[maybe_unused]] int queueSize = taskQueue.getNumReadyTasks();
 
 		FDB_TRACE_PROBE(run_loop_tasks_start, queueSize);
+		int tasksExecuted = 0;
 		while (taskQueue.hasReadyTask()) {
 			++countTasks;
 			currentTaskID = taskQueue.getReadyTaskID();
@@ -1686,6 +1692,7 @@ void Net2::run() {
 			taskQueue.popReadyTask();
 
 			try {
+				++tasksExecuted;
 				++tasksSinceReact;
 				(*task)();
 			} catch (Error& e) {
@@ -1721,6 +1728,9 @@ void Net2::run() {
 			taskBegin = newTaskBegin;
 			tscBegin = tscNow;
 		}
+		static SimpleCounter<int64_t>* callbacksExecuted =
+		    SimpleCounter<int64_t>::makeCounter("/Net2/callbacksExecuted");
+		callbacksExecuted->increment(tasksExecuted);
 
 		trackAtPriority(TaskPriority::RunLoop, taskBegin);
 
@@ -1772,16 +1782,23 @@ void Net2::run() {
 		}
 #endif
 		nnow = timer_monotonic();
+		auto time_delta = nnow - now;
 
-		if ((nnow - now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
-		    nondeterministicRandom()->random01() < (nnow - now) * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
-			TraceEvent("SomewhatSlowRunLoopBottom")
-			    .detail("Elapsed", nnow - now); // This includes the time spent running tasks
+		static SimpleCounter<double>* exec_time = SimpleCounter<double>::makeCounter("/Net2/mainThreadExecutionTime");
+		exec_time->increment(time_delta);
+
+		if (time_delta > FLOW_KNOBS->SLOW_LOOP_CUTOFF &&
+		    nondeterministicRandom()->random01() < time_delta * FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE) {
+			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", time_delta);
+		}
 	}
 
 	for (auto& fn : stopCallbacks) {
 		fn();
 	}
+
+	// Emit at least one batch of counters, for manual inspection.
+	simpleCounterReport();
 
 #ifdef WIN32
 	timeEndPeriod(1);
@@ -2429,63 +2446,3 @@ TEST_CASE("noSim/flow/Net2/onMainThreadFIFO") {
 	}
 	return Void();
 }
-
-void net2_test() {
-	/*
-	g_network = newNet2();  // for promise serialization below
-
-	Endpoint destination;
-
-	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
-
-	char junk[100];
-
-	double before = timer();
-
-	std::vector<TestGVR> reqs;
-	reqs.reserve( 10000 );
-
-	int totalBytes = 0;
-	for(int j=0; j<1000; j++) {
-	    UnsentPacketQueue unsent;
-	    ReliablePacketList reliable;
-
-	    reqs.resize(10000);
-	    for(int i=0; i<10000; i++) {
-	        TestGVR &req = reqs[i];
-	        req.key = "Foobar"_sr;
-
-	        SerializeSource<TestGVR> what(req);
-
-	        SendBuffer* pb = unsent.getWriteBuffer();
-	        ReliablePacket* rp = new ReliablePacket;  // 0
-
-	        PacketWriter wr(pb,rp,AssumeVersion(g_network->protocolVersion()));
-	        //BinaryWriter wr;
-	        SplitBuffer packetLen;
-	        uint32_t len = 0;
-	        wr.writeAhead(sizeof(len), &packetLen);
-	        wr << destination.token;
-	        //req.reply.getEndpoint();
-	        what.serializePacketWriter(wr);
-	        //wr.serializeBytes(junk, 43);
-
-	        unsent.setWriteBuffer(wr.finish());
-	        len = wr.size() - sizeof(len);
-	        packetLen.write(&len, sizeof(len));
-
-	        //totalBytes += wr.getLength();
-	        totalBytes += wr.size();
-
-	        if (rp) reliable.insert(rp);
-	    }
-	    reqs.clear();
-	    unsent.discardAll();
-	    reliable.discardAll();
-	}
-
-	printf("SimSend x 1Kx10K: %0.2f sec\n", timer()-before);
-	printf("  Bytes: %d\n", totalBytes);
-	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
-	*/
-};
