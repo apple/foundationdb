@@ -67,6 +67,7 @@
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/worker/Worker.actor.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #ifdef WITH_ROCKSDB

@@ -47,7 +47,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MetricLogger.actor.h"
+#include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.actor.h"
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
@@ -56,8 +56,9 @@
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/core/BackupInterface.h"
-#include "fdbserver/RoleLineage.actor.h"
+#include "RoleLineage.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
+#include "fdbserver/worker/Worker.actor.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/ratekeeper/Ratekeeper.actor.h"
 #include "fdbserver/resolver/Resolver.actor.h"
@@ -116,7 +117,6 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 
 namespace {
 RoleLineageCollector roleLineageCollector;
-}
 
 struct ErrorInfo {
 	Error error;
@@ -1366,7 +1366,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 }
 
+} // namespace
+
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
+namespace {
 // A set of threads that should be profiled
 std::set<std::thread::id> profiledThreads;
 
@@ -1374,6 +1377,7 @@ std::set<std::thread::id> profiledThreads;
 int filter_in_thread(void* arg) {
 	return profiledThreads.contains(std::this_thread::get_id()) ? 1 : 0;
 }
+} // namespace
 #endif
 
 // Enables the calling thread to be profiled
@@ -1387,6 +1391,8 @@ void registerThreadForProfiling() {
 	backtrace(pc, num_levels);
 #endif
 }
+
+namespace {
 
 // Starts or stops the CPU profiler
 void updateCpuProfiler(ProfilerRequest req) {
@@ -1909,6 +1915,7 @@ ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnecti
 	return Never();
 }
 #endif
+} // namespace
 
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -2942,6 +2949,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	}
 }
 
+namespace {
 static std::set<int> const& normalWorkerErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -3408,7 +3416,7 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 	platform::eraseDirectoryRecursive(testDir);
 	return Void();
 }
-} // anonymous namespace
+} // namespace
 
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
@@ -3657,6 +3665,7 @@ Optional<UID> readClusterId(std::string filePath) {
 	br >> clusterId;
 	return clusterId;
 }
+} // anonymous namespace
 
 ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         LocalityData localities,

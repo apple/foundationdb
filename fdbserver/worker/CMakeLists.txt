@@ -1,0 +1,39 @@
+fdb_find_sources(FDBSERVER_WORKER_SRCS)
+
+add_flow_target(STATIC_LIBRARY NAME fdbserver_worker SRCS ${FDBSERVER_WORKER_SRCS})
+
+configure_fdbserver_common_includes(fdbserver_worker)
+target_include_directories(fdbserver_worker
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/fdbserver/include
+    ${CMAKE_BINARY_DIR}/fdbserver/include
+    ${CMAKE_SOURCE_DIR}/fdbctl/include
+    ${CMAKE_BINARY_DIR}/fdbctl/include
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(fdbserver_worker
+  PUBLIC
+    fdbctl
+  PRIVATE
+    fdbclient
+    fdbserver_backupworker
+    fdbserver_restoreworker
+    fdbserver_clustercontroller
+    fdbserver_commitproxy
+    fdbserver_consistencyscan
+    fdbserver_coordinator
+    fdbserver_datadistributor
+    fdbserver_grvproxy
+    fdbserver_kvstore
+    fdbserver_logrouter
+    fdbserver_logsystem
+    fdbserver_ratekeeper
+    fdbserver_resolver
+    fdbserver_sequencer
+    fdbserver_storageserver
+    fdbserver_tester
+    fdbserver_tlog
+    fdbserver_core)

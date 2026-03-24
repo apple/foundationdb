@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RoleLineage.actor.h"
+#include "RoleLineage.actor.h"
 
 using namespace std::literals;
 

@@ -49,6 +49,7 @@ add_subdirectory(sequencer)
 add_subdirectory(storageserver)
 add_subdirectory(tester)
 add_subdirectory(tlog)
+add_subdirectory(worker)
 
 add_fdbserver_link_test(fdbserver_corelinktest
   fdbserver_core
@@ -135,6 +136,28 @@ add_fdbserver_link_test(fdbserver_tloglinktest
   fdbserver_kvstore
   fdbserver_core
   fdbclient)
+add_fdbserver_link_test(fdbserver_workerlinktest
+  fdbserver_worker
+  fdbserver_backupworker
+  fdbserver_restoreworker
+  fdbserver_clustercontroller
+  fdbserver_commitproxy
+  fdbserver_consistencyscan
+  fdbserver_coordinator
+  fdbserver_datadistributor
+  fdbserver_grvproxy
+  fdbserver_kvstore
+  fdbserver_logrouter
+  fdbserver_logsystem
+  fdbserver_ratekeeper
+  fdbserver_resolver
+  fdbserver_sequencer
+  fdbserver_storageserver
+  fdbserver_tester
+  fdbserver_tlog
+  fdbserver_core
+  fdbclient
+  fdbctl)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 
@@ -257,7 +280,7 @@ if (WITH_SWIFT)
 endif()
 
 configure_fdbserver_target_includes(fdbserver)
-target_link_libraries(fdbserver PRIVATE fdbserver_mocks3 fdbserver_backupworker fdbserver_restoreworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_kvstore fdbserver_logrouter fdbserver_logsystem fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tester fdbserver_tlog fdbserver_core)
+target_link_libraries(fdbserver PRIVATE fdbserver_mocks3 fdbserver_worker fdbserver_backupworker fdbserver_restoreworker fdbserver_clustercontroller fdbserver_commitproxy fdbserver_consistencyscan fdbserver_coordinator fdbserver_datadistributor fdbserver_grvproxy fdbserver_kvstore fdbserver_logrouter fdbserver_logsystem fdbserver_ratekeeper fdbserver_resolver fdbserver_sequencer fdbserver_storageserver fdbserver_tester fdbserver_tlog fdbserver_core)
 if (WITH_ROCKSDB)
   add_dependencies(fdbserver rocksdb)
   if(WITH_LIBURING)
