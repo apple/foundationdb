@@ -34,6 +34,8 @@ class IKeyValueStore;
 struct InitializeTLogRequest;
 struct ServerDBInfo;
 
+double effectiveTLogMinAvailableSpaceRatio();
+
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo> const> db,

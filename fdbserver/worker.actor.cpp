@@ -1718,8 +1718,9 @@ ACTOR Future<Void> monitorTLogIssues(std::string folder,
 			int64_t free = 0;
 			int64_t total = 0;
 			g_network->getDiskBytes(folder, free, total);
-			const bool recovered = SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO <= 0.0 || total <= 0 ||
-			                       double(free) / total >= SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
+			const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+			const bool recovered =
+			    minAvailableSpaceRatio <= 0.0 || total <= 0 || double(free) / total >= minAvailableSpaceRatio;
 			if (recovered) {
 				lowDiskTLogExclusion->set(false);
 			} else {

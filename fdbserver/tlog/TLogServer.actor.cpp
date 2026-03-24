@@ -2941,13 +2941,14 @@ void removeLog(TLogData* self, Reference<LogData> logData, bool terminateWorkerI
 static void throwLowDiskTLogRecoveryFailed(TLogData* self,
                                            Reference<LogData> logData,
                                            Version ver,
+                                           double minAvailableSpaceRatio,
                                            StorageBytes kvStoreBytes,
                                            StorageBytes queueBytes) {
 	if (!self->lowDiskTLogExclusion->get()) {
 		self->lowDiskTLogExclusion->set(true);
 	}
 	TraceEvent(SevWarnAlways, "TLogPullAsyncDataLowDiskSpace", logData->logId)
-	    .detail("MinAvailableSpaceRatio", SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)
+	    .detail("MinAvailableSpaceRatio", minAvailableSpaceRatio)
 	    .detail("AvailableSpaceRatio", self->availableSpaceRatio(kvStoreBytes, queueBytes))
 	    .detail("KvstoreBytesAvailable", kvStoreBytes.available)
 	    .detail("KvstoreBytesTotal", kvStoreBytes.total)
@@ -2959,15 +2960,24 @@ static void throwLowDiskTLogRecoveryFailed(TLogData* self,
 	throw recruitment_failed();
 }
 
+double effectiveTLogMinAvailableSpaceRatio() {
+	if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+		return 0.0;
+	}
+	return SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO;
+}
+
 static void failIfTLogCannotAcceptNewData(TLogData* self, Reference<LogData> logData, Version ver) {
 	StorageBytes kvStoreBytes = self->persistentData->getStorageBytes();
 	StorageBytes queueBytes = self->rawPersistentQueue->getStorageBytes();
-	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, SERVER_KNOBS->TLOG_MIN_AVAILABLE_SPACE_RATIO)) {
+	const double minAvailableSpaceRatio = effectiveTLogMinAvailableSpaceRatio();
+	if (self->shouldAcceptNewData(kvStoreBytes, queueBytes, minAvailableSpaceRatio)) {
 		return;
 	}
 	CODE_PROBE(true, "pullAsyncData blocked by TLOG_MIN_AVAILABLE_SPACE_RATIO");
-	// Fail recovery and temporarily exclude this worker from TLog recruitment until disk space recovers.
-	throwLowDiskTLogRecoveryFailed(self, logData, ver, kvStoreBytes, queueBytes);
+	// Outside speedUpSimulation, fail recovery and temporarily exclude this worker from TLog recruitment until disk
+	// space recovers.
+	throwLowDiskTLogRecoveryFailed(self, logData, ver, minAvailableSpaceRatio, kvStoreBytes, queueBytes);
 }
 
 // remote tLog pull data from log routers
