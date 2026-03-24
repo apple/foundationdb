@@ -1,5 +1,5 @@
 /*
- * DDTxnProcessor.actor.cpp
+ * DDTxnProcessor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,8 +23,8 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
+#include "flow/CoroUtils.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
                                             std::vector<UID>& completeSources,
@@ -45,42 +45,45 @@ static void updateServersAndCompleteSources(std::set<UID>& servers,
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
-	ACTOR static Future<ServerWorkerInfos> getServerListAndProcessClasses(Database cx) {
-		state Transaction tr(cx);
-		state ServerWorkerInfos res;
-		loop {
+	static Future<ServerWorkerInfos> getServerListAndProcessClasses(Database cx) {
+		Transaction tr(cx);
+		ServerWorkerInfos res;
+		while (true) {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Error err;
 			try {
-				wait(store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr)));
+				co_await store(res.servers, NativeAPI::getServerListAndProcessClasses(&tr));
 				res.readVersion = tr.getReadVersion().get();
-				return res;
+				co_return res;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
 	// return {sourceServers, completeSources}
-	ACTOR static Future<IDDTxnProcessor::SourceServers> getSourceServersForRange(Database cx, KeyRangeRef keys) {
-		state std::set<UID> servers;
-		state std::vector<UID> completeSources;
-		state Transaction tr(cx);
+	static Future<IDDTxnProcessor::SourceServers> getSourceServersForRange(Database cx, KeyRangeRef keys) {
+		std::set<UID> servers;
+		std::vector<UID> completeSources;
+		Transaction tr(cx);
 
-		loop {
+		while (true) {
 			servers.clear();
 			completeSources.clear();
 
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Error err;
 			try {
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				RangeResult keyServersEntries = wait(tr.getRange(lastLessOrEqual(keyServersKey(keys.begin)),
-				                                                 firstGreaterOrEqual(keyServersKey(keys.end)),
-				                                                 SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS));
+				RangeResult keyServersEntries = co_await tr.getRange(lastLessOrEqual(keyServersKey(keys.begin)),
+				                                                     firstGreaterOrEqual(keyServersKey(keys.end)),
+				                                                     SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS);
 
 				if (keyServersEntries.size() < SERVER_KNOBS->DD_QUEUE_MAX_KEY_SERVERS) {
 					for (int shard = 0; shard < keyServersEntries.size(); shard++) {
@@ -98,7 +101,7 @@ class DDTxnProcessorImpl {
 				// When a shard is inflight and DD crashes, some destination servers may have already got the data.
 				// The new DD will treat the destination servers as source servers. So the size can be large.
 				else {
-					RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+					RangeResult serverList = co_await tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (auto s = serverList.begin(); s != serverList.end(); ++s)
@@ -109,38 +112,39 @@ class DDTxnProcessorImpl {
 
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 
-		return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
+		co_return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 	}
 
-	ACTOR static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(
-	    Database cx,
-	    KeyRangeRef range) {
-		state std::vector<IDDTxnProcessor::DDRangeLocations> res;
-		state Transaction tr(cx);
+	static Future<std::vector<IDDTxnProcessor::DDRangeLocations>> getSourceServerInterfacesForRange(Database cx,
+	                                                                                                KeyRangeRef range) {
+		std::vector<IDDTxnProcessor::DDRangeLocations> res;
+		Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-		loop {
+		while (true) {
 			res.clear();
+			Error err;
 			try {
-				state RangeResult shards = wait(krmGetRanges(&tr,
-				                                             keyServersPrefix,
-				                                             range,
-				                                             SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
-				                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
+				RangeResult shards = co_await krmGetRanges(&tr,
+				                                           keyServersPrefix,
+				                                           range,
+				                                           SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
+				                                           SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT);
 				ASSERT(!shards.empty());
 
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				state int i = 0;
+				int i = 0;
 				for (i = 0; i < shards.size() - 1; ++i) {
-					state std::vector<UID> src;
+					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
@@ -149,7 +153,7 @@ class DDTxnProcessorImpl {
 					for (int j = 0; j < src.size(); ++j) {
 						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
 					}
-					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					std::vector<Optional<Value>> serverListValues = co_await getAll(serverListEntries);
 					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
 					for (int j = 0; j < serverListValues.size(); ++j) {
 						if (!serverListValues[j].present()) {
@@ -165,26 +169,30 @@ class DDTxnProcessorImpl {
 				}
 				break;
 			} catch (Error& e) {
-				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError").errorUnsuppressed(e).detail("Range", range);
-				wait(tr.onError(e));
+				err = e;
+				TraceEvent(SevWarnAlways, "GetSourceServerInterfacesError")
+				    .errorUnsuppressed(err)
+				    .detail("Range", range);
 			}
+			co_await tr.onError(err);
 		}
 
-		return res;
+		co_return res;
 	}
 
 	// set the system key space
-	ACTOR static Future<Void> updateReplicaKeys(Database cx,
-	                                            std::vector<Optional<Key>> primaryDcId,
-	                                            std::vector<Optional<Key>> remoteDcIds,
-	                                            DatabaseConfiguration configuration) {
-		state Transaction tr(cx);
-		loop {
+	static Future<Void> updateReplicaKeys(Database cx,
+	                                      std::vector<Optional<Key>> primaryDcId,
+	                                      std::vector<Optional<Key>> remoteDcIds,
+	                                      DatabaseConfiguration configuration) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				RangeResult replicaKeys = wait(tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult replicaKeys = co_await tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 
 				for (auto& kv : replicaKeys) {
 					auto dcId = decodeDatacenterReplicasKey(kv.key);
@@ -199,71 +207,75 @@ class DDTxnProcessorImpl {
 					}
 				}
 
-				wait(tr.commit());
+				co_await tr.commit();
 				break;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
-		return Void();
 	}
 
-	ACTOR static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
-		state Transaction tr(cx);
-		loop {
+	static Future<int> tryUpdateReplicasKeyForDc(Database cx, Optional<Key> dcId, int storageTeamSize) {
+		Transaction tr(cx);
+		while (true) {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
+			Error err;
 			try {
-				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
-				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
+				Optional<Value> val = co_await tr.get(datacenterReplicasKeyFor(dcId));
+				int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 				if (oldReplicas == storageTeamSize) {
-					return oldReplicas;
+					co_return oldReplicas;
 				}
 				if (oldReplicas < storageTeamSize) {
 					tr.set(rebootWhenDurableKey, StringRef());
 				}
 				tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(storageTeamSize));
-				wait(tr.commit());
+				co_await tr.commit();
 
-				return oldReplicas;
+				co_return oldReplicas;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Optional<Key>> getHealthyZone(Database cx, UID distributorId) {
+	static Future<Optional<Key>> getHealthyZone(Database cx, UID distributorId) {
 		// Read healthyZone value which is later used to determine on/off of failure triggered DD.
 		// Occasionally this can be slow to read.  This is due to hotspots on the \xff\x02 shard
 		// due to over-aggressive use of this feature:
 		// https://apple.github.io/foundationdb/transaction-profiler-analyzer.html
 		// All in all, it's better to succeed in starting up with a risk to a
 		// non-default feature (maintenance mode) than to block DD startup indefinitely.
-		state Transaction tr(cx);
-		state int maxRetries = SERVER_KNOBS->DD_HEALTHY_ZONE_READ_RETRY_COUNT;
-		state bool healthyZoneRead = false;
-		state Optional<Value> healthyZoneVal;
-		state int i = 0;
+		Transaction tr(cx);
+		int maxRetries = SERVER_KNOBS->DD_HEALTHY_ZONE_READ_RETRY_COUNT;
+		bool healthyZoneRead = false;
+		Optional<Value> healthyZoneVal;
+		int i = 0;
 		for (; i < maxRetries; i++) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> _hz = wait(tr.get(healthyZoneKey));
+				Optional<Value> _hz = co_await tr.get(healthyZoneKey);
 				healthyZoneVal = _hz;
 				healthyZoneRead = true;
 				break;
 			} catch (Error& e) {
-				TraceEvent("ReadHealthyZone", distributorId).error(e);
-				wait(tr.onError(e));
+				err = e;
+				TraceEvent("ReadHealthyZone", distributorId).error(err);
 			}
+			co_await tr.onError(err);
 		}
 		if (healthyZoneRead) {
 			if (healthyZoneVal.present()) {
 				auto p = decodeHealthyZoneValue(healthyZoneVal.get());
 				if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
-					return Optional<Key>(p.first);
+					co_return Optional<Key>(p.first);
 				}
 			}
 		} else {
@@ -276,41 +288,40 @@ class DDTxnProcessorImpl {
 			            " appear to be down. Data distributor/cluster restart can be used to reattempt to read"
 			            " the maintenance mode settings.");
 		}
-		return Optional<Key>();
+		co_return Optional<Key>();
 	}
 
 	// Read keyservers, return unique set of teams
-	ACTOR static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(
-	    Database cx,
-	    UID distributorId,
-	    MoveKeysLock moveKeysLock,
-	    std::vector<Optional<Key>> remoteDcIds,
-	    const DDEnabledState* ddEnabledState,
-	    SkipDDModeCheck skipDDModeCheck) {
-		state Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
-		state Key beginKey = allKeys.begin;
+	static Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
+	                                                                             UID distributorId,
+	                                                                             MoveKeysLock moveKeysLock,
+	                                                                             std::vector<Optional<Key>> remoteDcIds,
+	                                                                             const DDEnabledState* ddEnabledState,
+	                                                                             SkipDDModeCheck skipDDModeCheck) {
+		Reference<InitialDataDistribution> result = makeReference<InitialDataDistribution>();
+		Key beginKey = allKeys.begin;
 
-		state bool succeeded;
+		bool succeeded{ false };
 
-		state Transaction tr(cx);
+		Transaction tr(cx);
 
 		if (ddLargeTeamEnabled()) {
-			wait(store(result->userRangeConfig,
-			           DDConfiguration().userRangeConfig().getSnapshot(
-			               SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end)));
+			co_await store(result->userRangeConfig,
+			               DDConfiguration().userRangeConfig().getSnapshot(
+			                   SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
 		}
-		state std::map<UID, Optional<Key>> server_dc;
-		state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
-		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
-		state int numDataMoves = 0;
+		std::map<UID, Optional<Key>> server_dc;
+		std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
+		std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
+		int numDataMoves = 0;
 
-		Optional<Key> healthyZone = wait(getHealthyZone(cx, distributorId));
+		Optional<Key> healthyZone = co_await getHealthyZone(cx, distributorId);
 		result->initHealthyZoneValue = healthyZone;
 
 		CODE_PROBE((bool)skipDDModeCheck, "DD Mode won't prevent read initial data distribution.");
 		// Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure
 		// causing entries to be duplicated
-		loop {
+		while (true) {
 			numDataMoves = 0;
 			server_dc.clear();
 			result->allServers.clear();
@@ -319,12 +330,13 @@ class DDTxnProcessorImpl {
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				result->mode = 1;
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
@@ -332,11 +344,11 @@ class DDTxnProcessorImpl {
 				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isEnabled()) {
 					// DD can be disabled persistently (result->mode = 0) or transiently (isEnabled() = 0)
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
-					return result;
+					co_return result;
 				}
 
 				result->bulkLoadMode = 0;
-				Optional<Value> bulkLoadMode = wait(tr.get(bulkLoadModeKey));
+				Optional<Value> bulkLoadMode = co_await tr.get(bulkLoadModeKey);
 				if (bulkLoadMode.present()) {
 					BinaryReader rd(bulkLoadMode.get(), Unversioned());
 					rd >> result->bulkLoadMode;
@@ -344,16 +356,16 @@ class DDTxnProcessorImpl {
 				TraceEvent(SevInfo, "DDBulkLoadEngineInitMode").detail("Mode", result->bulkLoadMode);
 
 				result->bulkDumpMode = 0;
-				Optional<Value> bulkDumpMode = wait(tr.get(bulkDumpModeKey));
+				Optional<Value> bulkDumpMode = co_await tr.get(bulkDumpModeKey);
 				if (bulkDumpMode.present()) {
 					BinaryReader rd(bulkDumpMode.get(), Unversioned());
 					rd >> result->bulkDumpMode;
 				}
 				TraceEvent(SevInfo, "DDBulkDumpInitMode").detail("Mode", result->bulkDumpMode);
 
-				state Future<std::vector<ProcessData>> workers = getWorkers(&tr);
-				state Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				wait(success(workers) && success(serverList));
+				Future<std::vector<ProcessData>> workers = getWorkers(&tr);
+				Future<RangeResult> serverList = tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				co_await (success(workers) && success(serverList));
 				ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 
 				std::map<Optional<Standalone<StringRef>>, ProcessData> id_data;
@@ -370,7 +382,7 @@ class DDTxnProcessorImpl {
 					}
 				}
 
-				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeResult dms = co_await tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY);
 				ASSERT(!dms.more && dms.size() < CLIENT_KNOBS->TOO_MANY);
 				// For each data move, find out the src or dst servers are in primary or remote DC.
 				for (int i = 0; i < dms.size(); ++i) {
@@ -420,31 +432,33 @@ class DDTxnProcessorImpl {
 
 				break;
 			} catch (Error& e) {
-				TraceEvent("GetInitialTeamsRetry", distributorId).error(e);
-				wait(tr.onError(e));
-
-				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
+				err = e;
+				TraceEvent("GetInitialTeamsRetry", distributorId).error(err);
 			}
+			co_await tr.onError(err);
+			ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
+			                    // loop
 		}
 
 		// If keyServers is too large to read in a single transaction, then we will have to break this process up into
 		// multiple transactions. In that case, each iteration should begin where the previous left off
 		while (beginKey < allKeys.end) {
 			CODE_PROBE(beginKey > allKeys.begin, "Multi-transactional getInitialDataDistribution");
-			loop {
+			while (true) {
 				succeeded = false;
+				Error err;
 				try {
 					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					wait(checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState));
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					co_await checkMoveKeysLockReadOnly(&tr, moveKeysLock, ddEnabledState);
+					RangeResult UIDtoTagMap = co_await tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-					RangeResult keyServers = wait(krmGetRanges(&tr,
-					                                           keyServersPrefix,
-					                                           KeyRangeRef(beginKey, allKeys.end),
-					                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                           SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					RangeResult keyServers = co_await krmGetRanges(&tr,
+					                                               keyServersPrefix,
+					                                               KeyRangeRef(beginKey, allKeys.end),
+					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
+					                                               SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES);
 					succeeded = true;
 
 					std::vector<UID> src, dest, last;
@@ -517,12 +531,12 @@ class DDTxnProcessorImpl {
 					beginKey = keyServers.end()[-1].key;
 					break;
 				} catch (Error& e) {
-					TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(e);
-
-					wait(tr.onError(e));
-					ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this
-					                    // loop
+					err = e;
+					TraceEvent("GetInitialTeamsKeyServersRetry", distributorId).error(err);
 				}
+				co_await tr.onError(err);
+				ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in
+				                    // this loop
 			}
 
 			tr.reset();
@@ -544,23 +558,25 @@ class DDTxnProcessorImpl {
 			result->allServers.push_back(it);
 		}
 
-		return result;
+		co_return result;
 	}
 
-	ACTOR static Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
-		state Transaction tr(cx);
-		loop {
-			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
+	static Future<Void> waitForDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+		Transaction tr(cx);
+		while (true) {
+			co_await delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution);
 
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
+			Error err;
+			bool hasErr = false;
 			try {
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
 				if (!mode.present() && ddEnabledState->isEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded").log();
-					return Void();
+					co_return;
 				}
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
@@ -571,28 +587,33 @@ class DDTxnProcessorImpl {
 					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
-						return Void();
+						co_return;
 					}
 				}
 
 				tr.reset();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR static Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
-		state Transaction tr(cx);
-		loop {
+	static Future<bool> isDataDistributionEnabled(Database cx, const DDEnabledState* ddEnabledState) {
+		Transaction tr(cx);
+		while (true) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
+			Error err;
 			try {
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				Optional<Value> mode = co_await tr.get(dataDistributionModeKey);
 				if (!mode.present() && ddEnabledState->isEnabled())
-					return true;
+					co_return true;
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					int m;
@@ -601,11 +622,11 @@ class DDTxnProcessorImpl {
 						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 						    .detail("Mode", m)
 						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-						return true;
+						co_return true;
 					}
 				}
 				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
-				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
+				Optional<Value> readVal = co_await tr.get(moveKeysLockOwnerKey);
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
@@ -613,84 +634,92 @@ class DDTxnProcessorImpl {
 					    .detail("CurrentOwner", currentOwner)
 					    .detail("DDModeLock", dataDistributionModeLock)
 					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-					return true;
+					co_return true;
 				}
 				TraceEvent(SevDebug, "IsDDEnabledFailed")
 				    .detail("CurrentOwner", currentOwner)
 				    .detail("DDModeLock", dataDistributionModeLock)
 				    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-				return false;
+				co_return false;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
-		loop {
-			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
-			state Transaction tr(cx);
-			loop {
+	static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
+		while (true) {
+			co_await delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY);
+			Transaction tr(cx);
+			while (true) {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Error err;
 				try {
-					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
+					co_await checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState);
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
-		state Transaction tr(cx);
-		loop {
+	static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
-				return res;
+				Optional<Value> res = co_await tr.get(rebalanceDDIgnoreKey);
+				co_return res;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
+	static Future<Void> waitDDTeamInfoPrintSignal(Database cx) {
+		ReadYourWritesTransaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
-				wait(tr.commit());
-				wait(watchFuture);
-				return Void();
+				Future<Void> watchFuture = tr.watch(triggerDDTeamInfoPrintKey);
+				co_await tr.commit();
+				co_await watchFuture;
+				co_return;
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
-	ACTOR static Future<Void> waitForAllDataRemoved(
-	    Database cx,
-	    UID serverID,
-	    Version addedVersion,
-	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		loop {
+	static Future<Void> waitForAllDataRemoved(Database cx,
+	                                          UID serverID,
+	                                          Version addedVersion,
+	                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
+		Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		while (true) {
+			Error err;
+			bool hasErr = false;
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Version ver = wait(tr->getReadVersion());
+				Version ver = co_await tr->getReadVersion();
 
 				// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery
 				// could cause us to not store the mutations sent to the short lived storage server.
 				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
+					bool canRemove = co_await canRemoveStorageServer(tr, serverID);
 					auto shards = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
 					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
 					    .detail("Server", serverID)
@@ -698,15 +727,19 @@ class DDTxnProcessorImpl {
 					    .detail("Shards", shards);
 					ASSERT_GE(shards, 0);
 					if (canRemove && shards == 0) {
-						return Void();
+						co_return;
 					}
 				}
 
 				// Wait for any change to the serverKeys for this server
-				wait(delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution));
+				co_await delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution);
 				tr->reset();
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				err = e;
+				hasErr = true;
+			}
+			if (hasErr) {
+				co_await tr->onError(err);
 			}
 		}
 	}
@@ -821,11 +854,11 @@ Future<Void> DDTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
 
 struct DDMockTxnProcessorImpl {
 	// return when all status become FETCHED
-	ACTOR static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
-		state TraceInterval interval("MockCheckFetchingState");
+	static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
+		TraceInterval interval("MockCheckFetchingState");
 		TraceEvent(SevDebug, interval.begin()).detail("Range", range);
-		loop {
-			wait(delayJittered(1.0, TaskPriority::FetchKeys));
+		while (true) {
+			co_await delayJittered(1.0, TaskPriority::FetchKeys);
 			bool done = true;
 			for (auto& id : ids) {
 				auto& server = self->mgs->allServers.at(id);
@@ -839,7 +872,6 @@ struct DDMockTxnProcessorImpl {
 			}
 		}
 		TraceEvent(SevDebug, interval.end()).log();
-		return Void();
 	}
 
 	static Future<Void> rawCheckFetchingState(DDMockTxnProcessor* self, const MoveKeysParams& params) {
@@ -853,21 +885,20 @@ struct DDMockTxnProcessorImpl {
 		return checkFetchingState(self, params.destinationTeam, params.keys.get());
 	}
 
-	ACTOR static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
-		state std::map<UID, StorageServerInterface> tssMapping;
+	static Future<Void> moveKeys(DDMockTxnProcessor* self, MoveKeysParams params) {
+		std::map<UID, StorageServerInterface> tssMapping;
 		// Because SFBTF::Team requires the ID is ordered
 		std::sort(params.destinationTeam.begin(), params.destinationTeam.end());
 		std::sort(params.healthyDestinations.begin(), params.healthyDestinations.end());
 
-		wait(self->rawStartMovement(params, tssMapping));
+		co_await self->rawStartMovement(params, tssMapping);
 		ASSERT(tssMapping.empty());
 
-		wait(rawCheckFetchingState(self, params));
+		co_await rawCheckFetchingState(self, params);
 
-		wait(self->rawFinishMovement(params, tssMapping));
+		co_await self->rawFinishMovement(params, tssMapping);
 		if (!params.dataMovementComplete.isSet())
 			params.dataMovementComplete.send(Void());
-		return Void();
 	}
 };
 
@@ -1042,11 +1073,11 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 	return Future<std::vector<ProcessData>>();
 }
 
-ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
-                                    MoveKeysParams params,
-                                    std::map<UID, StorageServerInterface> tssMapping) {
-	state TraceInterval interval("RelocateShard_MockStartMoveKeys");
-	state KeyRange keys;
+Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
+                              MoveKeysParams params,
+                              std::map<UID, StorageServerInterface> tssMapping) {
+	TraceInterval interval("RelocateShard_MockStartMoveKeys");
+	KeyRange keys;
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
@@ -1057,8 +1088,8 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 		keys = params.keys.get();
 	}
 	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
-	wait(params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
-	state FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
+	co_await params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch);
+	FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
@@ -1093,7 +1124,6 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 		server->signalFetchKeys(keys, totalRangeSize);
 	}
 	TraceEvent(SevDebug, interval.end());
-	return Void();
 }
 
 Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
@@ -1101,11 +1131,11 @@ Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
 	return ::rawStartMovement(mgs, params, tssMapping);
 }
 
-ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
-                                     MoveKeysParams params,
-                                     std::map<UID, StorageServerInterface> tssMapping) {
-	state TraceInterval interval("RelocateShard_MockFinishMoveKeys");
-	state KeyRange keys;
+Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
+                               MoveKeysParams params,
+                               std::map<UID, StorageServerInterface> tssMapping) {
+	TraceInterval interval("RelocateShard_MockFinishMoveKeys");
+	KeyRange keys;
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
 		// TODO: make startMoveShards work with multiple ranges.
@@ -1118,8 +1148,8 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 
 	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
 
-	wait(params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
-	state FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
+	co_await params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch);
+	FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
 
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(keys);
@@ -1150,7 +1180,6 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	mgs->shardMapping->finishMove(keys);
 	mgs->shardMapping->defineShard(keys); // coalesce for merge
 	TraceEvent(SevDebug, interval.end());
-	return Void();
 }
 
 Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
