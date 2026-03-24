@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbrpc/Locality.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "flow/UnitTest.h"
 
 Future<Void> testerServerCore(TesterInterface const& interf,

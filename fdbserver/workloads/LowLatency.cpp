@@ -20,7 +20,7 @@
 
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.actor.h"

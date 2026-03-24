@@ -28,7 +28,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "flow/ActorCollection.h"

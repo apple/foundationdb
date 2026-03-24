@@ -72,7 +72,6 @@ add_fdbserver_link_test(fdbserver_restoreworkerlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
   fdbserver_clustercontroller
-  fdbserver_tester
   fdbserver_logsystem
   fdbserver_kvstore
   fdbserver_core
@@ -85,7 +84,6 @@ add_fdbserver_link_test(fdbserver_commitproxylinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_consistencyscanlinktest
   fdbserver_consistencyscan
-  fdbserver_tester
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_coordinatorlinktest
@@ -95,7 +93,6 @@ add_fdbserver_link_test(fdbserver_coordinatorlinktest
   fdbclient)
 add_fdbserver_link_test(fdbserver_datadistributorlinktest
   fdbserver_datadistributor
-  fdbserver_tester
   fdbserver_core
   fdbclient)
 add_fdbserver_link_test(fdbserver_grvproxylinktest

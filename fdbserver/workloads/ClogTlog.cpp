@@ -25,7 +25,7 @@
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"

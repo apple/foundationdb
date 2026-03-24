@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
 
 // SOMEDAY: Make this actually run on multiple clients

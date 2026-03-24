@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbserver/tester/TesterInterface.h"
-#include "fdbserver/tester/QuietDatabase.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/tester/workloads.actor.h"
 

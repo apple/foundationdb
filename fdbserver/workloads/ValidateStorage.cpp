@@ -23,7 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "flow/Error.h"

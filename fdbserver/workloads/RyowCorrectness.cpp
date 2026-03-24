@@ -20,7 +20,7 @@
 
 #include <vector>
 
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "fdbserver/workloads/ApiWorkload.h"

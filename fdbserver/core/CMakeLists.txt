@@ -40,8 +40,6 @@ target_include_directories(fdbserver_core
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
-    ${CMAKE_SOURCE_DIR}/fdbserver/tester/include
-    ${CMAKE_BINARY_DIR}/fdbserver/tester/include
   PRIVATE
     ${CMAKE_SOURCE_DIR}/fdbserver/include
     ${CMAKE_BINARY_DIR}/fdbserver/include)

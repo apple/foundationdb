@@ -39,7 +39,7 @@
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/UnitTest.h"
-#include "fdbserver/tester/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/RatekeeperLimitReasons.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/Knobs.h"

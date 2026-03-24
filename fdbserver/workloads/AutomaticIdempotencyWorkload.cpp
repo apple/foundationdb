@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/tester/workloads.actor.h"

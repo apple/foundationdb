@@ -41,8 +41,8 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/ShardSizing.h"
 #include "fdbserver/core/WaitFailure.h"
-#include "fdbserver/tester/TesterInterface.h"
-#include "fdbserver/tester/QuietDatabase.actor.h"
+#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.

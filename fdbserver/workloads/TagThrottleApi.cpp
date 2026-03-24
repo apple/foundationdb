@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 

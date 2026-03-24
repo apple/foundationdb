@@ -24,7 +24,7 @@
 #include "fdbserver/core/IKeyValueStore.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
-#include "fdbserver/tester/QuietDatabase.actor.h"
+#include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/ServerCheckpoint.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "flow/Error.h"
