@@ -1,5 +1,5 @@
 /*
- * AuditUtils.actor.h
+ * AuditUtils.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,19 +18,15 @@
  * limitations under the License.
  */
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_AUDITUTILS_ACTOR_G_H)
-#define FDBCLIENT_AUDITUTILS_ACTOR_G_H
-#include "fdbclient/AuditUtils.actor.g.h"
-#elif !defined(FDBCLIENT_AUDITUTILS_ACTOR_H)
-#define FDBCLIENT_AUDITUTILS_ACTOR_H
 #pragma once
+
+#ifndef FDBCLIENT_AUDITUTILS_H
+#define FDBCLIENT_AUDITUTILS_H
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/fdbrpc.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
@@ -112,5 +108,4 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
 Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
 
-#include "flow/unactorcompiler.h"
 #endif

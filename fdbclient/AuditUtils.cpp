@@ -1,5 +1,5 @@
 /*
- * AuditUtils.actor.cpp
+ * AuditUtils.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 
 #include "fdbclient/Audit.h"
 #include "fdbclient/FDBTypes.h"

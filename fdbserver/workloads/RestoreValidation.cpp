@@ -37,7 +37,7 @@
 // - Error detection: Fails the test if audit finds missing or mismatched keys
 
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
