@@ -12,4 +12,4 @@ target_include_directories(fdbserver_clustercontroller
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_SOURCE_DIR}/fdbserver/datadistributor/include
     ${CMAKE_BINARY_DIR}/fdbserver/datadistributor/include)
-target_link_libraries(fdbserver_clustercontroller PRIVATE fdbclient fdbserver_core fdbserver_logsystem)
+target_link_libraries(fdbserver_clustercontroller PRIVATE fdbclient fdbserver_core fdbserver_logsystem fdbserver_tester)

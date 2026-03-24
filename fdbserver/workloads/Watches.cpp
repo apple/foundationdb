@@ -20,11 +20,11 @@
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/TesterInterface.h"
 #include "flow/CodeProbe.h"
 #include "flow/Coroutines.h"
 #include "flow/DeterministicRandom.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesWorkload : TestWorkload {

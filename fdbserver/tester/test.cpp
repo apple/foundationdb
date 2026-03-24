@@ -46,10 +46,10 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DataDistributionConfig.h"
-#include "fdbserver/core/KnobProtectiveGroups.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/tester/KnobProtectiveGroups.h"
+#include "fdbserver/tester/QuietDatabase.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/tester/WorkloadUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbclient/MonitorLeader.h"
@@ -60,7 +60,7 @@
 
 #include "flow/Trace.h"
 #include "flow/CoroUtils.h"
-#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/TesterInterface.h"
 
 // returns unconsumed options
 Standalone<VectorRef<KeyValueRef>> checkAllOptionsConsumed(VectorRef<KeyValueRef> options) {

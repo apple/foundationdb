@@ -19,16 +19,16 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CORE_QUIETDATABASE_ACTOR_G_H)
-#define FDBSERVER_CORE_QUIETDATABASE_ACTOR_G_H
-#include "fdbserver/core/QuietDatabase.actor.g.h"
-#elif !defined(FDBSERVER_CORE_QUIETDATABASE_ACTOR_H)
-#define FDBSERVER_CORE_QUIETDATABASE_ACTOR_H
+#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_TESTER_QUIETDATABASE_ACTOR_G_H)
+#define FDBSERVER_TESTER_QUIETDATABASE_ACTOR_G_H
+#include "fdbserver/tester/QuietDatabase.actor.g.h"
+#elif !defined(FDBSERVER_TESTER_QUIETDATABASE_ACTOR_H)
+#define FDBSERVER_TESTER_QUIETDATABASE_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

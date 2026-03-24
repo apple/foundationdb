@@ -20,10 +20,10 @@
 
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/core/QuietDatabase.actor.h"
+#include "fdbserver/tester/QuietDatabase.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PingWorkloadInterface {

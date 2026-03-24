@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_CORE_WORKLOADS_ACTOR_H
-#define FDBSERVER_CORE_WORKLOADS_ACTOR_H
+#ifndef FDBSERVER_TESTER_WORKLOADS_ACTOR_H
+#define FDBSERVER_TESTER_WORKLOADS_ACTOR_H
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
-#include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/WorkloadKeys.h"
+#include "fdbserver/tester/TesterInterface.h"
+#include "fdbserver/tester/WorkloadKeys.h"
 
 #include <algorithm>
 #include <functional>
@@ -74,7 +74,7 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 		if (runSetup)
 			phases |= TestWorkload::SETUP;
 	}
-	virtual ~TestWorkload() {};
+	virtual ~TestWorkload(){};
 	virtual Future<Void> initialized() { return Void(); }
 	// WARNING: this method must not be implemented by a workload directly. Instead, this will be implemented by
 	// the workload factory. Instead, provide a static member variable called name.

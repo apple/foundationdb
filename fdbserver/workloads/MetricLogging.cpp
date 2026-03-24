@@ -19,9 +19,9 @@
  */
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/TesterInterface.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 struct MetricLoggingWorkload : TestWorkload {
 	static constexpr auto NAME = "MetricLogging";

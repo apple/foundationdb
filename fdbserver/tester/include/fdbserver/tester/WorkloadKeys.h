@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_CORE_WORKLOADKEYS_H
-#define FDBSERVER_CORE_WORKLOADKEYS_H
+#ifndef FDBSERVER_TESTER_WORKLOADKEYS_H
+#define FDBSERVER_TESTER_WORKLOADKEYS_H
 #pragma once
 
 #include "fdbclient/FDBTypes.h"

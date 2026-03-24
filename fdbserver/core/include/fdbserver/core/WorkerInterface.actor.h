@@ -34,7 +34,7 @@
 #include "fdbserver/core/ResolverInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/core/TesterInterface.h"
+#include "fdbserver/tester/TesterInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/core/LogSystemConfig.h"
 #include "fdbrpc/MultiInterface.h"
