@@ -1049,7 +1049,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	// SOMEDAY: Figure out what this priority should actually be
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
-	state std::vector<Key> customBoundaries;
+	std::vector<Key> customBoundaries;
 
 	// Always split at the user/system keyspace boundary
 	customBoundaries.push_back(systemKeys.begin);
@@ -1059,8 +1059,8 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	}
 	std::sort(customBoundaries.begin(), customBoundaries.end());
 	customBoundaries.erase(std::unique(customBoundaries.begin(), customBoundaries.end()), customBoundaries.end());
-	state int s;
-	state int customBoundary = 0;
+	int s{ 0 };
+	int customBoundary = 0;
 	for (s = 0; s < initData->shards.size() - 1; s++) {
 		Key beginKey = initData->shards[s].key;
 		Key endKey = initData->shards[s + 1].key;
