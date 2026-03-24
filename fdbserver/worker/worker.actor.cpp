@@ -115,9 +115,6 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
 
-namespace {
-RoleLineageCollector roleLineageCollector;
-
 struct ErrorInfo {
 	Error error;
 	const Role& role;
@@ -128,6 +125,14 @@ struct ErrorInfo {
 		ASSERT(false);
 	}
 };
+
+struct PrimaryAndRemoteAddresses {
+	std::vector<NetworkAddress> primary;
+	std::vector<NetworkAddress> remote;
+};
+
+namespace {
+RoleLineageCollector roleLineageCollector;
 
 Error checkIOTimeout(Error const& e) {
 	// Convert all_errors to io_timeout if global timeout bool was set
@@ -1011,11 +1016,6 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 
 	return false;
 }
-
-struct PrimaryAndRemoteAddresses {
-	std::vector<NetworkAddress> primary;
-	std::vector<NetworkAddress> remote;
-};
 
 // Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
 UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
