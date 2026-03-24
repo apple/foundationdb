@@ -1116,6 +1116,7 @@ public:
 				    recheck) { // NOTE: do not check wrongSize
 					if (logTeamEvents) {
 						TraceEvent("ServerTeamHealthChanged", self->distributorId)
+						    .suppressFor(1.0)
 						    .detail("ServerTeam", team->getDesc())
 						    .detail("ServersLeft", serversLeft)
 						    .detail("LastServersLeft", lastServersLeft)
@@ -1146,6 +1147,7 @@ public:
 
 							if (self->healthyTeamCount == 0) {
 								TraceEvent(SevWarn, "ZeroServerTeamsHealthySignalling", self->distributorId)
+								    .suppressFor(1.0)
 								    .detail("SignallingTeam", team->getDesc())
 								    .detail("Primary", self->primary);
 							}
@@ -1339,6 +1341,7 @@ public:
 
 					if (self->healthyTeamCount == 0) {
 						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+						    .suppressFor(1.0)
 						    .detail("ServerPrimary", self->primary)
 						    .detail("SignallingServerTeam", team->getDesc());
 						self->zeroHealthyTeams->set(true);
@@ -5733,6 +5736,7 @@ void DDTeamCollection::noHealthyTeams() const {
 	}
 
 	TraceEvent(SevWarn, "NoHealthyTeams", distributorId)
+	    .suppressFor(5.0)
 	    .detail("CurrentServerTeamCount", teams.size())
 	    .detail("ServerCount", server_info.size())
 	    .detail("NonFailedServerCount", desiredServerSet.size());
