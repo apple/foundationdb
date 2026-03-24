@@ -1,6 +1,12 @@
 fdb_find_sources(FDBSERVER_STORAGESERVER_SRCS)
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_storageserver SRCS ${FDBSERVER_STORAGESERVER_SRCS})
+add_fdbserver_link_test(fdbserver_storageserverlinktest
+  fdbserver_storageserver
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
 
 configure_fdbserver_common_includes(fdbserver_storageserver)
 target_include_directories(fdbserver_storageserver

@@ -1,4 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
+include(AddFdbServerLinkTest)
 
 function(configure_fdbserver_common_includes target_name)
   target_include_directories(${target_name} PRIVATE
@@ -12,14 +13,6 @@ function(configure_fdbserver_target_includes target_name)
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
   )
-endfunction()
-
-function(add_fdbserver_link_test target_name)
-  set(link_libs ${ARGN})
-  list(GET link_libs 0 primary_lib)
-  list(REMOVE_AT link_libs 0)
-  add_flow_target(LINK_TEST NAME ${target_name} SRCS ../fdbclient/LinkTest.cpp)
-  target_link_libraries(${target_name} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${primary_lib}>" ${link_libs} rapidxml)
 endfunction()
 
 if(WITH_ROCKSDB)
@@ -50,114 +43,6 @@ add_subdirectory(storageserver)
 add_subdirectory(tester)
 add_subdirectory(tlog)
 add_subdirectory(worker)
-
-add_fdbserver_link_test(fdbserver_corelinktest
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_logsystemlinktest
-  fdbserver_logsystem
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_kvstorelinktest
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_backupworkerlinktest
-  fdbserver_backupworker
-  fdbserver_logsystem
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_restoreworkerlinktest
-  fdbserver_restoreworker
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
-  fdbserver_clustercontroller
-  fdbserver_logsystem
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_commitproxylinktest
-  fdbserver_commitproxy
-  fdbserver_logsystem
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_consistencyscanlinktest
-  fdbserver_consistencyscan
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_coordinatorlinktest
-  fdbserver_coordinator
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_datadistributorlinktest
-  fdbserver_datadistributor
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_grvproxylinktest
-  fdbserver_grvproxy
-  fdbserver_logsystem
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_logrouterlinktest
-  fdbserver_logrouter
-  fdbserver_logsystem
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_ratekeeperlinktest
-  fdbserver_ratekeeper
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_resolverlinktest
-  fdbserver_resolver
-  fdbserver_logsystem
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_sequencerlinktest
-  fdbserver_sequencer
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_storageserverlinktest
-  fdbserver_storageserver
-  fdbserver_logsystem
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_testerlinktest
-  fdbserver_tester
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_tloglinktest
-  fdbserver_tlog
-  fdbserver_logsystem
-  fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
-add_fdbserver_link_test(fdbserver_workerlinktest
-  fdbserver_worker
-  fdbserver_backupworker
-  fdbserver_restoreworker
-  fdbserver_clustercontroller
-  fdbserver_commitproxy
-  fdbserver_consistencyscan
-  fdbserver_coordinator
-  fdbserver_datadistributor
-  fdbserver_grvproxy
-  fdbserver_kvstore
-  fdbserver_logrouter
-  fdbserver_logsystem
-  fdbserver_ratekeeper
-  fdbserver_resolver
-  fdbserver_sequencer
-  fdbserver_storageserver
-  fdbserver_tester
-  fdbserver_tlog
-  fdbserver_core
-  fdbclient
-  fdbctl)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/workloads)
 

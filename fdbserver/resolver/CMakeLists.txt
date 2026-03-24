@@ -1,6 +1,12 @@
 fdb_find_sources(FDBSERVER_RESOLVER_SRCS)
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_resolver SRCS ${FDBSERVER_RESOLVER_SRCS})
+add_fdbserver_link_test(fdbserver_resolverlinktest
+  fdbserver_resolver
+  fdbserver_logsystem
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
 
 configure_fdbserver_common_includes(fdbserver_resolver)
 target_include_directories(fdbserver_resolver

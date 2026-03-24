@@ -1,6 +1,11 @@
 fdb_find_sources(FDBSERVER_BACKUPWORKER_SRCS)
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_backupworker SRCS ${FDBSERVER_BACKUPWORKER_SRCS})
+add_fdbserver_link_test(fdbserver_backupworkerlinktest
+  fdbserver_backupworker
+  fdbserver_logsystem
+  fdbserver_core
+  fdbclient)
 
 configure_fdbserver_common_includes(fdbserver_backupworker)
 target_include_directories(fdbserver_backupworker

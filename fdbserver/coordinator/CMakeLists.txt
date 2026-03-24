@@ -1,6 +1,11 @@
 fdb_find_sources(FDBSERVER_COORDINATOR_SRCS)
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_coordinator SRCS ${FDBSERVER_COORDINATOR_SRCS})
+add_fdbserver_link_test(fdbserver_coordinatorlinktest
+  fdbserver_coordinator
+  fdbserver_kvstore
+  fdbserver_core
+  fdbclient)
 
 configure_fdbserver_common_includes(fdbserver_coordinator)
 target_include_directories(fdbserver_coordinator
