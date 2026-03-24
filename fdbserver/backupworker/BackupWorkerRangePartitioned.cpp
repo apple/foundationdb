@@ -71,6 +71,8 @@ struct BackupRangePartitionedData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
+	// TODO akanksha: Update oldestBackupEpoch wherever needed.
+	LogEpoch oldestBackupEpoch = 0; // oldest epoch that still has data on tLogs for backup to pull
 	// Minimumum known committed version in StorageServers.
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
@@ -815,6 +817,57 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 
 	for (auto& lf : activeFiles) {
 		self->backups[lf.backupUid].nextFileBeginVersion = lastVersionInFile + 1;
+	}
+}
+
+Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
+	// TODO akanksha: Implement in next PR.
+	co_return;
+}
+
+// TODO akanksha: Do we need a new class BackupProgress.h for Backup V3???
+Future<Void> monitorBackupProgress(BackupRangePartitionedData* self) {
+	Future<Void> interval;
+
+	while (true) {
+		interval = delay(SERVER_KNOBS->BACKUP_PROGRESS_SAVE_INTERVAL);
+		while (self->backups.empty() || !self->logSystem.get()) {
+			co_await (self->changedTrigger.onTrigger() || self->logSystem.onChange());
+		}
+
+		// check all workers have started by checking their progress is larger
+		// than the backup's start version.
+		Reference<BackupProgress> progress(new BackupProgress(self->myId, /*infos=*/{}));
+		// TODO akanksha: getBackupProgress for this worker defined in BackupProgress.cpp - based on progress key, fetch
+		// the progress.
+		co_await getBackupProgress(self->cx, self->myId, progress, /*logging=*/false);
+
+		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
+		if (tagVersions.size() != self->totalTags) {
+			co_await interval;
+			continue;
+		}
+
+		std::map<UID, Version> savedLogVersions;
+		// update progress so far if previous epochs are done.
+		if (self->recruitedEpoch == self->oldestBackupEpoch) {
+			Version v = std::numeric_limits<Version>::max();
+			// Find the version we can gurantee is fully backed up for all backup workers.
+			for (const auto& [tag, version] : tagVersions) {
+				v = std::min(v, version);
+			}
+
+			for (auto& [uid, info] : self->backups) {
+				savedLogVersions.emplace(uid, v);
+				TraceEvent("BWRangePartitionedSavedBackupVersion", self->myId)
+				    .detail("BackupID", uid)
+				    .detail("Version", v);
+			}
+		}
+
+		// TODO akanksha: Implement and explain what setBackupKeys does in next PR.
+		Future<Void> setKeys = savedLogVersions.empty() ? Void() : setBackupKeys(self, savedLogVersions);
+		co_await (interval && setKeys);
 	}
 }
 
