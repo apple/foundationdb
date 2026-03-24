@@ -31,6 +31,7 @@
 #include "fdbclient/MutationList.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "flow/CoroUtils.h"
 
 // Split RestoreConfigFR defined in FileBackupAgent.cpp to declaration in Restore.actor.h and implementation in
 // RestoreCommon.cpp

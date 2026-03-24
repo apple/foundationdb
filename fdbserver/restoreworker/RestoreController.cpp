@@ -32,8 +32,8 @@
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
 #include "RestoreController.h"
-#include "RestoreApplier.actor.h"
-#include "RestoreLoader.actor.h"
+#include "RestoreApplier.h"
+#include "RestoreLoader.h"
 
 #include "flow/Platform.h"
 

@@ -18,14 +18,9 @@
  * limitations under the License.
  */
 
-// This file declares the actors used by the RestoreLoader role
+// This file declares the functions used by the RestoreLoader role
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_LOADER_G_H)
-#define FDBSERVER_RESTORE_LOADER_G_H
-#include "RestoreLoader.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_LOADER_H)
-#define FDBSERVER_RESTORE_LOADER_H
 
 #include <sstream>
 #include "fdbclient/FDBTypes.h"
@@ -37,10 +32,8 @@
 #include "fdbserver/core/RestoreUtil.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.h"
+#include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbclient/BackupContainer.h"
-
-#include "flow/actorcompiler.h" // has to be last include
 
 class LoaderVersionBatchState : RoleVersionBatchState {
 public:
@@ -234,10 +227,7 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 	}
 };
 
-ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
-                                     int nodeIndex,
-                                     Database cx,
-                                     RestoreControllerInterface ci);
-
-#include "flow/unactorcompiler.h"
-#endif
+Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
+                               int nodeIndex,
+                               Database cx,
+                               RestoreControllerInterface ci);
