@@ -5,8 +5,7 @@ add_fdbserver_link_test(fdbserver_storageserverlinktest
   fdbserver_storageserver
   fdbserver_logsystem
   fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_storageserver)
 target_include_directories(fdbserver_storageserver
@@ -16,4 +15,4 @@ target_include_directories(fdbserver_storageserver
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(fdbserver_storageserver PRIVATE fdbclient fdbserver_core fdbserver_kvstore fdbserver_logsystem)
+target_link_libraries(fdbserver_storageserver PRIVATE fdbserver_core fdbserver_kvstore fdbserver_logsystem)

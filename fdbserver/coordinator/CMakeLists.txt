@@ -4,8 +4,7 @@ add_flow_target(STATIC_LIBRARY NAME fdbserver_coordinator SRCS ${FDBSERVER_COORD
 add_fdbserver_link_test(fdbserver_coordinatorlinktest
   fdbserver_coordinator
   fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_coordinator)
 target_include_directories(fdbserver_coordinator
@@ -15,4 +14,4 @@ target_include_directories(fdbserver_coordinator
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(fdbserver_coordinator PRIVATE fdbclient fdbserver_core)
+target_link_libraries(fdbserver_coordinator PRIVATE fdbserver_core)

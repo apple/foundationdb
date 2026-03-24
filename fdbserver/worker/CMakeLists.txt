@@ -21,7 +21,6 @@ add_fdbserver_link_test(fdbserver_workerlinktest
   fdbserver_tester
   fdbserver_tlog
   fdbserver_core
-  fdbclient
   fdbctl)
 
 configure_fdbserver_common_includes(fdbserver_worker)
@@ -40,7 +39,6 @@ target_link_libraries(fdbserver_worker
   PUBLIC
     fdbctl
   PRIVATE
-    fdbclient
     fdbserver_backupworker
     fdbserver_restoreworker
     fdbserver_clustercontroller

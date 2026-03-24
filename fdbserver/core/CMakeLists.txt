@@ -35,8 +35,7 @@ endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbserver_core SRCS ${FDBSERVER_CORE_SRCS})
 add_fdbserver_link_test(fdbserver_corelinktest
-  fdbserver_core
-  fdbclient)
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_core)
 target_include_directories(fdbserver_core
@@ -46,7 +45,7 @@ target_include_directories(fdbserver_core
   PRIVATE
     ${CMAKE_SOURCE_DIR}/fdbserver/include
     ${CMAKE_BINARY_DIR}/fdbserver/include)
-target_link_libraries(fdbserver_core PRIVATE fdbclient)
+target_link_libraries(fdbserver_core PUBLIC fdbclient)
 
 if(WITH_ROCKSDB)
   add_dependencies(fdbserver_core rocksdb)

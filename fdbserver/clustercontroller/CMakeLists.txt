@@ -5,8 +5,7 @@ add_fdbserver_link_test(fdbserver_clustercontrollerlinktest
   fdbserver_clustercontroller
   fdbserver_logsystem
   fdbserver_kvstore
-  fdbserver_core
-  fdbclient)
+  fdbserver_core)
 
 configure_fdbserver_common_includes(fdbserver_clustercontroller)
 target_include_directories(fdbserver_clustercontroller
@@ -18,4 +17,4 @@ target_include_directories(fdbserver_clustercontroller
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_SOURCE_DIR}/fdbserver/datadistributor/include
     ${CMAKE_BINARY_DIR}/fdbserver/datadistributor/include)
-target_link_libraries(fdbserver_clustercontroller PRIVATE fdbclient fdbserver_core fdbserver_logsystem)
+target_link_libraries(fdbserver_clustercontroller PRIVATE fdbserver_core fdbserver_logsystem)
