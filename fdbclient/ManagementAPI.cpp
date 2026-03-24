@@ -4231,4 +4231,6 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	ASSERT(chosenValues["zoneid"_sr].size() == 5);
 	ASSERT(chosenValues["machineid"_sr].size() == 5);
 	ASSERT(std::find(chosen.begin(), chosen.end(), workers[noAssignIndex].address) != chosen.end());
+
+	return Void();
 }
