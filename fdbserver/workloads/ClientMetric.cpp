@@ -21,7 +21,7 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/GlobalConfig.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunTransaction.h"
 #include "fdbclient/Tuple.h"
 

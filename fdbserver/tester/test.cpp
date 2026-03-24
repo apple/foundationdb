@@ -53,7 +53,7 @@
 #include "fdbserver/tester/WorkloadUtils.h"
 #include "fdbserver/tester/tester.h"
 #include "fdbclient/MonitorLeader.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "flow/Platform.h"

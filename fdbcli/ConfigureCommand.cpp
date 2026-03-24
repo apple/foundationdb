@@ -23,7 +23,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"

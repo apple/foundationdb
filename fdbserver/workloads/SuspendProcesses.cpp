@@ -24,7 +24,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunRYWTransaction.h"
 
 struct SuspendProcessesWorkload : TestWorkload {

@@ -1,5 +1,5 @@
 /*
- * ManagementAPI.actor.cpp
+ * ManagementAPI.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -3063,7 +3063,7 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 			}
 			co_await tr.onError(err);
 		}
-	    }
+	}
 }
 
 Future<int> setBulkDumpMode(Database cx, int mode) {
@@ -3935,7 +3935,7 @@ Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName owne
 			}
 			co_await tr.onError(err);
 		}
-	    }
+	}
 }
 
 // Transactional

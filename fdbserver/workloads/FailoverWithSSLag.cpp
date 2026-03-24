@@ -27,7 +27,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/StatusClient.h"
 #include "flow/CoroUtils.h"
 

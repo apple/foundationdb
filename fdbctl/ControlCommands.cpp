@@ -19,7 +19,7 @@
  */
 #ifdef FLOW_GRPC_ENABLED
 #include "fdbctl/ControlCommands.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fmt/format.h"
 #include <boost/algorithm/string.hpp>

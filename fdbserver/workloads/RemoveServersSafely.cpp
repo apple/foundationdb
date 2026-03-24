@@ -24,7 +24,7 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
 
 template <>

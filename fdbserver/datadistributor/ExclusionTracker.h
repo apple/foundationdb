@@ -26,7 +26,7 @@
 #include "flow/flow.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 struct ExclusionTracker {
 	std::set<AddressExclusion> excluded;

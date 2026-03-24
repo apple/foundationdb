@@ -24,7 +24,7 @@
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 // This test creates a scenario that large number of SS join the cluster, by excluding and including a random
 // SS consistently for many times.

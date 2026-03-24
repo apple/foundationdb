@@ -22,7 +22,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
 // (sim2.cpp)

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainerFileSystem.h"

@@ -25,7 +25,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/FaultInjection.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/SimulatorProcessInfo.h"

@@ -25,7 +25,7 @@
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/CoroUtils.h"
 
 struct KillRegionWorkload : TestWorkload {
