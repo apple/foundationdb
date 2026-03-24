@@ -23,7 +23,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "flow/ApiVersion.h"
 

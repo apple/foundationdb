@@ -1,5 +1,5 @@
 fdb_find_sources(FDBSERVER_SRCS)
-list(FILTER FDBSERVER_SRCS EXCLUDE REGEX "^(workloads/|include/fdbserver/workloads/)")
+list(FILTER FDBSERVER_SRCS EXCLUDE REGEX "^workloads/")
 include(AddFdbServerLinkTest)
 
 function(configure_fdbserver_common_includes target_name)

@@ -22,7 +22,7 @@
 #include "fdbclient/MutationLogReader.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/Tuple.h"
-#include "fdbserver/workloads/ApiWorkload.h"
+#include "ApiWorkload.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "flow/Error.h"

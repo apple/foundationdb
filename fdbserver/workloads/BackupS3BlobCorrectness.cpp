@@ -91,7 +91,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "fdbserver/mocks3/MockS3Server.h"
 #include "fdbserver/mocks3/MockS3ServerChaos.h"
 #include "flow/IRandom.h"

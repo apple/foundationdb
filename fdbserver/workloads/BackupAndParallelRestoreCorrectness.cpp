@@ -28,7 +28,7 @@
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 
 #define TEST_ABORT_FASTRESTORE 0
 

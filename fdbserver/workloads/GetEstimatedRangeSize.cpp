@@ -24,7 +24,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 
 #include "flow/Error.h"
 #include "flow/Trace.h"

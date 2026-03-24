@@ -25,7 +25,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "flow/ApiVersion.h"
 
 // This workload tests backing up one cluster to another.

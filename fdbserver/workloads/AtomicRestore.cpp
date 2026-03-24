@@ -25,7 +25,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "fdbserver/core/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 
 // Workload to test atomicRestore().
 

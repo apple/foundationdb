@@ -22,7 +22,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/IAsyncFile.h"
-#include "fdbserver/workloads/AsyncFile.h"
+#include "AsyncFile.h"
 
 struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	static constexpr auto NAME = "DiskDurability";
