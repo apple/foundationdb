@@ -25,7 +25,7 @@
 
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/GenericManagementAPI.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/RangeLock.h"
 #include "flow/Error.h"

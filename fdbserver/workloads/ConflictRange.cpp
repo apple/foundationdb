@@ -25,7 +25,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
-// (sim2.actor.cpp)
+// (sim2.cpp)
 
 struct ConflictRangeWorkload : TestWorkload {
 	static constexpr auto NAME = "ConflictRange";

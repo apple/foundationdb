@@ -24,7 +24,7 @@
 
 #include <cstddef>
 
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"

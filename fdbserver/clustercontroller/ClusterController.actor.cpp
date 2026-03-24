@@ -40,6 +40,7 @@
 #include "fdbserver/core/BackupInterface.h"
 #include "fdbserver/core/CoordinatedState.h"
 #include "fdbserver/core/CoordinationInterface.h" // copy constructors for ServerCoordinators class
+#include "fdbserver/clustercontroller/ClusterController.actor.h"
 #include "ClusterController.actor.h"
 #include "ClusterRecovery.actor.h"
 #include "fdbserver/core/DataDistributorInterface.h"
@@ -53,7 +54,7 @@
 #include "SingletonRoles.h"
 #include "Status.h"
 #include "fdbserver/core/LatencyBandConfig.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"

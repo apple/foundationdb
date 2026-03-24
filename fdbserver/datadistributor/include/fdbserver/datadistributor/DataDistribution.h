@@ -29,12 +29,12 @@
 #include "fdbserver/core/DataMovement.h"
 #include "fdbserver/core/ShardMetrics.h"
 #include "fdbserver/core/ShardSizing.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/LogSystem.h"
 #include "fdbserver/datadistributor/ShardsAffectedByTeamFailure.h"
 #include "fdbserver/datadistributor/TCInfo.h"
-#include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbclient/StorageWiggleMetrics.h"
 #include "fdbclient/DataDistributionConfig.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>

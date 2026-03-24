@@ -253,7 +253,7 @@ message ConfigureRequest {
 // from error_definitions.h?
 message ConfigureReply {
     // Result codes indicating the outcome of the configuration operation
-    // Refer: GenericManagementAPI.actor.h::ConfigurationResult
+    // Refer: GenericManagementAPI.h::ConfigurationResult
     enum Result {
         SUCCESS = 0;                                  // Configuration succeeded
         NO_OPTIONS_PROVIDED = 1;                      // No configuration options were provided

@@ -79,9 +79,9 @@ Values must always be encoded according to the :ref:`api-python-tuple-layer`.
 
 .. code-block:: cpp
 
-   // In GlobalConfig.actor.h
+   // In GlobalConfig.h
    extern const KeyRef myGlobalConfigKey;
-   // In GlobalConfig.actor.cpp
+   // In GlobalConfig.cpp
    const KeyRef myGlobalConfigKey = "config/key"_sr;
    
    // When you want to set the value..

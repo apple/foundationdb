@@ -24,7 +24,7 @@
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/IAsyncFile.h"
-#include "fdbserver/workloads/AsyncFile.actor.h"
+#include "fdbserver/workloads/AsyncFile.h"
 #include "flow/DeterministicRandom.h"
 
 static const double ROLL_TIME = 5.0;

@@ -20,7 +20,7 @@
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/core/workloads.actor.h"
 #include "flow/ApiVersion.h"

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupAgent.h"
 #include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"

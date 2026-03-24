@@ -1293,7 +1293,7 @@ const KeyRef tagThrottleCountKey = "\xff\x02/throttledTags/manualThrottleCount"_
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange("\xff\x02/fdbClientInfo/"_sr, "\xff\x02/fdbClientInfo0"_sr);
-// See remaining fields in GlobalConfig.actor.h
+// See remaining fields in GlobalConfig.h
 
 // ConsistencyCheck settings
 const KeyRef fdbShouldConsistencyCheckBeSuspended = "\xff\x02/ConsistencyCheck/Suspend"_sr;

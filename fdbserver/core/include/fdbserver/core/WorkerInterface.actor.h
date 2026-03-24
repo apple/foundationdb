@@ -1063,77 +1063,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> ccr,
                         std::string whitelistBinPaths,
                         bool consistencyCheckUrgentMode);
 
-ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
-                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
-                                     Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                     LocalityData locality,
-                                     Reference<AsyncVar<Optional<UID>>> clusterId);
-
-// These servers are started by workerServer
-class IKeyValueStore;
-class ServerCoordinators;
-class IDiskQueue;
-
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 Version startVersion,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
-
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder,
-                                 Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord);
-
-ACTOR Future<Void> masterServer(MasterInterface mi,
-                                Reference<AsyncVar<ServerDBInfo> const> db,
-                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                ServerCoordinators serverCoordinators,
-                                LifetimeToken lifetime,
-                                bool forceRecovery);
-ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
-                                     InitializeCommitProxyRequest req,
-                                     Reference<AsyncVar<ServerDBInfo> const> db,
-                                     std::string whitelistBinPaths);
-ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
-                                  InitializeGrvProxyRequest req,
-                                  Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
-                        IDiskQueue* persistentQueue,
-                        Reference<AsyncVar<ServerDBInfo> const> db,
-                        LocalityData locality,
-                        PromiseStream<InitializeTLogRequest> tlogRequests,
-                        UID tlogId,
-                        UID workerID,
-                        bool restoreFromDisk,
-                        Promise<Void> oldLog,
-                        Promise<Void> recovered,
-                        std::string folder,
-                        Reference<AsyncVar<bool>> degraded,
-                        Reference<AsyncVar<bool>> lowDiskTLogExclusion,
-                        Reference<AsyncVar<UID>> activeSharedTLog,
-                        Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
-ACTOR Future<Void> resolver(ResolverInterface resolver,
-                            InitializeResolverRequest initReq,
-                            Reference<AsyncVar<ServerDBInfo> const> db);
-Future<Void> logRouter(TLogInterface interf,
-                       InitializeLogRouterRequest req,
-                       Reference<AsyncVar<ServerDBInfo> const> db);
-Future<Void> dataDistributor(DataDistributorInterface ddi,
-                             Reference<AsyncVar<ServerDBInfo> const> db,
-                             std::string folder);
-ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-
-ACTOR Future<Void> backupWorker(BackupInterface bi,
-                                InitializeBackupRequest req,
-                                Reference<AsyncVar<ServerDBInfo> const> db);
-
 void registerThreadForProfiling();
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
@@ -1147,8 +1076,6 @@ bool addressInDbAndRemoteDc(
     Optional<std::vector<NetworkAddress>> storageServers = Optional<std::vector<NetworkAddress>>{});
 
 void updateCpuProfiler(ProfilerRequest req);
-
-typedef decltype(&tLog) TLogFn;
 
 extern bool isSimulatorProcessUnreliable();
 

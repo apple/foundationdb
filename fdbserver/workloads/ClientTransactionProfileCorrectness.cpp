@@ -20,9 +20,9 @@
 
 #include "fdbserver/core/workloads.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
-#include "fdbclient/GlobalConfig.actor.h"
+#include "fdbclient/GlobalConfig.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunRYWTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.h"
 #include "fdbclient/Tuple.h"
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = "client_latency/"_sr;
