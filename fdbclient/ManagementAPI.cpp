@@ -3673,6 +3673,7 @@ Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 		}
 		co_await tr.onError(err);
 	}
+	co_return res;
 }
 
 // Not transactional
@@ -3716,6 +3717,7 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 		}
 		co_await tr.onError(err);
 	}
+	co_return lockedRanges;
 }
 
 // Validate the input range and owner.
@@ -4173,8 +4175,6 @@ std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 }
 
 TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
-	wait(Future<Void>(Void()));
-
 	std::vector<ProcessData> workers;
 	std::vector<NetworkAddress> chosen;
 	std::set<AddressExclusion> excluded;
@@ -4231,6 +4231,4 @@ TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
 	ASSERT(chosenValues["zoneid"_sr].size() == 5);
 	ASSERT(chosenValues["machineid"_sr].size() == 5);
 	ASSERT(std::find(chosen.begin(), chosen.end(), workers[noAssignIndex].address) != chosen.end());
-
-	return Void();
 }
