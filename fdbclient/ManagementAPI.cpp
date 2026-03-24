@@ -926,20 +926,17 @@ Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 		// to make sure we clear the previous coordinators key, we have to use
 		// a new transaction here.
 		Reference<ReadYourWritesTransaction> clearTr = makeReference<ReadYourWritesTransaction>(cx);
-		{
-			Error err;
-			try {
-				clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				clearTr->clear(previousCoordinatorsKey);
-				co_await clearTr->commit();
-				co_return;
-			} catch (Error& e2) {
-				err = e2;
-			}
-			co_await clearTr->onError(err);
+		Error err;
+		try {
+			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			clearTr->clear(previousCoordinatorsKey);
+			co_await clearTr->commit();
+			co_return;
+		} catch (Error& e2) {
+			err = e2;
 		}
+		co_await clearTr->onError(err);
 	}
-	co_return res;
 }
 
 } // namespace
@@ -1494,7 +1491,6 @@ Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, 
 			co_await tr.onError(err);
 		}
 	}
-	co_return lockedRanges;
 }
 
 // excludes localities by setting the keys in api version below 7.0
@@ -2219,23 +2215,21 @@ Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
 	while (true) {
 		ReadYourWritesTransaction tr(cx);
 		inProgressExclusion.clear();
-		{
-			Error err;
-			try {
-				bool ok = co_await checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion);
-				if (ok)
-					co_return inProgressExclusion;
-				if (!waitForAllExcluded)
-					break;
+		Error err;
+		try {
+			bool ok = co_await checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion);
+			if (ok)
+				co_return inProgressExclusion;
+			if (!waitForAllExcluded)
+				break;
 
-				co_await delayJittered(1.0); // SOMEDAY: watches!
-				continue;
-			} catch (Error& e) {
-				err = e;
-			}
-			TraceEvent("CheckForExcludingServersError").error(err);
-			co_await tr.onError(err);
+			co_await delayJittered(1.0); // SOMEDAY: watches!
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		TraceEvent("CheckForExcludingServersError").error(err);
+		co_await tr.onError(err);
 	}
 	co_return inProgressExclusion;
 }
@@ -2296,19 +2290,17 @@ Future<Void> waitForFullReplication(Database cx) {
 Future<Void> timeKeeperSetDisable(Database cx) {
 	while (true) {
 		Transaction tr(cx);
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.set(timeKeeperDisableKey, StringRef());
-				co_await tr.commit();
-				co_return;
-			} catch (Error& e) {
-				err = e;
-			}
-			co_await tr.onError(err);
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.set(timeKeeperDisableKey, StringRef());
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -2448,22 +2440,20 @@ Future<Void> advanceVersion(Database cx, Version v) {
 	while (true) {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		{
-			Error err;
-			try {
-				Version rv = co_await tr.getReadVersion();
-				if (rv <= v) {
-					tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
-					co_await tr.commit();
-				} else {
-					fmt::print("Current read version is {}\n", rv);
-					co_return;
-				}
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			Version rv = co_await tr.getReadVersion();
+			if (rv <= v) {
+				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
+				co_await tr.commit();
+			} else {
+				fmt::print("Current read version is {}\n", rv);
+				co_return;
 			}
-			co_await tr.onError(err);
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -2972,36 +2962,34 @@ Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockA
 	Key beginKey = normalKeys.begin;
 	Key endKey = normalKeys.end;
 	while (beginKey < endKey) {
-		{
-			Error err;
-			try {
-				if (lockAware) {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				}
-				rangeResult.clear();
-				co_await store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey)));
-				if (rangeResult.empty()) {
-					break;
-				}
-				for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; i++) {
-					if (rangeResult[i].value.empty()) {
-						continue;
-					}
-					BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
-					if (!jobState.isValid()) {
-						continue;
-					}
-					// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
-					// The metadata is added to bulkload history.
-					co_return jobState;
-				}
-				beginKey = rangeResult.back().key;
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			if (lockAware) {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
-			co_await tr.onError(err);
+			rangeResult.clear();
+			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey)));
+			if (rangeResult.empty()) {
+				break;
+			}
+			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; i++) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkLoadJobState jobState = decodeBulkLoadJobState(rangeResult[i].value);
+				if (!jobState.isValid()) {
+					continue;
+				}
+				// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
+				// The metadata is added to bulkload history.
+				co_return jobState;
+			}
+			beginKey = rangeResult.back().key;
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 	co_return Optional<BulkLoadJobState>();
 }
@@ -3015,54 +3003,51 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 	RangeResult bulkLoadTaskResult;
 	int i = 0;
 	while (beginKey < endKey) {
-		{
-			Error err;
-			try {
-				tr.reset();
-				bulkLoadTaskResult.clear();
-				co_await store(bulkLoadTaskResult,
-				               krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
-				if (bulkLoadTaskResult.empty()) {
-					break;
-				}
-				i = 0;
-				for (; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
-					if (bulkLoadTaskResult[i].value.empty()) {
-						lastKey = bulkLoadTaskResult[i + 1].key;
-						continue;
-					}
-					existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
-					if (!existTask.isValid()) {
-						lastKey = bulkLoadTaskResult[i + 1].key;
-						continue; // Has been acknowledged and cleared by the engine
-					}
-					if (existTask.getJobId() != jobId) {
-						throw bulkload_task_outdated();
-					}
-					if (existTask.getRange() != KeyRangeRef(bulkLoadTaskResult[i].key, bulkLoadTaskResult[i + 1].key)) {
-						continue; // The task has been overlapped by other tasks
-					}
-					if (existTask.phase == BulkLoadPhase::Error) {
-						TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorBulkLoadTask")
-						    .detail("JobId", jobId)
-						    .detail("JobRange", jobRange)
-						    .detail("ExistTaskID", existTask.getTaskId())
-						    .detail("ExistTaskRange", existTask.getRange())
-						    .detail("ExistTaskJobId", existTask.getJobId());
-						co_await setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId());
-					}
-					lastKey = bulkLoadTaskResult[i + 1].key;
-					break; // We actively break because we do not want transaction large
-				}
-				co_await tr.commit();
-				ASSERT(lastKey.present());
-				beginKey = lastKey.get();
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr.reset();
+			bulkLoadTaskResult.clear();
+			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+			if (bulkLoadTaskResult.empty()) {
+				break;
 			}
-			co_await tr.onError(err);
+			i = 0;
+			for (; i < static_cast<int>(bulkLoadTaskResult.size()) - 1; i++) {
+				if (bulkLoadTaskResult[i].value.empty()) {
+					lastKey = bulkLoadTaskResult[i + 1].key;
+					continue;
+				}
+				existTask = decodeBulkLoadTaskState(bulkLoadTaskResult[i].value);
+				if (!existTask.isValid()) {
+					lastKey = bulkLoadTaskResult[i + 1].key;
+					continue; // Has been acknowledged and cleared by the engine
+				}
+				if (existTask.getJobId() != jobId) {
+					throw bulkload_task_outdated();
+				}
+				if (existTask.getRange() != KeyRangeRef(bulkLoadTaskResult[i].key, bulkLoadTaskResult[i + 1].key)) {
+					continue; // The task has been overlapped by other tasks
+				}
+				if (existTask.phase == BulkLoadPhase::Error) {
+					TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorBulkLoadTask")
+					    .detail("JobId", jobId)
+					    .detail("JobRange", jobRange)
+					    .detail("ExistTaskID", existTask.getTaskId())
+					    .detail("ExistTaskRange", existTask.getRange())
+					    .detail("ExistTaskJobId", existTask.getJobId());
+					co_await setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId());
+				}
+				lastKey = bulkLoadTaskResult[i + 1].key;
+				break; // We actively break because we do not want transaction large
+			}
+			co_await tr.commit();
+			ASSERT(lastKey.present());
+			beginKey = lastKey.get();
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -3132,38 +3117,36 @@ Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 	KeyRange rangeToRead = normalKeys;
 	Key beginKey = normalKeys.begin;
 	while (beginKey < normalKeys.end) {
-		{
-			Error err;
-			try {
-				rangeResult.clear();
-				co_await store(rangeResult,
-				               krmGetRanges(tr,
-				                            bulkDumpPrefix,
-				                            KeyRangeRef(beginKey, normalKeys.end),
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
-				// krmGetRanges splits the result into batches.
-				// Check first batch is enough since we only check if any task exists
-				if (rangeResult.empty()) {
-					break;
-				}
-				for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
-					if (rangeResult[i].value.empty()) {
-						continue;
-					}
-					BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
-					if (!bulkDumpState.isValid()) {
-						continue;
-					}
-					co_return bulkDumpState;
-				}
-				beginKey = rangeResult.back().key;
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			rangeResult.clear();
+			co_await store(rangeResult,
+			               krmGetRanges(tr,
+			                            bulkDumpPrefix,
+			                            KeyRangeRef(beginKey, normalKeys.end),
+			                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+			// krmGetRanges splits the result into batches.
+			// Check first batch is enough since we only check if any task exists
+			if (rangeResult.empty()) {
+				break;
 			}
-			co_await tr->onError(err);
+			for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
+				if (rangeResult[i].value.empty()) {
+					continue;
+				}
+				BulkDumpState bulkDumpState = decodeBulkDumpState(rangeResult[i].value);
+				if (!bulkDumpState.isValid()) {
+					continue;
+				}
+				co_return bulkDumpState;
+			}
+			beginKey = rangeResult.back().key;
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
 	co_return Optional<BulkDumpState>();
 }
@@ -3233,49 +3216,47 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 	KeyRange rangeToRead;
 	RangeResult bulkDumpResult;
 	while (beginKey < endKey) {
-		{
-			Error err;
-			try {
-				bulkDumpResult.clear();
-				rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-				co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
-				if (bulkDumpResult.empty()) {
-					break;
-				}
-				for (int i = 0; i < static_cast<int>(bulkDumpResult.size()) - 1; i++) {
-					if (bulkDumpResult[i].value.empty()) {
-						continue;
-					}
-					existJob = decodeBulkDumpState(bulkDumpResult[i].value);
-					if (!existJob.isValid()) {
-						continue;
-					}
-					// We only clear the metadata if it has the same jobId as the input Id.
-					// When there is a new jobId persisted different than the input Id,
-					// a new job has been submitted successfully. Since a new job can be submitted successfully if and
-					// only if no old metadata exists (the old job metadata has been cleared). So, we can stop at this
-					// point.
-					if (existJob.getJobId() != jobId) {
-						TraceEvent(SevWarn, "DDBulkDumpJobHasChanged")
-						    .detail("InputJobID", jobId.toString())
-						    .detail("ExistJobID", existJob.getJobId().toString());
-						throw bulkload_task_outdated();
-					}
-				}
-				co_await krmSetRangeCoalescing(
-				    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState()));
-				// Clean up owner info when clearing job metadata
-				tr.clear(bulkDumpOwnerKeyFor(jobId));
-				co_await tr.commit();
-				tr.reset();
-
-				beginKey = bulkDumpResult.back().key;
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			bulkDumpResult.clear();
+			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			if (bulkDumpResult.empty()) {
+				break;
 			}
-			co_await tr.onError(err);
+			for (int i = 0; i < static_cast<int>(bulkDumpResult.size()) - 1; i++) {
+				if (bulkDumpResult[i].value.empty()) {
+					continue;
+				}
+				existJob = decodeBulkDumpState(bulkDumpResult[i].value);
+				if (!existJob.isValid()) {
+					continue;
+				}
+				// We only clear the metadata if it has the same jobId as the input Id.
+				// When there is a new jobId persisted different than the input Id,
+				// a new job has been submitted successfully. Since a new job can be submitted successfully if and
+				// only if no old metadata exists (the old job metadata has been cleared). So, we can stop at this
+				// point.
+				if (existJob.getJobId() != jobId) {
+					TraceEvent(SevWarn, "DDBulkDumpJobHasChanged")
+					    .detail("InputJobID", jobId.toString())
+					    .detail("ExistJobID", existJob.getJobId().toString());
+					throw bulkload_task_outdated();
+				}
+			}
+			co_await krmSetRangeCoalescing(
+			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState()));
+			// Clean up owner info when clearing job metadata
+			tr.clear(bulkDumpOwnerKeyFor(jobId));
+			co_await tr.commit();
+			tr.reset();
+
+			beginKey = bulkDumpResult.back().key;
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -3672,27 +3653,25 @@ Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 	Transaction tr(cx);
 	while (beginKey < endKey) {
 		KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult result = co_await tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY);
-				for (const auto& kv : result) {
-					RangeLockOwner owner = decodeRangeLockOwner(kv.value);
-					ASSERT(owner.isValid());
-					res.push_back(owner);
-					beginKey = keyAfter(kv.key);
-				}
-				if (!result.more) {
-					break;
-				}
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult result = co_await tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY);
+			for (const auto& kv : result) {
+				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
+				ASSERT(owner.isValid());
+				res.push_back(owner);
+				beginKey = keyAfter(kv.key);
 			}
-			co_await tr.onError(err);
+			if (!result.more) {
+				break;
+			}
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -3708,36 +3687,34 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 	Transaction tr(cx);
 	while (beginKey < endKey) {
 		KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-		{
-			Error err;
-			try {
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult result = co_await krmGetRanges(&tr, rangeLockPrefix, rangeToRead);
-				if (result.empty()) {
-					break;
-				}
-				for (int i = 0; i < static_cast<int>(result.size()) - 1; i++) {
-					if (result[i].value.empty()) {
-						continue;
-					}
-					RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
-					ASSERT(rangeLockStateSet.isValid());
-					if (rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
-					    (!ownerName.present() ||
-					     ownerName.get() == rangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId())) {
-						// Exclusive lock can only have one lock in the set, so we just check the first lock in the set
-						lockedRanges.push_back(std::make_pair(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)),
-						                                      rangeLockStateSet.getAllLockStats()[0]));
-					}
-				}
-				beginKey = result.back().key;
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			RangeResult result = co_await krmGetRanges(&tr, rangeLockPrefix, rangeToRead);
+			if (result.empty()) {
+				break;
 			}
-			co_await tr.onError(err);
+			for (int i = 0; i < static_cast<int>(result.size()) - 1; i++) {
+				if (result[i].value.empty()) {
+					continue;
+				}
+				RangeLockStateSet rangeLockStateSet = decodeRangeLockStateSet(result[i].value);
+				ASSERT(rangeLockStateSet.isValid());
+				if (rangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+				    (!ownerName.present() ||
+				     ownerName.get() == rangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId())) {
+					// Exclusive lock can only have one lock in the set, so we just check the first lock in the set
+					lockedRanges.push_back(std::make_pair(Standalone(KeyRangeRef(result[i].key, result[i + 1].key)),
+					                                      rangeLockStateSet.getAllLockStats()[0]));
+				}
+			}
+			beginKey = result.back().key;
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -3889,52 +3866,50 @@ Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName owne
 	Key endKeyToClear;
 	while (beginKey < endKey) {
 		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-		{
-			Error err;
-			try {
-				tr.reset();
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				result.clear();
-				co_await store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
-				if (result.empty()) {
-					break;
-				}
-				i = 0;
-				beginKeyToClear = result[0].key;
-				endKeyToClear = result[0].key; // Expanding when currentRange is valid to clear
-				for (; i < static_cast<int>(result.size()) - 1; i++) {
-					currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
-					if (result[i].value.empty()) {
-						endKeyToClear = currentRange.end;
-						continue;
-					}
-					currentRangeLockStateSet = decodeRangeLockStateSet(result[i].value);
-					ASSERT(currentRangeLockStateSet.isValid());
-					if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
-					    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
-						// If this range is exclusively locked by the input owner, we will clear it.
-						endKeyToClear = currentRange.end;
-						continue;
-					}
-					break;
-				}
-				if (beginKeyToClear != endKeyToClear) {
-					ASSERT(endKeyToClear > beginKeyToClear);
-					co_await krmSetRangeCoalescing(&tr,
-					                               rangeLockPrefix,
-					                               KeyRangeRef(beginKeyToClear, endKeyToClear),
-					                               normalKeys,
-					                               rangeLockStateSetValue(RangeLockStateSet()));
-					co_await tr.commit();
-				}
-				beginKey = currentRange.end; // We skip the currentRange if it is not locked by the input owner.
-				continue;
-			} catch (Error& e) {
-				err = e;
+		Error err;
+		try {
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			result.clear();
+			co_await store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
+			if (result.empty()) {
+				break;
 			}
-			co_await tr.onError(err);
+			i = 0;
+			beginKeyToClear = result[0].key;
+			endKeyToClear = result[0].key; // Expanding when currentRange is valid to clear
+			for (; i < static_cast<int>(result.size()) - 1; i++) {
+				currentRange = KeyRangeRef(result[i].key, result[i + 1].key);
+				if (result[i].value.empty()) {
+					endKeyToClear = currentRange.end;
+					continue;
+				}
+				currentRangeLockStateSet = decodeRangeLockStateSet(result[i].value);
+				ASSERT(currentRangeLockStateSet.isValid());
+				if (currentRangeLockStateSet.isLockedFor(RangeLockType::ExclusiveReadLock) &&
+				    currentRangeLockStateSet.getAllLockStats()[0].getOwnerUniqueId() == ownerUniqueID) {
+					// If this range is exclusively locked by the input owner, we will clear it.
+					endKeyToClear = currentRange.end;
+					continue;
+				}
+				break;
+			}
+			if (beginKeyToClear != endKeyToClear) {
+				ASSERT(endKeyToClear > beginKeyToClear);
+				co_await krmSetRangeCoalescing(&tr,
+				                               rangeLockPrefix,
+				                               KeyRangeRef(beginKeyToClear, endKeyToClear),
+				                               normalKeys,
+				                               rangeLockStateSetValue(RangeLockStateSet()));
+				co_await tr.commit();
+			}
+			beginKey = currentRange.end; // We skip the currentRange if it is not locked by the input owner.
+			continue;
+		} catch (Error& e) {
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
