@@ -1074,10 +1074,22 @@ const KeyRangeRef backupProgressKeys("\xff\x02/backupProgress/"_sr, "\xff\x02/ba
 const KeyRef backupProgressPrefix = backupProgressKeys.begin;
 const KeyRef backupStartedKey = "\xff\x02/backupStarted"_sr;
 extern const KeyRef backupPausedKey = "\xff\x02/backupPaused"_sr;
+
+// Backup keys related to Range Partitioned.
 const KeyRef backupRangePartitionedMapUploadedPrefix = "\xff\x02/backupRangePartitionedMapUploaded/"_sr;
+const KeyRangeRef backupRangePartitionedProgressKeys("\xff\x02/backupRangePartitionedProgress/"_sr,
+                                                     "\xff\x02/backupRangePartitionedProgress0"_sr);
+const KeyRef backupRangePartitionedProgressPrefix = backupRangePartitionedProgressKeys.begin;
 
 Key backupRangePartitionedMapUploadedKeyFor(Version v) {
 	return backupRangePartitionedMapUploadedPrefix.withSuffix(format("%lld", v));
+}
+
+Key backupRangePartitionedProgressKey(UID workerID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(backupRangePartitionedProgressPrefix);
+	wr << workerID;
+	return wr.toValue();
 }
 
 Key backupProgressKeyFor(UID workerID) {

@@ -71,7 +71,7 @@ struct BackupRangePartitionedData {
 	const Optional<Version> endVersion; // old epoch's end version (inclusive), or empty for current epoch
 	const LogEpoch recruitedEpoch; // current epoch whose tLogs are receiving mutations
 	const LogEpoch backupEpoch; // the epoch workers should pull mutations
-	// TODO akanksha: Check if minKnownCommittedVersion is needed after or remove it.
+	// Minimumum known committed version in StorageServers.
 	Version minKnownCommittedVersion;
 	Version savedVersion; // Largest version saved to blob storage
 	NotifiedVersion pulledVersion;
@@ -89,6 +89,7 @@ struct BackupRangePartitionedData {
 	std::unordered_map<int, KeyRange> partitionToKeyRange;
 	// KeyRange to backup UID and partition id map needed to create log files for the right backup and partition.
 	KeyRangeMap<std::vector<std::pair<UID, int32_t>>> keyRangeToBackupAssignment;
+	// TODO akanksha: Once end to end implementation complete, check if stopped need to be added or not.
 
 	struct PerBackupInfo {
 		PerBackupInfo() = default;
@@ -137,6 +138,28 @@ struct BackupRangePartitionedData {
 	}
 
 	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }
+
+	Version maxPopVersion() const { return endVersion.present() ? endVersion.get() : minKnownCommittedVersion; }
+
+	bool allMessageSaved() const { return (endVersion.present() && savedVersion >= endVersion.get()); }
+
+	// Erases messages and updates lock with memory released.
+	void eraseMessages(int num) {
+		ASSERT(num <= messages.size());
+		if (num == 0)
+			return;
+
+		// Accumulate erased message sizes
+		int64_t bytes = 0;
+		for (int i = 0; i < num; i++) {
+			bytes += messages[i].getEstimatedSize();
+		}
+		TraceEvent(SevDebugMemory, "BWRangePartitionedMemory", myId)
+		    .detail("Release", bytes)
+		    .detail("Total", lock->activePermits());
+		lock->release(bytes);
+		messages.erase(messages.begin(), messages.begin() + num);
+	}
 
 	void eraseMessagesAfterEndVersion() {
 		ASSERT(endVersion.present());
@@ -792,5 +815,113 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 
 	for (auto& lf : activeFiles) {
 		self->backups[lf.backupUid].nextFileBeginVersion = lastVersionInFile + 1;
+	}
+}
+
+// TODO akanksha: Implement getBackupProgress during Monitoring.
+Future<Void> saveProgress(BackupRangePartitionedData* self, Version backupVersion) {
+	Transaction tr(self->cx);
+	Key key = backupRangePartitionedProgressKey(self->myId);
+
+	while (true) {
+		Error err;
+		try {
+			// It's critical to save progress immediately so that after a master
+			// recovery, the new master can know the progress so far.
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			// CHECK: Don't save progress if backup workers are disabled
+			Optional<Value> backupWorkerEnabled = co_await tr.get(backupWorkerEnabledKey);
+			if (!backupWorkerEnabled.present() || backupWorkerEnabled.get() == "0"_sr) {
+				TraceEvent("BWRangePartitionedProgressSkipped", self->myId).detail("Reason", "BackupWorkersDisabled");
+				co_return;
+			}
+
+			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
+			tr.set(key, backupProgressValue(status));
+			tr.addReadConflictRange(singleKeyRange(key));
+			co_await tr.commit();
+			co_return;
+		} catch (Error& e) {
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+// Uploads self->messages to storage and updates savedVersion.
+Future<Void> uploadData(BackupRangePartitionedData* self) {
+	// Version up to which messages will be popped from tlog.
+	Version popVersion = invalidVersion;
+
+	while (true) {
+		// Too large uploadDelay will delay popping tLog data for too long.
+		Future<Void> uploadDelay = delay(SERVER_KNOBS->BACKUP_UPLOAD_DELAY);
+
+		int numMsg = 0;
+		// Last Version that we popped from tlog.
+		Version lastPopVersion = popVersion;
+		// index of last version's end position in self->messages. i.e. the first index of next version???
+		int lastVersionIndex = 0;
+		// Version just before current popVersion - to find version boundaries.
+		Version lastVersion = invalidVersion;
+
+		for (auto& message : self->messages) {
+			// message may be prefetched in peek; uncommitted message should not be uploaded.
+			const Version msgVersion = message.getVersion();
+			if (msgVersion > self->maxPopVersion()) {
+				break;
+			}
+			if (msgVersion > popVersion) {
+				lastVersionIndex = numMsg;
+				lastVersion = popVersion;
+				popVersion = msgVersion;
+			}
+			numMsg++;
+		}
+		if (self->pullFinished()) {
+			popVersion = self->endVersion.get();
+		} else {
+			// make sure file is saved on version boundary
+			popVersion = lastVersion;
+			numMsg = lastVersionIndex;
+
+			// If we aren't able to process any messages and the lock is blocking us from
+			// queuing more, then we are stuck. This could suggest the lock capacity is too small.
+			ASSERT(numMsg > 0 || self->lock->waiters() == 0);
+		}
+
+		// TODO akanksha: Removed redundant check popVersion > lastPopVersion. Remove todo after testing completes.
+		if (numMsg > 0 || self->pullFinished()) {
+			TraceEvent("BWRangePartitionedSave", self->myId)
+			    .detail("Version", popVersion)
+			    .detail("LastPopVersion", lastPopVersion)
+			    .detail("SavedVersion", self->savedVersion)
+			    .detail("NumMsg", numMsg)
+			    .detail("MsgQ", self->messages.size());
+			// save an empty file for old epochs so that log file versions are continuous
+			co_await saveMutationsToFile(self, popVersion, numMsg);
+			self->eraseMessages(numMsg);
+		}
+
+		if (popVersion > self->savedVersion) {
+			co_await saveProgress(self, popVersion);
+			TraceEvent("BWRangePartitionedSavedProgress", self->myId)
+			    .detail("Tag", self->tag.toString())
+			    .detail("Version", popVersion)
+			    .detail("MsgQ", self->messages.size());
+			self->savedVersion = popVersion;
+			self->pop();
+		}
+
+		if (self->allMessageSaved()) {
+			co_return;
+		}
+
+		if (!self->pullFinished()) {
+			co_await (uploadDelay || self->doneTrigger.onTrigger());
+		}
 	}
 }

@@ -21,6 +21,8 @@
 #pragma once
 
 #include <set>
+
+#include "flow/CoroUtils.h"
 #include "flow/flow.h"
 #include "flow/Trace.h"
 #include "fdbclient/DatabaseContext.h"

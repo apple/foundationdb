@@ -1205,7 +1205,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		// When the version epoch is enabled, versions stay in sync with time.
 		// An offline cluster could see a large version jump when it comes back
 		// online, so test this behavior in simulation.
-		if (BUGGIFY) {
+		// Only inflate on first generation (no old TLog data) to avoid compound
+		// version growth across rapid recovery loops that can reach 20+ billion.
+		if (BUGGIFY && self->cstate.myDBState.oldTLogData.empty()) {
 			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 		}
 	}
