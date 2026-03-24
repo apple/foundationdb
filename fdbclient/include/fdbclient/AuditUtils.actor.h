@@ -36,52 +36,46 @@ struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
 };
 
-ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
-ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
-ACTOR Future<Void> persistAuditState(Database cx,
-                                     AuditStorageState auditState,
-                                     std::string context,
-                                     MoveKeyLockInfo lock,
-                                     bool ddEnabled);
-ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
-ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
-                                                            AuditType auditType,
-                                                            bool newFirst,
-                                                            Optional<int> num = Optional<int>(),
-                                                            Optional<AuditPhase> phase = Optional<AuditPhase>());
-
-ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
-                                                                  AuditType type,
-                                                                  UID auditId,
-                                                                  KeyRange range);
-ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState auditState);
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
-                                                                   AuditType type,
-                                                                   UID auditId,
-                                                                   UID auditServerId,
-                                                                   KeyRange range);
-ACTOR Future<Void> clearAuditMetadataForType(Database cx,
-                                             AuditType auditType,
-                                             UID maxAuditIdToClear,
-                                             int numFinishAuditToKeep);
-ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
-AuditPhase stringToAuditPhase(std::string auditPhaseStr);
-ACTOR Future<bool> checkAuditProgressCompleteByRange(Database cx,
-                                                     AuditType auditType,
-                                                     UID auditId,
-                                                     KeyRange auditRange);
-ACTOR Future<bool> checkAuditProgressCompleteByServer(Database cx,
+Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
+Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
+Future<Void> persistAuditState(Database cx,
+                               AuditStorageState auditState,
+                               std::string context,
+                               MoveKeyLockInfo lock,
+                               bool ddEnabled);
+Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
+Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                       AuditType auditType,
-                                                      UID auditId,
-                                                      KeyRange auditRange,
-                                                      UID serverId,
-                                                      std::shared_ptr<AsyncVar<int>> checkProgressBudget);
-ACTOR Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
-                                                               MoveKeyLockInfo lock,
-                                                               bool ddEnabled,
-                                                               UID dataDistributorId,
-                                                               int persistFinishAuditCount);
+                                                      bool newFirst,
+                                                      Optional<int> num = Optional<int>(),
+                                                      Optional<AuditPhase> phase = Optional<AuditPhase>());
+
+Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
+Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx, AuditType type, UID auditId, KeyRange range);
+Future<Void> persistAuditStateByServer(Database cx, AuditStorageState auditState);
+Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
+                                                             AuditType type,
+                                                             UID auditId,
+                                                             UID auditServerId,
+                                                             KeyRange range);
+Future<Void> clearAuditMetadataForType(Database cx,
+                                       AuditType auditType,
+                                       UID maxAuditIdToClear,
+                                       int numFinishAuditToKeep);
+Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
+AuditPhase stringToAuditPhase(std::string auditPhaseStr);
+Future<bool> checkAuditProgressCompleteByRange(Database cx, AuditType auditType, UID auditId, KeyRange auditRange);
+Future<bool> checkAuditProgressCompleteByServer(Database cx,
+                                                AuditType auditType,
+                                                UID auditId,
+                                                KeyRange auditRange,
+                                                UID serverId,
+                                                std::shared_ptr<AsyncVar<int>> checkProgressBudget);
+Future<std::vector<AuditStorageState>> initAuditMetadata(Database cx,
+                                                         MoveKeyLockInfo lock,
+                                                         bool ddEnabled,
+                                                         UID dataDistributorId,
+                                                         int persistFinishAuditCount);
 
 struct AuditGetServerKeysRes {
 	KeyRange completeRange;
@@ -115,8 +109,8 @@ struct AuditGetKeyServersRes {
 
 std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges);
 Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB);
-ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
-ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
+Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
+Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
 
 #include "flow/unactorcompiler.h"
 #endif
