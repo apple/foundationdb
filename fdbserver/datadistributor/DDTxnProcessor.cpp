@@ -671,20 +671,18 @@ class DDTxnProcessorImpl {
 	static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
 		Transaction tr(cx);
 		while (true) {
-			{
-				Error err;
-				try {
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			Error err;
+			try {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					Optional<Value> res = co_await tr.get(rebalanceDDIgnoreKey);
-					co_return res;
-				} catch (Error& e) {
-					err = e;
-				}
-				co_await tr.onError(err);
+				Optional<Value> res = co_await tr.get(rebalanceDDIgnoreKey);
+				co_return res;
+			} catch (Error& e) {
+				err = e;
 			}
+			co_await tr.onError(err);
 		}
 	}
 
