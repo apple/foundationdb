@@ -38,8 +38,8 @@
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
 #include "RestoreWorker.h"
-#include "RestoreLoader.actor.h"
-#include "RestoreApplier.actor.h"
+#include "RestoreLoader.h"
+#include "RestoreApplier.h"
 #include "RestoreController.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 

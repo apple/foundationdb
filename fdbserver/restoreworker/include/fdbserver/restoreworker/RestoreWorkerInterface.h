@@ -22,11 +22,6 @@
 // which are RestoreController, RestoreLoader, and RestoreApplier
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H)
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_G_H
-#include "fdbserver/restoreworker/RestoreWorkerInterface.actor.g.h"
-#elif !defined(FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H)
-#define FDBSERVER_RESTORE_WORKER_INTERFACE_ACTOR_H
 
 #include <sstream>
 #include <string>
@@ -39,7 +34,6 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/RestoreUtil.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 class RestoreConfigFR;
 
@@ -731,6 +725,3 @@ RestoreRequest decodeRestoreRequestValue(ValueRef const& value);
 const Key restoreStatusKeyFor(StringRef statusType);
 const Value restoreStatusValue(double val);
 Value restoreRequestDoneVersionValue(Version readVersion);
-
-#include "flow/unactorcompiler.h"
-#endif
