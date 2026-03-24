@@ -227,11 +227,7 @@ public:
 	std::vector<GenerationRegInterface> stateServers;
 };
 
-Future<Void> coordinationServer(std::string const& dataFolder, Reference<IClusterConnectionRecord> const& ccf);
-
 // Read a value of MovableValue and if the old cluster key is nested in it, update it to the new key
 Optional<Value> updateCCSInMovableValue(ValueRef movableVal, KeyRef oldClusterKey, KeyRef newClusterKey);
-
-Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey, KeyRef oldClusterKey);
 
 #endif

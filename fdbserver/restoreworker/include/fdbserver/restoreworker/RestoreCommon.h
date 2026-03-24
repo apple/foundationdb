@@ -26,6 +26,7 @@
 
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
+#include "flow/CoroUtils.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IAsyncFile.h"

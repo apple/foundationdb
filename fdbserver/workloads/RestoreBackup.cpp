@@ -29,6 +29,7 @@
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/TestEncryptionUtils.h"
 
 // TODO: explain the purpose of this workload and how it different from the
 // 20+ (literally) other backup/restore workloads.
