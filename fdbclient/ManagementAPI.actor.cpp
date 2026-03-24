@@ -488,7 +488,6 @@ Future<Void> disableBackupWorker(Database cx) {
 		TraceEvent("BackupWorkerDisableFailed").detail("Result", res);
 		throw operation_failed();
 	}
-	co_return;
 }
 
 Future<Void> enableBackupWorker(Database cx) {
@@ -502,7 +501,6 @@ Future<Void> enableBackupWorker(Database cx) {
 		TraceEvent("BackupWorkerEnableFailed").detail("Result", res);
 		throw operation_failed();
 	}
-	co_return;
 }
 
 Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
@@ -941,6 +939,7 @@ Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 			co_await clearTr->onError(err);
 		}
 	}
+	co_return res;
 }
 
 } // namespace
@@ -1450,7 +1449,6 @@ Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> serve
 	    .detail("Servers", describe(servers))
 	    .detail("ExcludeFailed", failed)
 	    .detail("ExclusionUpdated", containNewExclusion);
-	co_return;
 }
 
 Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
@@ -1496,6 +1494,7 @@ Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, 
 			co_await tr.onError(err);
 		}
 	}
+	co_return lockedRanges;
 }
 
 // excludes localities by setting the keys in api version below 7.0
@@ -1528,7 +1527,6 @@ Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> 
 	    .detail("Localities", describe(localities))
 	    .detail("ExcludeFailed", failed)
 	    .detail("ExclusionUpdated", containNewExclusion);
-	co_return;
 }
 
 // Exclude the servers matching the given set of localities from use as state servers.
@@ -2246,7 +2244,6 @@ Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snap
 	try {
 		co_await snapCreate(cx, snapCmd, snapUID);
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-		co_return;
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "SnapCreateFailed").error(e).detail("snapUID", snapUID);
 		throw;
@@ -2333,7 +2330,6 @@ Future<Void> lockDatabase(Transaction* tr, UID id) {
 	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
-	co_return;
 }
 
 Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
@@ -2354,7 +2350,6 @@ Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
 	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
-	co_return;
 }
 
 Future<Void> lockDatabase(Database cx, UID id) {
@@ -2391,7 +2386,6 @@ Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	}
 
 	tr->clear(singleKeyRange(databaseLockedKey));
-	co_return;
 }
 
 Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
@@ -2408,7 +2402,6 @@ Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
 	}
 
 	tr->clear(singleKeyRange(databaseLockedKey));
-	co_return;
 }
 
 Future<Void> unlockDatabase(Database cx, UID id) {
@@ -2437,8 +2430,6 @@ Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
-
-	co_return;
 }
 
 Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
@@ -2450,8 +2441,6 @@ Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) 
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
-
-	co_return;
 }
 
 Future<Void> advanceVersion(Database cx, Version v) {
@@ -2630,7 +2619,6 @@ Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	bulkLoadTask.submitTime = now();
 	co_await krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask));
-	co_return;
 }
 
 // Get bulk load task metadata with range and taskId and phase selector
@@ -2723,7 +2711,6 @@ Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID
 	ASSERT(normalKeys.contains(range));
 	co_await krmSetRange(
 	    tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState));
-	co_return;
 }
 
 // This is the only place to update job history map. So, we check the number of job history entries here is sufficient
@@ -2780,7 +2767,6 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 		tr->clear(bulkLoadJobHistoryKeyFor(oldestJobState.get().getJobId()));
 	}
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
-	co_return;
 }
 
 Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
@@ -2834,7 +2820,6 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
 		}
 		co_await tr.onError(err);
 	}
-	co_return;
 }
 
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
@@ -2904,7 +2889,6 @@ Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 		ASSERT(err.code() != error_code_range_unlock_reject);
 		co_await tr.onError(err);
 	}
-	co_return;
 }
 
 // TODO(Zhe): clear bulkload task metadata within the input range
@@ -2980,7 +2964,6 @@ Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lock
 		ASSERT(err.code() != error_code_range_lock_reject);
 		co_await tr.onError(err);
 	}
-	co_return;
 }
 
 Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
@@ -3080,8 +3063,7 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 			}
 			co_await tr.onError(err);
 		}
-	}
-	co_return;
+	    }
 }
 
 Future<int> setBulkDumpMode(Database cx, int mode) {
@@ -3241,7 +3223,6 @@ Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 		}
 		co_await tr.onError(err);
 	}
-	co_return;
 }
 
 Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
@@ -3296,7 +3277,6 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 			co_await tr.onError(err);
 		}
 	}
-	co_return;
 }
 
 // Generic owner tracking implementation for bulk operations
@@ -3344,7 +3324,6 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool is
 // Public API wrappers for backward compatibility
 Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
 	co_await setBulkOwner(cx, jobId, ownerInfo, true);
-	co_return;
 }
 
 Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
@@ -3354,7 +3333,6 @@ Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
 
 Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
 	co_await setBulkOwner(cx, jobId, ownerInfo, false);
-	co_return;
 }
 
 Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
@@ -3716,7 +3694,6 @@ Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 			co_await tr.onError(err);
 		}
 	}
-	co_return res;
 }
 
 // Not transactional
@@ -3762,7 +3739,6 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 			co_await tr.onError(err);
 		}
 	}
-	co_return lockedRanges;
 }
 
 // Validate the input range and owner.
@@ -3818,7 +3794,6 @@ Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr, KeyRange range,
 		}
 		beginKey = res.back().key;
 	}
-	co_return;
 }
 
 Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
@@ -3871,7 +3846,6 @@ Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr, KeyRange rang
 		}
 		beginKey = res.back().key;
 	}
-	co_return;
 }
 
 // Transactional. One transaction can call takeExclusiveReadLockOnRange at most for one time.
@@ -3888,7 +3862,6 @@ Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, Range
 	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range));
 	co_await krmSetRange(tr, rangeLockPrefix, range, rangeLockStateSetValue(rangeLockStateSet));
 	TraceEvent(SevInfo, "TakeExclusiveReadLockTransactionOnRange").detail("Range", range);
-	co_return;
 }
 
 // Transactional. One transaction can call releaseExclusiveReadLockOnRange at most for one time.
@@ -3901,7 +3874,6 @@ Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, Ra
 	// Unlock by overwiting the range.
 	co_await krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(RangeLockStateSet()));
 	TraceEvent(SevInfo, "ReleaseExclusiveReadLockTransactionOnRange").detail("Range", range);
-	co_return;
 }
 
 Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID) {
@@ -3963,8 +3935,7 @@ Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName owne
 			}
 			co_await tr.onError(err);
 		}
-	}
-	co_return;
+	    }
 }
 
 // Transactional
@@ -3982,7 +3953,6 @@ Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLock
 		}
 		co_await tr.onError(err);
 	}
-	co_return;
 }
 
 // Transactional
@@ -4000,7 +3970,6 @@ Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeL
 		}
 		co_await tr.onError(err);
 	}
-	co_return;
 }
 
 Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
