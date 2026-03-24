@@ -2144,6 +2144,21 @@ Optional<DurableVersionInfo> TagPartitionedLogSystem::getDurableVersion(UID dbgi
 		bTooManyFailures = true;
 	}
 
+	if (bTooManyFailures) {
+		TraceEvent(SevWarnAlways, "TLogGenerationUnavailable", dbgid)
+		    .detail("CurrentGeneration", lockInfo.isCurrent)
+		    .detail("Locality", logSet->locality)
+		    .detail("StartVersion", logSet->startVersion)
+		    .detail("EpochEnd", lockInfo.epochEnd)
+		    .detail("ReplicationFactor", logSet->tLogReplicationFactor)
+		    .detail("WriteAntiQuorum", logSet->tLogWriteAntiQuorum)
+		    .detail("Required", requiredCount)
+		    .detail("Present", results.size())
+		    .detail("FailedLogsCompletePolicy", failedLogsCompletePolicy)
+		    .detail("ServerState", sServerState)
+		    .detail("LogServers", logSet->logServerString());
+	}
+
 	ASSERT(logSet->logServers.size() == lockInfo.replies.size());
 	if (!bTooManyFailures) {
 		std::sort(results.begin(), results.end(), [](const TLogLockResult& a, const TLogLockResult& b) -> bool {
