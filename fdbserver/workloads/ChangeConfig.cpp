@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Schemas.h"
 #include "fdbserver/tester/workloads.actor.h"

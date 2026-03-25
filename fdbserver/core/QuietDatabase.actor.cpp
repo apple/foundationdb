@@ -38,7 +38,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<std::vector<WorkerDetails>> getWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo, int flags) {

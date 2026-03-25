@@ -100,6 +100,14 @@ struct WorkerFitnessInfo {
 	  : worker(worker), fitness(fitness), used(used) {}
 };
 
+inline bool hasWorkerIssue(const Standalone<VectorRef<StringRef>>& issues, StringRef issue) {
+	return std::find(issues.begin(), issues.end(), issue) != issues.end();
+}
+
+inline bool excludesFromTLogRecruitmentDueToLowDisk(const Standalone<VectorRef<StringRef>>& issues) {
+	return hasWorkerIssue(issues, "exclude_from_tlog_recruitment_low_disk"_sr);
+}
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	RecruitFromConfigurationRequest req;
 	RecruitFromConfigurationReply rep;
@@ -874,6 +882,16 @@ public:
 				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
 			}
+			if (excludesFromTLogRecruitmentDueToLowDisk(worker_info.issues)) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "simple",
+				                     "Worker is excluded from TLog recruitment due to low disk",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
 
 			// This worker is a candidate for TLog recruitment.
 			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
@@ -1024,6 +1042,16 @@ public:
 			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "deprecated", "Worker is not in the target DC", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (excludesFromTLogRecruitmentDueToLowDisk(worker_info.issues)) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "deprecated",
+				                     "Worker is excluded from TLog recruitment due to low disk",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
 				continue;
 			}
 

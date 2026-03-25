@@ -62,7 +62,7 @@
 
 #include "fdbclient/IClientApi.h"
 
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Audit.h"
 
 #include "flow/Arena.h"

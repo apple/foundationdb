@@ -29,7 +29,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/Knobs.h"
