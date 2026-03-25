@@ -42,7 +42,7 @@
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbclient/EventTypes.actor.h"
+#include "fdbclient/EventTypes.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/DDSketch.h"
 

@@ -50,7 +50,7 @@
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/MutationTracking.h"
-#include "fdbserver/core/ProxyCommitData.actor.h"
+#include "fdbserver/core/ProxyCommitData.h"
 #include "fdbserver/core/RatekeeperInterface.h"
 #include "fdbserver/core/RecoveryState.h"
 #include "fdbserver/core/RestoreUtil.h"

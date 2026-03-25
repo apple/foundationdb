@@ -1,5 +1,5 @@
 /*
- * EventTypes.actor.h
+ * EventTypes.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,14 +20,6 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_EVENTTYPES_ACTOR_G_H)
-#define FDBCLIENT_EVENTTYPES_ACTOR_G_H
-#include "fdbclient/EventTypes.actor.g.h"
-#elif !defined(FDBCLIENT_EVENTTYPES_ACTOR_H)
-#define FDBCLIENT_EVENTTYPES_ACTOR_H
-
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
 
@@ -38,5 +30,3 @@ struct GetValueComplete {
 template <>
 struct Descriptor<GetValueComplete>
   : DescribeType<GetValueComplete, "GetValueComplete", DescribeField<&GetValueComplete::latency, "latency", "ns">> {};
-
-#endif

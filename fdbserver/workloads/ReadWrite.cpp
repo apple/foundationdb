@@ -29,7 +29,7 @@
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
-#include "fdbserver/workloads/ReadWriteWorkload.actor.h"
+#include "fdbserver/workloads/ReadWriteWorkload.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/CoroUtils.h"

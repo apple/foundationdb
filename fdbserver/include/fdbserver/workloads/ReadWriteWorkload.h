@@ -1,5 +1,5 @@
 /*
- * ReadWriteWorkload.actor.h
+ * ReadWriteWorkload.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,17 +19,11 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H)
-#define FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H
-#include "fdbserver/workloads/ReadWriteWorkload.actor.g.h"
-#elif !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_H)
-#define FDBSERVER_READWRITEWORKLOAD_ACTOR_H
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "flow/TDMetric.actor.h"
 #include <boost/lexical_cast.hpp>
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TransactionSuccessMetric {
 	int64_t totalLatency;
@@ -185,6 +179,3 @@ struct ReadWriteCommon : KVWorkload {
 	Standalone<KeyValueRef> operator()(uint64_t n);
 	bool shouldRecord(double checkTime = now());
 };
-
-#include "flow/unactorcompiler.h"
-#endif // FDBSERVER_READWRITEWORKLOAD_ACTOR_H
