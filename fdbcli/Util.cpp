@@ -19,7 +19,7 @@
  */
 
 #include "fdbcli/fdbcli.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/BulkDumping.h"

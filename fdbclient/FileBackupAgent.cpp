@@ -38,7 +38,7 @@
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/PartitionedLogIterator.h"
 #include "fdbclient/RestoreInterface.h"
 #include "fdbclient/Status.h"

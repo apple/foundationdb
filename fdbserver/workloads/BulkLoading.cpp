@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"

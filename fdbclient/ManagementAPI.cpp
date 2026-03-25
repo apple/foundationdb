@@ -1,5 +1,5 @@
 /*
- * ManagementAPI.actor.cpp
+ * ManagementAPI.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -36,7 +36,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -51,7 +51,7 @@
 #include "fdbclient/Schemas.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 bool isInteger(const std::string& s) {
 	if (s.empty())
@@ -477,56 +477,56 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options) 
 	       options.count(p + "storage_engine") == 1;
 }
 
-ACTOR Future<Void> disableBackupWorker(Database cx) {
-	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
+Future<Void> disableBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
 	if (!configuration.backupWorkerEnabled) {
 		TraceEvent("BackupWorkerAlreadyDisabled");
-		return Void();
+		co_return;
 	}
-	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true));
+	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=0", true);
 	if (res != ConfigurationResult::SUCCESS) {
 		TraceEvent("BackupWorkerDisableFailed").detail("Result", res);
 		throw operation_failed();
 	}
-	return Void();
 }
 
-ACTOR Future<Void> enableBackupWorker(Database cx) {
-	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
+Future<Void> enableBackupWorker(Database cx) {
+	DatabaseConfiguration configuration = co_await getDatabaseConfiguration(cx);
 	if (configuration.backupWorkerEnabled) {
 		TraceEvent("BackupWorkerAlreadyEnabled");
-		return Void();
+		co_return;
 	}
-	ConfigurationResult res = wait(ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true));
+	ConfigurationResult res = co_await ManagementAPI::changeConfig(cx.getReference(), "backup_worker_enabled:=1", true);
 	if (res != ConfigurationResult::SUCCESS) {
 		TraceEvent("BackupWorkerEnableFailed").detail("Result", res);
 		throw operation_failed();
 	}
-	return Void();
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
+Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
 	if (useSystemPriority) {
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	}
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult res = co_await tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
 	DatabaseConfiguration config;
 	config.fromKeyValues((VectorRef<KeyValueRef>)res);
-	return config;
+	co_return config;
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority) {
-	state Transaction tr(cx);
-	loop {
+Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
-			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr, useSystemPriority));
-			return config;
+			DatabaseConfiguration config = co_await getDatabaseConfiguration(&tr, useSystemPriority);
+			co_return config;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -799,11 +799,11 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 	return result;
 }
 
-ACTOR Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
-	state Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
+	Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
-	wait(success(processClasses) && success(processData));
+	co_await (success(processClasses) && success(processData));
 	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!processData.get().more && processData.get().size() < CLIENT_KNOBS->TOO_MANY);
 
@@ -827,37 +827,41 @@ ACTOR Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
 			results.push_back(data);
 	}
 
-	return results;
+	co_return results;
 }
 
-ACTOR Future<std::vector<ProcessData>> getWorkers(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<std::vector<ProcessData>> getWorkers(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			std::vector<ProcessData> workers = wait(getWorkers(&tr));
-			return workers;
+			std::vector<ProcessData> workers = co_await getWorkers(&tr);
+			co_return workers;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<Optional<ClusterConnectionString>> getConnectionString(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+			Optional<Value> currentKey = co_await tr.get(coordinatorsKey);
 			if (!currentKey.present())
-				return Optional<ClusterConnectionString>();
-			return ClusterConnectionString(currentKey.get().toString());
+				co_return Optional<ClusterConnectionString>();
+			co_return ClusterConnectionString(currentKey.get().toString());
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -865,20 +869,20 @@ static std::vector<std::string> connectionStrings;
 
 namespace {
 
-ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromStorageServer(Transaction* tr) {
+Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromStorageServer(Transaction* tr) {
 
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-	state int retryTimes = 0;
-	loop {
+	int retryTimes = 0;
+	while (true) {
 		if (retryTimes >= CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_TIMES) {
-			return Optional<ClusterConnectionString>();
+			co_return Optional<ClusterConnectionString>();
 		}
 
-		state Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
+		Optional<Value> currentKey = co_await tr->get(coordinatorsKey);
 		if (g_network->isSimulated() && currentKey.present()) {
 			// If the change coordinators request succeeded, the coordinators
 			// should have changed to the connection string of the most
@@ -896,69 +900,71 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 		if (!currentKey.present()) {
 			// Someone deleted this key entirely?
 			++retryTimes;
-			wait(delay(CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_DELAY));
+			co_await delay(CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_DELAY);
 			continue;
 		}
 
-		state ClusterConnectionString clusterConnectionString(currentKey.get().toString());
+		ClusterConnectionString clusterConnectionString(currentKey.get().toString());
 		if (tr->getDatabase()->getConnectionRecord() &&
 		    clusterConnectionString.clusterKeyName().toString() !=
 		        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName()) {
 			// Someone changed the "name" of the database??
 			++retryTimes;
-			wait(delay(CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_DELAY));
+			co_await delay(CLIENT_KNOBS->CHANGE_QUORUM_BAD_STATE_RETRY_DELAY);
 			continue;
 		}
 
-		return clusterConnectionString;
+		co_return clusterConnectionString;
 	}
 }
 
-ACTOR Future<Void> resetPreviousCoordinatorsKey(Database cx) {
-	loop {
+Future<Void> resetPreviousCoordinatorsKey(Database cx) {
+	while (true) {
 		// When the change coordinators transaction succeeds, it uses the
 		// special key space error message to return a message to the client.
 		// This causes the underlying transaction to not be committed. In order
 		// to make sure we clear the previous coordinators key, we have to use
 		// a new transaction here.
-		state Reference<ReadYourWritesTransaction> clearTr = makeReference<ReadYourWritesTransaction>(cx);
+		Reference<ReadYourWritesTransaction> clearTr = makeReference<ReadYourWritesTransaction>(cx);
+		Error err;
 		try {
 			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			clearTr->clear(previousCoordinatorsKey);
-			wait(clearTr->commit());
-			return Void();
+			co_await clearTr->commit();
+			co_return;
 		} catch (Error& e2) {
-			wait(clearTr->onError(e2));
+			err = e2;
 		}
+		co_await clearTr->onError(err);
 	}
 }
 
 } // namespace
 
-ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
-                                                               ClusterConnectionString* conn,
-                                                               std::string newName) {
+Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
+                                                         ClusterConnectionString* conn,
+                                                         std::string newName) {
 	TraceEvent("ChangeQuorumCheckerStart").detail("NewConnectionString", conn->toString());
-	state Optional<ClusterConnectionString> clusterConnectionStringOptional =
-	    wait(getClusterConnectionStringFromStorageServer(tr));
+	Optional<ClusterConnectionString> clusterConnectionStringOptional =
+	    co_await getClusterConnectionStringFromStorageServer(tr);
 
 	if (!clusterConnectionStringOptional.present()) {
-		return CoordinatorsResult::BAD_DATABASE_STATE;
+		co_return CoordinatorsResult::BAD_DATABASE_STATE;
 	}
 
 	// The cluster connection string stored in the storage server
-	state ClusterConnectionString old = clusterConnectionStringOptional.get();
+	ClusterConnectionString old = clusterConnectionStringOptional.get();
 
 	if (conn->hostnames.size() + conn->coords.size() == 0) {
 		conn->hostnames = old.hostnames;
 		conn->coords = old.coords;
 	}
-	state std::vector<NetworkAddress> desiredCoordinators = wait(conn->tryResolveHostnames());
+	std::vector<NetworkAddress> desiredCoordinators = co_await conn->tryResolveHostnames();
 	if (desiredCoordinators.size() != conn->hostnames.size() + conn->coords.size()) {
 		TraceEvent("ChangeQuorumCheckerEarlyTermination")
 		    .detail("Reason", "One or more hostnames are unresolvable")
 		    .backtrace();
-		return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+		co_return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 	}
 
 	if (newName.empty()) {
@@ -974,10 +980,10 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			// Introduce a random delay in simulation to allow processes to be
 			// killed before previousCoordinatorKeys has been reset. This helps
 			// exercise coordinator change edge cases around key cleanup.
-			wait(delay(deterministicRandom()->random01() * 10));
+			co_await delay(deterministicRandom()->random01() * 10);
 		}
-		wait(resetPreviousCoordinatorsKey(tr->getDatabase()));
-		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
+		co_await resetPreviousCoordinatorsKey(tr->getDatabase());
+		co_return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 	}
 
 	conn->parseKey(newName + ':' + deterministicRandom()->randomAlphaNumeric(32));
@@ -1011,7 +1017,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			    .detail("MinimumRequired", minimumCoordinators)
 			    .detail("ConnectionString", conn->toString());
 
-			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
+			co_return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 		}
 	}
 
@@ -1032,46 +1038,45 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		}
 	}
 
-	choose {
-		when(wait(waitForAll(leaderServers))) {}
-		when(wait(delay(5.0))) {
-			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
-		}
+	auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
+	if (!leaderServersResult.present()) {
+		co_return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 	}
 	TraceEvent("ChangeQuorumCheckerSetCoordinatorsKey")
 	    .detail("CurrentCoordinators", old.toString())
 	    .detail("NewCoordinators", conn->toString());
 	tr->set(coordinatorsKey, conn->toString());
-	return Optional<CoordinatorsResult>();
+	co_return Optional<CoordinatorsResult>();
 }
 
-ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change) {
-	state Transaction tr(cx);
-	state int retries = 0;
-	state std::vector<NetworkAddress> desiredCoordinators;
-	state int notEnoughMachineResults = 0;
+Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChange> change) {
+	Transaction tr(cx);
+	int retries = 0;
+	std::vector<NetworkAddress> desiredCoordinators;
+	int notEnoughMachineResults = 0;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
-			state Optional<ClusterConnectionString> clusterConnectionStringOptional =
-			    wait(getClusterConnectionStringFromStorageServer(&tr));
+			Optional<ClusterConnectionString> clusterConnectionStringOptional =
+			    co_await getClusterConnectionStringFromStorageServer(&tr);
 
 			if (!clusterConnectionStringOptional.present()) {
-				return CoordinatorsResult::BAD_DATABASE_STATE;
+				co_return CoordinatorsResult::BAD_DATABASE_STATE;
 			}
 
 			// The cluster connection string stored in the storage server
-			state ClusterConnectionString oldClusterConnectionString = clusterConnectionStringOptional.get();
-			state Key oldClusterKeyName = oldClusterConnectionString.clusterKeyName();
+			ClusterConnectionString oldClusterConnectionString = clusterConnectionStringOptional.get();
+			Key oldClusterKeyName = oldClusterConnectionString.clusterKeyName();
 
-			state std::vector<NetworkAddress> oldCoordinators = wait(oldClusterConnectionString.tryResolveHostnames());
-			state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
+			std::vector<NetworkAddress> oldCoordinators = co_await oldClusterConnectionString.tryResolveHostnames();
+			CoordinatorsResult result = CoordinatorsResult::SUCCESS;
 			if (!desiredCoordinators.size()) {
-				std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
+				std::vector<NetworkAddress> _desiredCoordinators = co_await change->getDesiredCoordinators(
 				    &tr,
 				    oldCoordinators,
 				    makeReference<ClusterConnectionMemoryRecord>(oldClusterConnectionString),
-				    result));
+				    result);
 				desiredCoordinators = _desiredCoordinators;
 			}
 
@@ -1079,14 +1084,14 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				// we could get not_enough_machines if we happen to see the database while the cluster controller is
 				// updating the worker list, so make sure it happens twice before returning a failure
 				notEnoughMachineResults++;
-				wait(delay(1.0));
+				co_await delay(1.0);
 				tr.reset();
 				continue;
 			}
 			if (result != CoordinatorsResult::SUCCESS)
-				return result;
+				co_return result;
 			if (!desiredCoordinators.size())
-				return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
+				co_return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
 			std::sort(desiredCoordinators.begin(), desiredCoordinators.end());
 
 			std::string newName = change->getDesiredClusterKeyName();
@@ -1094,11 +1099,11 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				newName = oldClusterKeyName.toString();
 
 			if (oldCoordinators == desiredCoordinators && oldClusterKeyName == newName)
-				return retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
+				co_return retries ? CoordinatorsResult::SUCCESS : CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 
-			state ClusterConnectionString newClusterConnectionString(
+			ClusterConnectionString newClusterConnectionString(
 			    desiredCoordinators, StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
-			state Key newClusterKeyName = newClusterConnectionString.clusterKeyName();
+			Key newClusterKeyName = newClusterConnectionString.clusterKeyName();
 
 			if (g_network->isSimulated()) {
 				for (int i = 0; i < (desiredCoordinators.size() / 2) + 1; i++) {
@@ -1119,15 +1124,16 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 			CODE_PROBE(oldClusterKeyName != newClusterKeyName, "Quorum change with new name");
 			CODE_PROBE(oldClusterKeyName == newClusterKeyName, "Quorum change with unchanged name");
 
-			state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-			state ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
+			std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+			ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(
 			    new ClusterConnectionMemoryRecord(newClusterConnectionString)));
 			// check if allowed to modify the cluster descriptor
 			if (!change->getDesiredClusterKeyName().empty()) {
 				CheckDescriptorMutableReply mutabilityReply =
-				    wait(coord.clientLeaderServers[0].checkDescriptorMutable.getReply(CheckDescriptorMutableRequest()));
+				    co_await coord.clientLeaderServers[0].checkDescriptorMutable.getReply(
+				        CheckDescriptorMutableRequest());
 				if (!mutabilityReply.isMutable) {
-					return CoordinatorsResult::BAD_DATABASE_STATE;
+					co_return CoordinatorsResult::BAD_DATABASE_STATE;
 				}
 			}
 			leaderServers.reserve(coord.clientLeaderServers.size());
@@ -1135,22 +1141,21 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 				leaderServers.push_back(retryBrokenPromise(coord.clientLeaderServers[i].getLeader,
 				                                           GetLeaderRequest(coord.clusterKey, UID()),
 				                                           TaskPriority::CoordinationReply));
-			choose {
-				when(wait(waitForAll(leaderServers))) {}
-				when(wait(delay(5.0))) {
-					return CoordinatorsResult::COORDINATOR_UNREACHABLE;
-				}
+			auto leaderServersResult = co_await timeout(waitForAll(leaderServers), 5.0);
+			if (!leaderServersResult.present()) {
+				co_return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 			}
 
 			tr.set(coordinatorsKey, newClusterConnectionString.toString());
 
-			wait(tr.commit());
+			co_await tr.commit();
 			ASSERT(false); // commit should fail, but the value has changed
 		} catch (Error& e) {
-			TraceEvent("RetryQuorumChange").error(e).detail("Retries", retries);
-			wait(tr.onError(e));
-			++retries;
+			err = e;
 		}
+		TraceEvent("RetryQuorumChange").error(err).detail("Retries", retries);
+		co_await tr.onError(err);
+		++retries;
 	}
 }
 
@@ -1182,37 +1187,37 @@ struct AutoQuorumChange final : IQuorumChange {
 		return getDesired(Reference<AutoQuorumChange>::addRef(this), tr, oldCoordinators, ccr, &err);
 	}
 
-	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
-		state Future<Optional<Value>> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
-		state Future<Optional<Value>> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
-		wait(success(fStorageReplicas) && success(fLogReplicas));
+	static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
+		Future<Optional<Value>> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
+		Future<Optional<Value>> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
+		co_await (success(fStorageReplicas) && success(fLogReplicas));
 		int redundancy = std::min(atoi(fStorageReplicas.get().get().toString().c_str()),
 		                          atoi(fLogReplicas.get().get().toString().c_str()));
 
-		return redundancy;
+		co_return redundancy;
 	}
 
-	ACTOR static Future<bool> isAcceptable(AutoQuorumChange* self,
-	                                       Transaction* tr,
-	                                       std::vector<NetworkAddress> oldCoordinators,
-	                                       Reference<IClusterConnectionRecord> ccr,
-	                                       int desiredCount,
-	                                       std::set<AddressExclusion>* excluded) {
+	static Future<bool> isAcceptable(AutoQuorumChange* self,
+	                                 Transaction* tr,
+	                                 std::vector<NetworkAddress> oldCoordinators,
+	                                 Reference<IClusterConnectionRecord> ccr,
+	                                 int desiredCount,
+	                                 std::set<AddressExclusion>* excluded) {
 		ClusterConnectionString cs = ccr->getConnectionString();
 		if (oldCoordinators.size() != cs.hostnames.size() + cs.coords.size()) {
-			return false;
+			co_return false;
 		}
 
 		// Are there enough coordinators for the redundancy level?
 		if (oldCoordinators.size() < desiredCount)
-			return false;
+			co_return false;
 		if (oldCoordinators.size() % 2 != 1)
-			return false;
+			co_return false;
 
 		// Check exclusions
 		for (auto& c : oldCoordinators) {
 			if (addressExcluded(*excluded, c))
-				return false;
+				co_return false;
 		}
 
 		// Check locality
@@ -1220,7 +1225,7 @@ struct AutoQuorumChange final : IQuorumChange {
 		std::sort(oldCoordinators.begin(), oldCoordinators.end());
 		for (int i = 1; i < oldCoordinators.size(); i++)
 			if (oldCoordinators[i - 1].ip == oldCoordinators[i].ip)
-				return false; // Multiple coordinators share an IP
+				co_return false; // Multiple coordinators share an IP
 
 		// Check availability
 		ClientCoordinators coord(ccr);
@@ -1239,36 +1244,36 @@ struct AutoQuorumChange final : IQuorumChange {
 			}
 		}
 		Optional<std::vector<Optional<LeaderInfo>>> results =
-		    wait(timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY));
+		    co_await timeout(getAll(leaderServers), CLIENT_KNOBS->IS_ACCEPTABLE_DELAY);
 		if (!results.present()) {
-			return false;
+			co_return false;
 		} // Not all responded
 		for (auto& r : results.get()) {
 			if (!r.present()) {
-				return false; // Coordinator doesn't know about this database?
+				co_return false; // Coordinator doesn't know about this database?
 			}
 		}
 
-		return true; // The status quo seems fine
+		co_return true; // The status quo seems fine
 	}
 
-	ACTOR static Future<std::vector<NetworkAddress>> getDesired(Reference<AutoQuorumChange> self,
-	                                                            Transaction* tr,
-	                                                            std::vector<NetworkAddress> oldCoordinators,
-	                                                            Reference<IClusterConnectionRecord> ccr,
-	                                                            CoordinatorsResult* err) {
-		state int desiredCount = self->desired;
+	static Future<std::vector<NetworkAddress>> getDesired(Reference<AutoQuorumChange> self,
+	                                                      Transaction* tr,
+	                                                      std::vector<NetworkAddress> oldCoordinators,
+	                                                      Reference<IClusterConnectionRecord> ccr,
+	                                                      CoordinatorsResult* err) {
+		int desiredCount = self->desired;
 
 		if (desiredCount == -1) {
-			int redundancy = wait(getRedundancy(self.getPtr(), tr));
+			int redundancy = co_await getRedundancy(self.getPtr(), tr);
 			desiredCount = redundancy * 2 - 1;
 		}
 
-		std::vector<AddressExclusion> excl = wait(getAllExcludedServers(tr));
-		state std::set<AddressExclusion> excluded(excl.begin(), excl.end());
+		std::vector<AddressExclusion> excl = co_await getAllExcludedServers(tr);
+		std::set<AddressExclusion> excluded(excl.begin(), excl.end());
 
-		std::vector<ProcessData> _workers = wait(getWorkers(tr));
-		state std::vector<ProcessData> workers = _workers;
+		std::vector<ProcessData> _workers = co_await getWorkers(tr);
+		std::vector<ProcessData> workers = _workers;
 
 		std::map<NetworkAddress, LocalityData> addr_locality;
 		for (auto w : workers)
@@ -1289,10 +1294,10 @@ struct AutoQuorumChange final : IQuorumChange {
 		}
 
 		if (checkAcceptable) {
-			bool ok = wait(isAcceptable(self.getPtr(), tr, oldCoordinators, ccr, desiredCount, &excluded));
+			bool ok = co_await isAcceptable(self.getPtr(), tr, oldCoordinators, ccr, desiredCount, &excluded);
 			if (ok) {
 				*err = CoordinatorsResult::SAME_NETWORK_ADDRESSES;
-				return oldCoordinators;
+				co_return oldCoordinators;
 			}
 		}
 
@@ -1307,12 +1312,12 @@ struct AutoQuorumChange final : IQuorumChange {
 				    .detail("DesiredCoordinators", desiredCount)
 				    .detail("CurrentCoordinators", oldCoordinators.size());
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
-				return std::vector<NetworkAddress>();
+				co_return std::vector<NetworkAddress>();
 			}
 			chosen.resize((chosen.size() - 1) | 1);
 		}
 
-		return chosen;
+		co_return chosen;
 	}
 
 	// Select a desired set of workers such that
@@ -1410,12 +1415,13 @@ Reference<IQuorumChange> autoQuorumChange(int desired) {
 	return Reference<IQuorumChange>(new AutoQuorumChange(desired));
 }
 
-ACTOR Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
+Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion> servers, bool failed) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-	std::vector<AddressExclusion> excl = wait(failed ? getExcludedFailedServerList(tr) : getExcludedServerList(tr));
+	std::vector<AddressExclusion> excl =
+	    co_await (failed ? getExcludedFailedServerList(tr) : getExcludedServerList(tr));
 	std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	bool containNewExclusion = false;
 	for (auto& s : servers) {
@@ -1440,13 +1446,13 @@ ACTOR Future<Void> excludeServers(Transaction* tr, std::vector<AddressExclusion>
 	    .detail("Servers", describe(servers))
 	    .detail("ExcludeFailed", failed)
 	    .detail("ExclusionUpdated", containNewExclusion);
-	return Void();
 }
 
-ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
+Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
-		state ReadYourWritesTransaction ryw(cx);
-		loop {
+		ReadYourWritesTransaction ryw(cx);
+		while (true) {
+			Error err;
 			try {
 				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -1462,35 +1468,38 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 				TraceEvent("ExcludeServersSpecialKeySpaceCommit")
 				    .detail("Servers", describe(servers))
 				    .detail("ExcludeFailed", failed);
-				wait(ryw.commit());
-				return Void();
+				co_await ryw.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("ExcludeServersError").errorUnsuppressed(e);
-				wait(ryw.onError(e));
+				err = e;
 			}
+			TraceEvent("ExcludeServersError").errorUnsuppressed(err);
+			co_await ryw.onError(err);
 		}
 	} else {
-		state Transaction tr(cx);
-		loop {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
-				wait(excludeServers(&tr, servers, failed));
-				wait(tr.commit());
-				return Void();
+				co_await excludeServers(&tr, servers, failed);
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("ExcludeServersError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("ExcludeServersError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 	}
 }
 
 // excludes localities by setting the keys in api version below 7.0
-ACTOR Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> localities, bool failed) {
+Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::string> localities, bool failed) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
-	std::vector<std::string> excl = wait(failed ? getExcludedFailedLocalityList(tr) : getExcludedLocalityList(tr));
+	std::vector<std::string> excl = co_await (failed ? getExcludedFailedLocalityList(tr) : getExcludedLocalityList(tr));
 	std::set<std::string> exclusion(excl.begin(), excl.end());
 	bool containNewExclusion = false;
 	for (const auto& l : localities) {
@@ -1514,15 +1523,15 @@ ACTOR Future<Void> excludeLocalities(Transaction* tr, std::unordered_set<std::st
 	    .detail("Localities", describe(localities))
 	    .detail("ExcludeFailed", failed)
 	    .detail("ExclusionUpdated", containNewExclusion);
-	return Void();
 }
 
 // Exclude the servers matching the given set of localities from use as state servers.
 // excludes localities by setting the keys.
-ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed) {
+Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string> localities, bool failed) {
 	if (cx->apiVersionAtLeast(700)) {
-		state ReadYourWritesTransaction ryw(cx);
-		loop {
+		ReadYourWritesTransaction ryw(cx);
+		while (true) {
+			Error err;
 			try {
 				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -1539,33 +1548,37 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 				    .detail("Localities", describe(localities))
 				    .detail("ExcludeFailed", failed);
 
-				wait(ryw.commit());
-				return Void();
+				co_await ryw.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(e);
-				wait(ryw.onError(e));
+				err = e;
 			}
+			TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(err);
+			co_await ryw.onError(err);
 		}
 	} else {
-		state Transaction tr(cx);
-		loop {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
-				wait(excludeLocalities(&tr, localities, failed));
-				wait(tr.commit());
-				return Void();
+				co_await excludeLocalities(&tr, localities, failed);
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 	}
 }
 
-ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
-	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+Future<Void> includeServers(Database cx, std::vector<AddressExclusion> servers, bool failed) {
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
-		state ReadYourWritesTransaction ryw(cx);
-		loop {
+		ReadYourWritesTransaction ryw(cx);
+		while (true) {
+			Error err;
 			try {
 				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -1595,24 +1608,26 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				}
 				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
-				wait(ryw.commit());
-				return Void();
+				co_await ryw.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("IncludeServersError").errorUnsuppressed(e);
-				wait(ryw.onError(e));
+				err = e;
 			}
+			TraceEvent("IncludeServersError").errorUnsuppressed(err);
+			co_await ryw.onError(err);
 		}
 	} else {
-		state Transaction tr(cx);
-		loop {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-				// includeServers might be used in an emergency transaction, so make sure it is retry-self-conflicting
-				// and CAUSAL_WRITE_RISKY
+				// includeServers might be used in an emergency transaction, so make sure it is
+				// retry-self-conflicting and CAUSAL_WRITE_RISKY
 				tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 				if (failed) {
 					tr.addReadConflictRange(singleKeyRange(failedServersVersionKey));
@@ -1652,23 +1667,25 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 
 				TraceEvent("IncludeServersCommit").detail("Servers", describe(servers)).detail("Failed", failed);
 
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("IncludeServersError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("IncludeServersError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 	}
 }
 
 // Remove the given localities from the exclusion list.
 // include localities by clearing the keys.
-ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> localities, bool failed, bool includeAll) {
-	state std::string versionKey = deterministicRandom()->randomUniqueID().toString();
+Future<Void> includeLocalities(Database cx, std::vector<std::string> localities, bool failed, bool includeAll) {
+	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	if (cx->apiVersionAtLeast(700)) {
-		state ReadYourWritesTransaction ryw(cx);
-		loop {
+		ReadYourWritesTransaction ryw(cx);
+		while (true) {
+			Error err;
 			try {
 				ryw.setOption(FDBTransactionOptions::RAW_ACCESS);
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -1691,16 +1708,18 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				    .detail("Failed", failed)
 				    .detail("IncludeAll", includeAll);
 
-				wait(ryw.commit());
-				return Void();
+				co_await ryw.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
-				wait(ryw.onError(e));
+				err = e;
 			}
+			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
+			co_await ryw.onError(err);
 		}
 	} else {
-		state Transaction tr(cx);
-		loop {
+		Transaction tr(cx);
+		while (true) {
+			Error err;
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1739,27 +1758,29 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				    .detail("Failed", failed)
 				    .detail("IncludeAll", includeAll);
 
-				wait(tr.commit());
-				return Void();
+				co_await tr.commit();
+				co_return;
 			} catch (Error& e) {
-				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				err = e;
 			}
+			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(err);
+			co_await tr.onError(err);
 		}
 	}
 }
 
-ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass) {
-	state Transaction tr(cx);
+Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass processClass) {
+	Transaction tr(cx);
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-			std::vector<ProcessData> workers = wait(getWorkers(&tr));
+			std::vector<ProcessData> workers = co_await getWorkers(&tr);
 
 			bool foundChange = false;
 			for (int i = 0; i < workers.size(); i++) {
@@ -1776,16 +1797,17 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 			if (foundChange)
 				tr.set(processClassChangeKey, deterministicRandom()->randomUniqueID().toString());
 
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr) {
-	state RangeResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
+Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* tr) {
+	RangeResult r = co_await tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<AddressExclusion> exclusions;
@@ -1795,11 +1817,11 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServerList(Transaction* t
 			exclusions.push_back(a);
 	}
 	uniquify(exclusions);
-	return exclusions;
+	co_return exclusions;
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr) {
-	state RangeResult r = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
+Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transaction* tr) {
+	RangeResult r = co_await tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<AddressExclusion> exclusions;
@@ -1809,20 +1831,20 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedFailedServerList(Transact
 			exclusions.push_back(a);
 	}
 	uniquify(exclusions);
-	return exclusions;
+	co_return exclusions;
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr) {
-	state std::vector<AddressExclusion> exclusions;
+Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr) {
+	std::vector<AddressExclusion> exclusions;
 	// Request all exclusion based information concurrently.
-	state Future<std::vector<AddressExclusion>> fExcludedServers = getExcludedServerList(tr);
-	state Future<std::vector<AddressExclusion>> fExcludedFailed = getExcludedFailedServerList(tr);
-	state Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(tr);
-	state Future<std::vector<ProcessData>> fWorkers = getWorkers(tr);
+	Future<std::vector<AddressExclusion>> fExcludedServers = getExcludedServerList(tr);
+	Future<std::vector<AddressExclusion>> fExcludedFailed = getExcludedFailedServerList(tr);
+	Future<std::vector<std::string>> fExcludedLocalities = getAllExcludedLocalities(tr);
+	Future<std::vector<ProcessData>> fWorkers = getWorkers(tr);
 
 	// Wait until all data is gathered, we are not waiting here for the workers future to return
 	// instead we wait for the worker future only if we need the data.
-	wait(success(fExcludedServers) && success(fExcludedFailed) && success(fExcludedLocalities));
+	co_await (success(fExcludedServers) && success(fExcludedFailed) && success(fExcludedLocalities));
 	// Update the exclusions vector with all excluded servers.
 	auto excludedServers = fExcludedServers.get();
 	exclusions.insert(exclusions.end(), excludedServers.begin(), excludedServers.end());
@@ -1831,13 +1853,13 @@ ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* t
 
 	// We have to return all servers that are excluded, this includes servers that are excluded
 	// based on the locality. Otherwise those excluded servers might be used, even if they shouldn't.
-	state std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
+	std::vector<std::string> excludedLocalities = fExcludedLocalities.get();
 
 	// Only if at least one locality was found we have to perform this check.
 	if (!excludedLocalities.empty()) {
 		// First we have to fetch all workers to match the localities of each worker against the excluded localities.
-		wait(success(fWorkers));
-		state std::vector<ProcessData> workers = fWorkers.get();
+		co_await success(fWorkers);
+		std::vector<ProcessData> workers = fWorkers.get();
 
 		for (const auto& locality : excludedLocalities) {
 			std::set<AddressExclusion> localityAddresses = getAddressesByLocality(workers, locality);
@@ -1849,26 +1871,28 @@ ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* t
 	}
 
 	uniquify(exclusions);
-	return exclusions;
+	co_return exclusions;
 }
 
-ACTOR Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<std::vector<AddressExclusion>> getAllExcludedServers(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			std::vector<AddressExclusion> exclusions = wait(getAllExcludedServers(&tr));
-			return exclusions;
+			std::vector<AddressExclusion> exclusions = co_await getAllExcludedServers(&tr);
+			co_return exclusions;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr) {
-	state RangeResult r = wait(tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
+Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr) {
+	RangeResult r = co_await tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<std::string> excludedLocalities;
@@ -1877,11 +1901,11 @@ ACTOR Future<std::vector<std::string>> getExcludedLocalityList(Transaction* tr) 
 		excludedLocalities.push_back(a);
 	}
 	uniquify(excludedLocalities);
-	return excludedLocalities;
+	co_return excludedLocalities;
 }
 
-ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction* tr) {
-	state RangeResult r = wait(tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
+Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction* tr) {
+	RangeResult r = co_await tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<std::string> excludedLocalities;
@@ -1890,16 +1914,16 @@ ACTOR Future<std::vector<std::string>> getExcludedFailedLocalityList(Transaction
 		excludedLocalities.push_back(a);
 	}
 	uniquify(excludedLocalities);
-	return excludedLocalities;
+	co_return excludedLocalities;
 }
 
-ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr) {
-	state std::vector<std::string> exclusions;
-	state Future<std::vector<std::string>> fExcludedLocalities = getExcludedLocalityList(tr);
-	state Future<std::vector<std::string>> fFailedLocalities = getExcludedFailedLocalityList(tr);
+Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr) {
+	std::vector<std::string> exclusions;
+	Future<std::vector<std::string>> fExcludedLocalities = getExcludedLocalityList(tr);
+	Future<std::vector<std::string>> fFailedLocalities = getExcludedFailedLocalityList(tr);
 
 	// Wait until all data is gathered.
-	wait(success(fExcludedLocalities) && success(fFailedLocalities));
+	co_await (success(fExcludedLocalities) && success(fFailedLocalities));
 
 	auto excludedLocalities = fExcludedLocalities.get();
 	exclusions.insert(exclusions.end(), excludedLocalities.begin(), excludedLocalities.end());
@@ -1907,22 +1931,24 @@ ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Transaction* tr)
 	exclusions.insert(exclusions.end(), failedLocalities.begin(), failedLocalities.end());
 
 	uniquify(exclusions);
-	return exclusions;
+	co_return exclusions;
 }
 
 // Get the list of excluded localities by reading the keys.
-ACTOR Future<std::vector<std::string>> getAllExcludedLocalities(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<std::vector<std::string>> getAllExcludedLocalities(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			std::vector<std::string> exclusions = wait(getAllExcludedLocalities(&tr));
-			return exclusions;
+			std::vector<std::string> exclusions = co_await getAllExcludedLocalities(&tr);
+			co_return exclusions;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -1992,13 +2018,14 @@ std::set<AddressExclusion> getAddressesByLocality(const std::vector<ProcessData>
 	return locality_addresses;
 }
 
-ACTOR Future<Void> printHealthyZone(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> printHealthyZone(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			Optional<Value> val = co_await tr.get(healthyZoneKey);
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
 				       "maintenance mode is not active.\n");
@@ -2010,79 +2037,85 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 				           healthyZone.first.toString(),
 				           (healthyZone.second - tr.getReadVersion().get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 			}
-			return Void();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
-	state Transaction tr(cx);
+Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSSFailureZoneString) {
+	Transaction tr(cx);
 	TraceEvent("ClearHealthyZone").detail("ClearSSFailureZoneString", clearSSFailureZoneString);
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			Optional<Value> val = co_await tr.get(healthyZoneKey);
 			if (!clearSSFailureZoneString && val.present() &&
 			    decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				if (printWarning) {
 					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
 					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
-				return false;
+				co_return false;
 			}
 
 			tr.clear(healthyZoneKey);
-			wait(tr.commit());
-			return true;
+			co_await tr.commit();
+			co_return true;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
-	state Transaction tr(cx);
+Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds, bool printWarning) {
+	Transaction tr(cx);
 	TraceEvent("SetHealthyZone").detail("Zone", zoneId).detail("DurationSeconds", seconds);
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			Optional<Value> val = co_await tr.get(healthyZoneKey);
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				if (printWarning) {
 					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
 					       "server failures. Use 'datadistribution on' to reenable data distribution.\n");
 				}
-				return false;
+				co_return false;
 			}
-			Version readVersion = wait(tr.getReadVersion());
+			Version readVersion = co_await tr.getReadVersion();
 			tr.set(healthyZoneKey,
 			       healthyZoneValue(zoneId, readVersion + (seconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
-			wait(tr.commit());
-			return true;
+			co_await tr.commit();
+			co_return true;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<int> setDDMode(Database cx, int mode) {
-	state Transaction tr(cx);
-	state int oldMode = -1;
-	state BinaryWriter wr(Unversioned());
+Future<int> setDDMode(Database cx, int mode) {
+	Transaction tr(cx);
+	int oldMode = -1;
+	BinaryWriter wr(Unversioned());
 	wr << mode;
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> old = wait(tr.get(dataDistributionModeKey));
+			Optional<Value> old = co_await tr.get(dataDistributionModeKey);
 			if (oldMode < 0) {
 				oldMode = 1;
 				if (old.present()) {
@@ -2102,7 +2135,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
 				// set DDMode to 2 is a security mode which disables data moves but allows auditStorage part
 				// DDMode=2 is set when shard location metadata inconsistency is detected
-				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
+				Optional<Value> currentHealthyZoneValue = co_await tr.get(healthyZoneKey);
 				if (currentHealthyZoneValue.present() &&
 				    decodeHealthyZoneValue(currentHealthyZoneValue.get()).first == ignoreSSFailuresZoneString) {
 					// only clear the key if it is currently being used to disable all SS failure data movement
@@ -2110,22 +2143,23 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 				}
 				tr.clear(rebalanceDDIgnoreKey);
 			}
-			wait(tr.commit());
-			return oldMode;
+			co_await tr.commit();
+			co_return oldMode;
 		} catch (Error& e) {
-			TraceEvent("SetDDModeRetrying").error(e);
-			wait(tr.onError(e));
+			err = e;
 		}
+		TraceEvent("SetDDModeRetrying").error(err);
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
-                                                   std::set<AddressExclusion>* exclusions,
-                                                   std::set<NetworkAddress>* inProgressExclusion) {
+Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr,
+                                             std::set<AddressExclusion>* exclusions,
+                                             std::set<NetworkAddress>* inProgressExclusion) {
 	// TODO : replace using ExclusionInProgressRangeImpl in special key space
 	ASSERT(inProgressExclusion->size() == 0); //  Make sure every time it is cleared beforehand
 	if (!exclusions->size())
-		return true;
+		co_return true;
 
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
@@ -2135,10 +2169,10 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 	// recovery
 
 	// Check that there aren't any storage servers with addresses violating the exclusions
-	RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeResult serverList = co_await tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
-	state bool ok = true;
+	bool ok = true;
 	for (auto& s : serverList) {
 		auto addresses = decodeServerListValue(s.value).getKeyValues.getEndpoint().addresses;
 		if (addressExcluded(*exclusions, addresses.address)) {
@@ -2152,7 +2186,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 	}
 
 	if (ok) {
-		Optional<Standalone<StringRef>> value = wait(tr->get(logsKey));
+		Optional<Standalone<StringRef>> value = co_await tr->get(logsKey);
 		ASSERT(value.present());
 		auto logs = decodeLogsValue(value.get());
 		for (const auto& [_logId, logAddress] : logs.first) {
@@ -2169,65 +2203,68 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 		}
 	}
 
-	return ok;
+	co_return ok;
 }
 
-ACTOR Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
-                                                                std::vector<AddressExclusion> excl,
-                                                                bool waitForAllExcluded) {
-	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
-	state std::set<NetworkAddress> inProgressExclusion;
+Future<std::set<NetworkAddress>> checkForExcludingServers(Database cx,
+                                                          std::vector<AddressExclusion> excl,
+                                                          bool waitForAllExcluded) {
+	std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
+	std::set<NetworkAddress> inProgressExclusion;
 
-	loop {
-		state ReadYourWritesTransaction tr(cx);
+	while (true) {
+		ReadYourWritesTransaction tr(cx);
 		inProgressExclusion.clear();
+		Error err;
 		try {
-			bool ok = wait(checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion));
+			bool ok = co_await checkForExcludingServersTxActor(&tr, &exclusions, &inProgressExclusion);
 			if (ok)
-				return inProgressExclusion;
+				co_return inProgressExclusion;
 			if (!waitForAllExcluded)
 				break;
 
-			wait(delayJittered(1.0)); // SOMEDAY: watches!
+			co_await delayJittered(1.0); // SOMEDAY: watches!
+			continue;
 		} catch (Error& e) {
-			TraceEvent("CheckForExcludingServersError").error(e);
-			wait(tr.onError(e));
+			err = e;
 		}
+		TraceEvent("CheckForExcludingServersError").error(err);
+		co_await tr.onError(err);
 	}
-	return inProgressExclusion;
+	co_return inProgressExclusion;
 }
 
-ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
+Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID) {
 	try {
-		wait(snapCreate(cx, snapCmd, snapUID));
+		co_await snapCreate(cx, snapCmd, snapUID);
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
-		return Void();
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "SnapCreateFailed").error(e).detail("snapUID", snapUID);
 		throw;
 	}
 }
 
-ACTOR Future<Void> waitForFullReplication(Database cx) {
-	state ReadYourWritesTransaction tr(cx);
-	loop {
+Future<Void> waitForFullReplication(Database cx) {
+	ReadYourWritesTransaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			RangeResult confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeResult confResults = co_await tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY);
 			ASSERT(!confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY);
-			state DatabaseConfiguration config;
+			DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
 
-			state std::vector<Future<Optional<Value>>> replicasFutures;
+			std::vector<Future<Optional<Value>>> replicasFutures;
 			for (auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
-			wait(waitForAll(replicasFutures));
+			co_await waitForAll(replicasFutures);
 
-			state std::vector<Future<Void>> watchFutures;
+			std::vector<Future<Void>> watchFutures;
 			for (int i = 0; i < config.regions.size(); i++) {
 				if (!replicasFutures[i].get().present() ||
 				    decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize) {
@@ -2236,41 +2273,45 @@ ACTOR Future<Void> waitForFullReplication(Database cx) {
 			}
 
 			if (!watchFutures.size() || (config.usableRegions == 1 && watchFutures.size() < config.regions.size())) {
-				return Void();
+				co_return;
 			}
 
-			wait(tr.commit());
-			wait(waitForAny(watchFutures));
+			co_await tr.commit();
+			co_await waitForAny(watchFutures);
 			tr.reset();
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
-	loop {
-		state Transaction tr(cx);
+Future<Void> timeKeeperSetDisable(Database cx) {
+	while (true) {
+		Transaction tr(cx);
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.set(timeKeeperDisableKey, StringRef());
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> lockDatabase(Transaction* tr, UID id) {
+Future<Void> lockDatabase(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (val.present()) {
 		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
-			return Void();
+			co_return;
 		} else {
 			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
@@ -2281,17 +2322,16 @@ ACTOR Future<Void> lockDatabase(Transaction* tr, UID id) {
 	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
-	return Void();
 }
 
-ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
+Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (val.present()) {
 		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
-			return Void();
+			co_return;
 		} else {
 			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
@@ -2302,34 +2342,35 @@ ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id)
 	             BinaryWriter::toValue(id, Unversioned()).withPrefix("0123456789"_sr).withSuffix("\x00\x00\x00\x00"_sr),
 	             MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
-	return Void();
 }
 
-ACTOR Future<Void> lockDatabase(Database cx, UID id) {
-	state Transaction tr(cx);
+Future<Void> lockDatabase(Database cx, UID id) {
+	Transaction tr(cx);
 	UID debugID = deterministicRandom()->randomUniqueID();
 	TraceEvent("LockDatabaseTransaction", debugID).log();
 	tr.debugTransaction(debugID);
-	loop {
+	while (true) {
+		Error err;
 		try {
-			wait(lockDatabase(&tr, id));
-			wait(tr.commit());
-			return Void();
+			co_await lockDatabase(&tr, id);
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked)
-				throw e;
-			wait(tr.onError(e));
+			err = e;
 		}
+		if (err.code() == error_code_database_locked)
+			throw err;
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> unlockDatabase(Transaction* tr, UID id) {
+Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (!val.present())
-		return Void();
+		co_return;
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
@@ -2337,16 +2378,15 @@ ACTOR Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	}
 
 	tr->clear(singleKeyRange(databaseLockedKey));
-	return Void();
 }
 
-ACTOR Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
+Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (!val.present())
-		return Void();
+		co_return;
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
@@ -2354,103 +2394,102 @@ ACTOR Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID i
 	}
 
 	tr->clear(singleKeyRange(databaseLockedKey));
-	return Void();
 }
 
-ACTOR Future<Void> unlockDatabase(Database cx, UID id) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> unlockDatabase(Database cx, UID id) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
-			wait(unlockDatabase(&tr, id));
-			wait(tr.commit());
-			return Void();
+			co_await unlockDatabase(&tr, id);
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			if (e.code() == error_code_database_locked)
-				throw e;
-			wait(tr.onError(e));
+			err = e;
 		}
+		if (err.code() == error_code_database_locked)
+			throw err;
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
+Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
+Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	Optional<Value> val = co_await tr->get(databaseLockedKey);
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
-
-	return Void();
 }
 
-ACTOR Future<Void> advanceVersion(Database cx, Version v) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> advanceVersion(Database cx, Version v) {
+	Transaction tr(cx);
+	while (true) {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		Error err;
 		try {
-			Version rv = wait(tr.getReadVersion());
+			Version rv = co_await tr.getReadVersion();
 			if (rv <= v) {
 				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
-				wait(tr.commit());
+				co_await tr.commit();
+				continue;
 			} else {
 				fmt::print("Current read version is {}\n", rv);
-				return Void();
+				co_return;
 			}
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
+		}
+		co_await tr.onError(err);
+	}
+}
+
+Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Key dcId) {
+	Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	while (true) {
+		Future<Void> forceRecoveryFuture = Never();
+		if (clusterInterface->get().present()) {
+			forceRecoveryFuture =
+			    brokenPromiseToNever(clusterInterface->get().get().forceRecovery.getReply(ForceRecoveryRequest(dcId)));
+		}
+		if (auto const res = co_await race(forceRecoveryFuture, clusterInterface->onChange()); res.index() == 0) {
+			co_return;
 		}
 	}
 }
 
-ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Key dcId) {
-	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-
-	loop {
-		choose {
-			when(wait(clusterInterface->get().present()
-			              ? brokenPromiseToNever(
-			                    clusterInterface->get().get().forceRecovery.getReply(ForceRecoveryRequest(dcId)))
-			              : Never())) {
-				return Void();
-			}
-			when(wait(clusterInterface->onChange())) {}
-		}
-	}
-}
-
-ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
-                               KeyRange range,
-                               AuditType type,
-                               KeyValueStoreType engineType,
-                               double timeoutSeconds) {
-	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                         KeyRange range,
+                         AuditType type,
+                         KeyValueStoreType engineType,
+                         double timeoutSeconds) {
+	Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 	TraceEvent(SevVerbose, "ManagementAPIAuditStorageTrigger").detail("AuditType", type).detail("Range", range);
-	state UID auditId;
+	UID auditId;
 	try {
 		while (!clusterInterface->get().present()) {
-			wait(clusterInterface->onChange());
+			co_await clusterInterface->onChange();
 		}
 		TraceEvent(SevVerbose, "ManagementAPIAuditStorageBegin").detail("AuditType", type).detail("Range", range);
 		TriggerAuditRequest req(type, range, engineType);
-		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		UID auditId_ = co_await timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds);
 		auditId = auditId_;
 		TraceEvent(SevVerbose, "ManagementAPIAuditStorageEnd")
 		    .detail("AuditType", type)
@@ -2465,27 +2504,27 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 		throw e;
 	}
 
-	return auditId;
+	co_return auditId;
 }
 
-ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
-                                     AuditType type,
-                                     UID auditId,
-                                     double timeoutSeconds) {
-	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                               AuditType type,
+                               UID auditId,
+                               double timeoutSeconds) {
+	Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 	TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageTrigger")
 	    .detail("AuditType", type)
 	    .detail("AuditId", auditId);
 	try {
 		while (!clusterInterface->get().present()) {
-			wait(clusterInterface->onChange());
+			co_await clusterInterface->onChange();
 		}
 		TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageBegin")
 		    .detail("AuditType", type)
 		    .detail("AuditId", auditId);
 		TriggerAuditRequest req(type, auditId);
-		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		UID auditId_ = co_await timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds);
 		ASSERT(auditId_ == auditId);
 		TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageEnd")
 		    .detail("AuditType", type)
@@ -2498,20 +2537,21 @@ ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> cluster
 		throw e;
 	}
 
-	return auditId;
+	co_return auditId;
 }
 
-ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
-	state Transaction tr(cx);
-	state BinaryWriter wr(Unversioned());
+Future<int> setBulkLoadMode(Database cx, int mode) {
+	Transaction tr(cx);
+	BinaryWriter wr(Unversioned());
 	wr << mode;
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state int oldMode = 0;
-			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			int oldMode = 0;
+			Optional<Value> oldModeValue = co_await tr.get(bulkLoadModeKey);
 			if (oldModeValue.present()) {
 				BinaryReader rd(oldModeValue.get(), Unversioned());
 				rd >> oldMode;
@@ -2524,59 +2564,61 @@ ACTOR Future<int> setBulkLoadMode(Database cx, int mode) {
 				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
 				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 				tr.set(bulkLoadModeKey, wr.toValue());
-				wait(tr.commit());
+				co_await tr.commit();
 				TraceEvent(bulkLoadVerboseEventSev(), "DDBulkLoadEngineModeKeyChanged")
 				    .detail("NewMode", mode)
 				    .detail("OldMode", oldMode);
 			}
-			return oldMode;
+			co_return oldMode;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<int> getBulkLoadMode(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<int> getBulkLoadMode(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state int oldMode = 0;
-			Optional<Value> oldModeValue = wait(tr.get(bulkLoadModeKey));
+			int oldMode = 0;
+			Optional<Value> oldModeValue = co_await tr.get(bulkLoadModeKey);
 			if (oldModeValue.present()) {
 				BinaryReader rd(oldModeValue.get(), Unversioned());
 				rd >> oldMode;
 			}
-			return oldMode;
+			co_return oldMode;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
+Future<Void> setBulkLoadSubmissionTransaction(Transaction* tr, BulkLoadTaskState bulkLoadTask) {
 	ASSERT(normalKeys.contains(bulkLoadTask.getRange()) &&
 	       (bulkLoadTask.phase == BulkLoadPhase::Submitted ||
 	        (bulkLoadTask.phase == BulkLoadPhase::Complete && bulkLoadTask.hasEmptyData())));
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	bulkLoadTask.submitTime = now();
-	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask)));
-	return Void();
+	co_await krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTask.getRange(), bulkLoadTaskStateValue(bulkLoadTask));
 }
 
 // Get bulk load task metadata with range and taskId and phase selector
 // Throw error if the task is outdated or the task is not in any input phase at the tr read version
 // TODO: check jobId
-ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
-                                                KeyRange range,
-                                                UID taskId,
-                                                std::vector<BulkLoadPhase> phases) {
-	state BulkLoadTaskState bulkLoadTaskState;
+Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
+                                          KeyRange range,
+                                          UID taskId,
+                                          std::vector<BulkLoadPhase> phases) {
+	BulkLoadTaskState bulkLoadTaskState;
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	RangeResult result = wait(krmGetRanges(tr, bulkLoadTaskPrefix, range));
+	RangeResult result = co_await krmGetRanges(tr, bulkLoadTaskPrefix, range);
 	if (result.size() > 2) {
 		TraceEvent(SevWarn, "GetBulkLoadTaskError")
 		    .detail("Reason", "TooManyRanges")
@@ -2636,16 +2678,17 @@ ACTOR Future<BulkLoadTaskState> getBulkLoadTask(Transaction* tr,
 		    .backtrace();
 		throw bulkload_task_outdated();
 	}
-	return bulkLoadTaskState;
+	co_return bulkLoadTaskState;
 }
 
-ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId) {
-	state BulkLoadTaskState bulkLoadTaskState;
+Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID taskId) {
+	BulkLoadTaskState bulkLoadTaskState;
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	wait(store(bulkLoadTaskState,
-	           getBulkLoadTask(
-	               tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error })));
+	co_await store(
+	    bulkLoadTaskState,
+	    getBulkLoadTask(
+	        tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error }));
 	if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
 		TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorTask")
 		    .detail("TaskId", taskId.toString())
@@ -2654,22 +2697,22 @@ ACTOR Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange rang
 	bulkLoadTaskState.phase = BulkLoadPhase::Acknowledged;
 	ASSERT(range == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
 	ASSERT(normalKeys.contains(range));
-	wait(krmSetRange(tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState)));
-	return Void();
+	co_await krmSetRange(
+	    tr, bulkLoadTaskPrefix, bulkLoadTaskState.getRange(), bulkLoadTaskStateValue(bulkLoadTaskState));
 }
 
 // This is the only place to update job history map. So, we check the number of job history entries here is sufficient
 // to maintain that the number of jobs in the history is no more than BULKLOAD_JOB_HISTORY_COUNT_MAX.
-ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState) {
-	state Key newJobKey = bulkLoadJobHistoryKeyFor(jobState.getJobId());
-	state RangeResult jobHistoryResult;
-	state Optional<BulkLoadJobState> oldestJobState; // Set to remove when the job history is full.
-	state Key beginKey = bulkLoadJobHistoryKeys.begin;
-	state Key endKey = bulkLoadJobHistoryKeys.end;
-	loop {
+Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState) {
+	Key newJobKey = bulkLoadJobHistoryKeyFor(jobState.getJobId());
+	RangeResult jobHistoryResult;
+	Optional<BulkLoadJobState> oldestJobState; // Set to remove when the job history is full.
+	Key beginKey = bulkLoadJobHistoryKeys.begin;
+	Key endKey = bulkLoadJobHistoryKeys.end;
+	while (true) {
 		jobHistoryResult.clear();
-		wait(store(jobHistoryResult,
-		           tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2)));
+		co_await store(jobHistoryResult,
+		               tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2));
 		// Set limit twice the max count to check the number of jobs in the history is no more than the max
 		// count.
 		for (int i = 0; i < jobHistoryResult.size(); i++) {
@@ -2689,7 +2732,7 @@ ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState job
 				tr->set(newJobKey, bulkLoadJobValue(jobState));
 				// BulkLoad job with the same jobId can run for multiple times, we only keep the latest one
 				// in the history.
-				return Void();
+				co_return;
 			}
 			if (jobHistoryResult.size() > CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX) {
 				TraceEvent(SevError, "DDBulkLoadJobHistoryCountExceed", jobState.getJobId())
@@ -2703,6 +2746,7 @@ ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState job
 		}
 		if (jobHistoryResult.more) {
 			beginKey = keyAfter(jobHistoryResult.back().key);
+			continue;
 		} else {
 			break;
 		}
@@ -2711,20 +2755,20 @@ ACTOR Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState job
 		tr->clear(bulkLoadJobHistoryKeyFor(oldestJobState.get().getJobId()));
 	}
 	tr->set(newJobKey, bulkLoadJobValue(jobState));
-	return Void();
 }
 
-ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
-	state RangeResult jobHistoryResult;
-	state Key beginKey = bulkLoadJobHistoryKeys.begin;
-	state Key endKey = bulkLoadJobHistoryKeys.end;
-	state Transaction tr(cx);
-	state std::vector<BulkLoadJobState> res;
-	loop {
+Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
+	RangeResult jobHistoryResult;
+	Key beginKey = bulkLoadJobHistoryKeys.begin;
+	Key endKey = bulkLoadJobHistoryKeys.end;
+	Transaction tr(cx);
+	std::vector<BulkLoadJobState> res;
+	while (true) {
+		Error err;
 		try {
 			jobHistoryResult.clear();
-			wait(store(jobHistoryResult,
-			           tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX)));
+			co_await store(jobHistoryResult,
+			               tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX));
 			for (int i = 0; i < jobHistoryResult.size(); i++) {
 				BulkLoadJobState jobState = decodeBulkLoadJobState(jobHistoryResult[i].value);
 				ASSERT_WE_THINK(jobState.isValid());
@@ -2736,40 +2780,43 @@ ACTOR Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database c
 			}
 			if (jobHistoryResult.more) {
 				beginKey = keyAfter(jobHistoryResult.back().key);
+				continue;
 			} else {
 				break;
 			}
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return res;
+	co_return res;
 }
 
-ACTOR Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			if (jobId.present()) {
 				tr.clear(bulkLoadJobHistoryKeyFor(jobId.get()));
 			} else {
 				tr.clear(bulkLoadJobHistoryKeys);
 			}
-			wait(tr.commit());
+			co_await tr.commit();
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
-ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
-	state RangeResult rangeResult;
+Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
+	RangeResult rangeResult;
 	// At most one job at a time, so looking at the first returned range is sufficient
-	wait(store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys)));
+	co_await store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys));
 	if (rangeResult.empty()) {
-		return Optional<BulkLoadJobState>();
+		co_return Optional<BulkLoadJobState>();
 	}
 	for (int i = 0; i < static_cast<int>(rangeResult.size()) - 1; ++i) {
 		if (rangeResult[i].value.empty()) {
@@ -2779,19 +2826,20 @@ ACTOR Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr
 		if (!jobState.isValid()) {
 			continue;
 		}
-		return jobState;
+		co_return jobState;
 	}
-	return Optional<BulkLoadJobState>();
+	co_return Optional<BulkLoadJobState>();
 }
 
-ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
-	state Transaction tr(cx);
-	state Optional<BulkLoadJobState> aliveJob;
-	loop {
+Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
+	Transaction tr(cx);
+	Optional<BulkLoadJobState> aliveJob;
+	while (true) {
+		Error err;
 		try {
-			wait(store(aliveJob, getSubmittedBulkLoadJob(&tr)));
+			co_await store(aliveJob, getSubmittedBulkLoadJob(&tr));
 			if (!aliveJob.present()) {
-				return Void(); // Has been cancelled
+				co_return; // Has been cancelled
 			}
 			if (aliveJob.get().getJobId() != jobId) {
 				throw bulkload_task_outdated(); // jobId is outdated
@@ -2805,48 +2853,46 @@ ACTOR Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 			tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 			// Clear all metadata of the job
 			ASSERT(!aliveJob.get().getJobRange().empty());
-			wait(krmSetRangeCoalescing(&tr,
-			                           bulkLoadJobPrefix,
-			                           aliveJob.get().getJobRange(),
-			                           normalKeys,
-			                           bulkLoadJobValue(BulkLoadJobState())));
+			co_await krmSetRangeCoalescing(
+			    &tr, bulkLoadJobPrefix, aliveJob.get().getJobRange(), normalKeys, bulkLoadJobValue(BulkLoadJobState()));
 			// Clear all metadata of the task. The task and the job is guaranteed to be consistent.
-			wait(krmSetRangeCoalescing(&tr,
-			                           bulkLoadTaskPrefix,
-			                           aliveJob.get().getJobRange(),
-			                           normalKeys,
-			                           bulkLoadTaskStateValue(BulkLoadTaskState())));
+			co_await krmSetRangeCoalescing(&tr,
+			                               bulkLoadTaskPrefix,
+			                               aliveJob.get().getJobRange(),
+			                               normalKeys,
+			                               bulkLoadTaskStateValue(BulkLoadTaskState()));
 			// Add cancelled job to history
 			aliveJob.get().setEndTime(now());
 			aliveJob.get().setCancelledPhase();
-			wait(addBulkLoadJobToHistory(&tr, aliveJob.get()));
-			wait(releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad));
+			co_await addBulkLoadJobToHistory(&tr, aliveJob.get());
+			co_await releaseExclusiveReadLockOnRange(&tr, aliveJob.get().getJobRange(), rangeLockNameForBulkLoad);
 			// Clean up BulkLoad owner info when clearing job metadata
 			tr.clear(bulkLoadOwnerKeyFor(jobId));
-			wait(tr.commit());
+			co_await tr.commit();
 			break;
 		} catch (Error& e) {
-			// Currently, only bulkload job uses the range lock, and one job exists at a time.
-			// TODO(BulkLoad): support multiple jobs at a time
-			ASSERT(e.code() != error_code_range_unlock_reject);
-			wait(tr.onError(e));
+			err = e;
 		}
+		// Currently, only bulkload job uses the range lock, and one job exists at a time.
+		// TODO(BulkLoad): support multiple jobs at a time
+		ASSERT(err.code() != error_code_range_unlock_reject);
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
 // TODO(Zhe): clear bulkload task metadata within the input range
-ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
+Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, bool lockAware) {
 	ASSERT(jobState.getPhase() == BulkLoadJobPhase::Submitted);
 
-	state Transaction tr(cx);
-	loop {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 			// There is at most one bulkLoad job or bulkDump job at a time globally
-			Optional<BulkDumpState> aliveBulkDumpJob = wait(getSubmittedBulkDumpJob(&tr));
+			Optional<BulkDumpState> aliveBulkDumpJob = co_await getSubmittedBulkDumpJob(&tr);
 			if (aliveBulkDumpJob.present()) {
 				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
 				    .setMaxEventLength(-1)
@@ -2856,10 +2902,10 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, boo
 				    .detail("ExistBulkDumpJob", aliveBulkDumpJob.get().toString());
 				throw bulkload_task_failed();
 			}
-			Optional<BulkLoadJobState> aliveJob = wait(getSubmittedBulkLoadJob(&tr));
+			Optional<BulkLoadJobState> aliveJob = co_await getSubmittedBulkLoadJob(&tr);
 			if (aliveJob.present()) {
 				if (aliveJob.get().getJobId() == jobState.getJobId()) {
-					return Void(); // The job has been submitted.
+					co_return; // The job has been submitted.
 				}
 				TraceEvent(SevWarn, "SubmitBulkLoadJobFailed")
 				    .setMaxEventLength(-1)
@@ -2887,40 +2933,41 @@ ACTOR Future<Void> submitBulkLoadJob(Database cx, BulkLoadJobState jobState, boo
 			}
 			ASSERT(!jobState.getJobRange().empty());
 			// Init the map of task states
-			wait(krmSetRange(
-			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState())));
+			co_await krmSetRange(
+			    &tr, bulkLoadTaskPrefix, jobState.getJobRange(), bulkLoadTaskStateValue(BulkLoadTaskState()));
 			// Persist job metadata
-			wait(krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(jobState)));
+			co_await krmSetRange(&tr, bulkLoadJobPrefix, jobState.getJobRange(), bulkLoadJobValue(jobState));
 			// Take lock on the job range
-			wait(takeExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad));
-			wait(tr.commit());
+			co_await takeExclusiveReadLockOnRange(&tr, jobState.getJobRange(), rangeLockNameForBulkLoad);
+			co_await tr.commit();
 			TraceEvent(SevInfo, "BulkLoadJobSubmitted")
 			    .setMaxEventLength(-1)
 			    .setMaxFieldLength(-1)
 			    .detail("SubmitBulkLoadJob", jobState.toString());
 			break;
 		} catch (Error& e) {
-			// Currently, only bulkload job uses the range lock, and one job exists at a time.
-			// TODO(BulkLoad): support multiple jobs at a time
-			ASSERT(e.code() != error_code_range_lock_reject);
-			wait(tr.onError(e));
+			err = e;
 		}
+		// Currently, only bulkload job uses the range lock, and one job exists at a time.
+		// TODO(BulkLoad): support multiple jobs at a time
+		ASSERT(err.code() != error_code_range_lock_reject);
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
-ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
-	state RangeResult rangeResult;
-	state Transaction tr(cx);
-	state Key beginKey = normalKeys.begin;
-	state Key endKey = normalKeys.end;
+Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockAware) {
+	RangeResult rangeResult;
+	Transaction tr(cx);
+	Key beginKey = normalKeys.begin;
+	Key endKey = normalKeys.end;
 	while (beginKey < endKey) {
+		Error err;
 		try {
 			if (lockAware) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 			rangeResult.clear();
-			wait(store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey))));
+			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey)));
 			if (rangeResult.empty()) {
 				break;
 			}
@@ -2934,29 +2981,32 @@ ACTOR Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool
 				}
 				// If a job is fully completed, the metadata should be removed from bulkLoadJobKeys
 				// The metadata is added to bulkload history.
-				return jobState;
+				co_return jobState;
 			}
 			beginKey = rangeResult.back().key;
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Optional<BulkLoadJobState>();
+	co_return Optional<BulkLoadJobState>();
 }
 
-ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {
-	state Transaction tr(cx);
-	state Key beginKey = jobRange.begin;
-	state Key endKey = jobRange.end;
-	state Optional<Key> lastKey;
-	state BulkLoadTaskState existTask;
-	state RangeResult bulkLoadTaskResult;
-	state int i = 0;
+Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange jobRange) {
+	Transaction tr(cx);
+	Key beginKey = jobRange.begin;
+	Key endKey = jobRange.end;
+	Optional<Key> lastKey;
+	BulkLoadTaskState existTask;
+	RangeResult bulkLoadTaskResult;
+	int i = 0;
 	while (beginKey < endKey) {
+		Error err;
 		try {
 			tr.reset();
 			bulkLoadTaskResult.clear();
-			wait(store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey))));
+			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
 			if (bulkLoadTaskResult.empty()) {
 				break;
 			}
@@ -2984,32 +3034,34 @@ ACTOR Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyR
 					    .detail("ExistTaskID", existTask.getTaskId())
 					    .detail("ExistTaskRange", existTask.getRange())
 					    .detail("ExistTaskJobId", existTask.getJobId());
-					wait(setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId()));
+					co_await setBulkLoadFinalizeTransaction(&tr, existTask.getRange(), existTask.getTaskId());
 				}
 				lastKey = bulkLoadTaskResult[i + 1].key;
 				break; // We actively break because we do not want transaction large
 			}
-			wait(tr.commit());
+			co_await tr.commit();
 			ASSERT(lastKey.present());
 			beginKey = lastKey.get();
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
-ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
-	state Transaction tr(cx);
-	state BinaryWriter wr(Unversioned());
+Future<int> setBulkDumpMode(Database cx, int mode) {
+	Transaction tr(cx);
+	BinaryWriter wr(Unversioned());
 	wr << mode;
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state int oldMode = 0;
-			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			int oldMode = 0;
+			Optional<Value> oldModeValue = co_await tr.get(bulkDumpModeKey);
 			if (oldModeValue.present()) {
 				BinaryReader rd(oldModeValue.get(), Unversioned());
 				rd >> oldMode;
@@ -3022,33 +3074,36 @@ ACTOR Future<int> setBulkDumpMode(Database cx, int mode) {
 				wrLastWrite << deterministicRandom()->randomUniqueID(); // triger DD restarts
 				tr.set(moveKeysLockWriteKey, wrLastWrite.toValue());
 				tr.set(bulkDumpModeKey, wr.toValue());
-				wait(tr.commit());
+				co_await tr.commit();
 				TraceEvent(SevInfo, "DDBulkDumpModeKeyChanged").detail("NewMode", mode).detail("OldMode", oldMode);
 			}
-			return oldMode;
+			co_return oldMode;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<int> getBulkDumpMode(Database cx) {
-	state Transaction tr(cx);
-	loop {
+Future<int> getBulkDumpMode(Database cx) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state int oldMode = 0;
-			Optional<Value> oldModeValue = wait(tr.get(bulkDumpModeKey));
+			int oldMode = 0;
+			Optional<Value> oldModeValue = co_await tr.get(bulkDumpModeKey);
 			if (oldModeValue.present()) {
 				BinaryReader rd(oldModeValue.get(), Unversioned());
 				rd >> oldMode;
 			}
-			return oldMode;
+			co_return oldMode;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -3056,19 +3111,20 @@ ACTOR Future<int> getBulkDumpMode(Database cx) {
 // There is at most one bulk dump job at any time on the entire key space.
 // A job of a range can spawn multiple tasks according to the shard boundary.
 // Those tasks share the same job Id (aka belonging to the same job).
-ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
-	state RangeResult rangeResult;
-	state KeyRange rangeToRead = normalKeys;
-	state Key beginKey = normalKeys.begin;
+Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
+	RangeResult rangeResult;
+	KeyRange rangeToRead = normalKeys;
+	Key beginKey = normalKeys.begin;
 	while (beginKey < normalKeys.end) {
+		Error err;
 		try {
 			rangeResult.clear();
-			wait(store(rangeResult,
-			           krmGetRanges(tr,
-			                        bulkDumpPrefix,
-			                        KeyRangeRef(beginKey, normalKeys.end),
-			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+			co_await store(rangeResult,
+			               krmGetRanges(tr,
+			                            bulkDumpPrefix,
+			                            KeyRangeRef(beginKey, normalKeys.end),
+			                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 			// krmGetRanges splits the result into batches.
 			// Check first batch is enough since we only check if any task exists
 			if (rangeResult.empty()) {
@@ -3082,24 +3138,27 @@ ACTOR Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 				if (!bulkDumpState.isValid()) {
 					continue;
 				}
-				return bulkDumpState;
+				co_return bulkDumpState;
 			}
 			beginKey = rangeResult.back().key;
+			continue;
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			err = e;
 		}
+		co_await tr->onError(err);
 	}
-	return Optional<BulkDumpState>();
+	co_return Optional<BulkDumpState>();
 }
 
-ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			// There is at most one bulkLoad job or bulkDump job at a time globally
-			Optional<BulkLoadJobState> aliveBulkLoadJob = wait(getSubmittedBulkLoadJob(&tr));
+			Optional<BulkLoadJobState> aliveBulkLoadJob = co_await getSubmittedBulkLoadJob(&tr);
 			if (aliveBulkLoadJob.present()) {
 				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
 				    .setMaxEventLength(-1)
@@ -3109,10 +3168,10 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 				    .detail("NewJob", bulkDumpJob.toString());
 				throw bulkdump_task_failed();
 			}
-			Optional<BulkDumpState> aliveJob = wait(getSubmittedBulkDumpJob(&tr));
+			Optional<BulkDumpState> aliveJob = co_await getSubmittedBulkDumpJob(&tr);
 			if (aliveJob.present()) {
 				if (aliveJob.get().getJobId() == bulkDumpJob.getJobId()) {
-					return Void(); // The job has been persisted
+					co_return; // The job has been persisted
 				}
 				TraceEvent(SevWarn, "SubmitBulkDumpJobFailed")
 				    .setMaxEventLength(-1)
@@ -3138,28 +3197,29 @@ ACTOR Future<Void> submitBulkDumpJob(Database cx, BulkDumpState bulkDumpJob) {
 				    .detail("NewJob", bulkDumpJob.toString());
 				throw bulkdump_task_failed();
 			}
-			wait(krmSetRange(&tr, bulkDumpPrefix, bulkDumpJob.getJobRange(), bulkDumpStateValue(bulkDumpJob)));
-			wait(tr.commit());
+			co_await krmSetRange(&tr, bulkDumpPrefix, bulkDumpJob.getJobRange(), bulkDumpStateValue(bulkDumpJob));
+			co_await tr.commit();
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
-ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
-	state Transaction tr(cx);
-	state Key beginKey = normalKeys.begin;
-	state Key endKey = normalKeys.end;
-	state BulkDumpState existJob;
-	state KeyRange rangeToRead;
-	state RangeResult bulkDumpResult;
+Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
+	Transaction tr(cx);
+	Key beginKey = normalKeys.begin;
+	Key endKey = normalKeys.end;
+	BulkDumpState existJob;
+	KeyRange rangeToRead;
+	RangeResult bulkDumpResult;
 	while (beginKey < endKey) {
+		Error err;
 		try {
 			bulkDumpResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			wait(store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead)));
+			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
 			if (bulkDumpResult.empty()) {
 				break;
 			}
@@ -3173,8 +3233,9 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 				}
 				// We only clear the metadata if it has the same jobId as the input Id.
 				// When there is a new jobId persisted different than the input Id,
-				// a new job has been submitted successfully. Since a new job can be submitted successfully if and only
-				// if no old metadata exists (the old job metadata has been cleared). So, we can stop at this point.
+				// a new job has been submitted successfully. Since a new job can be submitted successfully if and
+				// only if no old metadata exists (the old job metadata has been cleared). So, we can stop at this
+				// point.
 				if (existJob.getJobId() != jobId) {
 					TraceEvent(SevWarn, "DDBulkDumpJobHasChanged")
 					    .detail("InputJobID", jobId.toString())
@@ -3182,107 +3243,112 @@ ACTOR Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 					throw bulkload_task_outdated();
 				}
 			}
-			wait(krmSetRangeCoalescing(
-			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState())));
+			co_await krmSetRangeCoalescing(
+			    &tr, bulkDumpPrefix, rangeToRead, normalKeys, bulkDumpStateValue(BulkDumpState()));
 			// Clean up owner info when clearing job metadata
 			tr.clear(bulkDumpOwnerKeyFor(jobId));
-			wait(tr.commit());
+			co_await tr.commit();
 			tr.reset();
 
 			beginKey = bulkDumpResult.back().key;
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
 // Generic owner tracking implementation for bulk operations
-ACTOR Future<Void> setBulkOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo, bool isBulkDump) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> setBulkOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo, bool isBulkDump) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Key ownerKey = isBulkDump ? bulkDumpOwnerKeyFor(jobId) : bulkLoadOwnerKeyFor(jobId);
 			tr.set(ownerKey, ObjectWriter::toValue(ownerInfo, IncludeVersion()));
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool isBulkDump) {
-	state Transaction tr(cx);
-	loop {
+Future<Optional<BulkDumpOwnerInfo>> getBulkOwner(Database cx, UID jobId, bool isBulkDump) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Key ownerKey = isBulkDump ? bulkDumpOwnerKeyFor(jobId) : bulkLoadOwnerKeyFor(jobId);
-			Optional<Value> value = wait(tr.get(ownerKey));
+			Optional<Value> value = co_await tr.get(ownerKey);
 			if (!value.present()) {
-				return Optional<BulkDumpOwnerInfo>();
+				co_return Optional<BulkDumpOwnerInfo>();
 			}
 			BulkDumpOwnerInfo info;
 			ObjectReader reader(value.get().begin(), IncludeVersion());
 			reader.deserialize(info);
-			return info;
+			co_return info;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
 // Public API wrappers for backward compatibility
-ACTOR Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
-	wait(setBulkOwner(cx, jobId, ownerInfo, true));
-	return Void();
+Future<Void> setBulkDumpOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	co_await setBulkOwner(cx, jobId, ownerInfo, true);
 }
 
-ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
-	Optional<BulkDumpOwnerInfo> result = wait(getBulkOwner(cx, jobId, true));
-	return result;
+Future<Optional<BulkDumpOwnerInfo>> getBulkDumpOwner(Database cx, UID jobId) {
+	Optional<BulkDumpOwnerInfo> result = co_await getBulkOwner(cx, jobId, true);
+	co_return result;
 }
 
-ACTOR Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
-	wait(setBulkOwner(cx, jobId, ownerInfo, false));
-	return Void();
+Future<Void> setBulkLoadOwner(Database cx, UID jobId, BulkDumpOwnerInfo ownerInfo) {
+	co_await setBulkOwner(cx, jobId, ownerInfo, false);
 }
 
-ACTOR Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
-	Optional<BulkDumpOwnerInfo> result = wait(getBulkOwner(cx, jobId, false));
-	return result;
+Future<Optional<BulkDumpOwnerInfo>> getBulkLoadOwner(Database cx, UID jobId) {
+	Optional<BulkDumpOwnerInfo> result = co_await getBulkOwner(cx, jobId, false);
+	co_return result;
 }
 
-ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
-	state Transaction tr(cx);
-	state Key readBegin = rangeToRead.begin;
-	state Key readEnd = rangeToRead.end;
-	state RangeResult rangeResult;
-	state size_t completeTaskCount = 0;
+Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
+	Transaction tr(cx);
+	Key readBegin = rangeToRead.begin;
+	Key readEnd = rangeToRead.end;
+	RangeResult rangeResult;
+	size_t completeTaskCount = 0;
 	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
+		int retryCount = 0;
+		while (true) {
+			Error err;
 			try {
 				rangeResult.clear();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkDumpPrefix,
-				                        KeyRangeRef(readBegin, readEnd),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				co_await store(rangeResult,
+				               krmGetRanges(&tr,
+				                            bulkDumpPrefix,
+				                            KeyRangeRef(readBegin, readEnd),
+				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 				break;
 			} catch (Error& e) {
-				if (retryCount > 30) {
-					throw timed_out();
-				}
-				wait(tr.onError(e));
-				retryCount++;
+				err = e;
 			}
+			if (retryCount > 30) {
+				throw timed_out();
+			}
+			co_await tr.onError(err);
+			retryCount++;
 		}
 		// Guard against empty results (can happen during cluster instability)
 		if (rangeResult.empty()) {
@@ -3299,34 +3365,36 @@ ACTOR Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToR
 		}
 		readBegin = rangeResult.back().key;
 	}
-	return completeTaskCount;
+	co_return completeTaskCount;
 }
 
-ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
-	state Transaction tr(cx);
-	state BulkDumpProgress progress;
-	state double currentTime = now();
+Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
+	Transaction tr(cx);
+	BulkDumpProgress progress;
+	double currentTime = now();
 
-	state Optional<BulkDumpState> submittedJob;
-	loop {
+	Optional<BulkDumpState> submittedJob;
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<BulkDumpState> job = wait(getSubmittedBulkDumpJob(&tr));
+			Optional<BulkDumpState> job = co_await getSubmittedBulkDumpJob(&tr);
 			submittedJob = job;
 			if (!submittedJob.present()) {
-				return Optional<BulkDumpProgress>();
+				co_return Optional<BulkDumpProgress>();
 			}
 			progress.jobId = submittedJob.get().getJobId();
 			progress.jobRange = submittedJob.get().getJobRange();
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 
 	// Get start time from owner info (stored separately from BulkDumpState)
-	Optional<BulkDumpOwnerInfo> ownerInfo = wait(getBulkDumpOwner(cx, progress.jobId));
+	Optional<BulkDumpOwnerInfo> ownerInfo = co_await getBulkDumpOwner(cx, progress.jobId);
 	if (ownerInfo.present()) {
 		progress.startTime = ownerInfo.get().submitTime;
 	} else {
@@ -3334,31 +3402,33 @@ ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 		progress.startTime = currentTime;
 	}
 
-	state Key readBegin = progress.jobRange.begin;
-	state Key readEnd = progress.jobRange.end;
-	state RangeResult rangeResult;
+	Key readBegin = progress.jobRange.begin;
+	Key readEnd = progress.jobRange.end;
+	RangeResult rangeResult;
 
 	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
+		int retryCount = 0;
+		while (true) {
+			Error err;
 			try {
 				rangeResult.clear();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkDumpPrefix,
-				                        KeyRangeRef(readBegin, readEnd),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				co_await store(rangeResult,
+				               krmGetRanges(&tr,
+				                            bulkDumpPrefix,
+				                            KeyRangeRef(readBegin, readEnd),
+				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 				break;
 			} catch (Error& e) {
-				if (retryCount > 30) {
-					throw timed_out();
-				}
-				wait(tr.onError(e));
-				retryCount++;
+				err = e;
 			}
+			if (retryCount > 30) {
+				throw timed_out();
+			}
+			co_await tr.onError(err);
+			retryCount++;
 		}
 
 		// Guard against empty results (can happen during cluster instability)
@@ -3386,21 +3456,22 @@ ACTOR Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 
 	progress.elapsedSeconds = currentTime - progress.startTime;
 
-	return progress;
+	co_return progress;
 }
 
-ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
-	state Transaction tr(cx);
-	state BulkLoadProgress progress;
-	state double currentTime = now();
+Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
+	Transaction tr(cx);
+	BulkLoadProgress progress;
+	double currentTime = now();
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<BulkLoadJobState> runningJob = wait(getRunningBulkLoadJob(cx));
+			Optional<BulkLoadJobState> runningJob = co_await getRunningBulkLoadJob(cx);
 			if (!runningJob.present()) {
-				return Optional<BulkLoadProgress>();
+				co_return Optional<BulkLoadProgress>();
 			}
 			progress.jobId = runningJob.get().getJobId();
 			progress.jobRange = runningJob.get().getJobRange();
@@ -3410,35 +3481,38 @@ ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
 			progress.elapsedSeconds = currentTime - progress.startTime;
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 
-	state Key readBegin = progress.jobRange.begin;
-	state Key readEnd = progress.jobRange.end;
-	state RangeResult rangeResult;
+	Key readBegin = progress.jobRange.begin;
+	Key readEnd = progress.jobRange.end;
+	RangeResult rangeResult;
 
 	while (readBegin < readEnd) {
-		state int retryCount = 0;
-		loop {
+		int retryCount = 0;
+		while (true) {
+			Error err;
 			try {
 				rangeResult.clear();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				wait(store(rangeResult,
-				           krmGetRanges(&tr,
-				                        bulkLoadTaskPrefix,
-				                        KeyRangeRef(readBegin, readEnd),
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				co_await store(rangeResult,
+				               krmGetRanges(&tr,
+				                            bulkLoadTaskPrefix,
+				                            KeyRangeRef(readBegin, readEnd),
+				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 				break;
 			} catch (Error& e) {
-				if (retryCount > 30) {
-					throw timed_out();
-				}
-				wait(tr.onError(e));
-				retryCount++;
+				err = e;
 			}
+			if (retryCount > 30) {
+				throw timed_out();
+			}
+			co_await tr.onError(err);
+			retryCount++;
 		}
 
 		// Guard against empty results (can happen during cluster instability)
@@ -3488,94 +3562,101 @@ ACTOR Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
 		readBegin = rangeResult.back().key;
 	}
 
-	return progress;
+	co_return progress;
 }
 
 // Persist a new owner if input ownerUniqueID is not existing; Update description if input ownerUniqueID exists
-ACTOR Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description) {
+Future<Void> registerRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID, std::string description) {
 	if (ownerUniqueID.empty() || description.empty()) {
 		throw range_lock_failed();
 	}
-	state Transaction tr(cx);
-	loop {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
+			Optional<Value> res = co_await tr.get(rangeLockOwnerKeyFor(ownerUniqueID));
 			RangeLockOwner owner;
 			if (res.present()) {
 				owner = decodeRangeLockOwner(res.get());
 				ASSERT(owner.isValid());
 				if (owner.getDescription() == description) {
-					return Void();
+					co_return;
 				}
 				owner.setDescription(description);
 			} else {
 				owner = RangeLockOwner(ownerUniqueID, description);
 			}
 			tr.set(rangeLockOwnerKeyFor(ownerUniqueID), rangeLockOwnerValue(owner));
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
+Future<Void> removeRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
 	if (ownerUniqueID.empty()) {
 		throw range_lock_failed();
 	}
-	state Transaction tr(cx);
-	loop {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
+			Optional<Value> res = co_await tr.get(rangeLockOwnerKeyFor(ownerUniqueID));
 			if (!res.present()) {
-				return Void();
+				co_return;
 			}
 			RangeLockOwner owner = decodeRangeLockOwner(res.get());
 			ASSERT(owner.isValid());
 			tr.clear(rangeLockOwnerKeyFor(ownerUniqueID));
-			wait(tr.commit());
-			return Void();
+			co_await tr.commit();
+			co_return;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
-	state Transaction tr(cx);
-	loop {
+Future<Optional<RangeLockOwner>> getRangeLockOwner(Database cx, RangeLockOwnerName ownerUniqueID) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(rangeLockOwnerKeyFor(ownerUniqueID)));
+			Optional<Value> res = co_await tr.get(rangeLockOwnerKeyFor(ownerUniqueID));
 			if (!res.present()) {
-				return Optional<RangeLockOwner>();
+				co_return Optional<RangeLockOwner>();
 			}
 			RangeLockOwner owner = decodeRangeLockOwner(res.get());
 			ASSERT(owner.isValid());
-			return owner;
+			co_return owner;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
-ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
-	state std::vector<RangeLockOwner> res;
-	state Key beginKey = rangeLockOwnerKeys.begin;
-	state Key endKey = rangeLockOwnerKeys.end;
-	state Transaction tr(cx);
+Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
+	std::vector<RangeLockOwner> res;
+	Key beginKey = rangeLockOwnerKeys.begin;
+	Key endKey = rangeLockOwnerKeys.end;
+	Transaction tr(cx);
 	while (beginKey < endKey) {
-		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+		KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = wait(tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY));
+			RangeResult result = co_await tr.getRange(rangeToRead, CLIENT_KNOBS->TOO_MANY);
 			for (const auto& kv : result) {
 				RangeLockOwner owner = decodeRangeLockOwner(kv.value);
 				ASSERT(owner.isValid());
@@ -3585,29 +3666,32 @@ ACTOR Future<std::vector<RangeLockOwner>> getAllRangeLockOwners(Database cx) {
 			if (!result.more) {
 				break;
 			}
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return res;
+	co_return res;
 }
 
 // Not transactional
-ACTOR Future<std::vector<std::pair<KeyRange, RangeLockState>>>
+Future<std::vector<std::pair<KeyRange, RangeLockState>>>
 findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwnerName> ownerName) {
 	if (range.end > normalKeys.end) {
 		throw range_lock_failed();
 	}
-	state std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges;
-	state Key beginKey = range.begin;
-	state Key endKey = range.end;
-	state Transaction tr(cx);
+	std::vector<std::pair<KeyRange, RangeLockState>> lockedRanges;
+	Key beginKey = range.begin;
+	Key endKey = range.end;
+	Transaction tr(cx);
 	while (beginKey < endKey) {
-		state KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+		KeyRange rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult result = wait(krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
+			RangeResult result = co_await krmGetRanges(&tr, rangeLockPrefix, rangeToRead);
 			if (result.empty()) {
 				break;
 			}
@@ -3626,19 +3710,19 @@ findExclusiveReadLockOnRange(Database cx, KeyRange range, Optional<RangeLockOwne
 				}
 			}
 			beginKey = result.back().key;
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return lockedRanges;
+	co_return lockedRanges;
 }
 
 // Validate the input range and owner.
 // If invalid, reject the request by throwing range_lock_failed error.
 // If the range has been locked, reject the request by throwing range_lock_reject error.
-ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
-                                                      KeyRange range,
-                                                      RangeLockOwnerName ownerUniqueID) {
+Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
 	// Check input range
 	if (range.end > normalKeys.end) {
 		TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
@@ -3647,7 +3731,7 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 		throw range_lock_failed();
 	}
 	// Check owner
-	state Optional<Value> ownerValue = wait(tr->get(rangeLockOwnerKeyFor(ownerUniqueID)));
+	Optional<Value> ownerValue = co_await tr->get(rangeLockOwnerKeyFor(ownerUniqueID));
 	if (!ownerValue.present()) {
 		TraceEvent(SevDebug, "PrepareExclusiveRangeLockOperationFailed")
 		    .detail("Reason", "Owner not found")
@@ -3655,15 +3739,15 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 		    .detail("Range", range);
 		throw range_lock_failed();
 	}
-	state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+	RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
 	ASSERT(owner.isValid());
 	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
-	state Key beginKey = range.begin;
-	state Key endKey = range.end;
-	state KeyRange rangeToRead;
+	Key beginKey = range.begin;
+	Key endKey = range.end;
+	KeyRange rangeToRead;
 	while (beginKey < endKey) {
 		rangeToRead = KeyRangeRef(beginKey, endKey);
-		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		RangeResult res = co_await krmGetRanges(tr, rangeLockPrefix, rangeToRead);
 		if (res.empty()) {
 			break;
 		}
@@ -3688,12 +3772,9 @@ ACTOR Future<Void> prepareExclusiveRangeLockOperation(Transaction* tr,
 		}
 		beginKey = res.back().key;
 	}
-	return Void();
 }
 
-ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
-                                                        KeyRange range,
-                                                        RangeLockOwnerName ownerUniqueID) {
+Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
 	// Check input range
 	if (range.end > normalKeys.end) {
 		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
@@ -3702,7 +3783,7 @@ ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
 		throw range_lock_failed();
 	}
 	// Check owner
-	state Optional<Value> ownerValue = wait(tr->get(rangeLockOwnerKeyFor(ownerUniqueID)));
+	Optional<Value> ownerValue = co_await tr->get(rangeLockOwnerKeyFor(ownerUniqueID));
 	if (!ownerValue.present()) {
 		TraceEvent(SevDebug, "PrepareExclusiveRangeUnlockOperationFailed")
 		    .detail("Reason", "Owner not found")
@@ -3710,16 +3791,16 @@ ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
 		    .detail("Range", range);
 		throw range_lock_failed();
 	}
-	state RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
+	RangeLockOwner owner = decodeRangeLockOwner(ownerValue.get());
 	ASSERT(owner.isValid());
 
 	// Check lock state on the entire input range. Throw exception if the range has been locked by a different owner.
-	state Key beginKey = range.begin;
-	state Key endKey = range.end;
-	state KeyRange rangeToRead;
+	Key beginKey = range.begin;
+	Key endKey = range.end;
+	KeyRange rangeToRead;
 	while (beginKey < endKey) {
 		rangeToRead = KeyRangeRef(beginKey, endKey);
-		RangeResult res = wait(krmGetRanges(tr, rangeLockPrefix, rangeToRead));
+		RangeResult res = co_await krmGetRanges(tr, rangeLockPrefix, rangeToRead);
 		if (res.empty()) {
 			break;
 		}
@@ -3743,58 +3824,56 @@ ACTOR Future<Void> prepareExclusiveRangeUnlockOperation(Transaction* tr,
 		}
 		beginKey = res.back().key;
 	}
-	return Void();
 }
 
 // Transactional. One transaction can call takeExclusiveReadLockOnRange at most for one time.
 // This is the limitation of the krmSetRangeCoalescing.
-ACTOR Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+Future<Void> takeExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	// Add conflict range
 	tr->addWriteConflictRange(range);
-	wait(prepareExclusiveRangeLockOperation(tr, range, ownerUniqueID));
+	co_await prepareExclusiveRangeLockOperation(tr, range, ownerUniqueID);
 	// At this point, no lock presents on the range.
 	// Lock range by writting the range.
 	RangeLockStateSet rangeLockStateSet;
 	rangeLockStateSet.insertIfNotExist(RangeLockState(RangeLockType::ExclusiveReadLock, ownerUniqueID, range));
-	wait(krmSetRange(tr, rangeLockPrefix, range, rangeLockStateSetValue(rangeLockStateSet)));
+	co_await krmSetRange(tr, rangeLockPrefix, range, rangeLockStateSetValue(rangeLockStateSet));
 	TraceEvent(SevInfo, "TakeExclusiveReadLockTransactionOnRange").detail("Range", range);
-	return Void();
 }
 
 // Transactional. One transaction can call releaseExclusiveReadLockOnRange at most for one time.
 // This is the limitation of the krmSetRangeCoalescing.
-ACTOR Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+Future<Void> releaseExclusiveReadLockOnRange(Transaction* tr, KeyRange range, RangeLockOwnerName ownerUniqueID) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	wait(prepareExclusiveRangeUnlockOperation(tr, range, ownerUniqueID));
+	co_await prepareExclusiveRangeUnlockOperation(tr, range, ownerUniqueID);
 	// At this point, no lock presents on the range.
 	// Unlock by overwiting the range.
-	wait(krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(RangeLockStateSet())));
+	co_await krmSetRangeCoalescing(tr, rangeLockPrefix, range, normalKeys, rangeLockStateSetValue(RangeLockStateSet()));
 	TraceEvent(SevInfo, "ReleaseExclusiveReadLockTransactionOnRange").detail("Range", range);
-	return Void();
 }
 
-ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID) {
-	state Key beginKey = normalKeys.begin;
-	state Key endKey = normalKeys.end;
-	state Transaction tr(cx);
-	state int i = 0;
-	state RangeResult result;
-	state KeyRange rangeToRead;
-	state RangeLockStateSet currentRangeLockStateSet;
-	state KeyRange currentRange;
-	state Key beginKeyToClear;
-	state Key endKeyToClear;
+Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName ownerUniqueID) {
+	Key beginKey = normalKeys.begin;
+	Key endKey = normalKeys.end;
+	Transaction tr(cx);
+	int i = 0;
+	RangeResult result;
+	KeyRange rangeToRead;
+	RangeLockStateSet currentRangeLockStateSet;
+	KeyRange currentRange;
+	Key beginKeyToClear;
+	Key endKeyToClear;
 	while (beginKey < endKey) {
 		rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
+		Error err;
 		try {
 			tr.reset();
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			result.clear();
-			wait(store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead)));
+			co_await store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
 			if (result.empty()) {
 				break;
 			}
@@ -3819,71 +3898,77 @@ ACTOR Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerNam
 			}
 			if (beginKeyToClear != endKeyToClear) {
 				ASSERT(endKeyToClear > beginKeyToClear);
-				wait(krmSetRangeCoalescing(&tr,
-				                           rangeLockPrefix,
-				                           KeyRangeRef(beginKeyToClear, endKeyToClear),
-				                           normalKeys,
-				                           rangeLockStateSetValue(RangeLockStateSet())));
-				wait(tr.commit());
+				co_await krmSetRangeCoalescing(&tr,
+				                               rangeLockPrefix,
+				                               KeyRangeRef(beginKeyToClear, endKeyToClear),
+				                               normalKeys,
+				                               rangeLockStateSetValue(RangeLockStateSet()));
+				co_await tr.commit();
 			}
 			beginKey = currentRange.end; // We skip the currentRange if it is not locked by the input owner.
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
 // Transactional
-ACTOR Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> takeExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
-			wait(takeExclusiveReadLockOnRange(&tr, range, ownerUniqueID));
-			wait(tr.commit());
+			co_await takeExclusiveReadLockOnRange(&tr, range, ownerUniqueID);
+			co_await tr.commit();
 			TraceEvent(SevInfo, "TakeExclusiveReadLockOnRange").detail("Range", range);
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
 // Transactional
-ACTOR Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
-	state Transaction tr(cx);
-	loop {
+Future<Void> releaseExclusiveReadLockOnRange(Database cx, KeyRange range, RangeLockOwnerName ownerUniqueID) {
+	Transaction tr(cx);
+	while (true) {
+		Error err;
 		try {
-			wait(releaseExclusiveReadLockOnRange(&tr, range, ownerUniqueID));
-			wait(tr.commit());
+			co_await releaseExclusiveReadLockOnRange(&tr, range, ownerUniqueID);
+			co_await tr.commit();
 			TraceEvent(SevInfo, "ReleaseExclusiveReadLockOnRange").detail("Range", range);
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
-	return Void();
 }
 
-ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
-	state ReadYourWritesTransaction tr(cx);
+Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
+	ReadYourWritesTransaction tr(cx);
 
-	loop {
+	while (true) {
+		Error err;
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(primaryDatacenterKey));
+			Optional<Value> res = co_await tr.get(primaryDatacenterKey);
 			if (res.present() && res.get() == dcId) {
-				return Void();
+				co_return;
 			}
 
-			state Future<Void> watchFuture = tr.watch(primaryDatacenterKey);
-			wait(tr.commit());
-			wait(watchFuture);
+			Future<Void> watchFuture = tr.watch(primaryDatacenterKey);
+			co_await tr.commit();
+			co_await watchFuture;
 			tr.reset();
+			continue;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			err = e;
 		}
+		co_await tr.onError(err);
 	}
 }
 
@@ -4089,8 +4174,6 @@ std::string ManagementAPI::generateErrorMessage(const CoordinatorsResult& res) {
 }
 
 TEST_CASE("/ManagementAPI/AutoQuorumChange/checkLocality") {
-	wait(Future<Void>(Void()));
-
 	std::vector<ProcessData> workers;
 	std::vector<NetworkAddress> chosen;
 	std::set<AddressExclusion> excluded;

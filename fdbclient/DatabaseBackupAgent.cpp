@@ -32,7 +32,7 @@
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include <inttypes.h>
 #include <map>
