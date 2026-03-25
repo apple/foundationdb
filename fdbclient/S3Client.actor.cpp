@@ -85,7 +85,7 @@ struct PartConfig {
 // Uses xxhash library because it's fast (supposedly) and used elsewhere in fdb.
 // If size is -1, the function will determine the file size automatically.
 // Returns a hex string representation of the xxhash64 checksum.
-Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size) {
+AsyncResult<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size) {
 	int64_t pos = 0;
 	XXH64_state_t* hashState = XXH64_createState();
 	std::shared_ptr<std::vector<uint8_t>> buffer = std::make_shared<std::vector<uint8_t>>(65536);
@@ -226,10 +226,10 @@ static Future<Void> writeChecksumWithFallback(Reference<S3BlobStoreEndpoint> end
 }
 
 // Read checksum with configurable fallback strategy
-static Future<Optional<std::string>> readChecksumWithFallback(Reference<S3BlobStoreEndpoint> endpoint,
-                                                              std::string bucket,
-                                                              std::string objectName,
-                                                              PartConfig config) {
+static AsyncResult<Optional<std::string>> readChecksumWithFallback(Reference<S3BlobStoreEndpoint> endpoint,
+                                                                   std::string bucket,
+                                                                   std::string objectName,
+                                                                   PartConfig config) {
 	if (!config.enableChecksumValidation) {
 		TraceEvent(SevDebug, "S3ClientChecksumValidationDisabled")
 		    .detail("Bucket", bucket)
@@ -799,9 +799,9 @@ static Future<PartState> downloadPart(Reference<S3BlobStoreEndpoint> endpoint,
 	}
 }
 
-static Future<Optional<std::string>> getExpectedChecksum(Reference<S3BlobStoreEndpoint> endpoint,
-                                                         std::string bucket,
-                                                         std::string objectName) {
+static AsyncResult<Optional<std::string>> getExpectedChecksum(Reference<S3BlobStoreEndpoint> endpoint,
+                                                              std::string bucket,
+                                                              std::string objectName) {
 	PartConfig config; // Use default configuration
 	Optional<std::string> result = co_await readChecksumWithFallback(endpoint, bucket, objectName, config);
 	co_return result;
@@ -1136,9 +1136,9 @@ Future<Void> listFiles(std::string s3url, int maxDepth) {
 	}
 }
 
-Future<std::vector<std::string>> listFiles_impl(Reference<S3BlobStoreEndpoint> bstore,
-                                                std::string bucket,
-                                                std::string path) {
+AsyncResult<std::vector<std::string>> listFiles_impl(Reference<S3BlobStoreEndpoint> bstore,
+                                                     std::string bucket,
+                                                     std::string path) {
 	co_await bstore->requestRateRead->getAllowance(1);
 
 	std::string resource = bstore->constructResourcePath(bucket, path);

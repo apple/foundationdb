@@ -124,7 +124,7 @@ Future<Void> deleteResource(std::string s3url);
 // file: File handle to calculate checksum for
 // size: Size of the file in bytes, or -1 to determine automatically
 // Returns a Future that completes with the hex string representation of the checksum
-Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
+AsyncResult<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
 
 // List files and directories at the given S3 URL
 // s3url: S3 URL to list (must include bucket parameter)
