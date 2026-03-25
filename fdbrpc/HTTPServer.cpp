@@ -1,5 +1,5 @@
 /*
- * HTTPServer.actor.cpp
+ * HTTPServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -397,44 +397,41 @@ Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConnection
 TEST_CASE("/HTTP/Server/HelloWorld") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	state std::string hostname = "helloworld-" + deterministicRandom()->randomUniqueID().toString();
-	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloWorldRequestHandler>()));
+	std::string hostname = "helloworld-" + deterministicRandom()->randomUniqueID().toString();
+	co_await g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloWorldRequestHandler>());
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest(hostname, "80", doHelloWorldReq)));
+	co_await doRequestTest(hostname, "80", doHelloWorldReq);
 
 	fmt::print("Done Hello\n");
-	return Void();
 }
 
 TEST_CASE("/HTTP/Server/HelloError") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	state std::string hostname = "helloerror-" + deterministicRandom()->randomUniqueID().toString();
-	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloErrorRequestHandler>()));
+	std::string hostname = "helloerror-" + deterministicRandom()->randomUniqueID().toString();
+	co_await g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloErrorRequestHandler>());
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest(hostname, "80", doHelloWorldErrorReq)));
+	co_await doRequestTest(hostname, "80", doHelloWorldErrorReq);
 
 	fmt::print("Done Error\n");
-	return Void();
 }
 
 TEST_CASE("/HTTP/Server/HelloBadMD5") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	state std::string hostname = "hellobadmd5-" + deterministicRandom()->randomUniqueID().toString();
-	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloBadMD5RequestHandler>()));
+	std::string hostname = "hellobadmd5-" + deterministicRandom()->randomUniqueID().toString();
+	co_await g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloBadMD5RequestHandler>());
 	fmt::print("Registered sim server\n");
 
 	// TODO refactor this into ASSERT_ERROR()?
 	try {
-		wait(success(doRequestTest(hostname, "80", doHelloBadMD5Req)));
+		co_await doRequestTest(hostname, "80", doHelloBadMD5Req);
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_http_bad_response);
 	}
 
 	fmt::print("Done Bad MD5\n");
-	return Void();
 }
