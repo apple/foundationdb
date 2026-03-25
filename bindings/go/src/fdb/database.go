@@ -115,6 +115,9 @@ func (d Database) CreateTransaction() (Transaction, error) {
 // process address is the form of IP:Port pair without the :tls suffix if the cluster is running
 // with TLS enabled. The address can also be multiple processes addresses concated by a comma, e.g.
 // "IP1:Port,IP2:port", in this case the RebootWorker will reboot all provided addresses concurrently.
+// It's not recommened to close the Database directly after calling the RebootWorker method as the
+// reboot commands will be queue and executed asynchronous. If the Database context is closed immediately
+// some of the commands might not be delievered, even if the RebootWorker method returned successfully.
 func (d Database) RebootWorker(address string, checkFile bool, suspendDuration int) error {
 	t := &futureInt64{
 		future: newFutureWithDb(
