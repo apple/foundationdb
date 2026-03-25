@@ -864,7 +864,7 @@ Future<Void> applyMutations(Database cx,
 	keyVersion->insert(metadataVersionKey, 0);
 
 	try {
-		co_await store(*dbConfig, getDatabaseConfiguration(cx));
+		*dbConfig = co_await getDatabaseConfiguration(cx);
 
 		while (true) {
 			if (beginVersion >= *endVersion) {

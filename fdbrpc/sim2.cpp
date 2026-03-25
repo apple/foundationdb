@@ -1080,7 +1080,7 @@ public:
 		return t->promise.getFuture();
 	}
 	static Future<Void> checkShutdown(Sim2* self, TaskPriority taskID) {
-		co_await success(self->getCurrentProcess()->shutdownSignal.getFuture());
+		co_await self->getCurrentProcess()->shutdownSignal.getFuture();
 		self->setCurrentTask(taskID);
 		co_return;
 	}
@@ -2489,7 +2489,7 @@ public:
 
 		// check not too many servers
 		ASSERT(self->httpHandlers.size() < 1000);
-		Reference<HTTP::SimRegisteredHandlerContext> handlerContext =
+		auto handlerContext =
 		    makeReference<HTTP::SimRegisteredHandlerContext>(hostname, service, self->nextHTTPPort++, requestHandler);
 		self->httpHandlers.insert({ id, handlerContext });
 

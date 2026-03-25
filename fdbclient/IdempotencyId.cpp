@@ -233,7 +233,7 @@ static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransaction> tr
 }
 
 Future<JsonBuilderObject> getIdmpKeyStatus(Database db) {
-	Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	auto tr = makeReference<ReadYourWritesTransaction>(db);
 	int64_t size{ 0 };
 	IdempotencyIdsExpiredVersion expired;
 	KeyBackedObjectProperty<IdempotencyIdsExpiredVersion, _Unversioned> expiredKey(idempotencyIdsExpiredVersion,
@@ -306,11 +306,10 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 			}
 
 			// Only used for a trace event
-			co_await store(idmpKeySize, tr->getEstimatedRangeSizeBytes(idempotencyIdKeys));
+			idmpKeySize = co_await tr->getEstimatedRangeSizeBytes(idempotencyIdKeys);
 
 			// Get the version of the most recent idempotency ID
-			co_await success(
-			    getBoundary(tr, idempotencyIdKeys, Oldest::False, &candidateDeleteVersion, &candidateDeleteTime));
+			co_await getBoundary(tr, idempotencyIdKeys, Oldest::False, &candidateDeleteVersion, &candidateDeleteTime);
 
 			// Keep dividing the candidate range until clearing it would not delete something younger than
 			// minAgeSeconds
@@ -327,8 +326,8 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 				}
 
 				// Find the youngest key in candidate range
-				co_await success(getBoundary(
-				    tr, candidateRangeToClean, Oldest::False, &candidateDeleteVersion, &candidateDeleteTime));
+				co_await getBoundary(
+				    tr, candidateRangeToClean, Oldest::False, &candidateDeleteVersion, &candidateDeleteTime);
 
 				// Update the range so that it ends at an idempotency id key. Since we're binary searching, the
 				// candidate range was probably too large before.
@@ -337,7 +336,7 @@ Future<Void> cleanIdempotencyIds(Database db, double minAgeSeconds) {
 				                BinaryWriter::toValue(bigEndian64(candidateDeleteVersion + 1), Unversioned())
 				                    .withPrefix(idempotencyIdKeys.begin));
 
-				co_await store(candidateDeleteSize, tr->getEstimatedRangeSizeBytes(candidateRangeToClean));
+				candidateDeleteSize = co_await tr->getEstimatedRangeSizeBytes(candidateRangeToClean);
 
 				int64_t youngestAge = int64_t(now()) - candidateDeleteTime;
 				TraceEvent("IdempotencyIdsCleanerCandidateDelete")
