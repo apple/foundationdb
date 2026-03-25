@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 

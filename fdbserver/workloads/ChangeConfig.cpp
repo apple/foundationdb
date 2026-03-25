@@ -21,7 +21,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Schemas.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 
 struct ChangeConfigWorkload : TestWorkload {

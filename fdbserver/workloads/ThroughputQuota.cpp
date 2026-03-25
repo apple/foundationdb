@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/TagThrottle.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 // This workload sets the throughput quota of a tag during the setup phase
 class ThroughputQuotaWorkload : public TestWorkload {

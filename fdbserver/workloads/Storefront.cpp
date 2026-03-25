@@ -20,7 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 
 // Storefront workload will maintain 2 tables: one for orders and one for items
