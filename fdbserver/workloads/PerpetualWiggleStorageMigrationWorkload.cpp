@@ -20,7 +20,7 @@
 
 #include "fdbserver/datadistributor/DDTeamCollection.h"
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/datadistributor/DDSharedContext.h"
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbserver/core/MoveKeys.h"

@@ -20,7 +20,7 @@
 
 #include "fdbserver/datadistributor/DDTxnProcessor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/DatabaseContext.h"
 #include "flow/CoroUtils.h"

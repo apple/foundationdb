@@ -23,7 +23,7 @@
 #include "fdbcli/fdbcli.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/Arena.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Util.h"
