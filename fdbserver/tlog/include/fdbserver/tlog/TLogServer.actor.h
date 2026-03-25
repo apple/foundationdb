@@ -34,6 +34,8 @@ class IKeyValueStore;
 struct InitializeTLogRequest;
 struct ServerDBInfo;
 
+double effectiveTLogMinAvailableSpaceRatio();
+
 ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         IDiskQueue* persistentQueue,
                         Reference<AsyncVar<ServerDBInfo> const> db,
@@ -46,6 +48,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
                         Promise<Void> recovered,
                         std::string folder,
                         Reference<AsyncVar<bool>> degraded,
+                        Reference<AsyncVar<bool>> lowDiskTLogExclusion,
                         Reference<AsyncVar<UID>> activeSharedTLog,
                         Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck);
 
