@@ -1938,6 +1938,7 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 			// control updater if it wasn't started yet
 			if (!pollRateUpdater.isValid())
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
+			continue;
 		} catch (Error& e) {
 			err = e;
 		}
