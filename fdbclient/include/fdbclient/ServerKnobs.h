@@ -820,6 +820,8 @@ public:
 	                                               // failover.
 	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
 	                                               // failover.
+	double CC_FAILOVER_DUE_TO_TPS_LIMIT_DURATION; // Trigger failover if HealthMetrics.tpsLimit stays at 0 for at
+	                                              // least this duration (disabled with knob value 0.0).
 	bool CC_ENABLE_ENTIRE_SATELLITE_MONITORING; // When enabled, gray failure tries to detect whether the entire
 	                                            // satellite DC is degraded.
 	int CC_SATELLITE_DEGRADATION_MIN_COMPLAINER; // When the network between primary and satellite becomes bad, all the
