@@ -2693,12 +2693,8 @@ Future<Void> expireBackupData(const char* name,
 		Future<Void> expire = c->expireData(endVersion, force, &progress, restorableAfterVersion);
 
 		while (true) {
-			auto res = co_await race(delay(5), expire);
-			if (res.index() == 1) {
+			if (auto const res = co_await timeout(expire, 5); res.present()) {
 				break;
-			}
-			if (res.index() != 0) {
-				UNREACHABLE();
 			}
 
 			std::string p = progress.toString();
@@ -2743,12 +2739,8 @@ Future<Void> deleteBackupContainer(const char* name, std::string destinationCont
 		printf("Deleting %s...\n", destinationContainer.c_str());
 
 		while (true) {
-			auto res = co_await race(done, delay(5));
-			if (res.index() == 0) {
+			if (auto const res = co_await timeout(done, 5); res.present()) {
 				break;
-			}
-			if (res.index() != 1) {
-				UNREACHABLE();
 			}
 
 			if (numDeleted != lastUpdate) {
