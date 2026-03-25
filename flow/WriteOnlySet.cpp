@@ -1,5 +1,5 @@
 /*
- * WriteOnlySet.actor.cpp
+ * WriteOnlySet.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -254,7 +254,7 @@ void writer(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 TEST_CASE("/flow/WriteOnlySet") {
 	if (g_network->isSimulated()) {
 		// This test is not deterministic, so we shouldn't run it in simulation
-		return Void();
+		co_return;
 	}
 	auto set = std::make_shared<TestSet>();
 	auto threads = std::make_shared<std::vector<std::thread>>();
@@ -263,13 +263,13 @@ TEST_CASE("/flow/WriteOnlySet") {
 		threads->emplace_back([set, runFor]() { writer(set, runFor); });
 	}
 	threads->emplace_back([set, runFor]() { testCopier(set, runFor); });
-	wait(threadjoiner(threads, set));
+	co_await threadjoiner(threads, set);
 	TraceEvent("WriteOnlySetTestResult")
 	    .detail("Inserts", numInserts.load())
 	    .detail("Erases", numErase.load())
 	    .detail("Copies", numCopied.load())
 	    .detail("LockedErase", numLockedErase.load());
-	return Void();
+	co_return;
 }
 } // namespace
 #endif

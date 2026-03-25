@@ -1,5 +1,5 @@
 /*
- * FileDecoder.actor.cpp
+ * FileDecoder.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -466,9 +466,9 @@ struct VersionedMutations {
  * Model a decoding progress for a mutation file. Usage is:
  *
  *    DecodeProgress progress(logfile);
- *    wait(progress->openFile(container));
+ *    co_await progress.openFile(container);
  *    while (1) {
- *        Optional<VersionedMutations> batch = wait(progress->getNextBatch());
+ *        Optional<VersionedMutations> batch = progress.getNextBatch();
  *        if (!batch.present()) break;
  *        ... // process the batch mutations
  *    }
