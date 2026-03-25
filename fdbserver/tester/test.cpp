@@ -41,7 +41,7 @@
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"

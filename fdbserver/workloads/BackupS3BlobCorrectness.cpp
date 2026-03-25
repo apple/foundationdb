@@ -80,7 +80,7 @@
 
 #include <atomic>
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
