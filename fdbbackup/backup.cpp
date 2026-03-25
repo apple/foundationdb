@@ -1884,7 +1884,7 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 		Error err;
 		try {
 			while (true) {
-				Error err;
+				Error innerErr;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1892,10 +1892,10 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 					co_await tr->commit();
 					break;
 				} catch (Error& e) {
-					err = e;
+					innerErr = e;
 				}
-				TraceEvent(SevWarnAlways, "LayerStatusMetaKeyUpdateError").errorUnsuppressed(err);
-				co_await tr->onError(err); // Non-retryable txns throws back the error.
+				TraceEvent(SevWarnAlways, "LayerStatusMetaKeyUpdateError").errorUnsuppressed(innerErr);
+				co_await tr->onError(innerErr); // Non-retryable txns throws back the error.
 			}
 			break;
 		} catch (Error& e) {
@@ -1912,7 +1912,7 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 		Error err;
 		try {
 			while (true) {
-				Error err;
+				Error innerErr;
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1924,10 +1924,10 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 					co_await tr->commit();
 					break;
 				} catch (Error& e) {
-					err = e;
+					innerErr = e;
 				}
-				TraceEvent(SevWarnAlways, "LayerBackupStatusUpdateError").errorUnsuppressed(err);
-				co_await tr->onError(err);
+				TraceEvent(SevWarnAlways, "LayerBackupStatusUpdateError").errorUnsuppressed(innerErr);
+				co_await tr->onError(innerErr);
 			}
 
 			co_await delay(CLIENT_KNOBS->BACKUP_STATUS_DELAY *
