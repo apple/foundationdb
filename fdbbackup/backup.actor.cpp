@@ -1793,8 +1793,6 @@ Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 			readMore = false;
 		}
 	}
-
-	co_return;
 }
 
 // Get layer status document for just this layer
@@ -2237,8 +2235,6 @@ Future<Void> abortDBBackup(Database src, Database dest, std::string tagName, Par
 		}
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> abortBackup(Database db, std::string tagName) {
@@ -2264,8 +2260,6 @@ Future<Void> abortBackup(Database db, std::string tagName) {
 		}
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> cleanupMutations(Database db, DeleteData deleteData) {
@@ -2277,8 +2271,6 @@ Future<Void> cleanupMutations(Database db, DeleteData deleteData) {
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> waitBackup(Database db, std::string tagName, StopWhenDone stopWhenDone) {
@@ -2296,8 +2288,6 @@ Future<Void> waitBackup(Database db, std::string tagName, StopWhenDone stopWhenD
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> discontinueBackup(Database db, std::string tagName, WaitForComplete waitForCompletion) {
@@ -2336,8 +2326,6 @@ Future<Void> discontinueBackup(Database db, std::string tagName, WaitForComplete
 		}
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> changeBackupResumed(Database db, bool pause) {
@@ -2351,8 +2339,6 @@ Future<Void> changeBackupResumed(Database db, bool pause) {
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause) {
@@ -2366,8 +2352,6 @@ Future<Void> changeDBBackupResumed(Database src, Database dest, bool pause) {
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 Reference<IBackupContainer> openBackupContainer(const char* name,
@@ -2527,8 +2511,6 @@ Future<Void> runRestore(Database db,
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 // Fast restore agent that kicks off the restore: send restore requests to restore workers.
@@ -2646,8 +2628,6 @@ Future<Void> runFastRestoreTool(Database db,
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> dumpBackupData(const char* name,
@@ -2677,8 +2657,6 @@ Future<Void> dumpBackupData(const char* name,
 	fmt::print("Scanning version range {0} to {1}\n", beginVersion, endVersion);
 	BackupFileList files = co_await c->dumpFileList(beginVersion, endVersion);
 	files.toStream(stdout);
-
-	co_return;
 }
 
 Future<Void> expireBackupData(const char* name,
@@ -2807,8 +2785,6 @@ Future<Void> describeBackup(const char* name,
 		fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
-
-	co_return;
 }
 
 static void reportBackupQueryError(UID operationId, JsonBuilderObject& result, std::string errorMessage) {
@@ -3025,7 +3001,6 @@ Future<Void> queryBackup(const char* name,
 	}
 
 	printf("%s\n", result.getJson().c_str());
-	co_return;
 }
 
 Future<Void> listBackup(std::string baseUrl, Optional<std::string> proxy) {
@@ -3042,8 +3017,6 @@ Future<Void> listBackup(std::string baseUrl, Optional<std::string> proxy) {
 		fprintf(stderr, "%s\n", msg.c_str());
 		throw;
 	}
-
-	co_return;
 }
 
 Future<Void> listBackupTags(Database cx) {
