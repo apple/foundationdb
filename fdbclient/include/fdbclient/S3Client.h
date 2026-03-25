@@ -1,5 +1,5 @@
 /*
- * S3Client.actor.h
+ * S3Client.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,10 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_S3CLIENT_ACTOR_G_H)
-#define FDBCLIENT_S3CLIENT_ACTOR_G_H
-#include "fdbclient/S3Client.actor.g.h"
-#elif !defined(FDBCLIENT_S3CLIENT_ACTOR_H)
-#define FDBCLIENT_S3CLIENT_ACTOR_H
-
 #include <string>
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/BulkDumping.h"
 #include "flow/Error.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // FDB S3 Client. Includes copying files and directories to and from s3.
 // Uses the S3BlobStoreEndpoint to interact with s3. The s3url is of the form
@@ -124,7 +117,7 @@ Future<Void> deleteResource(std::string s3url);
 // file: File handle to calculate checksum for
 // size: Size of the file in bytes, or -1 to determine automatically
 // Returns a Future that completes with the hex string representation of the checksum
-AsyncResult<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
+Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
 
 // List files and directories at the given S3 URL
 // s3url: S3 URL to list (must include bucket parameter)
@@ -141,6 +134,3 @@ Future<Void> listFiles(std::string s3url, int maxDepth = 1);
 Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
                                            std::string& resource,
                                            S3BlobStoreEndpoint::ParametersT& parameters);
-
-#include "flow/unactorcompiler.h"
-#endif

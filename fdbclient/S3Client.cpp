@@ -1,5 +1,5 @@
 /*
- * S3Client.actor.cpp
+ * S3Client.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -29,7 +29,7 @@
 #include <io.h>
 #endif
 
-#include "fdbclient/S3Client.actor.h"
+#include "fdbclient/S3Client.h"
 #include "flow/IAsyncFile.h"
 #include "flow/Trace.h"
 #include "flow/Traceable.h"
