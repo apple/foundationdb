@@ -1544,13 +1544,13 @@ DBType getDBType(std::string dbType) {
 	return enBackupType;
 }
 
-Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
-                                   IPAddress localIP,
-                                   std::string name,
-                                   std::string id,
-                                   ProgramExe exe,
-                                   Database dest,
-                                   Snapshot snapshot = Snapshot::False) {
+AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
+                                        IPAddress localIP,
+                                        std::string name,
+                                        std::string id,
+                                        ProgramExe exe,
+                                        Database dest,
+                                        Snapshot snapshot = Snapshot::False) {
 	// This process will write a document that looks like this:
 	// { backup : { $expires : {<subdoc>}, version: <version from approximately 30 seconds from now> }
 	// so that the value under 'backup' will eventually expire to null and thus be ignored by
@@ -1796,7 +1796,7 @@ Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 }
 
 // Get layer status document for just this layer
-Future<json_spirit::mObject> getLayerStatus(Database src, std::string rootKey) {
+AsyncResult<json_spirit::mObject> getLayerStatus(Database src, std::string rootKey) {
 	Transaction tr(src);
 
 	while (true) {
@@ -1916,10 +1916,10 @@ Future<Void> statusUpdateActor(Database statusUpdateDest,
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-					Future<std::string> futureStatusDoc =
+					AsyncResult<std::string> asyncResultStatusDoc =
 					    getLayerStatus(tr, localIP, name, id, exe, taskDest, Snapshot::True);
 					co_await cleanupStatus(tr, rootKey, name, id);
-					std::string statusdoc = co_await futureStatusDoc;
+					std::string statusdoc = co_await std::move(asyncResultStatusDoc);
 					tr->set(instanceKey, statusdoc);
 					co_await tr->commit();
 					break;
