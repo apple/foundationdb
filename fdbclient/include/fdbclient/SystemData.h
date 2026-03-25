@@ -706,8 +706,6 @@ extern const KeyRef snapshotEndVersionKey;
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
 
-
-
 #pragma clang diagnostic pop
 
 #endif

@@ -570,8 +570,6 @@ Future<Void> brokenPromiseToReady(Future<Void> f) {
 }
 
 // True if [begin, end) spans across the system keyspace boundary.
-// Merges must not cross systemKeys.begin so that user-space data
-// is never co-located with critical system metadata.
 static bool crossesCriticalSystemBoundary(KeyRef begin, KeyRef end) {
 	return begin < systemKeys.begin && end > systemKeys.begin;
 }
@@ -1045,15 +1043,9 @@ Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<Initial
 	co_await delay(0.0, TaskPriority::DataDistribution);
 
 	std::vector<Key> customBoundaries;
-
-	// Always split at the user/system keyspace boundary
-	customBoundaries.push_back(systemKeys.begin);
-
 	for (auto it : self->userRangeConfig->ranges()) {
 		customBoundaries.push_back(it->range().begin);
 	}
-	std::sort(customBoundaries.begin(), customBoundaries.end());
-	customBoundaries.erase(std::unique(customBoundaries.begin(), customBoundaries.end()), customBoundaries.end());
 
 	int s{ 0 };
 	int customBoundary = 0;
@@ -2082,24 +2074,10 @@ TEST_CASE("/DataDistributor/Tracker/FetchTopK") {
 }
 
 TEST_CASE("/DataDistributor/Tracker/CrossesCriticalSystemBoundary") {
-	// Pure user-space range — should not cross
 	ASSERT(!crossesCriticalSystemBoundary("a"_sr, "z"_sr));
-
-	// Pure system-space range — should not cross
 	ASSERT(!crossesCriticalSystemBoundary(systemKeys.begin, systemKeys.end));
-
-	// Range exactly at the boundary edges — should not cross
 	ASSERT(!crossesCriticalSystemBoundary("a"_sr, systemKeys.begin));
-
-	// Range that starts before and ends inside system space — crosses
 	ASSERT(crossesCriticalSystemBoundary("a"_sr, "\xff/serverList/"_sr));
-
-	// Range that starts before and ends exactly at boundary — should not cross
-	// (boundary is exclusive: end > systemKeys.begin required)
-	ASSERT(!crossesCriticalSystemBoundary("a"_sr, systemKeys.begin));
-
-	// Range spanning from user space all the way through system space — crosses
 	ASSERT(crossesCriticalSystemBoundary(""_sr, allKeys.end));
-
 	return Void();
 }
