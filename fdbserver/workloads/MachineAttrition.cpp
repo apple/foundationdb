@@ -23,7 +23,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/ManagementAPI.h"
 #include "flow/FaultInjection.h"

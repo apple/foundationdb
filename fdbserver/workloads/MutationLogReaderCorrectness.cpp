@@ -25,7 +25,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/MutationLogReader.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"

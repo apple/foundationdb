@@ -23,7 +23,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/StatusClient.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 struct DDMetricsExcludeWorkload : TestWorkload {
 	static constexpr auto NAME = "DDMetricsExclude";

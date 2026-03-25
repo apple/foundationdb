@@ -22,7 +22,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/ApiVersion.h"
 #include "flow/genericactors.actor.h"
 

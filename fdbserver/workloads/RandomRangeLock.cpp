@@ -23,7 +23,7 @@
 #include "fdbclient/RangeLock.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"

@@ -25,7 +25,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Schemas.h"
 #include "fdbclient/SpecialKeySpace.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/actorcompiler.h"
 
 struct SpecialKeySpaceRobustnessWorkload : TestWorkload {

@@ -26,7 +26,7 @@
 #include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 #include "fdbclient/RunRYWTransaction.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/workloads/BulkSetup.h"
 

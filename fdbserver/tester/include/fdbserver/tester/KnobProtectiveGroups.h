@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_KNOBPROTECTIVEGROUPS_H
-#define FDBSERVER_KNOBPROTECTIVEGROUPS_H
+#ifndef FDBSERVER_TESTER_KNOBPROTECTIVEGROUPS_H
+#define FDBSERVER_TESTER_KNOBPROTECTIVEGROUPS_H
 
 #include <array>
 #include <unordered_map>
@@ -58,4 +58,4 @@ public:
 	~KnobProtectiveGroup();
 };
 
-#endif // FDBSERVER_KNOBPROTECTIVEGROUPS_H
+#endif // FDBSERVER_TESTER_KNOBPROTECTIVEGROUPS_H

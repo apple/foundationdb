@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/IAsyncFile.h"

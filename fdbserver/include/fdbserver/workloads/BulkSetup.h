@@ -29,7 +29,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbserver/tester/WorkloadUtils.h"

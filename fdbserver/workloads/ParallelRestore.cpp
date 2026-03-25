@@ -20,7 +20,7 @@
 
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/restoreworker/RestoreWorkerInterface.h"
 

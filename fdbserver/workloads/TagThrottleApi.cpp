@@ -22,7 +22,7 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 
 struct TagThrottleApiWorkload : TestWorkload {

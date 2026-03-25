@@ -30,7 +30,7 @@
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 namespace {
 

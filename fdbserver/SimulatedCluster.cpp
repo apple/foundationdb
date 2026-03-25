@@ -1,5 +1,5 @@
 /*
- * SimulatedCluster.actor.cpp
+ * SimulatedCluster.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -61,7 +61,7 @@
 #include "fdbserver/datadistributor/SimulatedCluster.h"
 #include "flow/IConnection.h"
 #include "fdbserver/datadistributor/MockGlobalState.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/CoroUtils.h"
 
 #undef max
 #undef min
@@ -557,12 +557,12 @@ T simulate(const T& in) {
 	return out;
 }
 
-ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
-	state Future<Void> agentFuture;
-	state FileBackupAgent fileAgent;
+Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
+	Future<Void> agentFuture;
+	FileBackupAgent fileAgent;
 
 	while (g_simulator->backupAgents == ISimulator::BackupAgentType::WaitForType) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	if (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
@@ -573,36 +573,36 @@ ACTOR Future<Void> runBackup(Reference<IClusterConnectionRecord> connRecord) {
 		    fileAgent.run(cx, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 
 		while (g_simulator->backupAgents == ISimulator::BackupAgentType::BackupToFile) {
-			wait(delay(1.0));
+			co_await delay(1.0);
 		}
 
 		TraceEvent("SimBackupAgentsStopping").log();
 		agentFuture.cancel();
 	}
 
-	wait(Future<Void>(Never()));
+	co_await Future<Void>(Never());
 	throw internal_error();
 }
 
-ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
-	state std::vector<Future<Void>> agentFutures;
+Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
+	std::vector<Future<Void>> agentFutures;
 
 	while (g_simulator->drAgents == ISimulator::BackupAgentType::WaitForType) {
-		wait(delay(1.0));
+		co_await delay(1.0);
 	}
 
 	if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
 		ASSERT(g_simulator->extraDatabases.size() == 1);
 		Database cx = Database::createDatabase(connRecord, ApiVersion::LATEST_VERSION);
 
-		state Database drDatabase = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
+		Database drDatabase = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 
 		TraceEvent("StartingDrAgents")
 		    .detail("ConnectionString", connRecord->getConnectionString().toString())
 		    .detail("ExtraString", g_simulator->extraDatabases[0]);
 
-		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
-		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(drDatabase);
+		DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
+		DatabaseBackupAgent extraAgent = DatabaseBackupAgent(drDatabase);
 
 		auto drPollDelay = 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 
@@ -610,7 +610,7 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 		agentFutures.push_back(dbAgent.run(drDatabase, drPollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
 		while (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			wait(delay(1.0));
+			co_await delay(1.0);
 		}
 
 		TraceEvent("StoppingDrAgents").log();
@@ -620,17 +620,17 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 		}
 	}
 
-	wait(Future<Void>(Never()));
+	co_await Future<Void>(Never());
 	throw internal_error();
 }
 
-ACTOR Future<Void> runSimHTTPServer() {
+Future<Void> runSimHTTPServer() {
 	TraceEvent("SimHTTPServerStarting");
-	state Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
+	Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 
 	try {
-		wait(context->actors.getResult());
+		co_await context->actors.getResult();
 	} catch (Error& e) {
 		TraceEvent("SimHTTPServerDied").errorUnsuppressed(e);
 		context->stop();
@@ -659,32 +659,32 @@ bool processRunHTTPServer(ProcessMode mode) {
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
 //  takes care of house-keeping such as context switching and file closing.
-ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionRecord> connRecord,
-                                                         IPAddress ip,
-                                                         bool sslEnabled,
-                                                         uint16_t port,
-                                                         uint16_t listenPerProcess,
-                                                         LocalityData localities,
-                                                         ProcessClass processClass,
-                                                         std::string* dataFolder,
-                                                         std::string* coordFolder,
-                                                         std::string baseFolder,
-                                                         ClusterConnectionString connStr,
-                                                         ClusterConnectionString otherConnStr,
-                                                         bool useSeedFile,
-                                                         ProcessMode processMode,
-                                                         std::string whitelistBinPaths,
-                                                         ProtocolVersion protocolVersion,
-                                                         bool isDr) {
-	state ISimulator::ProcessInfo* simProcess = g_simulator->getCurrentProcess();
-	state UID randomId = nondeterministicRandom()->randomUniqueID();
-	state int cycles = 0;
-	state IPAllowList allowList;
+Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConnectionRecord> connRecord,
+                                                   IPAddress ip,
+                                                   bool sslEnabled,
+                                                   uint16_t port,
+                                                   uint16_t listenPerProcess,
+                                                   LocalityData localities,
+                                                   ProcessClass processClass,
+                                                   std::string* dataFolder,
+                                                   std::string* coordFolder,
+                                                   std::string baseFolder,
+                                                   ClusterConnectionString connStr,
+                                                   ClusterConnectionString otherConnStr,
+                                                   bool useSeedFile,
+                                                   ProcessMode processMode,
+                                                   std::string whitelistBinPaths,
+                                                   ProtocolVersion protocolVersion,
+                                                   bool isDr) {
+	ISimulator::ProcessInfo* simProcess = g_simulator->getCurrentProcess();
+	UID randomId = nondeterministicRandom()->randomUniqueID();
+	int cycles = 0;
+	IPAllowList allowList;
 
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
 	allowList.addTrustedSubnet("abcd::/16"sv);
 
-	loop {
+	while (true) {
 		auto waitTime =
 		    SERVER_KNOBS->MIN_REBOOT_TIME +
 		    (SERVER_KNOBS->MAX_REBOOT_TIME - SERVER_KNOBS->MIN_REBOOT_TIME) * deterministicRandom()->random01();
@@ -698,23 +698,23 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		    .detail("Port", port)
 		    .detail("IsDr", isDr);
 
-		wait(delay(waitTime));
+		co_await delay(waitTime);
 
-		state ISimulator::ProcessInfo* process = g_simulator->newProcess("Server",
-		                                                                 ip,
-		                                                                 port,
-		                                                                 sslEnabled,
-		                                                                 listenPerProcess,
-		                                                                 localities,
-		                                                                 processClass,
-		                                                                 dataFolder->c_str(),
-		                                                                 coordFolder->c_str(),
-		                                                                 protocolVersion,
-		                                                                 isDr);
-		wait(g_simulator->onProcess(
+		ISimulator::ProcessInfo* process = g_simulator->newProcess("Server",
+		                                                           ip,
+		                                                           port,
+		                                                           sslEnabled,
+		                                                           listenPerProcess,
+		                                                           localities,
+		                                                           processClass,
+		                                                           dataFolder->c_str(),
+		                                                           coordFolder->c_str(),
+		                                                           protocolVersion,
+		                                                           isDr);
+		co_await g_simulator->onProcess(
 		    process,
-		    TaskPriority::DefaultYield)); // Now switch execution to the process on which we will run
-		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
+		    TaskPriority::DefaultYield); // Now switch execution to the process on which we will run
+		Future<ISimulator::KillType> onShutdown = process->onShutdown();
 
 		try {
 			TraceEvent("SimulatedRebooterStarting")
@@ -793,7 +793,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					// rebooting flag is still false, which breaks the assertion in g_simulator->destroyProcess
 					process->rebooting = true;
 				}
-				wait(waitForAny(futures));
+				co_await waitForAny(futures);
 			} catch (Error& e) {
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set
 				// then somewhere an io_timeout was converted to a different error.
@@ -855,9 +855,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 		    .detail("Excluded", process->excluded)
 		    .detail("Rebooting", process->rebooting)
 		    .detail("ZoneId", localities.zoneId());
-		wait(g_simulator->onProcess(simProcess));
+		co_await g_simulator->onProcess(simProcess);
 
-		wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY)); // One last chance for the process to clean up?
+		co_await delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY); // One last chance for the process to clean up?
 
 		g_simulator->destroyProcess(
 		    process); // Leak memory here; the process may be used in other parts of the simulation
@@ -879,7 +879,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("Excluded", process->excluded)
 			    .detail("ZoneId", localities.zoneId())
 			    .detail("KillType", shutdownResult);
-			return onShutdown.get();
+			co_return shutdownResult;
 		}
 
 		if (onShutdown.get() == ISimulator::KillType::RebootProcessAndDelete) {
@@ -933,25 +933,25 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 std::map<Optional<Standalone<StringRef>>, std::vector<std::vector<std::string>>> availableFolders;
 // process count is no longer needed because it is now the length of the vector of ip's, because it was one ip per
 // process
-ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
-                                    ClusterConnectionString otherConnStr,
-                                    std::vector<IPAddress> ips,
-                                    bool sslEnabled,
-                                    LocalityData localities,
-                                    ProcessClass processClass,
-                                    std::string baseFolder,
-                                    bool restarting,
-                                    bool useSeedFile,
-                                    ProcessMode processMode,
-                                    bool sslOnly,
-                                    std::string whitelistBinPaths,
-                                    ProtocolVersion protocolVersion,
-                                    bool isDr) {
-	state int bootCount = 0;
-	state std::vector<std::string> myFolders;
-	state std::vector<std::string> coordFolders;
-	state UID randomId = nondeterministicRandom()->randomUniqueID();
-	state int listenPerProcess = (sslEnabled && !sslOnly) ? 2 : 1;
+Future<Void> simulatedMachine(ClusterConnectionString connStr,
+                              ClusterConnectionString otherConnStr,
+                              std::vector<IPAddress> ips,
+                              bool sslEnabled,
+                              LocalityData localities,
+                              ProcessClass processClass,
+                              std::string baseFolder,
+                              bool restarting,
+                              bool useSeedFile,
+                              ProcessMode processMode,
+                              bool sslOnly,
+                              std::string whitelistBinPaths,
+                              ProtocolVersion protocolVersion,
+                              bool isDr) {
+	int bootCount = 0;
+	std::vector<std::string> myFolders;
+	std::vector<std::string> coordFolders;
+	UID randomId = nondeterministicRandom()->randomUniqueID();
+	int listenPerProcess = (sslEnabled && !sslOnly) ? 2 : 1;
 
 	try {
 		CSimpleIni ini;
@@ -992,8 +992,8 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			}
 		}
 
-		loop {
-			state std::vector<Future<ISimulator::KillType>> processes;
+		while (true) {
+			std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
 				ProcessMode ipProcessMode =
@@ -1075,7 +1075,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			    .detail("DataHall", localities.dataHallId())
 			    .detail("Locality", localities.toString());
 
-			wait(waitForAll(processes));
+			co_await waitForAll(processes);
 
 			TraceEvent("SimulatedMachineRebootStart", randomId)
 			    .detail("Folder0", myFolders[0])
@@ -1099,11 +1099,11 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				for (auto fileItr = files.begin(); fileItr != files.end(); ++fileItr)
 					killFutures.push_back((*fileItr)->kill());
 
-				wait(waitForAll(killFutures));
+				co_await waitForAll(killFutures);
 			}
 
-			state std::set<std::string> filenames;
-			state std::string closingStr;
+			std::set<std::string> filenames;
+			std::string closingStr;
 			auto& machineCache = g_simulator->getMachineById(localities.machineId())->openFiles;
 			for (auto& [filename, openFile] : machineCache) {
 				filenames.insert(filename);
@@ -1133,9 +1133,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			//   without delay(0)-equivalents, so delay(0) a few times waiting for it to achieve that goal.
 			// After an injected fault:
 			//   The process is expected to shut down eventually, but not necessarily instantly.  Wait up to 60 seconds.
-			state int shutdownDelayCount = 0;
-			state double backoff = 0;
-			loop {
+			int shutdownDelayCount = 0;
+			double backoff = 0;
+			while (true) {
 				auto& machineCache = g_simulator->getMachineById(localities.machineId())->closingFiles;
 
 				if (!machineCache.empty()) {
@@ -1159,7 +1159,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					ASSERT(false);
 				}
 
-				wait(delay(backoff));
+				co_await delay(backoff);
 				backoff = std::min(backoff + 1.0, 6.0);
 			}
 
@@ -1174,14 +1174,14 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			// ASSERT( this machine is rebooting );
 
 			// Since processes can end with different codes, take the highest (least severe) to detmine what to do
-			state ISimulator::KillType killType = processes[0].get();
+			ISimulator::KillType killType = processes[0].get();
 			for (int i = 1; i < ips.size(); i++)
 				killType = std::max(processes[i].get(), killType);
 
 			CODE_PROBE(true, "Simulated machine has been rebooted");
 
-			state bool swap = killType == ISimulator::KillType::Reboot && BUGGIFY_WITH_PROB(0.75) &&
-			                  g_simulator->canSwapToMachine(localities.zoneId());
+			bool swap = killType == ISimulator::KillType::Reboot && BUGGIFY_WITH_PROB(0.75) &&
+			            g_simulator->canSwapToMachine(localities.zoneId());
 			if (swap)
 				availableFolders[localities.dcId()].push_back(myFolders);
 
@@ -1195,7 +1195,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			    .detail("DataHall", localities.dataHallId())
 			    .detail("MachineIPs", toIPVectorString(ips));
 
-			wait(delay(rebootTime));
+			co_await delay(rebootTime);
 
 			if (swap) {
 				auto& avail = availableFolders[localities.dcId()];
@@ -1262,14 +1262,14 @@ IPAddress makeIPAddressForSim(bool isIPv6, std::array<int, 4> parts) {
 // Configures the system according to the given specifications in order to run
 // simulation, but with the additional consideration that it is meant to act
 // like a "rebooted" machine, mostly used for restarting tests.
-ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
-                                          std::string baseFolder,
-                                          int* pTesterCount,
-                                          Optional<ClusterConnectionString>* pConnString,
-                                          Standalone<StringRef>* pStartingConfiguration,
-                                          TestConfig* testConfig,
-                                          std::string whitelistBinPaths,
-                                          ProtocolVersion protocolVersion) {
+Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActors,
+                                    std::string baseFolder,
+                                    int* pTesterCount,
+                                    Optional<ClusterConnectionString>* pConnString,
+                                    Standalone<StringRef>* pStartingConfiguration,
+                                    TestConfig* testConfig,
+                                    std::string whitelistBinPaths,
+                                    ProtocolVersion protocolVersion) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -1447,9 +1447,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		TraceEvent(SevError, "RestartSimulationError").error(e);
 	}
 
-	wait(delay(1.0));
-
-	return Void();
+	co_await delay(1.0);
 }
 
 // Configuration details compiled in a structure used when setting up a simulated cluster
@@ -2659,27 +2657,42 @@ using namespace std::literals;
 [[maybe_unused]] void checkTestConf(const char* testFile, TestConfig* testConfig) {}
 
 // Actor that waits for a specified simulation time and then resets the random seed
-ACTOR Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
-	wait(delay(waitTime));
+Future<Void> reseedRandomAtTime(double waitTime, uint32_t newSeed) {
+	co_await delay(waitTime);
 	TraceEvent("ResettingRandomSeed").detail("WaitTime", waitTime).detail("NewSeed", newSeed);
 	deterministicRandom()->resetSeed(newSeed);
-	return Void();
 }
 
 } // namespace
 
-ACTOR void simulationSetupAndRun(std::string dataFolder,
-                                 const char* testFile,
-                                 bool rebooting,
-                                 bool restoring,
-                                 std::string whitelistBinPaths,
-                                 double reseedTime) {
-	state std::vector<Future<Void>> systemActors;
-	state Optional<ClusterConnectionString> connectionString;
-	state Standalone<StringRef> startingConfiguration;
-	state int testerCount = 1;
-	state TestConfig testConfig;
-	state IPAllowList allowList;
+static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
+                                              const char* testFile,
+                                              bool rebooting,
+                                              bool restoring,
+                                              std::string whitelistBinPaths,
+                                              double reseedTime);
+
+void simulationSetupAndRun(std::string const& dataFolder,
+                           const char* const& testFile,
+                           bool const& rebooting,
+                           bool const& restoring,
+                           std::string const& whitelistBinPath,
+                           double const& reseedTime) {
+	uncancellable(simulationSetupAndRunImpl(dataFolder, testFile, rebooting, restoring, whitelistBinPath, reseedTime));
+}
+
+static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
+                                              const char* testFile,
+                                              bool rebooting,
+                                              bool restoring,
+                                              std::string whitelistBinPaths,
+                                              double reseedTime) {
+	std::vector<Future<Void>> systemActors;
+	Optional<ClusterConnectionString> connectionString;
+	Standalone<StringRef> startingConfiguration;
+	int testerCount = 1;
+	TestConfig testConfig;
+	IPAllowList allowList;
 	testConfig.readFromConfig(testFile);
 	g_simulator->hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator->setDiffProtocol = false;
@@ -2714,7 +2727,7 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.insert(SimulationStorageEngine::SHARDED_ROCKSDB);
 	}
 
-	state ProtocolVersion protocolVersion = currentProtocolVersion();
+	ProtocolVersion protocolVersion = currentProtocolVersion();
 	if (testConfig.startIncompatibleProcess) {
 		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
 		uint64_t minAddToMakeIncompatible =
@@ -2739,27 +2752,27 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	                            currentProtocolVersion(),
 	                            false);
 	testSystem->excludeFromRestarts = true;
-	wait(g_simulator->onProcess(testSystem, TaskPriority::DefaultYield));
+	co_await g_simulator->onProcess(testSystem, TaskPriority::DefaultYield);
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	CODE_PROBE(true, "Simulation start");
 
-	state bool testsFinished = false;
-	state int timeoutSeconds = isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
-	                                                     : testConfig.simulationNormalRunTestsTimeoutSeconds;
+	bool testsFinished = false;
+	int timeoutSeconds = isGeneralBuggifyEnabled() ? testConfig.simulationBuggifyRunTestsTimeoutSeconds
+	                                               : testConfig.simulationNormalRunTestsTimeoutSeconds;
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			wait(timeoutError(restartSimulatedSystem(&systemActors,
-			                                         dataFolder,
-			                                         &testerCount,
-			                                         &connectionString,
-			                                         &startingConfiguration,
-			                                         &testConfig,
-			                                         whitelistBinPaths,
-			                                         protocolVersion),
-			                  100.0));
+			co_await timeoutError(restartSimulatedSystem(&systemActors,
+			                                             dataFolder,
+			                                             &testerCount,
+			                                             &connectionString,
+			                                             &startingConfiguration,
+			                                             &testConfig,
+			                                             whitelistBinPaths,
+			                                             protocolVersion),
+			                      100.0);
 			// FIXME: snapshot restore does not support multi-region restore, hence restore it as single region always
 			if (restoring) {
 				startingConfiguration = "usable_regions=1"_sr;
@@ -2774,24 +2787,24 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 			                     whitelistBinPaths,
 			                     testConfig,
 			                     protocolVersion);
-			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
+			co_await delay(1.0); // FIXME: WHY!!!  //wait for machines to boot
 			// Yeah right, I agree, Whyyyyy?  Since it's 1s, should we poll some condition?  Is there a risk
 			// 1s is not enough and random weird bad stuff happens after this?
 		}
 
 		TraceEvent("TestProgress").detail("Progress", "StartedSimulatedSystem");
 
-		wait(HTTP::registerAlwaysFailHTTPHandler());
+		co_await HTTP::registerAlwaysFailHTTPHandler();
 
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
-		state Reference<ClusterConnectionFile> connFile =
+		Reference<ClusterConnectionFile> connFile =
 		    makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster"));
 		if (rebooting) {
 			// protect coordinators for restarting tests
 			std::vector<NetworkAddress> coordinatorAddresses =
-			    wait(connFile->getConnectionString().tryResolveHostnames());
+			    co_await connFile->getConnectionString().tryResolveHostnames();
 			ASSERT(coordinatorAddresses.size() > 0);
 			for (int i = 0; i < (coordinatorAddresses.size() / 2) + 1; i++) {
 				TraceEvent("ProtectCoordinator")
@@ -2827,7 +2840,7 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 		                                  LocalityData(),
 		                                  UnitTestParameters(),
 		                                  rebooting);
-		wait(testConfig.longRunningTest ? runTestsF : timeoutError(runTestsF, timeoutSeconds));
+		co_await (testConfig.longRunningTest ? runTestsF : timeoutError(runTestsF, timeoutSeconds));
 
 		testsFinished = true;
 		TraceEvent("TestProgress").detail("Progress", "RunTestsFinished");
@@ -2844,7 +2857,7 @@ ACTOR void simulationSetupAndRun(std::string dataFolder,
 	TraceEvent("SimulatedSystemDestruct").log();
 	g_simulator->stop();
 	destructed = true;
-	wait(Never());
+	co_await Future<Void>(Never());
 	ASSERT(false);
 }
 

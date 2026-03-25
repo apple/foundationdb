@@ -80,7 +80,7 @@
 
 #include <atomic>
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -89,7 +89,7 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
 #include "fdbserver/workloads/BulkSetup.h"
 #include "fdbserver/mocks3/MockS3Server.h"

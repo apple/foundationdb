@@ -20,7 +20,7 @@
 
 #include "fdbcli/fdbcli.h"
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/IClientApi.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"

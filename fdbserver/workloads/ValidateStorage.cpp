@@ -19,13 +19,13 @@
  */
 
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/QuietDatabase.actor.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
