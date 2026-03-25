@@ -110,12 +110,20 @@ void initProfiling() {
 }
 #endif
 
-DESCR struct SlowTask {
-	int64_t clocks; // clocks
-	int64_t duration; // ns
-	int64_t priority; // priority level
-	int64_t numYields; // count
+struct SlowTask {
+	int64_t clocks;
+	int64_t duration;
+	int64_t priority;
+	int64_t numYields;
 };
+
+template <>
+struct Descriptor<SlowTask> : DescribeType<SlowTask,
+                                           "SlowTask",
+                                           DescribeField<&SlowTask::clocks, "clocks", "clocks">,
+                                           DescribeField<&SlowTask::duration, "duration", "ns">,
+                                           DescribeField<&SlowTask::priority, "priority", "priority level">,
+                                           DescribeField<&SlowTask::numYields, "numYields", "count">> {};
 
 namespace N2 { // No indent, it's the whole file
 

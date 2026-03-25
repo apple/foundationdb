@@ -47,7 +47,6 @@ class FutureStream;
 #ifndef NO_INTELLISENSE
 #define ACTOR
 #define SWIFT_ACTOR
-#define DESCR
 #define state
 #define UNCANCELLABLE
 #define choose if (1)

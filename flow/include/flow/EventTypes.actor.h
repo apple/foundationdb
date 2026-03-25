@@ -30,13 +30,16 @@
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-DESCR struct TraceEventNameID {
+struct TraceEventNameID {
 	Standalone<StringRef> name;
 	Standalone<StringRef> id;
 };
 
-#include "flow/unactorcompiler.h"
+template <>
+struct Descriptor<TraceEventNameID> : DescribeType<TraceEventNameID,
+                                                   "TraceEventNameID",
+                                                   DescribeField<&TraceEventNameID::name, "name">,
+                                                   DescribeField<&TraceEventNameID::id, "id">> {};
 
 #endif

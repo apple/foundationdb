@@ -30,12 +30,13 @@
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
-DESCR struct GetValueComplete {
-	int64_t latency; // ns
+struct GetValueComplete {
+	int64_t latency;
 };
 
-#include "flow/unactorcompiler.h"
+template <>
+struct Descriptor<GetValueComplete>
+  : DescribeType<GetValueComplete, "GetValueComplete", DescribeField<&GetValueComplete::latency, "latency", "ns">> {};
 
 #endif

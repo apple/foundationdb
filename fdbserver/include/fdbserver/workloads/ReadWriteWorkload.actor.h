@@ -30,21 +30,42 @@
 #include "flow/TDMetric.actor.h"
 #include <boost/lexical_cast.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
-DESCR struct TransactionSuccessMetric {
-	int64_t totalLatency; // ns
-	int64_t startLatency; // ns
-	int64_t commitLatency; // ns
-	int64_t retries; // count
+
+struct TransactionSuccessMetric {
+	int64_t totalLatency;
+	int64_t startLatency;
+	int64_t commitLatency;
+	int64_t retries;
 };
 
-DESCR struct TransactionFailureMetric {
-	int64_t startLatency; // ns
-	int64_t errorCode; // flow error code
+template <>
+struct Descriptor<TransactionSuccessMetric>
+  : DescribeType<TransactionSuccessMetric,
+                 "TransactionSuccessMetric",
+                 DescribeField<&TransactionSuccessMetric::totalLatency, "totalLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetric::startLatency, "startLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetric::commitLatency, "commitLatency", "ns">,
+                 DescribeField<&TransactionSuccessMetric::retries, "retries", "count">> {};
+
+struct TransactionFailureMetric {
+	int64_t startLatency;
+	int64_t errorCode;
 };
 
-DESCR struct ReadMetric {
-	int64_t readLatency; // ns
+template <>
+struct Descriptor<TransactionFailureMetric>
+  : DescribeType<TransactionFailureMetric,
+                 "TransactionFailureMetric",
+                 DescribeField<&TransactionFailureMetric::startLatency, "startLatency", "ns">,
+                 DescribeField<&TransactionFailureMetric::errorCode, "errorCode", "flow error code">> {};
+
+struct ReadMetric {
+	int64_t readLatency;
 };
+
+template <>
+struct Descriptor<ReadMetric>
+  : DescribeType<ReadMetric, "ReadMetric", DescribeField<&ReadMetric::readLatency, "readLatency", "ns">> {};
 
 // Common ReadWrite test settings
 struct ReadWriteCommon : KVWorkload {

@@ -36,13 +36,22 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-DESCR struct SingleKeyMutation {
+struct SingleKeyMutation {
 	Standalone<StringRef> shardBegin;
 	Standalone<StringRef> shardEnd;
 	int64_t tag1;
 	int64_t tag2;
 	int64_t tag3;
 };
+
+template <>
+struct Descriptor<SingleKeyMutation> : DescribeType<SingleKeyMutation,
+                                                    "SingleKeyMutation",
+                                                    DescribeField<&SingleKeyMutation::shardBegin, "shardBegin">,
+                                                    DescribeField<&SingleKeyMutation::shardEnd, "shardEnd">,
+                                                    DescribeField<&SingleKeyMutation::tag1, "tag1">,
+                                                    DescribeField<&SingleKeyMutation::tag2, "tag2">,
+                                                    DescribeField<&SingleKeyMutation::tag3, "tag3">> {};
 
 class LogSystemDiskQueueAdapter;
 
