@@ -2463,16 +2463,13 @@ Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile, Key 
 	Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
 
 	while (true) {
-		auto res = co_await race(
-		    clusterInterface->get().present()
-		        ? brokenPromiseToNever(clusterInterface->get().get().forceRecovery.getReply(ForceRecoveryRequest(dcId)))
-		        : Never(),
-		    clusterInterface->onChange());
-		if (res.index() == 0) {
+		Future<Void> forceRecoveryFuture = Never();
+		if (clusterInterface->get().present()) {
+			forceRecoveryFuture =
+			    brokenPromiseToNever(clusterInterface->get().get().forceRecovery.getReply(ForceRecoveryRequest(dcId)));
+		}
+		if (auto const res = co_await race(forceRecoveryFuture, clusterInterface->onChange()); res.index() == 0) {
 			co_return;
-		} else if (res.index() == 1) {
-		} else {
-			UNREACHABLE();
 		}
 	}
 }
