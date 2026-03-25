@@ -401,6 +401,8 @@ using tuple_indexes_t = typename make_index_sequence_impl<0, index_sequence<>, s
 
 template <class T>
 struct Descriptor {
+	// Specialize Descriptor<T> next to each metric payload struct, typically by inheriting from
+	// DescribeType<T, "...", DescribeField<&T::member, "...">, ...>.
 #ifndef NO_INTELLISENSE
 	using fields = std::tuple<>;
 	using field_indexes = tuple_indexes_t<fields>;
@@ -409,6 +411,7 @@ struct Descriptor {
 #endif
 };
 
+// String literals need a wrapper type before they can be used as non-type template parameters.
 template <size_t N>
 struct FixedString {
 	std::array<char, N> value{};
@@ -433,6 +436,7 @@ StringRef fixedStringRef() {
 template <auto MemberPtr>
 struct MemberPointerTraits;
 
+// DescribeField only takes a member pointer at the call site; recover the owning class and field type here.
 template <class Class, class FieldType, FieldType Class::*MemberPtr>
 struct MemberPointerTraits<MemberPtr> {
 	using class_type = Class;
@@ -464,6 +468,8 @@ inline StringRef describeFieldTypeName<Standalone<StringRef>>() {
 	return "Standalone<StringRef>"_sr;
 }
 
+// One field entry inside a Descriptor<T> specialization.
+// Use DescribeField<&T::member, "memberName", "optional comment">.
 template <auto MemberPtr, FixedString Name, FixedString Comment = "">
 struct DescribeField {
 	using traits = MemberPointerTraits<MemberPtr>;
@@ -476,6 +482,8 @@ struct DescribeField {
 	static inline type get(class_type& from) { return from.*MemberPtr; }
 };
 
+// Shared implementation for Descriptor<T> specializations. The specialization names the metric type
+// and lists its exported fields in the order they should appear in TDMetric output.
 template <class Self, FixedString TypeName, class... Fields>
 struct DescribeType {
 	static_assert((std::is_same_v<Self, typename Fields::class_type> && ...));
