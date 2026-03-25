@@ -27,7 +27,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/restoreworker/RestoreUtil.h"
 #include "RestoreWorker.h"
 #include "fdbserver/restoreworker/RestoreCommon.h"
 #include "RestoreRoleCommon.h"
