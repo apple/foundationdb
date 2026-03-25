@@ -36,7 +36,7 @@
 #include "flow/IRandom.h"
 #include "flow/DebugTrace.h"
 
-#include "flow/actorcompiler.h" // must be last include
+#include "flow/CoroUtils.h"
 
 namespace {
 
@@ -170,14 +170,14 @@ Reference<TLogTestContext> initTLogTestContext(TestTLogOptions tLogOptions,
 
 // Create and start a tLog. If optional parmeters are set, the tLog is a new generation of "tLogID"
 // as described by initReq. Otherwise, it is a newborn generation 0 tLog.
-ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContext,
-                                      TestTLogOptions tLogOptions,
-                                      uint16_t processID,
-                                      InitializeTLogRequest* initReq = nullptr,
-                                      UID tLogID = UID()) {
+Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContext,
+                                TestTLogOptions tLogOptions,
+                                uint16_t processID,
+                                InitializeTLogRequest* initReq = nullptr,
+                                UID tLogID = UID()) {
 
 	// build per-tLog state.
-	state Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
+	Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
 	pTLogContext->tagProcessID = processID;
 
 	pTLogContext->tLogID = tLogID != UID(0, 0) ? tLogID : deterministicRandom()->randomUniqueID();
@@ -187,7 +187,7 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	std::filesystem::create_directory(tLogOptions.dataFolder);
 
 	// create persistent storage
-	state StorageResources storage = setupPersistentStorage(pTLogContext, *pTLogTestContext, tLogOptions);
+	StorageResources storage = setupPersistentStorage(pTLogContext, *pTLogTestContext, tLogOptions);
 
 	// prepare tLog construction.
 	Standalone<StringRef> machineID = "machine"_sr;
@@ -198,29 +198,29 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	Reference<AsyncVar<bool>> isDegraded = FlowTransport::transport().getDegraded();
 	Reference<AsyncVar<UID>> activeSharedTLog(new AsyncVar<UID>(pTLogContext->tLogID));
 	Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck(new AsyncVar<bool>(false));
-	state PromiseStream<InitializeTLogRequest> promiseStream = PromiseStream<InitializeTLogRequest>();
+	PromiseStream<InitializeTLogRequest> promiseStream;
 	Promise<Void> oldLog;
 	Promise<Void> recovery;
 
 	// construct tLog.
-	state Future<Void> tl = ::tLog(pTLogContext->persistentData,
-	                               pTLogContext->persistentQueue,
-	                               pTLogTestContext->dbInfoRef,
-	                               localities,
-	                               promiseStream,
-	                               pTLogContext->tLogID,
-	                               pTLogTestContext->workerID,
-	                               false, /* restoreFromDisk */
-	                               oldLog,
-	                               recovery,
-	                               pTLogTestContext->diskQueueBasename,
-	                               isDegraded,
-	                               activeSharedTLog,
-	                               enablePrimaryTxnSystemHealthCheck);
+	Future<Void> tl = ::tLog(pTLogContext->persistentData,
+	                         pTLogContext->persistentQueue,
+	                         pTLogTestContext->dbInfoRef,
+	                         localities,
+	                         promiseStream,
+	                         pTLogContext->tLogID,
+	                         pTLogTestContext->workerID,
+	                         false, /* restoreFromDisk */
+	                         oldLog,
+	                         recovery,
+	                         pTLogTestContext->diskQueueBasename,
+	                         isDegraded,
+	                         activeSharedTLog,
+	                         enablePrimaryTxnSystemHealthCheck);
 
-	state InitializeTLogRequest initTLogReq = initReq != nullptr ? *initReq : buildInitializeRequest(*pTLogTestContext);
+	InitializeTLogRequest initTLogReq = initReq != nullptr ? *initReq : buildInitializeRequest(*pTLogTestContext);
 
-	TLogInterface interface = wait(promiseStream.getReply(initTLogReq));
+	TLogInterface interface = co_await promiseStream.getReply(initTLogReq);
 	pTLogContext->TestTLogInterface = interface;
 	pTLogContext->init = promiseStream;
 
@@ -230,36 +230,31 @@ ACTOR Future<Void> getTLogCreateActor(Reference<TLogTestContext> pTLogTestContex
 	TraceEvent("TestTLogServerInitializedTLog", pTLogContext->tLogID);
 
 	// wait for either test completion or tLog failure.
-	choose {
-		when(wait(tl)) {}
-		when(bool testCompleted = wait(pTLogContext->TestTLogServerCompleted.getFuture())) {
-			ASSERT_EQ(testCompleted, true);
-		}
+	auto choice = co_await race(tl, pTLogContext->TestTLogServerCompleted.getFuture());
+	if (choice.index() == 1) {
+		bool testCompleted = std::get<1>(std::move(choice));
+		ASSERT_EQ(testCompleted, true);
 	}
 
-	wait(delay(1.0));
+	co_await delay(1.0);
 
 	storage.tempFiles.cleanup();
-
-	return Void();
 }
 
-ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestContext) {
+Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestContext) {
 
 	TraceEvent("TestTLogServerEnterPush", pTLogTestContext->workerID);
 
-	state uint16_t logID = 0;
-	for (; logID < pTLogTestContext->numLogServers; logID++) {
-		state Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
-		bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
+	for (uint16_t logID = 0; logID < pTLogTestContext->numLogServers; ++logID) {
+		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
+		bool tLogReady = co_await pTLogContext->TLogStarted.getFuture();
 		ASSERT_EQ(tLogReady, true);
 	}
 
-	state uint32_t i = 0;
-	state Version prev = pTLogTestContext->initVersion - 1;
-	state Version next = pTLogTestContext->initVersion;
+	Version prev = pTLogTestContext->initVersion - 1;
+	Version next = pTLogTestContext->initVersion;
 
-	for (; i < pTLogTestContext->numCommits; i++) {
+	for (uint32_t i = 0; i < pTLogTestContext->numCommits; ++i) {
 		Standalone<StringRef> key = StringRef(format("key %d", i));
 		Standalone<StringRef> val = StringRef(format("value %d", i));
 		MutationRef m(MutationRef::Type::SetValue, key, val);
@@ -294,7 +289,7 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 			const auto versionSet = ILogSystem::PushVersionSet{ prev, next, prev, prev };
 			Future<Version> loggingComplete =
 			    pTLogTestContext->ls->push(versionSet, toCommit, SpanContext(), UID(), tpcvMap);
-			Version ver = wait(loggingComplete);
+			Version ver = co_await loggingComplete;
 			ASSERT_LE(ver, next);
 		}
 		prev = next;
@@ -304,30 +299,26 @@ ACTOR Future<Void> TLogTestContext::sendPushMessages(TLogTestContext* pTLogTestC
 
 	TraceEvent("TestTLogServerExitPush", pTLogTestContext->workerID)
 	    .detail("NumVersions", pTLogTestContext->tLogOptions.versions.size());
-
-	return Void();
 }
 
 // send peek/pop through a given TLog interface and tag
-ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTestContext,
-                                                       uint16_t tagID,
-                                                       uint32_t logID) {
-	state Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
-	bool tLogReady = wait(pTLogContext->TLogStarted.getFuture());
+Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTestContext, uint16_t tagID, uint32_t logID) {
+	Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[logID];
+	bool tLogReady = co_await pTLogContext->TLogStarted.getFuture();
 	ASSERT_EQ(tLogReady, true);
 
 	// peek from the same tag
-	state Tag tag(pTLogTestContext->tagLocality, tagID);
+	Tag tag(pTLogTestContext->tagLocality, tagID);
 
 	TraceEvent("TestTLogServerEnterPeek", pTLogTestContext->workerID).detail("LogID", logID).detail("Tag", tag);
 
-	state uint32_t i = 0;
-	state std::vector<Version> versions = pTLogTestContext->commitHistory[std::tuple(tagID, logID)];
+	uint32_t i = 0;
+	std::vector<Version> versions = pTLogTestContext->commitHistory[std::tuple(tagID, logID)];
 	for (Version v : versions) {
-		state Version begin = v;
+		Version begin = v;
 		// wait for next message commit
 		::TLogPeekRequest request(begin, tag, false, false);
-		::TLogPeekReply reply = wait(pTLogContext->TestTLogInterface.peekMessages.getReply(request));
+		::TLogPeekReply reply = co_await pTLogContext->TestTLogInterface.peekMessages.getReply(request);
 		TraceEvent("TestTLogServerTryValidateDataOnPeek", pTLogTestContext->workerID)
 		    .detail("R", begin)
 		    .detail("B", reply.begin.present() ? reply.begin.get() : -1)
@@ -384,18 +375,15 @@ ACTOR Future<Void> TLogTestContext::peekCommitMessages(TLogTestContext* pTLogTes
 
 		// go directly to pop as there is no SS.
 		::TLogPopRequest requestPop(begin, begin, tag);
-		wait(pTLogContext->TestTLogInterface.popMessages.getReply(requestPop));
+		co_await pTLogContext->TestTLogInterface.popMessages.getReply(requestPop);
 		i++;
 	}
 
 	TraceEvent("TestTLogServerExitPeek", pTLogTestContext->workerID).detail("LogID", logID).detail("TagID", tag);
-
-	return Void();
 }
 
-ACTOR Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
-	state TLogSet tLogSet;
-	state uint16_t processID = 0;
+Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
+	TLogSet tLogSet;
 
 	tLogSet.tLogLocalities.push_back(LocalityData());
 	tLogSet.tLogPolicy = Reference<IReplicationPolicy>(new PolicyOne());
@@ -403,20 +391,19 @@ ACTOR Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 	tLogSet.isLocal = true;
 	tLogSet.tLogVersion = TLogVersion::V6;
 	tLogSet.tLogReplicationFactor = 1;
-	for (; processID < pTLogTestContext->numLogServers; processID++) {
-		state Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
-		bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
+	for (uint16_t processID = 0; processID < pTLogTestContext->numLogServers; ++processID) {
+		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
+		bool isCreated = co_await pTLogContext->TLogCreated.getFuture();
 		ASSERT_EQ(isCreated, true);
 
 		tLogSet.tLogs.push_back(OptionalInterface<TLogInterface>(pTLogContext->TestTLogInterface));
 	}
 	pTLogTestContext->dbInfo.logSystemConfig.tLogs.push_back(tLogSet);
-	for (processID = 0; processID < pTLogTestContext->numLogServers; processID++) {
+	for (uint16_t processID = 0; processID < pTLogTestContext->numLogServers; ++processID) {
 		Reference<TLogContext> pTLogContext = pTLogTestContext->pTLogContextList[processID];
 		// start transactions
 		pTLogContext->TLogStarted.send(true);
 	}
-	return Void();
 }
 
 // This test creates a tLog and pushes data to it. the If the recovery
@@ -424,14 +411,14 @@ ACTOR Future<Void> buildTLogSet(Reference<TLogTestContext> pTLogTestContext) {
 // and pull data from the old generation. The data is peeked from either the old or new generation
 // depending on the recovery switch, validated, and popped.
 
-ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
-	state std::vector<Future<Void>> tLogActors;
-	state Reference<TLogTestContext> pTLogTestContextEpochOne =
+Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
+	std::vector<Future<Void>> tLogActors;
+	Reference<TLogTestContext> pTLogTestContextEpochOne =
 	    initTLogTestContext(params, Optional<Reference<TLogTestContext>>());
 
 	FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 
-	state uint16_t tLogIdx = 0;
+	uint16_t tLogIdx = 0;
 
 	TraceEvent("TestTLogServerEnterRecoveryTest");
 
@@ -444,26 +431,26 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 	}
 
 	// wait for tLogs to be created, and signal pushes can start
-	wait(buildTLogSet(pTLogTestContextEpochOne));
+	co_await buildTLogSet(pTLogTestContextEpochOne);
 
 	PromiseStream<Future<Void>> promises;
 
 	pTLogTestContextEpochOne->ls = makeLogSystemFromServerDBInfo(
 	    pTLogTestContextEpochOne->logID, pTLogTestContextEpochOne->dbInfo, false, promises);
 
-	wait(pTLogTestContextEpochOne->sendPushMessages());
+	co_await pTLogTestContextEpochOne->sendPushMessages();
 
-	state uint32_t tagID = 0;
-	state std::map<std::tuple<uint32_t, uint32_t>, std::vector<Version>> commitHistory;
+	uint32_t tagID = 0;
+	std::map<std::tuple<uint32_t, uint32_t>, std::vector<Version>> commitHistory;
 
 	if (!pTLogTestContextEpochOne->recover) {
 		commitHistory = pTLogTestContextEpochOne->commitHistory;
 		for (const auto& [loc, ver] : commitHistory) {
-			wait(pTLogTestContextEpochOne->peekCommitMessages(std::get<0>(loc), std::get<1>(loc)));
+			co_await pTLogTestContextEpochOne->peekCommitMessages(std::get<0>(loc), std::get<1>(loc));
 		}
 	} else {
 		// Done with old generation. Lock the old generations of tLogs.
-		state Reference<TLogTestContext> pTLogTestContextEpochTwo =
+		Reference<TLogTestContext> pTLogTestContextEpochTwo =
 		    initTLogTestContext(TestTLogOptions(params), pTLogTestContextEpochOne);
 		// for validation: the expected versions in EpochTwo that were written in EpochOne
 		pTLogTestContextEpochTwo->tLogOptions.versions = pTLogTestContextEpochOne->tLogOptions.versions;
@@ -472,8 +459,8 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 		for (const auto& [loc, ver] : commitHistory) {
 			tLogIdx = std::get<1>(loc);
 			tagID = std::get<0>(loc);
-			TLogLockResult data = wait(pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
-			                               ->TestTLogInterface.lock.template getReply<TLogLockResult>());
+			TLogLockResult data = co_await pTLogTestContextEpochOne->pTLogContextList[tLogIdx]
+			                          ->TestTLogInterface.lock.template getReply<TLogLockResult>();
 			TraceEvent("TestTLogServerLockResult")
 			    .detail("KCV", data.knownCommittedVersion)
 			    .detail("T", tagID)
@@ -481,7 +468,7 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 
 			Reference<TLogContext> pNewTLogContext(new TLogContext(tLogIdx));
 			pTLogTestContextEpochTwo->pTLogContextList[tLogIdx] = pNewTLogContext;
-			state InitializeTLogRequest req;
+			InitializeTLogRequest req;
 			req.recruitmentID = pTLogTestContextEpochTwo->dbInfo.logSystemConfig.recruitmentID;
 			req.recoverAt = pTLogTestContextEpochOne->tLogOptions.versions.back();
 			// for testing + 10;
@@ -508,14 +495,14 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 			                                           &req,
 			                                           pTLogTestContextEpochOne->pTLogContextList[tLogIdx]->tLogID));
 
-			state Reference<TLogContext> pTLogContext = pTLogTestContextEpochTwo->pTLogContextList[tLogIdx];
-			bool isCreated = wait(pTLogContext->TLogCreated.getFuture());
+			Reference<TLogContext> pTLogContext = pTLogTestContextEpochTwo->pTLogContextList[tLogIdx];
+			bool isCreated = co_await pTLogContext->TLogCreated.getFuture();
 			ASSERT_EQ(isCreated, true);
 			pTLogContext->TLogStarted.send(true);
 		}
 
 		for (const auto& [loc, ver] : commitHistory) {
-			wait(pTLogTestContextEpochTwo->peekCommitMessages(std::get<0>(loc), std::get<1>(loc)));
+			co_await pTLogTestContextEpochTwo->peekCommitMessages(std::get<0>(loc), std::get<1>(loc));
 		}
 
 		// signal that tLogs can be destroyed
@@ -529,25 +516,21 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 	}
 
 	// wait for tLogs to destruct
-	wait(waitForAll(tLogActors));
+	co_await waitForAll(tLogActors);
 
 	TraceEvent("TestTLogServerExitRecoveryTest");
-
-	return Void();
 }
 
 // TEST_CASE("/fdbserver/test/TestTLogCommits") {
 // 	params.set("recover", static_cast<int64_t>(0));
 // 	TestTLogOptions testTLogOptions(params);
-// 	wait(startTestsTLogRecoveryActors(testTLogOptions));
-// 	return Void();
+// 	co_await startTestsTLogRecoveryActors(testTLogOptions);
 // }
 
 // // Two tlogs, one tag. Write 10 commits up to version V. Start recovery with RV set to V+10.
 // TEST_CASE("/fdbserver/test/TestTLogRecovery1") {
 // 	TestTLogOptions testTLogOptions(params);
-// 	wait(startTestsTLogRecoveryActors(testTLogOptions));
-// 	return Void();
+// 	co_await startTestsTLogRecoveryActors(testTLogOptions);
 // }
 
 // // Four tlogs, two tags.
@@ -556,6 +539,5 @@ ACTOR Future<Void> startTestsTLogRecoveryActors(TestTLogOptions params) {
 // 	params.set("numTags", static_cast<int64_t>(2));
 
 // 	TestTLogOptions testTLogOptions(params);
-// 	wait(startTestsTLogRecoveryActors(testTLogOptions));
-// 	return Void();
+// 	co_await startTestsTLogRecoveryActors(testTLogOptions);
 // }
