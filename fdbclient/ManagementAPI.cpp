@@ -2446,6 +2446,7 @@ Future<Void> advanceVersion(Database cx, Version v) {
 			if (rv <= v) {
 				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
 				co_await tr.commit();
+				continue;
 			} else {
 				fmt::print("Current read version is {}\n", rv);
 				co_return;
@@ -2782,6 +2783,7 @@ Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
 			}
 			if (jobHistoryResult.more) {
 				beginKey = keyAfter(jobHistoryResult.back().key);
+				continue;
 			} else {
 				break;
 			}
