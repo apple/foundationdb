@@ -2167,6 +2167,7 @@ Future<Void> monitorRatekeeperTpsLimit(ClusterControllerData* self) {
 			if (self->canSafelyTriggerFailoverToRemoteDc()) {
 				if (SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER &&
 				    self->triggerFailoverToRemoteDc("RatekeeperZeroTpsLimit", healthMetrics.tpsLimit)) {
+					CODE_PROBE(true, "Ratekeeper zero TPS limit triggered region failover", probe::decoration::rare);
 					self->ratekeeperMonitor.resetZeroRatekeeperTpsLimitObservation();
 				} else if (!SERVER_KNOBS->CC_HEALTH_TRIGGER_FAILOVER) {
 					TraceEvent(SevWarn, "RatekeeperZeroTpsLimitSuggestFailover", self->id)
