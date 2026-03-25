@@ -3,7 +3,7 @@
  */
 
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 // This workload is meant to be run with the ThroughputQuotaWorklaod.
 // The ThroughputQuotaWorkload sets a total quota, and then this workload runs

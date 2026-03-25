@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_CORE_WORKLOADS_ACTOR_H
-#define FDBSERVER_CORE_WORKLOADS_ACTOR_H
+#ifndef FDBSERVER_TESTER_WORKLOADS_ACTOR_H
+#define FDBSERVER_TESTER_WORKLOADS_ACTOR_H
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
