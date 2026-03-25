@@ -22,8 +22,8 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
-#include "BulkSetup.h"
+#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 // For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in
 // (sim2.cpp)

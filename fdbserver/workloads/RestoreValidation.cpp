@@ -37,11 +37,11 @@
 // - Error detection: Fails the test if audit finds missing or mismatched keys
 
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RestoreValidationWorkload : TestWorkload {

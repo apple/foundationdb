@@ -21,8 +21,8 @@
 #include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
-#include "BulkSetup.h"
+#include "fdbserver/tester/workloads.actor.h"
+#include "fdbserver/workloads/BulkSetup.h"
 
 struct StreamingReadWorkload : TestWorkload {
 	static constexpr auto NAME = "StreamingRead";

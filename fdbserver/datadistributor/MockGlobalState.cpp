@@ -22,6 +22,7 @@
 #include "fdbserver/core/WorkloadKeys.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbclient/FDBTypes.h"
+#include "flow/CoroUtils.h"
 
 class MockGlobalStateImpl {
 public:
@@ -917,7 +918,7 @@ TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
 
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	auto mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
@@ -1003,7 +1004,7 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SplittingFunctions") {
 	testConfig.logAntiQuorum = 0;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
-	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	auto mgs = std::make_shared<MockGlobalState>();
 	mgs->initializeClusterLayout(dbConfig);
 	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 

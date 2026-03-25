@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 
 struct ProtocolVersionWorkload : TestWorkload {

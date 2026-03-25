@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/IAsyncFile.h"
 
 class RandomByteGenerator {

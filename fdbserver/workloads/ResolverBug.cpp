@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 #include "flow/ProcessEvents.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/resolver/ResolverBug.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 

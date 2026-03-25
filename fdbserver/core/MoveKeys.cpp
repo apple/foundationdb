@@ -473,6 +473,9 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
                                            std::vector<UID> servers,
                                            std::string context,
                                            UID dataMoveId) {
+	// This code has only been tested with `SHARD_ENCODE_LOCATION_METADATA` enabled.
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 	if (range.empty()) {
 		TraceEvent(SevWarn, "CheckLocationMetadataEmptyInputRange").detail("By", "PreCheck").detail("Range", range);
 		co_return;
@@ -538,6 +541,9 @@ Future<Void> auditLocationMetadataPreCheck(Database occ,
 }
 
 Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
+	// This code has only been tested with `SHARD_ENCODE_LOCATION_METADATA` enabled.
+	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
+
 	if (range.empty()) {
 		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "CheckLocationMetadataEmptyInputRange")
 		    .detail("By", "PostCheck")

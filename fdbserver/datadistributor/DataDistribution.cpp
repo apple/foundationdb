@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/Audit.h"
-#include "fdbclient/AuditUtils.actor.h"
+#include "fdbclient/AuditUtils.h"
 #include "fdbclient/BulkDumping.h"
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/DatabaseContext.h"

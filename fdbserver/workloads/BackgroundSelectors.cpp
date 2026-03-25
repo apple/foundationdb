@@ -20,7 +20,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 KeySelector randomizedSelector(const KeyRef& key, bool orEqual, int offset) {
 	if (orEqual && deterministicRandom()->random01() > 0.5)

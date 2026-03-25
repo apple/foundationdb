@@ -22,7 +22,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "BulkSetup.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // #define SevAtomicOpDebug SevInfo

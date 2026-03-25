@@ -24,7 +24,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/core/MoveKeys.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/QuietDatabase.actor.h"

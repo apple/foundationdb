@@ -24,7 +24,7 @@
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
-#include "fdbserver/core/workloads.actor.h"
+#include "fdbserver/tester/workloads.actor.h"
 
 struct ThreadSafetyWorkload;
 
