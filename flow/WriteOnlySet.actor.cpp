@@ -26,7 +26,6 @@
 #include <chrono>
 #include <random>
 #include <thread>
-#include "flow/actorcompiler.h" // has to be last include
 
 #ifdef ENABLE_SAMPLING
 template <class T, class IndexType, IndexType CAPACITY>
@@ -176,9 +175,9 @@ using TestSet = WriteOnlySet<TestObject, unsigned, 128>;
 using Clock = std::chrono::steady_clock;
 
 // An actor that can join a set of threads in an async way.
-ACTOR Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> threads, std::shared_ptr<TestSet> set) {
-	loop {
-		wait(delay(0.1));
+Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> threads, std::shared_ptr<TestSet> set) {
+	while (true) {
+		co_await delay(0.1);
 		for (unsigned i = 0;;) {
 			if (threads->size() == i) {
 				break;
@@ -197,7 +196,7 @@ ACTOR Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> thread
 		if (threads->empty()) {
 			set->copy();
 			ASSERT(instanceCounter.load() == 0);
-			return Void();
+			co_return;
 		}
 	}
 }

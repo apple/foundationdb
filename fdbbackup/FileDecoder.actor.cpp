@@ -55,8 +55,6 @@
 #include "flow/flow.h"
 #include "flow/serialize.h"
 
-#include "flow/actorcompiler.h" // has to be last include
-
 #define SevDecodeInfo SevVerbose
 
 extern bool g_crashOnError;
@@ -523,11 +521,10 @@ public:
 		return Optional<VersionedMutations>();
 	}
 
-	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
-		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
-		self->fd = fd;
-		state Standalone<StringRef> buf = makeString(self->file.fileSize);
-		int rLen = wait(self->fd->read(mutateString(buf), self->file.fileSize, 0));
+	static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
+		self->fd = co_await container->readFile(self->file.fileName);
+		Standalone<StringRef> buf = makeString(self->file.fileSize);
+		int rLen = co_await self->fd->read(mutateString(buf), self->file.fileSize, 0);
 		if (rLen != self->file.fileSize) {
 			throw restore_bad_read();
 		}
@@ -557,7 +554,6 @@ public:
 		}
 
 		self->decodeFile(buf);
-		return Void();
 	}
 
 	// Add chunks to mutationBlocksByVersion
@@ -571,7 +567,7 @@ public:
 	// Reads a file a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
 	void decodeFile(const Standalone<StringRef>& buf) {
 		try {
-			loop {
+			while (true) {
 				int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - offset);
 				if (len == 0) {
 					return;
@@ -617,13 +613,12 @@ public:
 	// Open and loads file into memory
 	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
 
-	ACTOR static Future<Void> openFileImpl(DecodeRangeProgress* self, Reference<IBackupContainer> container) {
+	static Future<Void> openFileImpl(DecodeRangeProgress* self, Reference<IBackupContainer> container) {
 		TraceEvent("ReadFile").detail("Name", self->file.fileName).detail("Len", self->file.fileSize);
 
-		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
-		self->fd = fd;
-		state Standalone<StringRef> buf = makeString(self->file.fileSize);
-		int rLen = wait(self->fd->read(mutateString(buf), self->file.fileSize, 0));
+		self->fd = co_await container->readFile(self->file.fileName);
+		Standalone<StringRef> buf = makeString(self->file.fileSize);
+		int rLen = co_await self->fd->read(mutateString(buf), self->file.fileSize, 0);
 		if (rLen != self->file.fileSize) {
 			throw restore_bad_read();
 		}
@@ -654,13 +649,12 @@ public:
 		}
 
 		self->decodeFile(buf);
-		return Void();
 	}
 
 	// Reads a file content in the buffer, decodes it into key/value pairs, and stores these pairs.
 	void decodeFile(const Standalone<StringRef>& buf) {
 		try {
-			loop {
+			while (true) {
 				// process one block at a time
 				int64_t len = std::min<int64_t>(file.blockSize, file.fileSize - offset);
 				if (len == 0) {
@@ -698,18 +692,18 @@ std::string hexStringRef(const StringRef& s) {
 	return result;
 }
 
-ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
-                                      RangeFile file,
-                                      UID uid,
-                                      Reference<DecodeParams> params) {
+Future<Void> process_range_file(Reference<IBackupContainer> container,
+                                RangeFile file,
+                                UID uid,
+                                Reference<DecodeParams> params) {
 
 	if (file.fileSize == 0) {
 		TraceEvent("SkipEmptyFile", uid).detail("Name", file.fileName);
-		return Void();
+		co_return;
 	}
 
-	state DecodeRangeProgress progress(file, params->save_file_locally);
-	wait(progress.openFile(container));
+	DecodeRangeProgress progress(file, params->save_file_locally);
+	co_await progress.openFile(container);
 
 	for (auto& block : progress.blocks) {
 		for (const auto& kv : block) {
@@ -730,21 +724,19 @@ ACTOR Future<Void> process_range_file(Reference<IBackupContainer> container,
 		}
 	}
 	TraceEvent("ProcessRangeFileDone", uid).detail("File", file.fileName);
-
-	return Void();
 }
 
-ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
-                                LogFile file,
-                                UID uid,
-                                Reference<DecodeParams> params) {
+Future<Void> process_file(Reference<IBackupContainer> container,
+                          LogFile file,
+                          UID uid,
+                          Reference<DecodeParams> params) {
 	if (file.fileSize == 0) {
 		TraceEvent("SkipEmptyFile", uid).detail("Name", file.fileName);
-		return Void();
+		co_return;
 	}
 
-	state DecodeProgress progress(file, params->save_file_locally);
-	wait(progress.openFile(container));
+	DecodeProgress progress(file, params->save_file_locally);
+	co_await progress.openFile(container);
 	while (true) {
 		auto batch = progress.getNextBatch();
 		if (!batch.present())
@@ -775,21 +767,19 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container,
 		}
 	}
 	TraceEvent("ProcessFileDone", uid).detail("File", file.fileName);
-	return Void();
 }
 
 // Use the snapshot metadata to quickly identify relevant range files and
 // then filter by versions.
-ACTOR Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
-	state std::vector<KeyspaceSnapshotFile> snapshots =
-	    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots());
-	state std::vector<RangeFile> files;
+Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> bc, Reference<DecodeParams> params) {
+	std::vector<KeyspaceSnapshotFile> snapshots =
+	    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->listKeyspaceSnapshots();
+	std::vector<RangeFile> files;
 
-	state int i = 0;
-	for (; i < snapshots.size(); i++) {
+	for (int i = 0; i < snapshots.size(); i++) {
 		try {
 			std::pair<std::vector<RangeFile>, std::map<std::string, KeyRange>> results =
-			    wait((dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]));
+			    co_await (dynamic_cast<BackupContainerFileSystem*>(bc.getPtr()))->readKeyspaceSnapshot(snapshots[i]);
 			for (const auto& rangeFile : results.first) {
 				const auto& keyRange = results.second.at(rangeFile.fileName);
 				if (params->matchFilters(keyRange)) {
@@ -803,14 +793,13 @@ ACTOR Future<std::vector<RangeFile>> getRangeFiles(Reference<IBackupContainer> b
 			}
 		}
 	}
-	return getRelevantRangeFiles(files, params);
+	co_return getRelevantRangeFiles(files, params);
 }
 
-ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
-	state Reference<IBackupContainer> container =
-	    IBackupContainer::openContainer(params->container_url, params->proxy, {});
-	state UID uid = deterministicRandom()->randomUniqueID();
-	state BackupFileList listing = wait(container->dumpFileList());
+Future<Void> decode_logs(Reference<DecodeParams> params) {
+	Reference<IBackupContainer> container = IBackupContainer::openContainer(params->container_url, params->proxy, {});
+	UID uid = deterministicRandom()->randomUniqueID();
+	BackupFileList listing = co_await container->dumpFileList();
 	// remove partitioned logs
 	listing.logs.erase(std::remove_if(listing.logs.begin(),
 	                                  listing.logs.end(),
@@ -823,11 +812,11 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	TraceEvent("Container", uid).detail("URL", params->container_url).detail("Logs", listing.logs.size());
 	TraceEvent("DecodeParam", uid).setMaxFieldLength(100000).detail("Value", params->toString());
 
-	BackupDescription desc = wait(container->describeBackup());
+	BackupDescription desc = co_await container->describeBackup();
 	std::cout << "\n" << desc.toString() << "\n";
 
-	state std::vector<LogFile> logFiles;
-	state std::vector<RangeFile> rangeFiles;
+	std::vector<LogFile> logFiles;
+	std::vector<RangeFile> rangeFiles;
 
 	if (params->decode_logs) {
 		logFiles = getRelevantLogFiles(listing.logs, params);
@@ -836,7 +825,7 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 
 	if (params->decode_range) {
 		// rangeFiles = getRelevantRangeFiles(filteredRangeFiles, params);
-		std::vector<RangeFile> files = wait(getRangeFiles(container, params));
+		std::vector<RangeFile> files = co_await getRangeFiles(container, params);
 		rangeFiles = files;
 		printLogFiles("Relevant range files are: ", rangeFiles);
 	}
@@ -844,14 +833,14 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 	TraceEvent("TotalFiles", uid).detail("LogFiles", logFiles.size()).detail("RangeFiles", rangeFiles.size());
 
 	if (params->list_only)
-		return Void();
+		co_return;
 
 	// Decode log files.
-	state int idx = 0;
+	int idx = 0;
 	if (params->decode_logs) {
 		while (idx < logFiles.size()) {
 			TraceEvent("ProcessFile").detail("Name", logFiles[idx].fileName).detail("I", idx);
-			wait(process_file(container, logFiles[idx], uid, params));
+			co_await process_file(container, logFiles[idx], uid, params);
 			idx++;
 		}
 		TraceEvent("DecodeLogsDone", uid).log();
@@ -862,13 +851,11 @@ ACTOR Future<Void> decode_logs(Reference<DecodeParams> params) {
 		idx = 0;
 		while (idx < rangeFiles.size()) {
 			TraceEvent("ProcessFile").detail("Name", rangeFiles[idx].fileName).detail("I", idx);
-			wait(process_range_file(container, rangeFiles[idx], uid, params));
+			co_await process_range_file(container, rangeFiles[idx], uid, params);
 			idx++;
 		}
 		TraceEvent("DecodeRangeFileDone", uid).log();
 	}
-
-	return Void();
 }
 
 } // namespace file_converter

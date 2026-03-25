@@ -43,8 +43,6 @@
 #include "flow/ScopeExit.h"
 #include "flow/TLSConfig.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
-
 using namespace std::literals::string_view_literals;
 
 enum ExitCodes : int {
@@ -181,11 +179,17 @@ struct fmt::formatter<Result> : fmt::formatter<std::string> {
 	}
 };
 
-ACTOR template <class T>
+template <class T>
 Future<T> stopNetworkAfter(Future<T> what) {
-	T t = wait(what);
-	g_network->stop();
-	return t;
+	if constexpr (std::is_same_v<T, Void>) {
+		co_await what;
+		g_network->stop();
+		co_return;
+	} else {
+		T t = co_await what;
+		g_network->stop();
+		co_return t;
+	}
 }
 
 // Reflective struct containing information about the requester from a server PoV
@@ -252,9 +256,9 @@ void runServer(const Endpoint& endpoint, int addrPipe, int completionPipe) {
 	return;
 }
 
-ACTOR Future<Void> waitAndPrintResponse(Future<SessionInfo> response, Result* rc) {
+Future<Void> waitAndPrintResponse(Future<SessionInfo> response, Result* rc) {
 	try {
-		SessionInfo info = wait(response);
+		SessionInfo info = co_await response;
 		log("Probe response: trusted={} peerAddress={}", info.isPeerTrusted, info.peerAddress.toString());
 		*rc = info.isPeerTrusted ? Result::TRUSTED : Result::UNTRUSTED;
 	} catch (Error& err) {
@@ -266,7 +270,6 @@ ACTOR Future<Void> waitAndPrintResponse(Future<SessionInfo> response, Result* rc
 			*rc = Result::TIMEOUT;
 		}
 	}
-	return Void();
 }
 
 // int runAsServer(TLSCreds creds, int addrPipe, int completionPipe, Result expect) {}
