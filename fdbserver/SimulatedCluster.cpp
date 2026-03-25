@@ -45,7 +45,7 @@
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/versions.h"
