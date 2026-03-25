@@ -223,17 +223,17 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		if (clientId != 0)
 			return true;
 		else
-			return _check(cx, this);
+			return _check(cx);
 	}
 
-	static Future<bool> _check(Database cx, BackupAndRestoreCorrectnessWorkload* self) {
+	Future<bool> _check(Database cx) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
 			try {
-				for (int restoreIndex = 0; restoreIndex < self->skippedRestoreRanges.size(); restoreIndex++) {
-					KeyRangeRef range = self->skippedRestoreRanges[restoreIndex];
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+				for (int restoreIndex = 0; restoreIndex < skippedRestoreRanges.size(); restoreIndex++) {
+					KeyRangeRef range = skippedRestoreRanges[restoreIndex];
+					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					RangeResult res = co_await tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED);
 					if (!res.empty()) {
 						TraceEvent(SevError, "BARW_UnexpectedRangePresent").detail("Range", printable(range));
@@ -273,14 +273,13 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> doBackup(BackupAndRestoreCorrectnessWorkload* self,
-	                             double startDelay,
-	                             FileBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay,
-	                             Promise<Void> submitted) {
+	Future<Void> doBackup(double startDelay,
+	                      FileBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay,
+	                      Promise<Void> submitted) {
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
@@ -318,7 +317,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   UsePartitionedLog::False,
 			                                   IncrementalBackupOnly::False,
-			                                   self->encryptionKeyFileName);
+			                                   encryptionKeyFileName);
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -443,12 +442,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	/**
 	    This actor attempts to restore the database without clearing the keyspace.
 	 */
-	static Future<Void> attemptDirtyRestore(BackupAndRestoreCorrectnessWorkload* self,
-	                                        Database cx,
-	                                        FileBackupAgent* backupAgent,
-	                                        Standalone<StringRef> lastBackupContainer,
-	                                        UID randomID,
-	                                        Optional<std::string> encryptionKeyFileName) {
+	Future<Void> attemptDirtyRestore(Database cx,
+	                                 FileBackupAgent* backupAgent,
+	                                 Standalone<StringRef> lastBackupContainer,
+	                                 UID randomID,
+	                                 Optional<std::string> encryptionKeyFileName) {
 		Transaction tr(cx);
 		int rowCount = 0;
 		while (true) {
@@ -468,7 +466,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			try {
 				co_await backupAgent->restore(cx,
 				                              cx,
-				                              self->backupTag,
+				                              backupTag,
 				                              KeyRef(lastBackupContainer),
 				                              {},
 				                              WaitForComplete::True,
@@ -477,7 +475,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				                              normalKeys,
 				                              Key(),
 				                              Key(),
-				                              self->locked,
+				                              locked,
 				                              OnlyApplyMutationLogs::False,
 				                              InconsistentSnapshotOnly::False,
 				                              ::invalidVersion,
@@ -561,16 +559,14 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(backupTag));
 			Promise<Void> submitted;
-			Future<Void> b =
-			    doBackup(this, 0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
+			Future<Void> b = doBackup(0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
 			if (abortAndRestartAfter) {
 				TraceEvent("BARW_DoBackup2", randomID)
 				    .detail("Tag", printable(backupTag))
 				    .detail("AbortWait", abortAndRestartAfter);
 				co_await submitted.getFuture();
-				b = b && doBackup(this,
-				                  abortAndRestartAfter,
+				b = b && doBackup(abortAndRestartAfter,
 				                  &backupAgent,
 				                  cx,
 				                  backupTag,
@@ -633,8 +629,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				BackupDescription desc = co_await container->describeBackup();
 
 				if (deterministicRandom()->random01() < 0.5) {
-					co_await attemptDirtyRestore(this,
-					                             cx,
+					co_await attemptDirtyRestore(cx,
 					                             &backupAgent,
 					                             StringRef(lastBackupContainer->getURL()),
 					                             randomID,
