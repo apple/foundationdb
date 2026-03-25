@@ -1,5 +1,5 @@
 /*
- * TestTLogServer.actor.cpp
+ * TestTLogServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "TestTLogServer.actor.h"
+#include "TestTLogServer.h"
 
 #include <filesystem>
 #include <vector>

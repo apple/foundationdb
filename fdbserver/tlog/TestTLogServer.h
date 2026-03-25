@@ -1,5 +1,5 @@
 /*
- * TestTLogServer.actor.h
+ * TestTLogServer.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
-#define FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
+#ifndef FDBSERVER_TLOG_TEST_TLOG_H
+#define FDBSERVER_TLOG_TEST_TLOG_H
 
 #include <memory>
 #include <unordered_map>
@@ -81,7 +81,7 @@ struct TLogContext : NonCopyable, public ReferenceCounted<TLogContext> {
 	Promise<bool> TLogStarted;
 	Promise<bool> TestTLogServerCompleted;
 
-	explicit TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID) {};
+	explicit TLogContext(uint32_t inProcessID = 0) : tagProcessID(inProcessID){};
 };
 
 // test state
@@ -129,4 +129,4 @@ struct TLogTestContext : NonCopyable, public ReferenceCounted<TLogTestContext> {
 	const uint32_t primaryLocality = 0;
 };
 
-#endif // FDBSERVER_TLOG_TEST_TLOG_ACTOR_H
+#endif // FDBSERVER_TLOG_TEST_TLOG_H
