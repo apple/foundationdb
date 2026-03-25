@@ -650,7 +650,7 @@ func (o TransactionOptions) SetUsedDuringCommitProtectionDisable() error {
 	return o.setOpt(701, nil)
 }
 
-// The transaction can read from locked databases.
+// The transaction can read from locked databases. This option will make the transaction read-only if the lock_aware option is not set.
 func (o TransactionOptions) SetReadLockAware() error {
 	return o.setOpt(702, nil)
 }
