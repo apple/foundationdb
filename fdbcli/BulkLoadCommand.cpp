@@ -19,7 +19,7 @@
  */
 
 #include "fdbcli/fdbcli.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/BulkLoading.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"

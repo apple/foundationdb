@@ -21,7 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 struct LockDatabaseFrequentlyWorkload : TestWorkload {
 	static constexpr auto NAME = "LockDatabaseFrequently";
