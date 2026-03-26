@@ -1,5 +1,5 @@
 /*
- * DirectoryTester.actor.cpp
+ * DirectoryTester.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

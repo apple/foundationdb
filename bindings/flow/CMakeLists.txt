@@ -1,5 +1,5 @@
 set(SRCS
-  DirectoryLayer.actor.cpp
+  DirectoryLayer.cpp
   DirectoryLayer.h
   DirectoryPartition.h
   DirectorySubspace.cpp
