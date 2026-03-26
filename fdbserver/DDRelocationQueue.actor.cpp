@@ -1401,6 +1401,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.isRestore()) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						req.keys = rd.keys;
+						TraceEvent("GetTeamRequestCalled").detail("ID", rd.dataMoveId);
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
 						bestTeamReady = fbestTeam.isReady();

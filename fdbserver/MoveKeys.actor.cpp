@@ -1858,7 +1858,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				wait(tr.commit());
 
-				TraceEvent(sevDm, "DataMoveMetaDataCommit", dataMove.id)
+				TraceEvent("DataMoveMetaDataCommit", dataMove.id)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("DataMoveKey", dataMoveKeyFor(dataMoveId))
 				    .detail("CommitVersion", tr.getCommittedVersion())
