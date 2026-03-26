@@ -681,7 +681,12 @@ public:
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
 
+	// IMPORTANT: teams and teamsByServerIDs MUST be consistency, so any time we
+	// mutate teams, we must also mutate teamsByServerIDs
 	std::vector<Reference<TCTeamInfo>> teams;
+	// O(1) lookup index for getTeamByServers; key is the sorted server IDs string
+	// from TCTeamInfo::getServerIDsStr()
+	std::unordered_map<std::string, Reference<TCTeamInfo>> teamsByServerIDs;
 
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;

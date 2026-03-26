@@ -185,13 +185,10 @@ public:
 
 	// Find the team with the exact storage servers as req.src.
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
-		const std::string servers = TCTeamInfo::serversToString(req.src);
 		Optional<Reference<IDataDistributionTeam>> res;
-		for (const auto& team : self->teams) {
-			if (team->getServerIDsStr() == servers) {
-				res = team;
-				break;
-			}
+		auto it = self->teamsByServerIDs.find(TCTeamInfo::serversToString(req.src));
+		if (it != self->teamsByServerIDs.end()) {
+			res = it->second;
 		}
 		req.reply.send(std::make_pair(res, false));
 	}
@@ -4763,6 +4760,7 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 
 	// For a good team, we add it to teams and create machine team for it when necessary
 	teams.push_back(teamInfo);
+	teamsByServerIDs[teamInfo->getServerIDsStr()] = teamInfo;
 	for (auto& server : newTeamServers) {
 		server->addTeam(teamInfo);
 	}
@@ -5688,6 +5686,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 
 bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	TraceEvent("RemovedServerTeam", distributorId).detail("Team", team->getDesc());
+	teamsByServerIDs.erase(team->getServerIDsStr());
 	bool found = false;
 	for (int t = 0; t < teams.size(); t++) {
 		if (teams[t] == team) {
