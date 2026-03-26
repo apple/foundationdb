@@ -185,15 +185,41 @@ public:
 
 	// Find the team with the exact storage servers as req.src.
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
-		const std::string servers = TCTeamInfo::serversToString(req.src);
+		getTeamByServersConsistencyCheckInSim(self);
 		Optional<Reference<IDataDistributionTeam>> res;
-		for (const auto& team : self->teams) {
-			if (team->getServerIDsStr() == servers) {
-				res = team;
-				break;
-			}
+		auto it = self->teamsByServerIDs.find(TCTeamInfo::serversToString(req.src));
+		if (it != self->teamsByServerIDs.end()) {
+			res = it->second;
 		}
 		req.reply.send(std::make_pair(res, false));
+	}
+
+	// Probabilistic consistency check between teams and teamsByServerIDs
+	// Run only in simulation with a probability of DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM
+	// We may need to tune this knob if simulation runs too slowly (in real-time) and results in
+	// ExternalTimeout in Joshua
+	static void getTeamByServersConsistencyCheckInSim(DDTeamCollection* self) {
+		// This check can be expensive in prod so only run it in simulation
+		if (!g_network->isSimulated()) {
+			return;
+		}
+
+		if (deterministicRandom()->random01() < SERVER_KNOBS->DD_TEAMS_BY_SERVER_IDS_CONSISTENCY_CHECK_PROB_SIM) {
+			std::unordered_map<std::string, Reference<TCTeamInfo>> expected;
+			for (const auto& team : self->teams) {
+				expected[team->getServerIDsStr()] = team;
+			}
+			ASSERT(expected.size() == self->teamsByServerIDs.size());
+			for (const auto& [key, value] : expected) {
+				auto it = self->teamsByServerIDs.find(key);
+				ASSERT(it != self->teamsByServerIDs.end());
+				ASSERT(it->second == value);
+			}
+			TraceEvent("TeamByServerIDsConsistencyCheckPassed")
+			    .suppressFor(5.0)
+			    .detail("TeamsSize", self->teams.size())
+			    .detail("MapSize", self->teamsByServerIDs.size());
+		}
 	}
 
 	// Return a threshold of team queue size which guarantees at least DD_LONG_STORAGE_QUEUE_TEAM_MAJORITY_PERCENTILE
@@ -4763,6 +4789,7 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 
 	// For a good team, we add it to teams and create machine team for it when necessary
 	teams.push_back(teamInfo);
+	teamsByServerIDs[teamInfo->getServerIDsStr()] = teamInfo;
 	for (auto& server : newTeamServers) {
 		server->addTeam(teamInfo);
 	}
@@ -5688,6 +5715,9 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 
 bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 	TraceEvent("RemovedServerTeam", distributorId).detail("Team", team->getDesc());
+	if (teamsByServerIDs.find(team->getServerIDsStr()) != teamsByServerIDs.end()) {
+		teamsByServerIDs.erase(team->getServerIDsStr());
+	}
 	bool found = false;
 	for (int t = 0; t < teams.size(); t++) {
 		if (teams[t] == team) {
