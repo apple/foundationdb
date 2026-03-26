@@ -330,66 +330,6 @@ Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo> const> db,
 	}
 }
 
-Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
-                                          InitializeBackupRequest req,
-                                          Reference<AsyncVar<ServerDBInfo> const> db) {
-	BackupRangePartitionedData self(interf.id(), db, req);
-	PromiseStream<Future<Void>> addActor;
-	Future<Void> error = actorCollection(addActor.getFuture());
-	Future<Void> dbInfoChange = Void();
-	Future<Void> done;
-	Error err;
-
-	TraceEvent("BWRangePartitionedStart", self.myId)
-	    .detail("Tag", req.routerTag.toString())
-	    .detail("TotalTags", req.totalTags)
-	    .detail("StartVersion", req.startVersion)
-	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
-	    .detail("LogEpoch", req.recruitedEpoch)
-	    .detail("BackupEpoch", req.backupEpoch);
-
-	try {
-		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
-		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
-
-		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
-			addActor.send(monitorBackupProgress(&self));
-		}
-
-		while (true) {
-			auto res = co_await race(dbInfoChange, done, error);
-			if (res.index() == 0) {
-				dbInfoChange = db->onChange();
-				[[maybe_unused]] Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
-			} else if (res.index() == 1) {
-				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);
-				// Notify master so that this worker can be removed from log system, then this
-				// worker (for an old epoch's unfinished work) can safely exit.
-				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
-				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
-				break;
-			} else if (res.index() != 2) {
-				UNREACHABLE();
-			}
-		}
-		co_return;
-	} catch (Error& e) {
-		err = e;
-	}
-
-	if (err.code() == error_code_worker_removed) {
-		try {
-			co_await done;
-		} catch (Error& shutdownErr) {
-			TraceEvent("BWRangePartitionedShutdownError", self.myId).errorUnsuppressed(shutdownErr);
-		}
-	}
-	TraceEvent("BWRangePartitionedTerminated", self.myId).errorUnsuppressed(err);
-	if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
-		throw err;
-	}
-}
-
 Future<Version> pullPartitionMapFromTLog(BackupRangePartitionedData* self, PartitionMap* outPartitionMap) {
 	Reference<ILogSystem::IPeekCursor> cursor;
 	Version partitionMapVersion = invalidVersion;
@@ -978,5 +918,65 @@ Future<Void> uploadData(BackupRangePartitionedData* self) {
 		if (!self->pullFinished()) {
 			co_await (uploadDelay || self->doneTrigger.onTrigger());
 		}
+	}
+}
+
+Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
+                                          InitializeBackupRequest req,
+                                          Reference<AsyncVar<ServerDBInfo> const> db) {
+	BackupRangePartitionedData self(interf.id(), db, req);
+	PromiseStream<Future<Void>> addActor;
+	Future<Void> error = actorCollection(addActor.getFuture());
+	Future<Void> dbInfoChange = Void();
+	Future<Void> done;
+	Error err;
+
+	TraceEvent("BWRangePartitionedStart", self.myId)
+	    .detail("Tag", req.routerTag.toString())
+	    .detail("TotalTags", req.totalTags)
+	    .detail("StartVersion", req.startVersion)
+	    .detail("EndVersion", req.endVersion.present() ? req.endVersion.get() : -1)
+	    .detail("LogEpoch", req.recruitedEpoch)
+	    .detail("BackupEpoch", req.backupEpoch);
+
+	try {
+		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
+		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+
+		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
+			addActor.send(monitorBackupRangePartitionedProgress(&self));
+		}
+
+		while (true) {
+			auto res = co_await race(dbInfoChange, done, error);
+			if (res.index() == 0) {
+				dbInfoChange = db->onChange();
+				[[maybe_unused]] Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+			} else if (res.index() == 1) {
+				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);
+				// Notify master so that this worker can be removed from log system, then this
+				// worker (for an old epoch's unfinished work) can safely exit.
+				co_await brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
+				    BackupWorkerDoneRequest(self.myId, self.backupEpoch)));
+				break;
+			} else if (res.index() != 2) {
+				UNREACHABLE();
+			}
+		}
+		co_return;
+	} catch (Error& e) {
+		err = e;
+	}
+
+	if (err.code() == error_code_worker_removed) {
+		try {
+			co_await done;
+		} catch (Error& shutdownErr) {
+			TraceEvent("BWRangePartitionedShutdownError", self.myId).errorUnsuppressed(shutdownErr);
+		}
+	}
+	TraceEvent("BWRangePartitionedTerminated", self.myId).errorUnsuppressed(err);
+	if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
+		throw err;
 	}
 }
