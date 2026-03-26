@@ -264,29 +264,25 @@ public:
 		Promise<Void> err;
 
 		while (true) {
-			auto choice = co_await race(serverChanges, err.getFuture());
-			if (choice.index() == 0) {
-				std::pair<UID, Optional<StorageServerInterface>> change = std::get<0>(std::move(choice));
+			auto res = co_await race(serverChanges, err.getFuture());
+			ASSERT_EQ(res.index(), 0);
+			std::pair<UID, Optional<StorageServerInterface>> change = std::get<0>(std::move(res));
 
-				co_await delay(0); // prevent storageServerTracker from getting cancelled while on the call stack
+			co_await delay(0); // prevent storageServerTracker from getting cancelled while on the call stack
 
-				const UID& id = change.first;
-				if (change.second.present()) {
-					if (!change.second.get().isTss()) {
+			const UID& id = change.first;
+			if (change.second.present()) {
+				if (!change.second.get().isTss()) {
 
-						auto& a = storageServerTrackers[change.first];
-						a = Future<Void>();
-						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
+					auto& a = storageServerTrackers[change.first];
+					a = Future<Void>();
+					a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
-						self->storageServerInterfaces[id] = change.second.get();
-					}
-				} else {
-					storageServerTrackers.erase(id);
-					self->storageServerInterfaces.erase(id);
+					self->storageServerInterfaces[id] = change.second.get();
 				}
-			} else if (choice.index() == 1) {
 			} else {
-				UNREACHABLE();
+				storageServerTrackers.erase(id);
+				self->storageServerInterfaces.erase(id);
 			}
 		}
 	}
@@ -563,21 +559,11 @@ public:
 		self.addActor.send(self.rateUpdater(&lastLimited));
 
 		try {
-			while (true) {
-				auto choice = co_await race(rkInterf.haltRatekeeper.getFuture(), err.getFuture(), collection);
-				if (choice.index() == 0) {
-					HaltRatekeeperRequest req = std::get<0>(std::move(choice));
-					req.reply.send(Void());
-					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
-					break;
-				} else if (choice.index() == 1) {
-				} else if (choice.index() == 2) {
-					ASSERT(false);
-					throw internal_error();
-				} else {
-					UNREACHABLE();
-				}
-			}
+			auto res = co_await race(rkInterf.haltRatekeeper.getFuture(), err.getFuture(), collection);
+			ASSERT_EQ(res.index(), 0);
+			HaltRatekeeperRequest req = std::get<0>(std::move(res));
+			req.reply.send(Void());
+			TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 		} catch (Error& err) {
 			TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
 		}
