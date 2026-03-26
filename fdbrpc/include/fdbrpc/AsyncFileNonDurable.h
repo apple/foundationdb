@@ -39,18 +39,15 @@ extern Future<Void> waitShutdownSignal();
 template <class T>
 Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
 	try {
-		auto choice = co_await race(waitShutdownSignal(), in);
-		if (choice.index() == 0) {
+		auto res = co_await race(waitShutdownSignal(), in);
+		if (res.index() == 0) {
 			throw io_error().asInjectedFault();
-		} else if (choice.index() == 1) {
+		} else {
 			if constexpr (std::is_same_v<T, Void>) {
-				std::get<1>(std::move(choice));
 				co_return;
 			} else {
-				co_return std::get<1>(std::move(choice));
+				co_return std::get<1>(std::move(res));
 			}
-		} else {
-			UNREACHABLE();
 		}
 	} catch (Error& e) {
 		ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
@@ -389,12 +386,8 @@ private:
 
 		// Wait a random amount of time or until a sync/kill is issued
 		bool saveDurable = true;
-		auto choice = co_await race(delay(delayDuration), startSyncFuture);
-		if (choice.index() == 0) {
-		} else if (choice.index() == 1) {
-			saveDurable = std::get<1>(std::move(choice));
-		} else {
-			UNREACHABLE();
+		if (auto const res = co_await timeout(startSyncFuture, delayDuration); res.present()) {
+			saveDurable = res.get();
 		}
 
 		debugFileCheck("AsyncFileNonDurableWriteAfterWait", self->filename, dataCopy.begin(), offset, length);
@@ -568,12 +561,8 @@ private:
 
 		// Wait a random amount of time or until a sync/kill is issued
 		bool saveDurable = true;
-		auto choice = co_await race(delay(delayDuration), startSyncFuture);
-		if (choice.index() == 0) {
-		} else if (choice.index() == 1) {
-			saveDurable = std::get<1>(std::move(choice));
-		} else {
-			UNREACHABLE();
+		if (auto const res = co_await timeout(startSyncFuture, delayDuration); res.present()) {
+			saveDurable = res.get();
 		}
 
 		if (g_network->check_yield(TaskPriority::DefaultYield)) {
