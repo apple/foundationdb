@@ -55,7 +55,7 @@ Optional<Subspace> DirectoryLayer::nodeWithPrefix(Optional<T> const& prefix) con
 Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer,
                                   Reference<Transaction> tr,
                                   IDirectory::Path path) {
-	DirectoryLayer::Node node = DirectoryLayer::Node(dirLayer, dirLayer->rootNode, IDirectory::Path(), path);
+	DirectoryLayer::Node node(dirLayer, dirLayer->rootNode, IDirectory::Path(), path);
 
 	for (int pathIndex = 0; pathIndex != path.size(); ++pathIndex) {
 		ASSERT(node.subspace.present());
@@ -65,8 +65,7 @@ Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer,
 		node.path.push_back(path[pathIndex]);
 		node = DirectoryLayer::Node(dirLayer, dirLayer->nodeWithPrefix(val), node.path, path);
 
-		DirectoryLayer::Node _node = co_await node.loadMetadata(tr);
-		node = _node;
+		node = co_await node.loadMetadata(tr);
 
 		if (!node.exists() || node.layer == DirectoryLayer::PARTITION_LAYER) {
 			co_return node;
@@ -74,8 +73,7 @@ Future<DirectoryLayer::Node> find(Reference<DirectoryLayer> dirLayer,
 	}
 
 	if (!node.loadedMetadata) {
-		DirectoryLayer::Node _node = co_await node.loadMetadata(tr);
-		node = _node;
+		node = co_await node.loadMetadata(tr);
 	}
 
 	co_return node;
