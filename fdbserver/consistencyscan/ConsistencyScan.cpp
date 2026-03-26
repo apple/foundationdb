@@ -242,8 +242,7 @@ Future<int> consistencyCheckReadData(UID myId,
 
 	// Try getting the entries in the specified range
 
-	int j = 0;
-	for (j = 0; j < storageServerInterfaces->size(); j++) {
+	for (int j = 0; j < storageServerInterfaces->size(); j++) {
 		resetReply(req);
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 			cx->getLatestCommitVersion((*storageServerInterfaces)[j], req.version, req.ssLatestCommitVersions);
@@ -272,7 +271,7 @@ Future<int> consistencyCheckReadData(UID myId,
 	// Read the resulting entries
 	bool allSucceeded = true;
 	bool foundInjected = false;
-	for (j = 0; j < storageServerInterfaces->size(); j++) {
+	for (int j = 0; j < storageServerInterfaces->size(); j++) {
 		ErrorOr<GetKeyValuesReply> rangeResult = (*keyValueFutures)[j].get();
 
 		// Compare the results with other storage servers
@@ -1308,12 +1307,11 @@ Future<bool> getKeyLocations(Database cx,
 	Standalone<VectorRef<KeyValueRef>> keyLocations;
 	Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);
 	Key endKey = allKeys.end.withPrefix(keyServersPrefix);
-	int i = 0;
 	Transaction onErrorTr(cx); // This transaction exists only to access onError and its backoff behavior
 
 	// If the responses are too big, we may use multiple requests to get the key locations.  Each request begins
 	// where the last left off
-	for (; i < shards.size(); i++) {
+	for (int i = 0; i < shards.size(); i++) {
 		while (beginKey < std::min<KeyRef>(shards[i].first.end, endKey)) {
 			Error err;
 			try {
