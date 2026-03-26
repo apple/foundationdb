@@ -170,37 +170,32 @@ Future<Void> AsyncFileNonDurable::closeFile(AsyncFileNonDurable* self) {
 	g_simulator->getMachineByNetworkAddress(self->openedAddress)->deletingOrClosingFiles.insert(self->getFilename());
 
 	co_await g_simulator->onMachine(currentProcess);
-	try {
-		// Make sure all writes have gone through.
-		Promise<bool> startSyncPromise = self->startSyncPromise;
-		self->startSyncPromise = Promise<bool>();
-		startSyncPromise.send(true);
+	// Make sure all writes have gone through.
+	Promise<bool> startSyncPromise = self->startSyncPromise;
+	self->startSyncPromise = Promise<bool>();
+	startSyncPromise.send(true);
 
-		std::vector<Future<Void>> outstandingModifications;
+	std::vector<Future<Void>> outstandingModifications;
 
-		for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
-		     ++itr)
-			if (itr->value().isValid() && !itr->value().isReady())
-				outstandingModifications.push_back(itr->value());
+	for (auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end();
+	     ++itr)
+		if (itr->value().isValid() && !itr->value().isReady())
+			outstandingModifications.push_back(itr->value());
 
-		// Ignore errors here so that all modifications can finish
-		co_await waitForAllReady(outstandingModifications);
+	// Ignore errors here so that all modifications can finish
+	co_await waitForAllReady(outstandingModifications);
 
-		// Make sure we aren't in the process of killing the file
-		if (self->killed.isSet())
-			co_await self->killComplete.getFuture();
+	// Make sure we aren't in the process of killing the file
+	if (self->killed.isSet())
+		co_await self->killComplete.getFuture();
 
-		// Remove this file from the filesBeingDeleted map so that new files can be created with this filename
-		g_simulator->getMachineByNetworkAddress(self->openedAddress)->closingFiles.erase(self->getFilename());
-		g_simulator->getMachineByNetworkAddress(self->openedAddress)->deletingOrClosingFiles.erase(self->getFilename());
-		AsyncFileNonDurable::filesBeingDeleted.erase(self->filename);
-		//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
+	// Remove this file from the filesBeingDeleted map so that new files can be created with this filename
+	g_simulator->getMachineByNetworkAddress(self->openedAddress)->closingFiles.erase(self->getFilename());
+	g_simulator->getMachineByNetworkAddress(self->openedAddress)->deletingOrClosingFiles.erase(self->getFilename());
+	AsyncFileNonDurable::filesBeingDeleted.erase(self->filename);
+	//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
 
-		delete self;
-	} catch (Error& e) {
-		Error err = e;
-		throw err;
-	}
+	delete self;
 }
 
 void AsyncFileNonDurable::removeOpenFile(std::string filename, AsyncFileNonDurable* file) {
