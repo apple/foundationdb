@@ -1040,7 +1040,7 @@ void startRole(const Role& role,
                const std::string& origination = "Recruited");
 void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error e = Error());
 
-ACTOR Future<Void> traceRole(Role role, UID roleId);
+Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
 

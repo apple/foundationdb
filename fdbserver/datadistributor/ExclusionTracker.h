@@ -93,7 +93,7 @@ struct ExclusionTracker {
 					}
 				}
 
-				co_await success(fServerList);
+				co_await fServerList;
 				// In some cases it can happen that the process is not running, e.g. because the process is down
 				// for maintenance. In this case the process will not be part of the worker list, but the process
 				// might be a storage server and could be part of the server list.

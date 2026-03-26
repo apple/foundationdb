@@ -627,7 +627,7 @@ Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 
 Future<Void> runSimHTTPServer() {
 	TraceEvent("SimHTTPServerStarting");
-	Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
+	auto context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 
 	try {
@@ -2800,8 +2800,7 @@ static Future<Void> simulationSetupAndRunImpl(std::string dataFolder,
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
-		Reference<ClusterConnectionFile> connFile =
-		    makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster"));
+		auto connFile = makeReference<ClusterConnectionFile>(joinPath(clusterFileDir, "fdb.cluster"));
 		if (rebooting) {
 			// protect coordinators for restarting tests
 			std::vector<NetworkAddress> coordinatorAddresses =

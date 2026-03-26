@@ -2,7 +2,7 @@ fdb_find_sources(FDBSERVER_CORE_LOCAL_SRCS)
 
 set(FDBSERVER_CORE_TO_KVSTORE_SRCS
   DiskQueue.actor.cpp
-  FDBExecHelper.actor.cpp
+  FDBExecHelper.cpp
   IKeyValueStore.cpp
   IPager.cpp
   KeyValueStoreCompressTestData.cpp

@@ -925,7 +925,7 @@ Future<Void> resetPreviousCoordinatorsKey(Database cx) {
 		// This causes the underlying transaction to not be committed. In order
 		// to make sure we clear the previous coordinators key, we have to use
 		// a new transaction here.
-		Reference<ReadYourWritesTransaction> clearTr = makeReference<ReadYourWritesTransaction>(cx);
+		auto clearTr = makeReference<ReadYourWritesTransaction>(cx);
 		Error err;
 		try {
 			clearTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1858,7 +1858,7 @@ Future<std::vector<AddressExclusion>> getAllExcludedServers(Transaction* tr) {
 	// Only if at least one locality was found we have to perform this check.
 	if (!excludedLocalities.empty()) {
 		// First we have to fetch all workers to match the localities of each worker against the excluded localities.
-		co_await success(fWorkers);
+		co_await fWorkers;
 		std::vector<ProcessData> workers = fWorkers.get();
 
 		for (const auto& locality : excludedLocalities) {
@@ -2685,10 +2685,8 @@ Future<Void> setBulkLoadFinalizeTransaction(Transaction* tr, KeyRange range, UID
 	BulkLoadTaskState bulkLoadTaskState;
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	co_await store(
-	    bulkLoadTaskState,
-	    getBulkLoadTask(
-	        tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error }));
+	bulkLoadTaskState = co_await getBulkLoadTask(
+	    tr, range, taskId, { BulkLoadPhase::Complete, BulkLoadPhase::Acknowledged, BulkLoadPhase::Error });
 	if (bulkLoadTaskState.phase == BulkLoadPhase::Error) {
 		TraceEvent(SevWarnAlways, "ManagementAPIAcknowledgeErrorTask")
 		    .detail("TaskId", taskId.toString())
@@ -2711,8 +2709,8 @@ Future<Void> addBulkLoadJobToHistory(Transaction* tr, BulkLoadJobState jobState)
 	Key endKey = bulkLoadJobHistoryKeys.end;
 	while (true) {
 		jobHistoryResult.clear();
-		co_await store(jobHistoryResult,
-		               tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2));
+		jobHistoryResult =
+		    co_await tr->getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX * 2);
 		// Set limit twice the max count to check the number of jobs in the history is no more than the max
 		// count.
 		for (int i = 0; i < jobHistoryResult.size(); i++) {
@@ -2767,8 +2765,8 @@ Future<std::vector<BulkLoadJobState>> getBulkLoadJobFromHistory(Database cx) {
 		Error err;
 		try {
 			jobHistoryResult.clear();
-			co_await store(jobHistoryResult,
-			               tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX));
+			jobHistoryResult =
+			    co_await tr.getRange(KeyRangeRef(beginKey, endKey), CLIENT_KNOBS->BULKLOAD_JOB_HISTORY_COUNT_MAX);
 			for (int i = 0; i < jobHistoryResult.size(); i++) {
 				BulkLoadJobState jobState = decodeBulkLoadJobState(jobHistoryResult[i].value);
 				ASSERT_WE_THINK(jobState.isValid());
@@ -2814,7 +2812,7 @@ Future<Void> clearBulkLoadJobHistory(Database cx, Optional<UID> jobId) {
 Future<Optional<BulkLoadJobState>> getSubmittedBulkLoadJob(Transaction* tr) {
 	RangeResult rangeResult;
 	// At most one job at a time, so looking at the first returned range is sufficient
-	co_await store(rangeResult, krmGetRanges(tr, bulkLoadJobPrefix, normalKeys));
+	rangeResult = co_await krmGetRanges(tr, bulkLoadJobPrefix, normalKeys);
 	if (rangeResult.empty()) {
 		co_return Optional<BulkLoadJobState>();
 	}
@@ -2837,7 +2835,7 @@ Future<Void> cancelBulkLoadJob(Database cx, UID jobId) {
 	while (true) {
 		Error err;
 		try {
-			co_await store(aliveJob, getSubmittedBulkLoadJob(&tr));
+			aliveJob = co_await getSubmittedBulkLoadJob(&tr);
 			if (!aliveJob.present()) {
 				co_return; // Has been cancelled
 			}
@@ -2967,7 +2965,7 @@ Future<Optional<BulkLoadJobState>> getRunningBulkLoadJob(Database cx, bool lockA
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			}
 			rangeResult.clear();
-			co_await store(rangeResult, krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey)));
+			rangeResult = co_await krmGetRanges(&tr, bulkLoadJobPrefix, KeyRangeRef(beginKey, endKey));
 			if (rangeResult.empty()) {
 				break;
 			}
@@ -3006,7 +3004,7 @@ Future<Void> acknowledgeAllErrorBulkLoadTasks(Database cx, UID jobId, KeyRange j
 		try {
 			tr.reset();
 			bulkLoadTaskResult.clear();
-			co_await store(bulkLoadTaskResult, krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey)));
+			bulkLoadTaskResult = co_await krmGetRanges(&tr, bulkLoadTaskPrefix, KeyRangeRef(beginKey, endKey));
 			if (bulkLoadTaskResult.empty()) {
 				break;
 			}
@@ -3119,12 +3117,11 @@ Future<Optional<BulkDumpState>> getSubmittedBulkDumpJob(Transaction* tr) {
 		Error err;
 		try {
 			rangeResult.clear();
-			co_await store(rangeResult,
-			               krmGetRanges(tr,
-			                            bulkDumpPrefix,
-			                            KeyRangeRef(beginKey, normalKeys.end),
-			                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-			                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+			rangeResult = co_await krmGetRanges(tr,
+			                                    bulkDumpPrefix,
+			                                    KeyRangeRef(beginKey, normalKeys.end),
+			                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 			// krmGetRanges splits the result into batches.
 			// Check first batch is enough since we only check if any task exists
 			if (rangeResult.empty()) {
@@ -3219,7 +3216,7 @@ Future<Void> cancelBulkDumpJob(Database cx, UID jobId) {
 		try {
 			bulkDumpResult.clear();
 			rangeToRead = Standalone(KeyRangeRef(beginKey, endKey));
-			co_await store(bulkDumpResult, krmGetRanges(&tr, bulkDumpPrefix, rangeToRead));
+			bulkDumpResult = co_await krmGetRanges(&tr, bulkDumpPrefix, rangeToRead);
 			if (bulkDumpResult.empty()) {
 				break;
 			}
@@ -3334,12 +3331,11 @@ Future<size_t> getBulkDumpCompleteTaskCount(Database cx, KeyRange rangeToRead) {
 				rangeResult.clear();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				co_await store(rangeResult,
-				               krmGetRanges(&tr,
-				                            bulkDumpPrefix,
-				                            KeyRangeRef(readBegin, readEnd),
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				rangeResult = co_await krmGetRanges(&tr,
+				                                    bulkDumpPrefix,
+				                                    KeyRangeRef(readBegin, readEnd),
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -3414,12 +3410,11 @@ Future<Optional<BulkDumpProgress>> getBulkDumpProgress(Database cx) {
 				rangeResult.clear();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				co_await store(rangeResult,
-				               krmGetRanges(&tr,
-				                            bulkDumpPrefix,
-				                            KeyRangeRef(readBegin, readEnd),
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				rangeResult = co_await krmGetRanges(&tr,
+				                                    bulkDumpPrefix,
+				                                    KeyRangeRef(readBegin, readEnd),
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -3498,12 +3493,11 @@ Future<Optional<BulkLoadProgress>> getBulkLoadProgress(Database cx) {
 				rangeResult.clear();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				co_await store(rangeResult,
-				               krmGetRanges(&tr,
-				                            bulkLoadTaskPrefix,
-				                            KeyRangeRef(readBegin, readEnd),
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+				rangeResult = co_await krmGetRanges(&tr,
+				                                    bulkLoadTaskPrefix,
+				                                    KeyRangeRef(readBegin, readEnd),
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 				break;
 			} catch (Error& e) {
 				err = e;
@@ -3873,7 +3867,7 @@ Future<Void> releaseExclusiveReadLockByUser(Database cx, RangeLockOwnerName owne
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			result.clear();
-			co_await store(result, krmGetRanges(&tr, rangeLockPrefix, rangeToRead));
+			result = co_await krmGetRanges(&tr, rangeLockPrefix, rangeToRead);
 			if (result.empty()) {
 				break;
 			}

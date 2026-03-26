@@ -1045,12 +1045,8 @@ Future<std::pair<BulkLoadTaskState, Version>> triggerBulkLoadTask(Reference<Data
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
 			std::vector<BulkLoadPhase> phase;
-			co_await store(
-			    newBulkLoadTaskState,
-			    getBulkLoadTask(&tr,
-			                    taskRange,
-			                    taskId,
-			                    { BulkLoadPhase::Submitted, BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
+			newBulkLoadTaskState = co_await getBulkLoadTask(
+			    &tr, taskRange, taskId, { BulkLoadPhase::Submitted, BulkLoadPhase::Triggered, BulkLoadPhase::Running });
 			newBulkLoadTaskState.phase = BulkLoadPhase::Triggered;
 			newBulkLoadTaskState.clearDataMoveId();
 			newBulkLoadTaskState.restartCount = newBulkLoadTaskState.restartCount + 1;
@@ -1092,9 +1088,8 @@ Future<Void> failBulkLoadTask(Reference<DataDistributor> self,
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			co_await checkMoveKeysLock(&tr, self->context->lock, self->context->ddEnabledState.get());
-			co_await store(
-			    bulkLoadTaskState,
-			    getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running }));
+			bulkLoadTaskState =
+			    co_await getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Triggered, BulkLoadPhase::Running });
 			bulkLoadTaskState.phase = BulkLoadPhase::Error;
 			bulkLoadTaskState.setCancelledDataMovePriority(cancelledDataMovePriority);
 			ASSERT(taskRange == bulkLoadTaskState.getRange() && taskId == bulkLoadTaskState.getTaskId());
@@ -1222,7 +1217,7 @@ Future<Void> eraseBulkLoadTask(Reference<DataDistributor> self, KeyRange taskRan
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			co_await store(bulkLoadTask, getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Acknowledged }));
+			bulkLoadTask = co_await getBulkLoadTask(&tr, taskRange, taskId, { BulkLoadPhase::Acknowledged });
 			co_await krmSetRangeCoalescing(
 			    &tr, bulkLoadTaskPrefix, taskRange, normalKeys, bulkLoadTaskStateValue(BulkLoadTaskState()));
 			co_await tr.commit();
@@ -1507,16 +1502,15 @@ Future<Void> bulkLoadJobWaitUntilTaskCompleteOrError(Reference<DataDistributor> 
 		Error err;
 		bool hasErr = false;
 		try {
-			co_await store(currentTask,
-			               getBulkLoadTask(&tr,
-			                               bulkLoadTask.getRange(),
-			                               bulkLoadTask.getTaskId(),
-			                               { BulkLoadPhase::Submitted,
-			                                 BulkLoadPhase::Triggered,
-			                                 BulkLoadPhase::Running,
-			                                 BulkLoadPhase::Complete,
-			                                 BulkLoadPhase::Acknowledged,
-			                                 BulkLoadPhase::Error }));
+			currentTask = co_await getBulkLoadTask(&tr,
+			                                       bulkLoadTask.getRange(),
+			                                       bulkLoadTask.getTaskId(),
+			                                       { BulkLoadPhase::Submitted,
+			                                         BulkLoadPhase::Triggered,
+			                                         BulkLoadPhase::Running,
+			                                         BulkLoadPhase::Complete,
+			                                         BulkLoadPhase::Acknowledged,
+			                                         BulkLoadPhase::Error });
 			if (currentTask.getJobId() != bulkLoadTask.getJobId()) {
 				throw bulkload_task_outdated();
 			}

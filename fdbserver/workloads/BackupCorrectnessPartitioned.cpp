@@ -222,17 +222,17 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		if (clientId != 0)
 			return true;
 		else
-			return _check(cx, this);
+			return _check(cx);
 	}
 
-	static Future<bool> _check(Database cx, BackupAndRestorePartitionedCorrectnessWorkload* self) {
+	Future<bool> _check(Database cx) {
 		Transaction tr(cx);
 		while (true) {
 			Error err;
 			try {
-				for (int restoreIndex = 0; restoreIndex < self->skippedRestoreRanges.size(); restoreIndex++) {
-					KeyRangeRef range = self->skippedRestoreRanges[restoreIndex];
-					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
+				for (int restoreIndex = 0; restoreIndex < skippedRestoreRanges.size(); restoreIndex++) {
+					KeyRangeRef range = skippedRestoreRanges[restoreIndex];
+					Standalone<StringRef> restoreTag(backupTag.toString() + "_" + std::to_string(restoreIndex));
 					RangeResult res = co_await tr.getRange(range, GetRangeLimits::ROW_LIMIT_UNLIMITED);
 					if (!res.empty()) {
 						TraceEvent(SevError, "BARW_UnexpectedRangePresent").detail("Range", printable(range));
@@ -273,13 +273,12 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 		}
 	}
 
-	static Future<Void> doBackup(BackupAndRestorePartitionedCorrectnessWorkload* self,
-	                             double startDelay,
-	                             FileBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay) {
+	Future<Void> doBackup(double startDelay,
+	                      FileBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay) {
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
@@ -317,7 +316,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   UsePartitionedLog::True, // enable partitioned log here
 			                                   IncrementalBackupOnly::False,
-			                                   self->encryptionKeyFileName);
+			                                   encryptionKeyFileName);
 		} catch (Error& e) {
 			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -505,7 +504,7 @@ struct BackupAndRestorePartitionedCorrectnessWorkload : TestWorkload {
 			co_await delay(backupAfter);
 
 			TraceEvent("BARW_DoBackup1", randomID).detail("Tag", printable(backupTag));
-			Future<Void> b = doBackup(this, 0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter);
+			Future<Void> b = doBackup(0, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter);
 
 			TraceEvent("BARW_DoBackupWait", randomID)
 			    .detail("BackupTag", printable(backupTag))
