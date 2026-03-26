@@ -1,5 +1,5 @@
 /*
- * FDBExecHelper.actor.cpp
+ * FDBExecHelper.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -45,7 +45,6 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/kvstore/FDBExecHelper.h"
 #include "fdbserver/core/Knobs.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 ExecCmdValueString::ExecCmdValueString(StringRef pCmdValueString) {
 	cmdValueString = pCmdValueString;
@@ -106,9 +105,12 @@ void ExecCmdValueString::dbgPrint() const {
 	return;
 }
 
-ACTOR void destroyChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
+Future<Void> destroyChildProcess(Uncancellable,
+                                 Future<Void> parentSSClosed,
+                                 ISimulator::ProcessInfo* childInfo,
+                                 std::string message) {
 	// This code path should be bug free
-	wait(parentSSClosed);
+	co_await parentSSClosed;
 	TraceEvent(SevDebug, message.c_str()).log();
 	// This one is root cause for most failures, make sure it's okay to destroy
 	g_simulator->destroyProcess(childInfo);
@@ -117,13 +119,13 @@ ACTOR void destroyChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 }
 
 #if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
-ACTOR Future<int> spawnProcess(std::string binPath,
-                               std::vector<std::string> paramList,
-                               double maxWaitTime,
-                               bool isSync,
-                               double maxSimDelayTime) {
-	wait(delay(0.0));
-	return 0;
+Future<int> spawnProcess(std::string binPath,
+                         std::vector<std::string> paramList,
+                         double maxWaitTime,
+                         bool isSync,
+                         double maxSimDelayTime) {
+	co_await delay(0.0);
+	co_return 0;
 }
 #else
 
@@ -166,11 +168,11 @@ static void setupTraceWithOutput(TraceEvent& event, size_t bytesRead, char* outp
 	event.detail("Output", std::string(outputBuffer));
 }
 
-ACTOR Future<int> spawnProcess(std::string path,
-                               std::vector<std::string> args,
-                               double maxWaitTime,
-                               bool isSync,
-                               double maxSimDelayTime) {
+Future<int> spawnProcess(std::string path,
+                         std::vector<std::string> args,
+                         double maxWaitTime,
+                         bool isSync,
+                         double maxSimDelayTime) {
 	// for async calls in simulator, always delay by a deterministic amount of time and then
 	// do the call synchronously, otherwise the predictability of the simulator breaks
 	if (!isSync && g_network->isSimulated()) {
@@ -178,7 +180,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 		// add some randomness
 		snapDelay += deterministicRandom()->random01();
 		TraceEvent("SnapDelaySpawnProcess").detail("SnapDelay", snapDelay);
-		wait(delay(snapDelay));
+		co_await delay(snapDelay);
 	}
 
 	std::vector<char*> paramList;
@@ -188,28 +190,28 @@ ACTOR Future<int> spawnProcess(std::string path,
 	}
 	paramList.push_back(nullptr);
 
-	state std::string allArgs;
+	std::string allArgs;
 	for (int i = 0; i < args.size(); i++) {
 		if (i > 0)
 			allArgs += " ";
 		allArgs += args[i];
 	}
 
-	state std::pair<pid_t, Optional<int>> pidAndReadFD = fork_child(path, paramList);
-	state pid_t pid = pidAndReadFD.first;
-	state Optional<int> readFD = pidAndReadFD.second;
+	std::pair<pid_t, Optional<int>> pidAndReadFD = fork_child(path, paramList);
+	pid_t pid = pidAndReadFD.first;
+	Optional<int> readFD = pidAndReadFD.second;
 	if (pid == -1) {
 		TraceEvent(SevWarnAlways, "SpawnProcessFailure")
 		    .detail("Reason", "Command failed to spawn")
 		    .detail("Cmd", path)
 		    .detail("Args", allArgs);
-		return -1;
+		co_return -1;
 	} else if (pid > 0) {
-		state int status = -1;
-		state double runTime = 0;
-		state Arena arena;
-		state char* outputBuffer = new (arena) char[SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT];
-		state size_t bytesRead = 0;
+		int status = -1;
+		double runTime = 0;
+		Arena arena;
+		char* outputBuffer = new (arena) char[SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT];
+		size_t bytesRead = 0;
 		int flags = fcntl(readFD.get(), F_GETFL, 0);
 		fcntl(readFD.get(), F_SETFL, flags | O_NONBLOCK);
 		while (true) {
@@ -220,10 +222,10 @@ ACTOR Future<int> spawnProcess(std::string path,
 				    .detail("Reason", "Command failed, timeout")
 				    .detail("Cmd", path)
 				    .detail("Args", allArgs);
-				return -1;
+				co_return -1;
 			}
 			int err = waitpid(pid, &status, WNOHANG);
-			loop {
+			while (true) {
 				int bytes =
 				    read(readFD.get(), &outputBuffer[bytesRead], SERVER_KNOBS->MAX_FORKED_PROCESS_OUTPUT - bytesRead);
 				if (bytes < 0 && errno == EAGAIN)
@@ -241,7 +243,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 				    .detail("Cmd", path)
 				    .detail("Args", allArgs)
 				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-				return -1;
+				co_return -1;
 			} else if (err == 0) {
 				// child process has not completed yet
 				if (isSync || g_network->isSimulated()) {
@@ -249,7 +251,7 @@ ACTOR Future<int> spawnProcess(std::string path,
 					threadSleep(0.1);
 				} else {
 					// yield for other actors to run
-					wait(delay(0.1));
+					co_await delay(0.1);
 				}
 				runTime += 0.1;
 			} else {
@@ -261,29 +263,26 @@ ACTOR Future<int> spawnProcess(std::string path,
 					    .detail("Cmd", path)
 					    .detail("Args", allArgs)
 					    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-					return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+					co_return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 				}
 				TraceEvent event("SpawnProcessCommandStatus");
 				setupTraceWithOutput(event, bytesRead, outputBuffer);
 				event.detail("Cmd", path)
 				    .detail("Args", allArgs)
 				    .detail("Errno", WIFEXITED(status) ? WEXITSTATUS(status) : 0);
-				return 0;
+				co_return 0;
 			}
 		}
 	}
-	return -1;
+	co_return -1;
 }
 #endif
 
-ACTOR static Future<int> execHelperImpl(ExecCmdValueString* execArg,
-                                        UID snapUID,
-                                        std::string folder,
-                                        std::string role) {
-	state Standalone<StringRef> uidStr(snapUID.toString());
-	state int err = 0;
-	state Future<int> cmdErr;
-	state double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
+static Future<int> execHelperImpl(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {
+	Standalone<StringRef> uidStr(snapUID.toString());
+	int err = 0;
+	Future<int> cmdErr;
+	double maxWaitTime = SERVER_KNOBS->SNAP_CREATE_MAX_TIMEOUT;
 	if (!g_network->isSimulated()) {
 		// get bin path
 		auto snapBin = execArg->getBinaryPath();
@@ -305,18 +304,18 @@ ACTOR static Future<int> execHelperImpl(ExecCmdValueString* execArg,
 		paramList.push_back("--uid");
 		paramList.push_back(uidStr.toString());
 		cmdErr = spawnProcess(snapBin.toString(), paramList, maxWaitTime, false /*isSync*/, 0);
-		wait(success(cmdErr));
+		co_await success(cmdErr);
 		err = cmdErr.get();
 	} else {
 		// copy the files
-		state std::string folderFrom = folder + "/.";
-		state std::string folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
+		std::string folderFrom = folder + "/.";
+		std::string folderTo = folder + "-snap-" + uidStr.toString() + "-" + role;
 		std::vector<std::string> paramList;
 		std::string mkdirBin = "/bin/mkdir";
 		paramList.push_back(mkdirBin);
 		paramList.push_back(folderTo);
 		cmdErr = spawnProcess(mkdirBin, paramList, maxWaitTime, false /*isSync*/, 10.0);
-		wait(success(cmdErr));
+		co_await success(cmdErr);
 		err = cmdErr.get();
 		if (err == 0) {
 			std::vector<std::string> paramList;
@@ -326,11 +325,11 @@ ACTOR static Future<int> execHelperImpl(ExecCmdValueString* execArg,
 			paramList.push_back(folderFrom);
 			paramList.push_back(folderTo);
 			cmdErr = spawnProcess(cpBin, paramList, maxWaitTime, true /*isSync*/, 1.0);
-			wait(success(cmdErr));
+			co_await success(cmdErr);
 			err = cmdErr.get();
 		}
 	}
-	return err;
+	co_return err;
 }
 
 Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role) {

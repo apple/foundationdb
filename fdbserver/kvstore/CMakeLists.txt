@@ -1,6 +1,6 @@
 set(FDBSERVER_KVSTORE_SRCS
   DiskQueue.actor.cpp
-  FDBExecHelper.actor.cpp
+  FDBExecHelper.cpp
   IKeyValueStore.cpp
   IPager.cpp
   KeyValueStoreCompressTestData.cpp

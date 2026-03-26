@@ -35,7 +35,7 @@
 #include "fdbserver/logsystem/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/core/MasterInterface.h"
 #include "fdbserver/core/ResolverInterface.h"
-#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/core/RestoreCoreUtil.h"
 #include "fdbserver/core/ServerDBInfo.h"
 #include "fdbserver/core/StorageMetrics.actor.h"
 #include "fdbserver/core/WaitFailure.h"

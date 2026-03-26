@@ -62,14 +62,14 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> doBackup(BackupAndRestoreValidationWorkload* self, FileBackupAgent* backupAgent, Database cx) {
+	Future<Void> doBackup(FileBackupAgent* backupAgent, Database cx) {
 		std::string backupContainer = "file://simfdb/backups/";
 		Standalone<VectorRef<KeyRangeRef>> backupRanges;
 
 		// Only backup normal user keys (not system keys)
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
-		TraceEvent("BARV_SubmitBackup").detail("Tag", printable(self->backupTag)).detail("Container", backupContainer);
+		TraceEvent("BARV_SubmitBackup").detail("Tag", printable(backupTag)).detail("Container", backupContainer);
 
 		try {
 			co_await backupAgent->submitBackup(cx,
@@ -77,7 +77,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 			                                   {},
 			                                   deterministicRandom()->randomInt(0, 60),
 			                                   deterministicRandom()->randomInt(0, 100),
-			                                   self->backupTag.toString(),
+			                                   backupTag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ true });
 		} catch (Error& e) {
@@ -87,29 +87,26 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		}
 
 		// Wait for backup to complete
-		TraceEvent("BARV_WaitBackup").detail("Tag", printable(self->backupTag));
-		EBackupState statusValue = co_await backupAgent->waitBackup(cx, self->backupTag.toString(), StopWhenDone::True);
+		TraceEvent("BARV_WaitBackup").detail("Tag", printable(backupTag));
+		EBackupState statusValue = co_await backupAgent->waitBackup(cx, backupTag.toString(), StopWhenDone::True);
 
 		TraceEvent("BARV_BackupComplete")
-		    .detail("Tag", printable(self->backupTag))
+		    .detail("Tag", printable(backupTag))
 		    .detail("Status", BackupAgentBase::getStateText(statusValue));
 	}
 
-	static Future<Void> doRestore(BackupAndRestoreValidationWorkload* self,
-	                              FileBackupAgent* backupAgent,
-	                              Database cx,
-	                              Reference<IBackupContainer> backupContainer) {
+	Future<Void> doRestore(FileBackupAgent* backupAgent, Database cx, Reference<IBackupContainer> backupContainer) {
 		Standalone<VectorRef<KeyRangeRef>> restoreRanges;
 
 		// Restore normal user keys only
 		restoreRanges.push_back_deep(restoreRanges.arena(), normalKeys);
 
-		Standalone<StringRef> restoreTag(self->backupTag.toString() + "_restore");
+		Standalone<StringRef> restoreTag(backupTag.toString() + "_restore");
 
 		TraceEvent("BARV_StartRestore")
 		    .detail("Tag", printable(restoreTag))
 		    .detail("Container", backupContainer->getURL())
-		    .detail("AddPrefix", printable(self->addPrefix));
+		    .detail("AddPrefix", printable(addPrefix));
 
 		// Don't clear keys - we want to keep original data for validation comparison
 		// The restore will put data at the addPrefix location
@@ -123,7 +120,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 		                              WaitForComplete::True,
 		                              ::invalidVersion,
 		                              Verbose::True,
-		                              self->addPrefix,
+		                              addPrefix,
 		                              Key(), // removePrefix
 		                              LockDB{ false },
 		                              UnlockDB::True,
@@ -134,7 +131,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 
 		TraceEvent("BARV_RestoreComplete")
 		    .detail("Tag", printable(restoreTag))
-		    .detail("AddPrefix", printable(self->addPrefix));
+		    .detail("AddPrefix", printable(addPrefix));
 
 		// Wait a bit to ensure all restored data is committed and visible
 		// The restore API returns success before all data is fully flushed to storage servers
@@ -190,7 +187,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 				TraceEvent("BARV_StartBackup", randomID)
 				    .detail("Tag", printable(backupTag))
 				    .detail("RetryCount", retryCount);
-				co_await doBackup(this, &backupAgent, cx);
+				co_await doBackup(&backupAgent, cx);
 
 				// Get backup container info
 				KeyBackedTag keyBackedTag = makeBackupTag(backupTag.toString());
@@ -206,7 +203,7 @@ struct BackupAndRestoreValidationWorkload : TestWorkload {
 				TraceEvent("BARV_StartRestore", randomID)
 				    .detail("Tag", printable(backupTag))
 				    .detail("Container", backupContainer->getURL());
-				co_await doRestore(this, &backupAgent, cx, backupContainer);
+				co_await doRestore(&backupAgent, cx, backupContainer);
 
 				TraceEvent("BARV_Complete", randomID).detail("Tag", printable(backupTag));
 				break; // Success!

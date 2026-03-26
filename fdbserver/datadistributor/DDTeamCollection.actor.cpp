@@ -1816,8 +1816,9 @@ public:
 				    .detail("ZeroHealthy", self->zeroHealthyTeams->get())
 				    .detail("ProcessingUnhealthy", self->processingUnhealthy->get())
 				    .detail("ProcessingPerpetualWiggle", self->processingWiggle->get());
-				co_await (self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange() ||
-				          self->processingWiggle->onChange());
+				co_await race(self->zeroHealthyTeams->onChange(),
+				              self->processingUnhealthy->onChange(),
+				              self->processingWiggle->onChange());
 				waitCount = 0;
 			}
 			co_await delay(SERVER_KNOBS->DD_STALL_CHECK_DELAY,

@@ -1,5 +1,5 @@
 /*
- * RestoreUtil.cpp
+ * RestoreCoreUtil.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,12 +18,7 @@
  * limitations under the License.
  */
 
-// This file implements the functions defined in RestoreUtil.h
-
-#include "fdbserver/core/RestoreUtil.h"
-
-const std::vector<std::string> RestoreRoleStr = { "Invalid", "Controller", "Loader", "Applier" };
-int numRoles = RestoreRoleStr.size();
+#include "fdbserver/core/RestoreCoreUtil.h"
 
 // Similar to debugMutation(), we use debugFRMutation to track mutations for fast restore systems only.
 #if CENABLED(0, NOT_IN_CLEAN)
@@ -46,25 +41,17 @@ bool debugFRMutation(const char* context, Version version, MutationRef const& mu
 		    .detail("MutationType", getTypeString((MutationRef::Type)mutation.type))
 		    .detail("Begin", mutation.param1)
 		    .detail("End", mutation.param2);
-	} else
+	} else {
 		return false;
+	}
 
 	return true;
 }
 #else
-// Default implementation.
 bool debugFRMutation(const char* context, Version version, MutationRef const& mutation) {
 	return false;
 }
 #endif
-
-std::string getRoleStr(RestoreRole role) {
-	if ((int)role >= numRoles || (int)role < 0) {
-		printf("[ERROR] role:%d is out of scope\n", (int)role);
-		return "[Unset]";
-	}
-	return RestoreRoleStr[(int)role];
-}
 
 bool isRangeMutation(MutationRef m) {
 	if (m.type == MutationRef::Type::ClearRange) {

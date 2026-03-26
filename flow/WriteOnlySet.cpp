@@ -1,5 +1,5 @@
 /*
- * WriteOnlySet.actor.cpp
+ * WriteOnlySet.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,6 @@
 #include <chrono>
 #include <random>
 #include <thread>
-#include "flow/actorcompiler.h" // has to be last include
 
 #ifdef ENABLE_SAMPLING
 template <class T, class IndexType, IndexType CAPACITY>
@@ -176,9 +175,9 @@ using TestSet = WriteOnlySet<TestObject, unsigned, 128>;
 using Clock = std::chrono::steady_clock;
 
 // An actor that can join a set of threads in an async way.
-ACTOR Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> threads, std::shared_ptr<TestSet> set) {
-	loop {
-		wait(delay(0.1));
+Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> threads, std::shared_ptr<TestSet> set) {
+	while (true) {
+		co_await delay(0.1);
 		for (unsigned i = 0;;) {
 			if (threads->size() == i) {
 				break;
@@ -197,7 +196,7 @@ ACTOR Future<Void> threadjoiner(std::shared_ptr<std::vector<std::thread>> thread
 		if (threads->empty()) {
 			set->copy();
 			ASSERT(instanceCounter.load() == 0);
-			return Void();
+			co_return;
 		}
 	}
 }
@@ -255,7 +254,7 @@ void writer(std::shared_ptr<TestSet> set, std::chrono::seconds runFor) {
 TEST_CASE("/flow/WriteOnlySet") {
 	if (g_network->isSimulated()) {
 		// This test is not deterministic, so we shouldn't run it in simulation
-		return Void();
+		co_return;
 	}
 	auto set = std::make_shared<TestSet>();
 	auto threads = std::make_shared<std::vector<std::thread>>();
@@ -264,13 +263,13 @@ TEST_CASE("/flow/WriteOnlySet") {
 		threads->emplace_back([set, runFor]() { writer(set, runFor); });
 	}
 	threads->emplace_back([set, runFor]() { testCopier(set, runFor); });
-	wait(threadjoiner(threads, set));
+	co_await threadjoiner(threads, set);
 	TraceEvent("WriteOnlySetTestResult")
 	    .detail("Inserts", numInserts.load())
 	    .detail("Erases", numErase.load())
 	    .detail("Copies", numCopied.load())
 	    .detail("LockedErase", numLockedErase.load());
-	return Void();
+	co_return;
 }
 } // namespace
 #endif
