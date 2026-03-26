@@ -217,6 +217,12 @@ class Ratekeeper {
 	Future<Void> handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf);
 	Future<Void> handleGetSSVersionLagReqs(RatekeeperInterface rkInterf);
 	Future<Void> handleGetRateInfoReqs(RatekeeperInterface rkInterf, Version* recoveryVersion, bool* lastLimited);
+	Future<Void> handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+	                                 bool* recovering,
+	                                 Version* recoveryVersion,
+	                                 std::vector<TLogInterface>* tlogInterfs,
+	                                 std::vector<Future<Void>>* tlogTrackers,
+	                                 Promise<Void>* err);
 
 	void getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRemoteVersion);
 

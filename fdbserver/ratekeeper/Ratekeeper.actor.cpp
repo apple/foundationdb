@@ -412,6 +412,48 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> handleDBInfoChanges(Ratekeeper* self,
+	                                              Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+	                                              bool* recovering,
+	                                              Version* recoveryVersion,
+	                                              std::vector<TLogInterface>* tlogInterfs,
+	                                              std::vector<Future<Void>>* tlogTrackers,
+	                                              Promise<Void>* err) {
+		loop {
+			wait(dbInfo->onChange());
+
+			if (!*recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+				*recovering = true;
+				*recoveryVersion = self->maxVersion;
+				if (*recoveryVersion == 0) {
+					*recoveryVersion = std::numeric_limits<Version>::max();
+				}
+				if (self->version_recovery.contains(*recoveryVersion)) {
+					auto& it = self->version_recovery[*recoveryVersion];
+					double existingEnd = it.second.present() ? it.second.get() : now();
+					double existingDuration = existingEnd - it.first;
+					self->version_recovery[*recoveryVersion] =
+					    std::make_pair(now() - existingDuration, Optional<double>());
+				} else {
+					self->version_recovery[*recoveryVersion] = std::make_pair(now(), Optional<double>());
+				}
+			}
+			if (*recovering && dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+				*recovering = false;
+				self->version_recovery[*recoveryVersion].second = now();
+			}
+
+			if (*tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
+				*tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
+				*tlogTrackers = std::vector<Future<Void>>();
+				for (int i = 0; i < tlogInterfs->size(); i++) {
+					tlogTrackers->push_back(splitError(self->trackTLogQueueInfo((*tlogInterfs)[i]), *err));
+				}
+			}
+			self->remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
+		}
+	}
+
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -477,6 +519,8 @@ public:
 
 		state bool lastLimited = false;
 		self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &recoveryVersion, &lastLimited));
+		self.addActor.send(
+		    self.handleDBInfoChanges(dbInfo, &recovering, &recoveryVersion, &tlogInterfs, &tlogTrackers, &err));
 
 		try {
 			loop choose {
@@ -515,36 +559,6 @@ public:
 					break;
 				}
 				when(wait(err.getFuture())) {}
-				when(wait(dbInfo->onChange())) {
-					if (!recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
-						recovering = true;
-						recoveryVersion = self.maxVersion;
-						if (recoveryVersion == 0) {
-							recoveryVersion = std::numeric_limits<Version>::max();
-						}
-						if (self.version_recovery.contains(recoveryVersion)) {
-							auto& it = self.version_recovery[recoveryVersion];
-							double existingEnd = it.second.present() ? it.second.get() : now();
-							double existingDuration = existingEnd - it.first;
-							self.version_recovery[recoveryVersion] =
-							    std::make_pair(now() - existingDuration, Optional<double>());
-						} else {
-							self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
-						}
-					}
-					if (recovering && dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
-						recovering = false;
-						self.version_recovery[recoveryVersion].second = now();
-					}
-
-					if (tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs()) {
-						tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
-						tlogTrackers = std::vector<Future<Void>>();
-						for (int i = 0; i < tlogInterfs.size(); i++)
-							tlogTrackers.push_back(splitError(self.trackTLogQueueInfo(tlogInterfs[i]), err));
-					}
-					self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
-				}
 				when(wait(collection)) {
 					ASSERT(false);
 					throw internal_error();
@@ -610,6 +624,16 @@ Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
                                                Version* recoveryVersion,
                                                bool* lastLimited) {
 	return RatekeeperImpl::handleGetRateInfoReqs(this, rkInterf, recoveryVersion, lastLimited);
+}
+
+Future<Void> Ratekeeper::handleDBInfoChanges(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                             bool* recovering,
+                                             Version* recoveryVersion,
+                                             std::vector<TLogInterface>* tlogInterfs,
+                                             std::vector<Future<Void>>* tlogTrackers,
+                                             Promise<Void>* err) {
+	return RatekeeperImpl::handleDBInfoChanges(
+	    this, dbInfo, recovering, recoveryVersion, tlogInterfs, tlogTrackers, err);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
