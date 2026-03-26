@@ -1,5 +1,5 @@
 /*
- * AsyncFileNonDurable.actor.h
+ * AsyncFileNonDurable.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,43 +20,37 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILENONDURABLE_ACTOR_G_H)
-#define FLOW_ASYNCFILENONDURABLE_ACTOR_G_H
-#include "fdbrpc/AsyncFileNonDurable.actor.g.h"
-#elif !defined(FLOW_ASYNCFILENONDURABLE_ACTOR_H)
-#define FLOW_ASYNCFILENONDURABLE_ACTOR_H
-
 #include "flow/flow.h"
 #include "flow/IAsyncFile.h"
 #include "flow/ActorCollection.h"
+#include "flow/CoroUtils.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "fdbrpc/RangeMap.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
 #undef min
 
-ACTOR Future<Void> sendOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, TaskPriority taskID);
-ACTOR Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process,
-                                      Promise<Void> promise,
-                                      Error e,
-                                      TaskPriority taskID);
+Future<Void> sendOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, TaskPriority taskID);
+Future<Void> sendErrorOnProcess(ISimulator::ProcessInfo* process, Promise<Void> promise, Error e, TaskPriority taskID);
 
 extern Future<Void> waitShutdownSignal();
 
-ACTOR template <class T>
+template <class T>
 Future<T> sendErrorOnShutdown(Future<T> in, bool assertOnCancel = false) {
 	try {
-		choose {
-			when(wait(waitShutdownSignal())) {
-				throw io_error().asInjectedFault();
+		auto choice = co_await race(waitShutdownSignal(), in);
+		if (choice.index() == 0) {
+			throw io_error().asInjectedFault();
+		} else if (choice.index() == 1) {
+			if constexpr (std::is_same_v<T, Void>) {
+				std::get<1>(std::move(choice));
+				co_return;
+			} else {
+				co_return std::get<1>(std::move(choice));
 			}
-			when(T rep = wait(in)) {
-				return rep;
-			}
+		} else {
+			UNREACHABLE();
 		}
 	} catch (Error& e) {
 		ASSERT(e.code() != error_code_actor_cancelled || !assertOnCancel);
@@ -77,8 +71,8 @@ public:
 		shutdown = doShutdown(this);
 	}
 
-	ACTOR Future<Void> doShutdown(AsyncFileDetachable* self);
-	ACTOR static Future<Reference<IAsyncFile>> open(Future<Reference<IAsyncFile>> wrappedFile);
+	Future<Void> doShutdown(AsyncFileDetachable* self);
+	static Future<Reference<IAsyncFile>> open(Future<Reference<IAsyncFile>> wrappedFile);
 
 	void addref() override { ReferenceCounted<AsyncFileDetachable>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileDetachable>::delref(); }
@@ -189,11 +183,11 @@ public:
 	static std::map<std::string, Future<Void>> filesBeingDeleted;
 
 	// Creates a new AsyncFileNonDurable which wraps the provided IAsyncFile
-	ACTOR static Future<Reference<IAsyncFile>> open(std::string filename,
-	                                                std::string actualFilename,
-	                                                Future<Reference<IAsyncFile>> wrappedFile,
-	                                                Reference<DiskParameters> diskParameters,
-	                                                bool aio);
+	static Future<Reference<IAsyncFile>> open(std::string filename,
+	                                          std::string actualFilename,
+	                                          Future<Reference<IAsyncFile>> wrappedFile,
+	                                          Reference<DiskParameters> diskParameters,
+	                                          bool aio);
 
 	~AsyncFileNonDurable() override {
 		//TraceEvent("AsyncFileNonDurable_Destroy", id).detail("Filename", filename);
@@ -311,66 +305,64 @@ private:
 	}
 
 	// Checks if the file is killed.  If so, then the current sync is completed if running and then an error is thrown
-	ACTOR static Future<Void> checkKilled(AsyncFileNonDurable const* self, std::string context) {
+	static Future<Void> checkKilled(AsyncFileNonDurable const* self, std::string context) {
 		if (self->killed.isSet()) {
 			//TraceEvent("AsyncFileNonDurable_KilledInCheck", self->id).detail("In", context).detail("Filename", self->filename);
-			wait(self->killComplete.getFuture());
+			co_await self->killComplete.getFuture();
 			TraceEvent("AsyncFileNonDurable_KilledFileOperation", self->id)
 			    .detail("In", context)
 			    .detail("Filename", self->filename);
 			CODE_PROBE(true, "AsyncFileNonDurable operation killed", probe::decoration::rare);
 			throw io_error().asInjectedFault();
 		}
-
-		return Void();
 	}
 
 	// Passes along reads straight to the underlying file, waiting for any outstanding changes that could affect the
 	// results
-	ACTOR Future<int> onRead(AsyncFileNonDurable* self, void* data, int length, int64_t offset) {
-		wait(checkKilled(self, "Read"));
+	Future<int> onRead(AsyncFileNonDurable* self, void* data, int length, int64_t offset) {
+		co_await checkKilled(self, "Read");
 		std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length);
-		wait(waitForAll(priorModifications));
-		state Future<int> readFuture = self->file->read(data, length, offset);
-		wait(success(readFuture) || self->killed.getFuture());
+		co_await waitForAll(priorModifications);
+		Future<int> readFuture = self->file->read(data, length, offset);
+		co_await (success(readFuture) || self->killed.getFuture());
 
 		// throws if we were killed
-		wait(checkKilled(self, "ReadEnd"));
+		co_await checkKilled(self, "ReadEnd");
 
 		debugFileCheck("AsyncFileNonDurableRead", self->filename, data, offset, length);
 
 		// if(g_simulator->getCurrentProcess()->rebooting)
 		//TraceEvent("AsyncFileNonDurable_ReadEnd", self->id).detail("Filename", self->filename);
 
-		return readFuture.get();
+		co_return readFuture.get();
 	}
 
-	ACTOR Future<int> read(AsyncFileNonDurable* self, void* data, int length, int64_t offset);
+	Future<int> read(AsyncFileNonDurable* self, void* data, int length, int64_t offset);
 
 	// Delays writes a random amount of time before passing them through to the underlying file.
 	// If a kill interrupts the delay, then the output could be the correct write, part of the write,
 	// or none of the write.  It may also corrupt parts of sectors which have not been written correctly
-	ACTOR Future<Void> write(AsyncFileNonDurable* self,
-	                         Promise<Void> writeStarted,
-	                         Future<Future<Void>> ownFuture,
-	                         void const* data,
-	                         int length,
-	                         int64_t offset) {
-		state Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
-		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator->onMachine(currentProcess));
+	Future<Void> write(AsyncFileNonDurable* self,
+	                   Promise<Void> writeStarted,
+	                   Future<Future<Void>> ownFuture,
+	                   void const* data,
+	                   int length,
+	                   int64_t offset) {
+		Standalone<StringRef> dataCopy(StringRef((uint8_t*)data, length));
+		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
+		TaskPriority currentTaskID = g_network->getCurrentTask();
+		co_await g_simulator->onMachine(currentProcess);
 
-		state double delayDuration =
+		double delayDuration =
 		    g_simulator->speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
 
-		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
+		Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
 		try {
 			//TraceEvent("AsyncFileNonDurable_Write", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
-			wait(checkKilled(self, "Write"));
+			co_await checkKilled(self, "Write");
 
-			Future<Void> writeEnded = wait(ownFuture);
+			Future<Void> writeEnded = co_await ownFuture;
 			std::vector<Future<Void>> priorModifications =
 			    self->getModificationsAndInsert(offset, length, true, writeEnded);
 			self->minSizeAfterPendingModifications = std::max(self->minSizeAfterPendingModifications, offset + length);
@@ -383,7 +375,7 @@ private:
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, length) ||
 				                             self->killed.getFuture());
 
-			wait(waitForAll(priorModifications));
+			co_await waitForAll(priorModifications);
 
 			self->approximateSize = std::max(self->approximateSize, length + offset);
 
@@ -396,12 +388,13 @@ private:
 		//TraceEvent("AsyncFileNonDurable_WriteDoneWithPreviousMods", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
 
 		// Wait a random amount of time or until a sync/kill is issued
-		state bool saveDurable = true;
-		choose {
-			when(wait(delay(delayDuration))) {}
-			when(bool durable = wait(startSyncFuture)) {
-				saveDurable = durable;
-			}
+		bool saveDurable = true;
+		auto choice = co_await race(delay(delayDuration), startSyncFuture);
+		if (choice.index() == 0) {
+		} else if (choice.index() == 1) {
+			saveDurable = std::get<1>(std::move(choice));
+		} else {
+			UNREACHABLE();
 		}
 
 		debugFileCheck("AsyncFileNonDurableWriteAfterWait", self->filename, dataCopy.begin(), offset, length);
@@ -520,35 +513,34 @@ private:
 			writeOffset += pageLength;
 		}
 
-		wait(waitForAll(writeFutures));
+		co_await waitForAll(writeFutures);
 		//TraceEvent("AsyncFileNonDurable_WriteDone", self->id).detail("Delay", delayDuration).detail("Filename", self->filename).detail("WriteLength", length).detail("Offset", offset);
-		return Void();
 	}
 
 	// Delays truncates a random amount of time before passing them through to the underlying file.
 	// If a kill interrupts the delay, then the truncate may or may not be performed
-	ACTOR Future<Void> truncate(AsyncFileNonDurable* self,
-	                            Promise<Void> truncateStarted,
-	                            Future<Future<Void>> ownFuture,
-	                            int64_t size) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator->onMachine(currentProcess));
+	Future<Void> truncate(AsyncFileNonDurable* self,
+	                      Promise<Void> truncateStarted,
+	                      Future<Future<Void>> ownFuture,
+	                      int64_t size) {
+		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
+		TaskPriority currentTaskID = g_network->getCurrentTask();
+		co_await g_simulator->onMachine(currentProcess);
 
-		state double delayDuration =
+		double delayDuration =
 		    g_simulator->speedUpSimulation ? 0.0001 : (deterministicRandom()->random01() * self->maxWriteDelay);
-		state Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
+		Future<bool> startSyncFuture = self->startSyncPromise.getFuture();
 
 		try {
 			//TraceEvent("AsyncFileNonDurable_Truncate", self->id).detail("Delay", delayDuration).detail("Filename", self->filename);
-			wait(checkKilled(self, "Truncate"));
+			co_await checkKilled(self, "Truncate");
 
-			state Future<Void> truncateEnded = wait(ownFuture);
+			Future<Void> truncateEnded = co_await ownFuture;
 
 			// Need to know the size of the file directly before this truncate
 			// takes effect to see what range it modifies.
 			if (!self->minSizeAfterPendingModificationsIsExact) {
-				wait(success(self->size()));
+				co_await success(self->size());
 			}
 			ASSERT(self->minSizeAfterPendingModificationsIsExact);
 			int64_t beginModifiedRange = std::min(size, self->minSizeAfterPendingModifications);
@@ -564,7 +556,7 @@ private:
 			else
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, 0) || self->killed.getFuture());
 
-			wait(waitForAll(priorModifications));
+			co_await waitForAll(priorModifications);
 
 			self->approximateSize = size;
 
@@ -575,43 +567,42 @@ private:
 		}
 
 		// Wait a random amount of time or until a sync/kill is issued
-		state bool saveDurable = true;
-		choose {
-			when(wait(delay(delayDuration))) {}
-			when(bool durable = wait(startSyncFuture)) {
-				saveDurable = durable;
-			}
+		bool saveDurable = true;
+		auto choice = co_await race(delay(delayDuration), startSyncFuture);
+		if (choice.index() == 0) {
+		} else if (choice.index() == 1) {
+			saveDurable = std::get<1>(std::move(choice));
+		} else {
+			UNREACHABLE();
 		}
 
 		if (g_network->check_yield(TaskPriority::DefaultYield)) {
-			wait(delay(0, TaskPriority::DefaultYield));
+			co_await delay(0, TaskPriority::DefaultYield);
 		}
 
 		// If performing a durable truncate, then pass it through to the file.  Otherwise, pass it through with a 1/2
 		// chance
 		if (saveDurable || self->killMode == NO_CORRUPTION || deterministicRandom()->random01() < 0.5)
-			wait(self->file->truncate(size));
+			co_await self->file->truncate(size);
 		else {
 			TraceEvent("AsyncFileNonDurable_DroppedTruncate", self->id).detail("Size", size);
 			CODE_PROBE(true, "AsyncFileNonDurable dropped truncate", probe::decoration::rare);
 		}
-
-		return Void();
 	}
 
 	// Waits for delayed modifications to the file to complete and then syncs the underlying file
 	// If durable is false, then some of the delayed modifications will not be applied or will be
 	// applied incorrectly
-	ACTOR Future<Void> onSync(AsyncFileNonDurable* self, bool durable) {
+	Future<Void> onSync(AsyncFileNonDurable* self, bool durable) {
 		//TraceEvent("AsyncFileNonDurable_ImplSync", self->id).detail("Filename", self->filename).detail("Durable", durable);
 		ASSERT(durable || !self->killed.isSet()); // this file is kill()ed only once
 
 		if (durable) {
 			self->hasBeenSynced = true;
-			wait(waitUntilDiskReady(self->diskParameters, 0, true) || self->killed.getFuture());
+			co_await (waitUntilDiskReady(self->diskParameters, 0, true) || self->killed.getFuture());
 		}
 
-		wait(checkKilled(self, durable ? "Sync" : "Kill"));
+		co_await checkKilled(self, durable ? "Sync" : "Kill");
 
 		if (!durable)
 			self->killed.send(Void());
@@ -643,14 +634,14 @@ private:
 		self->startSyncPromise = Promise<bool>();
 
 		// Writes will be durable in a kill with a 10% probability
-		state bool writeDurable = durable || deterministicRandom()->random01() < 0.1;
+		bool writeDurable = durable || deterministicRandom()->random01() < 0.1;
 		startSyncPromise.send(writeDurable);
 
 		// Wait for outstanding writes to complete
 		if (durable)
-			wait(allModifications);
+			co_await allModifications;
 		else
-			wait(success(errorOr(allModifications)));
+			co_await success(errorOr(allModifications));
 
 		if (!durable) {
 			// Sometimes sync the file if writes were made durably.  Before a file is first synced, it is stored in a
@@ -658,7 +649,7 @@ private:
 			// simulate a failure to fsync the directory storing the file
 			if (self->hasBeenSynced && writeDurable && deterministicRandom()->random01() < 0.5) {
 				CODE_PROBE(true, "AsyncFileNonDurable kill was durable and synced", probe::decoration::rare);
-				wait(success(errorOr(self->file->sync())));
+				co_await success(errorOr(self->file->sync()));
 			}
 
 			// Setting this promise could trigger the deletion of the AsyncFileNonDurable; after this none of its
@@ -668,68 +659,65 @@ private:
 		}
 		// A killed file cannot be allowed to report that it successfully synced
 		else {
-			wait(checkKilled(self, "SyncEnd"));
-			wait(self->file->sync());
+			co_await checkKilled(self, "SyncEnd");
+			co_await self->file->sync();
 			//TraceEvent("AsyncFileNonDurable_ImplSyncEnd", self->id).detail("Filename", self->filename).detail("Durable", durable);
 		}
-
-		return Void();
 	}
 
-	ACTOR Future<Void> sync(AsyncFileNonDurable* self, bool durable) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-		state TaskPriority currentTaskID = g_network->getCurrentTask();
-		wait(g_simulator->onMachine(currentProcess));
+	Future<Void> sync(AsyncFileNonDurable* self, bool durable) {
+		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
+		TaskPriority currentTaskID = g_network->getCurrentTask();
+		co_await g_simulator->onMachine(currentProcess);
 
+		Error err;
 		try {
-			wait(self->onSync(self, durable));
-			wait(g_simulator->onProcess(currentProcess, currentTaskID));
-
-			return Void();
+			co_await self->onSync(self, durable);
+			co_await g_simulator->onProcess(currentProcess, currentTaskID);
+			co_return;
 		} catch (Error& e) {
-			state Error err = e;
-			wait(g_simulator->onProcess(currentProcess, currentTaskID));
-			throw err;
+			err = e;
 		}
+
+		co_await g_simulator->onProcess(currentProcess, currentTaskID);
+		throw err;
 	}
 
 	// Passes along size requests to the underlying file, augmenting with any writes past the end of the file
-	ACTOR static Future<int64_t> onSize(AsyncFileNonDurable const* self) {
+	static Future<int64_t> onSize(AsyncFileNonDurable const* self) {
 		//TraceEvent("AsyncFileNonDurable_Size", self->id).detail("Filename", self->filename);
-		wait(checkKilled(self, "Size"));
-		state Future<int64_t> sizeFuture = self->file->size();
-		wait(success(sizeFuture) || self->killed.getFuture());
+		co_await checkKilled(self, "Size");
+		Future<int64_t> sizeFuture = self->file->size();
+		co_await (success(sizeFuture) || self->killed.getFuture());
 
-		wait(checkKilled(self, "SizeEnd"));
+		co_await checkKilled(self, "SizeEnd");
 
 		// Include any modifications which extend past the end of the file
 		self->approximateSize = self->minSizeAfterPendingModifications =
 		    std::max<int64_t>(sizeFuture.get(), self->minSizeAfterPendingModifications);
 		self->minSizeAfterPendingModificationsIsExact = true;
-		return self->approximateSize;
+		co_return self->approximateSize;
 	}
 
-	ACTOR static Future<int64_t> size(AsyncFileNonDurable const* self) {
-		state ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
-		state TaskPriority currentTaskID = g_network->getCurrentTask();
+	static Future<int64_t> size(AsyncFileNonDurable const* self) {
+		ISimulator::ProcessInfo* currentProcess = g_simulator->getCurrentProcess();
+		TaskPriority currentTaskID = g_network->getCurrentTask();
 
-		wait(g_simulator->onMachine(currentProcess));
+		co_await g_simulator->onMachine(currentProcess);
 
+		Error err;
 		try {
-			state int64_t rep = wait(onSize(self));
-			wait(g_simulator->onProcess(currentProcess, currentTaskID));
-
-			return rep;
+			int64_t rep = co_await onSize(self);
+			co_await g_simulator->onProcess(currentProcess, currentTaskID);
+			co_return rep;
 		} catch (Error& e) {
-			state Error err = e;
-			wait(g_simulator->onProcess(currentProcess, currentTaskID));
-			throw err;
+			err = e;
 		}
+
+		co_await g_simulator->onProcess(currentProcess, currentTaskID);
+		throw err;
 	}
 
 	// Finishes all outstanding actors on an AsyncFileNonDurable and then deletes it
-	ACTOR Future<Void> closeFile(AsyncFileNonDurable* self);
+	Future<Void> closeFile(AsyncFileNonDurable* self);
 };
-
-#include "flow/unactorcompiler.h"
-#endif
