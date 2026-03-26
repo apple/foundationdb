@@ -1,5 +1,5 @@
 /*
- * pubsub.actor.cpp
+ * pubsub.cpp
  *
  * This source file is part of the FoundationDB open source project
  *

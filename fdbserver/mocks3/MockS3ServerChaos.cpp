@@ -1,5 +1,5 @@
 /*
- * MockS3ServerChaos.actor.cpp
+ * MockS3ServerChaos.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
