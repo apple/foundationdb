@@ -1176,8 +1176,7 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 		}
 	}
 
-	while (true) {
-		try {
+	    try {
 			auto res = co_await race(core, csInterf.haltConsistencyScan.getFuture(), actors.getResult());
 			// core or actors.getResult() never return so the only way out is throwing an exception.
 			ASSERT_EQ(res.index(), 1);
@@ -1191,8 +1190,7 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 			resetSimCorruptionCheckOnDeath(memState);
 			TraceEvent("ConsistencyScan_Error", csInterf.id()).errorUnsuppressed(err);
 			throw;
-		}
-	}
+	    }
 }
 
 ///////////////////////////////////////////////////////
