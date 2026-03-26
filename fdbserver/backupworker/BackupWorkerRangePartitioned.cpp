@@ -25,10 +25,11 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tracing.h"
 #include "BackupPartitionMap.h"
+#include "fdbserver/core/BackupRangePartitionedProgress.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/LogSystem.h"
-#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "fdbserver/core/WaitFailure.h"
+#include "fdbserver/logsystem/LogSystemFactory.h"
 #include "flow/CoroUtils.h"
 
 #define SevDebugMemory SevVerbose
@@ -350,6 +351,10 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 	try {
 		addActor.send(checkRemoved(db, req.recruitedEpoch, &self));
 		addActor.send(waitFailureServer(interf.waitFailure.getFuture()));
+
+		if (req.recruitedEpoch == req.backupEpoch && req.routerTag.id == 0) {
+			addActor.send(monitorBackupProgress(&self));
+		}
 
 		while (true) {
 			auto res = co_await race(dbInfoChange, done, error);
@@ -820,27 +825,24 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 	}
 }
 
-Future<Void> setBackupKeys(BackupData* self, std::map<UID, Version> savedLogVersions) {
+Future<Void> setBackupKeys(BackupRangePartitionedData* self, std::map<UID, Version> savedLogVersions) {
 	// TODO akanksha: Implement in next PR.
 	co_return;
 }
 
-// TODO akanksha: Do we need a new class BackupProgress.h for Backup V3???
-Future<Void> monitorBackupProgress(BackupRangePartitionedData* self) {
+Future<Void> monitorBackupRangePartitionedProgress(BackupRangePartitionedData* self) {
 	Future<Void> interval;
 
 	while (true) {
-		interval = delay(SERVER_KNOBS->BACKUP_PROGRESS_SAVE_INTERVAL);
+		interval = delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL / 2.0);
 		while (self->backups.empty() || !self->logSystem.get()) {
 			co_await (self->changedTrigger.onTrigger() || self->logSystem.onChange());
 		}
 
 		// check all workers have started by checking their progress is larger
 		// than the backup's start version.
-		Reference<BackupProgress> progress(new BackupProgress(self->myId, /*infos=*/{}));
-		// TODO akanksha: getBackupProgress for this worker defined in BackupProgress.cpp - based on progress key, fetch
-		// the progress.
-		co_await getBackupProgress(self->cx, self->myId, progress, /*logging=*/false);
+		Reference<BackupRangePartitionedProgress> progress(new BackupRangePartitionedProgress(self->myId));
+		co_await getBackupRangePartitionedProgress(self->cx, self->myId, progress, /*logging=*/false);
 
 		std::map<Tag, Version> tagVersions = progress->getEpochStatus(self->recruitedEpoch);
 		if (tagVersions.size() != self->totalTags) {
@@ -871,7 +873,7 @@ Future<Void> monitorBackupProgress(BackupRangePartitionedData* self) {
 	}
 }
 
-// TODO akanksha: Implement getBackupProgress during Monitoring.
+// TODO akanksha: Implement getBackupRangePartitionedProgress during Monitoring.
 Future<Void> saveProgress(BackupRangePartitionedData* self, Version backupVersion) {
 	Transaction tr(self->cx);
 	Key key = backupRangePartitionedProgressKey(self->myId);
@@ -893,7 +895,7 @@ Future<Void> saveProgress(BackupRangePartitionedData* self, Version backupVersio
 			}
 
 			WorkerBackupStatus status(self->backupEpoch, backupVersion, self->tag, self->totalTags);
-			tr.set(key, backupProgressValue(status));
+			tr.set(key, backupRangePartitionedProgressValue(status));
 			tr.addReadConflictRange(singleKeyRange(key));
 			co_await tr.commit();
 			co_return;
