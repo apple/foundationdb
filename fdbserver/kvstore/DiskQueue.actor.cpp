@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/core/IDiskQueue.h"
+#include "fdbserver/kvstore/IDiskQueue.h"
 #include "flow/IAsyncFile.h"
 #include "fdbserver/core/Knobs.h"
 #include "fdbrpc/simulator.h"

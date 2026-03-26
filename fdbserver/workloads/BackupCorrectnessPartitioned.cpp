@@ -28,7 +28,7 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/tester/TestEncryptionUtils.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 #include "flow/IRandom.h"
 
 // A workload for

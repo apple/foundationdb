@@ -26,7 +26,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
-#include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "MemoryKeyValueStore.h"
 
 // an enumeration of apis being tested
 enum TransactionType { NATIVE, READ_YOUR_WRITES, THREAD_SAFE, MULTI_VERSION };

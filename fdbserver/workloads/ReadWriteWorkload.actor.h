@@ -21,7 +21,7 @@
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H)
 #define FDBSERVER_READWRITEWORKLOAD_ACTOR_G_H
-#include "fdbserver/workloads/ReadWriteWorkload.actor.g.h"
+#include "ReadWriteWorkload.actor.g.h"
 #elif !defined(FDBSERVER_READWRITEWORKLOAD_ACTOR_H)
 #define FDBSERVER_READWRITEWORKLOAD_ACTOR_H
 

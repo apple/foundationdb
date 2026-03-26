@@ -20,7 +20,7 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/TSSMappingUtil.h"
+#include "fdbserver/core/TSSMappingUtil.h"
 Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
                                std::map<UID, StorageServerInterface>* tssMapping) {
 	KeyBackedMap<UID, UID> tssMapDB = KeyBackedMap<UID, UID>(tssMappingKeys.begin);
