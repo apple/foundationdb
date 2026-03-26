@@ -3441,10 +3441,6 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	if (key == metadataVersionKey) {
 		++trState->cx->transactionMetadataVersionReads;
 		if (!ver.isReady() || trState->metadataVersion.isSet()) {
-			// GRV may have already failed (e.g. rate limit); don't return an unresolvable promise.
-			if (ver.isReady() && ver.isError()) {
-				return ver.getError();
-			}
 			return trState->metadataVersion.getFuture();
 		} else {
 			if (ver.isError()) {
