@@ -334,6 +334,15 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> handleGetSSVersionLagReqs(Ratekeeper* self, RatekeeperInterface rkInterf) {
+		loop {
+			GetSSVersionLagRequest req = waitNext(rkInterf.getSSVersionLag.getFuture());
+			GetSSVersionLagReply reply;
+			self->getSSVersionLag(reply.maxPrimarySSVersion, reply.maxRemoteSSVersion);
+			req.reply.send(reply);
+		}
+	}
+
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -362,6 +371,7 @@ public:
 
 		self.addActor.send(self.refreshStorageServerCommitCosts());
 		self.addActor.send(self.handleReportCommitCostEstimationReqs(rkInterf));
+		self.addActor.send(self.handleGetSSVersionLagReqs(rkInterf));
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
@@ -497,11 +507,6 @@ public:
 					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 					break;
 				}
-				when(GetSSVersionLagRequest req = waitNext(rkInterf.getSSVersionLag.getFuture())) {
-					GetSSVersionLagReply reply;
-					self.getSSVersionLag(reply.maxPrimarySSVersion, reply.maxRemoteSSVersion);
-					req.reply.send(reply);
-				}
 				when(wait(err.getFuture())) {}
 				when(wait(dbInfo->onChange())) {
 					if (!recovering && dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -588,6 +593,10 @@ Future<Void> Ratekeeper::monitorHotShards(Reference<AsyncVar<ServerDBInfo> const
 
 Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf) {
 	return RatekeeperImpl::handleReportCommitCostEstimationReqs(this, rkInterf);
+}
+
+Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf) {
+	return RatekeeperImpl::handleGetSSVersionLagReqs(this, rkInterf);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
