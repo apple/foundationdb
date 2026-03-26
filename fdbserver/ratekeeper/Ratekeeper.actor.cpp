@@ -343,6 +343,75 @@ public:
 		}
 	}
 
+	ACTOR static Future<Void> handleGetRateInfoReqs(Ratekeeper* self,
+	                                                RatekeeperInterface rkInterf,
+	                                                Version* recoveryVersion,
+	                                                bool* lastLimited) {
+		loop {
+			GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture());
+			GetRateInfoReply reply;
+
+			auto& p = self->grvProxyInfo[req.requesterID];
+			//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
+			if (p.totalTransactions > 0) {
+				self->smoothReleasedTransactions.addDelta(req.totalReleasedTransactions - p.totalTransactions);
+
+				for (auto const& [tag, count] : req.throttledTagCounts) {
+					self->tagThrottler->addRequests(tag, count);
+				}
+			}
+			if (p.batchTransactions > 0) {
+				self->smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions - p.batchTransactions);
+			}
+
+			p.totalTransactions = req.totalReleasedTransactions;
+			p.batchTransactions = req.batchReleasedTransactions;
+			p.version = req.version;
+			self->maxVersion = std::max(self->maxVersion, req.version);
+
+			if (*recoveryVersion == std::numeric_limits<Version>::max() &&
+			    self->version_recovery.contains(*recoveryVersion)) {
+				*recoveryVersion = self->maxVersion;
+				self->version_recovery[*recoveryVersion] = self->version_recovery[std::numeric_limits<Version>::max()];
+				self->version_recovery.erase(std::numeric_limits<Version>::max());
+			}
+
+			p.lastUpdateTime = now();
+
+			reply.transactionRate = self->normalLimits.tpsLimit / self->grvProxyInfo.size();
+			reply.batchTransactionRate = self->batchLimits.tpsLimit / self->grvProxyInfo.size();
+			reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
+
+			if (p.lastThrottledTagChangeId != self->tagThrottler->getThrottledTagChangeId() ||
+			    now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
+				p.lastThrottledTagChangeId = self->tagThrottler->getThrottledTagChangeId();
+				p.lastTagPushTime = now();
+
+				bool returningTagsToProxy{ false };
+				if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
+					auto proxyThrottledTags = self->tagThrottler->getProxyRates(self->grvProxyInfo.size());
+					if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+						returningTagsToProxy = proxyThrottledTags.size() > 0;
+						reply.proxyThrottledTags = std::move(proxyThrottledTags);
+					}
+				} else {
+					auto clientThrottledTags = self->tagThrottler->getClientRates();
+					if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+						returningTagsToProxy = clientThrottledTags.size() > 0;
+						reply.clientThrottledTags = std::move(clientThrottledTags);
+					}
+				}
+				CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
+			}
+
+			reply.healthMetrics.update(self->healthMetrics, true, req.detailed);
+			reply.healthMetrics.tpsLimit = self->normalLimits.tpsLimit;
+			reply.healthMetrics.batchLimited = *lastLimited;
+
+			req.reply.send(reply);
+		}
+	}
+
 	ACTOR static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 		state ActorOwningSelfRef<Ratekeeper> pSelf(
 		    new Ratekeeper(rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True)));
@@ -406,8 +475,10 @@ public:
 			self.version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
 		}
 
+		state bool lastLimited = false;
+		self.addActor.send(self.handleGetRateInfoReqs(rkInterf, &recoveryVersion, &lastLimited));
+
 		try {
-			state bool lastLimited = false;
 			loop choose {
 				when(wait(timeout)) {
 					double actualTps = self.smoothReleasedTransactions.smoothRate();
@@ -437,70 +508,6 @@ public:
 							++p;
 					}
 					timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
-				}
-				when(GetRateInfoRequest req = waitNext(rkInterf.getRateInfo.getFuture())) {
-					GetRateInfoReply reply;
-
-					auto& p = self.grvProxyInfo[req.requesterID];
-					//TraceEvent("RKMPU", req.requesterID).detail("TRT", req.totalReleasedTransactions).detail("Last", p.totalTransactions).detail("Delta", req.totalReleasedTransactions - p.totalTransactions);
-					if (p.totalTransactions > 0) {
-						self.smoothReleasedTransactions.addDelta(req.totalReleasedTransactions - p.totalTransactions);
-
-						for (auto const& [tag, count] : req.throttledTagCounts) {
-							self.tagThrottler->addRequests(tag, count);
-						}
-					}
-					if (p.batchTransactions > 0) {
-						self.smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions -
-						                                              p.batchTransactions);
-					}
-
-					p.totalTransactions = req.totalReleasedTransactions;
-					p.batchTransactions = req.batchReleasedTransactions;
-					p.version = req.version;
-					self.maxVersion = std::max(self.maxVersion, req.version);
-
-					if (recoveryVersion == std::numeric_limits<Version>::max() &&
-					    self.version_recovery.contains(recoveryVersion)) {
-						recoveryVersion = self.maxVersion;
-						self.version_recovery[recoveryVersion] =
-						    self.version_recovery[std::numeric_limits<Version>::max()];
-						self.version_recovery.erase(std::numeric_limits<Version>::max());
-					}
-
-					p.lastUpdateTime = now();
-
-					reply.transactionRate = self.normalLimits.tpsLimit / self.grvProxyInfo.size();
-					reply.batchTransactionRate = self.batchLimits.tpsLimit / self.grvProxyInfo.size();
-					reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
-
-					if (p.lastThrottledTagChangeId != self.tagThrottler->getThrottledTagChangeId() ||
-					    now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
-						p.lastThrottledTagChangeId = self.tagThrottler->getThrottledTagChangeId();
-						p.lastTagPushTime = now();
-
-						bool returningTagsToProxy{ false };
-						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-							auto proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
-							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-								returningTagsToProxy = proxyThrottledTags.size() > 0;
-								reply.proxyThrottledTags = std::move(proxyThrottledTags);
-							}
-						} else {
-							auto clientThrottledTags = self.tagThrottler->getClientRates();
-							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-								returningTagsToProxy = clientThrottledTags.size() > 0;
-								reply.clientThrottledTags = std::move(clientThrottledTags);
-							}
-						}
-						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
-					}
-
-					reply.healthMetrics.update(self.healthMetrics, true, req.detailed);
-					reply.healthMetrics.tpsLimit = self.normalLimits.tpsLimit;
-					reply.healthMetrics.batchLimited = lastLimited;
-
-					req.reply.send(reply);
 				}
 				when(HaltRatekeeperRequest req = waitNext(rkInterf.haltRatekeeper.getFuture())) {
 					req.reply.send(Void());
@@ -597,6 +604,12 @@ Future<Void> Ratekeeper::handleReportCommitCostEstimationReqs(RatekeeperInterfac
 
 Future<Void> Ratekeeper::handleGetSSVersionLagReqs(RatekeeperInterface rkInterf) {
 	return RatekeeperImpl::handleGetSSVersionLagReqs(this, rkInterf);
+}
+
+Future<Void> Ratekeeper::handleGetRateInfoReqs(RatekeeperInterface rkInterf,
+                                               Version* recoveryVersion,
+                                               bool* lastLimited) {
+	return RatekeeperImpl::handleGetRateInfoReqs(this, rkInterf, recoveryVersion, lastLimited);
 }
 
 Future<Void> Ratekeeper::run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {

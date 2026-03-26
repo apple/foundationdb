@@ -216,6 +216,7 @@ class Ratekeeper {
 	Future<Void> monitorHotShards(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 	Future<Void> handleReportCommitCostEstimationReqs(RatekeeperInterface rkInterf);
 	Future<Void> handleGetSSVersionLagReqs(RatekeeperInterface rkInterf);
+	Future<Void> handleGetRateInfoReqs(RatekeeperInterface rkInterf, Version* recoveryVersion, bool* lastLimited);
 
 	void getSSVersionLag(Version& maxSSPrimaryVersion, Version& maxSSRemoteVersion);
 
