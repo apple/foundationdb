@@ -1,5 +1,5 @@
 /*
- * RestoreUtil.h
+ * RestoreCoreUtil.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,30 +18,13 @@
  * limitations under the License.
  */
 
-// This file defines the commonly used data structure and functions
-// that are used by both RestoreWorker and RestoreRoles(Controller, Loader, and Applier)
-
-#ifndef FDBSERVER_RESTOREUTIL_H
-#define FDBSERVER_RESTOREUTIL_H
+#ifndef FDBSERVER_RESTORECOREUTIL_H
+#define FDBSERVER_RESTORECOREUTIL_H
 
 #pragma once
 
-#include "fdbclient/Tuple.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/RestoreInterface.h"
 #include "flow/flow.h"
-#include "fdbrpc/TimedRequest.h"
-#include "fdbrpc/fdbrpc.h"
-#include "flow/IAsyncFile.h"
-#include "fdbrpc/Stats.h"
-#include <cstdint>
-#include <cstdarg>
-
-#define SevFRMutationInfo SevVerbose
-// #define SevFRMutationInfo SevInfo
-
-#define SevFRDebugInfo SevVerbose
-// #define SevFRDebugInfo SevInfo
 
 struct VersionedMutationSerialized {
 	MutationRef mutation;
@@ -80,34 +63,7 @@ using LogMessageVersionVec = Standalone<VectorRef<LogMessageVersion>>;
 using VersionedMutationsVec = Standalone<VectorRef<VersionedMutationSerialized>>;
 using SampledMutationsVec = Standalone<VectorRef<SampledMutation>>;
 
-enum class RestoreRole { Invalid = 0, Controller = 1, Loader, Applier };
-std::string getRoleStr(RestoreRole role);
-extern const std::vector<std::string> RestoreRoleStr;
-extern int numRoles;
-
-std::string getHexString(StringRef input);
-
 bool debugFRMutation(const char* context, Version version, MutationRef const& mutation);
-
-struct RestoreSimpleRequest : TimedRequest {
-	constexpr static FileIdentifier file_identifier = 16448937;
-
-	ReplyPromise<RestoreCommonReply> reply;
-
-	RestoreSimpleRequest() = default;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
-	}
-
-	std::string toString() const {
-		std::stringstream ss;
-		ss << "RestoreSimpleRequest";
-		return ss.str();
-	}
-};
-
 bool isRangeMutation(MutationRef m);
 
-#endif // FDBSERVER_RESTOREUTIL_H
+#endif

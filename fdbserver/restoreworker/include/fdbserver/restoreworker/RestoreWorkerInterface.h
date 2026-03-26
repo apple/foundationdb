@@ -33,7 +33,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/core/CoordinationInterface.h"
 #include "fdbserver/core/Knobs.h"
-#include "fdbserver/core/RestoreUtil.h"
+#include "fdbserver/restoreworker/RestoreUtil.h"
 
 class RestoreConfigFR;
 
@@ -701,8 +701,6 @@ struct RestoreUpdateRateRequest : TimedRequest {
 		return ss.str();
 	}
 };
-
-std::string getRoleStr(RestoreRole role);
 
 ////--- Interface functions
 Future<Void> _restoreWorker(Database cx, LocalityData locality);
