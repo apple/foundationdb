@@ -22,7 +22,7 @@
 #include "fdbclient/BulkLoading.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyRangeMap.h"
-#include "fdbclient/S3Client.actor.h"
+#include "fdbclient/S3Client.h"
 #include "fdbserver/core/BulkDumpUtil.h"
 #include "fdbserver/core/BulkLoadUtil.actor.h"
 #include "fdbserver/core/Knobs.h"

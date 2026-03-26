@@ -1,5 +1,5 @@
 /*
- * S3Client.actor.h
+ * S3Client.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,17 +20,10 @@
 
 #pragma once
 
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_S3CLIENT_ACTOR_G_H)
-#define FDBCLIENT_S3CLIENT_ACTOR_G_H
-#include "fdbclient/S3Client.actor.g.h"
-#elif !defined(FDBCLIENT_S3CLIENT_ACTOR_H)
-#define FDBCLIENT_S3CLIENT_ACTOR_H
-
 #include <string>
 #include "fdbclient/S3BlobStore.h"
 #include "fdbclient/BulkDumping.h"
 #include "flow/Error.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 // FDB S3 Client. Includes copying files and directories to and from s3.
 // Uses the S3BlobStoreEndpoint to interact with s3. The s3url is of the form
@@ -81,28 +74,28 @@ const std::string BLOBSTORE_PREFIX = "blobstore://";
 // dirpath: Local directory path to copy from
 // s3url: S3 URL to copy to (must include bucket parameter)
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> copyUpDirectory(std::string dirpath, std::string s3url);
+Future<Void> copyUpDirectory(std::string dirpath, std::string s3url);
 
 // Copy filepath to bucket at resource in s3.
 // Uses multipart upload for large files.
 // filepath: Local file path to copy from
 // s3url: S3 URL to copy to (must include bucket parameter)
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> copyUpFile(std::string filepath, std::string s3url);
+Future<Void> copyUpFile(std::string filepath, std::string s3url);
 
 // Copy the file from s3 down to the local filesystem.
 // Overwrites existing file. Uses multipart download for large files.
 // s3url: S3 URL to copy from (must include bucket parameter)
 // filepath: Local file path to copy to
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> copyDownFile(std::string s3url, std::string filepath);
+Future<Void> copyDownFile(std::string s3url, std::string filepath);
 
 // Copy down the directory content from s3 to the local filesystem.
 // Recursively copies all files and subdirectories.
 // s3url: S3 URL to copy from (must include bucket parameter)
 // dirpath: Local directory path to copy to
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath);
+Future<Void> copyDownDirectory(std::string s3url, std::string dirpath);
 
 // Upload the source file set after clearing any existing files at the destination.
 // Used for bulk operations like backup and restore.
@@ -110,27 +103,27 @@ ACTOR Future<Void> copyDownDirectory(std::string s3url, std::string dirpath);
 // sourceFileSet: Source file set to copy
 // destinationFileSet: Destination file set to create
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> copyUpBulkDumpFileSet(std::string s3url,
-                                         BulkLoadFileSet sourceFileSet,
-                                         BulkLoadFileSet destinationFileSet);
+Future<Void> copyUpBulkDumpFileSet(std::string s3url,
+                                   BulkLoadFileSet sourceFileSet,
+                                   BulkLoadFileSet destinationFileSet);
 
 // Delete the file or directory at s3url -- recursively.
 // s3url: S3 URL to delete (must include bucket parameter)
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> deleteResource(std::string s3url);
+Future<Void> deleteResource(std::string s3url);
 
 // Calculate the xxhash64 checksum of a file.
 // Used for verifying data integrity during uploads and downloads.
 // file: File handle to calculate checksum for
 // size: Size of the file in bytes, or -1 to determine automatically
-// Returns a Future that completes with the hex string representation of the checksum
-ACTOR Future<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
+// Returns an AsyncResult that completes with the hex string representation of the checksum
+AsyncResult<std::string> calculateFileChecksum(Reference<IAsyncFile> file, int64_t size = -1);
 
 // List files and directories at the given S3 URL
 // s3url: S3 URL to list (must include bucket parameter)
 // maxDepth: Maximum depth to recurse (default: 1)
 // Returns a Future that completes when the operation is done
-ACTOR Future<Void> listFiles(std::string s3url, int maxDepth = 1);
+Future<Void> listFiles(std::string s3url, int maxDepth = 1);
 
 // Get the endpoint for the given s3url.
 // Populates parameters and resource with parse of s3url.
@@ -141,6 +134,3 @@ ACTOR Future<Void> listFiles(std::string s3url, int maxDepth = 1);
 Reference<S3BlobStoreEndpoint> getEndpoint(const std::string& s3url,
                                            std::string& resource,
                                            S3BlobStoreEndpoint::ParametersT& parameters);
-
-#include "flow/unactorcompiler.h"
-#endif
