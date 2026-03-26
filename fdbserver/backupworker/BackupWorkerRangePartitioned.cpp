@@ -765,8 +765,29 @@ Future<Void> saveMutationsToFile(BackupRangePartitionedData* self, Version lastV
 	}
 }
 
+static Future<Void> updateLogBytesWritten(BackupRangePartitionedData* self,
+                                          std::vector<UID> backupUids,
+                                          std::vector<Reference<IBackupFile>> logFiles) {
+	// TODO akanksha: Implement in next PR.
+	co_return;
+}
+
+static Future<bool> shouldBackupWorkerExitEarly(BackupRangePartitionedData* self) {
+	// TODO akanksha: Implement in next PR.
+	co_return true;
+}
+
+static Future<Void> monitorBackupStartedKeyChanges(BackupRangePartitionedData* self) {
+	// TODO akanksha: Implement in next PR.
+	co_return;
+}
+
 Future<Void> setBackupKeys(BackupRangePartitionedData* self, std::map<UID, Version> savedLogVersions) {
 	// TODO akanksha: Implement in next PR.
+	co_return;
+}
+
+static Future<Void> monitorWorkerPause(BackupRangePartitionedData* self) {
 	co_return;
 }
 
@@ -813,7 +834,6 @@ Future<Void> monitorBackupRangePartitionedProgress(BackupRangePartitionedData* s
 	}
 }
 
-// TODO akanksha: Implement getBackupRangePartitionedProgress during Monitoring.
 Future<Void> saveProgress(BackupRangePartitionedData* self, Version backupVersion) {
 	Transaction tr(self->cx);
 	Key key = backupRangePartitionedProgressKey(self->myId);
@@ -928,6 +948,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> error = actorCollection(addActor.getFuture());
 	Future<Void> dbInfoChange = Void();
+	Future<Void> pull;
 	Future<Void> done;
 	Error err;
 
@@ -947,11 +968,33 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 			addActor.send(monitorBackupRangePartitionedProgress(&self));
 		}
 
+		// If the worker is on an old epoch and all backups starts a version >= the endVersion
+		bool exitEarly = co_await shouldBackupWorkerExitEarly(&self);
+		TraceEvent("BWRangePartitionedExitEarly", self.myId).detail("ExitEarly", exitEarly);
+		if (!exitEarly) {
+			addActor.send(monitorBackupStartedKeyChanges(&self));
+		}
+
+		pull = exitEarly ? Void() : pullAsyncData(&self);
+		addActor.send(pull);
+		done = exitEarly ? Void() : uploadData(&self);
+
 		while (true) {
 			auto res = co_await race(dbInfoChange, done, error);
 			if (res.index() == 0) {
 				dbInfoChange = db->onChange();
-				[[maybe_unused]] Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+				Reference<ILogSystem> ls = makeLogSystemFromServerDBInfo(self.myId, db->get(), true);
+
+				if (ls.isValid()) {
+					self.logSystem.set(ls);
+					self.oldestBackupEpoch = std::max(self.oldestBackupEpoch, ls->getOldestBackupEpoch());
+					TraceEvent("BWRangePartitionedLogSystemUpdate", self.myId)
+					    .detail("Tag", self.tag.toString())
+					    .detail("TagLocality", self.tag.locality)
+					    .detail("OldestEpoch", self.oldestBackupEpoch);
+				} else {
+					TraceEvent("BWRangePartitionedNoLogSystem", self.myId);
+				}
 			} else if (res.index() == 1) {
 				TraceEvent("BWRangePartitionedDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
@@ -969,6 +1012,7 @@ Future<Void> backupWorkerRangePartitioned(BackupInterface interf,
 	}
 
 	if (err.code() == error_code_worker_removed) {
+		pull = Void(); // cancels pulling
 		try {
 			co_await done;
 		} catch (Error& shutdownErr) {
