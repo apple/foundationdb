@@ -1,5 +1,5 @@
 /*
- * ConsistencyScan.actor.cpp
+ * ConsistencyScan.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,7 @@
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbclient/json_spirit/json_spirit_writer_options.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
-#include "fdbserver/consistencyscan/ConsistencyScan.actor.h"
+#include "fdbserver/consistencyscan/ConsistencyScan.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
@@ -1176,21 +1176,21 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 		}
 	}
 
-	    try {
-			auto res = co_await race(core, csInterf.haltConsistencyScan.getFuture(), actors.getResult());
-			// core or actors.getResult() never return so the only way out is throwing an exception.
-			ASSERT_EQ(res.index(), 1);
-			HaltConsistencyScanRequest req = std::get<1>(std::move(res));
+	try {
+		auto res = co_await race(core, csInterf.haltConsistencyScan.getFuture(), actors.getResult());
+		// core or actors.getResult() never return so the only way out is throwing an exception.
+		ASSERT_EQ(res.index(), 1);
+		HaltConsistencyScanRequest req = std::get<1>(std::move(res));
 
-			resetSimCorruptionCheckOnDeath(memState);
-			req.reply.send(Void());
-			core = Void();
-			TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
-		} catch (Error& err) {
-			resetSimCorruptionCheckOnDeath(memState);
-			TraceEvent("ConsistencyScan_Error", csInterf.id()).errorUnsuppressed(err);
-			throw;
-	    }
+		resetSimCorruptionCheckOnDeath(memState);
+		req.reply.send(Void());
+		core = Void();
+		TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
+	} catch (Error& err) {
+		resetSimCorruptionCheckOnDeath(memState);
+		TraceEvent("ConsistencyScan_Error", csInterf.id()).errorUnsuppressed(err);
+		throw;
+	}
 }
 
 ///////////////////////////////////////////////////////

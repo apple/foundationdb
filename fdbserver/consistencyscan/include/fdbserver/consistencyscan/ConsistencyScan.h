@@ -1,5 +1,5 @@
 /*
- * ConsistencyScan.actor.h
+ * ConsistencyScan.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,19 +19,10 @@
  */
 
 #pragma once
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CONSISTENCYSCAN_ACTOR_G_H)
-#define FDBSERVER_CONSISTENCYSCAN_ACTOR_G_H
-#include "fdbserver/consistencyscan/ConsistencyScan.actor.g.h"
-#elif !defined(FDBSERVER_CONSISTENCYSCAN_ACTOR_H)
-#define FDBSERVER_CONSISTENCYSCAN_ACTOR_H
 
 #include "fdbclient/ConsistencyScanInterface.actor.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct ServerDBInfo;
 
 Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
-
-#include "flow/unactorcompiler.h"
-#endif
