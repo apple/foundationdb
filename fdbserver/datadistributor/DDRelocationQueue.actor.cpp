@@ -29,7 +29,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/datadistributor/DataDistribution.h"
 #include "fdbserver/core/Knobs.h"
@@ -2655,7 +2655,7 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 		co_await delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 		try {
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
-				co_await store(skipCurrentLoop, getSkipRebalanceValue(self->txnProcessor, readRebalance));
+				skipCurrentLoop = co_await getSkipRebalanceValue(self->txnProcessor, readRebalance);
 				lastRead = now();
 			}
 
@@ -2708,9 +2708,9 @@ Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, DataMovem
 			// clang-format off
 			if (sourceTeam.isValid() && destTeam.isValid()) {
 				if (readRebalance) {
-					co_await store(moved,self->rebalanceReadLoad( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent));
+					moved = co_await self->rebalanceReadLoad( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent);
 				} else {
-					co_await store(moved,self->rebalanceTeams( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent));
+					moved = co_await self->rebalanceTeams( reason, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent);
 				}
 			}
 			// clang-format on

@@ -1,5 +1,5 @@
 /*
- * ClusterController.actor.h
+ * ClusterController.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,6 @@
  * limitations under the License.
  */
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
-// version.
-#if defined(NO_INTELLISENSE) && !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_G_H)
-#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_G_H
-#include "ClusterController.actor.g.h"
-#elif !defined(FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_H)
-#define FDBSERVER_CLUSTERCONTROLLER_CLUSTERCONTROLLER_ACTOR_H
 #pragma once
 
 #include <utility>
@@ -36,10 +29,9 @@
 #include "fdbserver/core/Knobs.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbrpc/Locality.h"
+#include "flow/CoroUtils.h"
 #include "flow/NetworkAddress.h"
 #include "flow/SystemMonitor.h"
-
-#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
@@ -98,6 +90,14 @@ struct WorkerFitnessInfo {
 	WorkerFitnessInfo(WorkerDetails worker, ProcessClass::Fitness fitness, int used)
 	  : worker(worker), fitness(fitness), used(used) {}
 };
+
+inline bool hasWorkerIssue(const Standalone<VectorRef<StringRef>>& issues, StringRef issue) {
+	return std::find(issues.begin(), issues.end(), issue) != issues.end();
+}
+
+inline bool excludesFromTLogRecruitmentDueToLowDisk(const Standalone<VectorRef<StringRef>>& issues) {
+	return hasWorkerIssue(issues, "exclude_from_tlog_recruitment_low_disk"_sr);
+}
 
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	RecruitFromConfigurationRequest req;
@@ -197,9 +197,9 @@ public:
 			clientInfo->set(newClientInfo);
 		}
 
-		ACTOR static Future<Void> countClients(DBInfo* self) {
-			loop {
-				wait(delay(SERVER_KNOBS->CC_PRUNE_CLIENTS_INTERVAL));
+		static Future<Void> countClients(DBInfo* self) {
+			while (true) {
+				co_await delay(SERVER_KNOBS->CC_PRUNE_CLIENTS_INTERVAL);
 
 				self->clientCount = 0;
 				for (auto itr = self->clientStatus.begin(); itr != self->clientStatus.end();) {
@@ -226,36 +226,40 @@ public:
 		std::map<Optional<Standalone<StringRef>>, Optional<ProcessData>> delta;
 		AsyncVar<bool> anyDelta;
 
-		ACTOR static Future<Void> update(UpdateWorkerList* self, Database db) {
+		static Future<Void> update(UpdateWorkerList* self, Database db) {
 			// The Database we are using is based on worker registrations to this cluster controller, which come only
 			// from master servers that we started, so it shouldn't be possible for multiple cluster controllers to
 			// fight.
-			state Transaction tr(db);
-			loop {
+			Transaction tr(db);
+			while (true) {
+				Error err;
 				try {
 					tr.clear(workerListKeys);
-					wait(tr.commit());
+					co_await tr.commit();
 					break;
 				} catch (Error& e) {
-					wait(tr.onError(e));
+					err = e;
 				}
+				co_await tr.onError(err);
 			}
 
-			loop {
+			while (true) {
 				tr.reset();
 
 				// Wait for some changes
-				while (!self->anyDelta.get())
-					wait(self->anyDelta.onChange());
+				while (!self->anyDelta.get()) {
+					co_await self->anyDelta.onChange();
+				}
 				self->anyDelta.set(false);
 
-				state std::map<Optional<Standalone<StringRef>>, Optional<ProcessData>> delta;
+				std::map<Optional<Standalone<StringRef>>, Optional<ProcessData>> delta;
 				delta.swap(self->delta);
 
 				TraceEvent("UpdateWorkerList").detail("DeltaCount", delta.size());
 
 				// Do a transaction to write the changes
-				loop {
+				while (true) {
+					Error err;
 					try {
 						for (auto w = delta.begin(); w != delta.end(); ++w) {
 							if (w->second.present()) {
@@ -263,11 +267,12 @@ public:
 							} else
 								tr.clear(workerListKeyFor(w->first.get()));
 						}
-						wait(tr.commit());
+						co_await tr.commit();
 						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						err = e;
 					}
+					co_await tr.onError(err);
 				}
 			}
 		}
@@ -873,6 +878,16 @@ public:
 				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
 				continue;
 			}
+			if (excludesFromTLogRecruitmentDueToLowDisk(worker_info.issues)) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "simple",
+				                     "Worker is excluded from TLog recruitment due to low disk",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
+				continue;
+			}
 
 			// This worker is a candidate for TLog recruitment.
 			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
@@ -1023,6 +1038,16 @@ public:
 			if (!dcIds.empty() && !dcIds.contains(worker_details.interf.locality.dcId())) {
 				logWorkerUnavailable(
 				    SevDebug, id, "deprecated", "Worker is not in the target DC", worker_details, fitness, dcIds);
+				continue;
+			}
+			if (excludesFromTLogRecruitmentDueToLowDisk(worker_info.issues)) {
+				logWorkerUnavailable(SevInfo,
+				                     id,
+				                     "deprecated",
+				                     "Worker is excluded from TLog recruitment due to low disk",
+				                     worker_details,
+				                     fitness,
+				                     dcIds);
 				continue;
 			}
 
@@ -1329,7 +1354,7 @@ public:
 	                                                      bool& satelliteFallback,
 	                                                      bool checkStable = false) {
 		int startDC = 0;
-		loop {
+		while (true) {
 			if (startDC > 0 && startDC >= region.satellites.size() + 1 -
 			                                  (satelliteFallback ? region.satelliteTLogUsableDcsFallback
 			                                                     : region.satelliteTLogUsableDcs)) {
@@ -3387,7 +3412,3 @@ public:
 };
 
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req);
-
-#include "flow/unactorcompiler.h"
-
-#endif

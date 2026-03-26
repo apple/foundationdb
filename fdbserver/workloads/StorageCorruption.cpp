@@ -20,7 +20,7 @@
 
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/core/StorageCorruptionBug.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/ProcessEvents.h"
 
 namespace {

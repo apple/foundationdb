@@ -1017,12 +1017,11 @@ Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Tran
 	AuditGetServerKeysRes res;
 
 	try {
-		co_await store(readResult,
-		               krmGetRanges(tr,
-		                            serverKeysPrefixFor(serverID),
-		                            range,
-		                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-		                            CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+		readResult = co_await krmGetRanges(tr,
+		                                   serverKeysPrefixFor(serverID),
+		                                   range,
+		                                   CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+		                                   CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES);
 		Future<Version> grvF = tr->getReadVersion();
 		if (!grvF.isReady()) {
 			TraceEvent(SevWarnAlways, "AuditUtilReadServerKeysGRVError", serverID);

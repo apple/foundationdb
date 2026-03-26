@@ -106,20 +106,20 @@ struct TxnTimeout : TestWorkload {
 	// Initializes the database with test data for each actor to operate on
 	// Each actor creates nodeCountPerClientPerActor keys initialized to value "0"
 	// Keys are batched into transactions for efficiency
-	static Future<Void> populateDatabase(TxnTimeout* self, Database db, int actorIdx) {
+	Future<Void> populateDatabase(Database db, int actorIdx) {
 		int nodeIdx = 0;
 		// Batch size is 1/4 of total keys, resulting in 4 batches per actor
-		int batchSize = std::max(1, self->nodeCountPerClientPerActor / 4);
+		int batchSize = std::max(1, nodeCountPerClientPerActor / 4);
 
-		while (nodeIdx < self->nodeCountPerClientPerActor) {
+		while (nodeIdx < nodeCountPerClientPerActor) {
 			Transaction tr(db);
 			while (true) {
 				Error err;
 				try {
 					// Batch up to batchSize keys in a single transaction
-					int batchEnd = std::min(nodeIdx + batchSize, self->nodeCountPerClientPerActor);
+					int batchEnd = std::min(nodeIdx + batchSize, nodeCountPerClientPerActor);
 					for (int i = nodeIdx; i < batchEnd; i++) {
-						Key key = makeKey(self->clientId, actorIdx, i);
+						Key key = makeKey(clientId, actorIdx, i);
 						tr.set(key, "0"_sr);
 					}
 					co_await tr.commit();
@@ -133,19 +133,19 @@ struct TxnTimeout : TestWorkload {
 		}
 
 		TraceEvent("TxnTimeoutPopulateComplete")
-		    .detail("ClientId", self->clientId)
+		    .detail("ClientId", clientId)
 		    .detail("ActorIdx", actorIdx)
 		    .detail("KeysCreated", nodeIdx);
 	}
 
 	// Runs database population concurrently across actors and clients
-	static Future<Void> populateDatabaseAllActors(TxnTimeout* self, Database db) {
+	Future<Void> populateDatabaseAllActors(Database db) {
 		std::vector<Future<Void>> populationActors;
-		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
-			populationActors.push_back(populateDatabase(self, db, actorIdx));
+		for (int actorIdx = 0; actorIdx < actorsPerClient; ++actorIdx) {
+			populationActors.push_back(populateDatabase(db, actorIdx));
 		}
 		co_await waitForAll(populationActors);
-		TraceEvent("TxnTimeoutPopulateAllComplete").detail("ClientId", self->clientId);
+		TraceEvent("TxnTimeoutPopulateAllComplete").detail("ClientId", clientId);
 	}
 
 	/*
@@ -166,23 +166,23 @@ struct TxnTimeout : TestWorkload {
 	 * - Version jumps due to recovery (>MAX_WRITE_TRANSACTION_LIFE_VERSIONS) are tolerated
 	 * - Any other transaction_too_old or similar timeout errors are counted as failures
 	 */
-	static Future<Void> txnClient(TxnTimeout* self, Database db, int actorIdx) {
+	Future<Void> txnClient(Database db, int actorIdx) {
 		int nodeIdx = 0;
 		double workloadStartTime = now();
 
 		// Run transactions for 80% of test duration to allow time for cleanup
-		double runDuration = self->testDuration * 0.8;
+		double runDuration = testDuration * 0.8;
 
 		while (true) {
 			// Cycle through all keys for this actor
-			if (nodeIdx == self->nodeCountPerClientPerActor) {
+			if (nodeIdx == nodeCountPerClientPerActor) {
 				nodeIdx = 0;
 			}
 
 			// Stop when we've reached the target run duration
 			if (now() - workloadStartTime > runDuration) {
 				TraceEvent("TxnTimeoutClientComplete")
-				    .detail("ClientId", self->clientId)
+				    .detail("ClientId", clientId)
 				    .detail("ActorIdx", actorIdx)
 				    .detail("Duration", now() - workloadStartTime);
 				break;
@@ -191,13 +191,13 @@ struct TxnTimeout : TestWorkload {
 			Transaction tr(db);
 			Version readVersion = 0;
 			double txnStartTime = now();
-			self->txnsTotal++;
+			txnsTotal++;
 
 			while (true) {
 				Error caughtErr;
 				try {
 					// Generate the same key pattern as in populate phase
-					Key key = makeKey(self->clientId, actorIdx, nodeIdx);
+					Key key = makeKey(clientId, actorIdx, nodeIdx);
 
 					// Get read version and read the current value
 					double readStartTime = now();
@@ -209,8 +209,8 @@ struct TxnTimeout : TestWorkload {
 
 					// Artificial delay to extend transaction lifetime to target duration
 					// This is the core of the test: keeping transactions open longer than the usual 5 seconds
-					if (self->txnMinDuration > readDuration) {
-						co_await delay(self->txnMinDuration - readDuration);
+					if (txnMinDuration > readDuration) {
+						co_await delay(txnMinDuration - readDuration);
 					}
 
 					// Perform write operation (increment counter)
@@ -222,9 +222,9 @@ struct TxnTimeout : TestWorkload {
 					co_await tr.commit();
 					double txnLatency = now() - txnStartTime;
 
-					self->txnsSucceeded++;
+					txnsSucceeded++;
 					TraceEvent("TxnTimeoutTxnSuccess")
-					    .detail("ClientId", self->clientId)
+					    .detail("ClientId", clientId)
 					    .detail("ActorIdx", actorIdx)
 					    .detail("Key", key)
 					    .detail("OldValue", currentVal)
@@ -243,9 +243,9 @@ struct TxnTimeout : TestWorkload {
 				                       err.code() == error_code_process_behind;
 
 				TraceEvent(isExpectedError ? SevInfo : SevWarn, "TxnTimeoutTxnError")
-				    .detail("ClientId", self->clientId)
+				    .detail("ClientId", clientId)
 				    .detail("ActorIdx", actorIdx)
-				    .detail("RecoveryState", self->dbInfo->get().recoveryState)
+				    .detail("RecoveryState", dbInfo->get().recoveryState)
 				    .detail("ReadVersion", readVersion)
 				    .errorUnsuppressed(err);
 
@@ -264,9 +264,9 @@ struct TxnTimeout : TestWorkload {
 				    ((double)SERVER_KNOBS->MAX_WRITE_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND);
 
 				if (!isExpectedError && !isHighVersionJump && !tooMuchTimeHasPassed) {
-					self->txnsFailed++;
+					txnsFailed++;
 					TraceEvent(SevError, "TxnTimeoutUnexpectedFailure")
-					    .detail("ClientId", self->clientId)
+					    .detail("ClientId", clientId)
 					    .detail("ActorIdx", actorIdx)
 					    .detail("OldReadVersion", readVersion)
 					    .detail("NewReadVersion", newReadVersion)
@@ -275,7 +275,7 @@ struct TxnTimeout : TestWorkload {
 					    .errorUnsuppressed(err);
 				} else {
 					TraceEvent("TxnTimeoutExpectedFailure")
-					    .detail("ClientId", self->clientId)
+					    .detail("ClientId", clientId)
 					    .detail("ActorIdx", actorIdx)
 					    .detail("OldReadVersion", readVersion)
 					    .detail("NewReadVersion", newReadVersion)
@@ -303,12 +303,12 @@ struct TxnTimeout : TestWorkload {
 		    .detail("ActorsPerClient", self->actorsPerClient);
 
 		// Phase 1: Initialize database with test data
-		co_await populateDatabaseAllActors(self, db);
+		co_await populateDatabaseAllActors(db);
 
 		// Phase 2: Run transaction clients that test timeout behavior
 		std::vector<Future<Void>> txnClients;
 		for (int actorIdx = 0; actorIdx < self->actorsPerClient; ++actorIdx) {
-			txnClients.emplace_back(txnClient(self, db, actorIdx));
+			txnClients.emplace_back(txnClient(db, actorIdx));
 		}
 		co_await waitForAll(txnClients);
 

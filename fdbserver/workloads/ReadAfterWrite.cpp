@@ -56,9 +56,9 @@ struct ReadAfterWriteWorkload : KVWorkload {
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
-	static Future<Void> benchmark(Database cx, ReadAfterWriteWorkload* self) {
+	Future<Void> benchmark(Database cx) {
 		while (true) {
-			Key key = self->getRandomKey();
+			Key key = getRandomKey();
 			Transaction writeTr(cx);
 			Transaction baselineReadTr(cx);
 			Transaction afterWriteTr(cx);
@@ -95,7 +95,7 @@ struct ReadAfterWriteWorkload : KVWorkload {
 				// the network, the storage server overhead, and the propagation delay, and then with our baseline
 				// read, subtract out the network and the storage server overhead, leaving only the propagation
 				// delay.
-				self->propagationLatency.addSample(std::max<double>(afterWriteLatency - baselineLatency, 0));
+				propagationLatency.addSample(std::max<double>(afterWriteLatency - baselineLatency, 0));
 			} catch (Error& e) {
 				err = e;
 			}
@@ -106,7 +106,7 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		Future<Void> lifetime = benchmark(cx, this);
+		Future<Void> lifetime = benchmark(cx);
 		co_await delay(testDuration);
 	}
 

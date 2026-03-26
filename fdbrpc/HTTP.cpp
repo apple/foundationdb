@@ -1,5 +1,5 @@
 /*
- * HTTP.actor.cpp
+ * HTTP.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -31,8 +31,6 @@
 #include <sstream>
 #include "flow/IConnection.h"
 #include <unordered_map>
-
-#include "flow/actorcompiler.h" // has to be last include
 
 namespace HTTP {
 
@@ -205,7 +203,7 @@ PacketBuffer* writeResponseHeader(Reference<OutgoingResponse> response, PacketBu
 	return writer.finish();
 }
 
-ACTOR Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingResponse> response) {
+Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingResponse> response) {
 
 	// Write headers to a packet buffer chain
 	ASSERT(response.isValid());
@@ -214,7 +212,7 @@ ACTOR Future<Void> writeResponse(Reference<IConnection> conn, Reference<Outgoing
 	PacketBuffer* pLast = writeResponseHeader(response, pFirst);
 	// Prepend headers to content packer buffer chain
 	response->data.content->prependWriteBuffer(pFirst, pLast);
-	loop {
+	while (true) {
 		int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
 		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
 			trySend = deterministicRandom()->randomInt(1, 10);
@@ -222,18 +220,18 @@ ACTOR Future<Void> writeResponse(Reference<IConnection> conn, Reference<Outgoing
 		int len = conn->write(response->data.content->getUnsent(), trySend);
 		response->data.content->sent(len);
 		if (response->data.content->empty()) {
-			return Void();
+			co_return;
 		}
 
-		wait(conn->onWritable());
-		wait(yield(TaskPriority::WriteSocket));
+		co_await conn->onWritable();
+		co_await yield(TaskPriority::WriteSocket);
 	}
 }
 
 // Read at least 1 bytes from conn and up to maxlen in a single read, append read data into *buf
 // Returns the number of bytes read.
-ACTOR Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int maxlen) {
-	loop {
+Future<int> read_into_string(Reference<IConnection> conn, std::string* buf, int maxlen) {
+	while (true) {
 		// Read into buffer
 		int originalSize = buf->size();
 		// TODO:  resize is zero-initializing the space we're about to overwrite, so do something else, which probably
@@ -246,59 +244,55 @@ ACTOR Future<int> read_into_string(Reference<IConnection> conn, std::string* buf
 
 		// Make sure data was actually read, it's possible for there to be none.
 		if (len > 0)
-			return len;
+			co_return len;
 
 		// Wait for connection to have something to read
-		wait(conn->onReadable());
-		wait(delay(0, TaskPriority::ReadSocket));
+		co_await conn->onReadable();
+		co_await delay(0, TaskPriority::ReadSocket);
 	}
 }
 
 // Returns the position of delim within buf, relative to pos.  If delim is not found, continues to read from conn until
 // either it is found or the connection ends, at which point connection_failed is thrown and buf contains
 // everything that was read up to that point.
-ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
-                                                const char* delim,
-                                                std::string* buf,
-                                                size_t pos) {
-	state size_t sPos = pos;
-	state int lookBack = strlen(delim) - 1;
+Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
+                                          const char* delim,
+                                          std::string* buf,
+                                          size_t pos) {
+	size_t sPos = pos;
+	int lookBack = strlen(delim) - 1;
 	ASSERT(lookBack >= 0);
 
-	loop {
+	while (true) {
 		size_t endPos = buf->find(delim, sPos);
 		if (endPos != std::string::npos) {
-			return endPos - pos;
+			co_return endPos - pos;
 		}
 		// Next search will start at the current end of the buffer - delim size + 1
 		if (buf->size() >= lookBack) {
 			sPos = buf->size() - lookBack;
 		}
-		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
+		co_await read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE);
 	}
 }
 
 // Reads from conn (as needed) until there are at least len bytes starting at pos in buf
-ACTOR Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string* buf, size_t pos) {
-	state int stop_size = pos + len;
+Future<Void> read_fixed_into_string(Reference<IConnection> conn, int len, std::string* buf, size_t pos) {
+	int stop_size = pos + len;
 	while (buf->size() < stop_size) {
-		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
+		co_await read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE);
 	}
-	return Void();
 }
 
-ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
-                                              Headers* headers,
-                                              std::string* buf,
-                                              size_t* pos) {
-	loop {
+Future<Void> read_http_response_headers(Reference<IConnection> conn, Headers* headers, std::string* buf, size_t* pos) {
+	while (true) {
 		// Get a line, reading more data from conn if necessary
-		size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", buf, *pos));
+		size_t lineLen = co_await read_delimited_into_string(conn, "\r\n", buf, *pos);
 		// If line is empty we have reached the end of the headers.
 		if (lineLen == 0) {
 			// Increment pos to move past the empty line.
 			*pos += 2;
-			return Void();
+			co_return;
 		}
 
 		int nameEnd = -1, valueStart = -1, valueEnd = -1;
@@ -345,16 +339,16 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 // buf has the http header line in it at *pos offset.
 // FIXME: should this throw a different error for http requests? Or should we rename http_bad_response to
 // http_bad_<something>?
-ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
-                                Reference<IConnection> conn,
-                                std::string* buf,
-                                size_t* pos,
-                                bool content_optional,
-                                bool skipCheckMD5) {
+Future<Void> readHTTPData(HTTPData<std::string>* r,
+                          Reference<IConnection> conn,
+                          std::string* buf,
+                          size_t* pos,
+                          bool content_optional,
+                          bool skipCheckMD5) {
 	// Read headers
 	r->headers.clear();
 
-	wait(read_http_response_headers(conn, &r->headers, buf, pos));
+	co_await read_http_response_headers(conn, &r->headers, buf, pos);
 
 	auto i = r->headers.find("Content-Length");
 	if (i != r->headers.end()) {
@@ -363,7 +357,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		r->contentLen = -1; // Content length unknown
 	}
 
-	state std::string transferEncoding;
+	std::string transferEncoding;
 	i = r->headers.find("Transfer-Encoding");
 	if (i != r->headers.end()) {
 		transferEncoding = i->second;
@@ -374,7 +368,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 	// If this is allowed to be a header-only response and the buffer has been fully processed then stop.  Otherwise,
 	// there must be response content.
 	if (content_optional && *pos == buf->size()) {
-		return Void();
+		co_return;
 	}
 
 	// There should be content (or at least metadata describing that there is no content.
@@ -385,7 +379,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		*pos = 0;
 
 		// Read until there are at least contentLen bytes available at pos
-		wait(read_fixed_into_string(conn, r->contentLen, &r->content, *pos));
+		co_await read_fixed_into_string(conn, r->contentLen, &r->content, *pos);
 
 		// There shouldn't be any bytes after content.
 		if (r->content.size() != r->contentLen) {
@@ -401,11 +395,11 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		r->content = buf->substr(*pos);
 		*pos = 0;
 
-		loop {
+		while (true) {
 			{
 				// Read the line that contains the chunk length as text in hex
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, *pos));
-				state int chunkLen = strtol(r->content.substr(*pos, lineLen).c_str(), nullptr, 16);
+				size_t lineLen = co_await read_delimited_into_string(conn, "\r\n", &r->content, *pos);
+				int chunkLen = strtol(r->content.substr(*pos, lineLen).c_str(), nullptr, 16);
 
 				// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the
 				// content buffer
@@ -416,13 +410,13 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 					break;
 
 				// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
-				wait(read_fixed_into_string(conn, chunkLen, &r->content, *pos));
+				co_await read_fixed_into_string(conn, chunkLen, &r->content, *pos);
 				*pos += chunkLen;
 			}
 
 			{
 				// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, *pos));
+				size_t lineLen = co_await read_delimited_into_string(conn, "\r\n", &r->content, *pos);
 				if (lineLen != 0)
 					throw http_bad_response();
 
@@ -435,7 +429,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 		r->contentLen = *pos;
 
 		// Next is the post-chunk header block, so read that.
-		wait(read_http_response_headers(conn, &r->headers, &r->content, pos));
+		co_await read_http_response_headers(conn, &r->headers, &r->content, pos);
 
 		// If the header parsing did not consume all of the buffer then something is wrong
 		if (*pos != r->content.size()) {
@@ -458,7 +452,7 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 	// If there is actual response content, check the MD5 sum against the Content-MD5 response header
 	if (r->content.size() > 0) {
 		if (skipCheckMD5) {
-			return Void();
+			co_return;
 		}
 
 		if (!HTTP::verifyMD5(r, false)) { // false arg means do not fail if the Content-MD5 header is missing.
@@ -468,19 +462,17 @@ ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
 			throw http_bad_response();
 		}
 	}
-
-	return Void();
 }
 
 // Reads an HTTP request from a network connection
 // If the connection fails while being read the exception will emitted
 // If the response is not parsable or complete in some way, http_bad_response will be thrown
-ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Reference<IConnection> conn) {
-	state std::string buf;
-	state size_t pos = 0;
+Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Reference<IConnection> conn) {
+	std::string buf;
+	size_t pos = 0;
 
 	// Read HTTP response code and version line
-	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
+	size_t lineLen = co_await read_delimited_into_string(conn, "\r\n", &buf, pos);
 
 	// FIXME: this is pretty inefficient with 2 copies, but sscanf isn't the best with strings
 	std::string requestLine = buf.substr(0, lineLen);
@@ -535,8 +527,7 @@ ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Referen
 	// Move position past the line found and the delimiter length
 	pos += lineLen + 2;
 
-	wait(readHTTPData(&r->data, conn, &buf, &pos, false, false));
-	return Void();
+	co_await readHTTPData(&r->data, conn, &buf, &pos, false, false);
 }
 
 Future<Void> HTTP::IncomingRequest::read(Reference<IConnection> conn, bool header_only) {
@@ -557,14 +548,12 @@ void HTTP::OutgoingResponse::reset() {
 // Reads an HTTP response from a network connection
 // If the connection fails while being read the exception will emitted
 // If the response is not parsable or complete in some way, http_bad_response will be thrown
-ACTOR Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r,
-                                      Reference<IConnection> conn,
-                                      bool header_only) {
-	state std::string buf;
-	state size_t pos = 0;
+Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r, Reference<IConnection> conn, bool header_only) {
+	std::string buf;
+	size_t pos = 0;
 
 	// Read HTTP response line
-	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
+	size_t lineLen = co_await read_delimited_into_string(conn, "\r\n", &buf, pos);
 
 	int reachedEnd = -1;
 	if (sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd) < 2 || reachedEnd < 0) {
@@ -580,9 +569,7 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r,
 
 	bool skipCheckMD5 = r->code == 206 && FLOW_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT;
 
-	wait(readHTTPData(&r->data, conn, &buf, &pos, header_only, skipCheckMD5));
-
-	return Void();
+	co_await readHTTPData(&r->data, conn, &buf, &pos, header_only, skipCheckMD5);
 }
 
 Future<Void> HTTP::IncomingResponse::read(Reference<IConnection> conn, bool header_only) {
@@ -593,20 +580,20 @@ Future<Void> HTTP::IncomingResponse::read(Reference<IConnection> conn, bool head
 // Request content is provided as UnsentPacketQueue in req, which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller
 // TODO:  pSent is very hackish, do something better.
-ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> conn,
-                                                               Reference<OutgoingRequest> request,
-                                                               Reference<IRateControl> sendRate,
-                                                               int64_t* pSent,
-                                                               Reference<IRateControl> recvRate) {
-	state TraceEvent event(SevDebug, "HTTPRequest");
+Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> conn,
+                                                         Reference<OutgoingRequest> request,
+                                                         Reference<IRateControl> sendRate,
+                                                         int64_t* pSent,
+                                                         Reference<IRateControl> recvRate) {
+	TraceEvent event(SevDebug, "HTTPRequest");
 
 	// There is no standard http request id header field, so either a global default can be set via a knob
 	// or it can be set per-request with the requestIDHeader argument (which overrides the default)
-	state std::string requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
+	std::string requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
 
-	state bool earlyResponse = false;
-	state int total_sent = 0;
-	state double send_start;
+	bool earlyResponse = false;
+	int total_sent = 0;
+	double send_start{ 0 };
 
 	event.detail("DebugID", conn->getDebugID());
 	event.detail("RemoteAddress", conn->getPeerAddress());
@@ -615,7 +602,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 	event.detail("RequestContentLen", request->data.contentLen);
 
 	try {
-		state std::string requestID;
+		std::string requestID;
 		if (!requestIDHeader.empty()) {
 			requestID = deterministicRandom()->randomUniqueID().toString();
 			requestID = requestID.insert(20, "-");
@@ -645,15 +632,15 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				fmt::print("Request Header: {}: {}\n", h.first, h.second);
 		}
 
-		state Reference<HTTP::IncomingResponse> r(new HTTP::IncomingResponse());
+		Reference<HTTP::IncomingResponse> r(new HTTP::IncomingResponse());
 		event.detail("IsHeaderOnlyResponse", request->isHeaderOnlyResponse());
-		state Future<Void> responseReading = r->read(conn, request->isHeaderOnlyResponse());
+		Future<Void> responseReading = r->read(conn, request->isHeaderOnlyResponse());
 		event.detail("ResponseReading", responseReading.isReady());
 
 		send_start = timer();
 
 		// too many state things here to refactor this with writing the response
-		loop {
+		while (true) {
 			// If we already got a response, before finishing sending the request, then close the connection,
 			// set the Connection header to "close" as a hint to the caller that this connection can't be used
 			// again, and break out of the send loop.
@@ -673,11 +660,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				break;
 			}
 
-			state int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
+			int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
 			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
 				trySend = deterministicRandom()->randomInt(1, 10);
 			}
-			wait(sendRate->getAllowance(trySend));
+			co_await sendRate->getAllowance(trySend);
 			int len = conn->write(request->data.content->getUnsent(), trySend);
 			if (pSent != nullptr)
 				*pSent += len;
@@ -688,11 +675,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 				break;
 			}
 
-			wait(conn->onWritable());
-			wait(yield(TaskPriority::WriteSocket));
+			co_await conn->onWritable();
+			co_await yield(TaskPriority::WriteSocket);
 		}
 
-		wait(responseReading);
+		co_await responseReading;
 		double elapsed = timer() - send_start;
 
 		event.detail("ResponseCode", r->code);
@@ -760,7 +747,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			throw err.get();
 		}
 
-		return r;
+		co_return r;
 	} catch (Error& e) {
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
@@ -789,18 +776,16 @@ Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
 	return doRequestActor(conn, request, sendRate, pSent, recvRate);
 }
 
-ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
-                                           std::string remoteHost,
-                                           std::string remoteService) {
-	state int requestTimeout = 60;
-	state int maxTries = FLOW_KNOBS->RESTCLIENT_CONNECT_TRIES;
-	state int thisTry = 1;
-	state double nextRetryDelay = 2.0;
-	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-	state int64_t bytes_sent = 0;
-	state UnsentPacketQueue empty_packet_queue;
+Future<Void> sendProxyConnectRequest(Reference<IConnection> conn, std::string remoteHost, std::string remoteService) {
+	int requestTimeout = 60;
+	int maxTries = FLOW_KNOBS->RESTCLIENT_CONNECT_TRIES;
+	int thisTry = 1;
+	double nextRetryDelay = 2.0;
+	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	int64_t bytes_sent = 0;
+	UnsentPacketQueue empty_packet_queue;
 
-	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	auto req = makeReference<HTTP::OutgoingRequest>();
 	req->verb = HTTP_VERB_CONNECT;
 	req->resource = remoteHost + ":" + remoteService;
 	req->data.content = &empty_packet_queue;
@@ -809,16 +794,13 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	req->data.headers["Accept"] = "application/xml";
 	req->data.headers["Proxy-Connection"] = "Keep-Alive";
 
-	loop {
-		state Optional<Error> err;
-
-		state Reference<HTTP::IncomingResponse> r;
+	while (true) {
+		Optional<Error> err;
+		Reference<HTTP::IncomingResponse> r;
 
 		try {
-			Future<Reference<HTTP::IncomingResponse>> f =
-			    HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate);
-			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(f, requestTimeout));
-			r = _r;
+			r = co_await timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate),
+			                          requestTimeout);
 		} catch (Error& e) {
 			TraceEvent("ProxyRequestFailed").errorUnsuppressed(e);
 			if (e.code() == error_code_actor_cancelled)
@@ -832,7 +814,7 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 			TraceEvent(SevDebug, "ProxyRequestSuccess")
 			    .detail("RemoteHost", remoteHost)
 			    .detail("RemoteService", remoteService);
-			return Void();
+			co_return;
 		}
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
@@ -882,7 +864,7 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 
 			// Log the delay then wait.
 			event.detail("RetryDelay", delay);
-			wait(::delay(delay));
+			co_await ::delay(delay);
 		} else {
 			// We can't retry, so throw something.
 
@@ -898,23 +880,23 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	}
 }
 
-ACTOR Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
-                                                      std::string remoteService,
-                                                      std::string proxyHost,
-                                                      std::string proxyService) {
-	state NetworkAddress remoteEndpoint =
-	    wait(map(INetworkConnections::net()->resolveTCPEndpoint(remoteHost, remoteService),
-	             [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
-		             NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-		             addr.fromHostname = true;
-		             addr.flags = NetworkAddress::FLAG_TLS;
-		             return addr;
-	             }));
-	state Reference<IConnection> connection = wait(INetworkConnections::net()->connect(proxyHost, proxyService));
-	wait(sendProxyConnectRequest(connection, remoteHost, remoteService));
+Future<Reference<IConnection>> proxyConnectImpl(std::string remoteHost,
+                                                std::string remoteService,
+                                                std::string proxyHost,
+                                                std::string proxyService) {
+	NetworkAddress remoteEndpoint =
+	    co_await map(INetworkConnections::net()->resolveTCPEndpoint(remoteHost, remoteService),
+	                 [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
+		                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+		                 addr.fromHostname = true;
+		                 addr.flags = NetworkAddress::FLAG_TLS;
+		                 return addr;
+	                 });
+	Reference<IConnection> connection = co_await INetworkConnections::net()->connect(proxyHost, proxyService);
+	co_await sendProxyConnectRequest(connection, remoteHost, remoteService);
 	boost::asio::ip::tcp::socket socket = std::move(connection->getSocket());
-	Reference<IConnection> remoteConnection = wait(INetworkConnections::net()->connect(remoteEndpoint, &socket));
-	return remoteConnection;
+	Reference<IConnection> remoteConnection = co_await INetworkConnections::net()->connect(remoteEndpoint, &socket);
+	co_return remoteConnection;
 }
 
 Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,

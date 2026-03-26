@@ -82,7 +82,7 @@
 #include "fdbclient/Audit.h"
 #include "fdbclient/AuditUtils.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
@@ -427,19 +427,18 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("SnapshotBytes", lastSnapshotBytes);
 	}
 
-	static Future<Void> doBackup(BackupS3BlobCorrectnessWorkload* self,
-	                             double startDelay,
-	                             FileBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges,
-	                             double stopDifferentialDelay,
-	                             Promise<Void> submitted) {
+	Future<Void> doBackup(double startDelay,
+	                      FileBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges,
+	                      double stopDifferentialDelay,
+	                      Promise<Void> submitted) {
 
 		UID randomID = nondeterministicRandom()->randomUniqueID();
 
 		// Increment the backup agent requests
-		if (self->agentRequest) {
+		if (agentRequest) {
 			BackupS3BlobCorrectnessWorkload::backupAgentRequests++;
 		}
 
@@ -506,7 +505,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		    .detail("StopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		// S3-specific: Use configurable backup URL and snapshot intervals
-		std::string backupContainer = self->backupURL;
+		std::string backupContainer = backupURL;
 		Future<Void> status = statusLoop(cx, tag.toString());
 
 		// Testing v1 (non-partitioned) backup approach
@@ -515,15 +514,15 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 			co_await backupAgent->submitBackup(cx,
 			                                   StringRef(backupContainer),
 			                                   {},
-			                                   self->initSnapshotInterval,
-			                                   self->snapshotInterval,
+			                                   initSnapshotInterval,
+			                                   snapshotInterval,
 			                                   tag.toString(),
 			                                   backupRanges,
 			                                   StopWhenDone{ !stopDifferentialDelay },
 			                                   UsePartitionedLog::False,
 			                                   IncrementalBackupOnly::False,
-			                                   self->encryptionKeyFileName,
-			                                   self->snapshotMode);
+			                                   encryptionKeyFileName,
+			                                   snapshotMode);
 		} catch (Error& e) {
 			TraceEvent("BS3BCW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -533,7 +532,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 		submitted.send(Void());
 
 		Future<Void> observabilityCheck = Void();
-		if (self->snapshotMode == 1 || self->snapshotMode == 2) {
+		if (snapshotMode == 1 || snapshotMode == 2) {
 			KeyBackedTag keyBackedTag = makeBackupTag(tag.toString());
 			try {
 				UidAndAbortedFlagT uidFlag = co_await keyBackedTag.getOrThrow(cx.getReference());
@@ -619,8 +618,8 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 
 		if (agentRequest) {
 			Promise<Void> submitted;
-			Future<Void> b = doBackup(
-			    this, backupAfter, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
+			Future<Void> b =
+			    doBackup(backupAfter, &backupAgent, cx, backupTag, backupRanges, stopDifferentialAfter, submitted);
 
 			if (abortAndRestartAfter) {
 				TraceEvent("BS3BCW_AbortAndRestartAfter").detail("AbortAndRestartAfter", abortAndRestartAfter);
@@ -636,8 +635,7 @@ struct BackupS3BlobCorrectnessWorkload : TestWorkload {
 				TraceEvent("BS3BCW_AbortComplete").detail("Tag", printable(backupTag));
 				co_await b;
 				TraceEvent("BS3BCW_RestartBackup").detail("Tag", printable(backupTag));
-				b = doBackup(this,
-				             0,
+				b = doBackup(0,
 				             &backupAgent,
 				             cx,
 				             backupTag,

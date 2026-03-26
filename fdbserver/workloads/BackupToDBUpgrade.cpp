@@ -24,7 +24,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbserver/tester/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.h"
-#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/ManagementAPI.h"
 #include "flow/ApiVersion.h"
 
 // TODO: explain the purpose of this workload and how it different from the
@@ -107,26 +107,25 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
-	static Future<Void> doBackup(BackupToDBUpgradeWorkload* self,
-	                             DatabaseBackupAgent* backupAgent,
-	                             Database cx,
-	                             Key tag,
-	                             Standalone<VectorRef<KeyRangeRef>> backupRanges) {
+	Future<Void> doBackup(DatabaseBackupAgent* backupAgent,
+	                      Database cx,
+	                      Key tag,
+	                      Standalone<VectorRef<KeyRangeRef>> backupRanges) {
 		try {
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->extraDB));
+			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(extraDB));
 			while (true) {
 				Error err;
 				try {
-					for (auto r : self->backupRanges) {
+					for (auto r : backupRanges) {
 						if (!r.empty()) {
-							auto targetRange = r.withPrefix(self->backupPrefix);
+							auto targetRange = r.withPrefix(backupPrefix);
 							printf("Clearing %s in destination\n", printable(targetRange).c_str());
 							tr->addReadConflictRange(targetRange);
 							tr->clear(targetRange);
 						}
 					}
 					co_await backupAgent->submitBackup(
-					    tr, tag, backupRanges, StopWhenDone::False, self->backupPrefix, StringRef());
+					    tr, tag, backupRanges, StopWhenDone::False, backupPrefix, StringRef());
 					co_await tr->commit();
 					break;
 				} catch (Error& e) {
@@ -143,7 +142,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		co_await backupAgent->waitBackup(self->extraDB, tag, StopWhenDone::False);
+		co_await backupAgent->waitBackup(extraDB, tag, StopWhenDone::False);
 	}
 
 	static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag, DatabaseBackupAgent* backupAgent) {
@@ -284,7 +283,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			co_await delay(backupAfter);
 
 			TraceEvent("DRU_DoBackup").detail("Tag", printable(backupTag));
-			Future<Void> b = doBackup(this, &backupAgent, extraDB, backupTag, backupRanges);
+			Future<Void> b = doBackup(&backupAgent, extraDB, backupTag, backupRanges);
 
 			TraceEvent("DRU_DoBackupWait").detail("BackupTag", printable(backupTag));
 			co_await b;

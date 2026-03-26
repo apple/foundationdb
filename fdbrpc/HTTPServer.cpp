@@ -1,5 +1,5 @@
 /*
- * HTTPServer.actor.cpp
+ * HTTPServer.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,21 +23,19 @@
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
-
-ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
-                                   Future<Void> readRequestDone,
-                                   Reference<HTTP::IRequestHandler> requestHandler,
-                                   Reference<HTTP::IncomingRequest> req,
-                                   FlowMutex* mutex) {
-	state Reference<HTTP::OutgoingResponse> response = makeReference<HTTP::OutgoingResponse>();
-	state UnsentPacketQueue content;
+Future<Void> callbackHandler(Reference<IConnection> conn,
+                             Future<Void> readRequestDone,
+                             Reference<HTTP::IRequestHandler> requestHandler,
+                             Reference<HTTP::IncomingRequest> req,
+                             FlowMutex* mutex) {
+	auto response = makeReference<HTTP::OutgoingResponse>();
+	UnsentPacketQueue content;
 	response->data.content = &content;
 	response->data.contentLen = 0;
 
 	try {
-		wait(readRequestDone);
-		wait(requestHandler->handleRequest(req, response));
+		co_await readRequestDone;
+		co_await requestHandler->handleRequest(req, response);
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
 			throw e;
@@ -46,7 +44,7 @@ ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
 		if (e.code() == error_code_connection_failed) {
 			TraceEvent(SevWarn, "HTTPServerConnHandlerFailed").error(e);
 			// return, client will retry
-			return Void();
+			co_return;
 		}
 		if (e.code() == error_code_http_request_failed || e.code() == error_code_http_bad_response) {
 			TraceEvent(SevWarn, "HTTPServerConnHandlerInternalError").errorUnsuppressed(e);
@@ -60,36 +58,35 @@ ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
 	}
 	// take out response mutex to ensure no parallel writers to response connection
 	// FIXME: is this necessary? I think it is
-	state FlowMutex::Lock lock = wait(mutex->take());
+	FlowMutex::Lock lock = co_await mutex->take();
 	try {
-		wait(response->write(conn));
+		co_await response->write(conn);
 	} catch (Error& e) {
 		lock.release();
 		if (e.code() == error_code_connection_failed) {
 			// connection back to client failed, end. They will retry if they still need the response.
 			TraceEvent("HTTPServerConnHandlerResponseError").errorUnsuppressed(e);
-			return Void();
+			co_return;
 		}
 		TraceEvent("HTTPServerConnHandlerResponseUnexpectedError").errorUnsuppressed(e);
 		throw e;
 	}
 	lock.release();
-	return Void();
 }
 
-ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
-                                     Reference<IConnection> conn,
-                                     Reference<HTTP::IRequestHandler> requestHandler) {
+Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
+                               Reference<IConnection> conn,
+                               Reference<HTTP::IRequestHandler> requestHandler) {
 	try {
 		// TODO do we actually have multiple requests on a connection? how does this work
-		state FlowMutex responseMutex;
-		state Future<Void> readPrevRequest = Future<Void>(Void());
-		wait(conn->acceptHandshake());
-		loop {
-			wait(readPrevRequest);
-			wait(delay(0));
-			wait(conn->onReadable());
-			state Reference<HTTP::IncomingRequest> req = makeReference<HTTP::IncomingRequest>();
+		FlowMutex responseMutex;
+		Future<Void> readPrevRequest = Future<Void>(Void());
+		co_await conn->acceptHandshake();
+		while (true) {
+			co_await readPrevRequest;
+			co_await delay(0);
+			co_await conn->onReadable();
+			auto req = makeReference<HTTP::IncomingRequest>();
 			readPrevRequest = req->read(conn, false);
 			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, &responseMutex));
 		}
@@ -103,22 +100,21 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 		}
 		conn->close();
 	}
-	return Void();
 }
 
-ACTOR Future<Void> listenActor(Reference<HTTP::SimServerContext> server,
-                               Reference<HTTP::IRequestHandler> requestHandler,
-                               NetworkAddress addr,
-                               Reference<IListener> listener) {
+Future<Void> listenActor(Reference<HTTP::SimServerContext> server,
+                         Reference<HTTP::IRequestHandler> requestHandler,
+                         NetworkAddress addr,
+                         Reference<IListener> listener) {
 	TraceEvent(SevDebug, "HTTPServerListenStart", server->dbgid).detail("ListenAddress", addr.toString());
 
-	wait(requestHandler->init());
+	co_await requestHandler->init();
 
 	TraceEvent(SevDebug, "HTTPServerListenInitialized", server->dbgid).detail("ListenAddress", addr.toString());
 
 	try {
-		loop {
-			Reference<IConnection> conn = wait(listener->accept());
+		while (true) {
+			Reference<IConnection> conn = co_await listener->accept();
 			if (!server->running) {
 				TraceEvent("HTTPServerExitedAfterAccept", server->dbgid);
 				break;
@@ -131,8 +127,6 @@ ACTOR Future<Void> listenActor(Reference<HTTP::SimServerContext> server,
 		TraceEvent(SevError, "HTTPListenError", server->dbgid).error(e);
 		throw;
 	}
-
-	return Void();
 }
 
 void HTTP::SimServerContext::registerNewServer(NetworkAddress addr, Reference<HTTP::IRequestHandler> requestHandler) {
@@ -184,9 +178,9 @@ Future<Void> HTTP::registerAlwaysFailHTTPHandler() {
 
 // unit test stuff
 
-ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req,
-                                            Reference<HTTP::OutgoingResponse> response) {
-	wait(delay(0));
+Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req,
+                                      Reference<HTTP::OutgoingResponse> response) {
+	co_await delay(0);
 	ASSERT_EQ(req->verb, HTTP::HTTP_VERB_POST);
 	ASSERT_EQ(req->resource, "/hello-world");
 	ASSERT_EQ(req->data.headers.size(), 2);
@@ -207,8 +201,6 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	PacketWriter pw(response->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
 	pw.serializeBytes(hello);
 	response->data.contentLen = hello.size();
-
-	return Void();
 }
 
 struct HelloWorldRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloWorldRequestHandler> {
@@ -222,9 +214,9 @@ struct HelloWorldRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloW
 	void delref() override { ReferenceCounted<HelloWorldRequestHandler>::delref(); }
 };
 
-ACTOR Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req,
-                                            Reference<HTTP::OutgoingResponse> response) {
-	wait(delay(0));
+Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req,
+                                      Reference<HTTP::OutgoingResponse> response) {
+	co_await delay(0);
 	if (deterministicRandom()->coinflip()) {
 		throw http_bad_response();
 	} else {
@@ -243,9 +235,9 @@ struct HelloErrorRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloE
 	void delref() override { ReferenceCounted<HelloErrorRequestHandler>::delref(); }
 };
 
-ACTOR Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> req,
-                                             Reference<HTTP::OutgoingResponse> response) {
-	wait(delay(0));
+Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> req,
+                                       Reference<HTTP::OutgoingResponse> response) {
+	co_await delay(0);
 	ASSERT_EQ(req->verb, HTTP::HTTP_VERB_GET);
 	ASSERT_EQ(req->resource, "/hello-world");
 	ASSERT_EQ(req->data.headers.size(), 1);
@@ -266,8 +258,6 @@ ACTOR Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> re
 	PacketWriter pw(response->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
 	pw.serializeBytes(hello);
 	response->data.contentLen = hello.size();
-
-	return Void();
 }
 
 struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
@@ -284,43 +274,45 @@ struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<Hello
 using DoRequestFunction = std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)>;
 
 // handles retrying on timeout and reinitializing connection like other users of HTTP (S3BlobStore, RestClient)
-ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname,
-                                                              std::string service,
-                                                              DoRequestFunction reqFunction) {
-	state Reference<IConnection> conn;
-	loop {
+Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname,
+                                                        std::string service,
+                                                        DoRequestFunction reqFunction) {
+	Reference<IConnection> conn;
+	while (true) {
+		Error err;
 		try {
 			if (!conn) {
-				wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
+				conn = co_await INetworkConnections::net()->connect(hostname, service, false);
 				ASSERT(conn.isValid());
-				wait(conn->connectHandshake());
+				co_await conn->connectHandshake();
 			}
 
-			Future<Reference<HTTP::IncomingResponse>> f = reqFunction(conn);
-			Reference<HTTP::IncomingResponse> response = wait(f);
+			Reference<HTTP::IncomingResponse> response = co_await reqFunction(conn);
 			conn->close();
-			return response;
+			co_return response;
 		} catch (Error& e) {
-			if (conn) {
-				conn->close();
-			}
-			if (e.code() != error_code_timed_out && e.code() != error_code_connection_failed &&
-			    e.code() != error_code_lookup_failed) {
-				throw e;
-			}
-			// request got timed out or connection could not be established, close conn and try again
-			conn.clear();
-			wait(delay(0.1));
+			err = e;
 		}
+
+		if (conn) {
+			conn->close();
+		}
+		if (err.code() != error_code_timed_out && err.code() != error_code_connection_failed &&
+		    err.code() != error_code_lookup_failed) {
+			throw err;
+		}
+		// Request timed out or the connection could not be established, so clear conn and try again.
+		conn.clear();
+		co_await delay(0.1);
 	}
 }
 
-ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConnection> conn) {
-	state UnsentPacketQueue content;
-	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConnection> conn) {
+	UnsentPacketQueue content;
+	auto req = makeReference<HTTP::OutgoingRequest>();
 
-	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-	state int64_t bytes_sent = 0;
+	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	int64_t bytes_sent = 0;
 
 	req->verb = HTTP::HTTP_VERB_POST;
 	req->resource = "/hello-world";
@@ -335,7 +327,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConne
 	pw.serializeBytes(hello);
 
 	Reference<HTTP::IncomingResponse> response =
-	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+	    co_await timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0);
 
 	std::string expectedContent = "Hello World Response!";
 
@@ -350,15 +342,15 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConne
 	ASSERT_EQ(response->data.contentLen, response->data.content.size());
 	ASSERT_EQ(response->data.content, expectedContent);
 
-	return response;
+	co_return response;
 }
 
-ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<IConnection> conn) {
-	state UnsentPacketQueue content;
-	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<IConnection> conn) {
+	UnsentPacketQueue content;
+	auto req = makeReference<HTTP::OutgoingRequest>();
 
-	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-	state int64_t bytes_sent = 0;
+	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	int64_t bytes_sent = 0;
 
 	req->verb = HTTP::HTTP_VERB_GET;
 	req->resource = "/hello-error";
@@ -367,19 +359,19 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<I
 	req->data.contentLen = 0;
 
 	Reference<HTTP::IncomingResponse> response =
-	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+	    co_await timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0);
 
 	ASSERT(response->code == 500);
 
-	return response;
+	co_return response;
 }
 
-ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConnection> conn) {
-	state UnsentPacketQueue content;
-	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConnection> conn) {
+	UnsentPacketQueue content;
+	auto req = makeReference<HTTP::OutgoingRequest>();
 
-	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
-	state int64_t bytes_sent = 0;
+	Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	int64_t bytes_sent = 0;
 
 	req->verb = HTTP::HTTP_VERB_GET;
 	req->resource = "/hello-world";
@@ -393,56 +385,53 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConn
 	pw.serializeBytes(hello);
 
 	Reference<HTTP::IncomingResponse> response =
-	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+	    co_await timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0);
 
 	// should have gotten error
 	ASSERT(false);
 
-	return response;
+	co_return response;
 }
 
 // can't run as regular unit test right now because it needs special setup
 TEST_CASE("/HTTP/Server/HelloWorld") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	state std::string hostname = "helloworld-" + deterministicRandom()->randomUniqueID().toString();
-	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloWorldRequestHandler>()));
+	std::string hostname = "helloworld-" + deterministicRandom()->randomUniqueID().toString();
+	co_await g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloWorldRequestHandler>());
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest(hostname, "80", doHelloWorldReq)));
+	co_await doRequestTest(hostname, "80", doHelloWorldReq);
 
 	fmt::print("Done Hello\n");
-	return Void();
 }
 
 TEST_CASE("/HTTP/Server/HelloError") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	state std::string hostname = "helloerror-" + deterministicRandom()->randomUniqueID().toString();
-	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloErrorRequestHandler>()));
+	std::string hostname = "helloerror-" + deterministicRandom()->randomUniqueID().toString();
+	co_await g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloErrorRequestHandler>());
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest(hostname, "80", doHelloWorldErrorReq)));
+	co_await doRequestTest(hostname, "80", doHelloWorldErrorReq);
 
 	fmt::print("Done Error\n");
-	return Void();
 }
 
 TEST_CASE("/HTTP/Server/HelloBadMD5") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	state std::string hostname = "hellobadmd5-" + deterministicRandom()->randomUniqueID().toString();
-	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloBadMD5RequestHandler>()));
+	std::string hostname = "hellobadmd5-" + deterministicRandom()->randomUniqueID().toString();
+	co_await g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloBadMD5RequestHandler>());
 	fmt::print("Registered sim server\n");
 
 	// TODO refactor this into ASSERT_ERROR()?
 	try {
-		wait(success(doRequestTest(hostname, "80", doHelloBadMD5Req)));
+		co_await doRequestTest(hostname, "80", doHelloBadMD5Req);
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_http_bad_response);
 	}
 
 	fmt::print("Done Bad MD5\n");
-	return Void();
 }
