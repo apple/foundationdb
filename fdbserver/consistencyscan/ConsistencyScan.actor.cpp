@@ -1178,28 +1178,15 @@ Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncV
 
 	while (true) {
 		try {
-			while (true) {
-				auto choice = co_await race(core, csInterf.haltConsistencyScan.getFuture(), actors.getResult());
-				if (choice.index() == 0) {
+			auto res = co_await race(core, csInterf.haltConsistencyScan.getFuture(), actors.getResult());
+			// core or actors.getResult() never return so the only way out is throwing an exception.
+			ASSERT_EQ(res.index(), 1);
+			HaltConsistencyScanRequest req = std::get<1>(std::move(res));
 
-					// This actor never returns so the only way out is throwing an exception.
-					ASSERT(false);
-				} else if (choice.index() == 1) {
-					HaltConsistencyScanRequest req = std::get<1>(std::move(choice));
-
-					resetSimCorruptionCheckOnDeath(memState);
-					req.reply.send(Void());
-					core = Void();
-					TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
-					co_return;
-				} else if (choice.index() == 2) {
-
-					ASSERT(false);
-					throw internal_error();
-				} else {
-					UNREACHABLE();
-				}
-			}
+			resetSimCorruptionCheckOnDeath(memState);
+			req.reply.send(Void());
+			core = Void();
+			TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
 		} catch (Error& err) {
 			resetSimCorruptionCheckOnDeath(memState);
 			TraceEvent("ConsistencyScan_Error", csInterf.id()).errorUnsuppressed(err);
@@ -1273,40 +1260,36 @@ Future<bool> getKeyServers(
 			            0));
 
 		bool keyServersInsertedForThisIteration = false;
-		{
-			auto choice = co_await race(waitForAll(keyServerLocationFutures), cx->onProxiesChanged());
-			if (choice.index() == 0) {
 
-				// Read the key server location results
-				for (int i = 0; i < keyServerLocationFutures.size(); i++) {
-					ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
+		auto res = co_await race(waitForAll(keyServerLocationFutures), cx->onProxiesChanged());
+		if (res.index() == 0) {
 
-					// If performing quiescent check, then all master proxies should be reachable.  Otherwise, only
-					// one needs to be reachable
-					if (performQuiescentChecks && !shards.present()) {
-						TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
-						    .error(shards.getError())
-						    .detail("CommitProxyID", commitProxyInfo->getId(i));
-						testFailure("Commit proxy unavailable", performQuiescentChecks, success, failureIsError);
-						co_return false;
-					}
+			// Read the key server location results
+			for (int i = 0; i < keyServerLocationFutures.size(); i++) {
+				ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
 
-					// Get the list of shards if one was returned.  If not doing a quiescent check, we can break if
-					// it is. If we are doing a quiescent check, then we only need to do this for the first shard.
-					if (shards.present() && !keyServersInsertedForThisIteration) {
-						keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
-						keyServersInsertedForThisIteration = true;
-						begin = shards.get().results.back().first.end;
+				// If performing quiescent check, then all master proxies should be reachable.  Otherwise, only
+				// one needs to be reachable
+				if (performQuiescentChecks && !shards.present()) {
+					TraceEvent("ConsistencyCheck_CommitProxyUnavailable")
+					    .error(shards.getError())
+					    .detail("CommitProxyID", commitProxyInfo->getId(i));
+					testFailure("Commit proxy unavailable", performQuiescentChecks, success, failureIsError);
+					co_return false;
+				}
 
-						if (!performQuiescentChecks)
-							break;
-					}
-				} // End of For
-			} else if (choice.index() == 1) {
-			} else {
-				UNREACHABLE();
+				// Get the list of shards if one was returned.  If not doing a quiescent check, we can break if
+				// it is. If we are doing a quiescent check, then we only need to do this for the first shard.
+				if (shards.present() && !keyServersInsertedForThisIteration) {
+					keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
+					keyServersInsertedForThisIteration = true;
+					begin = shards.get().results.back().first.end;
+
+					if (!performQuiescentChecks)
+						break;
+				}
 			}
-		} // End of choose
+		}
 
 		if (!keyServersInsertedForThisIteration) // Retry the entire workflow
 			co_await delay(1.0);
