@@ -1657,8 +1657,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		}
 		o.create("encryption_keys") = keysArr;
 
-		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
-		layerRoot.create("tags.timestamp") = now();
+		JSONDoc tagsRoot = layerRoot.subDoc("tags");
 		layerRoot.create("total_workers.$sum") =
 		    fBackupPaused.get().present() ? 0 : CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
 		layerRoot.create("paused.$latest") = fBackupPaused.get().present();
@@ -1669,7 +1668,9 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 			const char* statusText = fba.getStateText(status);
 
 			// The object for this backup tag inside this instance's subdocument
-			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName);
+			JSONDoc thisTag = tagsRoot.subDoc(eachTag.tagName);
+			thisTag.create("timestamp") = now();
+			JSONDoc tagRoot = thisTag.subDoc("$latest");
 			tagRoot.create("current_container") = tagContainers[j].get()->getURL();
 			tagRoot.create("current_status") = statusText;
 			if (tagLastRestorableVersions[j].get().present()) {
@@ -1717,8 +1718,7 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 		co_await (waitForAll(backupStatus) && waitForAll(backupVersion) && waitForAll(tagRangeBytesDR) &&
 		          waitForAll(tagLogBytesDR) && success(fDRPaused));
 
-		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
-		layerRoot.create("tags.timestamp") = now();
+		JSONDoc tagsRoot = layerRoot.subDoc("tags");
 		layerRoot.create("total_workers.$sum") = fDRPaused.get().present() ? 0 : CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
 		layerRoot.create("paused.$latest") = fDRPaused.get().present();
 
@@ -1727,7 +1727,9 @@ AsyncResult<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
 
 			auto status = backupStatus[i].get();
 
-			JSONDoc tagRoot = tagsRoot.create(tagName);
+			JSONDoc thisTag = tagsRoot.subDoc(tagName);
+			thisTag.create("timestamp") = now();
+			JSONDoc tagRoot = thisTag.subDoc("$latest");
 			tagRoot.create("running_backup") =
 			    (status == EBackupState::STATE_RUNNING_DIFFERENTIAL || status == EBackupState::STATE_RUNNING);
 			tagRoot.create("running_backup_is_restorable") = (status == EBackupState::STATE_RUNNING_DIFFERENTIAL);
