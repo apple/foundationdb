@@ -1859,13 +1859,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				wait(tr.commit());
 
 				TraceEvent("DataMoveMetaDataCommit", dataMove.id)
+				    .suppressFor(1.0)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("DataMoveKey", dataMoveKeyFor(dataMoveId))
 				    .detail("CommitVersion", tr.getCommittedVersion())
 				    .detail("DeltaRange", currentKeys.toString())
 				    .detail("Range", describe(dataMove.ranges))
-				    .detail("DataMove", dataMove.toString())
-				    .suppressFor(1.0);
+				    .detail("DataMove", dataMove.toString());
 
 				dataMove = DataMoveMetaData();
 				if (currentKeys.end == keys.end) {

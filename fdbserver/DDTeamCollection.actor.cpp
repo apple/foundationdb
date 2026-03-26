@@ -202,11 +202,11 @@ public:
 		}
 
 		TraceEvent("GetTeamByServersEnd")
+		    .suppressFor(1.0)
 		    .detail("TeamsSize", self->teams.size())
 		    .detail("TimeElapsed", now() - currTime)
 		    .detail("Servers", servers)
-		    .detail("Result", res.present())
-		    .suppressFor(1.0);
+		    .detail("Result", res.present());
 
 		req.reply.send(std::make_pair(res, false));
 		return Void();
