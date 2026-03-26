@@ -22,7 +22,7 @@
 #include "flow/flow.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_ROLE_LINEAGE_ACTOR_G_H)
 #define FDBSERVER_ROLE_LINEAGE_ACTOR_G_H
-#include "fdbserver/RoleLineage.actor.g.h"
+#include "RoleLineage.actor.g.h"
 #elif !defined(FDBSERVER_ROLE_LINEAGE_ACTOR_H)
 #define FDBSERVER_ROLE_LINEAGE_ACTOR_H
 

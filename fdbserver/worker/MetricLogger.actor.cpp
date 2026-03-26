@@ -36,14 +36,15 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbserver/MetricLogger.actor.h"
-#include "fdbserver/MetricClient.h"
+#include "MetricLogger.actor.h"
+#include "MetricClient.h"
 #include "flow/flow.h"
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace {
 struct MetricsRule {
 	explicit(false) MetricsRule(bool enabled = false, int minLevel = 0, StringRef const& name = StringRef())
 	  : namePattern(name), enabled(enabled), minLevel(minLevel) {}
@@ -379,6 +380,7 @@ ACTOR Future<Void> updateMetricRegistration(Database cx, MetricsConfig* config, 
 		wait(registrationChange || newMetric);
 	}
 }
+} // namespace
 
 ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	// Never log to an empty prefix, it's pretty much always a bad idea.
@@ -419,6 +421,7 @@ ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	return Void();
 }
 
+namespace {
 ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
 	if (model == MetricsDataModel::NONE) {
 		return Void{};
@@ -457,6 +460,7 @@ ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
 		}
 	}
 }
+} // namespace
 
 ACTOR Future<Void> runMetrics() {
 	state MetricCollection* metrics = nullptr;

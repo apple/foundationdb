@@ -24,7 +24,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/core/ServerDBInfo.actor.h"
 #include "DeltaTree.h"
-#include "fdbserver/core/IDiskQueue.h"
+#include "fdbserver/kvstore/IDiskQueue.h"
 #include "IKeyValueContainer.h"
 #include "fdbserver/core/IKeyValueStore.h"
 #include "RadixTree.h"

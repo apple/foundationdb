@@ -25,7 +25,7 @@
 #include "fdbserver/core/TesterInterface.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
 #include "fdbserver/tester/workloads.actor.h"
-#include "fdbserver/workloads/BulkSetup.h"
+#include "BulkSetup.h"
 
 struct WriteBandwidthWorkload : KVWorkload {
 	static constexpr auto NAME = "WriteBandwidth";

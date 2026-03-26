@@ -47,7 +47,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MetricLogger.actor.h"
+#include "MetricLogger.actor.h"
 #include "fdbserver/backupworker/BackupWorker.h"
 #include "fdbserver/clustercontroller/ClusterController.actor.h"
 #include "fdbserver/commitproxy/CommitProxyServer.actor.h"
@@ -56,9 +56,10 @@
 #include "fdbserver/grvproxy/GrvProxyServer.h"
 #include "fdbserver/logrouter/LogRouter.h"
 #include "fdbserver/core/BackupInterface.h"
-#include "fdbserver/RoleLineage.actor.h"
+#include "RoleLineage.actor.h"
 #include "fdbserver/core/WorkerInterface.actor.h"
-#include "fdbserver/core/IKeyValueStore.h"
+#include "fdbserver/worker/Worker.actor.h"
+#include "fdbserver/kvstore/IKeyValueStore.h"
 #include "fdbserver/ratekeeper/Ratekeeper.actor.h"
 #include "fdbserver/resolver/Resolver.actor.h"
 #include "fdbserver/sequencer/MasterServer.actor.h"
@@ -66,7 +67,7 @@
 #include "fdbserver/tlog/TLogServer.actor.h"
 #include "fdbserver/core/WaitFailure.h"
 #include "fdbserver/tester/tester.h"
-#include "fdbserver/core/IDiskQueue.h"
+#include "fdbserver/kvstore/IDiskQueue.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbserver/core/DataDistributorInterface.h"
 #include "fdbserver/coordinator/CoordinationServer.h"
@@ -114,10 +115,6 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 #define KV_STORE(filename, uid) keyValueStoreMemory(filename, uid)
 #endif
 
-namespace {
-RoleLineageCollector roleLineageCollector;
-}
-
 struct ErrorInfo {
 	Error error;
 	const Role& role;
@@ -128,6 +125,14 @@ struct ErrorInfo {
 		ASSERT(false);
 	}
 };
+
+struct PrimaryAndRemoteAddresses {
+	std::vector<NetworkAddress> primary;
+	std::vector<NetworkAddress> remote;
+};
+
+namespace {
+RoleLineageCollector roleLineageCollector;
 
 Error checkIOTimeout(Error const& e) {
 	// Convert all_errors to io_timeout if global timeout bool was set
@@ -1012,11 +1017,6 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 	return false;
 }
 
-struct PrimaryAndRemoteAddresses {
-	std::vector<NetworkAddress> primary;
-	std::vector<NetworkAddress> remote;
-};
-
 // Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
 UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const LocalityData& locality,
@@ -1366,7 +1366,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 }
 
+} // namespace
+
 #if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
+namespace {
 // A set of threads that should be profiled
 std::set<std::thread::id> profiledThreads;
 
@@ -1374,6 +1377,7 @@ std::set<std::thread::id> profiledThreads;
 int filter_in_thread(void* arg) {
 	return profiledThreads.contains(std::this_thread::get_id()) ? 1 : 0;
 }
+} // namespace
 #endif
 
 // Enables the calling thread to be profiled
@@ -1387,6 +1391,8 @@ void registerThreadForProfiling() {
 	backtrace(pc, num_levels);
 #endif
 }
+
+namespace {
 
 // Starts or stops the CPU profiler
 void updateCpuProfiler(ProfilerRequest req) {
@@ -1956,6 +1962,7 @@ ACTOR Future<Void> registerWorkerGrpcServices(UID id, Reference<IClusterConnecti
 	return Never();
 }
 #endif
+} // namespace
 
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -2995,6 +3002,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	}
 }
 
+namespace {
 static std::set<int> const& normalWorkerErrors() {
 	static std::set<int> s;
 	if (s.empty()) {
@@ -3461,7 +3469,7 @@ TEST_CASE("/fdbserver/storageengine/clearInflightCommits") {
 	platform::eraseDirectoryRecursive(testDir);
 	return Void();
 }
-} // anonymous namespace
+} // namespace
 
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
@@ -3710,6 +3718,7 @@ Optional<UID> readClusterId(std::string filePath) {
 	br >> clusterId;
 	return clusterId;
 }
+} // anonymous namespace
 
 ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         LocalityData localities,
