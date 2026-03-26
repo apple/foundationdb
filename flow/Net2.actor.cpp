@@ -432,6 +432,7 @@ public:
 		try {
 			auto to = tcpEndpoint(addr);
 			BindPromise p("N2_ConnectError", self->id);
+			p.setPeerAddr(self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -930,6 +931,7 @@ public:
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
+			p.setPeerAddr(self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
@@ -972,6 +974,7 @@ public:
 		try {
 			auto to = tcpEndpoint(self->peer_address);
 			BindPromise p("N2_ConnectError", self->id);
+			p.setPeerAddr(self->peer_address);
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect(to, std::move(p));
 
