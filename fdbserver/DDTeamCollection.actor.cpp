@@ -190,8 +190,8 @@ public:
 		state Optional<Reference<IDataDistributionTeam>> res;
 		state std::vector<Reference<TCTeamInfo>>::iterator teamIt;
 
-		TraceEvent("GetTeamByServersStart");
 		wait(delay(SERVER_KNOBS->DD_GET_TEAM_BY_SERVERS_WAIT_INTERVAL));
+		TraceEvent("GetTeamByServersStart").suppressFor(1.0);
 		currTime = now();
 		teamIt = self->teams.begin();
 		for (; teamIt != self->teams.end(); ++teamIt) {
@@ -201,7 +201,12 @@ public:
 			}
 		}
 
-		TraceEvent("GetTeamByServersEnd").detail("TeamsSize", self->teams.size()).detail("TimeElapsed", now() - currTime).detail("Servers", servers).detail("Result", res.present());
+		TraceEvent("GetTeamByServersEnd")
+		    .detail("TeamsSize", self->teams.size())
+		    .detail("TimeElapsed", now() - currTime)
+		    .detail("Servers", servers)
+		    .detail("Result", res.present())
+		    .suppressFor(1.0);
 
 		req.reply.send(std::make_pair(res, false));
 		return Void();
