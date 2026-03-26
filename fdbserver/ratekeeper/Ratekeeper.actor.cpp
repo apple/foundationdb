@@ -111,6 +111,7 @@ public:
 				oldServers.swap(newServers);
 				tr = Transaction(self->db);
 				co_await delay(SERVER_KNOBS->SERVER_LIST_DELAY);
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
@@ -216,6 +217,7 @@ public:
 				// wait for monitorServerListChange to remove the interface
 				co_await delay(SERVER_KNOBS->RATEKEEPER_MONITOR_SS_DELAY);
 				tr = Transaction(self->db);
+				continue;
 			} catch (Error& e) {
 				err = e;
 			}
