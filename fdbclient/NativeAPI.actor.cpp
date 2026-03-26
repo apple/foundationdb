@@ -5193,79 +5193,89 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Future<GetReadVersionReply> f,
                                          Promise<Optional<Value>> metadataVersion) {
 	state Span span(spanContext, location, trState->spanContext);
-	GetReadVersionReply rep = wait(f);
-	double replyTime = now();
-	double latency = replyTime - trState->startTime;
-	trState->cx->lastProxyRequestTime = trState->startTime;
-	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
-	trState->proxyTagThrottledDuration += rep.proxyTagThrottledDuration;
-	if (rep.rkBatchThrottled) {
-		trState->cx->lastRkBatchThrottleTime = replyTime;
-	}
-	if (rep.rkDefaultThrottled) {
-		trState->cx->lastRkDefaultThrottleTime = replyTime;
-	}
-	trState->cx->GRVLatencies.addSample(latency);
-	if (trState->trLogInfo)
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
-		    trState->startTime, trState->cx->clientLocality.dcId(), latency, trState->options.priority, rep.version));
-	if (rep.locked && !trState->options.lockAware)
-		throw database_locked();
+	try {
+		GetReadVersionReply rep = wait(f);
+		double replyTime = now();
+		double latency = replyTime - trState->startTime;
+		trState->cx->lastProxyRequestTime = trState->startTime;
+		trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
+		trState->proxyTagThrottledDuration += rep.proxyTagThrottledDuration;
+		if (rep.rkBatchThrottled) {
+			trState->cx->lastRkBatchThrottleTime = replyTime;
+		}
+		if (rep.rkDefaultThrottled) {
+			trState->cx->lastRkDefaultThrottleTime = replyTime;
+		}
+		trState->cx->GRVLatencies.addSample(latency);
+		if (trState->trLogInfo)
+			trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
+			    trState->startTime, trState->cx->clientLocality.dcId(), latency, trState->options.priority, rep.version));
+		if (rep.locked && !trState->options.lockAware)
+			throw database_locked();
 
-	++trState->cx->transactionReadVersionsCompleted;
-	switch (trState->options.priority) {
-	case TransactionPriority::IMMEDIATE:
-		++trState->cx->transactionImmediateReadVersionsCompleted;
-		break;
-	case TransactionPriority::DEFAULT:
-		++trState->cx->transactionDefaultReadVersionsCompleted;
-		break;
-	case TransactionPriority::BATCH:
-		++trState->cx->transactionBatchReadVersionsCompleted;
-		break;
-	default:
-		ASSERT(false);
-	}
+		++trState->cx->transactionReadVersionsCompleted;
+		switch (trState->options.priority) {
+		case TransactionPriority::IMMEDIATE:
+			++trState->cx->transactionImmediateReadVersionsCompleted;
+			break;
+		case TransactionPriority::DEFAULT:
+			++trState->cx->transactionDefaultReadVersionsCompleted;
+			break;
+		case TransactionPriority::BATCH:
+			++trState->cx->transactionBatchReadVersionsCompleted;
+			break;
+		default:
+			ASSERT(false);
+		}
 
-	if (trState->options.tags.size() != 0) {
-		auto& priorityThrottledTags = trState->cx->throttledTags[trState->options.priority];
-		for (auto& tag : trState->options.tags) {
-			auto itr = priorityThrottledTags.find(tag);
-			if (itr != priorityThrottledTags.end()) {
-				if (itr->second.expired()) {
-					priorityThrottledTags.erase(itr);
-				} else if (itr->second.throttleDuration() > 0) {
-					CODE_PROBE(true, "throttling transaction after getting read version");
-					++trState->cx->transactionReadVersionsThrottled;
-					throw tag_throttled();
+		if (trState->options.tags.size() != 0) {
+			auto& priorityThrottledTags = trState->cx->throttledTags[trState->options.priority];
+			for (auto& tag : trState->options.tags) {
+				auto itr = priorityThrottledTags.find(tag);
+				if (itr != priorityThrottledTags.end()) {
+					if (itr->second.expired()) {
+						priorityThrottledTags.erase(itr);
+					} else if (itr->second.throttleDuration() > 0) {
+						CODE_PROBE(true, "throttling transaction after getting read version");
+						++trState->cx->transactionReadVersionsThrottled;
+						throw tag_throttled();
+					}
+				}
+			}
+
+			for (auto& tag : trState->options.tags) {
+				auto itr = priorityThrottledTags.find(tag);
+				if (itr != priorityThrottledTags.end()) {
+					itr->second.addReleased(1);
 				}
 			}
 		}
 
-		for (auto& tag : trState->options.tags) {
-			auto itr = priorityThrottledTags.find(tag);
-			if (itr != priorityThrottledTags.end()) {
-				itr->second.addReleased(1);
+		if (rep.version > trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
+			trState->cx->mvCacheInsertLocation =
+			    (trState->cx->mvCacheInsertLocation + 1) % trState->cx->metadataVersionCache.size();
+			trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation] =
+			    std::make_pair(rep.version, rep.metadataVersion);
+		}
+
+		metadataVersion.send(rep.metadataVersion);
+		if (trState->cx->versionVectorCacheActive(rep.ssVersionVectorDelta)) {
+			if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
+				trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+			} else {
+				trState->cx->ssVersionVectorCache.clear();
 			}
 		}
-	}
-
-	if (rep.version > trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
-		trState->cx->mvCacheInsertLocation =
-		    (trState->cx->mvCacheInsertLocation + 1) % trState->cx->metadataVersionCache.size();
-		trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation] =
-		    std::make_pair(rep.version, rep.metadataVersion);
-	}
-
-	metadataVersion.send(rep.metadataVersion);
-	if (trState->cx->versionVectorCacheActive(rep.ssVersionVectorDelta)) {
-		if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
-			trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
-		} else {
-			trState->cx->ssVersionVectorCache.clear();
+		return rep.version;
+	} catch (Error& e) {
+		// If the GRV fails (e.g. batch_grv_request_rate_limit_exceeded), explicitly
+		// propagate the error to metadataVersion so that callers waiting on
+		// metadataVersion.getFuture() receive the error instead of hanging forever.
+		if (!metadataVersion.isSet()) {
+			metadataVersion.sendError(e);
 		}
+		throw;
 	}
-	return rep.version;
 }
 
 bool rkThrottlingCooledDown(DatabaseContext* cx, TransactionPriority priority) {
