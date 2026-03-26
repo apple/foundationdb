@@ -185,6 +185,8 @@ public:
 
 	// Find the team with the exact storage servers as req.src.
 	static void getTeamByServers(DDTeamCollection* self, GetTeamRequest req) {
+		TraceEvent("GetTeamByServersStart").suppressFor(1.0);
+		double currTime = now();
 		const std::string servers = TCTeamInfo::serversToString(req.src);
 		Optional<Reference<IDataDistributionTeam>> res;
 		for (const auto& team : self->teams) {
@@ -193,6 +195,12 @@ public:
 				break;
 			}
 		}
+		TraceEvent("GetTeamByServersEnd")
+		    .suppressFor(1.0)
+		    .detail("TeamsSize", self->teams.size())
+		    .detail("TimeElapsed", now() - currTime)
+		    .detail("Servers", servers)
+		    .detail("Result", res.present());
 		req.reply.send(std::make_pair(res, false));
 	}
 
@@ -3078,6 +3086,7 @@ public:
 			GetTeamRequest req = waitNext(tci.getTeam.getFuture());
 			if (req.findTeamByServers) {
 				getTeamByServers(self, req);
+				wait(delay(SERVER_KNOBS->DD_GET_TEAM_BY_SERVERS_WAIT_INTERVAL));
 			} else {
 				self->addActor.send(self->getTeam(req));
 			}
