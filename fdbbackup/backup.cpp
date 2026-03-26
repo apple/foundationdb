@@ -1761,8 +1761,7 @@ Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
                            int limit = 1) {
 	RangeResult docs = co_await tr->getRange(KeyRangeRef(rootKey, strinc(rootKey)), limit, Snapshot::True);
 	bool readMore = false;
-	int i{ 0 };
-	for (i = 0; i < docs.size(); ++i) {
+	for (int i = 0; i < docs.size(); ++i) {
 		json_spirit::mValue docValue;
 		try {
 			json_spirit::read_string(docs[i].value.toString(), docValue);
